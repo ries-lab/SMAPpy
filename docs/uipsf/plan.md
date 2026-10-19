@@ -1,6 +1,6 @@
 # uiPSF v2: plan for a PyTorch re-implementation
 
-October 2026. Proposal for discussion; no library code yet. Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4).
+October 2026. Proposal for discussion; no library code yet. Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4). Revision 6: the *PSF calibration* plugin, the v1 bridge removed, the microscope database (§7.5).
 
 **Status (October 2026): M0–M4 and M7 are done.** The forward model reproduces uiPSF v1 and the TU Delft model; Gauss–Newton L-BFGS learns the review's synthetic beads to their CRLB without settings; on the Zenodo beads the whole calibration (84 beads, n_max 8, rejection included) takes 45 s on a laptop GPU (M7). Two channels (M4) share the emitter, each with its own pupil, and refine SMAPpy's transform; on Zenodo `2ch_40nm_bead` the transform agrees with SMAPpy's and v1's to 0.025 px. What exists is in `docs/uipsf/architecture.md`, the conventions as implemented in `docs/uipsf/conventions.md`.
 
@@ -556,6 +556,9 @@ accepted. Both sides stay simple. Checked against SMAPpy `main` (e148090):
 - Spline 3D needs knots ≥ fit ROI + 2 laterally, z0 a knot index with z = −(k − z0)·dz, and for two
   channels the same z grid and a `photon_normalization` per channel.
 
+*Superseded by §7.5 where they differ: a new plugin, PSF calibration, rather than a model choice in
+the bead calibration; the v1 bridge removed now; uipsf's own loader removed.*
+
 **One window, a model choice.** The bead calibration gets *model*: *bead average* (today's) or
 *uiPSF pupil*. Everything else is the same window: the stack list, *Detect + calibrate*, the bead
 table with Space and *Recalculate*, *Calculate fit quality*, *Save calibration…*, *Use in the Spline 3D
@@ -786,7 +789,110 @@ The fitters and uipsf read the same entry. Its design is a step of its own, afte
 
 Open with it: one window with two outputs or two plugins over one learning call; what the analysis
 compares against (the previous model of the same microscope, from the instrument database below); which
-settings each shows by default; where the torch install's button sits (above, *For the future*).
+settings each shows by default; where the torch install's button sits (above, *For the future*).  *Decided in §7.5.*
+
+### 7.5 The PSF calibration plugin (decided October 2026)
+
+Revision 6.  Replaces §7.1's *One window, a model choice* and answers §7.4's *To discuss*.
+
+**A new plugin, *PSF calibration*,** not a mode of the bead calibration: in situ (M5) learns from blinking
+molecules, not beads, so the name says what comes out.  It reuses the bead calibration's widgets and code
+(the file list, the stack view, the bead table with Space and *Recalculate*, the worker thread, *Calculate
+fit quality*), and keeps the shapes that make extensions entries rather than branches: a *source* (bead
+stacks now, a blinking movie with M5) and a model whose options are choices, not flags (below).  The
+current *Bead calibration* stays as its own plugin, unchanged, until *PSF calibration* does everything it
+does; then it is retired.
+
+**The v1 bridge is removed now,** not after M5: `smappy/uipsf/` (runner, worker, prepare, convert,
+plots), the plugin `Localize/uiPSF calibration`, its page and `tests/test_uipsf.py`.  In-situ learning is
+gone until M5, accepted.  Of `microscopes.py` only the idea survives, in the microscope database (below).
+
+**No calibration / diagnosis switch.**  The diagnostics are cheap beside the fit, so every run shows them
+all: the pupil (phase and magnitude), the Zernikes with their CRLBs, the residual atlas and its findings,
+the held-out report, and the comparison with the start model when there is one.  One option, *save model*,
+on by default: on, the run writes the model file and the spline (or dual) calibration made from it;
+off, it only draws, for looking at a microscope without leaving a file behind.
+
+**Start from a previous calibration**, a visible file chooser near the top of the form, used often: its
+model is the warm start (`warm_start`), and the comparison page draws the new Zernikes against it.  Empty,
+the fit starts from the data as now.  Later it may default to this microscope's latest model from the
+database.
+
+**Model options shown, for now.**  They are under investigation (§10, 2 and 3), so they are exposed, as
+choices that can grow or be taken out again once the investigations settle them:
+- *pupil magnitude*: **free** (1 + Σ c_j Z_j over every mode up to n_max), **symmetric** (the
+  rotationally symmetric modes only, m = 0: Noll 4, 11, 22, …, through `magnitude_modes`), **fixed**
+  (uniform: the apodisation only, `magnitude_n_max=0`);
+- *blur σ*: **free** or **fixed** (at its start value; the machinery is `ParamSet.fix`, the setting is
+  new);
+- *Zernike order*: auto (6) or a number.
+
+They live in one dataclass of model options in uipsf (`BeadSettings`), so a choice added or removed is one
+field, and its defaults are written once.
+
+**The form**, short, the rest folded under *more*:
+- *microscope*: from the file's metadata, every instrument value shown with its source, *Edit
+  microscope…* beside it;
+- *start from*: a previous calibration;
+- *bead diameter*;
+- the model options above;
+- *save model*;
+- under *more*: the sample medium's refractive index (from the microscope entry: beads in water, say;
+  set here when the sample differs, e.g. index matched, which matters most in situ), rejection's k, the
+  held-out fraction.
+
+Solver settings (grid, solver, tolerances, stages, chunking) are not in the form; the device is named in
+the status line.
+
+**How smappy feeds uipsf: one adapter, uipsf takes arrays.**  uipsf's own reader (`data/io.py`), bead
+finder (`data/rois.find_beads`), pairing (`data/pairing`) and hand-typed camera (`noise.Camera` as an
+input) are removed; a standalone uipsf is SMAPpy without its GUI (§7.4).  smappy's
+`calibrate/pupil.py`, headless:
+1. `read_bead_stacks`, z from the metadata;
+2. the camera per file from the camera database, then photons; saturated pixels a mask;
+3. beads by `detect_beads`, pairs and the starting transform by `collect_dual_beads`;
+4. raw photon ROIs into a `uipsf.Batch` (`z_nm`, `s`, `mask`, `roi_xy`, `field_xy`, `stack_id`);
+5. `uipsf.calibrate_beads(batch, optics, settings, decisions, warm_start, progress, cancel)`;
+6. sample, normalise as `_single_model` / `positive_pair_models`, save with `save_spline_calibration`
+   or `save_dual_color_calibration`, the model file beside it.
+
+This needs `collect_beads` split in two: *find* (positions, records, the brightness and saturation flags,
+shared) and *cut* (normalised, background-free volumes for the bead average; raw photon ROIs for the
+pupil), so that both calibrations share the bead table and its exclusions.
+
+**The instrument database: microscopes beside cameras.**  Built on `camera_db`'s machinery (`Parameter`:
+fixed, a metadata tag, a `map` from what the tag reads; `State`; `Source`), so a value can follow the
+acquisition's state: a filter changes the emission wavelength, the cylindrical lens the expected
+astigmatism, as the lens already changes the pixel size in the camera database.  An entry:
+- *identify*: the tag that names the microscope (to be chosen from real files: which tags the lab's
+  microscopes write for the objective, the filters and the lens; pending, the user provides files);
+- *cameras*: ids in the camera database;
+- *NA*, *immersion index*, *coverslip index*: fixed or by the objective's tag;
+- *emission wavelength* per channel: fixed or by a filter's or dichroic's tag;
+- *channels*: the layout, split and main channel;
+- *sample defaults*: the medium's index, the bead diameter;
+- *history*: the previous model files, for the start and the comparison.
+
+Its editor is built as the camera editor: from an open file, showing what the entry makes of it.  **No
+silent defaults for an instrument value:** v1's profile fell back to NA 1.43 and 680 nm; here a missing
+value is shown in orange and the run refused until it is given.  After the fit, the findings point back
+at the instrument values the dictionary of §10, 2 ties to a pattern (a radial magnitude with a z scale
+off 1: is the NA or the wavelength right?).  The fitters read the same entry later (pixel size, the
+split).
+
+**Settings to test before their defaults are fixed** (on Zenodo and the lab's stacks, by held-out deviance
+and z bias): n_max 6 or 8; the magnitude free, symmetric or fixed; σ free or fixed; the intensity model;
+upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those that settle leave the form.
+
+**Order of work:**
+1. uipsf: `BeadSettings` with form metadata (the model options above), `calibrate_beads`, σ fixed,
+   the symmetric magnitude, the figures (`diagnostics.figures`, drawing on a figure it is given).
+2. Remove the v1 bridge; remove uipsf's reader, finder, pairing and camera input, its tests moved onto
+   smappy's.
+3. smappy, headless: split `collect_beads`; `calibrate/pupil.py`; tests from simulated beads to Spline
+   3D (z, photons, the z sign against the bead average, the normalisation).
+4. The microscope database and its editor, once the metadata of real files is in.
+5. The *PSF calibration* window and plugin, its page, `default.gui.yaml`.
 
 ---
 
