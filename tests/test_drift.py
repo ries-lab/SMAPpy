@@ -501,3 +501,70 @@ def test_comet_stopped_mid_fit_raises_stopped_and_corrects_nothing():
     # a stop never set changes nothing
     assert np.array_equal(estimate_drift(locs, spline).drift,
                           estimate_drift(locs, spline, stop=_StopsAfter(10**6)).drift)
+
+
+# ---------------------------------------------------------------- a time axis
+
+def _minflux_like(n=500, seed=3):
+    """Localizations with no frames to speak of: times irregular, frame the rank."""
+    rng = np.random.default_rng(seed)
+    t = np.sort(rng.uniform(5.0, 95.0, n))
+    return Localizations({"x_nm": rng.uniform(0, 1000, n), "y_nm": rng.uniform(0, 1000, n),
+                          "z_nm": rng.uniform(-100, 100, n), "time_s": t,
+                          "x_nc_nm": np.zeros(n), "frame": np.arange(n)}, {})
+
+
+def test_a_drift_on_a_time_axis_moves_each_localization_by_the_curve_at_its_time():
+    locs = _minflux_like()
+    times = np.arange(10.0, 91.0, 2.0)                    # a point every 2 s, as MBM
+    curve = np.column_stack([0.5 * times, -0.2 * times, np.sin(times / 10)])
+    drift = Drift(curve, method="mbm", times_s=times)
+    out = drift.apply(locs)
+    t = locs["time_s"]
+    inside = (t >= 10) & (t <= 90)
+    assert np.allclose((locs["x_nm"] - out["x_nm"])[inside], 0.5 * t[inside])
+    assert np.allclose((locs["y_nm"] - out["y_nm"])[inside], -0.2 * t[inside])
+    # held at the ends, not extrapolated
+    assert np.allclose((locs["x_nm"] - out["x_nm"])[t < 10], 5.0)
+    assert np.allclose((locs["x_nm"] - out["x_nm"])[t > 90], 45.0)
+    assert np.array_equal(out["x_nc_nm"], locs["x_nc_nm"])            # not a position column
+    assert out.metadata["drift_correction"]["axis"] == "time_s"
+    assert str(drift).startswith("drift over 80 s")
+    # part of the table: the other rows stay
+    rows = t > 50
+    part = drift.apply(locs, rows=rows)
+    assert np.array_equal(part["x_nm"][~rows], locs["x_nm"][~rows])
+    assert np.allclose(part["x_nm"][rows], out["x_nm"][rows])
+
+
+def test_a_drift_on_a_time_axis_is_kept_saved_and_read_back_with_its_times(tmp_path):
+    from smappy.drift import load_drift, save_drift_corrected
+    times = np.array([0.0, 2.0, 4.5, 7.0])
+    drift = Drift(np.arange(12.0).reshape(4, 3), method="mbm", times_s=times)
+    again = Drift.from_dict(drift.to_dict())
+    assert np.array_equal(again.times_s, times) and np.array_equal(again.drift, drift.drift)
+    assert Drift.from_dict(Drift(np.zeros((3, 3))).to_dict()).times_s is None
+    path = save_drift_corrected(tmp_path / "x_driftc.hdf5", drift.apply(_minflux_like()), drift)
+    loaded = load_drift(path)
+    assert np.array_equal(loaded.times_s, times) and loaded.method == "mbm"
+    assert np.allclose(loaded.drift, drift.drift)
+
+
+def test_a_drift_on_a_time_axis_is_referenced_and_added_on_its_own_axis_only():
+    times = np.array([1.0, 2.0, 3.0])
+    drift = Drift(np.array([[1.0, 0, 0], [2, 0, 0], [4, 0, 0]]), times_s=times)
+    assert np.allclose(drift.referenced("first frame").drift[:, 0], [0, 1, 3])
+    assert np.allclose(drift.referenced("last frame").drift[:, 0], [-3, -2, 0])
+    assert np.array_equal(drift.referenced("last frame").times_s, times)
+    both = drift.then(drift)
+    assert np.allclose(both.drift[:, 0], [2, 4, 8]) and np.array_equal(both.times_s, times)
+    with pytest.raises(ValueError, match="same axis"):
+        drift.then(Drift(np.zeros((3, 3))))
+    with pytest.raises(ValueError, match="same axis"):
+        drift.then(Drift(np.zeros((3, 3)), times_s=times + 1))
+    with pytest.raises(ValueError, match="increase"):
+        Drift(np.zeros((3, 3)), times_s=[0.0, 0.0, 1.0])
+    with pytest.raises(ValueError, match="no transformation"):
+        Drift(np.zeros((3, 3)), times_s=times, matrix=np.tile(np.eye(3), (3, 1, 1)))
+    with pytest.raises(ValueError, match="no time_s"):
+        drift.apply(Localizations({"x_nm": np.zeros(2), "frame": np.arange(2)}, {}))

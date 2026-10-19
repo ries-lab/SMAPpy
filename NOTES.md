@@ -743,6 +743,14 @@ and it is deliberately thin -- an array in, a per-frame drift table out.
   `arange(0, max_frame + 1)`, so applying it is one fancy-index per coordinate.
   `min_max_frames` is passed explicitly because the subset the estimate is made
   from need not reach the last frame of the table it is applied to.
+* **Or by time, where there are no frames.**  `Drift(..., times_s=...)` is
+  sampled at those times and applied by interpolating linearly at each
+  row's `time_s`, held at the ends (`Drift.at`).  MINFLUX has no frames --
+  its `frame` is the rank in time, so a per-frame curve would be one value
+  per localization and true of one ordering of one table -- and its MBM
+  beads give a point every two seconds.  A time curve takes no
+  transformation, adds (`then`) only to one at the same times, and writes
+  `time_s` in place of `frame` in the `/drift` group.
 * **`peak_*` is left alone.** Those are detection positions -- the record of
   what was found where -- not measurements of the structure.
 * **Units survive.** COMET works in nm; a table in pixels is converted for the

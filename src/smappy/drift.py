@@ -340,10 +340,18 @@ class DriftSettings:
 
 
 class Drift:
-    """Per-frame drift in nm, indexed by frame number.
+    """Per-frame drift in nm, indexed by frame number -- or on a time axis.
 
     ``drift[f]`` is ``(dx, dy, dz)``: how far the sample had moved in frame
     ``f``, so correcting a localization *subtracts* it.
+
+    With ``times_s`` the curve is sampled at those times instead, and a
+    localization is corrected by the curve interpolated linearly at its
+    ``time_s`` (held at the ends).  That is the drift of an acquisition with
+    no frames: MINFLUX, whose ``frame`` is only the rank in time, so that a
+    per-frame curve would be one entry per localization, valid for one
+    ordering of one table; the MBM beads give a point every two seconds.
+    Such a curve takes no transformation.
 
     With a *transformation* (`DriftSettings.transformation`) each frame also
     has a matrix: ``matrix[f]`` is the 3x3 A_f, ``centre_nm`` the point it
@@ -358,11 +366,21 @@ class Drift:
                  method: str = "comet", reference: str = "as estimated",
                  matrix: Optional[np.ndarray] = None,
                  centre_nm: Optional[np.ndarray] = None,
-                 transformation: str = "shift"):
+                 transformation: str = "shift",
+                 times_s: Optional[np.ndarray] = None):
         drift = np.asarray(drift_nm, dtype=np.float64)
         if drift.ndim != 2 or drift.shape[1] != 3:
             raise ValueError(f"drift must be (n_frames, 3), got {drift.shape}")
         self.drift = drift
+        if times_s is not None:
+            times_s = np.asarray(times_s, dtype=np.float64).reshape(-1)
+            if len(times_s) != len(drift):
+                raise ValueError(f"{len(times_s)} times for {len(drift)} drift values")
+            if len(times_s) > 1 and np.any(np.diff(times_s) <= 0):
+                raise ValueError("the drift's times must increase")
+            if matrix is not None:
+                raise ValueError("a drift on a time axis takes no transformation")
+        self.times_s = times_s
         self.settings = settings
         self.n_used = n_used  # localizations the estimate was made from
         # time windows quality control discarded; the curve is interpolated
@@ -386,7 +404,7 @@ class Drift:
     def _like(self, drift, matrix, centre, reference=None) -> "Drift":
         return Drift(drift, self.settings, self.n_used, self.flagged_windows,
                      self.method, reference or self.reference, matrix, centre,
-                     self.transformation)
+                     self.transformation, self.times_s)
 
     def referenced(self, reference: str) -> "Drift":
         """The curve shifted to be zero at the first or the last frame.
@@ -423,8 +441,16 @@ class Drift:
     def then(self, other: "Drift", **kwargs) -> "Drift":
         """This correction followed by ``other``, one curve: the prepass and
         the two-stage fit, whose passes are drift of the same sample measured
-        in sequence.  Without transformations the curves add."""
+        in sequence.  Without transformations the curves add; curves on a
+        time axis add where they are sampled at the same times."""
         kwargs.setdefault("reference", other.reference)
+        if (self.times_s is None) != (other.times_s is None) or (
+                self.times_s is not None
+                and not np.array_equal(self.times_s, other.times_s)):
+            raise ValueError("only curves on the same axis add: both per frame, "
+                             "or both at the same times")
+        if self.times_s is not None:
+            kwargs.setdefault("times_s", self.times_s)
         if self.matrix is None and other.matrix is None:
             return Drift(self.drift + other.drift, **kwargs)
         a1, b1 = self.affine()
@@ -460,9 +486,22 @@ class Drift:
     def frames(self) -> np.ndarray:
         return np.arange(len(self))
 
+    def at(self, times_s) -> np.ndarray:
+        """The curve at ``times_s``, (n, 3): interpolated linearly between
+        its samples and held at either end.  Only for a curve on a time axis."""
+        if self.times_s is None:
+            raise ValueError("this drift is per frame; it has no times")
+        t = np.asarray(times_s, dtype=np.float64)
+        if not len(self):
+            return np.zeros((len(t), 3))
+        return np.column_stack([np.interp(t, self.times_s, self.drift[:, axis])
+                                for axis in range(3)])
+
     def __str__(self) -> str:
         span = self.drift.max(axis=0) - self.drift.min(axis=0)
-        text = (f"drift over {len(self)} frames, range "
+        over = (f"{len(self)} frames" if self.times_s is None or not len(self) else
+                f"{self.times_s[-1] - self.times_s[0]:.0f} s")
+        text = (f"drift over {over}, range "
                 f"x {span[0]:.0f} nm, y {span[1]:.0f} nm, z {span[2]:.0f} nm")
         parameters = self.parameters()
         if parameters:
@@ -485,22 +524,30 @@ class Drift:
         table, is left to the caller.
         """
         mask = None if rows is None else np.asarray(rows, bool)
-        frames = np.asarray(locs["frame"], dtype=np.int64)
-        if mask is not None:
-            frames = frames[mask]
-        if len(frames) and (frames.min() < 0 or frames.max() >= len(self)):
-            raise ValueError(
-                f"the table spans frames {frames.min()}..{frames.max()} but the "
-                f"drift covers 0..{len(self) - 1}; it was estimated from a "
-                f"different acquisition")
+        if self.times_s is not None:
+            if "time_s" not in locs:
+                raise ValueError("this drift is on a time axis, and the table has no "
+                                 "time_s; it has " + ", ".join(sorted(locs.columns)))
+            times = np.asarray(locs["time_s"], dtype=np.float64)
+            move = -self.at(times if mask is None else times[mask])
+            frames = None
+        else:
+            frames = np.asarray(locs["frame"], dtype=np.int64)
+            if mask is not None:
+                frames = frames[mask]
+            if len(frames) and (frames.min() < 0 or frames.max() >= len(self)):
+                raise ValueError(
+                    f"the table spans frames {frames.min()}..{frames.max()} but the "
+                    f"drift covers 0..{len(self) - 1}; it was estimated from a "
+                    f"different acquisition")
+            # how far each localization moves, in nm: the drift alone, or
+            # with a transformation the corrected position minus the old
+            # one, which needs every axis's position at once
+            move = -self.drift[frames]
 
         columns = dict(locs.columns)
-        # how far each localization moves, in nm: the drift alone, or with a
-        # transformation the corrected position minus the old one, which
-        # needs every axis's position at once
-        move = -self.drift[frames]
         if self.matrix is not None:
-            positions = np.zeros((len(frames), 3))
+            positions = np.zeros((len(move), 3))
             for axis, names in enumerate((("x_nm", "x_pix"), ("y_nm", "y_pix"),
                                           ("z_nm",))):
                 for name in names:
@@ -537,6 +584,7 @@ class Drift:
             "method": self.method,
             "columns": corrected,
             "n_frames": len(self),
+            "axis": "frame" if self.times_s is None else "time_s",
             "n_localizations_used": self.n_used,
             "flagged_windows": (None if self.flagged_windows is None
                                 else [int(w) for w in self.flagged_windows]),
@@ -565,6 +613,8 @@ class Drift:
             saved.update(matrix=self.matrix.reshape(-1, 9).tolist(),
                          centre_nm=self.centre_nm.tolist(),
                          transformation=self.transformation)
+        if self.times_s is not None:
+            saved["times_s"] = self.times_s.tolist()
         return saved
 
     @classmethod
@@ -598,7 +648,8 @@ class Drift:
                    matrix=None if matrix is None
                    else np.asarray(matrix, dtype=np.float64),
                    centre_nm=saved.get("centre_nm"),
-                   transformation=str(saved.get("transformation") or "shift"))
+                   transformation=str(saved.get("transformation") or "shift"),
+                   times_s=saved.get("times_s"))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
@@ -610,10 +661,11 @@ class Drift:
 
         if ax is None:
             _, ax = plt.subplots()
+        x = self.frames if self.times_s is None else self.times_s
         for axis, label in enumerate("xyz"):
             if np.any(self.drift[:, axis]):
-                ax.plot(self.frames, self.drift[:, axis], label=label)
-        ax.set_xlabel("frame")
+                ax.plot(x, self.drift[:, axis], label=label)
+        ax.set_xlabel("frame" if self.times_s is None else "time (s)")
         ax.set_ylabel("drift (nm)")
         ax.legend()
         return ax
@@ -1387,7 +1439,10 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
         group = f.create_group("drift")
         for axis, name in enumerate(("x_nm", "y_nm", "z_nm")):
             group.create_dataset(name, data=drift.drift[:, axis].astype(np.float32))
-        group.create_dataset("frame", data=drift.frames.astype(np.int64))
+        if drift.times_s is None:
+            group.create_dataset("frame", data=drift.frames.astype(np.int64))
+        else:
+            group.create_dataset("time_s", data=drift.times_s)
         group.attrs["reference"] = drift.reference
         if drift.matrix is not None:
             # the correction's matrix per frame and the point it acts about
@@ -1402,6 +1457,10 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
         if "rcc" in drift.method:
             group.attrs["prepass" if "comet" in drift.method else "method"] = \
                 "RCC (Wang et al. 2014)"
+        if "comet" not in drift.method and "rcc" not in drift.method:
+            # the beads' fits (fiducials, MBM) are no published estimator;
+            # the name alone says what made the curve
+            group.attrs["smappy_method"] = drift.method
     return path
 
 
@@ -1419,10 +1478,12 @@ def load_drift(path) -> Drift:
         matrix = group["matrix"][()] if "matrix" in group else None
         centre = group.attrs.get("centre_nm")
         transformation = str(group.attrs.get("transformation", "shift"))
-    name = ("rcc+comet" if prepass else "rcc" if method.startswith("RCC")
-            else "comet")
+        times = group["time_s"][()] if "time_s" in group else None
+        kept = str(group.attrs.get("smappy_method", ""))
+    name = kept or ("rcc+comet" if prepass else "rcc" if method.startswith("RCC")
+                    else "comet")
     return Drift(drift, method=name, reference=reference, matrix=matrix,
-                 centre_nm=centre, transformation=transformation)
+                 centre_nm=centre, transformation=transformation, times_s=times)
 
 
 # ---------------------------------------------------------------------- helpers
