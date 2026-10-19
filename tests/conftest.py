@@ -5,6 +5,7 @@ builds a `ControlWindow`, which opens the GUI file named there on the way up
 and writes the window position on the way down.  Without this the suite would
 take its plugin roots and tabs from whatever the developer has configured.
 """
+import importlib.util
 import os
 
 import pytest
@@ -27,10 +28,18 @@ if os.environ.get("PYTEST_XDIST_WORKER"):
         os.environ.setdefault(_name, "1")
 
 
+# uipsf's tests need torch, which is an extra (`pip install -e .[uipsf]`); without it they
+# are not collected, so a plain checkout runs the rest of the suite as before.
+if importlib.util.find_spec("torch") is None:
+    collect_ignore = ["uipsf_tests"]
+
+
 def pytest_addoption(parser):
     """`timeout` in pyproject.toml belongs to pytest-timeout; without that
     plugin it is declared here, so that it is not an unknown-option warning.
     The faulthandler's dump at `faulthandler_timeout` is what is left then."""
+    parser.addoption("--gpu", action="store_true",
+                     help="also run uipsf's GPU tier (needs CUDA or Apple's MPS)")
     parser.addoption("--slow", action="store_true",
                      help="also run the tests marked slow: the tutorials, the "
                           "pages' figures and the large numerical checks")
@@ -43,6 +52,8 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: seconds or more each; skipped unless --slow is given")
+    config.addinivalue_line(
+        "markers", "gpu: needs CUDA or Apple's MPS; skipped unless --gpu is given (uipsf)")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -50,7 +61,15 @@ def pytest_collection_modifyitems(config, items):
     time in a few dozen tests -- the tutorials alone half of it -- and check
     what a change to the GUI, a page or an algorithm breaks rather than what
     every edit might.  They are skipped, not deselected, so the summary says
-    how many were left out; `--slow` runs everything, as before a PR."""
+    how many were left out; `--slow` runs everything, as before a PR.
+
+    uipsf's GPU tier is a third, `--gpu`: run by hand on a Mac and a CUDA
+    machine, since no CI runner has the GPU."""
+    if not config.getoption("--gpu"):
+        gpu = pytest.mark.skip(reason="gpu tier: run with --gpu")
+        for item in items:
+            if "gpu" in item.keywords:
+                item.add_marker(gpu)
     if config.getoption("--slow"):
         # longest first: collected last (`test_tutorial`), the tutorials were
         # a tail of 20-50 s tests that four workers sat through after

@@ -1409,6 +1409,18 @@ saving) is the price of keeping it out of that window.
   driven by `worker.py` -- with every array of the result bit-identical, and
   `io.h5.load` (hdfdict on main, h5py on the branch) read them back alike.
   The worker drives uiPSF from before #17 as well.
+* **uiPSF v2, in this repository.**  `src/uipsf/` is uiPSF re-implemented
+  in PyTorch, moved here from its own private repository (ries-lab/uiPSF2)
+  so that it can use smappy's loading, camera database, bead detection and
+  fitters rather than copies of them.  It is a package of its own, `uipsf`,
+  and not `smappy.uipsf`, which stays the bridge to v1 above until v2 does
+  in situ.  Two rules keep it separable: it never imports Qt, and only it
+  imports torch.  torch is the extra `smappy-smlm[uipsf]`, not a dependency:
+  on Linux its default wheel brings NVIDIA's libraries, 4 GB to download
+  (torch 2.9.1), for a fitting machine that may never learn a PSF.  Its
+  plan, conventions and what is built are in `docs/uipsf/`, its rules in
+  `src/uipsf/CLAUDE.md`; the plugin that uses it is still to be designed
+  (`docs/uipsf/plan.md` §7.4).
 
 ## Tracking
 

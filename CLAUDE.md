@@ -11,6 +11,12 @@ plugin, and the traps that cost time.  It is a summary written at one moment
 and the code moves, so treat it as a starting point, not as authority -- and
 see "Keeping this file true" at the end.
 
+`src/uipsf/` is a second package beside `smappy`: uiPSF v2, the PSF learning
+in PyTorch, with its own rules in `src/uipsf/CLAUDE.md` (read it before
+working there), its docs in `docs/uipsf/` and its tests in
+`tests/uipsf_tests/`.  Where smappy uses it, it imports it inside the
+functions that need a model, so that nothing else loads torch.
+
 ## Before you edit anything
 
 Pull first:
@@ -84,6 +90,11 @@ Running the tests -- two tiers:
 * `SMAPPY_UIPSF_PYTHON=/path/to/python` (of an environment with uiPSF, as the
   page of `Localize/uiPSF calibration` installs it) enables the slow test that
   runs uiPSF itself, a few minutes on a CPU; without it it skips.
+* uipsf's tests (`tests/uipsf_tests/`) need torch, the extra `uipsf`:
+  `pip install -e .[test,uipsf]`.  Without torch they are not collected at
+  all (`collect_ignore` in `tests/conftest.py`), so the count drops by about
+  160 and nothing says so; `--gpu` adds their GPU tier, run by hand on a Mac
+  and a CUDA machine.
 
 ## Writing a plugin
 

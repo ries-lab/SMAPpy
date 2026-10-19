@@ -1,0 +1,8 @@
+{"case": "dim seed 0", "localise_first": false, "seconds": 28.1, "objective": 54420.955078125, "iterations": 30, "rebuilds_stage2": 1, "stop": "step", "phase": 0.01177}
+{"case": "dim seed 0", "localise_first": true, "seconds": 32.5, "objective": 54420.9541015625, "iterations": 22, "rebuilds_stage2": 1, "stop": "step", "phase": 0.01177}
+{"case": "dim seed 1", "localise_first": false, "seconds": 29.1, "objective": 54107.1416015625, "iterations": 24, "rebuilds_stage2": 2, "stop": "decrease", "phase": 0.00915}
+{"case": "dim seed 1", "localise_first": true, "seconds": 30.6, "objective": 54107.138671875, "iterations": 19, "rebuilds_stage2": 1, "stop": "step", "phase": 0.00915}
+{"case": "dim seed 2", "localise_first": false, "seconds": 28.5, "objective": 54318.818359375, "iterations": 25, "rebuilds_stage2": 1, "stop": "step", "phase": 0.00863}
+{"case": "dim seed 2", "localise_first": true, "seconds": 29.2, "objective": 54318.818359375, "iterations": 18, "rebuilds_stage2": 1, "stop": "step", "phase": 0.00863}
+{"case": "zenodo 19", "localise_first": false, "seconds": 116.4, "objective": 321971.306640625, "iterations": 35, "rebuilds_stage2": 2, "stop": "step"}
+{"case": "zenodo 19", "localise_first": true, "seconds": 103.6, "objective": 321971.3115234375, "iterations": 35, "rebuilds_stage2": 2, "stop": "step"}

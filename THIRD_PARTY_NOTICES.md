@@ -37,6 +37,14 @@ back to the method that produced it.  If you publish work that used it, cite it
 as `src/smappy/_comet/CITATION.cff` asks (Reinkensmeier and Bates,
 bioRxiv 2026, [doi:10.64898/2026.03.27.714864](https://doi.org/10.64898/2026.03.27.714864)).
 
+## Included: uipsf
+
+`src/uipsf/` is uiPSF v2, a re-implementation in PyTorch of uiPSF (Liu et al.,
+*Nat. Methods* 2024, [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x)),
+BSD 3-Clause licensed as smappy is, Copyright (c) 2026 uiPSF contributors.
+`src/uipsf/LICENSE` carries its notice and ships with it.  It needs PyTorch,
+the extra `smappy-smlm[uipsf]`.
+
 ## Dependencies
 
 Dependencies are separate works and remain subject to their own licenses. They

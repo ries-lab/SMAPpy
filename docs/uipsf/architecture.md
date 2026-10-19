@@ -1,0 +1,838 @@
+# Architecture, as built
+
+What exists in the code now, module by module, with the APIs as they are. The plan (`docs/uipsf/plan.md`) says where
+this is going; this file says where it is. Update it with every milestone.
+
+## Milestone M1: the forward model
+
+```
+src/uipsf/
+├── device.py         default_device(), resolve(device, dtype), complex_dtype(), to_cpu64()
+├── params.py         ParamSpec, Params; transforms Identity, Softplus, Exp, Bounded; prior Gaussian
+├── optics/           no parameters, no fitting
+│   ├── system.py     Optics(NA, wavelength_nm, n_imm, n_med, pixel_size_nm=(x, y), n_cov=None)
+│   │                 choose_pupil_size(optics, z_max_nm, max_phase_step=π/2)
+│   ├── grid.py       PupilGrid.build(optics, size, device, dtype): k-space, aperture, k_z, Fresnel, apodisation
+│   ├── zernike.py    noll_to_nm, nm_to_noll, zernike_modes(n_max, exclude), zernike_basis(grid, modes, high_na)
+│   ├── vectorial.py  dipole_fields(grid, analyser=None) -> [6|3, P, P]; scalar_field(grid) -> [1, P, P]
+│   ├── mdft.py       MatrixDFT(grid, (Y, X), spacing_nm)(field, x0, y0) -> [..., Y, X]
+│   └── kernels.py    gaussian_otf, sphere_otf, bin_pixels
+└── model/
+    ├── pupil.py      ZernikePupil(grid, n_max, …)(p) -> (magnitude, phase); PixelPupil
+    └── psf.py        VectorPSF(grid, pupil, roi, upsample, kind, analyser, bead_radius_nm)
+                      (p, xyz [E, K, 3], depth_nm=None, z_step_nm=None) -> [E, K, Y, X]
+```
+
+### How a PSF is computed
+
+```python
+optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.516, n_med=1.335, pixel_size_nm=(127, 116))
+grid = uipsf.PupilGrid.build(optics, size=64)                 # default device, float32
+pupil = uipsf.ZernikePupil(grid, n_max=6)                     # phase: Noll 5–28, magnitude: Noll 2–28
+psf = uipsf.VectorPSF(grid, pupil, roi=(21, 21), bead_radius_nm=20)
+p = uipsf.Params(psf.specs()).physical()                      # {"pupil.phase", "pupil.magnitude", "psf.sigma"}
+I = psf(p, xyz, z_step_nm=50)                                 # expected photons per pixel per photon
+```
+
+1. `pupil_field(p)`: magnitude × exp(i·phase), with the magnitude rescaled to the reference energy.
+2. `intensity(p, xyz)`:
+   - multiply by the defocus wave `exp(2πi k_z,imm z)` (and `exp(2πi k_z,med d)` for depth);
+   - multiply by the six dipole fields;
+   - take the matrix DFT, which also places the emitter laterally;
+   - sum `|E|²` over the fields.
+   Shape `[E, K, F, P, P]` before the DFT.
+3. `__call__`: Gaussian blur in 2-D, or blur × bead kernel in 3-D along a padded stack; then sum the upsampled samples of each pixel.
+
+Pupil coefficients with a leading emitter axis give one pupil per emitter. That is the slot field dependence will use.
+
+### Contracts the tests hold
+
+- Emitter independence: a tangent on one emitter's parameters changes no other emitter's pixels (`test_psf.py`). The solver's block structure (M2) relies on it.
+- Exact gradients for every parameter, including xyz, depth and σ, in float64 (`gradcheck`).
+- v1 and vecfit agreement (`test_oracles.py`); conventions in `docs/uipsf/conventions.md`.
+
+### Parameters
+
+- `ParamSpec(name, shape, scope="shared"|"emitter", init, transform, prior, fixed)`.
+- `Params(specs, n_emitters)` keeps unconstrained values:
+  - `physical()` gives what components see;
+  - `shared_vector()` and `emitter_matrix()` pack the free ones for the solver;
+  - `replace(shared=, emitter=)` unpacks them;
+  - `fix()` and `free()` change which parameters are free;
+  - `prior_penalty()` adds the Gaussian priors.
+- Components declare specs. In M1 that is `pupil.phase`, `pupil.magnitude` and `psf.sigma`; emitters, photons and background come with the forward model of M2.
+
+### Measured (benchmarks/uipsf/speed.py, float32, torch 2.14)
+
+| Beads × 41 slices | Mac GPU (MPS) | Mac CPU, 8 threads | Linux CPU, 4 cores (cloud) |
+|---|---|---|---|
+| 6 | 0.015 s | 0.052 s | 0.090 s |
+| 20 | 0.044 s | 0.160 s | 0.31 s |
+| 40 | 0.091 s | 0.31 s | 0.70 s |
+
+- On the Mac the GPU is 3.5× faster than its own CPU, more than the review's 2.5× for its prototype on the M1 Pro.
+- For comparison, the review measured 0.73 s for 6 beads with v1 (TF, eager, 4 CPU cores).
+- No CUDA numbers yet.
+- The gpu tier (`tests/uipsf_tests/test_gpu.py --gpu`) passes on an Apple-silicon Mac (MPS): the same PSF and gradient as on the CPU. It first found one float64 tensor built on the device, which MPS refuses; the bead kernel is now built on the CPU. Not yet run on CUDA.
+
+## Milestone M2: likelihood and solver
+
+```
+src/uipsf/
+├── data/dataset.py   Batch(data [E, C, K, Y, X] photons, z_nm [K] | [E, K], s, mask); subset(), to()
+│                     Batch.z_from_objective(objective_nm): SMAPpy's z sign, written once
+├── model/
+│   ├── geometry.py   BeadStackGeometry(drift=False, z_scale=False): xyz[e, k] = xyz_e + (δx_k, δy_k, s·z_k + δz_k)
+│   ├── intensity.py  Bleaching(order=1) (default), PerSliceFactor(order, prior_sigma), PerObservation()
+│   ├── background.py Constant() (default), Planar(pixel_size_nm)
+│   ├── start.py      rough_start(batch, pixel_size_nm): position, photons, background from the data
+│   └── forward.py    ForwardModel(psf, geometry, intensity, background)
+│                     .specs(batch, start=None) -> [ParamSpec];  (p, batch) -> μ [E, 1, K, Y, X]
+├── noise.py          ShiftedPoisson(excess=1), Poisson(), EMCCD(); Camera(conversion, offset, em_gain, read_noise_e)
+│                     .deviance(μ, d, s, mask), .derivatives(μ, d, s, mask) -> (∂(½D)/∂μ, Fisher weight)
+├── solve/
+│   ├── problem.py    Problem(model, noise, batch, chunk_size=None, tangents=None, device=None)
+│   │                 .objective(params), .normal_equations(params) -> Normal, .deviance(params), .expected(params)
+│   ├── lm.py         LevenbergMarquardt(max_iter=100, tol=1e-3, xtol=1e-3, damping=1e-3).solve(problem, params,
+│   │                 progress, cancel) -> FitResult;  schur_solve(normal, λ, D_s, D_e)
+│   └── result.py     FitResult: params, history, stop_reason, converged, objective, covariance_shared,
+│                     std (CRLB per parameter, physical), condition, remaining, clamped
+├── workflows/beads.py fit_beads(model, batch, noise=None, start=None, first_order=4, …) -> FitResult
+└── simulate.py       template(E, z_nm, roi), parameters(model, batch, values), simulate(model, params, batch, seed)
+```
+
+### How a bead fit runs
+
+```python
+model = uipsf.ForwardModel(uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=6), (21, 21), upsample=2,
+                                           sigma_nm=(30, 30)))
+batch = uipsf.Batch(data=photons[:, None], z_nm=uipsf.Batch.z_from_objective(objective_nm))
+result = uipsf.workflows.fit_beads(model, batch)          # Poisson; the start comes from the data
+result.params.physical()["pupil.phase"], result.std["pupil.phase"]
+```
+
+1. `ForwardModel.specs(batch)` collects every component's `ParamSpec`s, emitter ones started by
+   `rough_start`.  Defaults: `emitter.xyz`, `emitter.photons` (softplus), `emitter.bleaching`,
+   `emitter.background` (softplus) per bead; `pupil.phase`, `pupil.magnitude`, `psf.sigma` shared;
+   `geometry.drift` and `geometry.z_scale` declared but fixed.
+2. `Problem.normal_equations` takes each chunk of emitters, computes μ, one JVP per emitter parameter
+   (a unit tangent on that parameter of every emitter at once) and one per shared parameter (vmapped),
+   and adds JᵀWJ and Jᵀg per emitter in float64 on the CPU.  Priors add their exact least-squares terms.
+3. `LevenbergMarquardt` solves (H + λD)δ = −g by the Schur complement of the emitter blocks,
+   Jacobi-scaled, with D Moré's running maximum of diag(H); accepts only decreases; adapts λ by the gain
+   ratio; stops on decrease, step, gradient, no decrease, max_iter or cancel.  At the end the block
+   inverse gives the CRLBs.
+4. `fit_beads` runs it twice: Zernikes up to n = 4, then all of them, starting from the first stage.
+
+### Contracts the tests hold
+
+- The deviance is 0 at μ = d, its gradient is that of ½D, its weight the Fisher information (exact sum
+  over Poisson counts), its mean ≈ 1 on Poisson data (`test_noise.py`).
+- LM solves linear least squares in one undamped step; the Schur solve equals the dense one; priors add
+  exactly (`test_solve.py`).
+- Rescaling parameters by 10⁻³–10³ leaves every iterate unchanged to 10⁻⁸ (float64); chunk sizes 1–5
+  change no sum beyond 10⁻¹¹ and no float32 fit beyond 1 % of a standard error.
+- The CRLB matches the spread of 200 simulated localisations within 10 %; a matched fit's deviance is
+  1 per degree of freedom.
+- Emitter independence through the whole forward model (`test_forward.py`).
+- The review's bright, dim and very dim beads are learned to their CRLB without settings
+  (`test_benchmark.py`, slow).
+
+### Measured
+
+The review's beads (`benchmarks/uipsf/synthetic/beads.py`; 6 beads + 2 held out, 41 slices, 21 × 21 px, bin 2,
+n_max 6; Linux CPU, 4 cores, float32), default settings, one run each:
+
+| Scenario | Iterations | Time | Phase RMS error (CRLB) | z spread (CRLB) | Deviance (held out) |
+|---|---|---|---|---|---|
+| bright | 13 | 71 s | 0.0008 rad (0.0008) | 0.8 nm (0.7) | 1.004 (1.011) |
+| dim | 30 | 80 s | 0.0085 rad (0.0084) | 3.8 nm (5.2) | 1.002 (1.010) |
+| very dim | 25 | 122 s | 0.021 rad (0.024) | 15 nm (15) | 1.003 (1.013) |
+
+- For comparison, v1 on the dim beads: 0.059 rad and 61 nm by default, 0.0146 rad and 5.3 nm with the
+  best hand-set weights (review, 8 beads, 200 iterations, ~170 s).
+- Rewriting photons, background and the pupil in other units (×0.1 … ×10) gives the same dim fit to
+  < 0.05 standard errors.
+- One iteration of the 6-bead problem costs ~8 s on 4 CPU cores: 59 JVPs at ~0.12 s each, two to three
+  forwards' worth.  Each JVP propagates only its own block; a zero tangent on the other block cost as
+  much as a real one.  Speed is M7.
+- Without the two stages, the dim fit stopped in a local minimum 50 nats up (`workflows/beads.py`).
+
+
+### First look at real data: Zenodo `1ch_40nm_bead`
+
+The ROIs v1 fitted (`rois/psf_data`, 19 beads × 39 slices × 25 × 25), with v1's optics and n_max 8, fitted
+by `fit_beads` (`benchmarks/uipsf/real/zenodo_1ch_beads.py`; rows in `benchmarks/uipsf/results/zenodo_1ch_beads.jsonl`):
+
+| Photons | Iterations | Time (4 CPU cores) | Mean deviance, v2 / v1 | Blur σ, v2 / v1 (nm) |
+|---|---|---|---|---|
+| bleaching (default) | 23 | 9 min | 0.303 / 0.281 | (75.1, 66.3) / (74.8, 66.6) |
+| per observation (v1's) | 23 | 13 min | 0.2813 / 0.2813 | (75.2, 66.3) / (74.8, 66.6) |
+
+- **Zernikes:** with v1's photon model, 40 of 41 phase modes agree with v1 within 2 CRLB (median 0.2).
+  The exception is spherical, Noll 11 (v2 −0.001, v1 −0.012 rad): v1 also fits defocus, Z4 = −0.10 rad,
+  which v2 leaves out, and Z11 trades against it.  The magnitude agrees to ~0.002.
+- **Photons per slice matter here:** bleaching leaves 0.022 more deviance per pixel than a free count per
+  slice, so these beads' brightness varies from slice to slice beyond a smooth curve.  Which option, and
+  whether a shared `PerSliceFactor` suffices, is for the residual atlas (M3).
+- **v1's camera conversion is wrong.** In v1's photons ((ADU − 400)·0.22) the residual variance is only
+  0.13–0.36 of the model, hence the mean deviance of 0.28 for both programs.  SMAPpy's camera database
+  identifies the camera from the stacks' tags as the Evolve 512 (normal port): 4.7 e⁻/ADU, offset 398.6.
+  v1's 0.22 is about 1/4.7, so its photons are ~21× too few, and its likelihood weights and CRLBs are off
+  by that factor; the fitted shape is not (a common count scale does not move the maximum-likelihood
+  point).  In the right units the variance of the spots' pixels is still 3–5× Poisson, model mismatch or extra noise
+  for the residual atlas (M3) to show.  M3 reruns this in SMAPpy's photons (plan §5.7).
+
+## Milestone M3: data, camera, rejection, diagnostics
+
+```
+src/uipsf/data/
+├── io.py        read_stack(path, camera: noise.Camera, dz_nm=None, mirror=None) -> BeadStack (Micro-Manager TIFF)
+│                BeadStack(photons, z_objective_nm, read_noise_var, chip_origin, saturated, source, camera)
+│                BeadStack.from_adu(adu, z, Camera): photons and saturation; .mirrored(axis)
+├── rois.py      find_beads(stacks, roi_size, detection_sigma_px=2, detection_threshold_sigma=6,
+│                min_distance_px=25, padding=5) -> Beads: SMAPpy's detect_beads convention
+│                extract_rois(stacks, beads, roi_size, slices=slice(1, None)) -> Batch: the first slice dropped
+└── dataset.py   Batch gains field_xy [E, 2] (chip pixels) and stack_id [E]
+src/uipsf/diagnostics/camera.py  noise_transfer(data, mu) -> NoiseTransfer(slope, intercept, …): camera check
+```
+
+- **Camera:** given by the caller (`noise.Camera`); inside SMAPpy its camera database supplies it.
+  `test_camera.py` holds the conversion and read noise to SMAPpy's `CameraMetadata` on the same ADU
+  (skips without SMAPpy).  An earlier version read SMAPpy's camera database format itself; it was
+  dropped for simplicity (plan §5.7).
+- **Bead finding:** SMAPpy's convention; `test_rois.py` checks it against SMAPpy's `detect_beads`.
+- **Zenodo `1ch_40nm_bead`:** SMAPpy's database gives 4.7 e⁻/ADU and offset 398.6 for its Evolve 512;
+  v1's ROIs are exactly transpose((ADU − 389)·0.22) (docs/uipsf/data.md).  The finder of the time kept 72
+  isolated beads in the 31 stacks (the runs below used it); v1 kept 19 of its 20.  The photon-model test is closed too: with the right option
+  (`PerSliceFactor` for a laser, `PerObservation` for speckle) the pupil comes back within 4 CRLB and the
+  atlas is quiet; with the default the error is larger (`test_atlas.py`).
+- **The same 19 beads from the raw stacks**, camera frame, SMAPpy's photons, defaults otherwise
+  (`zenodo_1ch_beads.py --source raw`; rows in `benchmarks/uipsf/results/zenodo_1ch_beads.jsonl`):
+
+  | Pixels x × y (nm) | Read noise | Mean deviance | Iterations / time | Blur σ (nm) |
+  |---|---|---|---|---|
+  | 127 × 116 | 1 e⁻ (SMAPpy's default) | 12.71 | 41 / 15 min | (86.9, 55.2) |
+  | 116 × 127 | 1 e⁻ | 12.65 | 47 / 11 min | (66.4, 75.1) |
+  | 116 × 127 | 21 e⁻ | **1.390** | 42 / 13 min | (65.9, 74.1) |
+  | 127 × 116 | 21 e⁻ | 1.416 | 36 / 13 min | (85.8, 54.0) |
+
+  - **Read noise is what was wrong.** The residuals' variance at zero signal is 20 ADU² (4.5 ADU, ≈ 21 e⁻
+    at 4.7 e⁻/ADU), the normal-port read noise of this EMCCD; SMAPpy's default of 1 e⁻ is an sCMOS value
+    and its camera database carries none.  With 21 e⁻ the deviance falls from 12.7 to 1.39.
+    `diagnostics.noise_transfer` makes this check after every fit.
+  - **The pixels are 116 nm in x and 127 nm in y** in the camera's frame: v1's 127 × 116 through its
+    transpose.  The deviance prefers it by 0.026 per pixel, ~6000 nats over the 19 beads, and the blur
+    then matches v1's.
+  - **Zernikes are v1's, transposed:** Noll 6 changes sign (−0.558, v1 +0.558), x and y coma swap
+    (0.035 / −0.099, v1 −0.099 / 0.036).
+  - The remaining excess, 0.39 per pixel, is for the residual atlas; photons per slice are the first
+    suspect (with v1's ROIs, a free count per slice removed 0.022 of 0.30).
+
+### Bead rejection and the bead table
+
+```
+src/uipsf/workflows/
+├── beads.py      learn_beads(model, batch, noise=None, decisions=None, warm_start=None, rejection=None,
+│                 heldout=0.2, first_order=4, …) -> Calibration(model, result, beads, scores, heldout, first)
+│                 first_stage(…): stage 1 alone; fit_beads: both stages, every bead
+├── scoring.py    score_beads(model, shared, batch, noise) -> BeadScores(deviance, z_bias_nm, photons,
+│                 xy_offset_px, masked, fit); localise(…), slice_z(…)
+└── rejection.py  RejectionSettings(k=3, floors, max_xy_offset_px=3, max_masked=0.01, min_beads=5)
+                  decide(scores, settings, heldout, decisions) -> BeadTable(rows, thresholds); held_out(…)
+```
+
+1. Stage 1 on every bead not held out or excluded by hand (skipped after a warm start).
+2. Every bead localised on that pupil, shared parameters fixed, and scored: deviance per pixel, z bias
+   (each slice localised alone against the stack fit, the median over beads removed: v1's `msez` in nm),
+   photons against the median, offset from the ROI centre, masked fraction.
+3. `decide`: median + 3·1.4826·MAD per relative score, with floors (deviance 5 % of the median, z bias
+   5 nm, photons a factor 1.5) so a tight set is not thinned by its noise; absolute limits for the
+   offset and the masked fraction.  Manual decisions win.
+4. Stage 2 on the used beads, from stage 1 and their localisations.
+5. Every bead scored again on the final pupil (`BeadRow.final`), so the table shows whether leaving a
+   bead out was right.
+
+**For the GUI:** `Calibration.beads.as_dicts()` is one row per bead (state, reason, manual decision, every
+score and its final value); `learn_beads(..., decisions={bead: "include" | "exclude"}, warm_start=cal)`
+is *Recalculate*.  The window applies no rule of its own.
+
+Tested (`test_rejection.py`): each planted outlier (a double bead, a 300 nm jump in z, 3× the photons,
+3 % saturated pixels) is rejected for its own reason and the fit then reaches its CRLB; 20 matched beads
+lose at most one; a warm *Recalculate* with manual decisions equals a cold fit of the same beads.
+
+**On Zenodo `1ch_40nm_bead`** (v1's 20 candidates, camera frame, 21 e⁻, 116 × 127 nm, nothing held out;
+`benchmarks/uipsf/real/zenodo_1ch_rejection.py`, 18 min, rows in `benchmarks/uipsf/results/zenodo_1ch_rejection.jsonl`):
+- v2 rejects one bead, in Pos10 (stage-1 deviance 2.96 > 2.53).  On the final pupil it is still the worst
+  of the 20 (2.18; the others 1.14–1.66).  v1 kept it.
+- v1's one rejection, in Pos13 at (178, 32), looks ordinary to v2: final deviance 1.23, z bias 9.6 nm,
+  photons within the spread.  v1's reason is not recorded; its photon ratio or a non-positive photon count
+  in one slice (`Fitter.relearn`) are the candidates.
+- Stage-1 deviances (1.2–3.0) are higher than the final ones (1.1–1.7): stage 1 has modes up to n = 4
+  only.  The thresholds are relative, so this shifts them, not the decisions.
+
+### Residual atlas, likelihood-ratio probes, held-out report
+
+```
+src/uipsf/diagnostics/
+├── atlas.py     residual_atlas(model, params, batch, noise) -> Atlas(mean_deviance, groups, checks, findings)
+├── probes.py    probe_terms(model, params, batch, noise, p=1e-6) -> [Probe]; select_terms(…) -> (model, params, added)
+└── heldout.py   heldout_report(model, shared, batch, noise) -> HeldOutReport (z-bias curve, CRLB vs spread)
+```
+
+- **Atlas:** deviance and signed residuals grouped by slice, |z|, radius, bead and field, each with a
+  heterogeneity chi²/dof; and three specific checks, each ≈ 1 on matched data: photons per slice shared
+  by all beads (a laser; measured against the per-observation scatter so speckle does not raise it),
+  photons per bead and slice (speckle), a plane in the signed residuals (a background ramp).  Thresholds:
+  4 null standard errors for the specific checks, 8 for the generic groups (their pixels share fitted
+  parameters; matched fits reached 3.8 where 4 would allow 3.3).
+- **Probes:** some physics leaves no pattern at all.  A 5 % piezo scale over ±1 µm left the deviance at
+  matched level and no group flagged, yet freeing the z scale recovered 1.052 ± 0.002 and gained 355 nats
+  (matched: 0.5).  Each optional term (z scale, planar background, per-slice photons) is refitted from the
+  fit and flagged when its gain exceeds the χ² quantile at p = 10⁻⁶; `select_terms` adds the largest and
+  probes again, since a wrong term can borrow a little of a missing one (a ramp lent the z scale 44 nats,
+  its own probe 6876).
+- **Held out:** the held-out beads localised stack by stack and slice by slice on the learned pupil: the
+  z-bias curve per slice, lateral bias, spread over beads against the CRLB, held-out deviance.
+  `learn_beads` attaches the atlas and this report to every `Calibration`.
+
+Tested (`test_atlas.py`, slow): a background ramp, a fluctuating laser and speckle are each named by their
+own check and no other specific one; forward selection adds the z scale (recovering 1.05), the planar
+background and the per-slice factor first for their own mismatch; 16 matched beads raise no flag, select
+no term, and their 4 held-out beads have deviance ≈ 1, no z bias beyond the noise and spread ≈ CRLB.
+Not yet covered: polychromatic emission, which needs a model the code does not have (M8).
+
+### The whole pipeline on Zenodo `1ch_40nm_bead` (first run)
+
+`benchmarks/uipsf/real/zenodo_1ch_full.py`: raw stacks, SMAPpy's camera with 21 e⁻, 116 × 127 nm pixels, all 41
+slices, 72 beads found, `learn_beads` defaults (n_max 8, 20 % held out), 4 CPU cores:
+- **Beads:** 46 used, 14 held out, 12 rejected.  Nine of the rejected are 12–60× dimmer than the median
+  bead with a deviance ≈ 1 (faint spots the finder took); two fit badly (deviance 4–5).
+- **Time:** stage 1 in 29 min (53 iterations), scoring, stage 2 in 8 iterations; 90 min in all.
+- **Held out** (re-judged from the saved fit with the current rules, `zenodo_1ch_resume.py`): two held-out
+  "beads" fail them (one with no photons, one faint) and are dropped; the 12 left give a z bias of
+  3.9 nm RMS over the central slices (the curve within ±7 nm), lateral 1.5 nm, and a spread over beads
+  2.5× the CRLB: on these beads the CRLB is optimistic by that factor, as the deviance of 1.47 implies.
+- **Atlas:** mean deviance 1.48; the largest excess is in the spot's shape (radius chi² 4155, |z| 1054,
+  slice 608) and over the field (345), then the photons per observation (93) and a background ramp
+  (28); a shared per-slice photon pattern is marginal (2.5 against 1.9).
+- **Probes** (16 of the used beads, refits capped at 8 iterations, so the gains are lower bounds; the
+  full run's own probes were lost to a container restart):
+
+  | Term | Gain (nats) | Threshold | Fitted |
+  |---|---|---|---|
+  | per-slice photons | 10 410 | 50 | 0.96–1.22 |
+  | z scale | 2 193 | 12 | 0.968 |
+  | planar background | 1 594 | 43 | slopes ≤ 0.002 photons/px/nm |
+
+  The per-slice factors are not a laser: **the first slice is 22 % brighter** (an artefact of the first
+  frame; v1's settings drop the first and last slice for this reason), and the rest follow a smooth
+  U of ±4 % over z, shared by all beads, with ~1 % scatter.  Together with a 3 % z scale, the model's z
+  dependence is off: the stage, or the depth and index part of the optics.  Field dependence (the
+  field chi² of 345) is the other large term, and arrives later as a whole.
+- **Defaults changed from this** (decided October 2026): `extract_rois` drops the first slice of every
+  stack.  The z scale stays fixed until its cause is understood (plan, "To investigate").
+
+### Bead finders compared (`benchmarks/uipsf/real/compare_finders.py`)
+
+Since this comparison uipsf's finder follows SMAPpy's convention, and on these stacks both find the same
+84 beads.  What the first finder did differently, on the 31 Zenodo `1ch_40nm_bead` stacks, ROI 25 px:
+- uipsf's `find_beads` keeps 72; SMAPpy's `detect_beads` finds 84 and keeps 54 after its brightness range
+  of 6; 67 are common.  Of v1's 20 beads uipsf keeps all 20; SMAPpy detects 19 and accepts 16.
+- SMAPpy alone (17): all below uipsf's threshold (10 robust σ of the background-free projection;
+  SMAPpy's is 6 σ after a 2-px smooth): faint spots.
+- uipsf alone (5): 4 have another spot within 25 px, which SMAPpy drops in pairs whatever the
+  neighbour's brightness (uipsf drops a bead only for a neighbour at least 10 % as bright); 1 lies within
+  SMAPpy's 5-px padding of the edge.
+- Of the beads SMAPpy's brightness range drops, uipsf's rejection also rejects the faint ones (z bias and
+  photons) and two that fit badly, but uses 5 and holds out 4 that fit well.
+
+## Next in M3
+
+- Camera tests against SMAPpy, with the camera from SMAPpy's database; data readers, ROI extraction,
+  held-out split, residual atlas.
+- `learn_beads`: bead scoring and rejection between the two stages, the bead table `Calibration.beads`,
+  manual decisions and warm starts (plan §5.7).
+- The Zenodo `1ch_40nm_bead` comparison with v1 in full.
+
+## Milestone M7, in progress: speed
+
+```
+src/uipsf/
+├── solve/problem.py   Problem(..., linearise=True); .value_and_grad(params) -> (F, g_s, g_e): one backward pass
+├── solve/lbfgs.py     GaussNewtonLBFGS(max_iter=300, refresh=10, memory=10, tol, xtol, damping).solve(problem,
+│                      params) -> FitResult: L-BFGS whose initial matrix is the damped Gauss–Newton matrix
+├── model/psf.py       VectorPSF.pupil_linearisation(p, xyz, …) -> apply(dA [T, P, P]) -> [T, E, K, Y, X]
+├── model/forward.py   ForwardModel.pupil_linearisation(p, batch) -> (names, field, apply)
+├── optics/mdft.py     MatrixDFT.matrices(x0, y0), .apply(field, Ax, Ay); .real_matrices(x0, y0) -> (By, Bx),
+│                      .apply_wide(f [..., 2P, N, P], By, Bx) -> [..., N, Y, 2, X]; wide_product(f, By, Bx)
+├── optics/kernels.py  blur_bin_matrices(shape, spacing, sigma, factor) -> (M_y, M_x): blur + binning, no FFT
+├── solve/problem.py   TANGENT_BUDGET[device]: output values per batch of Jacobian columns
+└── device.py          compiled(fn, device): torch.compile on MPS only (UIPSF_COMPILE=0/1 overrides)
+benchmarks/uipsf/profile_lm.py          where an LM iteration's time goes, in forward + backward passes
+benchmarks/uipsf/synthetic/solvers.py   the bead benchmark per solver (rows in benchmarks/uipsf/results/solvers.jsonl)
+scripts/uipsf/time_v1_zenodo.py         uiPSF v1 timed on Zenodo 1ch_40nm_bead (TensorFlow environment)
+```
+
+**Profile** (dim beads, 6 × 41 slices, n_max 6, 4 CPU cores): one LM iteration costs 61 forward + backward
+passes, 57 of them the shared Jacobian (53 JVPs at 2.7 forward passes each), 9 the emitter Jacobian; the
+sums and the Schur solve are negligible.  In a forward pass: the matrix DFT 31 %, elementwise products
+25 %, the complex exp of the defocus waves 18 %, copies 10 %.
+
+**v1 on the same data** (`scripts/uipsf/time_v1_zenodo.py`, the demo's settings, 4 CPU cores, TF 2.20): 17
+beads, 7.6 min of learning: L-BFGS-B ran 126 iterations (159 evaluations), then 55 (95) after its
+rejection, both stopping on their relative-reduction test; ~1.9 s per evaluation.  v2 took 11–15 min on
+v1's 19 ROIs (M3).  So v1 was faster, about 1.7× per bead.
+
+**The pupil's Jacobian, linearised (candidate A).**  The PSF depends on the pupil field A only through
+|DFT(A·waves·fields)|², so a column of the Jacobian for a pupil coefficient is 2·Re(E*·DFT(dA·W)) with E
+and W computed once; dA comes from a JVP of the small pupil function.  Same normal equations to 10⁻¹⁶
+in float64, with and without a bead kernel (`test_solve.py`); 2.5× cheaper than the JVPs for six beads.
+Used by default wherever the model offers it (`Problem(linearise=True)`).
+
+**Gauss–Newton L-BFGS (candidates B and D).**  L-BFGS with the damped Gauss–Newton matrix as its initial
+matrix, applied by LM's Schur solve; one `value_and_grad` per iteration, the matrix rebuilt every 10
+iterations or when the line search fails.  Stopping is decided only at a rebuild, so the CRLBs are LM's.
+It stays unit-free: rescaled parameters give the same iterates to 10⁻⁸ (`test_solve.py`).
+
+The dim benchmark (`benchmarks/uipsf/synthetic/solvers.py`, 6 beads, default two-stage `fit_beads`, 4 CPU cores):
+
+| Seed | LM, JVPs | LM, linearised | GN-L-BFGS, linearised | memory 0 (chord) |
+|---|---|---|---|---|
+| 0 | 117 s, 12 Jacobians | 62 s | 36 s, 6 Jacobians | 36 s |
+| 1 | 102 s, 15 | 59 s | 38 s, 6 | 35 s |
+| 2 | 562 s, 63: **local minimum**, +100 nats, phase error 0.10 rad | 326 s, same | 37 s, 6: 0.012 rad | 45 s |
+
+On seeds 0 and 1 all solvers end within 0.003 nats of each other, with the same phase error and z spread.
+On seed 2 LM wanders for 80 iterations into a minimum 100 nats worse; the L-BFGS solvers do not.
+
+**On Apple's GPU (MPS)** (M1 Pro, 32 GB, torch 2.14.1; `benchmarks/uipsf/results/profile.jsonl`).  The first
+profile found MPS only 1.8× faster than the same Mac's CPU: the linearised columns cost as much per
+tangent as a whole forward pass, because the matrix DFT ran as 1 476 small complex products per tangent
+(6 beads), a few per cent of the GPU's peak, and the blur's FFTs of 42-sample regions were as slow as
+the DFT.  Changed, all with the same numbers (the tests unchanged, the normal equations of the compiled
+and the eager path identical to the bit):
+- *Real, wide matrix DFT* (`MatrixDFT.apply_wide`): real and imaginary parts stacked as [Re; Im], one
+  real product instead of four, and every dipole field (and tangent) of an emitter and slice side by
+  side in one wide product.  Forward pass 2× faster on both devices; the pupil columns 3.4× on MPS.
+- *Blur and binning as two small real matrices* (`blur_bin_matrices`) when there is no bead kernel: the
+  Gaussian's transfer function is separable, so the circular blur is a circulant matrix per axis, exact
+  to 10⁻¹⁴.  With a bead kernel the 3-D FFT stays.
+- *MPS pitfalls*, each a comment where it was avoided: strided `.real`/`.imag` views of a complex tensor
+  made a product 3.5× slower; a sum over two non-adjacent axes 150× slower than two sums; and
+  `.to("cpu", torch.float64)` from MPS returns **wrong values** (every element, off by up to the data's
+  range), which corrupted every simulation on MPS until `simulate` copied first and cast after
+  (`test_gpu.py`).
+- *Tangent batches per device* (`TANGENT_BUDGET`): 2²¹ output values per batch, at most 16 tangents.
+  The old 2¹⁹ gave one tangent at 20 beads; twice the new budget swaps on MPS (4.5 s instead of 1.6 s).
+  The same budget is best on both devices; smaller chunks than all beads were never faster.
+- *`torch.compile` on MPS* for the per-tangent part (`device.compiled`; batches padded to the first one's
+  width, so one shape compiles): 1.7× on that part after 4 s of compiling (1.7 s warm), 12 % off the
+  normal equations at 20 beads.  On the CPU only 1.2× after 12 s and a C++ compiler, so off there.
+- *Tried and dropped:* a shared z grid of pupil fields (the defocus waves are 4 % of a forward pass on
+  MPS, and interpolation would change the numbers); caching the DFT matrices across calls (≈ 8 ms of a
+  1.2 s normal-equations call, and hidden state).  Building them from cos and sin directly, without
+  complex numbers, took 20 % off their cost.
+
+One `normal_equations` (dim beads, 41 slices, n_max 6), before → after:
+
+| Device | 6 beads | 20 beads | forward + backward, 20 beads |
+|---|---|---|---|
+| MPS | 1.59 s → 0.41 s | 5.7 s → 1.21 s | 0.118 s → 0.081 s |
+| CPU, 8 cores | 2.87 s → 1.02 s | 10.2 s → 3.38 s | 0.279 s → 0.118 s |
+
+The dim benchmark on MPS (`solvers.py --device mps`, 6 beads; the first fit includes compiling):
+
+| Seed | LM | GN-L-BFGS | chord |
+|---|---|---|---|
+| 0 | 6.3 s, 13 Jacobians | 4.7 s, 6 | 3.8 s, 6 |
+| 1 | 4.8 s, 13 | 4.3 s, 6 | 3.9 s, 6 |
+| 2 | 25.7 s, 62: the same local minimum, phase error 0.10 rad | 3.8 s, 6: 0.012 rad | 5.4 s, 8 |
+
+Objectives, phase errors and z spreads as on the CPU (within 0.003 nats).  So six dim beads fit in
+4–5 s on a laptop GPU, 8× faster than the cloud CPU's 36 s.
+
+With 20 beads (`--beads 20`), every solver reaches the same optimum (within 0.003 nats, phase error at
+the CRLB, 0.004–0.005 rad):
+
+| Seed | LM | GN-L-BFGS | chord |
+|---|---|---|---|
+| 0 | 15.7 s, 14 Jacobians | 12.6 s, 6 | 276 s, 6: **323 iterations**, stopped at max_iter |
+| 1 | 13.7 s, 13 | 10.9 s, 6 | 259 s, 7: 305 iterations |
+| 2 | 15.4 s, 15 | 10.7 s, 6 | 10.2 s, 6 |
+
+So a 20-bead calibration takes ~11 s with GN-L-BFGS on the Mac's GPU.  Without its memory (chord) the
+fit crawls on two seeds of three: the curvature the Gauss–Newton matrix misses between rebuilds grows
+with the beads.
+
+**The CPU comparison, continued** (cloud, 4 x86 cores; `benchmarks/uipsf/results/solvers.jsonl`,
+`zenodo_1ch_solvers.jsonl`, `z_spacing.jsonl`).
+
+*Two fixes to GN-L-BFGS from Zenodo (41bb693).* Its first Zenodo fit ended 1852 nats above LM's.  Not a
+minimum of the physics: one step drove two beads' softplus backgrounds (11 and 8 photons) deep into the
+flat tail, where d(background)/du ≈ 0, so no solver could bring them back (their emitter blocks turned
+singular).  The line search now refuses a step that shrinks any transform's derivative by more than
+100× (`lbfgs._saturates`).  It then reached LM's optimum but kept "accepting" steps of α ≈ 0 at the
+float32 floor, each followed by a rebuild; LM's step test now stops it there.
+
+*Zenodo `1ch_40nm_bead`*, v1's 19 beads, raw stacks, 21 e⁻, 116 × 127 nm, n_max 8 (`zenodo_1ch_beads.py
+--solver`):
+
+| | v1 (17 beads) | LM, M3 | LM, linearised | GN-L-BFGS | GN-L-BFGS, after the MPS merge |
+|---|---|---|---|---|---|
+| Time | 7.6 min | 13 min | 343 s | 98 s | **88 s** |
+| Objective | | | 321971.3 | 321971.3 | 321971.3 |
+
+Both v2 solvers end at the same Zernikes to the 10⁻⁴ rad printed, mean deviance 1.3904.
+
+*The synthetic matrix* (6 beads unless said, two-stage `fit_beads`, before the MPS merge):
+
+| Scenario | Seeds | LM | GN-L-BFGS | Note |
+|---|---|---|---|---|
+| bright | 0, 1, 2 | 51–54 s | 17–24 s | same optimum |
+| dim | 0, 1 | 61–62 s | 33–37 s | same optimum |
+| dim | 2 | 338 s | 29 s | LM: +100 nats, phase error 0.10 rad |
+| very dim | 0, 2 | 86–92 s | 29–32 s | same optimum |
+| very dim | 1 | 395 s | 56 s | LM: +14 nats, phase error 0.15 rad (CRLB 0.03) |
+| dim, rescaled units | 0 | 56 s | 34 s | same optimum as unscaled |
+| dim, n_max 8 | 0 | 76 s | 43 s | same optimum |
+| dim, 20 beads | 0 | 251 s | 116 s | same optimum |
+| dim, 20 beads | 1, 2 | | 98 s; chord 107–117 s | chord converges in 26 iterations |
+
+GN-L-BFGS reached the best optimum in every case, 1.7–12× faster; LM fell into a worse minimum in 2 of
+9 seeded fits.  The chord's crawl at 20 beads on MPS was with the solver before 41bb693; with the fixes
+it converges, a little slower than GN-L-BFGS.
+
+*Tangents per batch on x86.* The merged default (up to 16) made a Jacobian build 20 % slower on these
+cores (6.4–7.2 s against 5.7 s before the merge, alternating runs).  Best of 3: 2 tangents 5.0 s, 4:
+5.6 s, 8: 5.9 s, 16: 6.5 s (6 beads); flat at 20 beads.  `TANGENT_MAX` is 2 on x86 CPUs, 16 elsewhere;
+with it the merged code takes 4.7 s.
+
+*z sampling* (`benchmarks/uipsf/synthetic/z_spacing.py`: dim beads acquired at 10 nm over ±1 µm, fitted thinned
+by `Batch.thinned`, 4 held-out beads localised with every slice):
+
+| Max spacing | Slices | Time | Phase error (CRLB), rad | z spread (CRLB), nm | Held-out deviance |
+|---|---|---|---|---|---|
+| 10 nm | 201 | 143 s | 0.0047 (0.0044) | 2.3 (2.7) | 1.0019 |
+| 20 nm | 101 | 67 s | 0.0062 (0.0062) | 5.4 (3.8) | 1.0022 |
+| 50 nm | 41 | 24 s | 0.0077 (0.0097) | 4.0 (6.0) | 1.0025 |
+| 100 nm | 21 | 29 s | 0.0101 (0.0135) | 6.3 (8.3) | 1.0030 |
+| 200 nm | 11 | 7 s | 0.0168 (0.0185) | 9.0 (11.5) | 1.0039 |
+
+Thinning loses precision as the CRLB says, for the photons left out, and adds no bias: errors stay at
+their CRLB and the held-out beads localise within theirs at every spacing.  Time falls with the slices.
+The default is not decided yet (plan §9 M7).
+
+**Defaults since M7 (decided October 2026).** `fit_beads` and `learn_beads` use `GaussNewtonLBFGS` and
+thin the slices to at most 50 nm apart (`max_dz_nm=50`; None keeps every slice); LM stays available as
+``solver=LevenbergMarquardt()`` and is still what localises single beads in `scoring`.  The blur σ is
+reported as a magnitude (`params.Magnitude`): the model sees only σ², and a warm and a cold fit gave
+±40.8 nm at the same objective.  `--slow -n auto`: 122 passed, 4 skipped.
+
+**After the merge: where a fit's time goes, and candidate C.**  At n_max 8 (87 shared parameters, 4
+x86 cores) one Jacobian build costs 8.4 s for 6 beads and 30 s for 20, of which the pupil's columns
+are 76–81 % and the beads' 19 %; a gradient costs 0.19 / 0.79 s.  In the Zenodo fit about 75 % of the
+time is its 6 builds.
+- *A smaller pupil grid* would cut every cost by ~(P/64)², but 56 saves only 14 %, and the model is not
+  converged in P anyway: against 128 samples, 64 differs by χ² ≈ 60 per bright bead stack (50 000
+  photons per slice) and 80 and 96 do no better (41, 52), so the error is the pixelated aperture edge,
+  not the sampling density.  For M8, not M7.
+- *Matrix-free Gauss–Newton* (`solve/cg.py`, `GaussNewtonCG`; `Problem.gauss_newton_operator`: H·v
+  for 0.8 of a gradient after a 1.8 s `torch.func.linearize` trace, or 2.3 untraced): each step solves
+  for the current H by CG, preconditioned by the last built one.  The preconditioner is so good that a
+  step needs about one product, so each step costs ~3 gradients against ~1 for GN-L-BFGS: dim beads 41 s
+  untraced, 62 s traced, against 33 s, same optimum.  Kept, tested and not the default: it is the start
+  for models whose shared block is too large to build, which will need a preconditioner that does not
+  need H either.
+
+**The emitter block linearised, a looser stage 1, and localising first.**
+- *Emitter columns* (`ForwardModel.emitter_linearisation`): a bead's position enters the pupil only as a
+  factor (−2πi k_x, −2πi k_y through the DFT, 2πi k_z through the defocus wave), so ∂I/∂(x, y, z) are
+  three tangents of `pupil_linearisation`; photons, bleaching and background act through μ = N·I + b,
+  JVPs of the small components.  Exact against the JVPs for every intensity and background model
+  (`test_solve.py`).  Emitter block, n_max 8: 2.2 → 0.52 s (6 beads), 8.5 → 1.6 s (20); a build at 20
+  beads 29.9 → 25.1 s; on Zenodo's 19 beads with the bead kernel 23.7 → 19.8 s.
+- *Stage 1 stops at 1 nat or 0.1 standard error* (`workflows.beads.STAGE1_TOL`): it is a start for
+  stage 2.  On Zenodo the end of stage 1 had spent ~26 s confirming an unchanged objective.  Zenodo
+  111 → 96 s at the same optimum (+0.2 nats); dim seeds 0–2 25–33 s, same optima; 20 beads 107 s.
+- *Localising every bead on the starting pupil before stage 1* (`localise_first`, off): fewer
+  iterations but no faster on dim beads (29–33 s against 28–29 s), 11 % on Zenodo.  Kept as an option.
+- *Very dim, seed 1* now ends in the worse of two minima (54125.7, phase error 0.080 rad, against
+  54114.9 and 0.023 before the MPS merge).  Bisected to the merge: the faster DFT's float32 rounding
+  alone picks the basin; stage 1's tolerance does not.  For the local-minima item (plan §10).
+
+**The full calibration, and scoring without a fit.**  The 84-bead Zenodo calibration (`learn_beads`
+defaults, `zenodo_1ch_full.py`, rows in `benchmarks/uipsf/results/zenodo_1ch_full_m7.jsonl`) took 64 min, of
+which 9 were the two fitting stages; ~55 min were bead scoring, twice: every bead localised again on the
+fixed pupil (829 s per scoring; one shared damping kept all 84 iterating to max_iter) and every slice
+localised alone for the z bias (419 s).
+- `BlockLM` (`solve/blocks.py`): LM with one damping, acceptance and stop per emitter, for problems whose
+  shared parameters are fixed; the same localisations to 1 % of a standard error; 829 → 180 s, 419 → 86 s.
+- `SplineFrames` (`workflows/spline.py`): the slice fits with SMAPpy's cubic-spline fitter on a voxel PSF
+  sampled from the whole model; agrees with the pupil-model fits to 0.5 CRLB; optional, needs SMAPpy.
+- Then decided (October 2026): **scoring takes no fit.**  A bead in a fit is scored from it (deviance,
+  photons, xy offset, saturation); the planted 300 nm z jump shows in its deviance (1.42 against
+  0.99–1.08).  The z bias is gone (on Zenodo it rejected 2 of 27 beads on its own); per-slice
+  consistency is SMAPpy's to show.  Excluded and held-out beads are not scored; no beads are held out by
+  default; the held-out report, which localises, is a diagnostic.  `BlockLM`, `slice_fits` and
+  `SplineFrames` stay for it and for later tests of fit-based rejection (plan §10).
+
+**On the Mac after the cloud's M7 work** (M1 Pro, 32 GB, torch 2.14.1; merged at 003ac89).  Tests:
+`--slow -n auto` 132 passed (SMAPpy installed; without it the three SMAPpy tests skip), `test_gpu.py
+--gpu` 2 passed.  Fixed for MPS, no test changed: the residual atlas, bead scoring and `SplineFrames`
+cast device tensors to float64 for NumPy (MPS has none), and `zenodo_1ch_full.py` ran only on the CPU
+(now `--device`).
+
+One `normal_equations` at n_max 8 (87 shared parameters; `profile.jsonl`):
+
+| | MPS, 6 beads | MPS, 20 | CPU, 6 | CPU, 20 |
+|---|---|---|---|---|
+| Emitter block, JVPs | 0.104 s | 0.381 s | 0.207 s | 0.781 s |
+| Emitter block, linearised | **0.034 s** | **0.097 s** | 0.081 s | 0.248 s |
+| Pupil block, linearised | 0.332 s | 1.038 s | 1.169 s | 3.638 s |
+| Whole build | 0.40 s | 1.16 s | 1.26 s | 3.95 s |
+
+The synthetic matrix (`solvers.py dim "very dim" --seeds 0,1,2 --solvers lm,gnl`, 6 beads), on both of
+the Mac's devices:
+
+| Scenario | Seed | LM, MPS / CPU | GN-L-BFGS, MPS / CPU | Optimum |
+|---|---|---|---|---|
+| dim | 0, 1 | 3.4–4.7 s / 8.7–9.1 s | 3.1 s / 5.2–6.1 s | the same on both devices |
+| dim | 2 | 18.0 s / 47.4 s | 2.9 s / 5.2 s | LM: the +100 nats minimum on both |
+| very dim | 0, 2 | 4.3 s / 10.7–11.0 s | 2.5–3.4 s / 4.3–4.9 s | the same on both devices |
+| very dim | 1 | 8.8 s / 23.1 s | 13.4 s / 16.5 s | GN-L-BFGS: the worse basin on both, 54124.5 (MPS), 54125.1 (CPU) |
+
+GN-L-BFGS reaches the CPU's optimum on MPS to 0.01 nats in five cases of six; in the sixth, very dim
+seed 1, both devices end in the worse basin noted above, 0.6 nats apart within it (the cloud: 54125.7).
+
+*The full Zenodo calibration* (`zenodo_1ch_full.py --no-probes`, 84 beads, `learn_beads` defaults;
+`zenodo_1ch_full_mps.jsonl`):
+
+| | MPS | CPU, 8 cores |
+|---|---|---|
+| Wall time, reading the stacks included | **45 s** | 113 s |
+| Stage 1 / stage 2 | 29 s (35 iterations) / 13 s (15) | 52 s (29) / 58 s (25) |
+| Beads used | 59 | 60 (bead 30 kept) |
+
+The two agree on the Zernikes to 1.2·10⁻⁴ rad (half a CRLB), on σ to 0.003 nm, atlas deviance 1.377 and
+1.371; bead 30 lies on the rejection threshold, where float32 rounding decides.  So the plan's target, a
+bead calibration in about a minute on a laptop GPU, is met for 84 beads at n_max 8.
+
+**The cloud's 4 x86 cores, after the merge** (`zenodo_1ch_full_cpu.jsonl`): the same calibration in
+7.5 min (stage 1 starts after 42 s of reading, stage 2 after 57 s), 59 beads used and 25 rejected as on
+MPS, atlas deviance 1.377, σ (66.96, 74.81) nm.  `--slow -n auto`: 132 passed, 2 skipped.
+
+### M7 in one table: the full Zenodo `1ch_40nm_bead` calibration (84 beads, n_max 8, rejection included)
+
+| | Time |
+|---|---|
+| uiPSF v1 (17 beads, its own finder; 4 cloud cores) | 7.6 min |
+| v2 at the end of M3 (4 cloud cores) | 90 min |
+| v2 during M7, before scoring took no fit (4 cloud cores) | 64 min |
+| v2 now, 4 cloud x86 cores | 7.5 min |
+| v2 now, M1 Pro CPU (8 cores) | 113 s |
+| v2 now, M1 Pro GPU (MPS) | **45 s** |
+
+
+## The model file (`export/model_file.py`, plan §5.8)
+
+- `save_model(cal, path)` writes one HDF5 file, `format = "uipsf-model"`, `version = 1`:
+  - `/model`: the components as JSON (`describe`; `build` makes the same `ForwardModel` again), the
+    optics, every shared parameter in physical units (`/model/params/<name>`) and its CRLB
+    (`/model/crlb/<name>`); the Noll indices are in the description, in the coefficients' order;
+  - `/fit`: objective, stop reason, iterations, condition, history, the shared covariance and its
+    layout, the used beads' own parameters and CRLBs;
+  - `/beads`: the bead table, its thresholds, the rejection settings, the held-out beads;
+  - `/diagnostics`: the residual atlas and the held-out report.
+  No data: the stacks are the user's files, and the file stays small.
+- `load_model(path)` returns a `LearnedPSF` (model, shared values, CRLBs and the record), not a
+  `Calibration`: what SMAPpy needs is the PSF, and a `Calibration` would need the stacks back.
+  `LearnedPSF.zernikes()` lists (Noll, coefficient, CRLB).
+- `LearnedPSF.psf(xyz_nm, roi_px, depth_nm, include_bead, upsample)` and `Calibration.psf` sample the
+  learned PSF, [N, Y, X] photons per pixel for one photon: the learned blur included; the bead's
+  size left out unless asked (a point emitter has none); the stage's z scale not applied (z is the
+  emitter's height above focus). Pixels are integrated over `upsample`² sub-samples, the model's by
+  default; a spline should be sampled with more. Tests: `tests/uipsf_tests/test_model_file.py` (round trip, the
+  same model from the description for every component, the sampled PSF is the model's, one photon
+  over a wide region, x along columns, sub-sampling converges, the bead only on request).
+
+## What a free pupil magnitude absorbs (`benchmarks/uipsf/synthetic/magnitude.py`, plan §10, 2)
+
+Each candidate error is the truth; the fit is always uipsf's default model (NA 1.43, apodisation as in
+`optics/grid.py`, beads in water, n_med 1.335), once with the magnitude free and once flat. 12 beads,
+31 slices over ±750 nm, 5000 photons per slice, background 20, blur 35 nm. Zernikes to n = 6, three
+seeds (ranges below), and one seed with n = 8 (`benchmarks/uipsf/results/magnitude.jsonl`). *Gain* is what the
+free magnitude gains in likelihood over the flat one; by chance it exceeds 39 nats (n = 6, 24 magnitude
+modes) or 52 (n = 8) with p = 10⁻⁶. *Radial* is the share of the magnitude's power in m = 0 modes.
+*Phase bias* is the largest |fit − truth| / CRLB over the phase modes.
+
+| truth | gain (nats) | radial | largest modes | phase bias, free / flat | σ (nm), free / flat | n = 8: gain, bias free / flat |
+|---|---|---|---|---|---|---|
+| matched | 9–17 | 0.02–0.27 | — | 2–3 / 2–3 | (35, 34) / (35, 34) | 22, 3 / 3 |
+| NA 1.40 | 1160–1220 | 0.98 | Z4, Z11, Z22 < 0 | 14–16 / 15–16 | (37, 37) / (31, 34) | 1211, 10 / 39 |
+| soft edge, outer 10 % | 3510–3610 | 1.00 | Z4, Z11, Z22 < 0 | 2–4 / 31–34 | (35, 35) / (26, 33) | 2530, 2 / 102 |
+| apodisation × √cos θ | 3200–3370 | 0.99 | Z4 < 0 | 2 / 28–36 | (34, 35) / (25, 33) | 2778, 2 / 87 |
+| dichroic, \|t_y\|² = 0.8 | 16–19 | 0.25–0.43 | — | 3–5 / 3–4 | **(43, 24)** / (43, 24) | 27, 4 / 4 |
+| phase modes above n_max | 155–190 | 0.05–0.11 | Z24, Z8, Z12 | 15–18 / 11–16 | (38, 35) / (38, 35) | 113, 13 / 12 |
+| astigmatism ±0.15 rad over the field | 9–22 | 0.20–0.46 | — | 2 / 2 | (36, 37) / (36, 38) | 33, 2 / 2 |
+| n_med 1.40 (mounting medium) | 187–207 | 0.88–0.90 | Z4, Z22, Z6 | 17–19 / 25–29 | **(24, 15)** / (20, 16) | 227, 13 / 26 |
+| n_med 1.00 (dried beads) | 1080–1130 | 0.85–0.87 | Z11, Z22, Z12 | 46–49 / 56–60 | **(83, 83)** / (84, 82) | 1067, 35 / 59 |
+
+What it says (the same for every seed, and at n = 8):
+
+- **Amplitude errors make a radial magnitude, and a free one is then right to be there.** A lower NA,
+  a soft edge or a different aplanatic factor give an almost purely rotationally symmetric magnitude
+  falling to the edge (Z4, Z11, Z22 negative), thousands of nats better than flat. Freed, the magnitude
+  takes the error and the phase stays unbiased; kept flat, the phase's spherical modes are biased by
+  30 CRLBs at n = 6 and by about 100 at n = 8 (more modes, more to absorb with), and σ shrinks to
+  narrow the spot. The NA is the exception: it also changes the defocus (k_z), which no magnitude
+  repairs, and the phase stays biased (less at n = 8).
+- **The only strongly asymmetric magnitude comes from phase the model lacks.** Modes above n_max give
+  a magnitude with only 5–13 % radial power, 110–190 nats over flat, and the phase biased by 13–18
+  CRLBs either way. A strong asymmetric magnitude is first a sign to raise n_max, not a property of
+  the optics.
+- **A wrong sample medium is the costliest error, and σ takes much of it.** n_med enters the Fresnel
+  transmission and the apodisation above NA = n_med, where most of the light of a high-NA objective
+  is. Fitted as water, dried beads (n = 1.00) bias the phase by ~50 CRLBs whatever the magnitude does,
+  raise σ from 35 to 83 nm and leave a deviance far above the matched fit (≈ 59 000 against 54 000
+  nats). Beads in a mounting medium (1.40) narrow σ to (24, 15) nm. A radial magnitude appears in both,
+  but repairs little. So the medium must be right before the magnitude or σ can be read.
+- **A dichroic does not show in the magnitude; it shows in σ.** A scalar magnitude multiplies Ex and
+  Ey alike; the free magnitude gains nothing. The fit widens the blur along x and narrows it along y
+  instead: (43, 24) nm from (35, 35). σx ≠ σy is a candidate signature of t_s ≠ t_p (or of n_med), worth
+  a probe before reading it as motion or pixel crosstalk.
+- **Field-dependent aberrations show in neither:** the gain stays under threshold and the mean phase
+  unbiased; the cost is in the deviance (≈ 2000 nats over matched), where the atlas's field group sees it.
+
+**For reading a real fit:** a radial magnitude falling to the edge is expected (NA, edge, apodisation)
+and should be kept, or replaced by a physical edge model; an asymmetric one points at n_max; a large
+or anisotropic σ points at n_med or polarisation before anything else. Next: t_s/t_p and n_med as
+likelihood-ratio probes (`diagnostics/probes.py`), then on Zenodo.
+
+## How finely SMAPpy's spline must sample a uipsf model (`benchmarks/uipsf/synthetic/spline_step.py`, plan §6)
+
+The truth is a uipsf model (astigmatic, 0.8 rad Noll 6, with coma and spherical; 110 nm pixels, σ 30
+nm) at 400 random positions (±½ px, z ±600 nm). Splines are made as SMAPpy makes them: knots at pixel
+centres over 27 px, each the PSF integrated over its pixel (8 × 8 sub-samples), z steps of 10–100 nm,
+normalised to a maximum plane sum of 1. SMAPpy's Spline 3D fits the noise-free images (the spline's
+systematic error alone) and Poisson ones (`benchmarks/uipsf/results/spline_step.jsonl`).
+
+| z step | bias rms x, y, z (nm) | bias max x, y, z (nm) | bias / CRLB rms at 10⁴ photons | noisy RMSE / CRLB |
+|---|---|---|---|---|
+| 10 nm | 1.0, 1.1, 0.4 | 4.4, 3.5, 1.5 | 0.10, 0.19, 0.05 | 1.00, 1.03, 0.99 |
+| 50 nm | the same | the same | the same | the same |
+| 100 nm | 1.0, 1.1, 0.4 | 4.4, 3.5, 1.5 | 0.10, 0.19, 0.05 | 1.00, 1.03, 0.99 |
+
+- **The z step does not matter from 10 to 100 nm:** the PSF changes slowly along z, and a cubic
+  interpolates it far below the CRLB. The stacks' own step will do; a finer one only makes the file
+  larger.
+- **The lateral knots set the error.** Knots at pixel centres hold the right quantity, the PSF
+  convolved with the pixel, as a function of the emitter's position; between them the spline
+  interpolates it, at one pixel's spacing. The error pulls positions towards pixel centres, up to 4.4 nm
+  at the pixel edges, and is largest where the PSF is narrowest (x below focus, y above: the astigmatic
+  focal lines). At 10⁴ photons it is 0.1–0.2 of the CRLB (rms); at 10³, 0.02–0.03. Photons are right to
+  0.05 %. A finer lateral grid would need a change to SMAPpy's spline format and fitter.
+
+## Every fit on the fastest device (October 2026)
+
+The model is built on `default_device()` (CUDA, then MPS, then the CPU; `UIPSF_DEVICE` overrides), but
+readers cut the stacks on the CPU and the solver works where the batch is: a `learn_beads` on
+`extract_rois`' batch ran on the CPU unless the caller moved it (`zenodo_1ch_full.py --device` did).
+Now `fit_beads`, `learn_beads`, scoring, the probes, the atlas and the held-out report move the batch to
+the model's device first (`device.on_model_device`); `tests/uipsf_tests/test_gpu.py` checks it with `--gpu`.
+
+## Milestone M4: several channels
+
+```
+src/uipsf/
+├── model/channels.py  Channel(psf, transform=None, share=None, dz_nm=None, name=None, fit_transform=True)
+│                      prefix(c), view(p, c), unpack_transform, map_points, inverse_map (adjugate, no inverse)
+├── model/forward.py   ForwardModel(psf | [Channel, …], geometry, intensity, background) -> μ [E, C, K, Y, X]
+│                      .positions(p, batch, xyz, c), .share(p, c), .psf_names(); the linearisations per channel
+├── model/background.py emitter.background [E, C] with several channels; Planar per channel
+├── model/start.py     rough_start: photons summed, shares and biplane offset from the data
+├── model/psf.py       VectorPSF(analyser="unpolarised" | "x" | "y"), unpolarised by default (review F1)
+├── data/dataset.py    Batch.roi_xy [E, C, 2]: each channel's ROI centre in chip pixels
+├── data/pairing.py    pair_beads(stacks, roi_size, layout="auto") -> Pairs (SMAPpy's convention);
+│                      detect_layout, fit_projective, extract_pair_rois(stacks, pairs, roi) -> Batch [E, 2, …]
+├── export/model_file  version 2: a "channels" list; reads version 1.  sample_psf(…, channel=c);
+│                      LearnedPSF.psf(…, channel), .shares(), .transform(c), .dz_nm(c), .zernikes(which, channel)
+└── workflows          learn_beads / fit_beads / scoring / atlas: a bead is a pair, every channel staged and scored
+benchmarks/uipsf/real/zenodo_2ch_beads.py     Zenodo 2ch_40nm_bead against SMAPpy's dual calibration and v1
+benchmarks/uipsf/synthetic/channels_speed.py  two channels against one
+```
+
+**The model.**  μ_c = f_c·N·I_c(xyz_c) + b_c.  Each channel has its own PSF (optics, pupil, blur, analyser);
+the emitter (x, y, z, photons, bleaching) is shared; each channel has its own background per emitter.
+Channel c ≥ 1 adds a projective transform to the main channel's chip pixels (SMAPpy's
+`DualColorCalibration.transformation`, 8 parameters with H₂₂ = 1), a photon share f_c (Σ f_c = 1, so N is
+the emitter's total, SMAPpy's convention) and a defocus offset δz_c.  The emitter's position in channel c
+is H⁻¹ of its main-channel chip position, exactly.  Conventions in `docs/uipsf/conventions.md`, "Channels".
+Emitter independence holds per emitter across channels (`test_channels.py`).
+
+**The speed paths per channel** (M7).  The pupil columns of channel c come from that channel's
+linearisation and fill only its pixels; the emitter columns take three PSF tangents per channel.  New:
+shared parameters that act only through where the emitter is and how bright (the transform, share and
+offset; also a per-slice factor) take their columns from the emitter linearisation the emitter block
+builds anyway, JVPs of the small components instead of the whole model.  With a bead kernel a slice
+depends on its neighbours' positions, so only columns that move every slice alike qualify there (the
+drift and z scale fall back to JVPs, checked per column).  All equal the JVPs' normal equations to 10⁻¹⁰
+in float64, mirrored, with a bead kernel and drift, and planar background (`test_channels.py`).
+
+**Pairing** (`data/pairing.py`) follows SMAPpy's `collect_dual_beads`: the layout by the vote over every
+within-stack bead pair (DoG-scored histograms of differences and of sums for a mirror), the cut at the
+middle, beads per half by `find_beads`, the offset by a histogram vote after the mirror, mutual nearest
+neighbours within 12 px, then a projective fit to the centroids as the start.  On Zenodo `2ch_40nm_bead`
+it finds SMAPpy's layout (up–down mirrored), split (256) and the same 84 pairs, each within 0.18 px of
+SMAPpy's position (`test_pairing.py`, with SMAPpy and the data).
+
+**Synthetic recovery** (`test_multichannel.py`, slow; 12 beads, 21 slices over ±1 µm, 17 × 17 px,
+20 000 photons): biplane (350 nm, half the light each) at n_max 4 and a mirrored ratiometric pair (30 nm
+redder, 40 nm focal shift, 30 % of the light) at n_max 6 come back within 3.3 CRLB for every parameter
+(the transform's 8, share, offset, both pupils' phase and magnitude, both blurs; the largest of ~60
+values), atlas quiet, 14–19 s each on 4 cores.  The transform starts from a projective fit to the
+centroids (0.37 px off).  A start 2.2 px off by a translation, or 1.4 px at the field's edge by a 0.4°
+rotation, reaches the same optimum; a translation alone (rotation, scale and perspective left out, ~3 px
+at the edge) stopped in a wrong minimum, the secondary pupil bent to take the misplacement.  A better
+start of the transform is in plan §10 ("To investigate", 5).
+
+**Zenodo `2ch_40nm_bead`** (`zenodo_2ch_beads.py`; rows in `benchmarks/uipsf/results/zenodo_2ch_beads.jsonl`):
+14 stacks, SMAPpy's camera (4.7 e⁻/ADU, offset 398.6, 21 e⁻), 116 × 127 nm, v1's optics (680 nm in both
+channels, n_med 1.35), 20 nm bead, n_max 8, 25 × 25 px, `learn_beads` defaults; 28 min on 4 cloud cores.
+- **Beads:** 84 pairs, 70 used, 14 rejected.  Atlas deviance 1.36 in the main channel (the 1ch data: 1.38)
+  and 1.89 in the secondary, which has five times the light; the atlas flags the spot's shape, z, field
+  and photons per slice as on 1ch, and the channel group (the secondary fits worse).
+- **The transform** agrees with SMAPpy's dual calibration of the same stacks to 0.025 px RMS (0.032 max)
+  where the used beads are, and with v1's (`res/T`, converted to chip pixels) to 0.025 px (0.048 max).  On
+  SMAPpy's own bead positions the three leave residuals of 0.036 (uipsf), 0.027 (SMAPpy, its own fit to
+  those points) and 0.037 px (v1).
+- **v1's frame**, found from its 74 ROI centres (all on beads uipsf detects): arrays transposed, and v1's
+  channel 0, its reference, is the camera's lower half with y reversed: v1's reference is SMAPpy's
+  secondary.  Zernikes compared through that frame (a signed permutation found on the pupil grid):
+  secondary channel correlation 0.9998 with v1's, RMS difference 0.0017 rad over Noll 5–45; main channel
+  0.997 and 0.007 rad, most of it spherical (Noll 11: −0.023 against v1's −0.003), the trade with v1's
+  fitted defocus seen on the 1ch data too.
+- **Photons:** the shares are 0.164 / 0.836 (± 0.0001); SMAPpy's dual calibration of the same stacks
+  stores `photon_normalization` 0.160 / 0.840, the same split to 0.004.  On the data, the light
+  summed over the stack in SMAPpy's 37-px box after its background gives a ratio of 5.20 (quartiles
+  4.9–5.5 over beads), uipsf 5.10.  SMAPpy's *brightness ratio* (4.2), the median of each pair's
+  brightest planes, is a different statistic and not what its splines are normalised by.  Inside the
+  fitted ROI the model's light equals the data's to 0.1 % in each channel; beyond it the model's wings
+  are heavier than the data's by ~2 % of each channel's light, so the ratio is unaffected.  v1's
+  intensity ratio (2.3) is not a photon split: v1 normalises each channel's model in its own ROI.
+  The background is fitted per bead and channel (μ = f·N·I + b), as SMAPpy subtracts one per channel.
+- **Defocus offset** 35.5 ± 0.15 nm (a chromatic focal shift); blur (75.6, 61.0) and (57.9, 75.7) nm.
+
+**Into SMAPpy's global fitter** (`tests/uipsf_tests/test_smappy_dual.py`, with SMAPpy): a two-channel model sampled
+per channel on one z grid (`sample_psf(…, channel=c)`), normalised by SMAPpy's `positive_pair_models`
+(its `photon_normalization` comes back as the share, 0.30), with the model's transform and the split's
+geometry (`Pairs.geometry`, stored in the model file: `LearnedPSF.geometry`), saved and reloaded as a
+`DualColorCalibration`.  Split frames drawn from uipsf's forward model (mirrored layout, 0.5° turn,
+ratiometric, 20 000 photons) fitted by `DualChannelEngine`: x and y within 0.005 px, z within 3 nm,
+ratio 0.295–0.298; photons are the light in the spline's box around focus (82 %), as with SMAPpy's own
+bead calibrations.  On Zenodo the stored geometry equals SMAPpy's field for field (`test_pairing.py`).
+
+**Cost** (`channels_speed.py`, 6 dim beads, 41 slices of 21², n_max 6, 4 cloud cores;
+`benchmarks/uipsf/results/channels_speed.jsonl`): one Jacobian build 2.9 s for one channel, 6.5 s for two (116
+shared parameters against 53); a gradient 0.18 / 0.32 s; the default fit 10 / 32 s (15 / 22 iterations).
+So a channel costs what a single-channel model costs.

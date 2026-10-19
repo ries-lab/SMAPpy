@@ -1,0 +1,2 @@
+{"model": "one channel", "beads": 6, "device": "cpu", "shared": 53, "normal_equations_s": 2.906, "value_and_grad_s": 0.177, "fit_s": 10.1, "iterations": 15, "stop": "step"}
+{"model": "two channels", "beads": 6, "device": "cpu", "shared": 116, "normal_equations_s": 6.518, "value_and_grad_s": 0.319, "fit_s": 32.1, "iterations": 22, "stop": "step"}

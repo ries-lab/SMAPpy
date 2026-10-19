@@ -12,3 +12,6 @@ dist/
 
 # simulated tables written by the drift examples
 sim*.hdf5
+
+# uipsf's benchmark runs kept on one machine
+benchmarks/uipsf/results/*.local.jsonl

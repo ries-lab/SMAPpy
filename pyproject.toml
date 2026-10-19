@@ -105,6 +105,10 @@ tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
 # localizations and scales where it does not.  DBSCAN and Voronoi need
 # nothing beyond the base.
 clusters = ["hdbscan>=0.8.44"]
+# uipsf (src/uipsf), the PSF learning, runs on PyTorch: a 4 GB download on Linux with its CUDA
+# libraries, 0.1 GB on a Mac or Windows.  So it is asked for, not installed by default, and the
+# window that uses it says what to type (docs/uipsf/plan.md §7.4).
+uipsf = ["torch>=2.4"]
 # What the test suite needs beyond the package: `pip install -e .[test]`.
 # pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
 test = ["pytest>=8.4", "pytest-timeout>=2.1", "pytest-xdist>=3.2"]
@@ -138,6 +142,8 @@ where = ["src"]
 # COMET's licence has to travel with the copy of COMET, in the wheel as well as
 # in the repository -- that is what the MIT licence asks for.
 "smappy._comet" = ["LICENSE.txt"]
+# uipsf's, likewise
+"uipsf" = ["LICENSE"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise, and the window icon,
