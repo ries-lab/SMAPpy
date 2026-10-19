@@ -148,7 +148,7 @@ where = ["src"]
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise, and the window icon,
 # and what the user's plugin folder is given (`smappy.user_plugins`)
-"smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml", "data/microscopes/*.yaml",
+"smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml",
             "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
             "data/icons/*.svg", "data/icons/*.png", "data/user_plugins/*.in"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per

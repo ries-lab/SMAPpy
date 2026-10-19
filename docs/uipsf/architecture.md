@@ -185,6 +185,10 @@ by `fit_beads` (`benchmarks/uipsf/real/zenodo_1ch_beads.py`; rows in `benchmarks
 
 ## Milestone M3: data, camera, rejection, diagnostics
 
+*Since October 2026 (plan §7.5) the reader, the finder, the pairing and `noise.Camera` below are gone: smappy
+reads, converts, finds and pairs (`smappy.calibrate.pupil`, `tests/uipsf_tests/test_bead_rois.py`), and uipsf
+takes the `Batch`.  What follows records them as they were built; the measurements stand.*
+
 ```
 src/uipsf/data/
 ├── io.py        read_stack(path, camera: noise.Camera, dz_nm=None, mirror=None) -> BeadStack (Micro-Manager TIFF)
@@ -333,7 +337,7 @@ slices, 72 beads found, `learn_beads` defaults (n_max 8, 20 % held out), 4 CPU c
 - **Defaults changed from this** (decided October 2026): `extract_rois` drops the first slice of every
   stack.  The z scale stays fixed until its cause is understood (plan, "To investigate").
 
-### Bead finders compared (`benchmarks/uipsf/real/compare_finders.py`)
+### Bead finders compared (`compare_finders.py`, removed with uipsf's finder)
 
 Since this comparison uipsf's finder follows SMAPpy's convention, and on these stacks both find the same
 84 beads.  What the first finder did differently, on the 31 Zenodo `1ch_40nm_bead` stacks, ROI 25 px:
@@ -779,7 +783,7 @@ depends on its neighbours' positions, so only columns that move every slice alik
 drift and z scale fall back to JVPs, checked per column).  All equal the JVPs' normal equations to 10⁻¹⁰
 in float64, mirrored, with a bead kernel and drift, and planar background (`test_channels.py`).
 
-**Pairing** (`data/pairing.py`) follows SMAPpy's `collect_dual_beads`: the layout by the vote over every
+**Pairing** (`data/pairing.py`, since replaced by SMAPpy's own through `smappy.calibrate.pupil.dual_rois`) followed SMAPpy's `collect_dual_beads`: the layout by the vote over every
 within-stack bead pair (DoG-scored histograms of differences and of sums for a mirror), the cut at the
 middle, beads per half by `find_beads`, the offset by a histogram vote after the mirror, mutual nearest
 neighbours within 12 px, then a projective fit to the centroids as the start.  On Zenodo `2ch_40nm_bead`
@@ -865,3 +869,11 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   reference)` gives them as {title: draw}, for tabs that draw lazily.  They read a `Calibration` or a
   `LearnedPSF` alike through `zernikes` and `pupil_maps`.
 - Tests: `tests/uipsf_tests/test_calibrate.py`.
+- **smappy makes the batch** (`smappy.calibrate.pupil`, step 2 of §7.5): `read_bead_stacks`, the camera as
+  a fit resolves it (`camera_for`), `camera.to_photons`, the read noise and EM excess from `CameraMetadata`
+  (`BeadROIs.noise`), beads by `detect_beads`, pairs, layout and the start transform by
+  `collect_dual_beads` and `fit_dual_transform`.  Raw ROIs around the detection's whole pixel, saturated
+  pixels masked, the first slice dropped, stacks cut to the shortest about their middles; `rois_at` cuts
+  around centres given by hand.  uipsf's own reader, finder, pairing and `noise.Camera` are removed.  End to
+  end, simulated ADU stacks read this way give back the aberrations to 0.02 rad
+  (`tests/uipsf_tests/test_bead_rois.py`).

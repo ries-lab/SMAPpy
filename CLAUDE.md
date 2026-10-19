@@ -87,9 +87,6 @@ Running the tests -- two tiers:
   `test_roi_session`), which is the environment and not your change.
 * `SMAPPY_TEST_CAL=/path/to/_3dcal.mat` enables the tests that want real
   calibration data; without it they skip.
-* `SMAPPY_UIPSF_PYTHON=/path/to/python` (of an environment with uiPSF, as the
-  page of `Localize/uiPSF calibration` installs it) enables the slow test that
-  runs uiPSF itself, a few minutes on a CPU; without it it skips.
 * uipsf's tests (`tests/uipsf_tests/`) need torch, the extra `uipsf`:
   `pip install -e .[test,uipsf]`.  Without torch they are not collected at
   all (`collect_ignore` in `tests/conftest.py`), so the count drops by about
@@ -141,7 +138,6 @@ shape, so read the one closest to what you are writing:
 | writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.write_values`, NaN outside, never over a column of the localizations' own; a block's *write values* calls the same) |
 | runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; the regions through `region_runs.regions_of` -- ROIs or an id column, one interface; `RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`; the ROI project holds one, `ROIProject.block`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
-| runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
 | is run by MicroClaw during an acquisition | `gui/live_session.py` (the GUI on a fit another program controls through `Context.stop` and `writer_finished`; the package and its protocol runner are `ries-lab/smappy-microclaw`) |
 

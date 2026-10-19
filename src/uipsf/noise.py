@@ -23,10 +23,12 @@ likelihood would cost far more for those few pixels (plan §10).
 **EM gain** doubles the variance (excess noise F = 2).  As in SMAPpy, data
 and model are divided by F before the Poisson likelihood; uipsf keeps the
 photons physical and does the division inside the noise model.
+
+**The camera is SMAPpy's.**  Photons, s and F come from its `CameraMetadata`
+(`adu_to_photons`, `readout_variance`, `excess_noise`) through
+`smappy.calibrate.pupil`, so the likelihood's noise is the fitter's.
 """
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import torch
 
@@ -94,37 +96,3 @@ class EMCCD(ShiftedPoisson):
 
     def __init__(self):
         super().__init__(2.0)
-
-
-@dataclass(frozen=True)
-class Camera:
-    """ADU to photons, with SMAPpy's names and defaults (`smappy.metadata.CameraMetadata`).
-
-    ``conversion`` is electrons per ADU, ``offset`` the baseline in ADU,
-    ``em_gain`` None without EM.  ``read_noise_e`` is the rms read noise in
-    electrons; unset it is 1 e⁻ without EM gain (a modern sCMOS reads 0.7 to
-    1.4 e⁻) and 0 with it, as in SMAPpy.  Per-pixel maps come with M3.
-    """
-    conversion: float
-    offset: float
-    em_gain: float | None = None
-    read_noise_e: float | None = None
-
-    @property
-    def excess(self) -> float:
-        return 2.0 if self.em_gain else 1.0
-
-    @property
-    def read_noise_var(self) -> float:
-        """s, in the noise model's units: electrons divided by the excess factor, squared."""
-        if self.em_gain:
-            return 0.0
-        noise = 1.0 if self.read_noise_e is None else float(self.read_noise_e)
-        return (noise / self.excess) ** 2
-
-    def to_photons(self, adu) -> torch.Tensor:
-        adu = torch.as_tensor(adu, dtype=torch.float32) if not isinstance(adu, torch.Tensor) else adu
-        return (adu.to(torch.float32) - self.offset) * (self.conversion / (self.em_gain or 1.0))
-
-    def noise(self) -> ShiftedPoisson:
-        return ShiftedPoisson(self.excess)

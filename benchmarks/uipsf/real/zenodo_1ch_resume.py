@@ -21,14 +21,13 @@ import time
 
 import numpy as np
 import torch
-from zenodo_camera import CAMERA
+from smappy.calibrate.core import CalibrationSettings
+from smappy.calibrate.pupil import single_rois
+from zenodo_camera import CAMERA, read
 
 import uipsf
-from uipsf.data.io import read_stack
-from uipsf.data.rois import extract_rois, find_beads
 from uipsf.diagnostics import heldout_report, probe_terms
 from uipsf.model import ForwardModel
-from uipsf.noise import ShiftedPoisson
 from uipsf.params import Params
 from uipsf.solve import LevenbergMarquardt
 from uipsf.workflows import RejectionSettings, decide
@@ -56,15 +55,15 @@ def main():
     beads_rows = sorted((r for r in rows if r["stage"] == "bead"), key=lambda r: r["bead"])
     saved = torch.load(os.path.splitext(args.run)[0] + "_params.pt")
     files = sorted(glob.glob(os.path.join(args.data, "1ch_40nm_bead", "*", "*.ome.tif")))
-    stacks = [read_stack(f, CAMERA) for f in files]
-    batch = extract_rois(stacks, find_beads(stacks, 25), 25)
+    rois = single_rois(read(files), CAMERA, CalibrationSettings(roi_size=25))
+    batch = rois.batch
     # Runs made before the finder took SMAPpy's convention (October 2026) found other beads.
     assert batch.n_emitters == len(beads_rows), "the finder found different beads than the run did"
     optics = uipsf.Optics(NA=1.43, wavelength_nm=600, n_imm=1.516, n_med=1.35, pixel_size_nm=(116, 127))
     grid = uipsf.PupilGrid.build(optics, 64, device="cpu")
     psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=8), (25, 25), bead_radius_nm=25.0,
                           sigma_nm=(30.0, 30.0))
-    model, noise = ForwardModel(psf), ShiftedPoisson()
+    model, noise = ForwardModel(psf), rois.noise
     used = saved["used"]
     sub = batch.subset(torch.tensor(used))
     params = Params(model.specs(sub), len(used))

@@ -113,7 +113,7 @@ class CameraSettings:
         The one place these fields meet a file: the camera database, the
         file's own metadata, then the fields set here, each winning over the
         one before (`io.tiff.resolve_camera`).  The fitters, their parameter
-        view, the camera editor and the uiPSF calibration all come through
+        view and the camera editor all come through
         here, so that none of them can disagree with the fit about a camera.
         """
         from ..io.tiff import resolve_camera

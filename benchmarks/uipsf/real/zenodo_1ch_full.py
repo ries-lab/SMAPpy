@@ -4,7 +4,8 @@
         [--device mps]
 
 Stacks read with the camera SMAPpy's database names (4.7 e⁻/ADU, offset 398.6) and a read noise of
-21 e⁻ (`zenodo_camera.py`); 116 × 127 nm pixels (docs/uipsf/data.md); beads found by `data.rois.find_beads`,
+21 e⁻ (`zenodo_camera.py`); 116 × 127 nm pixels (docs/uipsf/data.md); beads found by SMAPpy
+(`calibrate.pupil.single_rois`),
 25 × 25 ROIs, all 41 slices.  `learn_beads` with its defaults (20 % held out, rejection on), v1's optics and n_max 8, a
 25 nm bead.  Then the residual atlas of the used beads and forward selection of the optional terms
 (`diagnostics.select_terms`), and the held-out report again on the selected model.
@@ -15,21 +16,19 @@ Zernikes; the fitted parameters are saved next to ``--out`` (never committed).
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import glob
 import json
 import os
 import time
 
 import torch
-from zenodo_camera import CAMERA
+from smappy.calibrate.core import CalibrationSettings
+from smappy.calibrate.pupil import single_rois
+from zenodo_camera import CAMERA, read
 
 import uipsf
-from uipsf.data.io import read_stack
-from uipsf.data.rois import extract_rois, find_beads
 from uipsf.diagnostics import heldout_report, residual_atlas, select_terms
 from uipsf.model import ForwardModel
-from uipsf.noise import ShiftedPoisson
 from uipsf.workflows import learn_beads
 from uipsf.workflows.scoring import shared_values
 
@@ -54,16 +53,16 @@ def main():
     args = ap.parse_args()
     t0 = time.perf_counter()
     files = sorted(glob.glob(os.path.join(args.data, "1ch_40nm_bead", "*", "*.ome.tif")))
-    stacks = [read_stack(f, CAMERA) for f in files]
-    beads = find_beads(stacks, 25)
-    batch = extract_rois(stacks, beads, 25).to(args.device)
+    stacks = read(files)
+    rois = single_rois(stacks, CAMERA, CalibrationSettings(roi_size=25))
+    batch, beads = rois.batch.to(args.device), rois.records
     optics = uipsf.Optics(NA=1.43, wavelength_nm=600, n_imm=1.516, n_med=1.35, pixel_size_nm=(116, 127))
     grid = uipsf.PupilGrid.build(optics, 64, device=args.device)
     psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=8), (25, 25), bead_radius_nm=25.0,
                           sigma_nm=(30.0, 30.0))
-    model, noise = ForwardModel(psf), ShiftedPoisson()
+    model, noise = ForwardModel(psf), rois.noise
     emit(dict(stage="data", device=args.device, stacks=len(stacks), beads=len(beads), s=float(batch.s),
-              camera=dataclasses.asdict(CAMERA)), args.out)
+              camera=CAMERA.to_dict()), args.out)
     localiser = None
     if args.localiser == "spline":
         from uipsf.workflows.spline import SplineFrames

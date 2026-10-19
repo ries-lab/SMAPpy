@@ -78,9 +78,9 @@ Above the critical angle, the axial wave numbers take the `+i·|·|` branch of t
 - **EM gain** halves data and model before the Poisson likelihood (excess noise 2), inside the noise
   model; fitted photons stay physical.
 - **The objective** is ½ Σ deviance + priors, summed over every pixel, never averaged.
-- **The first slice of a stack is dropped by default** (`extract_rois(..., slices=slice(1, None))`): on the Zenodo beads the first frame is 22 % brighter than the rest. The nominal focus is the middle of the slices kept.
+- **The first slice of a stack is dropped by default** (`smappy.calibrate.pupil.KEEP`, the cut's default `slices`): on the Zenodo beads the first frame is 22 % brighter than the rest. The nominal focus is the middle of the slices kept.
 - **The stage's z scale** (`geometry.z_scale`): emitter z in slice k is z_e + s·z_k, s = 1 and fixed by default; fitted on request with a prior N(1, 0.1). [`test_atlas.py::test_a_fitted_z_scale_recovers_a_piezo_scale`]
-- **Mirroring (legacy, off by default).** An EMCCD's EM port reads out mirrored relative to its normal port. When beads and data were taken on different ports, `read_stack(..., mirror="x")` (or `BeadStack.mirrored`) flips the beads so the model matches the data. Beads and data taken with the same settings need none. v1's `swapxy` transposed instead; its ROIs are the camera's transposed (`docs/uipsf/data.md`). [`test_camera.py::test_mirroring_flips_the_stack_for_data_from_the_other_em_port`]
+- **Mirroring: none.** An EMCCD's EM port reads out mirrored relative to its normal port; beads and data must be taken on the same port. uipsf's own reader could flip the beads (`mirror="x"`); it went with that reader (plan §7.5), and SMAPpy's fitters warn when a calibration's EM state differs from the data's. v1's `swapxy` transposed instead; its ROIs are the camera's transposed (`docs/uipsf/data.md`).
 
 ## Blur and bead
 

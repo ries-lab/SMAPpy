@@ -149,7 +149,7 @@ class Calibration:
     settings: RejectionSettings = field(default_factory=RejectionSettings)
     atlas: object = None                   # diagnostics.Atlas of the used beads
     heldout_report: object = None          # diagnostics.HeldOutReport, when beads were held out
-    geometry: dict | None = None           # a split chip as SMAPpy records it (`data.pairing.Pairs.geometry`)
+    geometry: dict | None = None           # a split chip as SMAPpy records it (`calibrate.pupil.BeadROIs.geometry`)
     options: object = None                 # the choices it was learnt with (`calibrate.BeadSettings`)
 
     def shared(self) -> dict:
@@ -188,7 +188,7 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
     report, spread over the field (`rejection.held_out`); none by default,
     since a calibration should use every good bead (decided October 2026).
     ``solver`` and ``max_dz_nm`` as in `fit_beads`.  ``geometry``, for channels split on one chip,
-    is kept with the calibration and its model file (`data.pairing.Pairs.geometry`).
+    is kept with the calibration and its model file (`smappy.calibrate.pupil.BeadROIs.geometry`).
 
     ``start``, shared values of a previous model of the same microscope (`workflows.calibrate.
     start_values`), replaces stage 1: every bead is localised on that pupil (`scoring.localise`), scored

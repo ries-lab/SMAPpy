@@ -26,6 +26,3 @@ halves, each seeing one dye (a [splitter](plugin:Panels/Glossary), also
 called a dual-view): the calibration then holds a PSF for each half and the
 map between them (the [registration](plugin:Panels/Glossary), also called
 channel alignment), for Spline 3D 2C.
-
-For a PSF learnt as a model of the optics, or from the blinking molecules of
-the sample itself, see [uiPSF calibration](plugin:Localize/uiPSF calibration).

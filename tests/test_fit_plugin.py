@@ -75,13 +75,10 @@ def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):
 
 
 def test_every_camera_comes_through_the_one_resolution(stack):
-    """The fit, its parameter view and the uiPSF calibration resolve a camera
-    through `CameraSettings.resolution`, so none can disagree with the fit;
-    and photons are counted by the one `to_photons`."""
-    from smappy.camera import to_photons
+    """The fit and its parameter view resolve a camera
+    through `CameraSettings.resolution`, so neither can disagree with the fit."""
     from smappy.io.tiff import open_stack
     from smappy.plugins.fit import camera_resolution
-    from smappy.uipsf import prepare
     camera = CameraSettings(conversion=2.0, offset=100.0, pixelsize_um=0.1)
     settings = GaussianFitSettings(source=SourceSettings(path=str(stack)),
                                    camera=camera)
@@ -90,9 +87,6 @@ def test_every_camera_comes_through_the_one_resolution(stack):
     assert fitted.conversion == 2.0 and fitted.offset == 100.0
     assert camera_resolution(settings).camera_metadata() == fitted
     assert GaussianFit()._camera(settings) == fitted
-    profile = type("Profile", (), {"pixelsize_xy_um": None})()
-    assert prepare.resolve_camera(camera, source, profile) == fitted
-    assert prepare.to_photons is to_photons
 
 
 def test_the_default_output_goes_next_to_the_image_folder(tmp_path):

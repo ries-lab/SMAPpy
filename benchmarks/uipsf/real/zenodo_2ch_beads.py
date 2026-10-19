@@ -7,7 +7,7 @@ The 14 stacks (41 slices of 512 × 236, the chip split up–down, the secondary 
 the camera SMAPpy's database names (M2's Evolve 512, normal port: 4.7 e⁻/ADU, offset 398.6) and 21 e⁻ of
 read noise (`zenodo_camera.py`), 116 × 127 nm pixels in the camera's frame (docs/uipsf/data.md), v1's optics
 (NA 1.43, 680 nm in both channels, n_med 1.35), a 20 nm bead radius, n_max 8, 25 × 25 ROIs.  Pairs by
-SMAPpy's convention (`data.pairing.pair_beads`), `learn_beads` with its defaults.
+SMAPpy (`calibrate.pupil.dual_rois`), `learn_beads` with its defaults.
 
 Then:
 - **the transform** against SMAPpy's (`calibrate.dual.calibrate_dual` on the same stacks) and v1's
@@ -31,14 +31,13 @@ import time
 import h5py
 import numpy as np
 import torch
-from zenodo_camera import CAMERA
+from smappy.calibrate.dual import DualColorSettings, fit_projective
+from smappy.calibrate.pupil import dual_rois
+from zenodo_camera import CAMERA, read
 
 import uipsf
-from uipsf.data.io import read_stack
-from uipsf.data.pairing import extract_pair_rois, fit_projective, pair_beads
 from uipsf.diagnostics.camera import noise_transfer
 from uipsf.model import Channel, ForwardModel
-from uipsf.noise import ShiftedPoisson
 from uipsf.optics.zernike import zernike_basis
 from uipsf.params import Params
 from uipsf.solve import Problem
@@ -80,7 +79,8 @@ def v1_transform(f, origin) -> np.ndarray:
     ref = np.c_[rr.ravel(), cc.ravel()]
     other = (np.c_[ref, np.ones(len(ref))] - c) @ T
     other = other[:, :2] + c[:2]
-    return fit_projective(v1_to_chip(0, ref, origin), v1_to_chip(1, other, origin))
+    h = fit_projective(v1_to_chip(0, ref, origin), v1_to_chip(1, other, origin))
+    return h / h[2, 2]
 
 
 def v1_frame(grid, modes, channel):
@@ -110,19 +110,20 @@ def main():
     args = ap.parse_args()
     t0 = time.perf_counter()
     files = sorted(glob.glob(os.path.join(args.data, "2ch_40nm_bead", "*", "*.ome.tif")))
-    stacks = [read_stack(f, CAMERA) for f in files]
-    pairs = pair_beads(stacks, roi_size=27)
-    batch = extract_pair_rois(stacks, pairs, 25).to(args.device)
+    stacks = read(files)
+    rois = dual_rois(stacks, CAMERA, DualColorSettings(roi_size=25))
+    batch, start = rois.batch.to(args.device), rois.transform / rois.transform[2, 2]
     channels = []
     for c in range(2):
         optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.516, n_med=1.35, pixel_size_nm=PIXEL_NM)
         grid = uipsf.PupilGrid.build(optics, 64, device=args.device)
         psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=args.n_max), (25, 25), bead_radius_nm=20.0,
                               sigma_nm=(30.0, 30.0))
-        channels.append(Channel(psf, transform=pairs.transform if c else None))
-    model, noise = ForwardModel(channels), ShiftedPoisson()
-    emit(dict(stage="data", stacks=len(stacks), pairs=len(pairs), layout=pairs.layout, split=pairs.split,
-              start_transform=pairs.transform, s=float(batch.s), seconds=round(time.perf_counter() - t0, 1)),
+        channels.append(Channel(psf, transform=start if c else None))
+    model, noise = ForwardModel(channels), rois.noise
+    emit(dict(stage="data", stacks=len(stacks), pairs=batch.n_emitters, layout=rois.geometry["layout"],
+              split=rois.geometry["split_position"], start_transform=start, s=float(batch.s),
+              seconds=round(time.perf_counter() - t0, 1)),
          args.out)
     if args.from_saved:
         saved = torch.load(args.from_saved)
@@ -132,7 +133,7 @@ def main():
         p, std = params.physical(), saved["std"]
         H = uipsf.model.channels.unpack_transform(p["ch1.transform"].detach().cpu().double()).numpy()
     else:
-        cal = learn_beads(model, batch, noise, chunk_size=args.chunk, geometry=pairs.geometry(),
+        cal = learn_beads(model, batch, noise, chunk_size=args.chunk, geometry=rois.geometry,
                           progress=lambda e: print(json.dumps({k: round(v, 3) if isinstance(v, float) else v
                                                                for k, v in e.items()}), flush=True))
         minutes = round((time.perf_counter() - t0) / 60, 2)
@@ -155,7 +156,7 @@ def main():
                        os.path.splitext(args.out)[0] + "_params.pt")
 
     # The transform, against SMAPpy's and v1's: where each puts every used bead's partner.
-    main_chip = pairs.chip("main")[used_ids]
+    main_chip = rois.points[used_ids, 0]
     rows = {"uipsf": H}
     try:
         from smappy.calibrate.dual import calibrate_dual
@@ -170,7 +171,7 @@ def main():
                          for m in (res.calibration.main, res.calibration.secondary)]
     except ImportError:
         sm = ss = ok = brightness = normalisation = None
-    origin = stacks[0].chip_origin
+    origin = tuple(stacks[0].roi[:2]) if stacks[0].roi is not None else (0, 0)
     with h5py.File(os.path.join(args.data, V1_FILE)) as f:
         rows["v1"] = v1_transform(f, origin)
         cor = f["rois/cor"][()]

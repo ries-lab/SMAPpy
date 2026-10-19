@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from uipsf.noise import EMCCD, Camera, Poisson, ShiftedPoisson
+from uipsf.noise import EMCCD, Poisson, ShiftedPoisson
 
 f64 = torch.float64
 
@@ -68,15 +68,3 @@ def test_electron_multiplication_halves_the_information():
     mu, d = torch.tensor([50.0], dtype=f64), torch.tensor([60.0], dtype=f64)
     assert torch.allclose(EMCCD().deviance(mu, d), Poisson().deviance(mu, d) / 2)
     assert torch.allclose(EMCCD().derivatives(mu, d)[1], Poisson().derivatives(mu, d)[1] / 2)
-
-
-def test_the_camera_converts_as_smappy_does():
-    # smappy.metadata.CameraMetadata: (ADU − offset)·conversion, divided by the EM gain; read noise
-    # 1 e⁻ by default without EM and none with it.
-    cam = Camera(conversion=0.22, offset=400.0)
-    assert torch.allclose(cam.to_photons(torch.tensor([400.0, 500.0])), torch.tensor([0.0, 22.0]))
-    assert cam.read_noise_var == 1.0 and cam.excess == 1.0
-    em = Camera(conversion=10.0, offset=100.0, em_gain=100.0, read_noise_e=3.0)
-    assert torch.allclose(em.to_photons(torch.tensor([200.0])), torch.tensor([10.0]))
-    assert em.read_noise_var == 0.0 and em.excess == 2.0 and isinstance(em.noise(), ShiftedPoisson)
-    assert Camera(conversion=1.0, offset=0.0, read_noise_e=1.5).read_noise_var == 2.25

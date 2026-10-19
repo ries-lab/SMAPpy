@@ -23,7 +23,7 @@ at the end and not rated one by one.
 ## Summary: what I would do first
 
 The bulk of SMAP's day-to-day use is already there: fitting (Gaussian, spline,
-2-channel global), bead and uiPSF calibration, drift (COMET, RCC), rendering
+2-channel global), bead calibration, uiPSF v2 (its window in progress), drift (COMET, RCC), rendering
 with layers/filters/grouping and any-column axes, 3D view, ROI manager with
 NPC, line profiles, statistics, FRC, simulation and ground truth, history,
 batch.  The large gaps are **whole areas**, not single plugins:
@@ -44,7 +44,8 @@ recurring ones are: one plugin where SMAP had several near-duplicates
 (`FilterFields1–4`, `Get2CInt*`, `CME2CSide*`), express things through the math
 parser and `group.combine` instead of dedicated plugins (rename/remove fields,
 group by any field, site id columns), and run external deep-learning tools the
-way `uipsf.py` does instead of porting them.
+in their own Python (a worker script reporting on stdout, as the uiPSF v1 bridge did,
+retired October 2026: `git show 0164d42:src/smappy/uipsf/runner.py`) instead of porting them.
 
 ---
 
@@ -69,7 +70,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | `MLE_global_spline` | multi-channel global fit | ✅ 2C (Gaussian and spline) | – |
 | `MLE_4Pi`, `Loader4PiMat`, `Channeldrift4Pi`, `RegisterLocs4Pi`, `Phase2z4Pi` | 4Pi | ✗ | skip unless 4Pi data comes back into use (L). |
 | `iterativeMDfitter` | multi-emitter-aware single fitter | ✗ | **P3**, M – for medium density; DECODE is the better answer. |
-| `DECODE_fitting`, `Loader_decode`, `DECODE_training_estimates` | deep-learning localization | ✗ | **P2**, M – run DECODE in its own Python like `uipsf.py` (external worker + import of its output). Don't port the training glue as is. |
+| `DECODE_fitting`, `Loader_decode`, `DECODE_training_estimates` | deep-learning localization | ✗ | **P2**, M – run DECODE in its own Python (external worker + import of its output). Don't port the training glue as is. |
 | `deepSMLM`, `TrainDeepSMLM`, `FalconHD2D` | other high-density localizers | ✗ | skip |
 | `RadialSymmetry2D/3D` | fast non-MLE localizer | ✗ | **P3**, S – nice for beads/tracking; not for SMLM precision. |
 | `usePeakfinder`, `pushLocs` | pass positions through | n/a | skip |
@@ -83,7 +84,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | SMAP | does | smappy | suggestion |
 |---|---|---|---|
 | `calibrater3D_so` / `fit3Dcspline` | cspline PSF from beads | ✅ Bead calibration window | – |
-| `learnPSF_invmodeling` | PSF by inverse modelling | ✅ uiPSF calibration | – |
+| `learnPSF_invmodeling` | PSF by inverse modelling | 🔶 uipsf (uiPSF v2, `src/uipsf/`); its *PSF calibration* window is being built (`docs/uipsf/plan.md` §7.5) | – |
 | `CheckCalibration` | fitted vs true bead z | ✅ `calibrate/validation.py` | – |
 | `calibrate3Daberrations`, `correct3Daberrations`, `CorrectDepthDependentOffset` | depth-dependent PSF / z-scaling correction (Li et al. 2018) | ✗ | **P2**, M–L – needed for quantitative z deep in the sample. Simplify to: calibrate a z-correction map from beads in gel → apply as a table operation. |
 | `GainOffsetFFT` | camera gain/offset from data (Heintzmann 2016) | ✗ | **P2**, S–M – feeds the camera database when the conversion factor is unknown. |

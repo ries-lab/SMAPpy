@@ -1,7 +1,7 @@
 """Learning two channels from simulated beads (plan §9 M4): the transform, the photon share, the defocus
 offset and both pupils come back within their CRLBs, from the start a pairing gives.
 
-The transform starts where a pairing puts it (`data.pairing`, or SMAPpy's): a projective fit to the
+The transform starts where a pairing puts it (`smappy.calibrate.pupil.dual_rois`): a projective fit to the
 beads' centroids, here 0.37 px off.  Measured on the biplane beads: a start 2.2 px off by a translation,
 or 1.4 px at the field's edge by a 0.4° rotation, reaches the same optimum; a translation alone, the
 rotation, scale and perspective all left out (~3 px at the edge), stopped in a wrong minimum, the
@@ -15,9 +15,9 @@ from uipsf_tests.conftest import two_channel_beads
 
 
 def _from_centroids(batch, pixel_nm):
-    """The start a pairing gives (`data.pairing`): a projective fit to the beads' centroids in each channel
+    """The start a pairing gives (`smappy.calibrate.dual`): a projective fit to the beads' centroids in each channel
     (the background-free mean of the central slices), in chip pixels."""
-    from uipsf.data.pairing import fit_projective
+    from smappy.calibrate.dual import fit_projective
     d = batch.data.double()
     K = d.shape[2]
     m = d[:, :, K // 2 - 2:K // 2 + 3].mean(2)                          # [E, C, Y, X]
@@ -27,7 +27,8 @@ def _from_centroids(batch, pixel_nm):
     w = m.sum((-2, -1))
     xy = torch.stack([(m.sum(-2) * gx).sum(-1) / w, (m.sum(-1) * gy).sum(-1) / w], -1)
     chip = (batch.roi_xy.double() + xy).numpy()                         # [E, C, 2]
-    return fit_projective(chip[:, 1], chip[:, 0])
+    h = fit_projective(chip[:, 1], chip[:, 0])
+    return h / h[2, 2]                         # smappy's fit leaves the scale free; H₂₂ = 1 here
 
 
 @pytest.mark.slow

@@ -412,6 +412,8 @@ uipsf never fits splines. Anything that tests a spline uses SMAPpy's Spline 3D (
 
 ### 5.7 Data (`data/`)
 
+*Revised (§7.5): the standalone readers, finder, pairing and `noise.Camera` are removed; smappy's `calibrate.pupil` makes the `Batch`, and a standalone uipsf is SMAPpy without its GUI.*
+
 SMAPpy already reads Micro-Manager and NDTiff stacks, takes z from the metadata, converts to photons, finds beads, and finds and registers the split layout. uipsf does not duplicate that. Its data layer takes arrays and offers thin readers only for standalone use.
 
 ```python
@@ -889,7 +891,9 @@ upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those th
    the symmetric magnitude, the figures (`diagnostics.figures`, drawing on a figure it is given). *Done
    (October 2026, `docs/uipsf/architecture.md`).*
 2. Remove the v1 bridge; remove uipsf's reader, finder, pairing and camera input, its tests moved onto
-   smappy's.
+   smappy's.  *Done (October 2026): `smappy.calibrate.pupil` (`bead_rois`, `single_rois`, `dual_rois`,
+   `rois_at`) is the adapter, so step 3's headless part is half built; what is left of it is the split of
+   `collect_beads` for the window's shared bead table, and the sampling into a spline.*
 3. smappy, headless: split `collect_beads`; `calibrate/pupil.py`; tests from simulated beads to Spline
    3D (z, photons, the z sign against the bead average, the normalisation).
 4. The microscope database and its editor, once the metadata of real files is in.

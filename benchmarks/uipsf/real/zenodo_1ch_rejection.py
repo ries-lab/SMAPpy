@@ -17,12 +17,10 @@ import os
 import time
 
 import h5py
-import numpy as np
-from zenodo_camera import CAMERA
+from smappy.calibrate.pupil import rois_at
+from zenodo_camera import CAMERA, read
 
 import uipsf
-from uipsf.data.io import read_stack
-from uipsf.data.rois import Beads, extract_rois
 from uipsf.model import ForwardModel
 from uipsf.workflows import learn_beads
 
@@ -50,9 +48,10 @@ def main():
     args = ap.parse_args()
     x, y, stack, files, n_kept = v1_candidates(args.data)
     used = sorted(set(stack))
-    stacks = [read_stack(files[i], CAMERA) for i in used]
-    beads = Beads(np.array(x), np.array(y), np.array([used.index(s) for s in stack]), np.zeros(len(x)))
-    batch = extract_rois(stacks, beads, 25, slices=slice(1, 40))
+    stacks = read([files[i] for i in used])
+    centres = [(used.index(s), xi, yi) for s, xi, yi in zip(stack, x, y, strict=True)]
+    rois = rois_at(stacks, centres, CAMERA, 25, slices=slice(1, 40))
+    batch = rois.batch
     optics = uipsf.Optics(NA=1.43, wavelength_nm=600, n_imm=1.516, n_med=1.35, pixel_size_nm=(116, 127))
     grid = uipsf.PupilGrid.build(optics, 64, device="cpu")
     psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=8), (25, 25), bead_radius_nm=25.0,

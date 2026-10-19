@@ -30,14 +30,13 @@ import os
 import time
 
 import h5py
-import numpy as np
 import torch
 from zenodo_camera import CAMERA
 
 import uipsf
 from uipsf.diagnostics import noise_transfer
 from uipsf.model import Bleaching, ForwardModel, PerObservation, PerSliceFactor
-from uipsf.noise import Camera, Poisson, ShiftedPoisson
+from uipsf.noise import Poisson, ShiftedPoisson
 from uipsf.solve import GaussNewtonLBFGS, LevenbergMarquardt, Problem
 from uipsf.workflows import fit_beads
 
@@ -56,21 +55,21 @@ def load(path, n_beads=None):
 
 def raw_rois(root, n_beads=None, read_noise_e=None):
     """v1's beads, cut from the raw stacks in the camera's orientation, in SMAPpy's photons."""
+    import dataclasses
     import glob
 
-    from uipsf.data.io import read_stack
-    from uipsf.data.rois import Beads, extract_rois
+    from smappy.calibrate.pupil import rois_at
+    from zenodo_camera import read
     with h5py.File(os.path.join(root, RESULT), "r") as f:
         cor, fid = f["rois/cor"][()], f["rois/fileID"][()]
     if n_beads:
         cor, fid = cor[:n_beads], fid[:n_beads]
     files = sorted(glob.glob(os.path.join(root, "1ch_40nm_bead", "*", "*.ome.tif")))
     used = sorted(set(fid))
-    camera = CAMERA if read_noise_e is None else Camera(CAMERA.conversion, CAMERA.offset, read_noise_e=read_noise_e)
-    stacks = {i: read_stack(files[i], camera) for i in used}
-    order = [used.index(i) for i in fid]
-    beads = Beads(cor[:, 0].astype(int), cor[:, 1].astype(int), np.array(order), np.zeros(len(fid)))
-    batch = extract_rois([stacks[i] for i in used], beads, 25, slices=slice(1, 40))
+    camera = CAMERA if read_noise_e is None else dataclasses.replace(CAMERA, read_noise_e=read_noise_e)
+    stacks = read([files[i] for i in used])
+    centres = [(used.index(i), int(c[0]), int(c[1])) for i, c in zip(fid, cor, strict=True)]
+    batch = rois_at(stacks, centres, camera, 25, slices=slice(1, 40)).batch
     return batch.data[:, 0].numpy(), float(batch.s), camera
 
 
