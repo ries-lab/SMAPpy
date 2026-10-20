@@ -667,7 +667,9 @@ def blink_on_times(locs: Localizations) -> np.ndarray:
     on_time = np.asarray(locs["n_in_group"])
     if "group_id" not in locs:
         return on_time
-    _, first = np.unique(np.asarray(locs["group_id"]), return_index=True)
+    gid = np.asarray(locs["group_id"])
+    _, first = np.unique(gid, return_index=True)
+    first = first[gid[first] > 0]       # 0: in no blink (`group.USE`)
     return on_time[first]
 
 

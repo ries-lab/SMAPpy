@@ -265,6 +265,7 @@ class Tables:
         self.defer_from = defer_from
         self._grouped: Optional[LocSet] = None
         self._key = None
+        self._key_use = None
         # set while a merge of these rows runs elsewhere (the GUI's worker,
         # `gui.merging`): a layer showing blinks keeps the ones it has until
         # the new ones arrive, rather than linking them again, here, at once
@@ -281,7 +282,7 @@ class Tables:
         self._views: "weakref.WeakSet" = weakref.WeakSet()
         if grouped is not None:
             self._grouped = LocSet(grouped)
-            self._key = self._wanted()
+            self._keep_key(self._wanted())
             self._linked = set(self.ungrouped.files or ())
 
     @classmethod
@@ -296,6 +297,7 @@ class Tables:
         made._ready = other._ready
         made._grouped = other._grouped
         made._key = other._key
+        made._key_use = other._key_use
         made._linked = set(other._linked)
         made._next_id = other._next_id
         made._views = weakref.WeakSet()
@@ -318,7 +320,16 @@ class Tables:
         return self.ungrouped.growing
 
     def _wanted(self):
-        return (len(self.locs), asdict(self.settings))
+        from .group import use_token
+        # which rows take part (`group.USE`) is part of what linking reads
+        return (len(self.locs), dict(asdict(self.settings), use=use_token(self.locs)))
+
+    def _keep_key(self, key) -> None:
+        """Take ``key`` as the grouped table's, holding the `group.USE` array
+        it names: alive, its identity cannot be another array's."""
+        from .group import USE
+        self._key = key
+        self._key_use = self.locs.columns.get(USE)
 
     def _per_file(self) -> bool:
         """Whether these rows are linked file by file (see the class)."""
@@ -433,7 +444,7 @@ class Tables:
             table, _ = group(self.locs, self.settings,
                              attach_columns=not self.growing, progress=progress)
         self._grouped = LocSet(table)
-        self._key = key
+        self._keep_key(key)
         return self._grouped
 
     def _file_table(self, number: int):
@@ -466,7 +477,7 @@ class Tables:
         if not pieces:
             if self._grouped is None:       # nothing wanted is there: no blinks
                 self._grouped = LocSet(self.locs[np.zeros(0, np.int64)])
-            self._key = key
+            self._keep_key(key)
             return
         n = len(self.locs)
         # new arrays, never written into: a render thread may be reading the
@@ -480,12 +491,14 @@ class Tables:
             table.columns["group_id"] = (np.asarray(table["group_id"], np.int64)
                                          + base).astype(np.int32)
             index = np.asarray(index, np.int64)
-            gid[rows] = index + base
+            grouped_row = index > 0         # 0: left out of grouping (`group.USE`)
+            gid[rows] = np.where(grouped_row, index + base, 0)
             counts = np.asarray(table["n_in_group"])
             if on is None:
                 on = (np.array(self.locs["n_in_group"], counts.dtype)
                       if "n_in_group" in self.locs else np.zeros(n, counts.dtype))
-            on[rows] = counts[index - 1]
+            on[rows] = np.where(grouped_row, counts[np.maximum(index, 1) - 1]
+                                if len(counts) else 0, 0)
             self._next_id += len(table)
             self._linked.add(number)
             tables.append(table)
@@ -496,7 +509,7 @@ class Tables:
         merged = concat(tables) if len(tables) > 1 else tables[0]
         merged.metadata = dict(tables[0].metadata)
         self._grouped = LocSet(merged)
-        self._key = key
+        self._keep_key(key)
 
     def link_job(self) -> Optional[Tuple[Localizations, GroupSettings, tuple]]:
         """What linking these rows takes, for a worker thread:
@@ -518,7 +531,7 @@ class Tables:
             piece, _rows = self._file_table(missing[0])
             return piece, self.settings, self._wanted() + (missing[0],)
         locs = self.locs.snapshot() if self.growing else self.locs
-        return locs, self.settings, (len(locs), asdict(self.settings))
+        return locs, self.settings, (len(locs), self._wanted()[1])
 
     def take_grouped(self, grouped: Localizations, group_index: np.ndarray,
                      key: tuple) -> bool:
@@ -546,7 +559,7 @@ class Tables:
         if not self.growing:
             attach(self.locs, grouped, group_index)
         self._grouped = LocSet(grouped)
-        self._key = key
+        self._keep_key(key)
         return True
 
     def append(self, new: Localizations) -> int:

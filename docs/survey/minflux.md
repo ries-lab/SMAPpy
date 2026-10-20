@@ -34,7 +34,8 @@ closed):
 * **Per trace**: grouping by `tid`; `trace_index`, each localization's
   number in its trace (1, 2, ... by time), so a filter leaves out a trace's
   creeping start (a still emitter's first 5-30 localizations, in 10-30 % of
-  traces: NOTES.md); *Id statistics* (n, spread per axis, duration,
+  traces: NOTES.md), and `group_use` (Math Parser: `trace_index > 20`) to
+  merge traces without their start; *Id statistics* (n, spread per axis, duration,
   statistics of `cfr`, `efo`, `dcr`, ...) as a region table; the region
   filter on any of it; *Math parser* on its values.
 * **Two colours**: *Assign colours* reads `dcr` and `photons` as the two

@@ -192,7 +192,8 @@ another choice.
 | `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm` |
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
-| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
+| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row; 0 for a localization left out by `group_use` |
+| `group_use` | made by the user (usually by Math Parser), rarely there: where it is, a localization with 0 takes no part in grouping -- in no group, not in the grouped table, kept in the localizations (`group.USE`); e.g. `trace_index > 20` merges MINFLUX traces without their creeping start |
 | `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
 | `region_filter` | 1 for a localization in a region the region filter keeps, 0 for one it drops -- written by `Session.refresh_region_filter` from the conditions in the table's metadata; never read by a region's measurement (`region_runs.unmeasured`) |
 | `tid`, `trace_index` | MINFLUX: the trace a localization belongs to, and its number in it, 1, 2, 3, ... by time (`io.minflux.trace_index`) -- a filter `trace_index > 20` leaves out the start of each trace, where a still emitter creeps into place (NOTES.md); on merged traces the smallest |

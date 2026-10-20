@@ -1695,9 +1695,13 @@ measurements, four beads each) and checked by
   the rest of the trace is good, so the starts are filtered, never whole
   traces.  The reader numbers each trace's localizations, `trace_index`
   (1, 2, ...), so a filter such as `trace_index > 20` leaves the starts
-  out of whatever reads the layer (*Id statistics* does; the grouped
-  layer, built from every row, does not: a filter and *Remove
-  localizations* first).  The MBM beads are not traces -- one position
+  out of whatever reads the layer (*Id statistics* does).  The grouped
+  layer ignores layer filters, so merging takes its own column,
+  `group_use` (`group.USE`, general, usually absent): `group_use =
+  trace_index > 20` in Math Parser merges each trace without its start,
+  while the localizations keep every row.  **For the MINFLUX tutorial**
+  (to be written once the MINFLUX functionality is in): show `trace_index`,
+  the filter, and `group_use` for the merged traces.  The MBM beads are not traces -- one position
   per bead and time point, from the beam monitoring -- so nothing is left
   out of them: a first version of *MBM registration* skipped each bead's
   first 30 points and was undone.
