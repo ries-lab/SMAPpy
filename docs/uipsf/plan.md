@@ -1245,6 +1245,7 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
    acquisitions spread by up to 30 nm; σ is unmoved by a free z scale, larger along x on both, and on M2
    changed with July's camera swap and realignment.  The radial magnitude (twice as large on M5) partly
    absorbs the z scale, which every stack asks for (0.89–0.98).  Next: an NA scan, M5's NA 1.50 first.
+   - **The pixel's share** is item 8: at upsample 1 σ also holds a²/12 of the camera pixel.
 
 4. **Local minima.** Both solvers can end in a minimum that is not the best one, and which one they reach
    depends on the path (M7). On synthetic dim beads (seed 2) LM stopped 100 nats up with a phase error of
@@ -1336,6 +1337,164 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      solved as the emitter blocks are, avoids it.  The study's per-bead drift (`BeadDrift`) is the stand-in.
    - not measured: rejection's k, the held-out fraction, the bead diameter, upsampling.  To be repeated on
      the lab's own stacks: `model_choices.py "<glob>" --NA … --wavelength …` (one argument per dataset).
+
+8. **The camera pixel: sampled or integrated?** (planned October 2026, after M6; nothing run yet beyond
+   the noise-free checks below.)  Bead learning uses `VectorPSF(upsample=1)`, as v1 does for beads (its
+   `config_base.yaml` says `bin: 2`, but `channeltype/1ch.yaml`, `2ch.yaml`, `4pi.yaml`, `MF.yaml` set
+   `bin: 1`; v1 blurs the upsampled grid and sums `bin × bin` blocks by a strided convolution, the same as
+   v2's `bin_pixels`).  On integrated pixels the learnt σ takes the pixel's width (35 → 47.3 nm,
+   √(35² + 110²/12) = 47.4; M6).  The questions: what upsample computes, whether that explains σ, and what
+   it does to the magnitude, the phase, the localisation and the cost.
+
+   **What the code computes (read, and checked numerically).**
+   - The matrix DFT evaluates the image field at chosen points, the emitter placed by the matrices'
+     phase (`MatrixDFT.real_matrices`), so it is exact at any sub-pixel position.  *upsample 1*: the
+     intensity at pixel centres, then the Gaussian blur as a circulant on those samples
+     (`blur_bin_matrices`).  No pixel average of any kind.
+   - *upsample u*: u × u samples per pixel, centred on it, placed by the same DFT, blurred on the fine
+     grid, summed (`bin_pixels`): the midpoint rule for the pixel's integral.  Its kernel is u points
+     a/u apart, of variance a²(u² − 1)/(12u²); the true box's a²/12 is missed by a²/(12u²).
+   - *The proposal* (the PSF on a 3× grid, shifted to the emitter, binned) **is upsample 3** when the
+     shift is exact (a phase, as here, or an FFT shift on an alias-free grid).  Shifting a precomputed
+     grid by interpolation is an approximation that upsample avoids.
+   - *A Fourier pixel*: the box is a sinc in the image's frequencies, sinc(π q a), and folds into the
+     blur's transfer function as the bead kernel does, exact and at no cost **if the samples do not
+     alias**.  The intensity reaches |q| = 2NA/λ, so the spacing must be below λ/(4NA): 119 nm at 680 nm,
+     105 nm at 600 nm (Zenodo's 127 × 116 nm pixels alias at upsample 1).  Where it aliases: upsample u
+     with the sub-box sinc(π q a/u) and then the u-sum, which is exactly the full box (sinc(2t) =
+     sinc(t) cos t).  So upsample 2 is exact for every case here.
+
+   **Noise-free numbers** (λ 680 / 110 nm and Zenodo's 600 nm / 127 × 116 nm, astigmatic, σ 35 nm, 30
+   positions ±½ px, ±600 nm; the scratch script becomes E0 below):
+
+   | model of the pixel | max error / peak, 110 nm \| Zenodo | nats vs exact at 5000 photons, bg 20 |
+   |---|---|---|
+   | centres, σ 35 (pixel missing) | 4.1 % \| 6.4 % | 25 \| 64 |
+   | centres, σ free (best: 47.5 \| (51, 49)) | 0.08 % \| 0.12 % | 0.03 \| 0.12 |
+   | u = 2 / 3 / 4 summed, σ 35 | 1.0 / 0.4 / 0.2 % \| 1.5 / 0.6 / 0.3 % | 1.4 / 0.3 / 0.1 \| 3.4 / 0.7 / 0.2 |
+   | u = 1, Fourier sinc | 0.07 % \| 0.06 % | 0.02 \| 0.09 (aliasing) |
+   | u = 2, sub-box sinc, summed | ≤ 0.04 % (the reference's own error) | 0.00 |
+
+   The pixel's box and a Gaussian of the same variance differ by ≤ 0.1 nats per 30 images: on beads a
+   free σ absorbs the pixel almost exactly, so learning cannot tell them apart.  CPU forward (20 beads ×
+   41 slices, 25 px, n_max 8): 79, 132, 214, 303 ms for u = 1–4.
+
+   **Hypotheses.**
+   - H1. With σ free, the pixel model changes σ only: σ² = σ_optics² + a²/(12u²) for u-summing, σ_optics
+     with an exact pixel; phase, magnitude, z and the deviance move by less than their CRLBs and a few nats.
+   - H2. With σ fixed (*blur fixed*, 30 nm by default), a missing pixel costs 25–64 nats per 30 images
+     and goes into the magnitude as a radial falloff (narrower OTF) and into the spherical phase.  The
+     magnitude dictionary (*What a free pupil magnitude absorbs*) is unaffected: its truth and its fit
+     both sampled pixel centres.
+   - H3. Zenodo 1ch's (68, 75) nm are (57, 67) nm of optics and other blur (127 and 116 nm pixels): the
+     pixel explains about a third of σ², not the size, nor σx ≠ σy (the pixel widens x more, σ is wider in y).
+   - H4. The z slope of 1.011 against the stage does not depend on the pixel model (the pixel is lateral).
+   - H5. The localisation follows the model: the model file stores `upsample` and the export samples at
+     it (`pupil.UPSAMPLE = None`), so Spline 3D and `slice_fits` keep agreeing whichever pixel model is learnt.
+
+   **Experiments** (proposed; which ones to run is to be agreed, see below):
+   - E0 `benchmarks/uipsf/synthetic/pixels.py --check`: the table above, kept, plus `pupil_linearisation`
+     time and peak memory for u = 1–4 and the Fourier pixel, on the CPU and MPS.
+   - E1 the same script, learning: the magnitude benchmark's scenario (12 beads, 31 slices ±750 nm, 17 × 17
+     px of 127 × 116 nm, λ 680, 5000 photons, bg 20, Noll 6, 7, 11 = 0.5, 0.15, 0.2 rad), the truth's
+     pixels integrated exactly (u = 2 with the sub-box sinc), σ 35, magnitude flat and Noll 4 = −0.15;
+     learnt with u = 1, 2, 4 and the exact pixel, σ free; seeds 0, 1, 2.  Records σ, phase and magnitude
+     bias / CRLB, the magnitude's radial share, deviance against the truth's, z bias per bead, time,
+     memory.  Decides H1: σ against the formula to 0.5 nm, everything else within 1 CRLB.
+   - E2 the same, σ fixed at 35 and at the default 30, magnitude free / symmetric / fixed, u = 1 against
+     exact: a *pixels missing* row for the magnitude dictionary.  Decides H2 and whether *blur fixed* can
+     be offered without an exact pixel.
+   - E3 `benchmarks/uipsf/real/zenodo_pixels.py`: Zenodo 1ch and 2ch, `calibrate_beads` defaults, u = 1
+     against the exact pixel (u = 2 + sinc); u = 3, 4 only if those two disagree beyond H1.  Records σ,
+     Zernikes against u = 1 in CRLBs, the radial share, held-out deviance, the atlas's groups, the z slope
+     against the stage, wall time and memory on MPS.  Decides H3, H4 and the default.
+   - E4 the M6 checks on each E3 model: Spline 3D against `slice_fits` (rms, slope, photon ratio), and the
+     z of the u = 1 and exact models' splines on the same ROIs.  Decides H5;
+     `tests/uipsf_tests/test_pupil_spline.py` gains a case learnt with the exact pixel.
+
+   **E1, first run** (`benchmarks/uipsf/synthetic/pixels.py`, seed 0; `results/pixels.jsonl`): a point
+   source with no blur, its pixels integrated 16 × 16 (127 × 116 nm, λ 680 nm), 12 beads × 31 slices, σ free.
+
+   | learnt with | σ at 10⁵ photons (predicted) | nats over the best, 10⁵ \| 10⁴ \| 10³ | Spline 3D on pixelated data, rms x, y, z (nm) |
+   |---|---|---|---|
+   | pixel centres (u1) | (36.9, 33.3) (36.7, 33.5) | 311 \| 11 \| 0 | 0.18, 0.15, 0.63 |
+   | u2 summed | (17.9, 16.1) (18.3, 16.7) | 30 \| 1 \| 1 | 0.18, 0.14, 0.56 |
+   | u4 summed | (8.0, 7.2) (9.2, 8.4) | 0 \| 0 \| 1 | 0.18, 0.14, 0.54 |
+   | u2 + sub-pixel sinc | (0.1, 0.0) (0, 0) | 35 \| 1 \| 2 | 0.18, 0.14, 0.55 |
+   | the truth's own spline | | | 0.16, 0.16, 0.58 |
+
+   - σ is the pixel's share and nothing else; with no blur in the truth there is no other blur to find.
+   - Phase and magnitude do not move: phase rms error 0.0004–0.0005 rad and magnitude rms ≤ 0.0004 in
+     every model at 10⁵ photons.  The Gaussian surrogate is detectable only by its deviance, from about
+     10⁴ photons per slice: 311 nats at 10⁵.
+   - The sub-pixel sinc is 35 nats behind u4 at 10⁵, probably because its long tails wrap around the
+     region (circular).  u1 plus the sinc is no better than u1, because 127 nm aliases at 680 nm.
+   - **Spline 3D does not care.** Each model's spline, sampled at its own setting, fits noise-free
+     pixelated images (400 positions, ±½ px, ±600 nm) as well as the truth's own spline does: z slope
+     0.9995–0.9998 for models learnt at 10⁵ photons.  A pixelated PSF that the spline shifts fits
+     pixelated data to well under 1 nm.
+   - With brightness, σ (u1) is (36.9, 33.3) at 10⁵, (38.2, 33.6) ± 0.6 at 10⁴ and (39.2, 29.4) ± 3 at
+     10³.  There is no clear trend, and this is one seed.
+
+   **Field dependence as a source of σ** (`pixels.py --field NOLL SD`, `results/pixels_field.jsonl`; seed
+   0, 2·10⁴ photons, no blur in the truth, pixels integrated): one mode varying from bead to bead (normal,
+   sd in rad), learnt with u4.  The pixel's share alone is (7, 6) nm.
+
+   | varying mode, sd | σ learnt (nm) | deviance per pixel | magnitude rms, radial share |
+   |---|---|---|---|
+   | none | (7, 6) | 1.00 | 0.0007, — |
+   | astigmatism (Noll 6), 0.1 \| 0.2 | (14, 11) \| (19, 20) | 1.24 \| 1.90 | 0.001 \| 0.003, 0.68 |
+   | coma (Noll 7), 0.1 \| 0.2 | (11, 18) \| (19, 31) | 1.37 \| 2.37 | 0.002 \| 0.009, 0.53 |
+   | spherical (Noll 11), 0.1 \| 0.2 | (10, 11) \| (21, 18) | 1.18 \| 1.67 | 0.001 \| 0.004, 0.57 |
+
+   Field dependence does go into σ, and coma does so along its own axis.  It barely goes into the
+   magnitude, and the mean phase stays within 0.003 rad.  But it costs far more deviance than blur: by the
+   time it adds 15–30 nm of σ, the deviance per pixel is 1.7–2.4.  Zenodo 1ch has (57, 67) nm of
+   non-pixel blur at a deviance of 1.38.  On its own, field dependence is not enough there, unless
+   Zenodo's photon counts make the deviance far less sensitive (to check).
+
+   **σ across the Zenodo sets** (`benchmarks/uipsf/real/zenodo_sigma.py`, `results/zenodo_sigma.jsonl`;
+   `calibrate_beads` defaults, n_max 6, pixel centres; "σ − pixel" is √(σ² − a²/12)):
+
+   | set | camera, pixels | beads used | magnitude free: σ − pixel (nm) | magnitude rms (radial share) | deviance, free \| fixed |
+   |---|---|---|---|---|---|
+   | 1ch 40 nm, 600 nm | Evolve EMCCD, 116 × 127 | 52 | (56, 63) | 0.025 (0.92) | 1.45 \| 1.87 |
+   | 2ch 40 nm, 680 nm, main | the same chip | 71 | (68, 49) | 0.031 (0.88) | 1.73 \| 3.23 |
+   | 2ch, secondary | | | (48, 65) | 0.031 (0.95) | |
+   | FD, centre (r ≤ 400 px), NA 1.5 | Prime 95B sCMOS, 110 | 15 | (61, 85) | 0.055 (0.93) | 1.76 |
+   | FD, whole field (30 brightest) | | 28 | (77, 105) | 0.102 (0.89) | 5.70 |
+
+   - 2ch used v1's indices (1.516 / 1.35): with 1.518 / 1.33, the window's defaults, its fit stalls at
+     the start (deviance 20.8; a separate session is proposed).
+   - FD: one stack of two, ±600 nm (slices 41–160, every 5th), since its 128-sample pupil at ±1 µm needed
+     more than 9 GB.  The FD beads are fitted as points (v1's bead radius 0; their size is not recorded).
+
+   The blur is large on both microscopes, both cameras and both wavelengths.  The whole FD field adds
+   15–20 nm of σ, doubles the magnitude and raises the deviance from 1.8 to 5.7: field dependence, as the
+   synthetic test predicts, but on top of a central σ already at 60–85 nm.  The two 2ch channels
+   share a chip but are widened along different axes (x in the main, y in the secondary): that part of σ
+   comes from each channel's own path after the splitter, not from the camera.  Fixing the magnitude
+   lowers σ by up to 11 nm and costs 0.4–1.5 in deviance per pixel.
+
+   **Not stage wander** (`zenodo_sigma.py --wander`, `results/zenodo_wander.jsonl`): every slice of every
+   used bead was localised alone on the learnt pupil (`scoring.slice_fits`) and compared with where the
+   stack fit puts it.
+   - The common lateral shift per slice (the median over a stack's beads, its mean removed, less the
+     median's noise) is 4.6, 4.4 nm (1ch, 19 stacks), 4.0, 3.9 (2ch, 14) and 3.6, 2.0 (FD centre, one stack).
+   - Common and per-bead together, the residuals exceed the CRLB by 6–7 nm (1ch, 2ch) and 11–12 nm (FD).
+   - Against a σ of 50–85 nm beyond the pixel, wander between z steps is excluded.  Vibration within
+     one exposure is not measured this way.
+
+   **Decisions.**
+   - D1 (after E1, E3): if H1 holds, the pixel model is a convention on σ.  Then the exact pixel by
+     default, so that σ means the optics, motion and the camera's crosstalk and can be compared across
+     cameras, if its cost on Zenodo is below ~1.5× (u = 1 + sinc where λ/(4NA) allows, u = 2 + sinc
+     otherwise); else keep u = 1 and report σ_optics = √(σ² − a²/12) beside σ.
+   - D2 (after E2): *blur fixed* is physical only with the pixel integrated; it is offered with the exact
+     pixel only, or removed.
+   - D3: the model file records the pixel model; files written before keep meaning pixel centres.  The
+     export needs no change while it samples at the model's own setting.  In-situ (M5) and `localise`
+     use the same `VectorPSF`, so they follow.
 
 **Small technical defaults, unless you object:**
 - Negative shifted data (`d + s < 0`) clamped at 0 and counted, rather than the slower exact Poisson–Gaussian likelihood.
