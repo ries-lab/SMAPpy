@@ -5,7 +5,8 @@
 
 Each set is learnt the way SMAPpy's *PSF calibration* window learns it: SMAPpy's ROIs (`bead_rois`),
 `calibrate_beads` with its defaults (n_max 6, magnitude free, blur free, pixel centres), beads in water
-(n_med 1.33) for the 40 nm sets, v1's settings for FD, the bead's diameter given.  Per channel it records σ, σ less the pixel's share
+(n_med 1.33) for the 40 nm sets, v1's settings for FD, the bead's diameter given.  Per channel it records σ,
+σ less the pixel's share
 (√(σ² − a²/12): learning at pixel centres puts the pixel's width into σ, `synthetic/pixels.py`), the
 magnitude (rms, the rotationally symmetric share, the largest modes), the largest phase modes and the atlas's
 mean deviance.
@@ -59,7 +60,8 @@ def summary(cal, c, pixel):
     p = cal.shared()
     sig = [float(s) for s in p[prefix(c) + "psf.sigma"]]
     out["sigma_nm"] = [round(s, 1) for s in sig]
-    out["sigma_less_pixel_nm"] = [round(math.sqrt(max(s * s - a * a / 12, 0.0)), 1) for s, a in zip(sig, pixel)]
+    out["sigma_less_pixel_nm"] = [round(math.sqrt(max(s * s - a * a / 12, 0.0)), 1)
+                                  for s, a in zip(sig, pixel, strict=True)]
     for which in ("magnitude", "phase"):
         modes, values, crlb = zernikes(cal, which, c)
         v = np.asarray(values, float)
@@ -105,7 +107,8 @@ def wander(cal, batch, noise, stacks):
     return dict(stacks_with_2_beads=int(len(np.unique(stack)) - sum((stack == s).sum() < 2 for s in np.unique(stack))),
                 common_rms_nm=[round(float(v), 1) for v in rms],
                 common_noise_rms_nm=[round(float(v), 1) for v in noise_rms],
-                common_less_noise_nm=[round(float(np.sqrt(max(a * a - b * b, 0))), 1) for a, b in zip(rms, noise_rms)],
+                common_less_noise_nm=[round(float(np.sqrt(max(a * a - b * b, 0))), 1)
+                                      for a, b in zip(rms, noise_rms, strict=True)],
                 residual_excess_over_crlb_nm=[round(float(v), 1) for v in excess],
                 crlb_median_nm=[round(float(v), 1) for v in np.nanmedian(c, (0, 1))])
 
@@ -150,8 +153,9 @@ def main():
     cal = calibrate_beads(batch, optics, model_settings, transforms=[None, rois.transform] if dual else None,
                           geometry=rois.geometry, noise=rois.noise, device=args.device)
     xy = np.array([[rois.records[i]["x_px"], rois.records[i]["y_px"]] for i in keep])
-    row = dict(set=args.set, stacks=len(paths), step=args.step, first=args.first, last=args.last, camera=dict(conversion=rois.camera.conversion, offset=rois.camera.offset,
-                                         read_noise_e=rois.camera.read_noise_e), region=args.region, magnitude=args.magnitude, order=model_settings.order,
+    camera = dict(conversion=rois.camera.conversion, offset=rois.camera.offset, read_noise_e=rois.camera.read_noise_e)
+    row = dict(set=args.set, stacks=len(paths), step=args.step, first=args.first, last=args.last, camera=camera,
+               region=args.region, magnitude=args.magnitude, order=model_settings.order,
                pixel_nm=pixel, beads=len(keep), used=len(cal.beads.used),
                field_px=dict(x=[round(float(xy[:, 0].min())), round(float(xy[:, 0].max()))],
                              y=[round(float(xy[:, 1].min())), round(float(xy[:, 1].max()))]),

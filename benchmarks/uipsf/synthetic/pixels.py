@@ -215,7 +215,8 @@ def main():
             t = time.perf_counter()
             res = fit_beads(ForwardModel(psf), batch, Poisson())
             row, p = describe(res, psf)
-            row = dict(model=name, photons=photons, seed=args.seed, field=field, sigma_predicted_nm=predicted_sigma(name),
+            row = dict(model=name, photons=photons, seed=args.seed, field=field,
+                       sigma_predicted_nm=predicted_sigma(name),
                        seconds=round(time.perf_counter() - t, 1), **row)
             if loc is not None:
                 row["spline3d"] = localisation_report(localise(spline(name, p), loc[1]), loc[0])
