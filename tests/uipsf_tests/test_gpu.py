@@ -51,3 +51,22 @@ def test_a_bead_fit_from_a_cpu_batch_runs_on_the_models_device(optics, device):
     assert batch.data.device.type == "cpu"
     cal = learn_beads(model, batch, first_order=None)
     assert cal.result.params.values["pupil.phase"].device.type == device.type
+
+
+def test_held_out_beads_with_masked_pixels_are_reported_on_the_gpu(optics, device):
+    # The deviance comes back on the CPU, the saturation mask lives with the data: they must meet.
+    from dataclasses import replace
+
+    import uipsf
+    from uipsf.workflows import learn_beads
+    from uipsf.workflows.rejection import RejectionSettings
+    from uipsf_tests.conftest import small_beads
+    _, _, batch = small_beads(optics, n=6, dtype=torch.float32)
+    mask = torch.ones_like(batch.data, dtype=torch.bool)
+    mask[:, :, :, 4, 4] = False
+    grid = uipsf.PupilGrid.build(optics, 24, device=device)
+    model = uipsf.ForwardModel(uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=4), (9, 9),
+                                               sigma_nm=(30.0, 30.0)))
+    cal = learn_beads(model, replace(batch, mask=mask), first_order=None, heldout=0.34,
+                      rejection=RejectionSettings(enabled=False))
+    assert cal.heldout_report is not None and np.isfinite(cal.heldout_report.deviance)

@@ -744,6 +744,9 @@ readers cut the stacks on the CPU and the solver works where the batch is: a `le
 `extract_rois`' batch ran on the CPU unless the caller moved it (`zenodo_1ch_full.py --device` did).
 Now `fit_beads`, `learn_beads`, scoring, the probes, the atlas and the held-out report move the batch to
 the model's device first (`device.on_model_device`); `tests/uipsf_tests/test_gpu.py` checks it with `--gpu`.
+Held-out beads still failed on MPS, found by the model-choice study (October 2026): the held-out report met
+the CPU's deviance with the device's mask, and the slice fits gave their frames a z on the CPU.  Both fixed;
+`test_held_out_beads_with_masked_pixels_are_reported_on_the_gpu`.
 
 ## Milestone M4: several channels
 
@@ -904,3 +907,132 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   35.4 nm, blur (75.6, 61.0) and (57.9, 75.8) nm; the transform 0.025 px RMS from SMAPpy's; the Zernikes
   against v1's, correlation 0.997 (main) and 0.9998 (secondary).  1.4 min on MPS, where it had failed
   (above), against 28 min on 4 cloud cores.
+
+## Which model choices can be fixed (`benchmarks/uipsf/real/model_choices.py`, plan §7.5 and §10)
+
+Every variant is one bead calibration of the same ROIs (SMAPpy's adapter, `pupil.bead_rois`, 25 px),
+with one choice changed from **base**: the form's defaults (`BeadSettings()`: order 6, magnitude free,
+blur free), the z scale fixed at 1, bleaching of order 1 per bead, stage 1 to order 4, slices thinned to
+50 nm, 20 % held out (`rejection.held_out`, the same beads for every variant).  Base runs the rejection;
+every other variant gets its bead states as decisions, so all fit the same beads.  On a Mac's GPU (M-series,
+MPS, torch 2.14), October 2026; `benchmarks/uipsf/results/model_choices.jsonl`, and
+`model_choices.py --summary` prints the full table.  Base reproduces to the nat between invocations.
+
+- *Δ train*: the training objective (nats) against base, the same beads.  A nested model can only lower
+  it at its optimum: a positive value for a model that contains base means the fit ended in a worse basin.
+- *Δ held out*: the held-out beads localised on the learnt pupil with every slice (`heldout_report`), the
+  deviance in nats over all their pixels.  It does not reward parameters, only a better pupil.
+- *z bias*: the held-out report's, the pupil model's slice fits against its stack fit (RMS over the central
+  60 % of the range, nm).  *Spline*: Spline 3D on the exported spline (`pupil.fit_quality`), per slice the
+  median over beads of the centred z error; RMS over the central slices for the held-out beads / the used
+  ones.  The spline leaves the bead's size out, so on 40 nm beads a narrower model scores better here
+  than it should (on the simulation the true model scores 5–7 nm, a blur fixed at 0 2.5–4).
+- Data: Zenodo `1ch_40nm_bead` (56 beads after the dim specks: 43 used, 2 rejected, 11 held out; ~70 000
+  photons per slice) and `2ch_40nm_bead` (88 pairs: 57, 13, 18), NA 1.43, n_imm 1.516, beads in water
+  1.33, 600 nm (1ch) and 680 nm (2ch) as v1 ran them, 40 nm beads, `zenodo_camera.py`.  *sim*: 36
+  astigmatic beads in three stacks drawn by uipsf's model through the adapter (Zenodo's camera, pixels
+  and 50 nm slices; phase to n = 6, a radial magnitude Noll 4 = −0.15, σ 30 nm; 20 000 photons per
+  slice, background 40), two seeds; the phase is compared with the truth (0.001 rad RMS for base).
+
+| variant | 1ch Δ train / Δ held out | 1ch z bias, spline held/used | 2ch Δ train / Δ held out | 2ch z bias, spline held/used | sim Δ held out (2 seeds), z bias | σ 1ch (nm) |
+|---|---|---|---|---|---|---|
+| base | 0 / 0 | 5.4, 3.6 / 3.1 | 0 / 0 | 3.3, 6.6 / 5.1 | 0, 0; 2.8, 3.2 | (66, 73) |
+| order 8 | −35 300 / −10 400 | **3.4**, 3.5 / 2.6 | −132 500 / −68 900 | **2.6**, 7.1 / 4.9 | +5.5, +3.8; same | (65, 73) |
+| magnitude symmetric | +46 400 / +16 200 | 5.2, 4.6 / 4.3 | +297 800 / +162 200 | 4.0, 7.1 / 5.7 | 0, −2; same | (64, 75) |
+| magnitude fixed | +243 200 / +92 100 | **21.3**, 23.7 / 23.2 | +2.05 M / +1.10 M | **30.2**, 20.4 / 20.3 | +6200, +5400; 22 | (62, 78) |
+| order 8, symmetric | −6 100 / −900 | 3.5, 3.6 / 2.7 | +83 600 / +53 700 | 3.5, 7.0 / 5.2 | +3, −1; same | (64, 75) |
+| blur fixed 0 nm | +429 700 / +157 000 | 20.5, 13.1 / 13.6 | — | — | +420, +380; 5.0 | (0, 0) |
+| blur fixed 20 nm | +345 500 / +125 900 | 18.7, 11.7 / 12.2 | +1.03 M / +659 300 | 16.3, 13.6 / 13.6 | +130, +120; 3.5 | (20, 20) |
+| blur fixed 40 nm | +162 900 / +58 700 | 14.1, 7.9 / 8.4 | +465 400 / +332 000 | 12.5, 11.0 / 11.0 | +190, +160; 4.7–5.3 | (40, 40) |
+| z scale free | −5 300 / −3 300, s = 0.962 | 6.3, 13.4 / 13.2 (slope −0.037) | **+623 500** / +246 600, s = 0.957 | 9.8, 9.1 / 9.0 | 0, 0; s = 1.000, 1.001 | (65, 72) |
+| λ +10 / +20 / +30 nm | −400 / +500 / +2700; held −900 / −1300 / −1200 | 5.6–6.0, 3.5 / 3.0 | — | — | +32…+400; σ falls to 0–9 nm at +30 | (64…59, 71…68) |
+| NA −0.007 / −0.013 / −0.020 | −1900 / −2700 / −2300; held −700 / −900 / −600 | 5.5–6.0, 3.2–3.3 / 3.0–3.6 | — | — | +13…+220 | (66, 73) |
+| bleaching order 2 | −38 100 / −26 700 | **3.9**, 4.4 / 4.2 | −123 700 / −29 000 | **2.2**, 5.8 / 3.7 | −4, −6; same | (65, 72) |
+| per-slice photon factor | −10 800 / **+6 600** | 4.3, 4.2 / 4.1 | **+27.0 M** / +8.7 M | **80.5**, 80.0 / 79.1 | +1, +8; same | (65, 72) |
+| photons free per slice | fails: `score_beads` reads `emitter.photons` | | fails | | fails | |
+| order 8, bleaching 2 | −68 100 / −38 600 | **2.8**, 4.0 / 3.4 | **+170 000** / +84 900 | 7.9, 5.8 / 5.8 | +2, −2; same | (64, 73) |
+| no stage 1 | 0 / 0 | the same | 0 / −8 | the same | 0; same | |
+| stage 1 to order 2 | 0 / 0 | the same | **+27.8 M** / +9.1 M | 81, 430 / 431 | 0; same | |
+| `max_dz` 100 nm | (fewer pixels) / −7 | 5.3, 3.5 / 3.1 | / +340 | 3.0, 6.4 / 4.7 | +3, −5; same | |
+| `max_dz` 200 nm | / +120 | 5.2, 3.5 / 3.2 | / +1550 | 2.8, 6.4 / 4.7 | +6, +3; same | |
+
+Times (MPS, after the first fit of a process, which compiles): base 12–14 s for 1ch and 57 s for 2ch;
+order 8 about the same; `max_dz` 100 / 200 nm 8 / 9 s and 36 / 22 s.
+
+What it says:
+
+- **Order 8 is better on both real datasets, by far**: 10 000 and 69 000 nats on held-out beads, the
+  pupil's z bias 5.4 → 3.4 and 3.3 → 2.6 nm, at no cost in time.  On the simulation, whose truth stops at
+  n = 6, the extra modes cost 4–6 nats on the held-out beads and nothing in z.  The default 6 leaves real
+  aberrations out.
+- **The magnitude must be free, and asymmetric.**  *Fixed* is the worst choice everywhere: the z bias goes
+  to 21–30 nm (22 nm on the simulation, where the truth has a radial magnitude and the phase is then off by
+  0.026 rad).  *Symmetric* loses 16 000 / 162 000 nats on held-out beads at order 6, and at order 8 still
+  29 000 / 216 000 against the free magnitude: the Zenodo data want the non-symmetric modes, which the
+  dictionary (above) ties to phase above n_max or to the field.  Freeing them moves the phase by 0.014 rad
+  RMS (2ch).  On the simulation free and symmetric agree, as they should.
+- **No fixed blur reproduces the data.**  σ fits to (65, 73) nm on 1ch and (73, 59) on 2ch's main channel,
+  and fixing it at 0, 20 or 40 nm costs 59 000–157 000 nats (1ch) and 0.33–0.66 M (2ch) on held-out beads
+  and raises the z bias to 12–20 nm.  On the simulation the free σ comes back at the true 30 nm.  Whatever
+  the 70 nm stand for (plan §10, 3), the model needs them.
+- **The z scale: neither the NA nor the wavelength explains it.**  Freed on 1ch it goes to 0.962, gaining
+  5300 nats (3300 held out); then the spline's z is 3.7 % shorter than the stage's (the slope).  A lower
+  NA recovers at most 2700 of the 5300 (at −0.013, with s fixed), a redder emission 400 (+10 nm) and less
+  beyond; on the held-out beads both give ~900–1300.  So neither is the cause alone.  On 2ch the free z
+  scale also goes to 0.957, but the fit ends 624 000 nats *worse* than base, a model that contains it:
+  the solver did not find its optimum (plan §10, 4).  On the simulation (true s = 1) the free s stays at
+  1.000 and gains nothing: no false alarm.
+- **Bleaching of order 2 helps real beads and costs simulated ones nothing**: 27 000 / 29 000 nats held
+  out, z bias 3.9 and 2.2 nm.  The per-slice photon factor overfits on 1ch (better in training, 6600
+  nats worse held out) and wrecks 2ch (σ 33 nm, z bias 80 nm: a trap).  A free count per bead and slice
+  (`PerObservation`) cannot run in `learn_beads` at all: the bead scores read `emitter.photons`.
+- **Combinations are where 2ch breaks.**  Order 8 with bleaching 2 adds up on 1ch (−68 000 / −38 600, the
+  best z bias, 2.8 nm) but on 2ch ends 170 000 nats worse than base, though each alone gains over
+  120 000.  Three of the richer 2ch models (this one, the free z scale, the slice factor) landed in worse
+  basins; every 1ch and simulated fit was consistent.
+- **The first stage is not needed on these data, and order 2 is a trap.**  No stage 1, or stage 1 to
+  order 4, give the same fit to the nat on all four datasets; to order 2 on 2ch it ends with z off by 430 nm.
+- **Thinning to 100 nm costs nothing measurable**: on the held-out beads (judged with every slice) −7 and
+  +340 nats of 0.23 M and 0.92 M, the z bias the same or lower, 1.6× faster on 2ch; 200 nm costs 120 and
+  1550 nats, still the same z bias, 2.6× faster on 2ch.
+- Not tested here: rejection's k, the held-out fraction, the bead diameter, upsampling, and n_med (the dictionary
+  above covers it on simulations).
+
+### The z scale and the magnitude, drift and the blur, and fits started from a simpler one
+
+Three questions the table above left (October 2026, the same script, the same beads; the fits marked *from*
+start at another variant's solution through `start_values`, past stage 1).
+
+| variant | 1ch Δ train / Δ held out | 1ch s, σ (nm), z bias | 2ch Δ train / Δ held out | 2ch s, σ, z bias | sim (true s = 1): s, Δ held out |
+|---|---|---|---|---|---|
+| s free, magnitude fixed | +68 400 / +22 800 (−174 800 against fixed s) | **0.920**, (61, 72), 5.4 | +579 900 / +272 900 | **0.897**, (70, 64), 4.8 | **0.929**, +3400 |
+| s free, magnitude symmetric | +44 000 / +13 800 | 0.968, (64, 75), 6.0 | +293 400 / +154 600 | 0.964, (72, 64), 4.5 | 1.000, 0 |
+| s free, magnitude free, from base | −5 300 / −3 300 | 0.962, (65, 72), 6.3 | −43 100 / −27 400 | 0.948, (72, 57), 4.3 | 1.000, 0 |
+| order 8, s free, from order 8 | −36 300 / −11 100 (−1 000 against order 8) | 0.977, (64, 73), 3.9 | −143 100 / −75 000 (−10 600) | 0.966, (72, 58), 2.7 | 0.999, +5 |
+| order 8 + bleaching 2, from base | −68 100 / −38 600 | 1, (64, 73), 2.8 | **−243 500 / −91 600** | 1, (72, 59), **1.9** | 1, +2 |
+| drift shared, from base | −17 900 / −4 800 | 1, **(62, 71)**, 2.9; drift (10, 15) nm | −99 200 / −53 300 | 1, **(71, 57)**, 1.9; drift (7, 17) | 1, +13; drift (1.4, 1.1) |
+| drift per bead | −7 600 / −4 000 | 1, (65, 73), 5.3; drift (5.6, 4.5) | −50 300 / −24 800 | 1, (73, 59), 3.2; drift (8.7, 8.5) | 1, −197; drift (2.1, 2.1) |
+| drift per bead, σ fixed 20 nm | +335 400 / +120 400 | 1, (20, 20), 18.6 | +966 000 / +627 200 | 1, (20, 20), 16.1 | 1, −71 |
+
+*Drift shared*: uipsf's `geometry.drift`, one lateral and axial shift per slice for every bead.  *Drift per
+bead*: `BeadDrift` in the script, a lateral shift per bead and slice with the same 5 nm prior, which bounds
+what any drift between frames can do (one per file, the physical one, is 1440 shared parameters for 1ch,
+more than MPS takes in one Jacobian; plan §10, 7).  Fresh, the shared drift ended 70 000 (1ch) and 428 000
+(2ch) nats *worse* than base, as did 2ch's free s (+624 000) and order 8 with s free (+669 000); from the
+simpler fit each gains.
+
+- **A magnitude the model lacks makes a z scale.**  On simulated beads whose truth has s = 1 and a radial
+  magnitude, a fit with the magnitude fixed asks for s = 0.929; with it free, 1.000.  On Zenodo s follows
+  the magnitude the same way: 0.920 / 0.897 fixed, 0.968 / 0.964 symmetric, 0.962 / 0.948 free at order
+  6, 0.977 / 0.966 free at order 8, where 1ch gains only 1000 nats from it.  So most of the z scale is the
+  pupil's amplitude, not the piezo; what 2ch still asks for at order 8 is 10 600 nats.
+- **Drift between frames is not the blur.**  A drift per bead and slice fits 5–9 nm and leaves σ where it
+  was; with σ held at 20 nm the drift cannot take its place (16–19 nm z bias).  The shared drift, started
+  from base, fits 10–17 nm per slice, takes σ down by 2–4 nm and gives the lowest z bias of any single
+  change (2.9 and 1.9 nm): a real stage motion common to the beads of a frame, but not 70 nm of blur.  On
+  the simulation (no drift) the drifts stay at 1–2 nm.  What is left is blur within the exposure or a
+  mismatch of the model (plan §10, 3).
+- **Richer models need the simpler one's fit as their start.**  Every fresh 2ch fit that ended worse than
+  a model it contains reached the expected gain when started from that model's solution; on 1ch and the
+  simulation the start changes nothing.  Order 8 with bleaching of order 2, from base, is the best fit
+  measured on 2ch: −91 600 nats held out, z bias 1.9 nm.

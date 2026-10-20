@@ -50,7 +50,8 @@ def heldout_report(model, shared: dict, batch, noise, beads=None, localiser=None
     batch = on_model_device(batch, model)
     fit, problem = localise(model, shared, batch, noise)
     D = problem.deviance(fit.params)
-    mask = torch.ones_like(D, dtype=torch.bool) if batch.mask is None else batch.mask.expand_as(D)
+    # the deviance comes back on the CPU (`Problem.deviance`), the mask lives with the data
+    mask = torch.ones_like(D, dtype=torch.bool) if batch.mask is None else batch.mask.cpu().expand_as(D)
     deviance = float((D * mask).sum() / mask.sum())
     found, crlb, stack = (localiser or slice_fits)(model, shared, batch, noise, fit.params)
     diff = found - stack                                            # [E, K, 3]

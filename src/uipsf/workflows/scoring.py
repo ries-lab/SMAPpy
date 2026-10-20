@@ -93,7 +93,7 @@ def slice_fits(model, shared: dict, batch, noise, stack_fit: Params):
     E, C, K, Y, X = batch.data.shape
     xyz = model.geometry(stack_fit.physical(), batch).detach()            # [E, K, 3]
     frames = replace(batch, data=batch.data.transpose(1, 2).reshape(E * K, C, 1, Y, X),
-                     z_nm=torch.zeros(1, dtype=batch.data.dtype),
+                     z_nm=torch.zeros(1, dtype=batch.data.dtype, device=batch.data.device),
                      mask=None if batch.mask is None else
                      batch.mask.expand_as(batch.data).transpose(1, 2).reshape(E * K, C, 1, Y, X),
                      s=batch.s if not isinstance(batch.s, torch.Tensor) or batch.s.dim() == 0 else
