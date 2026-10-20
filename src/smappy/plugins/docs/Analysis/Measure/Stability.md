@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.stability.grid_step, smappy.stability.resample, smappy.stability.bead_traces, smappy.stability.combine, smappy.stability.longest_run, smappy.stability.highpass, smappy.stability.smooth, smappy.stability.spectrum, smappy.stability.cumulative_rms, smappy.stability.peak_amplitude, smappy.stability.peak_frequency, smappy.stability.peaks, smappy.stability.vibration_rms, smappy.stability.analyse, smappy.stability.pooled, smappy.plugins.stability.Stability.run]
+version: "2"
+covers: [smappy.stability.grid_step, smappy.stability.resample, smappy.stability.bead_traces, smappy.stability.combine, smappy.stability.longest_run, smappy.stability.highpass, smappy.stability.smooth, smappy.stability.spectrum, smappy.stability.cumulative_rms, smappy.stability.peak_amplitude, smappy.stability.peak_frequency, smappy.stability.peaks, smappy.stability.vibration_rms, smappy.stability.analyse, smappy.stability.pooled, smappy.stability.averaging_points, smappy.stability.runs_of, smappy.stability.allan_sums, smappy.stability.Scatter, smappy.stability.scatter, smappy.stability.pooled_scatter, smappy.plugins.stability.Stability.run]
 ---
 
 ## What it does
@@ -21,8 +21,22 @@ position against time, how much it jitters beyond its precision, and the
 [amplitude spectrum](plugin:Panels/Glossary): the movement taken apart
 into frequencies, where a vibration is a peak, so its source can be
 found -- a 50 Hz peak is the mains, a peak that moves with a pump's speed
-is the pump.  Long-term drift and the drift between two channels are to
-follow as approaches of their own.  To *correct* drift from beads, use
+is the pump.
+
+The second, **random scatter**, asks how much of the movement is noise
+that averages away: the difference between one point and the next, divided
+by √2, is one localization's error when nothing moves between them, so its
+spread is the precision the experiment achieved -- to set beside the
+precision the fit claims (the CRLB, `xy_err_nm`).  It is the idea of
+[NeNA](plugin:Panels/Glossary), asked of a trace known to be one bead
+rather than of neighbours in consecutive frames, and it works for a bead
+in a camera acquisition as for a MINFLUX trace.  Longer time scales follow
+from the [Allan deviation](plugin:Panels/Glossary) (Allan 1966): the
+same difference between means over more and more points, which for pure
+noise falls as one over the square root of the points averaged, and which
+drift, slow vibrations or a bead that wanders lift above that line.
+Long-term drift and the drift between two channels are to follow as
+approaches of their own.  To *correct* drift from beads, use
 [Fiducials](plugin:Analysis/Drift/Fiducials).
 
 It needs the beads' localizations with an id column that says which
@@ -150,6 +164,30 @@ left.set_title("each bead", fontsize=9)
 right.set_title("each minus the others", fontsize=9)
 ```
 
+**6. The random scatter.**  Only the measured points of each trace are
+compared -- a filled point lies on the line between its neighbours and
+would make the noise look smaller than it is -- and only points no
+further apart than *gap* typical steps, so a difference never spans a long
+pause.  Nothing is high-passed: drift moves two neighbouring points by
+the same amount and cancels in their difference.  The scatter is given as
+the RMS of the steps, robustly from their median absolute deviation, and
+as a ratio to the precision.
+
+```figure One bead (simulated, a frame per ms, 3 nm precision) with drift and the 6 nm vibration at 37 Hz on x. Left: the Allan deviation of x and y against the time averaged, with the precision over √n (dashed) -- y follows the line of pure noise; x stands above it -- a bump at half the vibration's period, dips where the mean is over whole periods -- and rises with the drift. Right: the steps of y, diff(y)/√2, whose spread is the precision.
+from smappy.plugins.stability import draw_steps
+fig.set_size_inches(9, 3.2)
+left, right = fig.subplots(1, 2)
+sc = st.scatter(beads[0], ("x", "y"), st.averaging_points(1000))
+left.loglog(sc[0].tau_s, sc[0].allan_nm, ".-", ms=3, lw=0.8, color="C0", label="x")
+left.loglog(sc[1].tau_s, sc[1].allan_nm, ".-", ms=3, lw=0.8, color="C1", label="y")
+left.loglog(sc[1].tau_s, sc[1].precision_nm / np.sqrt(sc[1].m), "--", color="0.4",
+            lw=0.9, label="precision / √n")
+left.set_xlabel("time averaged (s)")
+left.set_ylabel("Allan deviation (nm)")
+left.legend(fontsize=7)
+draw_steps(right, sc[1])
+```
+
 ## In detail
 
 **The grid.**  Frames give the grid directly: one point per frame, from
@@ -212,6 +250,32 @@ averaged in power, and the largest peak of that average.  With one trace
 they are its own.  The arrays are the first trace's spectrum and
 cumulative RMS.
 
+**The Allan deviation.**  Over the measured points $x_1 \ldots x_N$ of a
+run, the means over $m$ consecutive points, $\bar{x}_k^{(m)}$, starting at
+every point (overlapping), give
+
+$$\sigma_A^2(m) = \frac{1}{2} \left\langle \left( \bar{x}_{k+m}^{(m)} - \bar{x}_k^{(m)} \right)^2 \right\rangle$$
+
+averaged over every $k$ of every run at least $2m$ points long, and over
+the traces of the region (their sums added, so a long trace counts by its
+differences).  At $m = 1$ it is $\mathrm{RMS}(x_{k+1} - x_k)/\sqrt{2}$.
+For independent errors of SD $\sigma$ it is $\sigma/\sqrt{m}$; a linear
+drift adds $v m \Delta t / \sqrt{2}$, which grows with $m$.  The time
+averaged is $\tau = m\,\Delta t$ with $\Delta t$ the median step between
+measured points.  The curve takes about 24 values of $m$ evenly spaced in
+log from 1 to *longest*, and the one that is *time scale* when it is set.
+The robust value is $1.4826\,\mathrm{MAD}$ of the steps
+$(x_{k+1} - x_k)/\sqrt{2}$, the factor making a median absolute deviation
+a Gaussian's SD.  A run ends where a step is longer than *gap* times
+$\Delta t$; a point filled over a missed frame is not measured and ends
+one too.  This differs from NeNA's estimate in the
+[Localization Precision](plugin:Analysis/Measure/Localization Precision) plugin in two ways: the
+pairs are known (one bead's consecutive points), so no distribution of
+neighbour distances is fitted, and it goes beyond one step.  On a moving
+molecule the steps include its motion -- for diffusion $2D\Delta t$ in
+each axis' variance -- so it is the noise only for a still emitter or a
+slow one.
+
 ## Parameters
 
 ### id_column
@@ -235,6 +299,17 @@ drift in the SD, which then says little about vibration.
 Sets the frequency resolution, the sampling rate over this, and how many
 segments are averaged.  1024 points at 1 kHz resolves 1 Hz; longer
 segments resolve close peaks, shorter ones give a smoother spectrum.
+
+### random.time_scale_ms
+The time over which a measurement is averaged in practice -- a
+localization's dwell, or the length of a MINFLUX trace -- to read off
+the deviation there (`x_scatter_at_nm`) beside the precision over √n
+that pure noise would give.
+
+### random.max_gap
+For frames, 3 bridges a missed frame or two and stops at longer gaps.  On
+MINFLUX's irregular clock the steps vary; raise it when the runs come out
+short, lower it when a trace has long pauses in which the bead could move.
 
 ### frame_time_ms
 SMAP took the frame time from the file and allowed it to be overwritten;
@@ -272,6 +347,19 @@ Per region the values are `x_sd_nm`, `x_precision_nm`, `x_vibration_nm`,
 `x_cumulative_rms_nm`, which [Curves](plugin:Analysis/Regions/Summarize/Curves)
 summarises over beads.
 
+With *random scatter* ticked, per axis a line: the scatter at one point,
+its robust value, the precision and their ratio, and the deviation at
+*time scale* when it is set.  A ratio near 1 means the fit's precision is
+what was achieved; above 1, there is noise the fit does not know about --
+vibration faster than a frame, a PSF model that is off, or the emitter
+moving.  The figures: the Allan deviation against the time averaged with
+the precision over √n dashed, and the histogram of the steps with the
+Gaussians of the precision and of the scatter (heavy tails are jumps,
+which the robust value ignores).  The values are `x_scatter_nm`,
+`x_scatter_robust_nm`, `x_scatter_ratio` and `x_scatter_at_nm`, with
+`x_precision_nm`; the arrays `allan_tau_s` and `x_allan_nm`.  With *each
+bead* the per-bead table gains `x_scatter_nm` and `x_scatter_ratio`.
+
 ## Differences from SMAP
 
 Ported from SMAP's *Analyze/measure/Vibrations* (Ries 2020).
@@ -287,6 +375,8 @@ Ported from SMAP's *Analyze/measure/Vibrations* (Ries 2020).
   vibration's RMS is given beside it; SMAP's SD included the drift.
 * **Several beads**: SMAP analysed one bead per layer in the ROI.  Here
   every bead of the id column, their mean, or their differences.
+* **The random scatter** is new: SMAP's plugin had no Allan deviation and
+  no comparison of the point-to-point steps with the precision.
 * **Irregular times** are put on a grid at the 20th percentile of the
   intervals; SMAP halved that step, which made the upper half of the
   spectrum interpolation.
@@ -302,3 +392,7 @@ Ported from SMAP's *Analyze/measure/Vibrations* (Ries 2020).
   periodograms. *IEEE Trans Audio Electroacoust* 15, 70-73 (1967).
   [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
   -- the spectrum averaged over segments.
+* Allan DW. Statistics of atomic frequency standards. *Proc IEEE* 54,
+  221-230 (1966).
+  [doi:10.1109/PROC.1966.4634](https://doi.org/10.1109/PROC.1966.4634)
+  -- the two-sample deviation.

@@ -46,18 +46,28 @@ GROUPED_BY_DEFAULT = True
 DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1)
 
 
-def default_bounds(locs: Localizations) -> Dict[str, Tuple]:
+def default_bounds(locs: Localizations,
+                   base: Optional[Dict[str, Tuple]] = None) -> Dict[str, Tuple]:
     """What a new layer starts with on this table.
 
-    The defaults, then the bounds the table carries with it (`KEPT_BOUNDS`:
-    Remove Localizations' hide flag), for the columns the table has.  One
-    function for a layer and for Analysis/Process/Layers' *start from defaults*, which
+    The defaults -- ``base`` when given (the filters a GUI file or the last
+    file's layer carry, `Session.carried_bounds`), else the shipped ones --
+    then the bounds the table carries with it (`KEPT_BOUNDS`: Remove
+    Localizations' hide flag), for the columns the table has.  One function
+    for a layer and for Analysis/Process/Layers' *start from defaults*, which
     kept its own copy without the carried bounds and so showed what the file
     had hidden.
     """
-    bounds = dict(DEFAULT_BOUNDS)
-    if "z_nm" not in locs:
-        bounds.update(DEFAULT_BOUNDS_2D)
+    if base is not None:
+        bounds = {f: tuple(b) for f, b in base.items()}
+        # the 2D default on a PSF size that varies with z by design: a filter
+        # carried from a 2D table onto a 3D one is the default, not a choice
+        if "z_nm" in locs and bounds.get("sigma_nm") == DEFAULT_BOUNDS_2D["sigma_nm"]:
+            bounds.pop("sigma_nm")
+    else:
+        bounds = dict(DEFAULT_BOUNDS)
+        if "z_nm" not in locs:
+            bounds.update(DEFAULT_BOUNDS_2D)
     bounds.update({f: tuple(b) for f, b in
                    (locs.metadata.get(KEPT_BOUNDS) or {}).items()})
     return {f: b for f, b in bounds.items() if f in locs}
@@ -79,11 +89,13 @@ class Layer:
                  defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
-                 grouped: Optional[bool] = None):
+                 grouped: Optional[bool] = None,
+                 base: Optional[Dict[str, Tuple]] = None):
         """``grouped`` None opens the layer grouped where that is the default
         (`GROUPED_BY_DEFAULT`, a table with frames that is not still being
         fitted).  Nothing is linked here: the grouped table is linked when it
-        is first read, or in the GUI's worker (`gui.merging`)."""
+        is first read, or in the GUI's worker (`gui.merging`).  ``base`` is
+        what `default_bounds` starts from in place of the shipped defaults."""
         self.kind = "locs"
         self.image: Optional[ImageData] = None
         self.name = name
@@ -92,7 +104,7 @@ class Layer:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
         self.state = ViewState(settings=settings, display=display, tables=tables)
         if defaults:
-            self.apply_defaults()
+            self.apply_defaults(base)
         locs = tables.locs
         if grouped is None:
             grouped = (GROUPED_BY_DEFAULT and not tables.growing and bool(len(locs))
@@ -171,8 +183,8 @@ class Layer:
             return None if self.image.is_empty else self.image.bounds
         return self.state.bounds()
 
-    def apply_defaults(self) -> None:
-        for field, (lo, hi) in default_bounds(self.state.tables.locs).items():
+    def apply_defaults(self, base: Optional[Dict[str, Tuple]] = None) -> None:
+        for field, (lo, hi) in default_bounds(self.state.tables.locs, base).items():
             self.set_bound(field, lo, hi)
 
     @property
@@ -348,6 +360,11 @@ class Session:
         # and the window stays open on it: a Ctrl+S afterwards would change
         # what the record vouches for.  The session's work goes to a new file.
         self.protected: set = set()
+        # the filters a new file's layer starts from where the last table had
+        # no such column: a GUI file's (`Workspace.filters`), else None, the
+        # shipped `DEFAULT_BOUNDS` (`carried_bounds`)
+        self.default_filters: Optional[Dict[str, Tuple]] = None
+        self._live_bounds: Optional[Dict[str, Tuple]] = None
         self.layers: List[Layer] = [Layer(self.tables)]
         self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
         self._rois = None                          # the ROI manager's project
@@ -968,8 +985,10 @@ class Session:
         there is nothing left to go back to.
         """
         if self._live:                     # the finished form of the live table
+            # the filters from before the run, and any set while it ran
+            carried = self.carried_bounds(self._live_bounds)
             self.tables = self._new_tables(locs, self._group_settings)
-            self.layers = [Layer(self.tables)]    # (the step before the run is already pushed)
+            self.layers = [Layer(self.tables, base=carried)]    # (the step before the run is already pushed)
             self._live = False
         elif undoable or keep_layers:      # the same data, corrected: keep the layers
             if undoable:
@@ -977,10 +996,54 @@ class Session:
             self._take_tables(self._new_tables(locs, self._group_settings))
         else:                              # a new file: start over with one layer
             self.undo_stack.clear()
+            # with the filters the last file's first layer had: one sets them
+            # once for a series of files, and a reset to the defaults on every
+            # open undid that each time
+            carried = self.carried_bounds()
             self.tables = self._new_tables(locs, self._group_settings, grouped=grouped)
             self.layers = [l for l in self.layers if l.is_image]
-            self.layers.insert(0, Layer(self.tables))
+            self.layers.insert(0, Layer(self.tables, base=carried))
         self.changed("locs")
+
+    def carried_bounds(self, base: Optional[Dict[str, Tuple]] = None
+                       ) -> Dict[str, Tuple]:
+        """The filters to keep: what a GUI file saves and a new file starts with.
+
+        The first localization layer's bounds on the columns its table has --
+        one removed there stays removed -- and, for the columns it does not
+        have, the defaults (`default_filters`, else the shipped ones): a 2D
+        table says nothing about the z filter a 3D file should get.  ``base``
+        in place of those defaults.  Without
+        the bounds the table carries itself (`KEPT_BOUNDS`: a hide flag, the
+        region filter), which belong to that table.
+        """
+        locs = self.locs
+        if base is None:
+            base = self.default_filters
+        if base is None:
+            base = dict(DEFAULT_BOUNDS)
+            base.update(DEFAULT_BOUNDS_2D)
+        bounds = {f: tuple(b) for f, b in base.items() if f not in locs}
+        layer = self._locs_layer()
+        if layer is not None:
+            kept = locs.metadata.get(KEPT_BOUNDS) or {}
+            bounds.update({f: tuple(b) for f, b in layer.ranges.items()
+                           if f not in kept})
+        return bounds
+
+    def apply_default_filters(self, filters: Optional[Dict[str, Tuple]]) -> None:
+        """Take a GUI file's filters: for new files, and on the first layer now.
+
+        None is the shipped defaults -- for files to come; the layer keeps
+        what it has, as a GUI file without filters says nothing about them.
+        """
+        self.default_filters = None if filters is None else \
+            {f: tuple(b) for f, b in filters.items()}
+        layer = self._locs_layer()
+        if filters is None or layer is None or not len(self.locs):
+            return
+        layer.set_ranges(default_bounds(self.locs, self.default_filters))
+        self.changed("layer")
 
     @property
     def group_settings(self) -> GroupSettings:
@@ -1025,7 +1088,7 @@ class Session:
         # on the session's tables: a live table's new rows reach it too, and
         # it is not linked while growing (the default grouping says so)
         layer = Layer(self.tables, name=f"layer {len(self.layers) + 1}",
-                      defaults=template is None,
+                      defaults=template is None, base=self.default_filters,
                       settings=(dataclasses.replace(template.state.settings)
                                 if template is not None else None),
                       display=(dataclasses.replace(template.get_display())
@@ -1206,6 +1269,9 @@ class Session:
             self._push_undo("live acquisition")
         self._live = True
         self._recipes = []
+        # the filters the finished table's layer starts with: an empty table
+        # has no column to hold them meanwhile
+        self._live_bounds = self.carried_bounds()
         self.tables = self._new_tables(Localizations({}, {}), self._group_settings,
                              live=True, extent=extent)
         self.layers = [Layer(self.tables)]

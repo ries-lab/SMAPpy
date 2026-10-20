@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -24,8 +24,8 @@ the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
 (region of interest: a rectangle, line or polygon drawn on the picture) is
 drawn and edited on the first and its outline is on all of them.  Beside it, *pixel* says what one
 screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
-*pixel* to go to 10 nm.  Double-click the picture to move that place to the
-middle.  At the end of the toolbar is how many localizations each layer draws
+*pixel* to go to 10 nm.  Right-click the picture to move that place to the
+middle; double-click it to show everything, as *Reset view* (Ctrl+0) does.  At the end of the toolbar is how many localizations each layer draws
 in the view -- counted again after every zoom -- or in the ROI when one is
 drawn; *3D* opens the [3D view](plugin:Panels/3D view).  Every control below the layer strip edits one layer,
 the one selected in the strip.
@@ -97,7 +97,9 @@ one column at a time, as a histogram with the kept range shaded, and the
 range can be dragged or typed.  A new layer opens with a few bounds already
 set (see *In detail*), so that fits which are clearly bad are left out from
 the start -- and are left out visibly, in the shaded histogram, rather than
-silently.
+silently.  A file opened in place of the last one keeps the filters its
+first layer had, and a saved workspace (*File > Workspace > Save*) keeps
+them too and sets them again when it is opened.
 
 ```figure A simulated ring-and-cross structure.  Left: the localization precision of all localizations, with the range the default bound keeps shaded.  Middle: every localization.  Right: what the default bounds take out -- mostly the dim, imprecise localizations scattered around the lines.
 layer.show_grouped(False)
@@ -459,7 +461,15 @@ the intersection of all bounds and of the file choice.  A new layer starts
 with `xy_err_nm` at most 25 nm, `logl_rel` at least -2 and `z_nm`
 between -500 and 500 nm, plus `sigma_nm` at most 180 nm on a 2D table (in 3D the PSF width changes with z by design), each only if the
 table has that column, and any bounds the file carries from
-[Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A
+[Remove Localizations](plugin:Analysis/Process/Remove Localizations).
+Those are the shipped defaults.  A file opened in place of the last one
+starts instead from the bounds of the last table's first layer, on the
+columns that table had -- a bound removed there stays removed -- and from
+the defaults on the columns it did not have; the `sigma_nm` bound of a 2D
+table is not carried onto a 3D one.  A workspace file stores the same set
+(`filters`), which replaces the shipped defaults for new files and new
+layers and is set on the first layer when the workspace is opened; the
+bounds a file carries are its own and are not stored.  A
 layer has one set of bounds, applied to the table it shows: on a layer that
 merges blinks a bound on `xy_err_nm` or `photons` is a bound on a blink's combined
 precision or summed photons, so the same bound keeps more blinks than it
@@ -584,7 +594,9 @@ two.
 The quick buttons (*precision*, *fit quality*, *frame*, *z*, *photons*,
 *PSF*, *channel*, *file*) pick the usual columns -- `xy_err_nm`, `logl_rel`,
 `frame`, `z_nm`, `photons`, `sigma_nm`, `channel`, `filenumber`, each where
-the table has it, and named in the button's tooltip; the drop-down has every numeric column.  A column
+the table has it, and named in the button's tooltip; the drop-down has every numeric column.  A
+bounded column without a quick button gets one, named by the column, for as
+long as the bound is there.  A column
 with a bound on it is bold and marked with a dot, and the line under the
 quick buttons lists every bound of the layer (`xy_err_nm ≤ 25`): click one to
 edit it, × to remove it, so a bound on a column not on show is not

@@ -100,6 +100,10 @@ class Workspace:
     """A GUI: the tabs, their values, and which section each has open."""
     tabs: List[Tab] = field(default_factory=list)
     layout: Dict[str, Any] = field(default_factory=dict)
+    # the filters a new file's layer starts with, ``{field: [lo, hi]}``
+    # (`Session.carried_bounds`); None -- a file from before they were saved
+    # -- leaves the layers' as they are and new files on the shipped defaults
+    filters: Optional[Dict[str, List[Optional[float]]]] = None
     version: int = VERSION
     path: Optional[Path] = None            # where it was read from, if anywhere
 
@@ -127,7 +131,11 @@ class Workspace:
             for instance in tab["instances"]:
                 if instance.get("chain") is None:
                     instance.pop("chain", None)
-        return {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
+        data = {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
+        if self.filters is not None:
+            data["filters"] = {f: [None if v is None else float(v) for v in b]
+                               for f, b in self.filters.items()}
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], path: Optional[Path] = None) -> "Workspace":
@@ -156,6 +164,7 @@ class Workspace:
                             header=str(raw.get("header") or ""), instances=instances))
         layout = data.get("layout")
         return cls(tabs=tabs, layout=layout if isinstance(layout, dict) else {},
+                   filters=_filters(data.get("filters")),
                    version=int(data.get("version") or VERSION), path=path)
 
     # ------------------------------------------------------------ the file
@@ -188,6 +197,21 @@ class Workspace:
                  else gone).append(instance)
             tab.instances = keep
         return [i.plugin for i in gone]
+
+
+def _filters(raw) -> Optional[Dict[str, List[Optional[float]]]]:
+    """A file's filters, each ``field: [lo, hi]``; one that does not read
+    is dropped, and none at all is None."""
+    if not isinstance(raw, dict):
+        return None
+    filters = {}
+    for name, bound in raw.items():
+        try:
+            lo, hi = (None if v is None else float(v) for v in bound)
+        except (TypeError, ValueError):
+            continue
+        filters[str(name)] = [lo, hi]
+    return filters
 
 
 def display_name(path: Optional[Path]) -> str:
