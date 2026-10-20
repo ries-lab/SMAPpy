@@ -31,6 +31,17 @@ amplitude spectrum 2|FFT|/L with its highest peak.  The decisions are in
   `highpass`): over a long acquisition drift dominates the SD, and the SD
   is meant to say how much the bead jitters.  SD^2 - precision^2 is then
   the vibration's variance (`vibration_rms`).
+* **The random scatter** (`scatter`, `pooled_scatter`) is the other
+  question: not how much the bead jitters at which frequency, but how much
+  of its scatter is noise that averages away -- the localization error, set
+  against the precision the fit claims (the CRB).  It is the Allan
+  deviation of the position: half the mean square of the difference of
+  consecutive means over m points, which at m = 1 is RMS(diff(x))/sqrt(2),
+  NeNA's idea on a trace whose points are known to be one bead.  Drift
+  cancels in a difference to first order, so nothing is high-passed; white
+  noise falls as 1/sqrt(m), drift and slow vibrations rise or flatten it.
+  It takes the measured points only: a filled point would pull the
+  difference to its neighbours' and read the noise low.
 * **Several beads**: each, their mean, or **differential** -- one bead
   minus another, or each minus the mean of the others (`combine`) -- so
   motion common to the sample (the stage, drift) cancels and what is left
@@ -436,3 +447,131 @@ def pooled_spectrum(axes: Sequence[AxisResult]) -> Spectrum:
     psd = np.mean([s.psd for s in same], 0)
     amp = np.sqrt(np.mean([s.amplitude ** 2 for s in same], 0))
     return Spectrum(first.f_hz, psd, amp, sum(s.segments for s in same), first.length)
+
+
+# --------------------------------------------------------- random scatter
+#: 1 / Phi^-1(3/4): a median absolute deviation as a Gaussian's SD
+MAD_SCALE = 1.4826
+
+
+def averaging_points(longest: int, n: int = 24, also: Sequence[int] = ()) -> np.ndarray:
+    """The m of an Allan curve: 1 and ``longest`` and about ``n`` points
+    evenly spaced in log between them, with ``also`` (a chosen time scale)."""
+    longest = max(int(longest), 1)
+    m = np.rint(np.geomspace(1, longest, max(int(n), 2))).astype(np.int64)
+    return np.unique(np.r_[m, [int(a) for a in also if a >= 1]])
+
+
+def runs_of(t_s: np.ndarray, ok: np.ndarray, max_gap: float) -> Tuple[List[np.ndarray], float]:
+    """``(runs, step)``: the points where ``ok`` in stretches without a gap,
+    each an index array, and the typical step between consecutive points.
+
+    A gap is a step longer than ``max_gap`` times the median one: a
+    difference across it is of two moments far apart, whatever moved in
+    between, not of noise.  The median and not the grid step, since on an
+    irregular clock (MINFLUX) the measured points sit a few grid steps apart.
+    """
+    idx = np.flatnonzero(ok)
+    if len(idx) < 2:
+        return ([idx] if len(idx) else []), np.nan
+    dt = np.diff(np.asarray(t_s, float)[idx])
+    step = float(np.median(dt))
+    cut = np.flatnonzero(dt > max_gap * step) + 1
+    return [r for r in np.split(idx, cut) if len(r)], step
+
+
+def allan_sums(x: np.ndarray, m: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """``(sum of squares, count)`` per m of the differences of consecutive
+    overlapping means over m points of one gap-free run: what pools over
+    runs and traces before the root is taken."""
+    x = np.asarray(x, float)
+    c = np.r_[0.0, np.cumsum(x - x.mean())]
+    sq, count = np.zeros(len(m)), np.zeros(len(m), np.int64)
+    for i, mi in enumerate(m):
+        if len(x) < 2 * mi:
+            continue
+        means = (c[mi:] - c[:-mi]) / mi
+        d = means[mi:] - means[:-mi]
+        sq[i], count[i] = float(np.dot(d, d)), len(d)
+    return sq, count
+
+
+@dataclass
+class Scatter:
+    """One axis of one trace: the Allan deviation over ``m`` points averaged
+    (``tau_s`` = m x the typical step), from ``sq`` and ``count`` (kept to
+    pool), and the steps diff(x)/sqrt(2) for the robust value."""
+    axis: str
+    precision_nm: float
+    step_s: float
+    m: np.ndarray
+    sq: np.ndarray
+    count: np.ndarray
+    steps_nm: np.ndarray
+
+    @property
+    def tau_s(self) -> np.ndarray:
+        return self.m * self.step_s
+
+    @property
+    def allan_nm(self) -> np.ndarray:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(self.count > 0, np.sqrt(self.sq / (2 * np.maximum(self.count, 1))),
+                            np.nan)
+
+    @property
+    def scatter_nm(self) -> float:
+        """At one point: RMS(diff x) / sqrt(2)."""
+        return float(self.allan_nm[0])
+
+    @property
+    def robust_nm(self) -> float:
+        """The same from the median absolute deviation of the steps: a few
+        jumps (a mislinked point, a bead that hops) do not inflate it."""
+        s = self.steps_nm
+        if not len(s):
+            return np.nan
+        return float(MAD_SCALE * np.median(np.abs(s - np.median(s))))
+
+    def at(self, points: int) -> float:
+        hit = np.flatnonzero(self.m == int(points))
+        return float(self.allan_nm[hit[0]]) if len(hit) else np.nan
+
+
+def scatter(trace: Trace, axes: Sequence[str] = AXES, m: Optional[np.ndarray] = None,
+            max_gap: float = 3.0) -> List[Scatter]:
+    """Every axis of one trace: its measured points (not the filled ones),
+    in runs without a gap (`runs_of`), the Allan sums pooled over the runs."""
+    ok = np.isfinite(trace.values).all(1) & ~trace.filled
+    runs, step = runs_of(trace.t_s, ok, max_gap)
+    if m is None:
+        m = averaging_points(max([len(r) for r in runs] or [1]) // 2)
+    m = np.asarray(m, np.int64)
+    out = []
+    for a, name in enumerate(axes):
+        sq, count = np.zeros(len(m)), np.zeros(len(m), np.int64)
+        steps = []
+        for r in runs:
+            x = trace.values[r, a]
+            s, c = allan_sums(x, m)
+            sq += s
+            count += c
+            steps.append(np.diff(x) / np.sqrt(2))
+        p = trace.precision[a] if a < len(trace.precision) else np.nan
+        out.append(Scatter(name, float(p), step, m, sq, count,
+                           np.concatenate(steps) if steps else np.zeros(0)))
+    return out
+
+
+def pooled_scatter(per_trace: Sequence[Scatter]) -> Scatter:
+    """One axis over traces: the sums added (so a long trace counts as much
+    as it has differences), the steps joined, the precision the root of the
+    mean square and the step the median."""
+    first = per_trace[0]
+    return Scatter(first.axis,
+                   float(np.sqrt(np.nanmean([s.precision_nm ** 2 for s in per_trace])))
+                   if any(np.isfinite(s.precision_nm) for s in per_trace) else np.nan,
+                   float(np.nanmedian([s.step_s for s in per_trace])), first.m,
+                   np.sum([s.sq for s in per_trace], 0),
+                   np.sum([s.count for s in per_trace], 0),
+                   np.concatenate([s.steps_nm for s in per_trace]))

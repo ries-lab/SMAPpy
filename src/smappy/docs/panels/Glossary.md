@@ -130,6 +130,10 @@ papers and in other software.
 * **RMS** (root mean square): the square root of the mean of the squares --
   of a position around its mean, its standard deviation; a sinusoid of
   amplitude A has an RMS of A / √2.
+* **Allan deviation** (also called the two-sample deviation): how much the
+  mean position over a time τ differs from the mean over the next τ, as a
+  standard deviation; over one point it is the point-to-point scatter, and
+  pure noise falls as 1 / √(points averaged) while drift makes it rise.
 
 ## Regions
 

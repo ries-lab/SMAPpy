@@ -185,3 +185,61 @@ def test_each_bead_is_kept_as_a_row_and_the_shaking_one_stands_out():
     assert got["2"]["x_peak_hz"] == pytest.approx(23.0, abs=0.5)
     table = session.id_regions["track_id"]["Stability"]
     assert table.groups["x"]["vibration"] == "x_vibration_nm"
+
+
+def test_the_allan_deviation_is_the_precision_over_root_n_until_the_drift_shows():
+    rng = np.random.default_rng(0)
+    n = 20000
+    t = np.arange(n) * 1e-3
+    # 3 nm of noise on 50 nm of slow drift: the differences do not see the drift
+    x = rng.normal(0, 3, n) + 50 * np.sin(2 * np.pi * 0.05 * t)
+    trace = st.Trace("1", t, x[:, None], np.zeros(n, bool), np.array([3.0]))
+    s = st.scatter(trace, ("x",), st.averaging_points(100))[0]
+    assert s.scatter_nm == pytest.approx(3.0, rel=0.02)
+    assert s.robust_nm == pytest.approx(3.0, rel=0.03)
+    short = s.m <= 20
+    assert np.allclose(s.allan_nm[short], 3.0 / np.sqrt(s.m[short]), rtol=0.1)
+    # over 0.1 s the drift is seen: the curve leaves the white noise's line
+    assert s.allan_nm[-1] > 2 * 3.0 / np.sqrt(s.m[-1])
+
+
+def test_a_vibration_lifts_the_scatter_above_the_precision_and_a_jump_not_the_robust_one():
+    locs = beads(shaking(8000, 120.0, 6.0), precision_nm=3.0)
+    settings = Stability.Settings(use_z=False, vibrations=False, scatter=True)
+    v = Stability().run(Context(locs=locs), settings).values
+    # at 1 kHz a 120 Hz sine moves 6 * 2 sin(pi 120/1000) / sqrt(2) between points
+    step = 6.0 * 2 * np.sin(np.pi * 0.12) / np.sqrt(2)
+    assert v["x_scatter_nm"] == pytest.approx(np.sqrt(9 + step ** 2 / 2), rel=0.05)
+    assert v["y_scatter_nm"] == pytest.approx(3.0, rel=0.05)
+    assert v["y_scatter_ratio"] == pytest.approx(1.0, abs=0.05)
+    assert "x_sd_nm" not in v                 # vibrations off: not computed
+
+
+def test_filled_points_and_gaps_are_not_compared():
+    rng = np.random.default_rng(1)
+    n = 4000
+    t = np.arange(n) * 1e-3
+    x = rng.normal(0, 2, n)
+    x[2000:] += 500                           # a jump across a gap
+    filled = np.zeros(n, bool)
+    filled[1990:2010] = True                  # interpolated: would read low
+    x[1990:2010] = np.linspace(x[1989], x[2010], 20)
+    trace = st.Trace("1", t, x[:, None], filled, np.array([2.0]))
+    s = st.scatter(trace, ("x",), np.array([1]), max_gap=3.0)[0]
+    assert s.count[0] == n - 20 - 2           # two runs, minus the filled points
+    assert s.scatter_nm == pytest.approx(2.0, rel=0.05)
+
+
+def test_the_time_scale_reports_the_deviation_there_and_each_bead_gets_its_row():
+    locs = beads(np.zeros((6000, 3)), n_beads=3, precision_nm=4.0)
+    settings = Stability.Settings(use_z=False, vibrations=False, scatter=True)
+    settings.random.time_scale_ms = 16.0
+    result = Stability().run(Context(locs=locs), settings)
+    v = result.values
+    assert v["x_scatter_at_nm"] == pytest.approx(4.0 / 4, rel=0.1)
+    assert set(result.plots) | {"Allan deviation"} == {"Allan deviation", "steps"}
+    assert len(result.arrays["allan_tau_s"]) == len(result.arrays["x_allan_nm"])
+    _, values, groups = __import__("smappy.plugins.stability", fromlist=["per_bead"]) \
+        .per_bead([], ("x", "y"), result.data["scatter"])
+    assert len(values["x_scatter_nm"]) == 3
+    assert groups["x"]["random scatter"] == "x_scatter_nm"
