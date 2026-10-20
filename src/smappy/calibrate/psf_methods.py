@@ -17,6 +17,13 @@ Both save the same way: with *save model*, beside the stacks under the bead
 calibration's name, never over an existing file except this run's own on
 *Recalculate*.
 
+A run goes in two steps, so that an afternoon's learning is never started by
+accident: *Detect beads* (`detect`) finds the beads and says how many and,
+for the pupil model, about how long learning them will take; *Calibrate*
+learns from what was detected.  After a calibration the method's `finish`
+adds what is shown with it -- the fit quality and the model against the data
+(`model_views`) -- in the same worker, so neither waits for a button.
+
 A bead's *mark* is the user's wish for the next *Recalculate*: "exclude" a
 used bead, or, for the pupil model, "include" a rejected one (the bead
 average has no way to force a bead in: its rejection is part of the
@@ -24,11 +31,16 @@ alignment).
 """
 from __future__ import annotations
 
+import math
+import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
+
+from .model_views import SECTIONS, SHOW
 
 #: what only averaging reads, shown with the bead average's settings and hidden for the pupil model
 AVERAGE_ONLY = ("max_xy_shift_px", "max_z_shift_nm", "alignment_range_nm", "registration_iterations",
@@ -39,10 +51,92 @@ AVERAGE_ONLY = ("max_xy_shift_px", "max_z_shift_nm", "alignment_range_nm", "regi
 class Page:
     """One result page: ``draw(figure, selected, excluded)`` draws it and may return a status line.
     A page that shows no bead of its own (the pupil, shared by all beads) does not follow the table's
-    selection, and is not redrawn when it changes."""
+    selection, and is not redrawn when it changes.  ``controls`` ({label: choices}) are choices the window
+    puts above the page, the first one chosen at first; a page with any is drawn as
+    ``draw(figure, selected, excluded, chosen)``, ``chosen`` {label: choice}."""
     title: str
     draw: Callable
     follows_selection: bool = True
+    controls: dict = field(default_factory=dict)
+
+
+@dataclass
+class Detected:
+    """What *Detect beads* found: the method's own (``found``), a line saying so, and where each bead is,
+    (stack, x, y, bead) in the pixels of the stacks as `read_stacks` reads them -- a pair twice."""
+    found: object
+    text: str
+    positions: list = field(default_factory=list)
+    seconds: Optional[float] = None                    # about how long calibrating will take, if known
+
+
+class LearningProgress:
+    """How far a run is, as a fraction, and about how long it has left, from the entries a method reports.
+
+    An entry may say its ``fraction`` itself (the steps around learning do).  A learning stage does not
+    know how many iterations it will take -- it stops when the objective stops falling -- so its fraction
+    is how far the fall per iteration has come, on a log scale, from the first iteration's to the
+    solver's tolerance (`GaussNewtonLBFGS`, 1e-3): an L-BFGS fit's gain falls roughly geometrically.  Never
+    back: an iteration that gains more than the one before does not undo the bar.  The time left is the time so far scaled by what
+    is left, from 5 % on: before that it says nothing worth reading."""
+    #: (start, end) of each learning stage in the run's fraction; detection is a step of its own
+    STAGES = {1: (0.0, 0.45), 2: (0.45, 0.9)}
+    TOL = 1e-3
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.started = clock()
+        self.fraction: Optional[float] = None
+        self._stage = None
+        self._last = None
+        self._first_gain = None
+
+    def update(self, entry: dict) -> tuple:
+        """(fraction or None, seconds left or None, a status line) after ``entry``; ``{"restart": True}``
+        starts the bar and the clock again, for a step that follows another."""
+        if entry.get("restart"):
+            self.started, self.fraction, self._stage = self.clock(), None, None
+            return None, None, "calibrating"
+        if "fraction" in entry:
+            self._advance(float(entry["fraction"]))
+        if "message" in entry:
+            return self.fraction, self.left(), entry["message"]
+        stage = entry.get("stage")
+        objective = entry.get("objective")
+        if stage in self.STAGES and objective is not None:
+            if stage != self._stage:
+                self._stage, self._last, self._first_gain = stage, None, None
+            objective = float(objective)
+            if self._last is not None and objective < self._last:
+                gain = self._last - objective
+                self._first_gain = self._first_gain or gain
+                done = math.log(self._first_gain / gain) / math.log(max(self._first_gain / self.TOL, 1.0 + 1e-9))
+                start, end = self.STAGES[stage]
+                self._advance(start + (end - start) * min(max(done, 0.0), 1.0))
+            elif self._last is None:
+                self._advance(self.STAGES[stage][0])
+            self._last = objective
+        name = {1: "low orders", 2: "all orders"}.get(stage, "learning")
+        text = f"{name}: iteration {entry.get('iteration', 0)}" + (
+            "" if objective is None else f", -log L {float(objective):.6g}")
+        return self.fraction, self.left(), text
+
+    def _advance(self, fraction: float) -> None:
+        self.fraction = max(self.fraction or 0.0, min(max(fraction, 0.0), 1.0))
+
+    def left(self) -> Optional[float]:
+        if not self.fraction or self.fraction < 0.05:
+            return None
+        return (self.clock() - self.started) * (1 - self.fraction) / self.fraction
+
+
+def duration(seconds: float) -> str:
+    """"40 s", "3 min", "1.5 h": a duration as one reads it at a glance."""
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    if seconds < 90 * 60:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
 
 
 @dataclass
@@ -61,32 +155,102 @@ def _save_path(paths, dual, previous: Optional[Run]):
     return default_save_path(paths, dual), False
 
 
+def _not_yet(figure, text):
+    ax = figure.subplots()
+    ax.axis("off")
+    ax.text(0.5, 0.5, text, ha="center", va="center")
+
+
+def _positions(records) -> list:
+    """(stack, x, y, bead) of every bead, each channel of a pair: `Detected.positions`."""
+    out = []
+    for i, record in enumerate(records):
+        parts = record.get("channel_records") or record.get("channels")
+        if parts:
+            for part in parts:
+                x, y = part.get("full_image_xy") or (part["x_px"], part["y_px"])
+                out.append((int(part.get("stack", record.get("stack", 0))), float(x), float(y), i))
+        else:
+            out.append((int(record.get("stack", 0)), float(record["x_px"]), float(record["y_px"]), i))
+    return out
+
+
+def _model_page(run: Run) -> Page:
+    """*Model vs data*: `model_views.draw_model_vs_data` of the run's views, a selected bead alone."""
+    from .model_views import draw_model_vs_data
+
+    def draw(figure, selected, excluded, chosen):
+        views = run.extra.get("views")
+        if views is None:
+            _not_yet(figure, "the model against the data is drawn after calibrating")
+            return None
+        bead = selected[0] if selected else None
+        return draw_model_vs_data(figure, views, bead, chosen["section"], chosen["show"])
+    return Page("Model vs data", draw, controls={"section": SECTIONS, "show": SHOW})
+
+
+def _counted(report, start: float, end: float):
+    """A report that puts a step's own "i/n" messages into the run's fraction between ``start`` and
+    ``end`` (`LearningProgress`), for steps that only count."""
+    if report is None:
+        return None
+
+    def tell(text):
+        counted = re.search(r"(\d+)/(\d+)", text)
+        entry = {"message": text}
+        if counted and int(counted.group(2)) > 0:
+            entry["fraction"] = start + (end - start) * int(counted.group(1)) / int(counted.group(2))
+        report(entry)
+    return tell
+
+
 class BeadAverage:
     key, label = "average", "bead average"
     # the window's sections this method reads
     sections = {"start from": False, "microscope": False, "model": False, "spline": False, "averaging": True}
     columns = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation", "residual", "state")
     marks_include = False
-    has_quality = True
     has_stack = True
 
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .core import collect_beads
+        from .dual import collect_dual_beads
+        beads = (collect_dual_beads if dual else collect_beads)(paths, inputs["detection"],
+                                                                 _counted(progress, 0.0, 1.0))
+        bright = sum(bool(r.get("brightness_accepted", True)) for r in beads.records)
+        what = "pairs" if dual else "beads"
+        return Detected(beads, f"{len(beads.records)} {what} found, {bright} bright enough to average; "
+                               f"averaging takes seconds", _positions(beads.records))
+
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
-            marks: Optional[dict] = None) -> Run:
-        from .core import build_calibration, collect_beads
-        from .dual import build_dual_calibration, collect_dual_beads
-        report = (lambda text: progress({"message": text})) if progress else None
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .core import build_calibration
+        from .dual import build_dual_calibration
         excluded = sorted(b for b, wish in (marks or {}).items() if wish == "exclude")
         if previous is not None:
             beads = previous.result.beads
+        elif detected is not None:
+            beads = detected.found
         else:
-            beads = (collect_dual_beads if dual else collect_beads)(paths, inputs["detection"], report)
+            beads = self.detect(paths, dual, inputs, progress).found
         build = build_dual_calibration if dual else build_calibration
-        result = build(beads, excluded=excluded, progress=report)
+        result = build(beads, excluded=excluded, progress=_counted(progress, 0.0, 0.8))
         run = Run(result, dual)
         if inputs["run"].save_model:
             path, again = _save_path(paths, dual, previous)
             result.save(path, overwrite=again)
             run.saved = path
+        return run
+
+    def finish(self, run: Run, progress=None) -> Run:
+        """The fit quality and the model against the data, kept with the run (`Run.extra`)."""
+        from .model_views import average_views
+        tell = progress or (lambda entry: None)
+        tell({"message": "fitting the beads back with the " + ("two-channel" if run.dual else "spline") + " fitter",
+              "fraction": 0.8})
+        self.quality(run)
+        tell({"message": "the model against the data", "fraction": 0.97})
+        run.extra["views"] = average_views(run.result, run.dual)
         return run
 
     def save_as(self, run: Run, path) -> Path:
@@ -114,9 +278,7 @@ class BeadAverage:
         def quality(figure, selected, excluded):
             found = run.extra.get("quality")
             if found is None:
-                ax = figure.subplots()
-                ax.axis("off")
-                ax.text(0.5, 0.5, "Calculate fit quality to see it", ha="center", va="center")
+                _not_yet(figure, "the fit quality is calculated after calibrating")
                 return None
             if dual:
                 return plots.draw_paired_fit_quality(figure, result, found[0], found[1], selected)
@@ -125,6 +287,7 @@ class BeadAverage:
         pages = [Page("Overview", lambda f, s, e: (plots.draw_pairs if dual else plots.draw_overview)(f, result, s, e))]
         if dual:
             pages.append(Page("Transformation", lambda f, s, e: plots.draw_transformation(f, result, s, e)))
+        pages.append(_model_page(run))
         pages.append(Page("Fit quality", quality))
         if dual:
             pages.append(Page("Field diagnostics", lambda f, s, e: plots.draw_field(f, result, s, e)))
@@ -158,12 +321,11 @@ class BeadAverage:
         return "exclude"
 
     def stacks(self, run: Run):
-        """The averaged bead stack(s) to browse, their titles and the mirror axis (dual colour)."""
-        result = run.result
-        channels = getattr(getattr(result, "registration", None), "channel_raw_psfs", None)
-        if channels is not None and len(channels) > 1:
-            return list(channels), ["main", "secondary"], result.beads.geometry.get("mirror_axis_xy")
-        return [np.asarray(result.raw_psf)], ["average bead stack"], None
+        """What the stack browser shows: the run's `ModelViews`, and anything with ``z_index_to_nm`` for
+        its axial axis."""
+        from .model_views import average_views
+        views = run.extra.get("views") or average_views(run.result, run.dual)
+        return views, run.result.calibration
 
     def summary(self, run: Run) -> str:
         result = run.result
@@ -176,17 +338,41 @@ class PupilModel:
     columns = ("bead", "stack", "x, y (px)", "brightness", "state", "reason", "deviance", "photons",
                "xy offset (px)")
     marks_include = True
-    has_quality = True
-    has_stack = False
+    has_stack = True
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .pupil import bead_rois, estimate_seconds
+        tell = progress or (lambda entry: None)
+        tell({"message": "reading the stacks and finding the beads", "fraction": 0.0})
+        rois = bead_rois(paths, None, dual=dual, settings=inputs["detection"])
+        tell({"message": "timing the model on a few beads", "fraction": 0.7})
+        seconds = estimate_seconds(rois, inputs["optics"], inputs["model"])
+        what = "pairs" if dual else "beads"
+        return Detected(rois, f"{rois.batch.n_emitters} {what} to learn from ({'; '.join(rois.messages)}); "
+                              f"learning takes about {duration(seconds)}", _positions(rois.records), seconds)
 
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
-            marks: Optional[dict] = None) -> Run:
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
         from .pupil import run_calibration
         done = run_calibration(paths, dual, inputs["optics"], inputs["model"], inputs["detection"],
                                inputs["spline"], inputs["run"],
                                previous=None if previous is None else previous.result, decisions=marks or None,
-                               progress=progress, cancel=cancel)
+                               progress=progress, cancel=cancel, rois=None if detected is None else detected.found)
         return Run(done, dual, done.saved)
+
+    def finish(self, run: Run, progress=None) -> Run:
+        """The fit quality (Spline 3D on every bead) and the model against the data, kept with the run;
+        nothing after a stopped run."""
+        from .model_views import pupil_views
+        if run.result.cal.result.stop_reason == "cancelled":
+            return run
+        tell = progress or (lambda entry: None)
+        tell({"message": "fitting the beads back with the " + ("two-channel" if run.dual else "spline") + " fitter",
+              "fraction": 0.9})
+        self.quality(run)
+        tell({"message": "the model against the data", "fraction": 0.97})
+        run.extra["views"] = pupil_views(run.result)
+        return run
 
     def save_as(self, run: Run, path) -> Path:
         from .pupil import calibration_of, save
@@ -212,12 +398,11 @@ class PupilModel:
         def quality(figure, selected, excluded):
             found = run.extra.get("quality")
             if found is None:
-                ax = figure.subplots()
-                ax.axis("off")
-                ax.text(0.5, 0.5, "Calculate fit quality to see it", ha="center", va="center")
+                _not_yet(figure, "the fit quality is calculated after calibrating")
                 return None
             return plots.draw_pupil_fit_quality(figure, found, selected, excluded)
 
+        pages.append(_model_page(run))
         pages.append(Page("Fit quality", quality))
         if any(r.field_xy is not None for r in cal.beads.rows):
             pages.append(Page("Beads", lambda f, s, e: draw_beads(f, cal, s)))
@@ -246,6 +431,14 @@ class PupilModel:
 
     def mark(self, run: Run, bead: int) -> str:
         return "exclude" if run.result.cal.beads.rows[bead].state == "used" else "include"
+
+    def stacks(self, run: Run):
+        """What the stack browser shows: the run's `ModelViews` and the spline, for its axial axis."""
+        from .model_views import pupil_views
+        from .pupil import calibration_of
+        views = run.extra.get("views") or pupil_views(run.result)
+        calibration = calibration_of(run.result)
+        return views, getattr(calibration, "main", calibration)
 
     def summary(self, run: Run) -> str:
         cal = run.result.cal

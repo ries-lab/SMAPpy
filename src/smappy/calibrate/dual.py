@@ -874,7 +874,7 @@ def build_dual_calibration(beads, excluded=(), progress=None):
         predicted = map_points(inverse, main_center[None])[0]
         # Match SMAP: subpixel extraction correction, no projective warp of the PSF.
         offset = predicted-secondary_center
-        within_padding = np.max(np.abs(offset)) <= s.padding-1
+        within_padding = np.max(np.abs(offset)) <= s.padding_px-1
         correction = np.array([0., -offset[1], -offset[0]])
         if mirror is not None:
             vb = np.flip(vb, axis=2-mirror)
@@ -903,7 +903,7 @@ def build_dual_calibration(beads, excluded=(), progress=None):
     # Rejected pairs are aligned only for diagnostics. Score them against the
     # completed reference as well, so exclusion does not erase their plot points.
     reference = np.asarray(result.channel_raw_psfs)
-    crop, padding = result.z_crop_start, s.padding
+    crop, padding = result.z_crop_start, s.padding_px
     for i in np.flatnonzero(~result.accepted):
         sample = np.stack([shift_volume(result.beads.original_volumes[i, ch],
                     result.shifts[i]+result.beads.channel_offsets[i, ch]) for ch in range(2)])

@@ -25,7 +25,10 @@ from ..params import param
 class CalibrationSettings:
     roi_size: int = param(27, label="bead box", unit="px", min=7,
                          help="the square cut around each bead; the model's size")
-    padding: int = param(5, unit="px", min=1, advanced=True)
+    # auto by default: a padding set by hand failed the check below as soon as
+    # max xy shift was raised, with the cause in a field one does not look at
+    padding: Optional[int] = param(None, unit="px", min=1, advanced=True,
+                                   help="auto: max xy shift + 2, rounded down")
     dz_nm: Optional[float] = param(None, label="z step", unit="nm",
                                    help="auto: from the acquisition")
     detection_sigma_px: float = param(2., label="detection sigma", unit="px",
@@ -57,9 +60,18 @@ class CalibrationSettings:
                                             help="auto: the integer type's "
                                                  "maximum")
 
+    @property
+    def padding_px(self) -> int:
+        """The padding in use: as set, or the smallest that passes `validate`."""
+        if self.padding is None:
+            return int(np.floor(self.max_xy_shift_px)) + 2
+        return int(self.padding)
+
     def validate(self):
         for name in ('roi_size', 'padding', 'registration_iterations', 'min_beads'):
             v = getattr(self, name)
+            if v is None and name == 'padding':
+                continue
             if not isinstance(v, (int, np.integer)) or v < 1:
                 raise ValueError(f'{name} must be a positive integer')
         if self.roi_size < 7 or self.roi_size % 2 != 1:
@@ -73,8 +85,10 @@ class CalibrationSettings:
             v = getattr(self, name)
             if not np.isfinite(v) or v < 0:
                 raise ValueError(f'{name} must be nonnegative and finite')
-        if self.max_xy_shift_px + 1 >= self.padding:
-            raise ValueError('padding must exceed max_xy_shift_px by more than one pixel')
+        if self.max_xy_shift_px + 1 >= self.padding_px:
+            raise ValueError(f'padding ({self.padding_px} px) must exceed max xy shift '
+                             f'({self.max_xy_shift_px:g} px) by more than one pixel; '
+                             f'set padding to auto')
         if self.dz_nm is not None and (not np.isfinite(self.dz_nm) or self.dz_nm <= 0):
             raise ValueError('dz_nm must be positive and finite')
         if self.brightness_range is not None and (
@@ -221,7 +235,7 @@ def detect_beads(images, settings):
     labels, n = ndimage.label(peaks)
     centers = ndimage.center_of_mass(filtered, labels, np.arange(1, n + 1)) if n else []
     yx = np.rint(centers).astype(int).reshape(-1, 2)
-    radius = settings.roi_size // 2 + settings.padding
+    radius = settings.roi_size // 2 + settings.padding_px
     good = ((yx >= radius) & (yx < np.array(images.shape[1:]) - radius)).all(axis=1)
     # Reject both members of a close pair, including a neighbor outside the usable border.
     for a, b in cKDTree(yx).query_pairs(settings.min_distance_px):
@@ -266,7 +280,7 @@ def measure_peaks(images, yx, settings, saturation=None, heights=None):
     spot there is measured too: it may still be a neighbour that spoils a bead's isolation.  ``heights``
     (`find_peaks`) are kept as ``height``, what isolation judges a neighbour by."""
     images = np.asarray(images, np.float32)
-    radius = settings.roi_size//2 + settings.padding
+    radius = settings.roi_size//2 + settings.padding_px
     Y, X = images.shape[1:]
     records = []
     for i, (y, x) in enumerate(yx):
@@ -400,7 +414,7 @@ def collect_beads(inputs, settings=None, progress=None):
     candidates, cut = [], {}
     dz = None
     channels = set()
-    radius = settings.roi_size // 2 + settings.padding
+    radius = settings.roi_size // 2 + settings.padding_px
     for batch in batches:
         for stack in batch:
             report(f'Reading beads: {stack.source} {stack.axes}')
@@ -754,7 +768,7 @@ def build_calibration(beads, excluded=(), progress=None):
     if candidates.sum() < s.min_beads:
         raise ValueError(f'keep at least {s.min_beads} brightness-qualified beads')
     candidate_ids = np.flatnonzero(candidates)
-    p = s.padding
+    p = s.padding_px
 
     # SMAP seeds registration with the least-deviant half of the unaligned beads,
     # not one possibly atypical bead. The input volumes are already brightness

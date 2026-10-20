@@ -30,6 +30,11 @@ when a milestone lands or an item moves.
   model; *start from* a previous model; *save model*; the spline (or dual calibration) and the model file
   saved beside the stacks; fit quality by Spline 3D (2C for pairs) with z-against-frame curves that select
   a bead; *Install PyTorch* when torch is missing.  The headless path is `pupil.run_calibration`.
+- **The window in two steps** (October 2026): the stacks shown on load (file and plane sliders); *Detect
+  beads* rings them and estimates the learning time (`pupil.estimate_seconds`, one Gauss–Newton matrix
+  timed); *Calibrate* with a progress bar and the time left; the fit quality and *Model vs data*
+  (`calibrate.model_views`: the beads aligned onto the model by their fitted geometry, data, model and
+  residual on one scale) after every run, for both methods; Zernikes named by short abbreviations.
 - **M6 acceptance:** z slope 0.999 through the whole chain, photons 0.2 % from the bead average's; Spline
   3D and uipsf's own localisation 0.6 nm rms apart on Zenodo.
 - **Studies** (report-2026-10.md): the model choices measured; σ and the magnitude on Zenodo and on the

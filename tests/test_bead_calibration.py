@@ -389,3 +389,13 @@ def test_a_faint_speck_does_not_cost_a_bead_its_isolation_but_bright_dirt_does(a
                                 brightness_range=None)
     assert (20, 20) not in {(r['x_px'], r['y_px']) for r in collect_beads(_beads_with_neighbours(amplitude, saturate),
                                                                           every).records}   # no range: all count
+
+
+def test_padding_on_auto_follows_max_xy_shift_so_the_defaults_always_pass():
+    assert CalibrationSettings().padding is None and CalibrationSettings().padding_px == 5
+    for shift in (0., 2.5, 3., 7.9):
+        settings = CalibrationSettings(max_xy_shift_px=shift)
+        settings.validate()
+        assert settings.padding_px == int(shift) + 2
+    with pytest.raises(ValueError, match=r'padding \(4 px\).*max xy shift \(3 px\)'):
+        CalibrationSettings(padding=4).validate()

@@ -548,16 +548,53 @@ class PupilRun:
     dual: bool = False
 
 
+#: a learning run costs about this many Gauss-Newton matrices of the whole model, each timed as
+#: `estimate_seconds` times one: 4.4 to 5.1 on ten simulated beads at Zernike orders 4, 6 and 8 (9 to 15 s
+#: a run, 4 x86 cores).  Stage 1's lower orders and the cheap L-BFGS steps between matrices are in it
+MATRICES_PER_RUN = 5
+#: the beads one matrix is timed on; the time is scaled to all of them, linear in the beads as it is
+TIMED_BEADS = 8
+
+
+def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings) -> float:
+    """About how long learning ``rois`` will take, seconds: one Gauss-Newton matrix of the full model timed
+    on a few beads (`TIMED_BEADS`), scaled to all of them and by `MATRICES_PER_RUN`.  A figure to decide
+    by before an afternoon's run -- within a factor of two -- not a promise: the iterations a fit needs
+    depend on the beads."""
+    import time
+
+    import torch
+    from uipsf.device import on_model_device
+    from uipsf.params import Params
+    from uipsf.solve import Problem
+    from uipsf.workflows.beads import MAX_DZ_NM
+    from uipsf.workflows.calibrate import bead_model
+    batch = rois.batch
+    channels = batch.data.shape[1]
+    learnt = bead_model(optics.optics(rois.camera, channels), model, tuple(batch.data.shape[-2:]),
+                        [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()))
+    E = batch.n_emitters
+    sub = on_model_device(batch.subset(torch.arange(min(E, TIMED_BEADS))), learnt).thinned(MAX_DZ_NM)
+    def matrix(b):
+        start = Params(learnt.specs(b), b.n_emitters, dtype=b.data.dtype, device=b.data.device)
+        Problem(learnt, rois.noise, b).normal_equations(start)
+    matrix(sub.subset(torch.arange(1)))     # the first matrix pays for compiling: 1.8 s against 1.2 for 8 beads
+    t = time.perf_counter()
+    matrix(sub)
+    return (time.perf_counter() - t) * MATRICES_PER_RUN * E / sub.n_emitters
+
+
 def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettings, detection=None,
                     spline: SplineSettings | None = None, run: RunSettings | None = None, camera=None,
                     previous: PupilRun | None = None, decisions: dict | None = None, save_to=None,
-                    progress=None, cancel=None) -> PupilRun:
+                    progress=None, cancel=None, rois: BeadROIs | None = None) -> PupilRun:
     """Bead files to a learnt pupil model and, with *save model*, its calibration on disk: the PSF
     calibration window's whole run, for a script too.
 
     ``previous`` (the window's *Recalculate*): the same ROIs, its fit as the warm start, ``decisions``
     ({bead: "include" | "exclude"}) applied.  ``camera`` defaults to the first acquisition's, as a fit
-    would resolve it.  ``save_to`` defaults to the bead calibration's name beside the stacks."""
+    would resolve it.  ``save_to`` defaults to the bead calibration's name beside the stacks.  ``rois``,
+    the beads found already (the window's *Detect beads*), skips finding them again."""
     from uipsf.workflows import calibrate_beads
     spline = spline or SplineSettings()
     run = run or RunSettings()
@@ -565,8 +602,9 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         rois, start, warm = previous.rois, previous.start, previous.cal
     else:
         report = progress or (lambda entry: None)
-        report({"message": "reading the stacks and finding the beads"})
-        rois = bead_rois(paths, camera, dual=dual, settings=detection)
+        if rois is None:
+            report({"message": "reading the stacks and finding the beads"})
+            rois = bead_rois(paths, camera, dual=dual, settings=detection)
         start = load_start(run.start_from) if run.start_from else None
         warm = None
     channels = 2 if dual else 1

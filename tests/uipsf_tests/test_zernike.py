@@ -50,3 +50,12 @@ def test_orthogonalising_against_a_mode_removes_it():
     a = np.arange(16.0).reshape(1, 4, 4)
     out = orthogonalise(np.concatenate([a, a + 1]), np.ones((1, 4, 4)), mask)
     assert np.allclose(out[0], out[1]) and np.isclose(out.mean(), 0)
+
+
+def test_each_mode_has_a_short_name_that_says_its_family_order_and_axis():
+    from uipsf.optics.zernike import zernike_name
+    names = {j: zernike_name(j) for j in range(1, 46)}
+    assert [names[j] for j in (1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 22)] == \
+        ["Pi", "Tx", "Ty", "Df", "Asy", "Asx", "Coy", "Cox", "Sp", "2Asx", "2Sp"]
+    assert len(set(names.values())) == len(names)                        # no two modes alike
+    assert max(len(n) for n in names.values()) <= 4

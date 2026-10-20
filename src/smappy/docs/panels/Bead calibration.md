@@ -160,7 +160,7 @@ axes = fig.subplots(1, 4)
 psf = cal.psf
 z_model = cal.z_index_to_nm(np.arange(psf.shape[0]))
 extent_z = (z_model[-1], z_model[0])
-p = settings.padding
+p = settings.padding_px
 one = beads.volumes[int(np.flatnonzero(single.accepted)[0])][:, p:-p, p:-p]
 one = one[single.z_crop_start:single.z_crop_start + psf.shape[0]]
 panels = ((one, "one bead"), (single.raw_psf, "average"), (psf, "model"))
@@ -511,7 +511,8 @@ the PSF's change with z and costs z precision.
 
 ### padding
 Extra pixels around the bead box for the alignment to shift into; must exceed
-*max xy shift* by more than one pixel.
+*max xy shift* by more than one pixel.  Auto, the default, is *max xy shift*
+plus two, rounded down: 5 px for the default 3 px.
 
 ### detection sigma
 The smoothing before detection; about the spot's width.

@@ -154,3 +154,14 @@ def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_
     assert np.sqrt(np.mean(q["centred_error_nm"][central] ** 2)) < 12
     assert np.median(q["ratio"][central]) == pytest.approx(0.3, abs=0.01)
     assert len(q["state"]) == len(q["bead_id"]) == 8 * K
+    # the model against the data: each channel's beads aligned on its ROI's centre, where the transform puts
+    # them in the secondary one, and the model fitting them there
+    from smappy.calibrate.model_views import pupil_views
+    views = pupil_views(run)
+    assert len(views.data) == 2 and len(views.beads) == 8
+    for data, model in zip(views.data, views.model, strict=True):
+        weight = np.nansum(model, 0)
+        yy, xx = np.indices(weight.shape)
+        centre = (np.array(weight.shape) - 1) / 2
+        assert np.abs([(weight * yy).sum() / weight.sum(), (weight * xx).sum() / weight.sum()] - centre).max() < 0.3
+        assert np.nanmax(np.abs(data - model)) < 0.05 * np.nanmax(data)
