@@ -889,6 +889,8 @@ split).
 **Settings to test before their defaults are fixed** (on Zenodo and the lab's stacks, by held-out deviance
 and z bias): n_max 6 or 8; the magnitude free, symmetric or fixed; σ free or fixed; the intensity model;
 upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those that settle leave the form.
+*Measured on Zenodo 1ch and 2ch and simulated beads (October 2026): §10, 7, a recommendation per choice,
+to decide; the table in `docs/uipsf/architecture.md`.*
 
 **Order of work:**
 1. uipsf: `BeadSettings` with form metadata (the model options above), `calibrate_beads`, σ fixed,
@@ -1200,6 +1202,10 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
    - not the coverslip thickness or the sample medium, which give spherical aberration or a focus offset only.
 
    To decide: refits with s fixed at 1, scanning λ, then NA; the one that recovers the likelihood of a free s is the cause. Until then s is fixed (`BeadStackGeometry(z_scale=False)`), fitted on request.
+
+   *Measured further (October 2026, §10, 7): the magnitude makes most of it.*  Simulated beads with s = 1 and a radial magnitude, fitted with the magnitude fixed, ask for s = 0.929 (1.000 with it free).  On Zenodo 1ch / 2ch s is 0.920 / 0.897 with the magnitude fixed, 0.962 / 0.948 free, 0.977 / 0.966 free at order 8, where 1ch gains only 1000 nats from it.  A 4 % piezo error is not needed; what 2ch still asks for (10 600 nats at order 8) is the next thing to explain, with the magnitude we do not yet understand (item 2) first in line.
+
+   *Measured first (October 2026, §10, 7):* with v2's current defaults (beads in water, 1.33) a free s is 0.962 and gains 5300 nats on 43 beads, 3300 on 11 held out.  Neither scan recovers that: NA −0.007…−0.020 at most 2700 (at −0.013), λ +10…+30 nm at most 400; on the held-out beads both ~1000.  So neither is the cause alone.  2ch asks for 0.957 too, but its fit with s free ends in a worse basin than with s fixed.  Simulated beads with s = 1 give 1.000: the free s does not invent a scale.
 2. **The pupil magnitude: physical, not only better.** v2 fits it as 1 + Σ c_j Z_j over every Zernike up to n_max, including the non-rotationally-symmetric modes. In v1, fitted magnitudes were often strong and asymmetric, though little in the beam path absorbs asymmetrically, and a flat magnitude (apodisation only) never worked well. The worry is that an incomplete model hands part of the real phase aberrations to the magnitude. The goal is a magnitude explained by physics, with a free remainder that is small and tested.
 
    **Why might a flat magnitude fail?** Candidates for what the fixed amplitude model gets wrong, each one a radial or a cos 2φ pattern:
@@ -1230,6 +1236,9 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      aperture edge, a missing high mode) and fit with σ free and fixed: which σ and which magnitude
      pattern each produces, and whether the phase moves.  Then on real data: σ fixed at a physical
      value (camera and drift measured) against free, by held-out deviance and z bias.
+   - *Measured (October 2026, §10, 7):* no fixed value is close (0–40 nm cost 59 000–660 000 nats held out).
+     Drift between frames is not it: a free drift per bead and slice (5–9 nm) leaves σ unchanged, and the
+     shared per-slice drift (10–17 nm) takes 2–4 nm from it.  Left: motion within the exposure, or mismatch.
 
 4. **Local minima.** Both solvers can end in a minimum that is not the best one, and which one they reach
    depends on the path (M7). On synthetic dim beads (seed 2) LM stopped 100 nats up with a phase error of
@@ -1244,6 +1253,13 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      and 54125.7 (0.080 rad) after it: the faster DFT computes the same model with different float32
      rounding, and that alone picks the basin.  Stage 1's tolerance does not (0.001 to 1 nat, all
      54125);
+   - on real data (October 2026, §10, 7): on Zenodo 2ch three models that contain the default ended worse
+     than it -- order 8 with bleaching of order 2 (+170 000 nats, though each alone gains over 120 000), a
+     free z scale (+624 000) and the per-slice photon factor (+27 M, z off by 80 nm) -- and a first stage
+     to order 2 put every bead 430 nm off in z.  Every 1ch and simulated fit was consistent;
+   - started from the simpler model's solution (`start_values`), every one of those 2ch fits reached the
+     expected gain (free s: −43 100 instead of +624 000; order 8 with bleaching 2: −243 500 instead of
+     +170 000): freeing terms in stages is the cheapest remedy, and works;
    - remedies by cost: per-bead restarts (cheap: the emitter blocks are independent, a localisation per
      bead from a z grid), a check after each stage that every bead's deviance is in line, better starts
      (a per-bead z from the data), continuation over n_max (the two stages, generalised); only then
@@ -1271,6 +1287,49 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
    Zenodo it rejected 2 of 27 beads on its own.  When looking at the model, test whether a
    localisation-based score rejects better.  Per-slice consistency (a stage jump) shows in SMAPpy,
    which fits every bead with the exported model's spline.
+
+7. **The form's choices and the hidden defaults: measured, to decide** (October 2026,
+   `benchmarks/uipsf/real/model_choices.py`, the table in `docs/uipsf/architecture.md`).  One calibration
+   per choice on the same ROIs and the same beads, judged on 20 % held-out beads (deviance, and the pupil's
+   z bias) and by Spline 3D on the exported spline; Zenodo 1ch, 2ch, and simulated beads with a known pupil.
+   Nothing is changed yet; per choice, a recommendation:
+   - *Zernike order*: **fix the default (auto) at 8.**  Held out, −10 000 nats (1ch) and −69 000 (2ch), z
+     bias 5.4 → 3.4 and 3.3 → 2.6 nm, the same time; on simulated beads whose truth stops at 6 it costs
+     4–6 nats.  Keep the field, under *more*, for a microscope that needs more.  This replaces "n_max = 6
+     with a held-out check of 8" below.
+   - *pupil magnitude*: **keep free as the default; drop *fixed*** (z bias 21–30 nm on every dataset, the
+     worst choice measured).  **Drop *symmetric* from the form too**: it loses 29 000 / 216 000 nats to
+     the free magnitude even at order 8, on held-out beads as well, and gains nothing on the simulation.
+     `magnitude_modes` keeps it for studies such as §10, 2.  With one choice left, the field goes.
+   - *blur*: **drop the choice; σ stays free.**  Fixing it at 0, 20 or 40 nm costs 59 000–660 000 nats
+     held out and raises the z bias to 12–20 nm; free, it recovers a simulated 30 nm.  *blur σ* then is only
+     a start and can go under *more* or out.  What the 65–75 nm are stays §10, 3.
+   - *z scale*: **keep fixed at 1, not in the form**, as now; s stays a probe.  It is mostly the pupil's
+     amplitude, not the stage (item 1): a missing magnitude asks for s = 0.93 on simulated beads with
+     s = 1, and on Zenodo s goes 0.92 → 0.96 → 0.98 as the magnitude is fixed, free, free at order 8.
+   - *photons per slice* (not in the form): **bleaching of order 2 as the default, learnt after the
+     order-6 bleaching-1 fit.**  −27 000 / −29 000 nats held out, z bias 3.9 / 2.2 nm, no cost on simulated
+     beads.  With order 8, fresh, 2ch fell into a worse basin; started from the base fit it is the best
+     fit measured (−91 600 held out, z bias 1.9 nm).  So: a third stage, or richer terms freed after
+     stage 2.  Do not offer the per-slice factor (overfits 1ch, wrecks 2ch); `PerObservation` cannot run
+     in `learn_beads` (`score_beads` reads `emitter.photons`): fix or drop it.
+   - *stage drift* (not in the form): **the shared drift, freed after stage 2, is worth having**: from the
+     base fit it gains 4 800 / 53 300 nats held out and gives z bias 2.9 / 1.9 nm, with 10–17 nm per
+     slice.  Fresh it ended in worse basins.  It takes only 2–4 nm from σ, and a drift per bead none:
+     drift between frames is not the 65–75 nm blur (§10, 3).  Per file, below.
+   - *first stage* (not in the form): **keep order 4.**  No stage 1 gives the same fit to the nat on all four
+     datasets, order 2 is a trap on 2ch; the stage costs little and guards dim beads (item 4).
+   - *slice thinning* (not in the form): **`MAX_DZ_NM` 100 nm.**  Held out −7 / +340 nats of 0.23 / 0.92 M,
+     z bias unchanged, 1.6× faster on 2ch; 200 nm costs 120 / 1550 nats and is 2.6× faster, worth trying on
+     the lab's 10–20 nm stacks before going that far.
+   - **to do (asked October 2026): the stage drift per slice *and per file*.**  `BeadStackGeometry`'s drift is
+     one shift per slice shared by every bead (`geometry.drift`, [K, 3]), but beads from different files
+     are different acquisitions with their own drift (Zenodo 1ch: ~18 files).  Index it by
+     `Batch.stack_id`: [files, K, 3], the 5 nm prior per file.  As shared parameters that is 1440 for
+     Zenodo 1ch, more than MPS holds in one Jacobian (`model_choices.py` failed so); a block per file,
+     solved as the emitter blocks are, avoids it.  The study's per-bead drift (`BeadDrift`) is the stand-in.
+   - not measured: rejection's k, the held-out fraction, the bead diameter, upsampling.  To be repeated on
+     the lab's own stacks: `model_choices.py "<glob>" --NA … --wavelength …` (one argument per dataset).
 
 **Small technical defaults, unless you object:**
 - Negative shifted data (`d + s < 0`) clamped at 0 and counted, rather than the slower exact Poisson–Gaussian likelihood.
