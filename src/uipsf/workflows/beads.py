@@ -166,7 +166,7 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
                 rejection: RejectionSettings | None = None, heldout: float = 0.0, first_order: int | None = 4,
                 solver=None, chunk_size: int | None = None, max_dz_nm: float | None = MAX_DZ_NM,
                 localiser=None, progress=None, cancel=None, geometry: dict | None = None,
-                start: dict | None = None) -> Calibration:
+                start: dict | None = None, start_stage1: bool = False) -> Calibration:
     """Learn a pupil from bead stacks with outliers rejected, every decision explained (plan §5.7).
 
     1. Stage 1 (modes up to ``first_order``) on every bead not held out or
@@ -194,7 +194,13 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
     start_values`), replaces stage 1: every bead is localised on that pupil (`scoring.localise`), scored
     and judged from that fit, and stage 2 starts from it.  Stage 1 exists to place the beads before the
     high modes are free (module docstring); a pupil already close to the truth places them better than
-    a truncated one, and its scores judge the beads on the whole model.
+    a truncated one, and its scores judge the beads on the whole model.  ``start_stage1`` instead takes
+    ``start`` into stage 1, which then runs as without it, from those values (cut to its modes): for a
+    start that is only roughly right -- another camera's model, or the astigmatism a Gaussian read
+    (`model.astig`) -- which stage 1 should move with the beads before the high modes are freed.
+
+    The beads start from ``batch.start`` when it is set (`Batch.start`), else from the data's rough
+    start.
     """
     noise = noise if noise is not None else ShiftedPoisson()
     solver = solver if solver is not None else GaussNewtonLBFGS()
@@ -210,7 +216,7 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         shared = warm_start.shared()
         scores = warm_start.scores
         fitted, fit = warm_start.beads.used, warm_start.result.params
-    elif start is not None:
+    elif start is not None and not start_stage1:
         held = held_out(batch.field_xy, E, heldout)
         pool = [e for e in range(E) if e not in held and decisions.get(e) != "exclude"]
         sub = batch.subset(torch.tensor(pool))
@@ -224,7 +230,12 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         held = held_out(batch.field_xy, E, heldout)
         pool = [e for e in range(E) if e not in held and decisions.get(e) != "exclude"]
         sub = batch.subset(torch.tensor(pool))
-        start = Params(model.specs(sub), len(pool), dtype=dtype, device=device)
+        values = None
+        if start is not None:
+            shape = {sp.name: tuple(sp.shape) for sp in model.specs(sub) if sp.scope == "shared"}
+            values = {n: torch.as_tensor(v, dtype=dtype, device=device) for n, v in start.items()
+                      if tuple(torch.as_tensor(v).shape) == shape.get(n)}
+        start = Params(model.specs(sub), len(pool), dtype=dtype, device=device, values=values)
         full, first = first_stage(model, sub, noise, start, first_order, solver, chunk_size,
                                   _tagged(progress, 1), cancel)
         if full is None:            # no higher modes: stage 1 is the whole model

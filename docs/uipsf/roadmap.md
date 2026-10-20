@@ -51,6 +51,10 @@ when a milestone lands or an item moves.
 3. **Retire *Bead calibration*:** remove the old window and plugin, move the default GUI and the tutorial
    storyboard to *PSF calibration* (M6).
 4. **Fix: 2ch stalls** with the window's default indices (1.518 / 1.33) and converges with v1's 1.516 / 1.35.
+   Stage 1 stops after 4 iterations, 22 M nats up; a transform started from the beads' Gaussian positions
+   avoids it in these runs (plan §10, 5), the stall itself remains.
+4a. **Decide the starts** (measured, plan §10, 5): *start from* a previous model into stage 1
+   (`start_stage1`); a pair's transform from the Gaussian positions (`model.astig.gaussian_start`).
 5. **Drift per stack and file** in the bead model (plan §10, 7): a block per file.
 6. **Explain the blur σ** (report: 40–83 nm on M2, 0–32 on M5, cause open): where a blur-free model misses
    (core, wings, rings); a one-sided transfer trail on EMCCDs; at M2, beads at several clock settings.
@@ -91,6 +95,9 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
 - **4Pi:** a phase axis inside the channels (Zenodo `4pi_40nm_bead`, `4pi_smlm_nup96`).
 - **Lattice light-sheet:** a voxel model as the baseline (Zenodo `1ch_LLS_bead`).
 - **Polarisation:** a Jones pupil (2 × 2) for birefringence and a dichroic's s/p transmission.
+- **Engineered PSFs** (double helix, tetrapod, saddle point): a known phase mask in the pupil, fixed,
+  with the Zernikes learnt on top of it as the system's aberrations (noted October 2026).  The mask's
+  design pattern, its scale and its rotation and centring on the pupil are what to start from or fit.
 
 ### Data and scope
 

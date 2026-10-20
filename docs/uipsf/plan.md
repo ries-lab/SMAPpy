@@ -1265,22 +1265,24 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      (a per-bead z from the data), continuation over n_max (the two stages, generalised); only then
      global methods.
 
-5. **The start of a bead fit** (to discuss).  Today: the pupil at zero and each bead's rough position from
-   the data.  Proposed (October 2026):
-   - a previous model from the same microscope as the start, when the user gives one;
-   - otherwise, for astigmatic PSFs, an asymmetric Gaussian fit per slice: the widths against z give
-     each bead's z and the astigmatism Zernikes (Noll 5, 6), and the centroid's lateral movement through
-     focus gives some coma (Noll 7, 8).
-   - **for several channels (noted with M4, to explore with the other start options):** the channel
-     transform almost right before the learning.  Today it starts from the pairing's projective fit to
-     the beads' centroids (`data.pairing`, or SMAPpy's), and the joint fit tolerates a start 2.2 px off
-     by a translation or 1.4 px at the field's edge by a 0.4° rotation; from a translation alone (~3 px
-     off at the edge) it stopped in a wrong minimum, the secondary pupil bent to take the misplacement
-     (`tests/uipsf_tests/test_multichannel.py`).  Candidates: a previous model's transform (the same splitter drifts
-     little between sessions); a pre-fit of the transform with the pupils fixed, from each pair's
-     localisations on a previous or a symmetric pupil (only the emitter and transform blocks, cheap);
-     the per-channel Gaussian fits above giving each bead's position in both channels.  The same holds
-     for the photon share and the biplane offset, started today from the data's sharpest slices.
+5. **The start of a bead fit** (measured October 2026: `benchmarks/uipsf/real/starts.py`, the tables in
+   `docs/uipsf/architecture.md`, "How a bead fit starts").  Today: the pupil at zero, each bead at its
+   brightest slice, the transform from the pairing's centroids.
+   - one channel never needed better: the cold fit reached the optimum on every simulated and real
+     dataset, and neither the astigmatism nor each bead's z from elliptical Gaussians (`model/astig.py`)
+     made it faster; stage 1 still places beads and low modes together;
+   - a previous model of the same microscope: **into stage 1** (`learn_beads(start_stage1=True)`), 0.5–0.8
+     of the cold fit's time on M2 and always at the optimum, also from a model across a camera change;
+     replacing stage 1, as *start from* does now, was slower from a model 0.26 rad off and once ended in a
+     wrong minimum.  Proposed: *start from* takes it into stage 1.  A 665LP model started the 676/37
+     acquisitions as well as their own: no wavelength rescaling needed;
+   - two channels: the transform matters.  A start 2.5 px off fails on mirrored pairs, 4.5 px off always;
+     the Gaussians' positions start 2–3 × closer than the centroids (0.11–0.25 px) and every fit from
+     them converged; on Zenodo 2ch, where the cold fit stalls in stage 1 (roadmap 4), they reached the
+     optimum to ~100 nats.  Proposed: the pairing's transform refitted from the Gaussians' positions;
+   - an angle for SMAPpy's elliptical Gaussian is not needed: the astigmatism of the lab's and Zenodo's
+     data is Noll 6 to within 0.02 rad;
+   - the stage-1 stall on Zenodo 2ch is the solver's or the model's (n_med, roadmap 4), not the start's.
 
 6. **Rejection by a fit?**  Since M7 bead rejection uses the learning fit's residuals only (deviance,
    photons, xy offset, saturation); the z bias (each slice localised alone, v1's ``msez``) is gone: on

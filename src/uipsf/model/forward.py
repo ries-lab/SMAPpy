@@ -60,8 +60,11 @@ class ForwardModel:
         return self.psf.grid.optics.pixel_size_nm
 
     def specs(self, batch, start: dict | None = None) -> list[ParamSpec]:
-        """Every parameter, emitter-scope ones started from the data (`rough_start`) unless given."""
-        start = rough_start(batch, self.pixel_size_nm) if start is None else start
+        """Every parameter, emitter-scope ones started from ``start``, else the batch's own (`Batch.start`),
+        else the data's rough start (`rough_start`)."""
+        if start is None:
+            given = getattr(batch, "start", None)
+            start = given if given is not None else rough_start(batch, self.pixel_size_nm)
         specs = [s for c, ch in enumerate(self.channels) for s in ch.specs(c, start)]
         return (specs + self.geometry.specs(batch, start) + self.intensity.specs(batch, start)
                 + self.background.specs(batch, start))

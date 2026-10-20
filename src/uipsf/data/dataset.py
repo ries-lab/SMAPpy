@@ -31,6 +31,8 @@ class Batch:
     stack_id: torch.Tensor | None = None     # [E] which stack each emitter came from
     roi_xy: torch.Tensor | None = None       # [E, C, 2] each channel's ROI centre in chip pixels (x, y);
                                              # needed with several channels (`model.channels`)
+    start: dict | None = None                # each emitter's start (`model.start.rough_start`'s keys) when the
+                                             # data's rough one will not do (`model.astig.gaussian_start`)
 
     @staticmethod
     def z_from_objective(objective_nm) -> torch.Tensor:
@@ -56,8 +58,12 @@ class Batch:
         def rows(t):
             return t[index] if isinstance(t, torch.Tensor) else t
         z = self.z_nm[index] if self.z_nm.dim() == 2 else self.z_nm
+        start = None if self.start is None else {
+            k: (rows(v) if isinstance(v, torch.Tensor) and v.shape[:1] == (self.n_emitters,) else v)
+            for k, v in self.start.items()}
         return replace(self, data=self.data[index], z_nm=z, s=pick(self.s), mask=pick(self.mask),
-                       field_xy=rows(self.field_xy), stack_id=rows(self.stack_id), roi_xy=rows(self.roi_xy))
+                       field_xy=rows(self.field_xy), stack_id=rows(self.stack_id), roi_xy=rows(self.roi_xy),
+                       start=start)
 
     def thinned(self, max_dz_nm: float | None) -> Batch:
         """Every n-th slice, n the largest whole number with n·Δz ≤ ``max_dz_nm`` (None: every slice).
@@ -93,5 +99,6 @@ class Batch:
         data = move(self.data)
         # ROI centres are whole pixels, exact in float32; in the data's dtype, so never float64 on MPS
         roi = None if self.roi_xy is None else self.roi_xy.to(device=data.device, dtype=data.dtype)
+        start = None if self.start is None else {k: move(v) for k, v in self.start.items()}
         return replace(self, data=data, z_nm=move(self.z_nm), s=move(self.s),
-                       mask=move(self.mask, keep_dtype=True), roi_xy=roi)
+                       mask=move(self.mask, keep_dtype=True), roi_xy=roi, start=start)

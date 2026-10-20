@@ -1152,3 +1152,66 @@ the microscope (on M2, to its state since July's camera change and realignment),
 the z scale.  Its anisotropy, along x on both, is the next thing to explain.  The magnitude differs too (M5's
 radial part is about twice M2's), but its radial part partly absorbs the z scale and the effective NA,
 which the model does not yet separate: a physical magnitude needs the NA probe of §10, 2 first.
+
+## How a bead fit starts (October 2026, plan §10, 5; `benchmarks/uipsf/real/starts.py`)
+
+Today's start is the pupil at zero, each bead at its brightest slice and the transform from the pairing's
+centroids.  The study first gave fits pieces of their own answer, to bound what a better start could buy,
+then tried the two candidates: a previous model of the same microscope and elliptical Gaussians per slice
+(`model/astig.py`).  Every start ran on the cold fit's bead states, so objectives compare; rows in
+`benchmarks/uipsf/results/starts.jsonl` (sim, Zenodo, M2) and `starts_sim2.jsonl` (two simulated channels).
+
+**One channel never needed a better start.**  The cold fit reached the best optimum on 5 simulated
+datasets (`model_choices.simulated`), Zenodo 1ch and all five M2 acquisitions.  Its own final values as the
+start (the ideal previous model) take 35–50 % off the time, the stage-1 part of it; the astigmatism alone
+(the cold fit's or the truth's Noll 5 and 6) and the Gaussian start (`gauss`: z, x, y and Noll 5/6) take
+nothing off: stage 1 still needs 12–14 iterations to place the beads and the low modes together.
+
+**A previous model: into stage 1, not instead of it.**  Each M2 acquisition from each of the other four
+(the 665LP one among the 676/37: the filter change made no difference):
+
+| previous model | same camera (12) | across July's camera change (8, 0.26 rad apart) |
+| --- | --- | --- |
+| replacing stage 1 (`learn_beads(start=)`, today's *start from*) | 0.77 of cold's time, all at the optimum | 1.8 of cold's time; one +159 000 nats |
+| into stage 1 (`learn_beads(start=, start_stage1=True)`) | 0.69 (0.49–0.81), all at the optimum | 0.59 (0.51–1.0), all at the optimum |
+
+Skipping stage 1 frees every mode at once from a pupil that may be wrong (another camera turns the
+astigmatism by 90°), the trap stage 1 exists for (`workflows/beads.py`); started inside it, the previous
+model's low modes move with the beads and the higher ones wait.  The 665LP acquisition started the
+676/37 ones as well as they started each other, so no wavelength rescaling was needed there.
+
+**Two channels: the transform is the start that matters.**  Simulated pairs (12 beads, biplane and
+mirrored ratiometric, seeds 0–4): the centroid pairing starts 0.37–0.59 px off and every cold fit reaches
+the optimum; moved 1.5 px more (2.4–2.6 px off) the ratiometric pairs failed 3 times in 5, at 4.5 px every
+fit did (10 of 10, +86 000 to +208 000 nats, the secondary pupil bent to take the misplacement).  A true
+transform saves no time.  The Gaussians' positions (each bead's mean over the slices near its focus, in
+each channel, a projective fit: `gaussian_start`'s ``transform``) start 0.11–0.25 px off, 2–3 × closer than
+the centroids, and every fit from them reached the optimum.
+
+Zenodo 2ch (71 pairs, n_med 1.33): the cold fit ends 22–26 M nats above the best, stage 1 stopping after 4
+iterations (the stall of roadmap item 4).  From the transform the cold fit itself ends with, or from the
+Gaussians', it reaches the best (to 70–110 nats over three runs, in 52–80 s); the astigmatism into stage 1
+as well stalled again (+13 M), the angled Gaussian's start ended +1 000.  Which basin the stalling stage 1
+falls into depends on small differences of path (the same start gave +0 and +113 nats in two runs):
+the start shifts the odds, the stall itself is the solver's or the model's to fix.
+
+**The estimator** (`model/astig.py`).  Per slice the spot's covariance; through focus D = C_xx − C_yy and
+2C_xy are linear in the defocus (σ²_u − σ²_v = 4σ₀²c·z/d² in the astigmatic width model), so each bead's z
+is where they cross zero and their slopes are the astigmatism, matched to the slopes the same estimator
+reads from the model's own noise-free PSFs (so its biases cancel).  Weighted by each slice's precision
+(N_eff / (C_xx² + C_yy²)), Huber per bead, the window started at the brightest slice: started at the
+smallest spot it failed with 0.4 rad of spherical, where a fit far from focus collapses onto one lobe.
+- *Estimators:* SMAPpy's `GaussXY` (C++, axis-aligned, < 1 s for 70 beads × 41 slices), an angled Gaussian
+  (torch, 7 parameters, 20–40 s) and adaptive moments (0.2 s).  On pure astigmatism all three recover it
+  (bright beads: 0.93, 0.91, 0.93 for 0.9 rad); moments put the bead z 75–150 nm off as soon as coma is
+  present; only the angled fit sees Noll 5.  The lab's and Zenodo's astigmatism is Noll 6 (Noll 5 below
+  0.02 rad: the cylindrical lens sits along the camera's axes), so **an angle in SMAPpy's fitter is not worth adding**.
+- *Amplitude:* 84–86 % of the learnt Noll 6 on Zenodo (−0.48 for −0.56; 2ch −0.39, −0.42 for −0.46, −0.49),
+  0.5–0.8 on simulations with 0.4 rad of spherical and a radial magnitude (Noll 4 = −0.15), which change
+  how fast the spot widens and are not in the start.  Below about 1 000 photons per slice over 80–150
+  background the slopes are noise.
+- *Bead z:* within 5–15 nm (bright) and 15–30 nm (dim) of the truth, with a common offset of up to 60 nm
+  where spherical shifts the focus.
+
+**Decided from it** (proposed, plan §10, 5): a previous model goes into stage 1; the transform of a pair
+starts from the Gaussians' positions; the Gaussian astigmatism and z are not used as a pupil start.
