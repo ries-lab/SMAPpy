@@ -17,3 +17,5 @@ python -m pytest -q -n auto
 
 Documents: `docs/uipsf/plan.md` (plan), `docs/uipsf/conventions.md` (axes, signs, units), `docs/uipsf/architecture.md` (what is
 built), `docs/uipsf/data.md` (reference data). BSD-3-Clause.
+
+Study report, October 2026 (what the learnt blur σ and pupil magnitude are, the model choices measured, next steps): `docs/uipsf/report-2026-10.md`.
