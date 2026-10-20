@@ -12,7 +12,7 @@ def aligned_midline_profiles(result, bead_ids=None, normalize=True):
     ids = list(np.flatnonzero(result.accepted) if bead_ids is None else bead_ids)
     if not ids or not set(ids).issubset(range(len(beads.records))):
         raise ValueError('select at least one known bead ID')
-    p = beads.settings.padding
+    p = beads.settings.padding_px
     crop_z = result.z_crop_start
     x_profiles, z_profiles = [], []
     for i in ids:
@@ -55,7 +55,7 @@ def paired_profiles(result):
     r = result.registration
     ids = np.flatnonzero(r.accepted)
     reference = np.asarray(r.channel_raw_psfs)
-    p, crop = r.beads.settings.padding, r.z_crop_start
+    p, crop = r.beads.settings.padding_px, r.z_crop_start
     samples = []
     bright = reference > np.quantile(reference, .75)
     for i in ids:

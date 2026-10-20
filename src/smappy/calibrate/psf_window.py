@@ -7,10 +7,13 @@ window shows the chosen one's and knows none of them.  In situ learning from
 blinking molecules will add a *source* choice and a method, not a branch
 here (`docs/uipsf/plan.md` §7.5).
 
-What every method shares is the window's: the stacks, *mode* (single channel
-or dual colour), *save model* -- saved beside the stacks under the bead
-calibration's name and handed to the fitter -- *Save as...*, the bead table
-with its marks for the next *Recalculate*, and the worker thread.
+What every method shares is the window's: the stacks and their *Stacks*
+page (`stack_browser`), *mode* (single channel or dual colour), the two steps
+*Detect beads* and *Calibrate* with a progress bar and the time left, *save
+model* -- saved beside the stacks under the bead calibration's name and
+handed to the fitter -- *Save as...*, the bead table with its marks for the
+next *Recalculate*, the stack browser (`stack_view`, data beside the model)
+and the worker thread.
 
 torch is imported only by the pupil model's run: without it the window opens,
 the pupil model says how to install it, and the bead average works as ever.
@@ -25,8 +28,8 @@ from typing import List
 from PySide6.QtCore import QObject, QProcess, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
-                               QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSplitter,
-                               QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QListWidget, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+                               QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..gui import folders
 from ..gui.params import SettingsForm
@@ -34,7 +37,7 @@ from ..gui.widgets import CollapsibleSection
 from .core import CalibrationSettings
 from .dual import DualColorSettings
 from .input import discover_acquisitions
-from .psf_methods import AVERAGE_ONLY, METHODS
+from .psf_methods import AVERAGE_ONLY, METHODS, LearningProgress, duration
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
 from .qt_gui import _bead_specs
 
@@ -79,12 +82,14 @@ class PSFCalibrationWindow(QMainWindow):
         self.paths: List[str] = [str(p) for p in paths]
         self.method = METHODS[0]
         self.run_result = None
+        self.detected = None                # what Detect beads found, until a setting it read changes
         self.marks: dict = {}
         self.busy = False
         self._thread = None
         self._cancel = threading.Event()
         self.stack_viewer = None
         self.pages: list = []
+        self.choices: list = []                    # per page, its choices' boxes (`Page.controls`)
 
         scroll = QScrollArea(widgetResizable=True)
         scroll.setWidget(self._controls())
@@ -92,8 +97,14 @@ class PSFCalibrationWindow(QMainWindow):
         scroll.setMinimumWidth(360)
         scroll.setMaximumWidth(430)
 
+        from .stack_browser import StackBrowser
         self.tabs = QTabWidget()
+        self.tabs.setElideMode(Qt.ElideNone)
         self.tabs.currentChanged.connect(lambda _: self.redraw())
+        # the first page, always there: the stacks as recorded, the detected beads ringed on them
+        self.stack_browser = StackBrowser()
+        self.stack_browser.on_pick = self._select_bead
+        self.tabs.addTab(self.stack_browser, "Stacks")
         self.bead_table = QTableWidget(0, 0)
         self.bead_table.verticalHeader().setVisible(False)
         self.bead_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -135,6 +146,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.resize(1400, 900)
         self._refresh_files()
         self._show_method()
+        for form in self.detection_forms.values():
+            form.changed.connect(self._detection_changed)
 
     # ------------------------------------------------------------ controls
     def _controls(self) -> QWidget:
@@ -174,10 +187,19 @@ class PSFCalibrationWindow(QMainWindow):
         self.method_box = choice("method", [m.label for m in METHODS], self.method_changed)
         self.mode_box = choice("mode", ["Single channel", "Dual colour"], self.mode_changed)
 
+        # one RunSettings, two forms: *start from* is a choice of the model, *save model* of the run
         self.run_form = SettingsForm(RunSettings)
+        self.run_form.set_shown({"start_from": False})
         layout.addWidget(self.run_form)
+        self.start_form = SettingsForm(RunSettings)
+        self.start_form.set_shown({"save_model": False})
         self.optics_form = SettingsForm(OpticsSettings)
         self.model_form = SettingsForm(BeadSettings)
+        model = QWidget()
+        mlayout = QVBoxLayout(model)
+        mlayout.setContentsMargins(0, 0, 0, 0)
+        mlayout.addWidget(self.start_form)
+        mlayout.addWidget(self.model_form)
         self.spline_form = SettingsForm(SplineSettings)
         holder = QWidget()
         hlayout = QVBoxLayout(holder)
@@ -188,7 +210,7 @@ class PSFCalibrationWindow(QMainWindow):
             hlayout.addWidget(form)
             self.detection_forms[cls] = form
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=True),
-                         "model": CollapsibleSection("model", self.model_form, expanded=True),
+                         "model": CollapsibleSection("model", model, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -205,25 +227,42 @@ class PSFCalibrationWindow(QMainWindow):
         layout.addWidget(self.install_button)
         self._installer = None
 
-        self.run_button = QPushButton("Detect + calibrate")
+        self.detect_button = QPushButton("Detect beads")
+        self.detect_button.setToolTip("find the beads, ring them on the Stacks page and say how long "
+                                      "calibrating them will take")
+        self.detect_button.clicked.connect(self.detect)
+        self.run_button = QPushButton("Calibrate")
+        self.run_button.setToolTip("calibrate from the detected beads (detecting them first if they are not); "
+                                   "the fit quality and the model against the data follow")
         self.run_button.clicked.connect(self.run)
         self.stop_button = QPushButton("Stop")
         self.stop_button.setToolTip("stop the pupil model's learning after the current iteration; nothing is saved")
         self.stop_button.clicked.connect(self._cancel.set)
-        self.quality_button = QPushButton("Calculate fit quality")
-        self.quality_button.setToolTip("fit the beads back with the fitter the data will meet")
-        self.quality_button.clicked.connect(self.fit_quality)
+        self.found_label = QLabel("")
+        self.found_label.setWordWrap(True)
+        self.found_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1000)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setVisible(False)
         self.save_as_button = QPushButton("Save as...")
         self.save_as_button.setToolTip("save this calibration somewhere else, or when save model was off")
         self.save_as_button.clicked.connect(self.save_as)
         self.use_button = QPushButton("Use in the Spline 3D fitter")
         self.use_button.setToolTip("put the saved calibration into the fitter's calibration field")
         self.use_button.clicked.connect(self._use_in_fitter)
-        self.browse_button = QPushButton("Browse average stack...")
-        self.browse_button.setToolTip("look through the averaged bead stack slice by slice, in its own window")
+        self.browse_button = QPushButton("Browse stacks...")
+        self.browse_button.setToolTip("the averaged bead stack and the model, or each bead alone, slice by "
+                                      "slice in any direction, in its own window")
         self.browse_button.clicked.connect(self.browse_stack)
-        for button in (self.run_button, self.stop_button, self.quality_button, self.save_as_button,
-                       self.use_button, self.browse_button):
+        steps = QHBoxLayout()
+        steps.addWidget(self.detect_button)
+        steps.addWidget(self.run_button)
+        steps.addWidget(self.stop_button)
+        layout.addLayout(steps)
+        layout.addWidget(self.found_label)
+        layout.addWidget(self.progress_bar)
+        for button in (self.save_as_button, self.use_button, self.browse_button):
             layout.addWidget(button)
         layout.addStretch(1)
         return panel
@@ -241,7 +280,7 @@ class PSFCalibrationWindow(QMainWindow):
         reads = self.method.sections
         for name in ("microscope", "model", "spline"):
             self.sections[name].setVisible(reads[name])
-        self.run_form.set_shown({"start_from": reads["start from"]})
+        self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
         shared = {f.name for f in fields(CalibrationSettings)}
         for cls, form in self.detection_forms.items():
@@ -254,7 +293,6 @@ class PSFCalibrationWindow(QMainWindow):
         # shown only while torch is missing or too old: nothing to press once it is right
         self.install_button.setVisible(pupil and (missing is not None or self._installer is not None))
         self.stop_button.setVisible(pupil)
-        self.quality_button.setVisible(self.method.has_quality)
         self.browse_button.setVisible(self.method.has_stack)
         self.table_hint.setText("beads - space marks a used bead to be excluded"
                                 + (" or a rejected one to be included" if self.method.marks_include else "")
@@ -270,9 +308,23 @@ class PSFCalibrationWindow(QMainWindow):
         self.marks = {}
         self._clear_pages()
         self.bead_table.setRowCount(0)
+        self._undetect(None)
         self._show_method()
         self.status_bar.showMessage(message)
 
+    def _detection_changed(self) -> None:
+        self.stack_browser.set_paths(self.paths, self._dz_nm())
+        self._undetect("detection settings changed")
+
+    def _undetect(self, why) -> None:
+        """Drop what Detect beads found: the files or a setting it read changed.  A calibration made from
+        it stays, with its table; only its rings go from the Stacks page until the next detection."""
+        if self.busy or self.detected is None:
+            return
+        self.detected = None
+        self.found_label.setText(f"{why}: detect again" if why else "")
+        if self.run_result is None:
+            self.stack_browser.set_marks([])
     def method_changed(self, label: str) -> None:
         self.method = next(m for m in METHODS if m.label == label)
         self._forget("method changed; files and settings kept - calibrate again")
@@ -283,11 +335,11 @@ class PSFCalibrationWindow(QMainWindow):
     def _update_buttons(self) -> None:
         ready = not (self.method.key == "pupil" and torch_missing() is not None)
         done = self.run_result is not None
+        self.detect_button.setEnabled(ready and not self.busy)
         self.run_button.setEnabled(ready and not self.busy)
         self.stop_button.setEnabled(self.busy)
         self.rebuild_button.setEnabled(ready and done and not self.busy)
         self.toggle_button.setEnabled(done)
-        self.quality_button.setEnabled(done and not self.busy)
         self.save_as_button.setEnabled(done and not self.busy)
         self.browse_button.setEnabled(done)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
@@ -297,6 +349,21 @@ class PSFCalibrationWindow(QMainWindow):
         self.file_list.clear()
         for path in self.paths:
             self.file_list.addItem(path)
+        self.stack_browser.set_paths(self.paths, self._dz_nm())
+        self._undetect("the files changed")
+
+    def _box_px(self) -> int:
+        try:
+            return int(self.detection_form.value().roi_size)
+        except ValueError:
+            return self.stack_browser.box_px
+
+    def _dz_nm(self):
+        """The detection's z step for the Stacks page; the files' own while the field is being typed in."""
+        try:
+            return self.detection_form.value().dz_nm
+        except ValueError:
+            return self.stack_browser.dz_nm
 
     def add_paths(self, paths) -> None:
         for path in paths:
@@ -341,6 +408,10 @@ class PSFCalibrationWindow(QMainWindow):
             return
         self.busy = True
         self._cancel.clear()
+        self._tracker = LearningProgress()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setVisible(True)
         self._update_buttons()
         self._thread = QThread()
         self._thread.setStackSize(32 * 1024 * 1024)
@@ -353,22 +424,28 @@ class PSFCalibrationWindow(QMainWindow):
         self._thread.start()
 
     def _progress(self, entry) -> None:
-        if "message" in entry:
-            self.status_bar.showMessage(entry["message"])
-            return
-        stage = {1: "low orders", 2: "all orders"}.get(entry.get("stage"), "learning")
-        objective = entry.get("objective")
-        self.status_bar.showMessage(f"{stage}: iteration {entry.get('iteration', 0)}"
-                                    + ("" if objective is None else f", -log L {float(objective):.6g}"))
+        fraction, left, text = self._tracker.update(entry)
+        if "detected" in entry:                          # Calibrate detected first: shown at once
+            self._show_detected(entry["detected"])
+        if fraction is None:
+            self.progress_bar.setRange(0, 0)             # busy, no fraction yet
+        else:
+            self.progress_bar.setRange(0, 1000)
+            self.progress_bar.setValue(int(round(1000 * fraction)))
+            self.progress_bar.setFormat("%p%" + ("" if left is None or left < 1 else f" - about {duration(left)} left"))
+        self.status_bar.showMessage(text)
 
     def _finished(self, kind: str, value) -> None:
         self.busy = False
+        self.progress_bar.setVisible(False)
         if kind == "error":
             self._update_buttons()
             self.error(value)
             return
-        if kind == "quality":
-            self._show_result(focus="Fit quality")
+        if kind == "detected":
+            self._show_detected(value)
+            self._update_buttons()
+            self.status_bar.showMessage(value.text)
             return
         self.run_result = value
         self.marks = self.method.initial_marks(value)
@@ -377,7 +454,9 @@ class PSFCalibrationWindow(QMainWindow):
             self.calibrated.emit(str(value.saved), value.dual)
 
     def _inputs(self) -> dict:
-        inputs = dict(detection=self.detection_form.value(), run=self.run_form.value())
+        run = self.run_form.value()
+        run.start_from = self.start_form.value().start_from
+        inputs = dict(detection=self.detection_form.value(), run=run)
         if self.method.sections["microscope"]:
             inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
                           spline=self.spline_form.value())
@@ -385,7 +464,15 @@ class PSFCalibrationWindow(QMainWindow):
                 raise ValueError("give the microscope's NA and emission wavelength: there is no default for them")
         return inputs
 
-    def run(self) -> None:
+    def _show_detected(self, detected) -> None:
+        self.detected = detected
+        self.found_label.setText(detected.text)
+        sources = getattr(detected.found, "sources", None) or []
+        self.stack_browser.box_px = self._box_px()
+        self.stack_browser.set_marks(detected.positions, sources)
+
+    def detect(self) -> None:
+        """Find the beads and say how many and how long calibrating them will take; nothing is learnt."""
         if not self.paths:
             QMessageBox.information(self, "no stacks", "add bead stacks first")
             return
@@ -395,9 +482,32 @@ class PSFCalibrationWindow(QMainWindow):
             self.error(error)
             return
         method, paths, dual = self.method, list(self.paths), self.is_dual
-        self.marks = {}
         self.status_bar.showMessage("detecting beads...")
-        self._work("result", lambda progress: method.run(paths, dual, inputs, progress, self._cancel))
+        self._work("detected", lambda progress: method.detect(paths, dual, inputs, progress))
+
+    def run(self) -> None:
+        """Calibrate from the detected beads, detecting them first if they are not, then `Method.finish`."""
+        if not self.paths:
+            QMessageBox.information(self, "no stacks", "add bead stacks first")
+            return
+        try:
+            inputs = self._inputs()
+        except ValueError as error:
+            self.error(error)
+            return
+        method, paths, dual, detected = self.method, list(self.paths), self.is_dual, self.detected
+        self.marks = {}
+        self.status_bar.showMessage("calibrating..." if detected else "detecting beads...")
+
+        def work(progress):
+            found = detected
+            if found is None:
+                found = method.detect(paths, dual, inputs, progress)
+                progress({"message": found.text, "detected": found})
+                progress({"restart": True})        # one bar for the calibration; detection had its own
+            run = method.run(paths, dual, inputs, progress, self._cancel, detected=found)
+            return method.finish(run, progress)
+        self._work("result", work)
 
     def rebuild(self) -> None:
         if self.run_result is None:
@@ -409,44 +519,71 @@ class PSFCalibrationWindow(QMainWindow):
             return
         method, paths, previous, marks = self.method, list(self.paths), self.run_result, dict(self.marks)
         self.status_bar.showMessage("calibrating again with your marks...")
-        self._work("result", lambda progress: method.run(paths, previous.dual, inputs, progress, self._cancel,
-                                                         previous=previous, marks=marks))
-
-    def fit_quality(self) -> None:
-        if self.run_result is None or not self.method.has_quality:
-            return
-        method, run = self.method, self.run_result
-        self.status_bar.showMessage("fitting the beads back with the "
-                                    + ("two-channel" if run.dual else "spline") + " fitter...")
-        self._work("quality", lambda progress: method.quality(run))
+        self._work("result", lambda progress: method.finish(
+            method.run(paths, previous.dual, inputs, progress, self._cancel, previous=previous, marks=marks),
+            progress))
 
     # -------------------------------------------------------------- results
     def _clear_pages(self) -> None:
+        """Every result page goes; the Stacks page stays."""
         self.tabs.blockSignals(True)
-        while self.tabs.count():
-            widget = self.tabs.widget(0)
-            self.tabs.removeTab(0)
+        while self.tabs.count() > 1:
+            widget = self.tabs.widget(1)
+            self.tabs.removeTab(1)
             widget.deleteLater()
         self.tabs.blockSignals(False)
         self.pages = []
+        self.choices = []
+
+    def _page_widget(self, canvas, page) -> tuple:
+        """The canvas, with the page's choices (`Page.controls`) in a row above it; (widget, boxes)."""
+        if not page.controls:
+            return canvas, {}
+        holder = QWidget()
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        boxes = {}
+        for label, choices in page.controls.items():
+            row.addWidget(QLabel(label))
+            box = QComboBox()
+            box.addItems(list(choices))
+            box.currentTextChanged.connect(lambda _: self.redraw())
+            row.addWidget(box)
+            boxes[label] = box
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addWidget(canvas, 1)
+        return holder, boxes
 
     def _show_result(self, focus=None) -> None:
         from matplotlib.figure import Figure
 
         from ..gui.canvas import canvas_class
-        current = focus or (self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.count() else None)
+        current = focus or (self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.count() > 1 else None)
+        if current in (None, "Stacks"):
+            current = "Model vs data"
+        chosen = {page.title: {k: b.currentText() for k, b in boxes.items()}
+                  for (_, _, page), boxes in zip(self.pages, self.choices)}
         self._clear_pages()
         self.tabs.blockSignals(True)
         for page in self.method.pages(self.run_result):
             figure = Figure(figsize=(9, 6), constrained_layout=True)
             canvas = canvas_class()(figure)
             canvas.mpl_connect("pick_event", self.pick_pair)
-            self.tabs.addTab(canvas, page.title)
+            widget, boxes = self._page_widget(canvas, page)
+            for label, value in chosen.get(page.title, {}).items():      # the choices survive a Recalculate
+                if label in boxes:
+                    boxes[label].setCurrentText(value)
+            self.tabs.addTab(widget, page.title)
             self.pages.append((figure, canvas, page))
+            self.choices.append(boxes)
         titles = [self.tabs.tabText(i) for i in range(self.tabs.count())]
         if current in titles:
             self.tabs.setCurrentIndex(titles.index(current))
         self.tabs.blockSignals(False)
+        self.stack_browser.set_marks(self.detected.positions if self.detected else self._positions(),
+                                     self._sources(), self._states())
         self.refresh_table()
         self._update_buttons()
         self.redraw()
@@ -456,16 +593,43 @@ class PSFCalibrationWindow(QMainWindow):
         if self.stack_viewer is not None and self.stack_viewer.isVisible():
             self.browse_stack()
 
+    def _positions(self) -> list:
+        from .psf_methods import _positions
+        records = getattr(getattr(self.run_result.result, "rois", None), "records", None)
+        if records is None:
+            records = self.run_result.result.beads.records
+        return _positions(records)
+
+    def _sources(self) -> list:
+        result = self.run_result.result if self.run_result is not None else None
+        found = self.detected.found if self.detected is not None else (
+            getattr(result, "rois", None) or getattr(result, "beads", None))
+        return list(getattr(found, "sources", None) or [])
+
+    def _states(self) -> dict:
+        """Each bead's state for its ring, from the bead table's last column the methods share."""
+        rows = self.method.rows(self.run_result, {})
+        state = self.method.columns.index("state")
+        return {i: str(values[state]).split(":")[0] for i, (values, _) in enumerate(rows)}
+
+    def _page_index(self) -> int:
+        """The result page in front, an index into ``pages``; -1 for the Stacks page."""
+        return self.tabs.currentIndex() - 1
+
     def redraw(self) -> None:
         """Draw the page in front, with the table's selection and marks."""
-        index = self.tabs.currentIndex()
+        index = self._page_index()
         if self.run_result is None or not 0 <= index < len(self.pages):
             return
         figure, canvas, page = self.pages[index]
         excluded = {b for b, wish in self.marks.items() if wish == "exclude"}
         try:
             figure.clear()
-            message = page.draw(figure, self.selected_beads(), excluded)
+            if page.controls:
+                chosen = {k: b.currentText() for k, b in self.choices[index].items()}
+                message = page.draw(figure, self.selected_beads(), excluded, chosen)
+            else:
+                message = page.draw(figure, self.selected_beads(), excluded)
         except Exception as error:
             self.status_bar.showMessage(f"could not draw: {type(error).__name__}: {error}")
             return
@@ -474,9 +638,15 @@ class PSFCalibrationWindow(QMainWindow):
         canvas.draw_idle()
 
     def _selection_changed(self) -> None:
-        index = self.tabs.currentIndex()
+        self.stack_browser.select(self.selected_beads())
+        index = self._page_index()
         if 0 <= index < len(self.pages) and self.pages[index][2].follows_selection:
             self.redraw()
+
+    def _select_bead(self, bead: int) -> None:
+        """A ring clicked on the Stacks page: its bead selected in the table, if there is one yet."""
+        if bead < self.bead_table.rowCount():
+            self.bead_table.selectRow(bead)
 
     def refresh_table(self) -> None:
         if self.run_result is None:
@@ -529,14 +699,13 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is None or not self.method.has_stack:
             return
         from .stack_view import StackViewer
-        volumes, titles, mirror = self.method.stacks(self.run_result)
-        calibration = self.run_result.result.calibration
+        views, calibration = self.method.stacks(self.run_result)
         if self.stack_viewer is None:
-            self.stack_viewer = StackViewer(volumes, calibration, titles, mirror, self)
+            self.stack_viewer = StackViewer(views.data, calibration, views.titles, views.mirror_axis, self,
+                                            views=views)
         else:
             self.stack_viewer.calibration = calibration
-            self.stack_viewer.mirror_axis = mirror
-            self.stack_viewer.set_volumes(volumes, titles)
+            self.stack_viewer.set_views(views)
         self.stack_viewer.show()
         self.stack_viewer.raise_()
 

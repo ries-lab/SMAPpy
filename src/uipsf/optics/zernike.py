@@ -38,6 +38,34 @@ def noll_to_nm(j: int) -> tuple[int, int]:
     return n, (-m if j % 2 else m)
 
 
+# Short names by |m|, so a bar chart of coefficients reads without a table: astigmatism, coma, trefoil, ...
+_FAMILY = {0: "Sp", 1: "Co", 2: "As", 3: "Tr", 4: "Qu", 5: "Pe", 6: "He", 7: "Hp", 8: "Oc"}
+#: what the abbreviations of `zernike_name` stand for, for a figure's legend
+ZERNIKE_NAMES = ("Pi piston, T tilt, Df defocus, Sp spherical, Co coma, As astigmatism, Tr trefoil, "
+                 "Qu quadrafoil, Pe pentafoil, He hexafoil, Hp heptafoil, Oc octafoil; x: cos, y: sin; "
+                 "2, 3: the second, third order")
+
+
+def zernike_name(j: int) -> str:
+    """Noll index j's short name: "Df" defocus, "Asx" / "Asy" the astigmatisms (cos 2φ / sin 2φ), "Cox",
+    "Sp", "2Asx" the second astigmatism (n = 4), "2Sp" the second spherical (n = 6) and so on (`ZERNIKE_NAMES`).
+
+    The suffix is the azimuthal term, x for cos mφ and y for sin mφ: the axes of a tilt or a coma, and for
+    astigmatism 0°/90° against ±45°.  The prefix counts the family's radial orders from its first."""
+    n, m = noll_to_nm(j)
+    a = abs(m)
+    if n == 0:
+        return "Pi"
+    if n == 1:
+        return "Tx" if m > 0 else "Ty"
+    if n == 2 and m == 0:
+        return "Df"
+    family = _FAMILY.get(a, f"m{a}")
+    first = {0: 4, 1: 3}.get(a, a)                   # the family's lowest radial order
+    k = (n - first) // 2 + 1
+    return f"{k if k > 1 else ''}{family}{'' if m == 0 else ('x' if m > 0 else 'y')}"
+
+
 def nm_to_noll(n: int, m: int) -> int:
     j = n * (n + 1) // 2 + 1 + max(0, abs(m) - 1)
     if (m > 0 and n % 4 >= 2) or (m < 0 and n % 4 <= 1):

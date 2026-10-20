@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 from ..model.channels import prefix, view
-from ..optics.zernike import noll_to_nm
+from ..optics.zernike import ZERNIKE_NAMES, zernike_name
 
 STATES = {"used": "#1f77b4", "held out": "#2ca02c", "rejected": "#d62728", "excluded": "#7f7f7f"}
 
@@ -57,8 +57,7 @@ def pupil_maps(source, channel: int = 0) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _label(j: int) -> str:
-    n, m = noll_to_nm(j)
-    return f"{j}\n({n},{m})"
+    return f"{zernike_name(j)}\n{j}"
 
 
 def draw_pupil(fig, source, channel: int = 0) -> None:
@@ -98,7 +97,8 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
         ax.set_xticks(x + (width / 2 if reference is not None else 0))
         ax.set_xticklabels([_label(j) for j in modes], fontsize="x-small")
         ax.set_ylabel("rad" if w == "phase" else "relative")
-        ax.set_title(f"{w}: Noll index (n, m)")
+        ax.set_title(f"{w}: name and Noll index", fontsize="small")
+    fig.supxlabel(ZERNIKE_NAMES, fontsize="x-small", wrap=True)
 
 
 def draw_atlas(fig, atlas, groups=("slice", "|z|", "radius", "field")) -> None:

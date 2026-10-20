@@ -91,19 +91,40 @@ def _titles(window):
 
 
 def _every_page_draws(window):
-    for i in range(window.tabs.count()):
+    for i in range(1, window.tabs.count()):
         window.tabs.setCurrentIndex(i)
-        assert window.pages[i][0].axes, window.tabs.tabText(i)
+        assert window.pages[i - 1][0].axes, window.tabs.tabText(i)
 
 
 def test_the_window_shows_each_method_its_own_sections_only(stack_file, monkeypatch):
     window, _, _ = _window(stack_file, monkeypatch, "bead average")
     assert window.sections["microscope"].isHidden() and window.sections["model"].isHidden()
-    assert not window.sections["beads"].isHidden() and window.quality_button.isVisibleTo(window)
+    assert not window.sections["beads"].isHidden() and window.browse_button.isVisibleTo(window)
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert not window.sections["microscope"].isHidden() and not window.sections["model"].isHidden()
-    assert window.quality_button.isVisibleTo(window) and not window.browse_button.isVisibleTo(window)
+    assert window.start_form.isVisibleTo(window)                              # start from: in the model
+    assert not window.run_form.fields["start_from"].isVisibleTo(window)
     assert not window.install_button.isVisibleTo(window)                      # torch is here and recent
+    assert _titles(window) == ["Stacks"] and window.stack_browser.acquisitions == [str(stack_file)]
+    window.close()
+
+
+def test_detect_beads_rings_them_on_the_stacks_page_and_estimates_the_learning(stack_file, monkeypatch):
+    window, _, wait = _window(stack_file, monkeypatch, "pupil model (uiPSF)")
+    window.detect()
+    wait()
+    detected = window.detected
+    assert detected is not None, window.status_bar.currentMessage()
+    assert len({p[3] for p in detected.positions}) == 10 and 0 < detected.seconds < 600
+    assert "10 beads" in window.found_label.text() and "learning takes about" in window.found_label.text()
+    assert window.run_result is None                                          # nothing learnt
+    window.stack_browser.draw()
+    rings = [p for p in window.stack_browser.figure.axes[0].patches if hasattr(p, "pair_ids")]
+    assert len(rings) == 10
+    distance = window.detection_form.fields["min_distance_px"].widget          # typed in, as by hand
+    distance.setText("22")
+    distance.editingFinished.emit()
+    assert window.detected is None                                            # a detection setting changed
     window.close()
 
 
@@ -114,15 +135,19 @@ def test_the_bead_average_calibrates_in_the_window_as_in_the_bead_calibration(st
     wait()
     run = window.run_result
     assert run is not None, window.status_bar.currentMessage()
-    assert _titles(window) == ["Overview", "Fit quality", "Bead diagnostics"]
+    assert _titles(window) == ["Stacks", "Overview", "Model vs data", "Fit quality", "Bead diagnostics"]
     assert run.saved.exists() and handed == [(str(run.saved), False)]
     assert window.bead_table.rowCount() == 10 and window.bead_table.columnCount() == 8
-    window.fit_quality()
-    wait()
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Fit quality" and "quality" in run.extra
+    assert {"quality", "views"} <= set(run.extra)                             # without a button
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Model vs data"
     _every_page_draws(window)
     window.browse_stack()
     assert window.stack_viewer.isVisible()
+    viewer = window.stack_viewer
+    viewer.beside_box.setCurrentText("data | model")
+    assert [kind for _, _, kind in viewer.panels()] == ["data", "data"]
+    viewer.bead_slider.setValue(1)
+    assert viewer.bead == sorted(run.extra["views"].beads)[0]
     window.bead_table.selectRow(2)
     window.toggle_beads()
     window.rebuild()
@@ -140,18 +165,24 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     window.run()
     wait()
     assert window.run_result is not None, window.status_bar.currentMessage()
-    assert {"Pupil", "Zernikes", "Residual atlas", "Beads"} <= set(_titles(window))
+    assert {"Stacks", "Pupil", "Zernikes", "Residual atlas", "Model vs data", "Fit quality", "Beads"} <= \
+        set(_titles(window))
+    assert window.detected is not None                                        # Calibrate detected first
     _every_page_draws(window)
     assert window.bead_table.rowCount() == 10
     saved = window.run_result.saved
     assert handed == [(str(saved), False)] and window.use_button.isEnabled()
-    window.fit_quality()
-    wait()
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Fit quality"
+    views = window.run_result.extra["views"]
+    data, model = views.data[0], views.model[0]
+    assert np.nanmax(np.abs(data - model)) < 0.05 * np.nanmax(data)          # the model fits its beads
+    yy, xx = np.indices(model.shape[1:])
+    weight = np.nansum(model, 0)
+    assert abs((weight * xx).sum() / weight.sum() - (model.shape[2] - 1) / 2) < 0.5   # aligned on the centre
+    window.tabs.setCurrentIndex(_titles(window).index("Fit quality"))
     quality = window.run_result.extra["quality"]
     used = quality["state"] == "used"
     assert np.nanmedian(np.abs(quality["centred_error_nm"][used])) < 15        # the spline fits its own beads
-    curves = [line for ax in window.pages[window.tabs.currentIndex()][0].axes for line in ax.get_lines()
+    curves = [line for ax in window.pages[window.tabs.currentIndex() - 1][0].axes for line in ax.get_lines()
               if hasattr(line, "pair_ids")]
     assert len(curves) == 2 * 10                                               # every bead, used or not
     window.pick_pair(type("Pick", (), {"artist": curves[3], "ind": [0]})())    # a click on bead 3's curve
