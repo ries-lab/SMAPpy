@@ -610,3 +610,22 @@ def test_link_tracks_output_columns_stay_whole_numbers_when_merged():
                           "linked_id": np.array([3, 4]), "linked_length": np.array([5, 6])},
                          {"track_columns": ["linked_id"]})
     assert id_columns(locs) == {"linked_id": "max", "linked_length": "max"}
+
+
+def test_rows_with_group_use_zero_are_in_no_group_and_the_rest_merge_without_them():
+    """A trace's first localizations biased (MINFLUX's creep): left out of
+    the merge by `group_use`, kept in the localizations."""
+    tid = np.repeat([1, 2, 3], [5, 4, 2])
+    index = np.concatenate([np.arange(1, 6), np.arange(1, 5), np.arange(1, 3)])
+    x = tid * 1000.0 + np.where(index <= 2, 100.0, 0.0)
+    locs = Localizations({"x_nm": x, "y_nm": np.zeros(11), "frame": np.arange(11),
+                          "tid": tid, "xy_err_nm": np.ones(11),
+                          "photons": np.full(11, 100.0), "group_use": index > 2})
+    grouped, group_index = group(locs)
+    assert np.allclose(grouped["x_nm"], [1000.0, 2000.0])   # trace 3 had only its start
+    assert list(grouped["n_in_group"]) == [3, 2]
+    assert "group_use" not in grouped
+    assert list(group_index) == [0, 0, 1, 1, 1, 0, 0, 2, 2, 0, 0]
+    assert list(locs["group_id"]) == list(group_index)
+    assert list(locs["n_in_group"]) == [0, 0, 3, 3, 3, 0, 0, 2, 2, 0, 0]
+    assert len(locs) == 11

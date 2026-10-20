@@ -124,6 +124,9 @@ COMBINE_MODES: Dict[str, str] = {
     "frame": "min",
     "iterations": "max",
     "tid": "min",           # one trace per group: its id, kept an integer
+    # a localization's number in its trace (`io.minflux.trace_index`): a
+    # trace's row starts where it starts
+    "trace_index": "min",
     # a track simulation's truth (`simulate.tracks`): ids, which a mean turns
     # into another track's id when one blink merged two particles passing
     # close -- the tracks render mode then joined it to that track, across
@@ -138,7 +141,8 @@ COMBINE_MODES: Dict[str, str] = {
 }
 
 # Ids: integers after merging too, so they compare and draw as ids
-INTEGER_COLUMNS = ("tid", "track_id_true", "state_true", "track_id", "track_length")
+INTEGER_COLUMNS = ("tid", "trace_index", "track_id_true", "state_true", "track_id",
+                   "track_length")
 
 # Where Link tracks lists the id columns it wrote under another name than
 # `track_id` (its *output column*, `plugins/link_tracks.py`)
@@ -175,6 +179,31 @@ DROP_ON_GROUPING = ("logl",)
 # combinable without linking again: the expensive part of grouping is the walk,
 # and it has already been done.  It costs 4 bytes a localization.
 GROUP_COLUMNS = ("group_id", "n_in_group")
+
+# Which localizations take part in grouping: where the table has the column,
+# a row with 0 there is in no group -- `group_id` 0, in no row of the grouped
+# table -- and stays in the localizations, for every layer that shows them.
+# Usually absent, and then every row is grouped.  Made by the user, as a
+# recipe (`group_use = trace_index > 20`: a MINFLUX trace merged without its
+# creeping start, NOTES.md), so it follows the table; it means nothing on the
+# grouped table and is not kept there.
+USE = "group_use"
+
+
+def used_rows(locs) -> Optional[np.ndarray]:
+    """The rows grouping reads (`USE`), as a mask; None when that is all."""
+    if USE not in locs:
+        return None
+    use = np.asarray(locs[USE])
+    use = np.isfinite(use) & (use != 0) if use.dtype.kind == "f" else use != 0
+    return None if use.all() else use
+
+
+def use_token(locs) -> Optional[int]:
+    """What says whether `USE` changed: the array's identity, since columns
+    are replaced and never written into (`layer_state.Tables` keeps the
+    array alive, so the identity cannot be reused).  None without one."""
+    return id(locs.columns[USE]) if USE in locs.columns else None
 
 # The precision columns the general weight is taken from, best first (SMAP's
 # order).  It is a lateral precision, so it is the right weight for x and y.
@@ -762,7 +791,10 @@ def attach(locs: Localizations, grouped: Localizations,
     """
     gi = np.asarray(group_index, np.int64)
     locs.columns["group_id"] = gi.astype(np.int32)
-    locs.columns["n_in_group"] = np.asarray(grouped["n_in_group"])[gi - 1]
+    counts = np.asarray(grouped["n_in_group"])
+    # a row left out of grouping (`USE`) is in no group, of no size
+    locs.columns["n_in_group"] = np.where(gi > 0, counts[np.maximum(gi, 1) - 1]
+                                          if len(counts) else 0, 0).astype(counts.dtype)
     # a recipe in `n_in_group` can only now be computed -- see `mathparse`
     apply_recipes(locs)
 
@@ -800,8 +832,21 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     the instrument has already said which localizations are one molecule,
     and its `frame` is only the rank in time, so linking by distance and
     consecutive frames would cut a trace wherever it wandered 50 nm.
+
+    Rows with 0 in `USE` are left out: group id 0, no row of the grouped
+    table (a trace or blink of none of them is not there at all).
     """
     settings = settings or GroupSettings()
+    use = used_rows(locs)
+    if use is not None:
+        rows = np.flatnonzero(use)
+        grouped, index = group(locs[rows], settings, progress, attach_columns=False)
+        group_index = np.zeros(len(locs), np.int64)
+        group_index[rows] = index
+        grouped.columns.pop(USE, None)
+        if attach_columns:
+            attach(locs, grouped, group_index)
+        return grouped, group_index
     from .render import positions
 
     present = [locs[name] for name in settings.block_fields if name in locs]
@@ -809,6 +854,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     if TRACE in locs:
         group_index = by_trace(locs[TRACE], blocks)
         grouped = combine(locs, group_index, progress=progress)
+        grouped.columns.pop(USE, None)
         if attach_columns:
             attach(locs, grouped, group_index)
         return grouped, group_index
@@ -833,6 +879,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     group_index = connect(x, y, locs["frame"], dx, settings.dt, blocks,
                           progress=progress, **by_precision)
     grouped = combine(locs, group_index, progress=progress)
+    grouped.columns.pop(USE, None)
     if attach_columns:
         attach(locs, grouped, group_index)
     return grouped, group_index

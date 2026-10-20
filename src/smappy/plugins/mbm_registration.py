@@ -56,9 +56,6 @@ class MBMRegistrationSettings:
                         help="the measurement that moves")
     fit: str = param("auto", label="fit", choices=FITS,
                      help="a translation, or with three beads or more a rotation too")
-    skip: int = param(30, label="skip", unit="points", min=0, max=1000,
-                      help="a bead's first points, left out: MINFLUX's creep at the "
-                           "start of a trace")
     tolerance_nm: float = param(200.0, label="tolerance", unit="nm", min=1.0,
                                 help="how far two beads' shifts may differ and agree")
     max_shift_nm: float = param(5000.0, label="largest shift", unit="nm", min=10.0,
@@ -76,7 +73,7 @@ class MBMRegistration(Plugin):
 
     Settings = MBMRegistrationSettings
     changes_locs = False
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = FormState()
@@ -108,7 +105,7 @@ class MBMRegistration(Plugin):
 
     def run(self, ctx: Context, settings: MBMRegistrationSettings) -> Result:
         from ..mbm import MBMSettings, choose
-        from ..mbm_registration import register as fit_map, settled_positions
+        from ..mbm_registration import register as fit_map, start_positions
         from ..transformation import Transformation
         found = {label: (k, m) for label, k, m in measurements(ctx)}
         if not found:
@@ -127,12 +124,11 @@ class MBMRegistration(Plugin):
             chosen, axes = choose(m, MBMSettings())
             names = {b["tid"]: str(b["name"] or b["gri"]) for b in m.info}
             ids = sorted(names)
-            return settled_positions(np.asarray(m.beads["time_s"]),
+            return start_positions(np.asarray(m.beads["time_s"]),
                                      np.column_stack([np.asarray(m.beads[f"{a}_nm"])
                                                       for a in axes]),
                                      np.asarray(m.beads["tid"]),
-                                     [names[i] for i in ids], curve=chosen.drift_nm,
-                                     skip=settings.skip)
+                                     [names[i] for i in ids], curve=chosen.drift_nm)
         (_, ref_m), (target_file, tgt_m) = found[settings.reference], found[settings.target]
         reference, target = positions(ref_m), positions(tgt_m)
         rigid = None if settings.fit == "auto" else settings.fit == "rigid"

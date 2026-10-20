@@ -30,7 +30,11 @@ It measures every region in one pass.  The same numbers from
 *Localization statistics* run per region in a block take minutes for 10^5
 traces; here they take a second.  It reads the localizations, not merged
 blinks, and only those the layer's filter keeps; a drawn ROI does not
-narrow it, as it does not narrow a block's regions.
+narrow it, as it does not narrow a block's regions.  So on a MINFLUX file a
+filter on `trace_index` (each localization's number in its trace, from 1)
+leaves out the start of each trace, where a still emitter often creeps into
+place over its first 5 to 30 localizations: `trace_index > 20`, say, before
+a trace's centre and spread are measured.
 
 ## How it works
 

@@ -1702,19 +1702,25 @@ measurements, four beads each) and checked by
   so a curve from them holds all Imspector corrected, and on top of `x_nm`
   it would count twice.  Run again, it gives the same table.  An earlier
   plan had a mode "on top of Imspector's"; it was dropped for this reason.
-* **A fixed emitter's first points are biased** (2026-10, from the lab's
+* **A trace's first localizations are biased** (2026-10, from the lab's
   experience): in MINFLUX a still fluorophore's first localizations of a
-  trace -- an MBM bead's as well -- creep into place over up to some 30
-  points, so its last points measure its position better than its first.
-  *MBM registration* leaves each bead's first 30 points out
-  (`mbm_registration.settled_positions`).  Not yet followed elsewhere: the
-  MBM drift curve is fitted through the beads' first points, so it follows
-  their common creep for the first minute -- its zero at the first bead
-  point offsets the whole measurement by that creep (a constant, harmless
-  alone and cancelling in a registration), and the localizations of that
-  first minute are corrected by a creep that is the beads', not the
-  sample's; a trace's mean and spread (*Id statistics*, the grouped layer)
-  include its creeping start.
+  trace creep into place -- the first iterations do not converge fast
+  enough, an estimator bias -- in 10-30 % of traces and over 5 to 30
+  localizations depending on the sequence, so a trace's last points
+  measure its position better than its first.  It is within a trace only:
+  the rest of the trace is good, so the starts are filtered, never whole
+  traces.  The reader numbers each trace's localizations, `trace_index`
+  (1, 2, ...), so a filter such as `trace_index > 20` leaves the starts
+  out of whatever reads the layer (*Id statistics* does).  The grouped
+  layer ignores layer filters, so merging takes its own column,
+  `group_use` (`group.USE`, general, usually absent): `group_use =
+  trace_index > 20` in Math Parser merges each trace without its start,
+  while the localizations keep every row.  **For the MINFLUX tutorial**
+  (to be written once the MINFLUX functionality is in): show `trace_index`,
+  the filter, and `group_use` for the merged traces.  The MBM beads are not traces -- one position
+  per bead and time point, from the beam monitoring -- so nothing is left
+  out of them: a first version of *MBM registration* skipped each bead's
+  first 30 points and was undone.
 * **The beads are a file of their own** in the one table (`msr.bead_table`),
   with only columns the localizations have, so padding costs nothing; it is
   paired with its measurement by the `.msr`'s path and the measurements'

@@ -5,7 +5,7 @@ import pytest
 
 from smappy.io.formats import FileInfo
 from smappy.locs import Localizations
-from smappy.mbm_registration import BeadPositions, match, register, settled_positions
+from smappy.mbm_registration import BeadPositions, match, register, start_positions
 from smappy.session import Session
 
 BEADS = np.array([[2000.0, 3000.0], [15000.0, 4000.0], [8000.0, 18000.0],
@@ -19,19 +19,16 @@ def rigid(angle_deg, shift):
 
 def measurement_meta(positions, names, label, seed=0, drift_from=0.0):
     """A measurement's metadata with beads at ``positions`` at its start,
-    then drifting and noisy, named ``names`` -- the slots in another order --
-    each creeping into place over its first points, as MINFLUX's fixed
-    emitters do (a bias decaying over ~10 points, different per bead)."""
+    then drifting and noisy, named ``names`` -- the slots in another order."""
     rng = np.random.default_rng(seed)
     t = np.arange(0.0, 240.0, 2.0)
     gri, x, y, time = [], [], [], []
     for k, (p, name) in enumerate(zip(positions, names)):
         slot = 61 + 62 * k
         drift = drift_from + 0.2 * t                      # nm, after the start
-        creep = rng.uniform(20, 60) * np.exp(-np.arange(len(t)) / 8.0)
         gri += [slot] * len(t)
-        x += list(p[0] + drift + creep + rng.normal(0, 1.5, len(t)))
-        y += list(p[1] - 0.5 * drift - creep + rng.normal(0, 1.5, len(t)))
+        x += list(p[0] + drift + rng.normal(0, 1.5, len(t)))
+        y += list(p[1] - 0.5 * drift + rng.normal(0, 1.5, len(t)))
         time += list(t)
     return {"label": label, "did": label, "dimensionality": 2, "z_scale": 1.0,
             "mbm": {"used": list(names),
@@ -75,19 +72,14 @@ def test_a_rigid_map_comes_back_from_three_beads_and_more():
     assert two.kind == "translation" and np.allclose(two.matrix[:2, 3], [100.0, 50.0])
 
 
-def test_a_beads_position_leaves_out_its_creeping_start_and_its_drift():
-    """Its first points are biased (MINFLUX's creep), the rest drift: the
-    position is where it was at the start, from the points after the creep."""
+def test_a_beads_position_is_where_it_was_at_the_start_from_all_its_points():
+    """Every point, less the drift: one outlier moves the median not at all."""
     t = np.arange(100.0)
-    drift = 0.5 * t
-    x = 100.0 + drift + np.where(t < 30, 40.0 * np.exp(-t / 8), 0.0)
-    found = settled_positions(t, np.column_stack([x, x]), np.ones(100, int),
-                              curve=lambda s: np.column_stack([0.5 * s, 0.5 * s]),
-                              skip=30)
+    x = 100.0 + 0.5 * t
+    x[0] += 40.0
+    found = start_positions(t, np.column_stack([x, x]), np.ones(100, int),
+                            curve=lambda s: np.column_stack([0.5 * s, 0.5 * s]))
     assert np.allclose(found.xyz, [[100.0, 100.0]])
-    # a bead seen less than the skip keeps its last third
-    few = settled_positions(t[:9], np.column_stack([t[:9], t[:9]]), np.ones(9, int))
-    assert np.allclose(few.xyz, [[7.0, 7.0]])
 
 
 def test_the_plugin_keeps_a_transformation_that_puts_the_target_onto_the_reference():
@@ -108,7 +100,6 @@ def test_the_plugin_keeps_a_transformation_that_puts_the_target_onto_the_referen
     result = session.run(cls(), cls.Settings(reference=labels[0], target=labels[1]))
     found = result.data["registration"]
     assert found.kind == "rigid" and len(found.pairs) == 4
-    # the positions carry the beads' noise, not their creep (20-60 nm)
     assert found.rms_nm < 3.0
     assert np.allclose(found.matrix[:2, :2], rotation, atol=2e-4)
     name = next(iter(session.transformations))
@@ -117,8 +108,8 @@ def test_the_plugin_keeps_a_transformation_that_puts_the_target_onto_the_referen
     x, y, _ = kept.apply(target[:, 0], target[:, 1], target[:, 2])
     i, j = zip(*found.pairs)
     # onto the reference beads as its corrected frame has them: that frame
-    # is zero at the first bead point, which carries the beads' common creep
-    # as a constant offset of the whole measurement
+    # is zero at the first bead point, whose noise offsets the whole
+    # measurement by a constant
     assert np.allclose(np.column_stack([x, y])[list(j)],
                        found.reference.xyz[list(i), :2], atol=5.0)
     assert "found no partner" in result.text            # the target's own bead

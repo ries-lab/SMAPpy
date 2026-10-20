@@ -40,7 +40,9 @@ What is the same for both:
 
 There are no camera frames: ``frame`` is the rank in time (``time_s``,
 Imspector's ``tim``), the trace is ``tid``, and merging blinks merges a trace
-(`group.by_trace`).  The photons are the final iteration's ``eco``.
+(`group.by_trace`).  ``trace_index`` numbers each trace's localizations 1, 2,
+3, ... (`trace_index`), so a filter can leave out the start of a trace,
+where a still emitter creeps into place.  The photons are the final iteration's ``eco``.
 
 The records give no precision, so ``xy_err_nm`` is the Cramér-Rao bound at
 the centre of the beam pattern -- a number from the photons, as a camera
@@ -314,6 +316,28 @@ def _bound(f: Dict[str, np.ndarray], k: Optional[int], pattern_nm: float, crlb) 
     return crlb(pattern_nm, signal, background).astype(np.float32)
 
 
+def trace_index(tid: np.ndarray) -> np.ndarray:
+    """Each localization's number in its trace, 1, 2, 3, ... in the order of
+    the rows (by time, as `table` sorts them).
+
+    In MINFLUX a still emitter's first localizations of a trace -- a bead's
+    too -- often creep into place: 10-30 % of traces, over 5 to 30
+    localizations depending on the sequence (NOTES.md).  A filter on this
+    (``trace_index > 20``) leaves each trace's start out of whatever
+    averages it, which no rule could do better without knowing the
+    sequence."""
+    tid = np.asarray(tid)
+    if not len(tid):
+        return np.zeros(0, np.int32)
+    order = np.argsort(tid, kind="stable")          # by trace, time kept within
+    ordered = tid[order]
+    start = np.r_[0, np.flatnonzero(ordered[1:] != ordered[:-1]) + 1]
+    run = np.arange(len(tid)) - np.repeat(start, np.diff(np.r_[start, len(tid)]))
+    out = np.empty(len(tid), np.int32)
+    out[order] = run + 1
+    return out
+
+
 def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
           dimensionality: Optional[int] = None, source: str = "",
           sequence: Optional[Dict[str, Any]] = None
@@ -372,6 +396,7 @@ def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
         columns["time_s"] = np.asarray(f["tim"], np.float64)
     if "tid" in f:
         columns["tid"] = np.asarray(f["tid"], np.int64)
+        columns["trace_index"] = trace_index(columns["tid"])
     for name in ("sta", "gri", "thi", "sqi"):
         if name in f:
             columns[name] = np.asarray(f[name], np.int32)

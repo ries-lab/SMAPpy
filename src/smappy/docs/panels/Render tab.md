@@ -513,6 +513,18 @@ opens, a table is changed, *merge blinks* is ticked or the merge settings
 change.  A plugin run started meanwhile waits for it and starts by itself
 when it is done.
 
+**Leaving localizations out of the merge.**  Where the table has a column
+`group_use`, a localization with 0 there takes no part in merging: it is in
+no blink (`group_id` 0, `n_in_group` 0), a blink or trace of nothing but
+such localizations is not in the merged table at all, and the rest are
+merged without it.  It stays in the localizations, for every layer that
+shows them and every plugin that reads them.  [Math Parser](plugin:Analysis/Process/Math Parser)
+makes the column -- *new field* `group_use`, an expression such as
+`trace_index > 20` merges each [MINFLUX](plugin:Panels/Glossary) trace
+without its first 20 localizations, where a still emitter is still creeping
+into place -- and the merge follows it: changed or undone, the blinks are
+merged again.
+
 **The axes.**  A coordinate is the column divided by that axis's scale,
 $u / s$, and the render grid stays square in these units -- so the zoom, the
 ROIs and the 3D box work unchanged, and the two scales are what makes a pixel

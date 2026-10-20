@@ -9,16 +9,15 @@ the map between their beads (`docs/survey/minflux.md`, "MBM", item 2).
 **Which positions.**  A corrected measurement is in the instrument's frame
 at its start: *MBM drift correction* subtracts a curve that is zero at the
 measurement's first bead point (`x = x_nc - d(t)`), Imspector a mean
-displacement from it.  So a bead's position is where it was then -- and
-**not** its first samples, which minflux-viewer (the median of 10) and
-pyMINFLUX (the mean of 3) take: a fixed emitter's first points in MINFLUX,
-a bead's as a fluorophore's, carry a bias, a creep up to some 30 points
-long.  Each bead's position is instead the **median of its points after the
-first** *skip* (30), **less the beads' drift curve** at their times
-(`settled_positions`, with the curve of `mbm.choose`): its offset about the
-drift, which is its place at the start without its first points.  Exact
-for localizations corrected by *MBM drift correction*; Imspector's own
-reference, its beads' first point, carries their creep.
+displacement from it.  So a bead's position is where it was then -- not
+its first samples alone, which minflux-viewer (the median of 10) and
+pyMINFLUX (the mean of 3) take, but the **median of all its points less
+the beads' drift curve** at their times (`start_positions`, with the curve
+of `mbm.choose`): its offset about the drift, which is its place at the
+start with the noise of every point averaged.  The bead records are one
+position per bead and time point, not MINFLUX traces, so the creep of a
+trace's first localizations (NOTES.md) does not arise in them.  Exact for
+localizations corrected by *MBM drift correction*.
 
 **Which bead is which.**  Not by name: Imspector's names and slots (``gri``)
 are reused -- R0 was two beads 20 um apart in two measurements of one file
@@ -42,7 +41,6 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-SKIP = 30                   # a bead's first points left out: MINFLUX's creep
 TOLERANCE_NM = 200.0        # how far two pairs' shifts may differ and agree
 MAX_SHIFT_NM = 5000.0       # the largest shift looked for
 
@@ -81,12 +79,11 @@ class Registration:
         return text + f", residual {self.rms_nm:.2f} nm rms"
 
 
-def settled_positions(t, xyz, bead, names: Optional[Sequence[str]] = None,
-                      curve=None, skip: int = SKIP) -> BeadPositions:
-    """Per bead (``bead``, an id per sample), the median of its points after
-    its first ``skip`` in time, less ``curve(t)`` (the drift, nm, an array
-    per axis; None: none).  A bead with too few points keeps its last third.
-    ``names`` per bead id in ascending order, else the ids."""
+def start_positions(t, xyz, bead, names: Optional[Sequence[str]] = None,
+                    curve=None) -> BeadPositions:
+    """Per bead (``bead``, an id per sample), the median of its points less
+    ``curve(t)`` (the drift, nm, an array per axis; None: none).  ``names``
+    per bead id in ascending order, else the ids."""
     t = np.asarray(t, float)
     xyz = np.asarray(xyz, float)
     if xyz.ndim == 1:
@@ -97,10 +94,7 @@ def settled_positions(t, xyz, bead, names: Optional[Sequence[str]] = None,
     ids = np.unique(bead)
     out = np.empty((len(ids), xyz.shape[1]))
     for k, i in enumerate(ids):
-        rows = np.flatnonzero(bead == i)
-        rows = rows[np.argsort(t[rows], kind="stable")]
-        start = min(max(int(skip), 0), (2 * len(rows)) // 3)
-        out[k] = np.nanmedian(xyz[rows[start:]], axis=0)
+        out[k] = np.nanmedian(xyz[bead == i], axis=0)
     labels = list(names) if names is not None else [str(i) for i in ids]
     return BeadPositions(labels, out)
 
