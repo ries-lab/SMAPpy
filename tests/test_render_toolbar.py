@@ -57,22 +57,44 @@ def test_the_session_colour_keeps_the_buttons_framed(app):
     assert "QToolButton {" in bar.styleSheet() and "#ff0000" not in bar.styleSheet()
 
 
-def test_a_double_click_moves_that_place_to_the_middle(app):
-    from PySide6.QtCore import QEvent, QPointF, Qt
+def _click_at(view, kind, button, x, y):
+    from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
+    at = QPointF(view.graphics.mapFromScene(view.view.mapViewToScene(QPointF(x, y))))
+    buttons = Qt.NoButton if "Release" in kind.name else button
+    return view.eventFilter(view.graphics.viewport(),
+                            QMouseEvent(kind, at, at, button, buttons, Qt.NoModifier))
+
+
+def test_a_right_click_moves_that_place_to_the_middle(app):
+    from PySide6.QtCore import QEvent, QRectF, Qt
     from smappy.gui.render_view import RenderView
     view = RenderView(Session(uniform()))
     view.resize(400, 400)
     view.show()
     app.processEvents()
-    from PySide6.QtCore import QRectF
     view.view.setRange(QRectF(0, 0, 4000, 4000), padding=0)
     app.processEvents()
-    target = view.view.mapViewToScene(QPointF(1000, 3000))
-    at = view.graphics.mapFromScene(target)
-    event = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(at), QPointF(at),
-                        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
-    assert view.eventFilter(view.graphics.viewport(), event)
+    _click_at(view, QEvent.MouseButtonPress, Qt.RightButton, 1000, 3000)
+    _click_at(view, QEvent.MouseButtonRelease, Qt.RightButton, 1000, 3000)
     centre = view.view.viewRect().center()
     assert abs(centre.x() - 1000) < 40 and abs(centre.y() - 3000) < 40
+    assert abs(view.view.viewRect().width() - 4000) < 100     # the zoom kept
+    view.close()
+
+
+def test_a_double_click_shows_everything(app):
+    from PySide6.QtCore import QEvent, QRectF, Qt
+    from smappy.gui.render_view import RenderView
+    view = RenderView(Session(uniform()))
+    view.resize(400, 400)
+    view.show()
+    app.processEvents()
+    view.reset()
+    full = view.view.viewRect()
+    view.view.setRange(QRectF(100, 100, 200, 200), padding=0)
+    app.processEvents()
+    assert _click_at(view, QEvent.MouseButtonDblClick, Qt.LeftButton, 200, 200)
+    shown = view.view.viewRect()
+    assert abs(shown.width() - full.width()) < 1e-6 * full.width() + 1
     view.close()

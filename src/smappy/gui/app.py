@@ -160,6 +160,7 @@ class ControlWindow(QMainWindow):
         # behind anybody's back (see `workspace`)
         self.workspace = workspace_module.load_startup()
         missing = self.workspace.prune(list(plugins.refs()))
+        self.session.apply_default_filters(self.workspace.filters)
         if missing:
             print("workspace: dropped pins for plugins that are not installed: "
                   + ", ".join(sorted(set(missing))))
@@ -327,13 +328,15 @@ class ControlWindow(QMainWindow):
         self.batch_window = None
         self._fill_plugins_menu()
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
-        # The ROI manager, the per-region steps and the bead calibration are
-        # not in this menu: each has one way in where it is used (the Regions
-        # tab; the Localize tab's section), and a second entry in a menu made
-        # two of everything.  Ctrl+R stays, from this window and the picture.
+        # The per-region steps and the bead calibration are not in this menu:
+        # each has one way in where it is used (the Regions tab; the Localize
+        # tab's section).  The ROI manager is a window one looks at, as the 3D
+        # view is, so it is in View beside it; Ctrl+R from this window and
+        # the picture.
         manager = QAction("ROI manager", self, triggered=self._open_manager)
         manager.setShortcut("Ctrl+R")
         manager.setShortcutContext(Qt.WindowShortcut)
+        view.addAction(manager)
         self.addAction(manager)
         render.addAction(manager)
         # a plugin that would change a table a fit is still appending to
@@ -640,6 +643,7 @@ class ControlWindow(QMainWindow):
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
         self.build_tabs()
+        self.session.apply_default_filters(self.workspace.filters)
         self._update_title(f"from {Path(path).name}")
         if missing:
             QMessageBox.information(
@@ -661,6 +665,10 @@ class ControlWindow(QMainWindow):
                 if which:
                     opened[tab.name] = which
         self.workspace.layout = {"open": opened}
+        # the filters as they stand (`Session.carried_bounds`), so a GUI
+        # opens the next file filtered as this one is
+        self.workspace.filters = {f: list(b) for f, b in
+                                  self.session.carried_bounds().items()}
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
@@ -765,6 +773,8 @@ class ControlWindow(QMainWindow):
         if gui:
             self.workspace = Workspace.from_dict(gui)
             self.workspace.prune(list(plugins.refs()))
+            # for files to come: the layers came over as they were
+            self.session.default_filters = self.workspace.filters
             self.build_tabs()
             self._update_title("handed over")
         view = state.get("view")
@@ -853,6 +863,7 @@ class ControlWindow(QMainWindow):
         missing = self.workspace.prune(list(plugins.refs()))
         self.tabs.clear()               # start on File, not on the tab one was on
         self.build_tabs()
+        self.session.apply_default_filters(self.workspace.filters)
         workspace_module.remember(self.workspace.path)
         self._update_title()
         if path and self.workspace.path is None:

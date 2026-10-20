@@ -239,6 +239,7 @@ class RenderView(QWidget):
             self.view.addItem(item)
         self.graphics.scene().sigMouseMoved.connect(self._on_move)
         self._pressed = False
+        self._right_press = None
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
         # the trackpad's pinch, and the clicks of a drawing: installed last,
@@ -252,13 +253,27 @@ class RenderView(QWidget):
             return self._draw_event(event)
         if event.type() == QEvent.MouseButtonDblClick and \
                 event.button() == Qt.LeftButton:
-            # SMAP's double-click: that place to the middle, at the same zoom
-            scene = self.graphics.mapToScene(event.position().toPoint())
-            if self.view.sceneBoundingRect().contains(scene):
-                at = self.view.mapSceneToView(scene)
-                self.center_on(at.x(), at.y())
+            # a double-click shows everything, as Reset view does
+            if self.view.sceneBoundingRect().contains(
+                    self.graphics.mapToScene(event.position().toPoint())):
+                self.reset()
                 event.accept()
                 return True
+        if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease) \
+                and event.button() == Qt.RightButton:
+            # a right click puts that place in the middle, at the same zoom.
+            # Press and release are let through, so a right drag still zooms
+            # (pyqtgraph's); only a release where the press was is a click
+            pos = event.position().toPoint()
+            if event.type() == QEvent.MouseButtonPress:
+                self._right_press = pos
+            elif event.type() == QEvent.MouseButtonRelease:
+                press, self._right_press = self._right_press, None
+                scene = self.graphics.mapToScene(pos)
+                if press is not None and (pos - press).manhattanLength() <= 3 \
+                        and self.view.sceneBoundingRect().contains(scene):
+                    at = self.view.mapSceneToView(scene)
+                    self.center_on(at.x(), at.y())
         if event.type() == QEvent.NativeGesture and \
                 event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             factor = 1.0 / (1.0 + event.value())

@@ -310,3 +310,52 @@ def test_the_contrast_switches_to_an_absolute_maximum_where_the_view_was(app):
     tab.scale.setCurrentIndex(tab.scale.findData(False))
     assert not session.layers[0].get_display().absolute
     assert session.layers[0].get_display().maximum == pytest.approx(display.maximum)
+
+
+def test_a_new_file_keeps_the_filters_the_last_ones_layer_had():
+    session = Session(table(0))
+    session.layers[0].set_bound("photons", 300.0, None)
+    session.layers[0].remove_bound("xy_err_nm")
+    session.set_locs(table(1), undoable=False)
+    ranges = session.layers[0].ranges
+    assert ranges["photons"] == (300.0, None)
+    assert "xy_err_nm" not in ranges          # removed stays removed
+
+
+def test_a_column_the_last_table_lacked_gets_the_default_filter():
+    from smappy.session import DEFAULT_BOUNDS
+    session = Session(table(0))
+    t = table(1)
+    columns = {c: np.asarray(t[c]) for c in t.columns}
+    columns["z_nm"] = np.zeros(len(t), np.float32)
+    columns["sigma_nm"] = np.full(len(t), 150, np.float32)
+    session.set_locs(Localizations(columns, {"units": "nm"}), undoable=False)
+    assert session.layers[0].ranges["z_nm"] == DEFAULT_BOUNDS["z_nm"]
+    assert "sigma_nm" not in session.layers[0].ranges     # the 2D default
+
+
+def test_a_gui_files_filters_start_the_first_layer_and_new_ones():
+    session = Session(table(0))
+    session.apply_default_filters({"photons": (800.0, None)})
+    assert session.layers[0].ranges == {"photons": (800.0, None)}
+    assert session.add_layer().ranges == {"photons": (800.0, None)}
+
+
+def test_a_bounded_field_without_a_quick_button_gets_one_until_the_bound_goes(app):
+    from smappy.gui.render_tab import RenderTab
+    from smappy.gui.widgets import CONTROL_WIDTH
+    base, rng = table(0), np.random.default_rng(0)
+    columns = {name: np.asarray(base[name]) for name in base}
+    columns["a_rather_long_column_name"] = rng.uniform(0, 1, len(base))
+    session = Session(Localizations(columns, {"units": "nm"}))
+    tab = RenderTab(session)
+    name = "a_rather_long_column_name"
+    assert name not in tab.filter.quick
+    tab.filter._select(name)
+    tab.filter._apply(0.2, None)
+    button = tab.filter.quick[name]
+    assert button.toolTip() == name and button.isChecked()
+    assert tab.filter.minimumSizeHint().width() <= CONTROL_WIDTH
+    tab.filter._on_bound_link(f"remove:{name}")
+    assert name not in tab.filter.quick
+    assert "photons" in tab.filter.quick          # the usual ones stay

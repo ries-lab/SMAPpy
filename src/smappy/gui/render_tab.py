@@ -60,6 +60,7 @@ RENDER_MODES: Tuple[Tuple[str, str], ...] = (
     ("voronoi", "Voronoi density"),
 )
 QUICK_PER_ROW = 4
+QUICK_TEXT_WIDTH = 64       # px: a bounded column's button, its name elided to this
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
 
@@ -219,26 +220,55 @@ class FilterWidget(QWidget):
         for name in numeric:
             self.field.addItem(name, name)   # the data stays the plain name
         self.field.blockSignals(False)
-        self._mark_bounded()
 
         for b in self.quick.values():
             b.deleteLater()
         self.quick.clear()
+        self._fixed_quick = []
         for label, names in QUICK_FIELDS:
             name = next((n for n in names if n in locs), None)
-            if name is None:
-                continue
-            b = QToolButton(text=label, checkable=True, autoExclusive=True)
-            b.setToolTip(name)
-            b.clicked.connect(lambda _=False, n=name: self._select(n))
-            self.quick_grid.addWidget(b, *divmod(len(self.quick), QUICK_PER_ROW))
-            self.quick[name] = b
-        first = current if current in numeric else next(iter(self.quick), None)
+            if name is not None:
+                self._fixed_quick.append(name)
+                self._add_quick(name, label)
+        self._mark_bounded()          # and a button for each other bounded field
+        first = current if current in numeric else \
+            next((n for n in self._fixed_quick), None)
         if first is None and numeric:
             first = numeric[0]
         if first:
             self._select(first)
         self._show_field()
+
+    def _add_quick(self, name: str, label: str) -> QToolButton:
+        b = QToolButton(text=label, checkable=True, autoExclusive=True)
+        b.setToolTip(name)
+        b.clicked.connect(lambda _=False, n=name: self._select(n))
+        self.quick_grid.addWidget(b, *divmod(len(self.quick), QUICK_PER_ROW))
+        self.quick[name] = b
+        return b
+
+    def _sync_bounded_buttons(self, bounded) -> None:
+        """A button for every bounded field beyond the usual ones, gone when
+        its bound is: what filters the layer can be seen, and reached, at a
+        glance.  Named by the column, shortened to fit the row."""
+        from ..region_runs import REGION_FILTER     # has a button of its own
+        fixed = getattr(self, "_fixed_quick", [])
+        names = [self.field.itemData(i) for i in range(self.field.count())]
+        wanted = [n for n in names if n in bounded and n not in fixed
+                  and n != REGION_FILTER]
+        extra = [n for n in self.quick if n not in fixed]
+        if wanted == extra:
+            return
+        for n in extra:
+            b = self.quick.pop(n)
+            self.quick_grid.removeWidget(b)
+            b.deleteLater()
+        shown = self.current_field()
+        for n in wanted:
+            b = self._add_quick(n, "")
+            b.setText(b.fontMetrics().elidedText(n, Qt.ElideMiddle, QUICK_TEXT_WIDTH))
+            b.setStyleSheet("font-weight: bold")
+            b.setChecked(n == shown)
 
     def refresh(self) -> None:
         """The filter changed elsewhere (undo, new table): redraw."""
@@ -266,6 +296,7 @@ class FilterWidget(QWidget):
             return
         ranges = self.layer.ranges
         bounded = {n for n, r in ranges.items() if r != (None, None)}
+        self._sync_bounded_buttons(bounded)
         self.bounds_line.setText(bounds_text(
             {n: ranges[n] for n in sorted(bounded)}))
         plain, bold = QFont(self.field.font()), QFont(self.field.font())

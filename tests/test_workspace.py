@@ -205,10 +205,10 @@ def test_the_bead_calibration_section_opens_the_window_as_it_was_left(window):
 
 
 def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
-    """The bead calibration is the Localize tab's, the ROI manager and the
-    per-region steps the Regions tab's; Ctrl+R still opens the manager.  The
-    Plugins menu is the whole plugin tree, every plugin in it, and not
-    counted."""
+    """The bead calibration is the Localize tab's, the per-region steps the
+    Regions tab's.  The ROI manager is a window to look at, as the 3D view
+    is, and is in View, once, with Ctrl+R.  The Plugins menu is the whole
+    plugin tree, every plugin in it, and not counted."""
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMenu
 
@@ -222,7 +222,8 @@ def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
     in_menus = [a.text() for m in window.findChildren(QMenu) if not in_plugins(m)
                 for a in m.actions()]
     assert not [t for t in in_menus if "calibration" in t.lower()
-                or "ROI manager" in t or "Per-region" in t]
+                or "Per-region" in t]
+    assert in_menus.count("ROI manager") == 1
     shortcuts = [a for a in window.actions() if a.shortcut().toString() == "Ctrl+R"]
     assert [a.text() for a in shortcuts] == ["ROI manager"]
 
@@ -275,6 +276,34 @@ def test_values_survive_being_saved_and_reopened(window, tmp_path):
     # the screen's business, not the GUI's; and a GUI starts on File
     assert "geometry" not in reopened.layout
     assert "active_tab" not in reopened.layout
+
+
+def test_a_saved_gui_keeps_the_filters_and_gives_them_to_the_next_file(window, tmp_path):
+    session = window.session
+    session.set_locs(_filtered_table(), undoable=False)
+    session.layers[0].set_bound("photons", 500.0, None)
+    session.layers[0].remove_bound("xy_err_nm")
+    path = tmp_path / "filters.yaml"
+    window.save_gui_to(path)
+    saved = load(path).filters
+    assert saved["photons"] == [500.0, None] and "xy_err_nm" not in saved
+    # z is not in this table: the default for it is kept for a file that has it
+    assert saved["z_nm"] == [-500.0, 500.0]
+
+    session.layers[0].set_ranges({})
+    window.load_gui_from(path)
+    assert session.layers[0].ranges["photons"] == (500.0, None)
+    assert "xy_err_nm" not in session.layers[0].ranges
+    session.apply_default_filters(None)
+
+
+def _filtered_table(n=500):
+    import numpy as np
+    from smappy.locs import Localizations
+    rng = np.random.default_rng(1)
+    return Localizations({"x_nm": rng.uniform(0, 5000, n), "y_nm": rng.uniform(0, 5000, n),
+                          "frame": np.arange(n), "photons": rng.uniform(100, 2000, n),
+                          "xy_err_nm": rng.uniform(5, 40, n)})
 
 
 def test_an_unopened_panel_keeps_the_values_it_was_given(window, tmp_path):
