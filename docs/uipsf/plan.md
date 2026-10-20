@@ -1240,6 +1240,12 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      Drift between frames is not it: a free drift per bead and slice (5–9 nm) leaves σ unchanged, and the
      shared per-slice drift (10–17 nm) takes 2–4 nm from it.  Left: motion within the exposure, or mismatch.
 
+   *The lab's beads (October 2026, `docs/uipsf/architecture.md`, "Is the blur the microscope's?"):* with the
+   pixel's share taken out, M2 blurs by 40–83 nm and M5 by 0–32, never overlapping, while one microscope's
+   acquisitions spread by up to 30 nm; σ is unmoved by a free z scale, larger along x on both, and on M2
+   changed with July's camera swap and realignment.  The radial magnitude (twice as large on M5) partly
+   absorbs the z scale, which every stack asks for (0.89–0.98).  Next: an NA scan, M5's NA 1.50 first.
+
 4. **Local minima.** Both solvers can end in a minimum that is not the best one, and which one they reach
    depends on the path (M7). On synthetic dim beads (seed 2) LM stopped 100 nats up with a phase error of
    0.10 rad, where Gauss–Newton L-BFGS reached the CRLB; M2's two stages exist because one stage stopped

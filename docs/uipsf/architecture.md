@@ -1078,3 +1078,77 @@ simpler fit each gains.
   a model it contains reached the expected gain when started from that model's solution; on 1ch and the
   simulation the start changes nothing.  Order 8 with bleaching of order 2, from base, is the best fit
   measured on 2ch: −91 600 nats held out, z bias 1.9 nm.
+
+## Is the blur the microscope's?  The lab's own beads, M2 and M5 (October 2026, plan §10, 2 and 3)
+
+On Zenodo the model learns an extra blur σ ≈ (67, 75) nm and a free pupil magnitude; whether they belong
+to the microscope or soak up model mismatch was open.  `benchmarks/uipsf/real/lab_beads.py` learns nine of
+the lab's 2026 bead calibrations, five from M2 and four from M5 (no M6 stacks exist), through SMAPpy's
+headless path: `pupil.run_calibration`, the camera as `camera_for` resolves it, the beads `single_rois`
+finds, `BeadSettings(zernike_order=8, magnitude="free", blur="free")` with 100 nm beads; then
+`pupil.fit_quality` and the z-scale probe on the used beads.  Optics from the user: M2 NA 1.43, oil 1.516,
+116 × 127 nm; M5 NA 1.50, oil 1.518, 105.6 nm; TetraSpeck in water at 676 nm.  The stacks and their
+metadata: `docs/uipsf/microscopes.md`.  Results: `benchmarks/uipsf/results/lab_beads.jsonl`; the figure:
+`lab_beads_figure.py`.  Each run took 7–15 s on a Mac's GPU for M2 and 0.3–1.1 min for M5, whose pupil
+(NA 1.50 under oil of 1.518) needs 128 samples where M2's needs 64 and only fits 10 GB with the solver
+chunked one bead at a time (`--chunk 1`; the headless path does not chunk).
+
+**The pixel first.**  M2's astigmatic path has 116 × 127 nm pixels, and the camera changed in July from the
+Evolve to an iXon mounted 90° turned: with the same beads the likelihood picks 116 × 127 for the Evolve and
+127 × 116 for the iXon, by 28 000 and 38 000 nats, and the square 127 nm SMAPpy's database gives moves σ by
+21 nm along the wrong axis (`lab_beads_pixel.jsonl`).  The runs below use each camera's own orientation.
+
+σ as learnt (± CRLB), with the pixel's share taken out (√(σ² − p²/12): uipsf learns at pixel centres, so the
+blur holds the pixel's width; 0 where σ is below it), and the same with the z scale free; the magnitude's
+RMS over the radial (m = 0) and the other modes, with the z scale fixed / free; phase in rad (CRLBs ≤ 0.001);
+the atlas's mean deviance; the probe's z scale and its gain in nats (threshold 12); the fit quality's median
+| RMS centred error (nm) over ±600 nm.
+
+| | acquisition | camera | beads | σx, σy learnt (nm) | pixel out | z free | magnitude radial | other | Z(2,2) | Z(2,−2) | Z(4,0) | Z(6,0) | deviance | z scale (gain) | fit quality |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M2 | 260622_AA_BeadsCalZ_638 | Evolve | 14/15 | 75.8 ± 0.1, 74.0 ± 0.1 | 68, 64 | 67, 63 | 0.18 / 0.12 | 0.03 / 0.03 | −0.67 | +0.02 | −0.08 | −0.06 | 2.05 | 0.958 (4325) | 3.9 / 7.2 |
+| M2 | 260829_AA_BeadsCalZ_638_SingleMode | iXon | 11/11 | 67.2 ± 0.1, 53.5 ± 0.1 | 56, 42 | 56, 41 | 0.16 / 0.11 | 0.04 / 0.05 | +0.55 | −0.04 | +0.19 | +0.03 | 2.43 | 0.967 (3211) | 4.2 / 6.7 |
+| M2 | 260904_AA_BeadsCalZ_638_SingleMode | iXon | 11/12 | 64.4 ± 0.1, 52.4 ± 0.1 | 53, 40 | 52, 39 | 0.18 / 0.12 | 0.06 / 0.07 | +0.54 | −0.02 | +0.15 | +0.01 | 2.23 | 0.957 (4152) | 4.4 / 7.8 |
+| M2 | 260915_AASJ_BeadsCalZ_638_665LP | iXon | 18/24 | 85.3 ± 0.1, 59.6 ± 0.1 | 77, 49 | 76, 48 | 0.15 / 0.09 | 0.05 / 0.05 | +0.56 | −0.04 | +0.20 | +0.04 | 2.29 | 0.966 (5481) | 6.4 / 9.8 |
+| M2 | 261012_FF_beadscalib | iXon | 22/23 | 91.2 ± 0.1, 65.7 ± 0.1 | 83, 57 | 83, 56 | 0.10 / 0.07 | 0.04 / 0.04 | +0.54 | −0.05 | +0.26 | +0.06 | 2.28 | 0.984 (2249) | 4.4 / 8.7 |
+| M5 | 260205_HL_beatcalibration_z_640 | Fusion | 8/9 | 30.5 ± 0.2, 26.1 ± 0.2 | 1, 0 | 9, 0 | 0.26 / 0.20 | 0.05 / 0.05 | +0.37 | −0.03 | +0.41 | +0.25 | 2.60 | 0.943 (6121) | 8.6 / 13.6 |
+| M5 | 260818_PM_beadsCal | Fusion | 19/20 | 42.9 ± 0.1, 30.9 ± 0.1 | 30, 5 | 31, 6 | 0.28 / 0.15 | 0.09 / 0.09 | +0.55 | −0.12 | +0.19 | +0.16 | 3.60 | 0.893 (39300) | 8.5 / 15.6 |
+| M5 | 260826_AA_beadsCalZ_640_new | Fusion | 16/17 | 44.4 ± 0.1, 30.9 ± 0.1 | 32, 5 | 32, 4 | 0.32 / 0.31 | 0.12 / 0.15 | +0.71 | −0.17 | +0.43 | +0.32 | 5.43 | 0.975 (6740) | 12.1 / 22.4 |
+| M5 | 260901_MA_BeadsCalZ_20nm_-1to1 | Fusion | 22/22 | 38.0 ± 0.1, 29.6 ± 0.1 | 23, 0 | 24, 0 | 0.22 / 0.16 | 0.04 / 0.04 | +0.64 | −0.23 | +0.15 | +0.15 | 4.22 | 0.945 (19910) | 8.9 / 14.9 |
+
+**σ is the microscope's.**  With the pixel taken out, M2 blurs by 40–83 nm, M5 by
+0–32: the two never overlap, while on one microscope the acquisitions spread by up to 30 nm.  The Evolve on
+M2 learns (76, 74) nm, as on Zenodo's (68, 75) from the same microscope and camera.  The iXon's blur is
+anisotropic, 53–83 nm along x against 40–57 along y; the Evolve's on the same microscope is not, but it was
+recorded before July's realignment (below), so camera and optics changed together and these stacks cannot
+tell which made the difference.  M5's sCMOS is anisotropic along x too: 23–32 nm (1 in February, 8 beads), against y at or below
+the pixel's own share, so an EMCCD's charge spread cannot be the whole story; a dichroic's σx ≠ σy (the
+simulations of §10, 2) can.  The CRLBs (≤ 0.2 nm) are far below the spread between acquisitions, so
+that spread is not noise: what varies is the sample or the day.  Freeing the z scale leaves σ within 1 nm (one M5 run, 8 nm): σ does
+not trade with it.
+
+**The magnitude is larger on M5 and mostly radial on both.**  Radial RMS 0.10–0.18 on M2, 0.22–0.32 on M5;
+the non-symmetric part 0.03–0.06 on M2, 0.04–0.12 on M5.  The maps (the figure) are bright in the centre
+and fall to the rim, M5's more strongly: the pattern the dictionary of §10, 2 gives to an amplitude error
+(an NA lower in effect than nominal, a soft edge, the aplanatic factor), not to missing phase.  It does
+trade with the z scale: freed, the radial RMS drops by 23–46 % (M5 260826: 3 %), so part of the radial
+magnitude stands in for the z scale, as on Zenodo.
+
+**Every stack asks for a z scale, and the model does not fit at the noise.**  The probe's z scale is
+0.89–0.98 with gains of 2 000–39 000 nats (threshold 12), and the atlas flags every group, at a mean
+deviance of 2.0–2.4 on M2 and 2.6–5.4 on M5 (Zenodo: 1.4).  An effective NA below nominal acts as a z
+scale (§10, To investigate, 1) and makes the magnitude fall off radially; on M5, NA 1.50 within 0.018 of
+the oil's index is the likeliest candidate, and it would also explain M5's worse fit quality (8.5–12 nm
+median against 3.9–6.4).  Not tested here: an NA scan is the next run.
+
+**Phase.**  Astigmatism Z(2, 2) is +0.54 to +0.56 rad on M2's iXon (−0.67 on the Evolve, turned 90°) and
++0.37 to +0.71 on M5, with oblique astigmatism Z(2, −2) up to −0.23 on M5 only.  Spherical Z(4, 0) is +0.15
+to +0.26 on M2 since July and −0.08 before; M2 was realigned then (folders `260720_FR_spherical_M2`,
+`260727_FR_sphericalAdj_M2`, with the camera change).  M5 has the most spherical, Z(4, 0) up to +0.43 and
+Z(6, 0) up to +0.32, as a high NA into water would give.
+
+**Answer.**  σ differs between M2 and M5 by more than between acquisitions on either; it is specific to
+the microscope (on M2, to its state since July's camera change and realignment), and not a sink for
+the z scale.  Its anisotropy, along x on both, is the next thing to explain.  The magnitude differs too (M5's
+radial part is about twice M2's), but its radial part partly absorbs the z scale and the effective NA,
+which the model does not yet separate: a physical magnitude needs the NA probe of §10, 2 first.
