@@ -29,8 +29,7 @@ closed):
 * **MBM**: *MBM drift correction* (beads judged against each other,
   `x = x_nc - d(t)`, the bead window to choose them by hand), *MBM
   registration* of two measurements (beads matched by their shifts,
-  translation or rigid; each bead's position from its points after its
-  first 30, `beads.settled`), a region table per bead with the bead file
+  translation or rigid), a region table per bead with the bead file
   open.
 * **Per trace**: grouping by `tid`; `trace_index`, each localization's
   number in its trace (1, 2, ... by time), so a filter leaves out a trace's
