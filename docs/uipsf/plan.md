@@ -531,7 +531,11 @@ Every calibration takes this path, so it is specified exactly and tested end to 
    - Lateral: pixel centres over `roi_cal = fit ROI + 2 + margin`. SMAPpy refuses a spline whose lateral size is not at least the fit ROI + 2.
    - Axial: the stacks' own step is enough (measured: 10 to 100 nm give the same fit, `docs/uipsf/architecture.md`); for in-situ models, at the focus depth the user gives.
    - Knots sit on pixel centres, with the emitter at the central knot (`x0`), as `models.hpp` expects.
-   - `cal.psf` integrates over pixels exactly; it does not just sample their centres.
+   - Each pixel as the model was learnt: `cal.psf` at the model's own sampling (its centres, by default),
+     not integrated again.  *Revised (M6, October 2026):* this said "integrates over pixels exactly"; but
+     a model learnt on pixel centres holds the pixel's width in its blur, and integrating it again counted
+     the pixel twice (Spline 3D's z slope 0.992, 6 nm rms off the model's own localisation; at its own
+     sampling 0.999 and 2.8 nm, `docs/uipsf/architecture.md`, "M6").
 2. **z.** z0 is the knot at emitter z = 0, and `z_index_to_nm(k) = −(k − z0)·dz` holds by construction. A test checks the sign against SMAPpy's own bead calibration of the same simulated beads.
 3. **Normalisation.** As SMAPpy's bead calibration does it: maximum plane sum = 1 for one channel, two channels normalised jointly with each one's `photon_normalization`. A uipsf calibration and a bead calibration are then interchangeable in Spline 3D.
 4. **Two channels.**
@@ -600,7 +604,7 @@ the model file beside it (`_3dcal.uipsf.h5`, §5.8). Loading the model file agai
 grid without refitting.
 
 **Sampling for the spline.** Knots at pixel centres over the window's `roi_size` (27 by default: 26 spline
-cells, so fit boxes up to 24, as now); each pixel integrated over 4 × 4 sub-samples; z over the beads' range with the
+cells, so fit boxes up to 24, as now); each pixel as the model was learnt (§6.1); z over the beads' range with the
 stacks' own step: 10 to 100 nm fit the same, the error is lateral (knots a pixel apart), up to 4 nm at
 the pixel edges for a narrow focal line, 0.1–0.2 CRLB at 10⁴ photons (`docs/uipsf/architecture.md`).
 
@@ -1043,6 +1047,10 @@ GitHub Actions runs the CPU tiers.
 - Tests, in SMAPpy's suite, with SMAPpy's fitter:
   - simulated beads → uipsf → spline → Spline 3D on simulated frames: z slope 1.00 ± 0.01 and photons as with SMAPpy's own bead calibration;
   - Spline 3D and the pupil-model localisation agree on the same ROIs (§6.5).
+  *Both done (October 2026, `tests/uipsf_tests/test_pupil_spline.py`): slope 0.999, photons 0.2 % from the
+  bead average's; the same ROIs 2.8 nm rms apart in z against a CRLB of 3.4, after the sampling was
+  corrected (§6.1).  The dual fit quality fits each pair with Spline 3D 2C's global fit
+  (`pupil.fit_quality`, `test_smappy_dual.py`).*
 - The panel page in SMAPpy's docs format, and the tutorial storyboard updated.
 - The real benchmark (§10, benchmark data): no per-dataset settings, results that match or beat tuned v1.
 - Retire the TF bridge. uipsf documentation; release 2.0.

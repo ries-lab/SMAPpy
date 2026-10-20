@@ -123,3 +123,34 @@ def test_smappys_global_fitter_reads_a_two_channel_model_as_its_own_dual_calibra
         assert np.median(locs["z_nm"][mine]) == pytest.approx(z0, abs=15.0)
         assert np.median(locs["ratio"][mine]) == pytest.approx(SHARE, abs=0.03)
         assert np.median(locs["photons"][mine]) == pytest.approx(photons * in_box, rel=0.03)
+
+
+@pytest.mark.slow
+def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_the_learnt_ratio():
+    """`calibrate.pupil.fit_quality` on a learnt two-channel model: every slice of every pair fitted by Spline 3D
+    2C's global fit, x, y and z shared through the learnt transform, as the data will be fitted.  Measured
+    (8 ratiometric pairs, mirrored, ±600 nm in 50 nm steps): z −0.2 nm off the truth in the median, 6.6 nm rms
+    after each bead's offset, the ratio 0.297 for 0.3, flat in z."""
+    from smappy.calibrate.pupil import BeadROIs, PupilRun, fit_quality
+
+    from uipsf.workflows import BeadSettings, calibrate_beads
+    from uipsf_tests.conftest import two_channel_beads
+    from uipsf_tests.test_multichannel import _from_centroids
+    optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.516, n_med=1.335, pixel_size_nm=(127, 116))
+    redder = uipsf.Optics(NA=1.43, wavelength_nm=710, n_imm=1.516, n_med=1.335, pixel_size_nm=(127, 116))
+    model, truth, batch = two_channel_beads(optics, n=8, kind="ratiometric", dtype=torch.float32, P=48,
+                                            roi=(17, 17), K=25, z_range=600.0, n_max=4, photons=20000.0,
+                                            mirrored=True)
+    cal = calibrate_beads(batch, [optics, redder], BeadSettings(zernike_order=4),
+                          transforms=[None, _from_centroids(batch, None)],
+                          geometry={"layout": "up-down mirrored", "main_channel": "upper"}, device="cpu")
+    run = PupilRun(BeadROIs(batch, None, None, optics.pixel_size_nm, [], []), cal, dual=True)
+    q = fit_quality(run)
+    assert "fitted_z_nm_secondary" not in q and q["fit_valid"].all()             # one z per pair
+    K = batch.data.shape[2]
+    true_z = np.repeat(truth.physical()["emitter.xyz"][:, 2].double().numpy(), K) + q["nominal_z_nm"]
+    central = np.abs(q["nominal_z_nm"]) < 500
+    assert abs(np.median((q["fitted_z_nm"] - true_z)[central])) < 5
+    assert np.sqrt(np.mean(q["centred_error_nm"][central] ** 2)) < 12
+    assert np.median(q["ratio"][central]) == pytest.approx(0.3, abs=0.01)
+    assert len(q["state"]) == len(q["bead_id"]) == 8 * K

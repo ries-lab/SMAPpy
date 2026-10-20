@@ -883,17 +883,17 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   and so does `pupil.single_rois`, so both calibrations list the same beads with the same verdicts.  The
   bead average drops what is not *accepted*; the pupil model shows the verdict and judges by its fit.
 - **The spline from the model** (`pupil.spline_calibration`, `dual_calibration`, `save`): `sample` gives
-  the learnt PSF of a point emitter on the central pixel, each pixel integrated over 4 × 4, on
+  the learnt PSF of a point emitter on the central pixel, each pixel as the model was learnt (M6, below), on
   `z_grid(dz, range)` (z = −(index − z0)·dz, plane 0 the highest emitter), the learnt blur kept and the
   bead's size left out.  One channel: clipped at zero, the brightest plane summing to one, no smoothing,
   as `_single_model`.  Two: `positive_pair_models` with smoothing off, the model's transform and split,
   so `photon_normalization` is each channel's learnt share.  `parameters` records `method = "uipsf2_pupil"`,
   every channel's Zernikes with CRLBs, the settings, the sampling and, once saved, `model_file`.  `save`
   writes `x_3dcal.h5` and the model file `x_3dcal.uipsf.h5` beside it; a loaded model file re-samples
-  without learning.  On 12 simulated astigmatic beads (`tests/uipsf_tests/test_pupil_spline.py`), Spline 3D
-  with the learnt model's spline fits frames of the true PSF with z bias 2.5 nm and spread 11.5 nm
-  (the bead average of the same stack: −3.6 and 12.5 nm, the same way up), photons within 1 % of the bead
-  average's.
+  without learning.  On 12 simulated astigmatic beads (`tests/uipsf_tests/test_pupil_spline.py`, the
+  pixels integrated 8 × 8 as a camera records them), Spline 3D with the learnt model's spline fits frames
+  of the true PSF with z bias 0.1 nm and spread 11.1 nm (the bead average of the same stack: −4.2 and
+  13.7 nm, the same way up), photons within 0.2 % of the bead average's.
 - **Two channels on Apple's GPU** failed in the solver, not the data: on MPS a Python number meeting a
   0-d tensor under `vmap(jvp)` becomes a float64 tensor, which MPS refuses, and the photon share is a 0-d
   parameter.  `params.Bounded` and `Softplus` now make their constants tensors of the parameter's dtype
@@ -904,3 +904,46 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   35.4 nm, blur (75.6, 61.0) and (57.9, 75.8) nm; the transform 0.025 px RMS from SMAPpy's; the Zernikes
   against v1's, correlation 0.997 (main) and 0.9998 (secondary).  1.4 min on MPS, where it had failed
   (above), against 28 min on 4 cloud cores.
+
+## M6: the chain's acceptance (October 2026, plan §6.5 and §9 M6)
+
+- **Simulated beads → uipsf → spline → Spline 3D** (`test_pupil_spline.py`): 12 astigmatic beads drawn into
+  an ADU stack with their pixels integrated 8 × 8, cut by `single_rois`, learnt by `calibrate_beads`,
+  sampled by `spline_calibration`; 1000 frames over ±600 nm at 5000 photons.  The fitted z against the true
+  z: slope 0.9986 (three seeds 0.998–1.000), intercept −0.1 nm; the photons 0.2 % above the bead average's
+  of the same stack.
+- **Spline 3D and uipsf's localisation on the same ROIs**: every slice of every bead fitted by
+  `scoring.slice_fits` (the pupil model, from the beads' stack fits) and by Spline 3D on the exported spline
+  (4 px larger than the ROI, so both see the same pixels).  Over ±600 nm: z 0.07 nm apart in the median and
+  2.8 nm rms, against a CRLB of 3.4 nm at 40 000 photons; the photons in a constant ratio (the spline counts
+  the light its box holds) to 0.6 %.  On beads drawn with the model's own pixel centres the two agree to
+  1.6 nm rms and 0.4 nm in x, with no spline step from 10 to 50 nm making a difference: what is left is the
+  lateral interpolation of the knots, a pixel apart (above, "How finely").
+- **The sampling was wrong, and this found it.**  The spline sampled each pixel integrated over 4 × 4.  But
+  the learning samples pixel centres (`VectorPSF(upsample=1)`, v1's default), so on a camera's integrated
+  pixels the learnt blur takes the pixel's width: σ 35 nm learnt as 47.3, and √(35² + 110²/12) = 47.4.
+  Integrating that model again counted the pixel twice: z slope 0.992, photons 1.2 % high, and 6.1 nm rms
+  from uipsf's localisation with a ±7 nm bend in z.  `pupil.UPSAMPLE` is now the model's own sampling;
+  "How finely" above still holds for a model whose blur does not hold the pixel.  On Zenodo `1ch_40nm_bead`
+  (56 beads, 52 used, a Mac's GPU, σ learnt as 68 and 75 nm), the same comparison: at the model's own
+  sampling Spline 3D and `slice_fits` agree to 0.6 nm rms (CRLB 2.5) with slope 0.9999 and the photon ratio
+  constant to 0.02 %; integrated 4 × 4, 5.0 nm rms, a ±7 nm bend and slope 0.989.  Against the stage both
+  localisers find a slope of 1.011, uipsf's own too: that is the model or the stage, not the spline (the
+  4 × 4 spline's 0.999 was two errors cancelling).  The fit quality's median |centred error| there is 6.5 nm.  Learning with the pixels
+  integrated (upsample ≥ 2) would make the blur the optics' own, at the cost of 4× the pixels per fit: not
+  done.
+- **Dual colour: the fit quality is the global fit** (`pupil.fit_quality`): each slice of a pair fitted
+  by `GlobalSplinePSF` with x, y and z shared (`LINK_XYZ`), the photons free per channel, the link built
+  by `dualfit.build_link` from each ROI's centre and the learnt transform, as Spline 3D 2C builds it.
+  Before, each channel was fitted alone with its own half of the calibration, which never tried the
+  transform or whether the two splines agree on z.  On 8 simulated ratiometric pairs (mirrored, ±600 nm,
+  `test_smappy_dual.py`): z −0.2 nm from the truth in the median, 6.6 nm rms after each bead's offset, the
+  ratio 0.297 for a share of 0.3, flat in z.  A biplane pair (350 nm apart) gives a ratio of 0.471 for a
+  learnt share of 0.501, also flat in z: `positive_pair_models` takes each channel's share as the light
+  its box holds at the main channel's focus, where the defocused secondary holds less.  That is the dual
+  calibration's convention, the bead average's too, and not changed here.  On Zenodo `2ch_40nm_bead` (88
+  pairs, 71 used, learnt in 70 s on a Mac's GPU, fit quality 3 s): median |centred error| 4.5 nm, 6.5 nm rms
+  over ±600 nm, the ratio 0.837 for a learnt share of 0.838.  The global z is 1.0 nm rms from the bright
+  secondary channel's alone (84 % of the light); the dim main channel alone wandered by 32 nm rms, which
+  the former per-channel page showed as a second row of curves the data never meet.
+

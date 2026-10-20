@@ -317,9 +317,13 @@ def bead_rois(inputs, camera=None, dual: bool = False, settings=None, slices=KEE
 
 # ------------------------------------------------------------------ the spline from a learnt model
 
-#: each pixel of the spline's knots integrated over this many sub-samples per axis: 4 × 4 keeps the sampling's
-#: own error below the spline's (docs/uipsf/architecture.md, "How finely SMAPpy's spline must sample")
-UPSAMPLE = 4
+#: each pixel of the spline's knots sampled as the model was learnt (None: its own sub-samples, one by default).
+#: Not integrated more finely: learning on pixel centres puts the pixel's width into the learnt blur (σ 35 nm
+#: learnt as 47.3 on beads drawn with their pixels integrated, √(35² + 110²/12) = 47.4), and integrating
+#: that model again counted the pixel twice -- Spline 3D's z slope 0.992, 6 nm rms off uipsf's own
+#: localisation of the same ROIs, against 0.999 and 2.8 nm at the model's own sampling
+#: (docs/uipsf/architecture.md, "M6: the chain's acceptance").
+UPSAMPLE = None
 
 
 def z_grid(dz_nm: float, z_range_nm: float) -> tuple[np.ndarray, float]:
@@ -329,10 +333,10 @@ def z_grid(dz_nm: float, z_range_nm: float) -> tuple[np.ndarray, float]:
     return -(np.arange(2 * half + 1) - half) * float(dz_nm), float(half)
 
 
-def sample(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE,
+def sample(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int | None = UPSAMPLE,
            channel: int = 0) -> np.ndarray:
     """The learnt PSF of ``channel`` as a voxel stack [z, y, x] for a point emitter on the central pixel,
-    each pixel integrated: what a bead average is, without its noise.  ``learned`` is a uipsf
+    each pixel as the model sees it (`UPSAMPLE`): what a bead average is, without its noise.  ``learned`` is a uipsf
     `Calibration` or `LearnedPSF`; the bead's size is left out, the learnt blur kept, the channel's
     photon share and defocus offset included (`uipsf.export.sample_psf`)."""
     z, _ = z_grid(dz_nm, z_range_nm)
@@ -353,6 +357,11 @@ def _zernikes(learned) -> list:
     return out
 
 
+def _upsample(learned, upsample) -> int:
+    """The sub-samples per pixel axis a sampling used: ``upsample``, or the model's own."""
+    return int(learned.model.channels[0].psf.upsample if upsample is None else upsample)
+
+
 def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
     options = getattr(learned, "options", None)
     if options is not None and not isinstance(options, dict):
@@ -360,12 +369,12 @@ def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
         options = asdict(options)
     return {"method": "uipsf2_pupil", "zernikes": _zernikes(learned), "options": options or {},
             "sampling": {"dz_nm": float(dz_nm), "z_range_nm": float(z_range_nm), "roi_size": int(roi_size),
-                         "upsample": int(upsample)},
+                         "upsample": _upsample(learned, upsample)},
             "z_convention": "emitter_nm = -(index-z0)*dz", "lateral_unit": "pixel",
             "z_reference": "the model's focus: the emitter at z = 0"}
 
 
-def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE,
+def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int | None = UPSAMPLE,
                        camera=None):
     """smappy's `SplineCalibration` of a one-channel uipsf model, normalised as the bead average's
     (`core._single_model`: clipped at zero, the brightest plane summing to one, no smoothing, since a
@@ -395,7 +404,8 @@ def _transform(learned) -> np.ndarray:
     return _unit(unpack_transform(learned.shared()["ch1.transform"].detach().cpu().double()).numpy())
 
 
-def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE):
+def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27,
+                     upsample: int | None = UPSAMPLE):
     """smappy's `DualColorCalibration` of a two-channel uipsf model: both channels sampled on one z grid
     (a biplane offset is in the PSFs), normalised jointly by `positive_pair_models`, so each channel's
     `photon_normalization` is its learnt photon share; the model's transform and the split it was
@@ -592,8 +602,51 @@ def calibration_of(run: PupilRun):
     return run.calibration
 
 
+def _best_of(fit, starts, keys=("theta", "crlb", "logl", "iterations")):
+    """``fit(z_start_nm)`` from each start, per ROI the best likelihood kept: an ambiguous PSF shows as
+    jumps rather than as whichever side one start fell to."""
+    best = None
+    for z in starts:
+        result = fit(float(z))
+        if best is None:
+            best = result
+            continue
+        keep = np.isfinite(result.logl) & (~np.isfinite(best.logl) | (result.logl > best.logl))
+        for key in keys:
+            getattr(best, key)[keep] = getattr(result, key)[keep]
+    return best
+
+
+def _centred(error, bead_id, valid) -> np.ndarray:
+    """``error`` less each bead's median over its valid slices: its height above the coverslip is not
+    known, its curve's distortion is what is left."""
+    centred = error.copy()
+    for e in np.unique(bead_id):
+        use = (bead_id == e) & valid
+        if use.any():
+            centred[bead_id == e] -= np.nanmedian(error[use])
+    return centred
+
+
+def _pair_link(calibration, roi_xy, roisize: int) -> np.ndarray:
+    """The global fit's link [E, 2, 2, 5] for each pair's two ROIs, as the dual fitter builds it
+    (`dualfit.build_link`): each ROI was cut around its own channel's detection (`dual_rois`), so the
+    secondary's offset is where the transform puts the main ROI's centre, less its own centre."""
+    from ..detect import Candidates
+    from ..dualfit import build_link
+    main, second = np.asarray(roi_xy[:, 0], float), np.asarray(roi_xy[:, 1], float)
+    exact = calibration.to_secondary(main)
+    residual = np.zeros((len(main), 2, 2))
+    residual[:, 1] = exact - second
+
+    def candidates(xy):
+        return Candidates(np.zeros(len(xy), np.int64), xy[:, 0].astype(np.int32), xy[:, 1].astype(np.int32),
+                          np.ones(len(xy), np.float32))
+    return build_link(candidates(main), candidates(second), residual, calibration, roisize=roisize)
+
+
 def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:
-    """Every slice of every bead fitted with the run's spline by SMAPpy's Spline 3D fitter: what a
+    """Every slice of every bead fitted with the run's spline by SMAPpy's own fitter: what a
     localisation of data with this calibration will see, as the bead average's fit quality
     (`validation.fit_bead_diagnostics`) shows it, and SMAP's bead calibration before it.
 
@@ -601,10 +654,15 @@ def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:
     two pixels a side, for the spot's lateral shift; the read noise is added as the shifted Poisson does
     (`uipsf.workflows.spline`).  Each slice is started from ``z_starts`` heights and the best likelihood
     kept, so an ambiguous PSF shows as jumps.  The *centred* error removes each bead's own offset (its
-    height above the coverslip is not known), leaving the curve's distortion.  One channel; for two,
-    each channel is fitted with its own half of the calibration.
+    height above the coverslip is not known), leaving the curve's distortion.
+
+    One channel: Spline 3D.  Two: Spline 3D 2C's global fit (`GlobalSplinePSF`), one x, y and z per pair
+    linked through the transform, the photons free per channel, as `validation.fit_paired_bead_diagnostics`
+    refits the bead average's pairs: a fit of each channel on its own half of the calibration missed what
+    the data will meet, a transform that puts the partner in the wrong place or splines whose z disagree.
+    One z per pair, so one curve per bead, and the colour ratio beside it.
     """
-    from ..psf import SplinePSF
+    from ..psf import GlobalSplinePSF, SplinePSF
     calibration = calibration_of(run)
     batch = run.rois.batch
     data = batch.data.detach().cpu().double().numpy()                 # [E, C, K, Y, X] photons
@@ -614,32 +672,35 @@ def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:
     data = np.maximum(data + s, 0)
     nominal = batch.z_nm.detach().cpu().double().numpy()
     nominal = np.broadcast_to(nominal, (E, K)) if nominal.ndim == 1 else nominal
-    channels = [calibration] if C == 1 else [calibration.main, calibration.secondary]
     out = {"bead_id": np.repeat(np.arange(E), K), "frame": np.tile(np.arange(K), E),
            "nominal_z_nm": nominal.reshape(-1)}
-    for c, spline in enumerate(channels):
-        rois = np.ascontiguousarray(data[:, c, :, 2:Y - 2, 2:X - 2].reshape(E * K, Y - 4, X - 4), np.float32)
-        best = None
-        for z in np.linspace(1, spline.shape[0] - 2, z_starts):
-            fit = SplinePSF(spline, z_start_nm=float(spline.z_index_to_nm(z))).fit(rois, iterations=iterations)
-            if best is None:
-                best = fit
-                continue
-            keep = np.isfinite(fit.logl) & (~np.isfinite(best.logl) | (fit.logl > best.logl))
-            for key in ("theta", "crlb", "logl", "iterations"):
-                getattr(best, key)[keep] = getattr(fit, key)[keep]
-        fitted = spline.z_index_to_nm(best.theta[:, 4])
-        valid = np.isfinite(best.logl) & np.isfinite(best.theta).all(axis=1)
-        fitted[~valid] = np.nan
-        error = fitted - out["nominal_z_nm"]
-        centred = error.copy()
-        for e in range(E):
-            use = (out["bead_id"] == e) & valid
-            if use.any():
-                centred[out["bead_id"] == e] -= np.nanmedian(error[use])
-        key = "" if c == 0 else "_secondary"
-        out.update({f"fitted_z_nm{key}": fitted, f"centred_error_nm{key}": centred,
-                    f"photons{key}": best.theta[:, 2], f"fit_valid{key}": valid,
-                    f"at_z_boundary{key}": (best.theta[:, 4] < 1) | (best.theta[:, 4] > spline.shape[0] - 2)})
+    box = np.ascontiguousarray(data[..., 2:Y - 2, 2:X - 2].transpose(0, 2, 1, 3, 4).reshape(E * K, C, Y - 4, X - 4),
+                               np.float32)                            # [E·K, C, y, x]
+    if C == 1:
+        spline = calibration
+        best = _best_of(lambda z: SplinePSF(spline, z_start_nm=z).fit(np.ascontiguousarray(box[:, 0]),
+                                                                       iterations=iterations),
+                        spline.z_index_to_nm(np.linspace(1, spline.shape[0] - 2, z_starts)))
+        z_index, photons = best.theta[:, 4], best.theta[:, 2]
+    else:
+        from ..dualfit import LINK_XYZ
+        spline = calibration.main
+        model = GlobalSplinePSF((calibration.main, calibration.secondary), LINK_XYZ)
+        link = np.repeat(_pair_link(calibration, batch.roi_xy.detach().cpu().double().numpy(), Y - 4), K, axis=0)
+
+        def fit(z):
+            model.z_start_nm = z
+            return model.fit(box, link=link, iterations=iterations)
+        best = _best_of(fit, spline.z_index_to_nm(np.linspace(1, spline.shape[0] - 2, z_starts)))
+        values = model.unpack(best, link)
+        z_index, photons = best.theta[:, model.slot(4)], values["photons"]
+    valid = np.isfinite(best.logl) & np.isfinite(best.theta).all(axis=1)
+    fitted = np.where(valid, spline.z_index_to_nm(z_index), np.nan)
+    out.update({"fitted_z_nm": fitted,
+                "centred_error_nm": _centred(fitted - out["nominal_z_nm"], out["bead_id"], valid),
+                "photons": photons, "fit_valid": valid,
+                "at_z_boundary": (z_index < 1) | (z_index > spline.shape[0] - 2)})
+    if C == 2:
+        out["ratio"] = np.where(valid, values["ratio"], np.nan)
     out["state"] = np.repeat([row.state for row in run.cal.beads.rows], K)
     return out

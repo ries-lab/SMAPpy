@@ -458,46 +458,44 @@ def draw_beads(figure, result, selected=(), excluded=(), dual=False):
 def draw_pupil_fit_quality(figure, diagnostics, selected=(), excluded=()):
     """The pupil model's beads refitted with its spline (`pupil.fit_quality`): fitted z against the
     frame, each bead a curve one can click to select it in the table, and the centred error against the
-    nominal z.  The used beads in colour, the others grey and dashed, the selected ones thick; the axes
-    are scaled to the used and selected beads, so a rejected bead fitted far off does not set them.
-    Faint specks, whose refits are noise, are not picked in the first place (`pupil.single_rois`).
+    nominal z; for two channels one curve per pair, from the global fit.  The used beads in colour, the
+    others grey and dashed, the selected ones thick; the axes are scaled to the used and selected beads,
+    so a rejected bead fitted far off does not set them.  Faint specks, whose refits are noise, are not
+    picked in the first place (`pupil.single_rois`).
 
     Returns the status line's summary.
     """
     import matplotlib.colors as mcolors
     d, selected, excluded = diagnostics, set(selected), set(excluded)
     figure.clear()
-    two = "fitted_z_nm_secondary" in d
-    axes = np.atleast_2d(figure.subplots(2 if two else 1, 2, squeeze=False))
+    left, right = figure.subplots(1, 2)
     beads = sorted(set(d["bead_id"].tolist()))
     hues = np.linspace(0, 1, max(len(beads), 1), endpoint=False)
     colours = mcolors.hsv_to_rgb(np.column_stack((hues, np.full(len(hues), .7), np.full(len(hues), .8))))
-    for row, key in enumerate(("", "_secondary") if two else ("",)):
-        left, right = axes[row]
-        for colour, bead in zip(colours, beads):
-            use = d["bead_id"] == bead
-            used = d["state"][use][0] == "used" and bead not in excluded
-            style = dict(color=colour if used else "0.6", linestyle="-" if used else "--",
-                         linewidth=2.5 if bead in selected else .9,
-                         alpha=1 if bead in selected or used else .3, zorder=3 if used else 1)
-            line, = left.plot(d["frame"][use], d[f"fitted_z_nm{key}"][use], picker=5, **style)
-            line.pair_ids = np.array([bead])                    # a click selects the bead's row
-            curve, = right.plot(d["nominal_z_nm"][use], d[f"centred_error_nm{key}"][use], picker=5, **style)
-            curve.pair_ids = np.array([bead])
-        # scaled to the used beads: a rejected faint spot fits anywhere and would set the scale
-        used_rows = (d["state"] == "used") & ~np.isin(d["bead_id"], list(excluded))
-        for ax, values in ((left, d[f"fitted_z_nm{key}"]), (right, d[f"centred_error_nm{key}"])):
-            shown = values[used_rows | np.isin(d["bead_id"], list(selected))]
-            shown = shown[np.isfinite(shown)]
-            if shown.size:
-                low, high = float(shown.min()), float(shown.max())
-                pad = 0.1 * max(high - low, 20.0)
-                ax.set_ylim(low - pad, high + pad)
-        name = " (secondary)" if key else (" (main)" if two else "")
-        left.set(xlabel="frame", ylabel="fitted z (nm)", title="Beads refitted with the calibration" + name)
-        right.axhline(0, color="k", linewidth=.6)
-        right.set(xlabel="nominal emitter z (nm)", ylabel="error after the bead's offset (nm)",
-                  title="Centred fit error" + name)
+    for colour, bead in zip(colours, beads):
+        use = d["bead_id"] == bead
+        used = d["state"][use][0] == "used" and bead not in excluded
+        style = dict(color=colour if used else "0.6", linestyle="-" if used else "--",
+                     linewidth=2.5 if bead in selected else .9,
+                     alpha=1 if bead in selected or used else .3, zorder=3 if used else 1)
+        line, = left.plot(d["frame"][use], d["fitted_z_nm"][use], picker=5, **style)
+        line.pair_ids = np.array([bead])                    # a click selects the bead's row
+        curve, = right.plot(d["nominal_z_nm"][use], d["centred_error_nm"][use], picker=5, **style)
+        curve.pair_ids = np.array([bead])
+    # scaled to the used beads: a rejected faint spot fits anywhere and would set the scale
+    used_rows = (d["state"] == "used") & ~np.isin(d["bead_id"], list(excluded))
+    for ax, values in ((left, d["fitted_z_nm"]), (right, d["centred_error_nm"])):
+        shown = values[used_rows | np.isin(d["bead_id"], list(selected))]
+        shown = shown[np.isfinite(shown)]
+        if shown.size:
+            low, high = float(shown.min()), float(shown.max())
+            pad = 0.1 * max(high - low, 20.0)
+            ax.set_ylim(low - pad, high + pad)
+    name = " (two-channel fit)" if "ratio" in d else ""
+    left.set(xlabel="frame", ylabel="fitted z (nm)", title="Beads refitted with the calibration" + name)
+    right.axhline(0, color="k", linewidth=.6)
+    right.set(xlabel="nominal emitter z (nm)", ylabel="error after the bead's offset (nm)",
+              title="Centred fit error" + name)
     used = np.isin(d["state"], ["used"]) & ~np.isin(d["bead_id"], list(excluded))
     error = np.abs(d["centred_error_nm"][used & d["fit_valid"]])
     return (f"used beads refitted with the calibration: median |centred error| "

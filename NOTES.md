@@ -1417,6 +1417,22 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   optics are a form whose NA and wavelength have no default: 0 means "not
   given" and a run refuses it (None would show as *auto*).  No *diagnosis*
   mode: every run draws every figure, and *save model* off leaves no file.
+* **The spline samples the model as it was learnt** (October 2026, the M6
+  checks, `docs/uipsf/architecture.md`): `pupil.UPSAMPLE` is the model's own
+  sampling (pixel centres), no longer each pixel integrated 4 × 4.  The
+  learning fits pixel centres, so on a camera's integrated pixels the pixel's
+  width goes into the learnt blur; integrating that model again counted it
+  twice.  Plan §6.5's check found it: Spline 3D and uipsf's own localisation
+  of the same Zenodo 1ch beads were 5.0 nm rms apart with a ±7 nm bend, and
+  are 0.6 nm apart now (CRLB 2.5).  Learning with integrated pixels instead
+  would make the blur the optics' own, at four times the pixels per fit.
+* **The dual fit quality is Spline 3D 2C's global fit** (`pupil.fit_quality`):
+  one x, y and z per pair through the learnt transform, the photons free per
+  channel, the link built by `dualfit.build_link` -- as the bead average's
+  `fit_paired_bead_diagnostics` does, and as the data will be fitted.  Each
+  channel on its own half of the calibration never tried the transform, and
+  on Zenodo showed the dim channel wandering by 32 nm rms where the pair's
+  fit is within 1 nm of the bright channel's.
 
 ## Tracking
 

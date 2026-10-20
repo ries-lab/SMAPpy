@@ -91,10 +91,14 @@ the bead average's fit quality and SMAP's bead calibration do: what a
 localisation with this calibration will see.  Each bead becomes a curve of
 fitted z against frame; a bead whose curve jumps or bends away from the
 others is one to exclude, and clicking its curve selects it in the table.
+For dual colour each pair is fitted by [Spline 3D 2C](plugin:Localize/Spline 3D 2C)'s
+global fit, both channels at once with one position and one z, as the data
+will be.
 
 **Saving.**  With *save model*, the model is turned into a spline: the PSF of a
 point on the central pixel is computed on a grid through the stacks' z range,
-each pixel integrated over its area, and normalised as the bead average is.
+each pixel as the model saw it when it learnt, and normalised as the bead
+average is.
 The calibration and the model file go beside the stacks, named as the bead
 calibration names them, and the calibration goes to the fitter.
 
@@ -102,7 +106,10 @@ calibration names them, and the calibration goes to the fitter.
 
 The model is vectorial and high-NA: the pupil field carries the dipole
 emission's polarisation through the immersion, coverslip and sample media
-given under *microscope*, and the image is integrated over each camera pixel.
+given under *microscope*, and the image is taken at each camera pixel's
+centre: the pixel's width ends up in the learnt blur, which is therefore a
+little wider than the optics' own (about 30 nm added in quadrature for 110 nm
+pixels).
 The likelihood is Poisson with the camera's read noise added as a shifted
 Poisson, SMAPpy's own fitters' likelihood; with EM gain, the excess noise
 factor 2.  Slices closer than 50 nm are thinned for learning.  The first
@@ -125,11 +132,14 @@ rejects the bead, with floors so that near-identical beads are not rejected
 for tiny differences; *include* and *exclude* in the table always win.
 
 The spline is sampled on the knots of SMAPpy's spline grid, a pixel apart,
-each pixel integrated over 4 × 4 sub-samples, with z steps of *spline z step*
+each pixel sampled as in learning, at its centre, with z steps of *spline z step*
 (auto: the stacks' step) through ± *spline z range* (auto: the stacks'
 range).  One channel: clipped at zero and scaled so that the brightest plane
 sums to 1.  Two channels: both sampled on one z grid and scaled together, so
-that each channel's share of the light is the learnt one.
+that each channel's share of the light is the learnt one.  The pixels are not
+integrated again: the learnt blur already holds them, and integrating once more
+widened the spline's PSF, which pulled Spline 3D's z in by 1 % and bent it by
+up to 7 nm against the model's own localisation of the same beads.
 
 The fit quality fits every bead, used or not, so a rejected bead's curve
 shows why.  The fit box is the bead box less two pixels a side; the camera's
@@ -137,7 +147,10 @@ read noise is added to the data as the learning's likelihood does; each slice
 is started from five heights and the best likelihood kept, so an ambiguous
 PSF shows as jumps.  The *centred error* removes each bead's own offset (its
 height on the coverslip is not known), leaving the curve's distortion.  For
-dual colour each channel is fitted with its own half of the calibration.
+dual colour each slice of a pair is one global fit: x, y and z shared, the
+secondary channel placed where the learnt transform puts it and the photons
+free in each channel, so a wrong transform or channels whose z disagree show
+as they would in the data; one z per pair, and the photon ratio beside it.
 
 ## Controls
 
@@ -287,7 +300,8 @@ diagnostics*, *Bead diagnostics*), explained on its page.  The pupil model's:
   the frame, and its centred error against the nominal z.  The used beads in
   colour, the others grey and dashed, the ones selected in the table thick.
   Click a curve to select its bead.  On good beads the curves lie on top of
-  one another and the error stays within a few tens of nanometres.
+  one another and the error stays within a few tens of nanometres.  For dual
+  colour one curve per pair, from the two-channel fit.
 - **Beads**: where the beads were on the chip, coloured by whether they were
   used, rejected or excluded, the selected ones ringed; a click selects one.
 
