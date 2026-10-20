@@ -52,6 +52,11 @@ def torch_missing():
             f"into this Python; or, in a terminal:\n{' '.join(torch_install.command())}")
 
 
+def _chosen(box):
+    """A page control's value: a tick's state or a choice's text."""
+    return box.isChecked() if isinstance(box, QCheckBox) else box.currentText()
+
+
 class _Worker(QObject):
     done = Signal(str, object)
     progress = Signal(object)
@@ -130,8 +135,13 @@ class PSFCalibrationWindow(QMainWindow):
         self.rebuild_button = QPushButton("Recalculate")
         self.rebuild_button.setToolTip("calibrate again from the same beads, with your marks")
         self.rebuild_button.clicked.connect(self.rebuild)
+        self.browse_button = QPushButton("Browse stacks...")
+        self.browse_button.setToolTip("the beads beside the model and the residual, the average or one bead at "
+                                      "a time, slice by slice in any direction, in its own window")
+        self.browse_button.clicked.connect(self.browse_stack)
         row.addWidget(self.toggle_button)
         row.addWidget(self.rebuild_button)
+        row.addWidget(self.browse_button)
         row.addStretch(1)
         tlayout.addLayout(row)
         right.addWidget(table_side)
@@ -251,10 +261,6 @@ class PSFCalibrationWindow(QMainWindow):
         self.use_button = QPushButton("Use in the Spline 3D fitter")
         self.use_button.setToolTip("put the saved calibration into the fitter's calibration field")
         self.use_button.clicked.connect(self._use_in_fitter)
-        self.browse_button = QPushButton("Browse stacks...")
-        self.browse_button.setToolTip("the averaged bead stack and the model, or each bead alone, slice by "
-                                      "slice in any direction, in its own window")
-        self.browse_button.clicked.connect(self.browse_stack)
         steps = QHBoxLayout()
         steps.addWidget(self.detect_button)
         steps.addWidget(self.run_button)
@@ -262,7 +268,7 @@ class PSFCalibrationWindow(QMainWindow):
         layout.addLayout(steps)
         layout.addWidget(self.found_label)
         layout.addWidget(self.progress_bar)
-        for button in (self.save_as_button, self.use_button, self.browse_button):
+        for button in (self.save_as_button, self.use_button):
             layout.addWidget(button)
         layout.addStretch(1)
         return panel
@@ -324,7 +330,10 @@ class PSFCalibrationWindow(QMainWindow):
         self.detected = None
         self.found_label.setText(f"{why}: detect again" if why else "")
         if self.run_result is None:
+            self.marks = {}                       # they named beads of that detection
             self.stack_browser.set_marks([])
+            self.refresh_table()
+            self._update_buttons()
     def method_changed(self, label: str) -> None:
         self.method = next(m for m in METHODS if m.label == label)
         self._forget("method changed; files and settings kept - calibrate again")
@@ -335,11 +344,11 @@ class PSFCalibrationWindow(QMainWindow):
     def _update_buttons(self) -> None:
         ready = not (self.method.key == "pupil" and torch_missing() is not None)
         done = self.run_result is not None
+        self.toggle_button.setEnabled(done or self.detected is not None)
         self.detect_button.setEnabled(ready and not self.busy)
         self.run_button.setEnabled(ready and not self.busy)
         self.stop_button.setEnabled(self.busy)
         self.rebuild_button.setEnabled(ready and done and not self.busy)
-        self.toggle_button.setEnabled(done)
         self.save_as_button.setEnabled(done and not self.busy)
         self.browse_button.setEnabled(done)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
@@ -465,11 +474,19 @@ class PSFCalibrationWindow(QMainWindow):
         return inputs
 
     def _show_detected(self, detected) -> None:
+        """A new detection: its beads in the table, ringed on the Stacks page.  A calibration from an
+        earlier one is dropped -- its files stay on disk -- since the table can only hold one set of beads."""
+        if self.run_result is not None:
+            self.run_result = None
+            self._clear_pages()
+        self.marks = {}
         self.detected = detected
         self.found_label.setText(detected.text)
         sources = getattr(detected.found, "sources", None) or []
         self.stack_browser.box_px = self._box_px()
         self.stack_browser.set_marks(detected.positions, sources)
+        self.refresh_table()
+        self._update_buttons()
 
     def detect(self) -> None:
         """Find the beads and say how many and how long calibrating them will take; nothing is learnt."""
@@ -496,7 +513,9 @@ class PSFCalibrationWindow(QMainWindow):
             self.error(error)
             return
         method, paths, dual, detected = self.method, list(self.paths), self.is_dual, self.detected
-        self.marks = {}
+        # the marks made on the detected beads leave them out of this calibration; a calibration's own are
+        # for its Recalculate
+        marks = dict(self.marks) if detected is not None and self.run_result is None else {}
         self.status_bar.showMessage("calibrating..." if detected else "detecting beads...")
 
         def work(progress):
@@ -505,7 +524,7 @@ class PSFCalibrationWindow(QMainWindow):
                 found = method.detect(paths, dual, inputs, progress)
                 progress({"message": found.text, "detected": found})
                 progress({"restart": True})        # one bar for the calibration; detection had its own
-            run = method.run(paths, dual, inputs, progress, self._cancel, detected=found)
+            run = method.run(paths, dual, inputs, progress, self._cancel, detected=found, marks=marks or None)
             return method.finish(run, progress)
         self._work("result", work)
 
@@ -535,6 +554,48 @@ class PSFCalibrationWindow(QMainWindow):
         self.pages = []
         self.choices = []
 
+    def _table_page(self, page) -> QWidget:
+        """A page that is a table (`Page.table`): numbers to read, and *Copy* puts them on the clipboard
+        tab-separated, as a spreadsheet takes them."""
+        columns, rows, *colours = page.table()
+        colours = colours[0] if colours else [None] * len(rows)
+        holder = QWidget()
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        table = QTableWidget(len(rows), len(columns))
+        table.setHorizontalHeaderLabels(columns)
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+        def text(value):
+            return f"{value:.4g}" if isinstance(value, float) else str(value)
+        from PySide6.QtGui import QColor
+        for i, (row, colour) in enumerate(zip(rows, colours)):
+            for j, value in enumerate(row):
+                item = QTableWidgetItem(text(value))
+                if colour:                       # a row the figure marks, in its colour
+                    tint = QColor(colour)
+                    tint.setAlpha(70)
+                    item.setBackground(tint)
+                table.setItem(i, j, item)
+        table.resizeColumnsToContents()
+        copy = QPushButton("Copy")
+        copy.setToolTip("the whole table to the clipboard, tab-separated")
+
+        def to_clipboard():
+            from PySide6.QtWidgets import QApplication
+            lines = ["\t".join(columns)] + ["\t".join(text(v) for v in row) for row in rows]
+            QApplication.clipboard().setText("\n".join(lines))
+            self.status_bar.showMessage(f"{len(rows)} rows copied")
+        copy.clicked.connect(to_clipboard)
+        line = QHBoxLayout()
+        line.addWidget(copy)
+        line.addStretch(1)
+        layout.addLayout(line)
+        layout.addWidget(table, 1)
+        holder.table = table
+        return holder
+
     def _page_widget(self, canvas, page) -> tuple:
         """The canvas, with the page's choices (`Page.controls`) in a row above it; (widget, boxes)."""
         if not page.controls:
@@ -545,10 +606,15 @@ class PSFCalibrationWindow(QMainWindow):
         row = QHBoxLayout()
         boxes = {}
         for label, choices in page.controls.items():
-            row.addWidget(QLabel(label))
-            box = QComboBox()
-            box.addItems(list(choices))
-            box.currentTextChanged.connect(lambda _: self.redraw())
+            if isinstance(choices, bool):
+                box = QCheckBox(label)
+                box.setChecked(choices)
+                box.toggled.connect(lambda _: self.redraw())
+            else:
+                row.addWidget(QLabel(label))
+                box = QComboBox()
+                box.addItems(list(choices))
+                box.currentTextChanged.connect(lambda _: self.redraw())
             row.addWidget(box)
             boxes[label] = box
         row.addStretch(1)
@@ -563,18 +629,24 @@ class PSFCalibrationWindow(QMainWindow):
         current = focus or (self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.count() > 1 else None)
         if current in (None, "Stacks"):
             current = "Model vs data"
-        chosen = {page.title: {k: b.currentText() for k, b in boxes.items()}
+        chosen = {page.title: {k: _chosen(b) for k, b in boxes.items()}
                   for (_, _, page), boxes in zip(self.pages, self.choices)}
         self._clear_pages()
         self.tabs.blockSignals(True)
         for page in self.method.pages(self.run_result):
+            if page.table is not None:
+                self.tabs.addTab(self._table_page(page), page.title)
+                self.pages.append((None, None, page))
+                self.choices.append({})
+                continue
             figure = Figure(figsize=(9, 6), constrained_layout=True)
             canvas = canvas_class()(figure)
             canvas.mpl_connect("pick_event", self.pick_pair)
             widget, boxes = self._page_widget(canvas, page)
             for label, value in chosen.get(page.title, {}).items():      # the choices survive a Recalculate
                 if label in boxes:
-                    boxes[label].setCurrentText(value)
+                    box = boxes[label]
+                    box.setChecked(value) if isinstance(box, QCheckBox) else box.setCurrentText(value)
             self.tabs.addTab(widget, page.title)
             self.pages.append((figure, canvas, page))
             self.choices.append(boxes)
@@ -622,11 +694,13 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is None or not 0 <= index < len(self.pages):
             return
         figure, canvas, page = self.pages[index]
+        if figure is None:                       # a table: filled when made
+            return
         excluded = {b for b, wish in self.marks.items() if wish == "exclude"}
         try:
             figure.clear()
             if page.controls:
-                chosen = {k: b.currentText() for k, b in self.choices[index].items()}
+                chosen = {k: _chosen(b) for k, b in self.choices[index].items()}
                 message = page.draw(figure, self.selected_beads(), excluded, chosen)
             else:
                 message = page.draw(figure, self.selected_beads(), excluded)
@@ -649,11 +723,13 @@ class PSFCalibrationWindow(QMainWindow):
             self.bead_table.selectRow(bead)
 
     def refresh_table(self) -> None:
-        if self.run_result is None:
+        """The calibration's beads, or before one the beads detected (`Method.detected_rows`)."""
+        if self.run_result is None and self.detected is None:
             self.bead_table.setRowCount(0)
             return
         chosen = self.selected_beads()
-        rows = self.method.rows(self.run_result, self.marks)
+        rows = (self.method.rows(self.run_result, self.marks) if self.run_result is not None
+                else self.method.detected_rows(self.detected, self.marks))
         self.bead_table.blockSignals(True)
         self.bead_table.setColumnCount(len(self.method.columns))
         self.bead_table.setHorizontalHeaderLabels(self.method.columns)
@@ -674,14 +750,16 @@ class PSFCalibrationWindow(QMainWindow):
         return sorted({index.row() for index in self.bead_table.selectionModel().selectedRows()})
 
     def toggle_beads(self) -> None:
-        """Mark the selected beads for the next Recalculate (`Method.mark`); pressed again, unmark them."""
-        if self.run_result is None:
+        """Mark the selected beads for the next Recalculate (`Method.mark`), or before any calibration to be
+        left out of the first; pressed again, unmark them."""
+        if self.run_result is None and self.detected is None:
             return
         for bead in self.selected_beads():
             if bead in self.marks:
                 del self.marks[bead]
             else:
-                self.marks[bead] = self.method.mark(self.run_result, bead)
+                self.marks[bead] = ("exclude" if self.run_result is None
+                                    else self.method.mark(self.run_result, bead))
         self.refresh_table()
         self.redraw()
 

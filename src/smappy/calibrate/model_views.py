@@ -38,11 +38,13 @@ import numpy as np
 #: the z step the *Model vs data* page aims for between its planes: few enough to read, close enough to
 #: follow an astigmatic PSF through focus
 PLANE_STEP_NM = (100.0, 150.0)
-#: at most this many planes in a row
+#: at most this many planes on the page
 MAX_PLANES = 9
 
 SECTIONS = ("XY", "XZ", "YZ")
-SHOW = ("data, model", "data, model, residual", "data, residual")
+SHOW = ("data, model, residual", "data, model", "data, residual")
+#: the background where a plane is blank: a bead's slices do not reach it
+BLANK = (0.85, 0.85, 0.85, 1.0)
 
 
 @dataclass
@@ -192,6 +194,12 @@ def pupil_views(run) -> ModelViews:
                 m.append(_onto(expected[j, c], z_slice[j], z_nm, shift))
             views.beads[bead] = (d, m)
             views.states[bead] = cal.beads.rows[bead].state
+    # only the planes every used bead reaches (`pupil.covered_z_nm`): at the ends a few beads alone would
+    # stand for the average
+    covered = np.all([np.isfinite(views.beads[b][0][0]).any(axis=(1, 2)) for b in used], axis=0)
+    views.z_nm = z_nm[covered]
+    for bead, (d, m) in views.beads.items():
+        views.beads[bead] = ([v[covered] for v in d], [v[covered] for v in m])
     import warnings
     with warnings.catch_warnings():                             # a plane no bead reaches stays blank
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -224,43 +232,70 @@ def _section(volume, section):
     return {"XZ": volume[:, yc, :], "YZ": volume[:, :, xc]}[section]
 
 
+def _rgba(image, residual: bool):
+    """``image`` coloured on its own scale: 0 to its peak (inferno), or symmetric about 0 (RdBu) for a
+    residual; NaN grey.  Each image on its own scale so that its shape shows whatever its brightness."""
+    from matplotlib import colormaps
+    image = np.asarray(image, float)
+    peak = float(np.nanmax(np.abs(image))) if np.isfinite(image).any() else 0.0
+    peak = peak or 1.0
+    if residual:
+        out = colormaps["RdBu_r"]((image / peak + 1) / 2)
+    else:
+        out = colormaps["inferno"](np.clip(image / peak, 0, 1))
+    out[~np.isfinite(image)] = BLANK
+    return out
+
+
+def _cell(images, kinds, gap: int = 1):
+    """One plane as one picture: each channel a row of its images side by side, ``gap`` white pixels apart,
+    so that data and model are compared at a glance."""
+    rows = []
+    for channel in images:
+        parts = []
+        for image, kind in zip(channel, kinds):
+            if parts:
+                parts.append(np.ones((image.shape[0], gap, 4)))
+            parts.append(_rgba(image, kind == "residual"))
+        rows.append(np.concatenate(parts, 1))
+        rows.append(np.ones((gap, rows[-1].shape[1], 4)))
+    return np.concatenate(rows[:-1], 0)
+
+
 def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY", show: str = SHOW[0],
-                       step_nm=None) -> str:
-    """The data, the model and the residual in rows (each channel in turn): XY planes ``step_nm`` apart
-    (`planes`), or a side section through the centre.  Data and model on one scale per channel; the
-    residual, data − model, on its own symmetric scale, given in percent of the data's peak.
-    ``bead`` shows that bead alone instead of the average.  Returns a status line."""
+                       step_nm=None, average: bool = False) -> str:
+    """Each plane one picture: the data, the model and, if shown, the residual (data − model) side by
+    side, a channel to a row, each image on its own contrast (`_rgba`): XY planes ``step_nm`` apart
+    (`planes`), or a side section through the centre.  ``bead`` shows that bead alone unless ``average``.
+    Returns a status line."""
+    if average:
+        bead = None
     data, model = views.of(bead)
-    rows = {"data, model": ("data", "model"), "data, model, residual": ("data", "model", "residual"),
-            "data, residual": ("data", "residual")}[show]
-    C = len(data)
-    picked = planes(views.z_nm, step_nm) if section == "XY" else [None]
-    grid = figure.subplots(len(rows) * C, len(picked), squeeze=False)
-    for c in range(C):
-        content = {"data": data[c], "model": model[c], "residual": data[c] - model[c]}
-        peak = float(np.nanmax([np.nanmax(data[c]), np.nanmax(model[c])])) or 1.0
-        residual = float(np.nanmax(np.abs(content["residual"]))) or peak
-        for r, what in enumerate(rows):
-            row = grid[c * len(rows) + r]
-            for ax, k in zip(row, picked):
-                image = content[what][k] if section == "XY" else _section(content[what], section)
-                options = (dict(cmap="RdBu_r", vmin=-residual, vmax=residual) if what == "residual"
-                           else dict(cmap="inferno", vmin=0, vmax=peak))
-                if section != "XY":
-                    z = views.z_nm
-                    options.update(aspect="auto", extent=(0, image.shape[1] - 1, z[-1], z[0]))
-                ax.imshow(image, **options)
-                if section == "XY":
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    if c * len(rows) + r == 0:
-                        ax.set_title(f"{views.z_nm[k] + 0.0:.0f} nm".replace("-0 ", "0 "), fontsize="small")
-            name = what if what != "residual" else f"residual\n±{100 * residual / peak:.2g} %"
-            label = "\n".join(p for p in (views.titles[c], name) if p)
-            row[0].set_ylabel(label if section == "XY" else f"{label}\nz (nm)", fontsize="x-small")
-            if section != "XY" and c * len(rows) + r == len(grid) - 1:
-                row[0].set_xlabel("x (px)" if section == "XZ" else "y (px)")
+    kinds = {"data, model": ("data", "model"), "data, model, residual": ("data", "model", "residual"),
+             "data, residual": ("data", "residual")}[show]
+
+    def images(cut):
+        return [[cut({"data": d, "model": m, "residual": d - m}[k]) for k in kinds] for d, m in zip(data, model)]
     which = "the average of the used beads" if bead is None or bead not in views.beads else \
         f"bead {bead} ({views.states.get(bead, '')})"
-    figure.suptitle(f"{which}: {section}" + (" planes" if section == "XY" else " section"), fontsize="small")
+    legend = " | ".join(kinds) + (", main above secondary" if len(data) > 1 else "") + ", each on its own contrast"
+    if section != "XY":
+        ax = figure.subplots()
+        cell = _cell(images(lambda v: _section(v, section)), kinds)
+        z = views.z_nm
+        ax.imshow(cell, aspect="auto", extent=(0, cell.shape[1], z[-1], z[0]), interpolation="nearest")
+        ax.set_xticks([])
+        ax.set_ylabel("emitter z (nm)")
+        ax.set_title(f"{which}: {section} section through the centre\n{legend}", fontsize="small")
+        return f"model vs data: {which}"
+    picked = planes(views.z_nm, step_nm)
+    n = len(picked)
+    columns = max(1, min(n, int(round(np.sqrt(1.5 * n / len(kinds) * len(data))))))
+    grid = figure.subplots(int(np.ceil(n / columns)), columns, squeeze=False)
+    for ax in grid.flat:
+        ax.axis("off")
+    for ax, k in zip(grid.flat, picked):
+        ax.imshow(_cell(images(lambda v: v[k]), kinds), interpolation="nearest")
+        ax.set_title(f"{views.z_nm[k] + 0.0:.0f} nm".replace("-0 ", "0 "), fontsize="small")
+    figure.suptitle(f"{which}: XY planes\n{legend}", fontsize="small")
     return f"model vs data: {which}"

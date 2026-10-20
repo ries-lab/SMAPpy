@@ -31,16 +31,19 @@ def test_the_planes_shown_are_100_nm_apart_or_150_when_100_would_be_too_many():
     assert np.all(np.diff(np.arange(300., -300.1, -50.)[planes(np.arange(300., -300.1, -50.))]) == -100.)
 
 
-def test_model_vs_data_draws_a_row_for_each_of_data_model_and_residual():
+def test_model_vs_data_puts_data_model_and_residual_of_each_plane_side_by_side():
     from test_bead_calibration import synthetic_collection
     views = average_views(build_calibration(synthetic_collection()))
     figure = Figure()
     draw_model_vs_data(figure, views, None, "XY", "data, model, residual")
-    columns = len(planes(views.z_nm))
-    assert len(figure.axes) == 3 * columns
+    pictures = [ax.images[0].get_array() for ax in figure.axes if ax.images]
+    assert len(pictures) == len(planes(views.z_nm))                          # a picture per plane
+    width = views.data[0].shape[2]
+    assert pictures[0].shape[1] == 3 * width + 2                              # data | model | residual, 1 px apart
     figure = Figure()
     text = draw_model_vs_data(figure, views, 1, "XZ", "data, residual")
-    assert len(figure.axes) == 2 and "bead 1" in text
+    assert len(figure.axes) == 1 and "bead 1" in text
+    assert "average" in draw_model_vs_data(Figure(), views, 1, "XY", average=True)
 
 
 def test_the_bar_follows_a_fit_whose_gain_falls_geometrically_and_never_goes_back():

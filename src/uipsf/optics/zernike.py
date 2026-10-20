@@ -66,6 +66,18 @@ def zernike_name(j: int) -> str:
     return f"{k if k > 1 else ''}{family}{'' if m == 0 else ('x' if m > 0 else 'y')}"
 
 
+#: the aberrations a calibration is read by, (n, |m|) -> name: what an astigmatic 3D PSF is made of, and what
+#: a misaligned or mismatched objective adds
+KEY_ABERRATIONS = {(2, 2): "astigmatism", (3, 1): "coma 1", (5, 1): "coma 2", (4, 0): "spherical 1",
+                   (6, 0): "spherical 2"}
+
+
+def zernike_family(j: int) -> str | None:
+    """Which of `KEY_ABERRATIONS` Noll index j belongs to, or None."""
+    n, m = noll_to_nm(j)
+    return KEY_ABERRATIONS.get((n, abs(m)))
+
+
 def nm_to_noll(n: int, m: int) -> int:
     j = n * (n + 1) // 2 + 1 + max(0, abs(m) - 1)
     if (m > 0 and n % 4 >= 2) or (m < 0 and n % 4 <= 1):

@@ -59,3 +59,12 @@ def test_each_mode_has_a_short_name_that_says_its_family_order_and_axis():
         ["Pi", "Tx", "Ty", "Df", "Asy", "Asx", "Coy", "Cox", "Sp", "2Asx", "2Sp"]
     assert len(set(names.values())) == len(names)                        # no two modes alike
     assert max(len(n) for n in names.values()) <= 4
+
+
+def test_the_key_aberrations_are_astigmatism_two_comas_and_two_sphericals():
+    from uipsf.optics.zernike import zernike_family
+    families = {j: zernike_family(j) for j in range(1, 29)}
+    assert families[5] == families[6] == "astigmatism" and families[7] == families[8] == "coma 1"
+    assert families[16] == families[17] == "coma 2"
+    assert families[11] == "spherical 1" and families[22] == "spherical 2"
+    assert sum(f is not None for f in families.values()) == 8

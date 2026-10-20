@@ -11,8 +11,9 @@ Single channel shows one volume, dual colour the two averaged channels side by
 side on synchronized slices, which is what makes a registration error visible.
 
 Given a calibration's `model_views.ModelViews` (`set_views`), each channel's
-data is shown beside its model on one contrast, or beside the residual, and a
-second slider steps from the average to each bead alone, aligned onto the
+data is shown with its model and its residual beside it, each ticked on or
+off, each on its own contrast so that its shape shows; with *average* off, a
+second slider steps through the beads one at a time, each aligned onto the
 model as the average is: the PSF calibration window's *Browse stacks...*.
 """
 from __future__ import annotations
@@ -27,8 +28,6 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout
 from .plots import stack_slice
 
 ORIENTATIONS = ("XY", "XZ", "YZ")
-#: beside the data: nothing, the model, or the residual data - model
-BESIDE = ("data", "data | model", "data | residual")
 
 
 class StackViewer(QMainWindow):
@@ -94,12 +93,17 @@ class StackViewer(QMainWindow):
         for box in (self.linked_box, self.native_box):
             box.setVisible(len(self.volumes) > 1)
             top.addWidget(box)
-        self.beside_box = QComboBox()
-        self.beside_box.addItems(BESIDE)
-        self.beside_box.setToolTip("the model beside the data, on the same contrast, or the residual "
-                                   "data - model on its own symmetric scale")
-        self.beside_box.currentTextChanged.connect(self.draw)
-        top.addWidget(self.beside_box)
+        self.model_box = QCheckBox("model")
+        self.model_box.setChecked(True)
+        self.model_box.setToolTip("the model beside the data, aligned the same way")
+        self.residual_box = QCheckBox("residual")
+        self.residual_box.setToolTip("data - model beside them, on its own scale symmetric about 0")
+        self.average_box = QCheckBox("average")
+        self.average_box.setChecked(True)
+        self.average_box.setToolTip("the average of the used beads; off: one bead at a time, by the slider")
+        for box in (self.model_box, self.residual_box, self.average_box):
+            box.toggled.connect(self._on_view)
+            top.addWidget(box)
         top.addStretch(1)
         layout.addLayout(top)
         layout.addWidget(self.canvas, 1)
@@ -116,8 +120,7 @@ class StackViewer(QMainWindow):
 
         beads = QHBoxLayout()
         self.bead_slider = QSlider(Qt.Horizontal)
-        self.bead_slider.setToolTip("0: the average of the used beads; then each bead alone, aligned onto "
-                                    "the model as the average is")
+        self.bead_slider.setToolTip("one bead at a time, aligned onto the model as the average is")
         self.bead_slider.valueChanged.connect(self.draw)
         self.bead_label = QLabel("")
         self.bead_label.setStyleSheet("color: gray")
@@ -155,28 +158,38 @@ class StackViewer(QMainWindow):
         """Show a calibration's data and model (`model_views.ModelViews`); the planes are its own."""
         self.views = views
         self.mirror_axis = views.mirror_axis
+        if self.views is None or not hasattr(self, "_bead_ids"):
+            self.linked_box.setChecked(False)       # each panel on its own contrast, so that shapes compare
         self._bead_ids = sorted(views.beads)
         self.bead_slider.blockSignals(True)
-        self.bead_slider.setRange(0, len(self._bead_ids))
-        self.bead_slider.setValue(min(self.bead_slider.value(), len(self._bead_ids)))
+        self.bead_slider.setRange(0, max(len(self._bead_ids) - 1, 0))
+        self.bead_slider.setValue(min(self.bead_slider.value(), max(len(self._bead_ids) - 1, 0)))
         self.bead_slider.blockSignals(False)
         self.set_volumes(views.data, views.titles)
         self._show_view_controls()
 
     def _show_view_controls(self) -> None:
         has = self.views is not None
-        self.beside_box.setVisible(has)
+        for box in (self.model_box, self.residual_box, self.average_box):
+            box.setVisible(has)
+        beads = has and bool(self.views.beads)
+        self.average_box.setVisible(beads)
         for widget in (self.bead_slider, self.bead_label, self.bead_caption):
-            widget.setVisible(has and bool(self.views.beads))
+            widget.setVisible(beads)
+            widget.setEnabled(beads and not self.average_box.isChecked())
         for box in (self.linked_box, self.native_box):
             box.setVisible(len(self.volumes) > 1)
 
     @property
     def bead(self):
         """The bead shown alone, or None for the average."""
-        if self.views is None or self.bead_slider.value() == 0:
+        if self.views is None or self.average_box.isChecked() or not self._bead_ids:
             return None
-        return self._bead_ids[self.bead_slider.value() - 1]
+        return self._bead_ids[min(self.bead_slider.value(), len(self._bead_ids) - 1)]
+
+    def _on_view(self, _checked=None) -> None:
+        self._show_view_controls()
+        self.draw()
 
     def z_nm(self, index):
         if self.views is not None:
@@ -205,18 +218,19 @@ class StackViewer(QMainWindow):
         return self._mirrored(self.views.of(self.bead)[0])
 
     def panels(self) -> list:
-        """(title, volume, kind) of each panel, in order: each channel's data, and its model or
-        residual beside it; kind "data" or "residual" decides the colour scale."""
+        """(title, volume, kind) of each panel, in order: each channel's data, then its model and its
+        residual as ticked; kind "data" or "residual" decides the colour scale."""
         data = self.shown_volumes()
-        beside = self.beside_box.currentText() if self.views is not None else "data"
-        if beside == "data":
+        if self.views is None or not (self.model_box.isChecked() or self.residual_box.isChecked()):
             return [(title, v, "data") for title, v in zip(self.titles, data)]
         model = self._mirrored(self.views.of(self.bead)[1])
         out = []
         for title, d, m in zip(self.titles, data, model):
             out.append((" ".join(p for p in (title, "data") if p), d, "data"))
-            out.append(((" ".join(p for p in (title, "model") if p), m, "data") if beside == "data | model"
-                        else (" ".join(p for p in (title, "residual") if p), d - m, "residual")))
+            if self.model_box.isChecked():
+                out.append((" ".join(p for p in (title, "model") if p), m, "data"))
+            if self.residual_box.isChecked():
+                out.append((" ".join(p for p in (title, "residual") if p), d - m, "residual"))
         return out
 
     # -------------------------------------------------------------- events
@@ -257,23 +271,27 @@ class StackViewer(QMainWindow):
         def peak(image, volume):
             return float(np.nanmax(np.abs(image if self.auto_box.isChecked() else volume)))
         maxima = [peak(image, v) for image, (_, v, _) in zip(images, panels)]
-        # one scale for a channel's data and model; linked, one for every channel's
-        groups = [i // 2 if self.views is not None and len(panels) > len(self.titles) else i
-                  for i in range(len(panels))]
-        if self.linked_box.isChecked() and len(self.titles) > 1:
+        # each panel its own scale; linked, one for every data and model panel
+        groups = list(range(len(panels)))
+        if self.linked_box.isChecked():
             groups = [0] * len(panels)
         scale = {}
         for g, m, (_, _, kind) in zip(groups, maxima, panels):
             if kind == "data":
                 scale[g] = max(scale.get(g, 0.0), m)
         self.figure.clear()
-        axes = np.atleast_1d(self.figure.subplots(1, len(panels), sharex=True, sharey=True))
+        # a channel's panels side by side and almost touching, the channels one row each
+        per_row = len(panels) // len(self.titles) if len(panels) % len(self.titles) == 0 else len(panels)
+        rows = len(panels) // per_row
+        self.figure.get_layout_engine().set(w_pad=0.01, wspace=0.0)
+        axes = np.atleast_1d(self.figure.subplots(rows, per_row, sharex=True, sharey=True)).ravel()
         depth = self.volumes[0].shape[0]
         for ax, image, maximum, g, (title, _, kind) in zip(axes, images, maxima, groups, panels):
             if kind == "residual":
                 limit = max(maximum, 1e-15)
                 options = dict(cmap="RdBu_r", vmin=-limit, vmax=limit)
-                title = f"{title} ±{100 * limit / max(scale.get(g, limit), 1e-15):.2g} %"
+                peak_data = max((m for m, (_, _, k) in zip(maxima, panels) if k == "data"), default=limit)
+                title = f"{title} ±{100 * limit / max(peak_data, 1e-15):.2g} %"
             else:
                 options = dict(cmap="inferno", vmin=0, vmax=max(scale.get(g, maximum) * self.contrast.value(), 1e-15))
             if orientation != "XY":
@@ -283,6 +301,8 @@ class StackViewer(QMainWindow):
             ax.set(xlabel="y (px)" if orientation == "YZ" else "x (px)",
                    ylabel="y (px)" if orientation == "XY" else "emitter z (nm)",
                    title=" - ".join(p for p in (title, orientation) if p))
+        for ax in axes:
+            ax.label_outer()                            # the axes once, so the panels can almost touch
         self.canvas.draw_idle()
         where = (f"emitter z = {self.z_nm(index):.1f} nm"
                  if orientation == "XY" else

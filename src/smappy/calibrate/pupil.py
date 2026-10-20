@@ -498,7 +498,7 @@ class SplineSettings:
     dz_nm: Optional[float] = param(None, label="spline z step", unit="nm", min=1.0,
                                    help="auto: the stacks' step")
     z_range_nm: Optional[float] = param(None, label="spline z range", unit="nm", min=50.0,
-                                        help="± about focus; auto: the stacks' range")
+                                        help="± about focus; auto: the range every used bead covers")
 
 
 MODEL_FILTER = "uipsf model or PSF calibration (*.h5);;All files (*)"
@@ -548,40 +548,44 @@ class PupilRun:
     dual: bool = False
 
 
-#: a learning run costs about this many Gauss-Newton matrices of the whole model, each timed as
-#: `estimate_seconds` times one: 4.4 to 5.1 on ten simulated beads at Zernike orders 4, 6 and 8 (9 to 15 s
-#: a run, 4 x86 cores).  Stage 1's lower orders and the cheap L-BFGS steps between matrices are in it
-MATRICES_PER_RUN = 5
-#: the beads one matrix is timed on; the time is scaled to all of them, linear in the beads as it is
-TIMED_BEADS = 8
+#: a learning run costs about this many forward passes of one bead per bead and per parameter, each timed as
+#: `estimate_seconds` times one: 1.4 to 2.3 on ten simulated beads at Zernike orders 3 to 8 (7 to 16 s a run,
+#: 4 x86 cores).  The Jacobians, one forward-mode pass per parameter, are most of a run
+PASSES_PER_PARAMETER = 2.0
+#: forward passes timed, the median kept: one alone varied from 4.3 to 7.3 ms
+TIMED_PASSES = 3
 
 
 def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings) -> float:
-    """About how long learning ``rois`` will take, seconds: one Gauss-Newton matrix of the full model timed
-    on a few beads (`TIMED_BEADS`), scaled to all of them and by `MATRICES_PER_RUN`.  A figure to decide
-    by before an afternoon's run -- within a factor of two -- not a promise: the iterations a fit needs
-    depend on the beads."""
+    """About how long learning ``rois`` will take, seconds, in well under a second: the model's forward pass
+    on one bead, timed (`TIMED_PASSES`), times the beads, the parameters and `PASSES_PER_PARAMETER`.  A
+    figure to decide by before an afternoon's run -- within a factor of two -- not a promise: the iterations
+    a fit needs depend on the beads.  Timing one Gauss-Newton matrix instead was closer (4.4 to 5.1 matrices
+    a run) but cost 1.5 to 3 s on these ten beads, more on many."""
     import time
 
     import torch
     from uipsf.device import on_model_device
     from uipsf.params import Params
-    from uipsf.solve import Problem
     from uipsf.workflows.beads import MAX_DZ_NM
     from uipsf.workflows.calibrate import bead_model
     batch = rois.batch
     channels = batch.data.shape[1]
     learnt = bead_model(optics.optics(rois.camera, channels), model, tuple(batch.data.shape[-2:]),
                         [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()))
-    E = batch.n_emitters
-    sub = on_model_device(batch.subset(torch.arange(min(E, TIMED_BEADS))), learnt).thinned(MAX_DZ_NM)
-    def matrix(b):
-        start = Params(learnt.specs(b), b.n_emitters, dtype=b.data.dtype, device=b.data.device)
-        Problem(learnt, rois.noise, b).normal_equations(start)
-    matrix(sub.subset(torch.arange(1)))     # the first matrix pays for compiling: 1.8 s against 1.2 for 8 beads
-    t = time.perf_counter()
-    matrix(sub)
-    return (time.perf_counter() - t) * MATRICES_PER_RUN * E / sub.n_emitters
+    one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
+    start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
+    values = start.physical()
+    times = []
+    with torch.no_grad():
+        for k in range(TIMED_PASSES + 1):            # the first pass warms the kernels up: not counted
+            t = time.perf_counter()
+            learnt(values, one).sum().item()         # .item(): waits for a GPU to finish
+            if k:
+                times.append(time.perf_counter() - t)
+    shared = sum(int(torch.as_tensor(v).numel()) for n, v in values.items() if start.specs[n].scope == "shared")
+    per_bead = sum(int(torch.as_tensor(v).numel()) for n, v in values.items() if start.specs[n].scope != "shared")
+    return float(np.median(times)) * PASSES_PER_PARAMETER * batch.n_emitters * (shared + per_bead)
 
 
 def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettings, detection=None,
@@ -614,9 +618,8 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
                           progress=progress, cancel=cancel)
     result = PupilRun(rois, cal, start, dual=dual)
     if run.save_model and cal.result.stop_reason != "cancelled":
-        z = rois.batch.z_nm
         dz = spline.dz_nm or float(rois.batch.z_step_nm)
-        z_range = spline.z_range_nm or float(z.abs().max())
+        z_range = spline.z_range_nm or _auto_z_range(cal, rois.batch)
         roi = int(rois.batch.data.shape[-1])
         result.calibration = (dual_calibration(cal, dz, z_range, roi) if dual
                               else spline_calibration(cal, dz, z_range, roi, camera=rois.camera))
@@ -629,11 +632,33 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
 
 # ------------------------------------------------------------------ fit quality: the beads, refitted
 
+def covered_z_nm(cal, batch) -> tuple[float, float]:
+    """(lowest, highest) emitter z that every used bead's stack reaches, nm.  A bead sits at its own height,
+    so its slices cover the nominal range shifted by it; at the ends only some beads remain, and a model
+    there was learnt from those few.  So the spline on *auto*, *Model vs data* and the fit quality keep to
+    the range all of them cover, as the bead average crops its average (`core.build_calibration`)."""
+    import torch
+    from uipsf.device import on_model_device
+    from uipsf.workflows.beads import MAX_DZ_NM
+    used = list(cal.beads.used)
+    sub = on_model_device(batch, cal.model).thinned(MAX_DZ_NM).subset(torch.tensor(used))
+    with torch.no_grad():
+        p = {k: v.to(sub.data.device) for k, v in cal.result.params.physical().items()}
+        z = cal.model.geometry(p, sub)[..., 2].cpu().double().numpy()            # [E, K]
+    return float(np.max(z.min(axis=1))), float(np.min(z.max(axis=1)))
+
+
+def _auto_z_range(cal, batch) -> float:
+    """± the spline reaches on *auto*: the covered range (`covered_z_nm`), the nearer end about focus."""
+    low, high = covered_z_nm(cal, batch)
+    return max(min(-low, high), float(batch.z_step_nm))
+
+
 def calibration_of(run: PupilRun):
     """The run's spline (or dual) calibration: the saved one, else sampled now as saving would."""
     if run.calibration is None:
         rois = run.rois
-        dz, z_range = float(rois.batch.z_step_nm), float(rois.batch.z_nm.abs().max())
+        dz, z_range = float(rois.batch.z_step_nm), _auto_z_range(run.cal, rois.batch)
         roi = int(rois.batch.data.shape[-1])
         run.calibration = (dual_calibration(run.cal, dz, z_range, roi) if run.dual
                            else spline_calibration(run.cal, dz, z_range, roi, camera=rois.camera))
@@ -733,6 +758,15 @@ def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:
         values = model.unpack(best, link)
         z_index, photons = best.theta[:, model.slot(4)], values["photons"]
     valid = np.isfinite(best.logl) & np.isfinite(best.theta).all(axis=1)
+    # the slices of a bead beyond the spline's range (a bead high or low on the coverslip reaches past the
+    # range the others cover, `covered_z_nm`) are not fitted: the fit could only stop at the spline's end
+    reach = min(abs(float(spline.z_index_to_nm(0))), abs(float(spline.z_index_to_nm(spline.shape[0] - 1))))
+    found = spline.z_index_to_nm(z_index) - out["nominal_z_nm"]
+    for e in range(E):
+        mine = out["bead_id"] == e
+        central = mine & valid & (np.abs(out["nominal_z_nm"]) < reach / 2)
+        offset = float(np.median(found[central])) if central.any() else 0.0
+        valid[mine & (np.abs(out["nominal_z_nm"] + offset) > reach)] = False
     fitted = np.where(valid, spline.z_index_to_nm(z_index), np.nan)
     out.update({"fitted_z_nm": fitted,
                 "centred_error_nm": _centred(fitted - out["nominal_z_nm"], out["bead_id"], valid),

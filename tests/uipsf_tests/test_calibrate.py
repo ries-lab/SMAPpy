@@ -107,8 +107,20 @@ def test_a_two_channel_model_needs_a_transform_per_channel():
 def test_every_figure_of_a_calibration_draws_with_and_without_a_reference(symmetric_fixed):
     from uipsf.diagnostics import figures
     drawn = figures(symmetric_fixed, reference=symmetric_fixed)
-    assert {"Pupil", "Zernikes", "Residual atlas"} <= set(drawn)
+    assert {"Pupil and Zernikes", "Residual atlas"} <= set(drawn)
     for draw in list(drawn.values()) + list(figures(symmetric_fixed).values()):
         fig = Figure()
         draw(fig)
         assert fig.axes
+
+
+def test_the_zernike_table_holds_the_bars_numbers_and_colours_the_key_aberrations(symmetric_fixed):
+    from uipsf.diagnostics.figures import FAMILY_COLOURS, zernike_table, zernikes
+    columns, rows, colours = zernike_table(symmetric_fixed, reference=symmetric_fixed)
+    modes, values, _ = zernikes(symmetric_fixed, "phase")
+    phase = {row[1]: row[columns.index("phase (rad)")] for row in rows}
+    assert all(phase[j] == pytest.approx(v) for j, v in zip(modes, values, strict=True))
+    start = columns.index("start phase (rad)")
+    assert all(row[start] == pytest.approx(row[columns.index("phase (rad)")]) for row in rows if row[1] in modes)
+    for row, colour in zip(rows, colours, strict=True):
+        assert colour == FAMILY_COLOURS.get(row[columns.index("aberration")])
