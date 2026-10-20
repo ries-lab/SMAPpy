@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read from bead z-stacks, by one of two methods -- the bead average, or a physical model of the microscope's pupil and aberrations learnt with uiPSF v2 -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer]
+covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm]
 ---
 
 ## What it does
@@ -86,12 +86,19 @@ slice of every stack is left out: on real data it is often brighter than the
 rest.
 
 **Estimating the time.**  After detection the model is built for these beads
-and one step of its fit (its Gauss–Newton matrix, the costly part) is timed
-on up to eight of them.  A whole run costs about five such steps,
-measured on simulated beads at Zernike orders 4 to 8, so the estimate is
-that time scaled to all the beads and multiplied by five.  It is good to
+and its image of one bead is computed a few times and timed, which takes a
+few hundredths of a second.  Learning costs about two such images per bead and
+per fitted number (the pupil's modes, the blur, each bead's position,
+photons and background), measured on simulated beads at Zernike orders 3 to
+8, so the estimate is that time × 2 × the beads × the numbers.  It is good to
 about a factor of two: the number of iterations a fit needs depends on the
 beads.
+
+**Choosing beads by hand.**  The detected beads are listed in the table at
+once.  A bead marked there (*Exclude / include*) is left out of the first
+calibration; after one, a mark applies to the next *Recalculate*.  A bead
+excluded (or, for the pupil model, included) by hand stays so through every
+*Recalculate* until its mark is withdrawn.
 
 **Learning** fits one model to all beads at once: the pupil's Zernike modes
 (shared), an extra blur of the image (shared), and each bead's position,
@@ -124,8 +131,16 @@ alignment.  The average of the used beads is shown, or one bead alone.  For
 the bead average the data is its average before smoothing and the model the
 smoothed PSF the spline is made from.
 
+**The ends of the stacks.**  Each bead sits at its own height, so its slices
+cover the stage's range shifted by it, and at the top and bottom only some
+beads remain.  The pupil model keeps to the range every used bead covers: the
+spline on *auto* reaches that far, *Model vs data* shows only those planes,
+and the fit quality leaves out the slices of a bead beyond the spline.  The
+bead average crops its average the same way.
+
 **Saving.**  With *save model*, the model is turned into a spline: the PSF of a
-point on the central pixel is computed on a grid through the stacks' z range,
+point on the central pixel is computed on a grid through the z range every
+used bead covers,
 each pixel as the model saw it when it learnt, and normalised as the bead
 average is.
 The calibration and the model file go beside the stacks, named as the bead
@@ -176,9 +191,16 @@ localised on the final pupil.  Each slice goes to the emitter's height in it
 (stage drift and z scale included) by linear interpolation onto the slices
 learnt from; x and y are shifted by the bead's mean position over its
 slices, in each channel where the transform puts it.  Planes outside a bead's
-own slices are left blank.  The XY planes shown are 100 nm apart, or 150 nm
-when 100 nm would need more than nine; the residual's colour scale is its
-own, given in percent of the data's peak.
+own slices are left blank, and only the planes every used bead reaches are
+shown.  The XY planes shown are 100 nm apart, or 150 nm when 100 nm would
+need more than nine.  Each image is scaled to its own peak, the residual
+symmetric about zero.
+
+The covered range is the highest of the used beads' lowest emitter z and the
+lowest of their highest, from the fitted geometry; the spline's *auto* range
+is the nearer of its two ends about focus.  A slice of the fit quality is left
+out when the nominal z plus the bead's offset (the median of fitted − nominal
+over its central slices) lies beyond the spline.
 
 The progress bar's fraction during learning is how far the fall of the
 objective per iteration has come from the first iteration's to the solver's
@@ -287,11 +309,14 @@ How the model is sampled into the spline the fitter reads.
 The spline's z spacing; auto, the stacks' own.
 
 ### spline z range
-How far above and below focus the spline reaches; auto, the stacks' range.
+How far above and below focus the spline reaches; auto, the range every used
+bead covers (*The ends of the stacks*).
 
 ### Detect beads
-Finds the beads, rings them on the *Stacks* page and says how many there are
-and how long calibrating them will take (*How it works*).  Changing the files,
+Finds the beads, lists them in the table, rings them on the *Stacks* page and
+says how many there are and how long calibrating them will take (*How it
+works*).  A new detection drops an earlier calibration from the window; its
+files stay.  Changing the files,
 the *mode*, the *method* or a setting under *beads* drops the detection.
 
 ### Calibrate
@@ -313,19 +338,21 @@ pressed again, it stops.  The pupil model can be used as soon as it is done.
 Saves the calibration under another name, or one made with *save model* off.
 
 ### Browse stacks...
-The averaged beads and the model side by side, on one contrast, slice by
-slice in any direction (XY, XZ, YZ), in its own window; or the data beside
-the residual, data − model.  A second slider steps from the average to each
-bead alone, moved onto the model as the average is.
+Under the table.  The beads, slice by slice in any direction (XY, XZ, YZ), in
+their own window, with the model and the residual, data − model, beside them
+as ticked (*model*, *residual*), each on its own contrast.  With *average* the
+average of the used beads; without, a second slider steps through the beads
+one at a time, each moved onto the model as the average is.
 
 ### Use in the Spline 3D fitter
 Puts the saved calibration into the fitter again (it is put there when it is
 saved).  For dual colour, the Spline 3D 2C fitter.
 
 ### Exclude / include
-Marks the selected beads for the next *Recalculate*: a used bead to be
-excluded, and for the pupil model a rejected one to be included; pressed
-again, the mark is withdrawn.  Space does the same.
+Marks the selected beads: before any calibration, to be left out of the
+first; after one, for the next *Recalculate*, a used bead to be excluded and
+for the pupil model a rejected one to be included.  Pressed again, the mark is
+withdrawn; a choice by hand stays until then.  Space does the same.
 
 ### Recalculate
 Calibrates again from the same beads with the marks applied (the pupil model
@@ -336,23 +363,28 @@ from its current model) and saves over this run's files.
 *Stacks* is there from the start (*How it works*); the others appear after a
 calibration.  Both methods have:
 
-- **Model vs data**: the data in one row, the model in the next and, if
-  chosen (*show*), the residual, for each channel in turn, on XY planes 100
-  or 150 nm apart or on a side section through the centre (*section*: XZ,
-  YZ).  Data and model share one colour scale, so a difference in brightness
-  is a difference.  With beads selected in the table the first of them is
-  shown alone; otherwise the average of the used beads.  A good model leaves
-  a residual of noise, with no ring, lobe or tilt that repeats from plane to
-  plane; a single bead whose residual has a second spot is a double.
+- **Model vs data**: each plane one picture of the data, the model and, if
+  chosen (*show*), the residual side by side, almost touching, the channels
+  one above the other; XY planes 100 or 150 nm apart, or a side section
+  through the centre (*section*: XZ, YZ).  Each image is on its own contrast,
+  so the shapes compare whatever the brightness.  With beads selected in the
+  table the first of them is shown alone, unless *average* is ticked;
+  otherwise the average of the used beads.  A good model leaves a residual of
+  noise, with no ring, lobe or tilt that repeats from plane to plane; a
+  single bead whose residual has a second spot is a double.
 
 The bead average's other pages are the bead calibration's (*Overview*,
 *Transformation* for dual colour, *Fit quality*, *Field diagnostics*, *Bead
 diagnostics*), explained on its page.  The pupil model's:
 
-- **Pupil**: the learnt phase (radians) and magnitude over the pupil.  The
-  phase of an astigmatic PSF is a saddle; the magnitude should be close to 1.
-- **Zernikes**: every mode's coefficient with its uncertainty (CRLB) as an
-  error bar, beside the *start from* model's when there is one.  Each bar is
+- **Pupil and Zernikes**: on the left the learnt phase (radians) and
+  magnitude over the pupil.  The phase of an astigmatic PSF is a saddle; the
+  magnitude should be close to 1.  On the right every mode's coefficient with
+  its uncertainty (CRLB) as an error bar, beside the *start from* model's
+  when there is one.  The aberrations a calibration is read by have colours
+  of their own -- astigmatism, coma 1 and 2 (radial orders 3 and 5),
+  spherical 1 and 2 (orders 4 and 6) -- and their phase values are written
+  over the bars.  Each bar is
   named by a short abbreviation over its Noll index: *Df* defocus, *As*
   astigmatism, *Co* coma, *Tr* trefoil, *Sp* spherical, *Qu* quadrafoil and
   so on, *x* for the cos term (astigmatism at 0°/90°) and *y* for the sin
@@ -360,6 +392,10 @@ diagnostics*), explained on its page.  The pupil model's:
   family (*2Sp* the secondary spherical); the line under the figure lists
   them.  A
   difference far beyond the error bars is a change in the microscope.
+- **Zernike table**: the same numbers, every channel's phase and magnitude
+  with their uncertainties (and the *start from* model's), the key
+  aberrations' rows in their colours; *Copy* puts the table on the
+  clipboard, tab-separated, for a spreadsheet.
 - **Residual atlas**: where the model and the data disagree, grouped by
   slice, defocus, distance from the spot's centre and position on the field.
   Each group's mean deviance is about 1 where the model is right; a group
@@ -374,10 +410,11 @@ diagnostics*), explained on its page.  The pupil model's:
 - **Beads**: where the beads were on the chip, coloured by whether they were
   used, rejected or excluded, the selected ones ringed; a click selects one.
 
-*Pupil*, *Zernikes* and *Residual atlas* describe all beads together (one
-pupil per channel), so they do not follow the table's selection.
+*Pupil and Zernikes*, *Zernike table* and *Residual atlas* describe all beads
+together (one pupil per channel), so they do not follow the table's
+selection.
 
-For dual colour, *Pupil* and *Zernikes* come once per channel.
+For dual colour, *Pupil and Zernikes* comes once per channel.
 
 The bead average's table is the bead calibration's.  The pupil model's lists each bead with its brightness verdict (as the bead
 calibration would give it), its state, the reason for a rejection, and its

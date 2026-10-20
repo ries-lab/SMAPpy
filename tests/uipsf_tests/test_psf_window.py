@@ -93,7 +93,11 @@ def _titles(window):
 def _every_page_draws(window):
     for i in range(1, window.tabs.count()):
         window.tabs.setCurrentIndex(i)
-        assert window.pages[i - 1][0].axes, window.tabs.tabText(i)
+        figure, _, page = window.pages[i - 1]
+        if page.table is not None:
+            assert window.tabs.widget(i).table.rowCount() > 0, window.tabs.tabText(i)
+        else:
+            assert figure.axes, window.tabs.tabText(i)
 
 
 def test_the_window_shows_each_method_its_own_sections_only(stack_file, monkeypatch):
@@ -116,11 +120,19 @@ def test_detect_beads_rings_them_on_the_stacks_page_and_estimates_the_learning(s
     detected = window.detected
     assert detected is not None, window.status_bar.currentMessage()
     assert len({p[3] for p in detected.positions}) == 10 and 0 < detected.seconds < 600
+    from smappy.calibrate.pupil import estimate_seconds
+    started = time.perf_counter()
+    estimate_seconds(detected.found, OPTICS, MODEL)
+    assert time.perf_counter() - started < 1.0                                  # coarse, and quick
     assert "10 beads" in window.found_label.text() and "learning takes about" in window.found_label.text()
     assert window.run_result is None                                          # nothing learnt
     window.stack_browser.draw()
     rings = [p for p in window.stack_browser.figure.axes[0].patches if hasattr(p, "pair_ids")]
     assert len(rings) == 10
+    assert window.bead_table.rowCount() == 10 and window.bead_table.item(0, 4).text() == "found"
+    window.bead_table.selectRow(4)
+    window.toggle_beads()                                                    # left out of the first run
+    assert window.marks == {4: "exclude"} and "exclude on Calibrate" in window.bead_table.item(4, 4).text()
     distance = window.detection_form.fields["min_distance_px"].widget          # typed in, as by hand
     distance.setText("22")
     distance.editingFinished.emit()
@@ -144,10 +156,13 @@ def test_the_bead_average_calibrates_in_the_window_as_in_the_bead_calibration(st
     window.browse_stack()
     assert window.stack_viewer.isVisible()
     viewer = window.stack_viewer
-    viewer.beside_box.setCurrentText("data | model")
-    assert [kind for _, _, kind in viewer.panels()] == ["data", "data"]
+    assert [kind for _, _, kind in viewer.panels()] == ["data", "data"]          # data and model
+    viewer.residual_box.setChecked(True)
+    assert [kind for _, _, kind in viewer.panels()] == ["data", "data", "residual"]
+    assert viewer.bead is None and not viewer.bead_slider.isEnabled()          # the average
+    viewer.average_box.setChecked(False)
     viewer.bead_slider.setValue(1)
-    assert viewer.bead == sorted(run.extra["views"].beads)[0]
+    assert viewer.bead == sorted(run.extra["views"].beads)[1]
     window.bead_table.selectRow(2)
     window.toggle_beads()
     window.rebuild()
@@ -165,8 +180,8 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     window.run()
     wait()
     assert window.run_result is not None, window.status_bar.currentMessage()
-    assert {"Stacks", "Pupil", "Zernikes", "Residual atlas", "Model vs data", "Fit quality", "Beads"} <= \
-        set(_titles(window))
+    assert {"Stacks", "Pupil and Zernikes", "Residual atlas", "Zernike table", "Model vs data", "Fit quality",
+            "Beads"} <= set(_titles(window))
     assert window.detected is not None                                        # Calibrate detected first
     _every_page_draws(window)
     assert window.bead_table.rowCount() == 10
@@ -174,6 +189,12 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     assert handed == [(str(saved), False)] and window.use_button.isEnabled()
     views = window.run_result.extra["views"]
     data, model = views.data[0], views.model[0]
+    used = [b for b, state in views.states.items() if state == "used"]
+    assert all(np.isfinite(views.beads[b][0][0]).any(axis=(1, 2)).all() for b in used)   # no end plane only some reach
+    from smappy.calibrate.pupil import covered_z_nm
+    low, high = covered_z_nm(window.run_result.result.cal, window.run_result.result.rois.batch)
+    assert low <= views.z_nm.min() and views.z_nm.max() <= high
+    assert len(views.z_nm) < 25                                                  # the ±600 nm stack, its ends cut
     assert np.nanmax(np.abs(data - model)) < 0.05 * np.nanmax(data)          # the model fits its beads
     yy, xx = np.indices(model.shape[1:])
     weight = np.nansum(model, 0)
@@ -193,6 +214,14 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     window.rebuild()
     wait()
     assert window.run_result.result.cal.beads.rows[0].state == "excluded" and window.run_result.saved == saved
+    assert window.marks == {0: "exclude"}                                       # kept for the next one
+    window.bead_table.clearSelection()
+    window.bead_table.selectRow(1)
+    window.toggle_beads()
+    window.rebuild()
+    wait()
+    rows = window.run_result.result.cal.beads.rows
+    assert rows[0].state == rows[1].state == "excluded"                          # the first stays out
     window.close()
 
 

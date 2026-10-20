@@ -1,4 +1,4 @@
-"""The figures of a calibration: the pupil, its Zernikes, the residual atlas, the beads (plan §7.5).
+"""The figures of a calibration: the pupil beside its Zernikes, the residual atlas, the beads (plan §7.5).
 
 Every function draws on a matplotlib figure it is given and returns
 nothing: SMAPpy's window passes a tab's figure (a `SubFigure` on its *All*
@@ -17,9 +17,13 @@ import numpy as np
 import torch
 
 from ..model.channels import prefix, view
-from ..optics.zernike import ZERNIKE_NAMES, zernike_name
+from ..optics.zernike import ZERNIKE_NAMES, zernike_family, zernike_name
 
 STATES = {"used": "#1f77b4", "held out": "#2ca02c", "rejected": "#d62728", "excluded": "#7f7f7f"}
+#: a colour per key aberration (`KEY_ABERRATIONS`), the bars and the table's rows; the other modes grey
+FAMILY_COLOURS = {"astigmatism": "#1f77b4", "coma 1": "#d62728", "coma 2": "#ff9896", "spherical 1": "#2ca02c",
+                  "spherical 2": "#98df8a"}
+OTHER = "#b0b0b0"
 
 
 def _shared(source) -> dict:
@@ -60,10 +64,11 @@ def _label(j: int) -> str:
     return f"{zernike_name(j)}\n{j}"
 
 
-def draw_pupil(fig, source, channel: int = 0) -> None:
-    """The pupil's phase (rad) and magnitude over the aperture."""
+def draw_pupil(fig, source, channel: int = 0, vertical: bool = False) -> None:
+    """The pupil's phase (rad) and magnitude over the aperture, side by side or, ``vertical``, one above
+    the other."""
     magnitude, phase = pupil_maps(source, channel)
-    a, b = fig.subplots(1, 2)
+    a, b = fig.subplots(2, 1) if vertical else fig.subplots(1, 2)
     lim = np.nanmax(np.abs(phase)) or 1.0
     im = a.imshow(phase, cmap="RdBu_r", vmin=-lim, vmax=lim)
     a.set_title("phase (rad)")
@@ -85,20 +90,74 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
         modes, values, crlb = zernikes(source, w, channel)
         x = np.arange(len(modes))
         width = 0.4 if reference is not None else 0.8
-        ax.bar(x, values, width, yerr=crlb, capsize=2, label="this fit")
+        families = [zernike_family(j) for j in modes]
+        colours = [FAMILY_COLOURS.get(f, OTHER) for f in families]
+        ax.bar(x, values, width, yerr=crlb, capsize=2, color=colours)
+        if w == "phase":
+            # the key aberrations' values on their bars: the numbers a calibration is read by
+            span = float(np.nanmax(np.abs(values))) if len(values) else 1.0
+            for xi, v, f in zip(x, values, families, strict=True):
+                if f is not None and np.isfinite(v):
+                    ax.annotate(f"{v:.2f}", (xi, v), xytext=(0, 2 if v >= 0 else -2), textcoords="offset points",
+                                ha="center", va="bottom" if v >= 0 else "top", fontsize="xx-small",
+                                color=FAMILY_COLOURS[f])
+            ax.margins(y=0.15 if span else 0.05)
+            from matplotlib.patches import Patch
+            handles = [Patch(color=c, label=f) for f, c in FAMILY_COLOURS.items() if f in families]
         if reference is not None:
             rmodes, rvalues, rcrlb = zernikes(reference, w, channel)
             r = {j: (v, e) for j, v, e in zip(rmodes, rvalues, rcrlb, strict=True)}
             rv = np.array([r.get(j, (np.nan, np.nan))[0] for j in modes])
             re = np.array([r.get(j, (np.nan, np.nan))[1] for j in modes])
-            ax.bar(x + width, rv, width, yerr=re, capsize=2, color="#999999", label=reference_label)
-            ax.legend(fontsize="small")
+            ax.bar(x + width, rv, width, yerr=re, capsize=2, color="#555555", label=reference_label)
+        if w == "phase":
+            if reference is not None:
+                from matplotlib.patches import Patch
+                handles.append(Patch(color="#555555", label=reference_label))
+            if handles:
+                ax.legend(handles=handles, fontsize="x-small", ncols=min(len(handles), 3))
         ax.axhline(0, color="k", lw=0.5)
         ax.set_xticks(x + (width / 2 if reference is not None else 0))
         ax.set_xticklabels([_label(j) for j in modes], fontsize="x-small")
         ax.set_ylabel("rad" if w == "phase" else "relative")
         ax.set_title(f"{w}: name and Noll index", fontsize="small")
     fig.supxlabel(ZERNIKE_NAMES, fontsize="x-small", wrap=True)
+
+
+def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, reference_label: str = "start") -> None:
+    """The pupil (`draw_pupil`, one map above the other) on the left, its Zernikes (`draw_zernikes`) on the
+    right: the picture and the numbers it is made of, read together."""
+    left, right = fig.subfigures(1, 2, width_ratios=[1, 2.4])
+    draw_pupil(left, source, channel, vertical=True)
+    draw_zernikes(right, source, channel, reference, reference_label)
+
+
+def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]:
+    """(columns, rows, colours) of every channel's Zernike coefficients with their CRLBs, and
+    ``reference``'s beside them: the numbers of `draw_zernikes`, to read or copy, each key aberration's
+    row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted."""
+    from ..optics.zernike import noll_to_nm
+    columns = ["channel", "Noll", "name", "aberration", "n", "m", "phase (rad)", "± (rad)", "magnitude", "±"]
+    if reference is not None:
+        columns += ["start phase (rad)", "start magnitude"]
+    rows = []
+    for c in range(source.model.n_channels):
+        phase = {j: (v, e) for j, v, e in zip(*zernikes(source, "phase", c), strict=True)}
+        magnitude = {j: (v, e) for j, v, e in zip(*zernikes(source, "magnitude", c), strict=True)}
+        start_phase = start_magnitude = {}
+        if reference is not None:
+            start_phase = {j: v for j, v, _ in zip(*zernikes(reference, "phase", c), strict=True)}
+            start_magnitude = {j: v for j, v, _ in zip(*zernikes(reference, "magnitude", c), strict=True)}
+        nan = (float("nan"), float("nan"))
+        for j in sorted(set(phase) | set(magnitude)):
+            n, m = noll_to_nm(j)
+            row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *phase.get(j, nan),
+                   *magnitude.get(j, nan))
+            if reference is not None:
+                row += (start_phase.get(j, float("nan")), start_magnitude.get(j, float("nan")))
+            rows.append(tuple(float(v) if isinstance(v, (np.floating, float)) else v for v in row))
+    colours = [FAMILY_COLOURS.get(row[3]) for row in rows]
+    return columns, rows, colours
 
 
 def draw_atlas(fig, atlas, groups=("slice", "|z|", "radius", "field")) -> None:
@@ -151,8 +210,7 @@ def figures(cal, reference=None) -> dict:
     out = {}
     for c in range(cal.model.n_channels):
         tag = "" if cal.model.n_channels == 1 else f" {c + 1}"
-        out[f"Pupil{tag}"] = lambda fig, c=c: draw_pupil(fig, cal, c)
-        out[f"Zernikes{tag}"] = lambda fig, c=c: draw_zernikes(fig, cal, c, reference)
+        out[f"Pupil and Zernikes{tag}"] = lambda fig, c=c: draw_pupil_and_zernikes(fig, cal, c, reference)
     if cal.atlas is not None:
         out["Residual atlas"] = lambda fig: draw_atlas(fig, cal.atlas)
     if any(r.field_xy is not None for r in cal.beads.rows):

@@ -52,12 +52,13 @@ class Page:
     """One result page: ``draw(figure, selected, excluded)`` draws it and may return a status line.
     A page that shows no bead of its own (the pupil, shared by all beads) does not follow the table's
     selection, and is not redrawn when it changes.  ``controls`` ({label: choices}) are choices the window
-    puts above the page, the first one chosen at first; a page with any is drawn as
-    ``draw(figure, selected, excluded, chosen)``, ``chosen`` {label: choice}."""
+    puts above the page, the first one chosen at first, or a tick for a bool (its value the tick's start);
+    a page with any is drawn as ``draw(figure, selected, excluded, chosen)``, ``chosen`` {label: value}."""
     title: str
-    draw: Callable
+    draw: Optional[Callable]
     follows_selection: bool = True
     controls: dict = field(default_factory=dict)
+    table: Optional[Callable] = None           # instead of a figure: () -> (columns, rows[, row colours])
 
 
 @dataclass
@@ -175,6 +176,23 @@ def _positions(records) -> list:
     return out
 
 
+def _detected_rows(columns, records, marks, brightness) -> list:
+    """(values, greyed) per bead found, before any calibration: the method's own columns, those only a
+    calibration fills left empty; state "found" or "too dim", and a mark "-> exclude on Calibrate".
+    ``brightness(record)`` is what the method's *brightness* column shows."""
+    out = []
+    for i, record in enumerate(records):
+        bright = bool(record.get("brightness_accepted", True))
+        state = "found" if bright else str(record.get("brightness_reason", "too dim"))
+        if marks.get(i):
+            state = f"{state} -> {marks[i]} on Calibrate"
+        values = {"bead": i, "stack": int(record.get("stack", 0)) + 1,
+                  "x, y (px)": f"{record.get('x_px', '')}, {record.get('y_px', '')}",
+                  "brightness": brightness(record), "state": state}
+        out.append((tuple(values.get(c, "") for c in columns), not bright or i in marks))
+    return out
+
+
 def _model_page(run: Run) -> Page:
     """*Model vs data*: `model_views.draw_model_vs_data` of the run's views, a selected bead alone."""
     from .model_views import draw_model_vs_data
@@ -185,8 +203,11 @@ def _model_page(run: Run) -> Page:
             _not_yet(figure, "the model against the data is drawn after calibrating")
             return None
         bead = selected[0] if selected else None
-        return draw_model_vs_data(figure, views, bead, chosen["section"], chosen["show"])
-    return Page("Model vs data", draw, controls={"section": SECTIONS, "show": SHOW})
+        return draw_model_vs_data(figure, views, bead, chosen["section"], chosen["show"],
+                                  average=chosen["average"])
+    # average: the learnt average whatever the table's selection, so that a bead can be picked by its row
+    # and compared with the average without losing the selection
+    return Page("Model vs data", draw, controls={"section": SECTIONS, "show": SHOW, "average": False})
 
 
 def _counted(report, start: float, end: float):
@@ -221,6 +242,10 @@ class BeadAverage:
         what = "pairs" if dual else "beads"
         return Detected(beads, f"{len(beads.records)} {what} found, {bright} bright enough to average; "
                                f"averaging takes seconds", _positions(beads.records))
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _detected_rows(self.columns, detected.found.records, marks,
+                              lambda r: f"{r.get('brightness_adu', float('nan')):.4g}")
 
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
             marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
@@ -306,6 +331,8 @@ class BeadAverage:
             wish = marks.get(i)
             if wish is not None and state != "manual exclusion":
                 state = f"{state} -> {wish} on Recalculate"
+            elif wish is None and state == "manual exclusion":
+                state = f"{state} -> include on Recalculate"         # the exclusion withdrawn
             out.append(((i, record["stack"] + 1, f"{record['x_px']}, {record['y_px']}",
                          f"{record['brightness_adu']:.4g}",
                          f"{result.shifts[i, 0] * result.calibration.dz:.1f}",
@@ -351,6 +378,10 @@ class PupilModel:
         return Detected(rois, f"{rois.batch.n_emitters} {what} to learn from ({'; '.join(rois.messages)}); "
                               f"learning takes about {duration(seconds)}", _positions(rois.records), seconds)
 
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _detected_rows(self.columns, detected.found.records, marks,
+                              lambda r: r.get("brightness_reason", ""))
+
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
             marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
         from .pupil import run_calibration
@@ -389,11 +420,14 @@ class PupilModel:
 
     def pages(self, run: Run) -> list:
         from uipsf.diagnostics import draw_beads, figures
+        from uipsf.diagnostics.figures import zernike_table
 
         from . import plots
         cal = run.result.cal
         pages = [Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False)
                  for title, draw in figures(cal, reference=run.result.start).items() if title != "Beads"]
+        pages.append(Page("Zernike table", None, follows_selection=False,
+                          table=lambda: zernike_table(cal, reference=run.result.start)))
 
         def quality(figure, selected, excluded):
             found = run.extra.get("quality")
@@ -416,8 +450,10 @@ class PupilModel:
             final = row.final or {}
             state = row.state
             wish = marks.get(row.bead)
-            if wish is not None:
+            if wish is not None and wish != row.manual:
                 state = f"{state} -> {wish} on Recalculate"
+            elif row.manual and wish is None:
+                state = f"{state} -> automatic on Recalculate"         # a choice by hand withdrawn
             out.append(((row.bead, record.get("stack", 0) + 1, f"{record.get('x_px', '')}, {record.get('y_px', '')}",
                          record.get("brightness_reason", ""), state, row.reason,
                          f"{final.get('deviance', row.scores.get('deviance', float('nan'))):.3f}",
@@ -427,7 +463,9 @@ class PupilModel:
         return out
 
     def initial_marks(self, run: Run) -> dict:
-        return {}
+        """A run's own choices by hand stay marked, so the next Recalculate keeps them: a bead excluded by
+        hand stays out (and one included stays in) until it is unmarked."""
+        return {row.bead: row.manual for row in run.result.cal.beads.rows if row.manual}
 
     def mark(self, run: Run, bead: int) -> str:
         return "exclude" if run.result.cal.beads.rows[bead].state == "used" else "include"
