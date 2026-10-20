@@ -16,4 +16,4 @@ python -m pytest -q -n auto
 ```
 
 Documents: `docs/uipsf/plan.md` (plan), `docs/uipsf/conventions.md` (axes, signs, units), `docs/uipsf/architecture.md` (what is
-built), `docs/uipsf/data.md` (reference data). BSD-3-Clause.
+built), `docs/uipsf/data.md` (reference data), `docs/uipsf/microscopes.md` (the lab's microscopes, from their bead stacks). BSD-3-Clause.
