@@ -392,6 +392,30 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
                    offsets, t, residuals, index, rounds)
 
 
+# ------------------------------------------------------------ settled points
+#: a MINFLUX bead's first points left out by default: a still emitter's
+#: first localizations creep into place, over 5 to 30 of them depending on
+#: the sequence (NOTES.md), so the last ones measure it
+SKIP = 30
+
+
+def settled(t, bead, skip: int = SKIP) -> np.ndarray:
+    """Which points to keep (a mask): each bead's (``bead``, an id per
+    point) after its first ``skip`` in time; a bead with fewer keeps its
+    last third, so none is lost."""
+    t = np.asarray(t, float)
+    bead = np.asarray(bead)
+    keep = np.zeros(len(t), bool)
+    if skip <= 0:
+        keep[:] = True
+        return keep
+    for i in np.unique(bead):
+        rows = np.flatnonzero(bead == i)
+        rows = rows[np.argsort(t[rows], kind="stable")]
+        keep[rows[min(int(skip), (2 * len(rows)) // 3):]] = True
+    return keep
+
+
 # ---------------------------------------------------------- as a region table
 #: the id column the bead plugins write, naming each bead's localizations
 BEAD_ID = "bead_id"

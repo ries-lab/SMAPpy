@@ -42,7 +42,6 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-SKIP = 30                   # a bead's first points left out: MINFLUX's creep
 TOLERANCE_NM = 200.0        # how far two pairs' shifts may differ and agree
 MAX_SHIFT_NM = 5000.0       # the largest shift looked for
 
@@ -82,7 +81,7 @@ class Registration:
 
 
 def settled_positions(t, xyz, bead, names: Optional[Sequence[str]] = None,
-                      curve=None, skip: int = SKIP) -> BeadPositions:
+                      curve=None, skip: int = 30) -> BeadPositions:
     """Per bead (``bead``, an id per sample), the median of its points after
     its first ``skip`` in time, less ``curve(t)`` (the drift, nm, an array
     per axis; None: none).  A bead with too few points keeps its last third.
@@ -93,14 +92,13 @@ def settled_positions(t, xyz, bead, names: Optional[Sequence[str]] = None,
         xyz = xyz[:, None]
     if curve is not None:
         xyz = xyz - np.asarray(curve(t), float)[:, :xyz.shape[1]]
+    from .beads import settled
     bead = np.asarray(bead)
+    keep = settled(t, bead, skip)
     ids = np.unique(bead)
     out = np.empty((len(ids), xyz.shape[1]))
     for k, i in enumerate(ids):
-        rows = np.flatnonzero(bead == i)
-        rows = rows[np.argsort(t[rows], kind="stable")]
-        start = min(max(int(skip), 0), (2 * len(rows)) // 3)
-        out[k] = np.nanmedian(xyz[rows[start:]], axis=0)
+        out[k] = np.nanmedian(xyz[keep & (bead == i)], axis=0)
     labels = list(names) if names is not None else [str(i) for i in ids]
     return BeadPositions(labels, out)
 

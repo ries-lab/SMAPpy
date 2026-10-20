@@ -534,3 +534,17 @@ def test_the_open_dialog_queues_what_is_ticked_and_opens_its_images(two, monkeyp
     assert [f.name for f in session.files] == ["cell: first", "cell: second"]
     assert not any(l.is_image for l in session.layers)
     assert [im.name for im in session.images] == ["cell: Ch1 {0}"]
+
+
+def test_each_localization_is_numbered_in_its_trace_and_a_merged_trace_starts_at_one():
+    """`trace_index`: 1, 2, 3, ... per trace by time, so a filter can leave
+    out the start of a trace, where a still emitter creeps into place."""
+    from smappy.group import group
+    locs, _ = minflux.table(m2410_records())
+    tid = np.asarray(locs["tid"])
+    index = np.asarray(locs["trace_index"])
+    for t, (_, _, n) in TRUTH.items():
+        assert index[tid == t].tolist() == list(range(1, n + 1))
+    assert minflux.trace_index(np.array([5, 5, 7, 5, 7, 9])).tolist() == [1, 2, 1, 3, 2, 1]
+    grouped, _ = group(locs)
+    assert (np.asarray(grouped["trace_index"]) == 1).all()

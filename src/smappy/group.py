@@ -124,6 +124,9 @@ COMBINE_MODES: Dict[str, str] = {
     "frame": "min",
     "iterations": "max",
     "tid": "min",           # one trace per group: its id, kept an integer
+    # a localization's number in its trace (`io.minflux.trace_index`): a
+    # trace's row starts where it starts
+    "trace_index": "min",
     # a track simulation's truth (`simulate.tracks`): ids, which a mean turns
     # into another track's id when one blink merged two particles passing
     # close -- the tracks render mode then joined it to that track, across
@@ -138,7 +141,8 @@ COMBINE_MODES: Dict[str, str] = {
 }
 
 # Ids: integers after merging too, so they compare and draw as ids
-INTEGER_COLUMNS = ("tid", "track_id_true", "state_true", "track_id", "track_length")
+INTEGER_COLUMNS = ("tid", "trace_index", "track_id_true", "state_true", "track_id",
+                   "track_length")
 
 # Where Link tracks lists the id columns it wrote under another name than
 # `track_id` (its *output column*, `plugins/link_tracks.py`)
