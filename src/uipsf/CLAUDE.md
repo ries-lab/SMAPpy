@@ -5,6 +5,7 @@ lives in SMAPpy's repository and is installed with SMAPpy; SMAPpy's own CLAUDE.m
 file, which adds what is particular to uipsf.
 
 **Read first:**
+- `docs/uipsf/roadmap.md`: what is done, what is next, the ideas beyond; the short page.
 - `docs/uipsf/plan.md`: the plan, its decisions and the milestones.
 - `docs/uipsf/conventions.md`: axes, signs, units. SMAPpy's conventions are uipsf's.
 - `docs/uipsf/architecture.md`: what is built.
@@ -67,5 +68,6 @@ SMAPpy's whole suite (`python -m pytest tests -q -n auto`) includes these.
 
 ## Keeping the docs true
 
-- When a milestone lands, update `docs/uipsf/architecture.md`, and `docs/uipsf/plan.md` where the code changed the plan.
+- When a milestone lands or an item of the roadmap moves, update `docs/uipsf/roadmap.md`, `docs/uipsf/architecture.md`,
+  and `docs/uipsf/plan.md` where the code changed the plan.
 - If a fact here disagrees with the code, trust the code and fix the line.

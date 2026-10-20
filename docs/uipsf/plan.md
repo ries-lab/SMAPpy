@@ -1,8 +1,8 @@
 # uiPSF v2: plan for a PyTorch re-implementation
 
-October 2026. Proposal for discussion; no library code yet. Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4). Revision 6: the *PSF calibration* plugin, the v1 bridge removed, the microscope database (§7.5).
+October 2026. Written as a proposal before any code; the code has since followed it (status in `docs/uipsf/roadmap.md`). Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4). Revision 6: the *PSF calibration* plugin, the v1 bridge removed, the microscope database (§7.5).
 
-**Status (October 2026): M0–M4 and M7 are done.** The forward model reproduces uiPSF v1 and the TU Delft model; Gauss–Newton L-BFGS learns the review's synthetic beads to their CRLB without settings; on the Zenodo beads the whole calibration (84 beads, n_max 8, rejection included) takes 45 s on a laptop GPU (M7). Two channels (M4) share the emitter, each with its own pupil, and refine SMAPpy's transform; on Zenodo `2ch_40nm_bead` the transform agrees with SMAPpy's and v1's to 0.025 px. What exists is in `docs/uipsf/architecture.md`, the conventions as implemented in `docs/uipsf/conventions.md`.
+**Status: see `docs/uipsf/roadmap.md`**, the short page of what is done, what is next and the ideas beyond; this plan keeps the reasoning, the decisions and the milestones' detail.  What exists is in `docs/uipsf/architecture.md`, the conventions as implemented in `docs/uipsf/conventions.md`.
 
 **Basis.**
 - `docs/review_2026/REIMPLEMENTATION_BRIEF.md` and `uiPSF_review.html` on `main` of ries-lab/uiPSF (the "brief" and the "review").
@@ -1160,14 +1160,7 @@ minima (a reproducible case), the blur σ, the aperture edge, how a fit starts, 
 
 The cheap stage terms are defined as components in M2–M3 already, because the review found them most damaging. M8 decides whether they are on by default; the z scale is the first case (§10, "To investigate").
 
-**Later** (brief scope):
-- field dependence: `NodalPolynomial` (NAT term table from Droste et al. 2025 and funnat), `BSplineResidual`, axis centre, focal surface, coverage maps; tested on simulated beads over the field and on Zenodo `1ch_FD_bead`; then SMAPpy's per-tile splines (§7.3);
-- 4Pi;
-- in-situ multi-channel;
-- excitation PSFs (review §C);
-- SMAPpy fitters on the pupil model (§7.3);
-- revisit learning without Zernikes: the real-space (voxel) PSF and the pixel ("image") pupil, both dropped
-  for now.
+**Later:** the ideas beyond the milestones -- in situ with several channels, field dependence, 4Pi, excitation PSFs for confocal, ISM and MINFLUX (review §C), SMAPpy fitters on the pupil model, learning without Zernikes -- are collected in `docs/uipsf/roadmap.md`, "Ideas".
 
 ---
 
