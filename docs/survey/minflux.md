@@ -12,8 +12,8 @@ A survey written in 2026-10 as the starting point for MINFLUX support in
 SMAPpy: a reader for Abberior's `.msr` files, MBM (reference bead)
 handling, and MINFLUX-specific analysis.  The repositories were cloned and
 their code read; the facts below are from the code (`path:line` is relative
-to each repository) unless marked *unverified*.  Nothing here is
-implemented yet.
+to each repository) unless marked *unverified*.  What is implemented since
+is in "What SMAPpy has today" and at the end of "A possible order of work".
 
 ## What SMAPpy has today
 
@@ -27,17 +27,30 @@ closed):
   metadata, `xy_err_nm` the Cramér-Rao bound of the beam pattern.  MBM
   beads as a file of their own beside their measurement.
 * **MBM**: *MBM drift correction* (beads judged against each other,
-  `x = x_nc - d(t)`), *MBM registration* of two measurements (beads matched
-  by their shifts, translation or rigid), a region table per bead with the
-  bead file open.
-* **Per trace**: grouping by `tid`; *Id statistics* (n, spread per axis,
-  duration, statistics of `cfr`, `efo`, `dcr`, ...) as a region table; the
-  region filter on any of it; *Math parser* on its values.
+  `x = x_nc - d(t)`, the bead window to choose them by hand), *MBM
+  registration* of two measurements (beads matched by their shifts,
+  translation or rigid; each bead's position from its points after its
+  first 30, `beads.settled`), a region table per bead with the bead file
+  open.
+* **Per trace**: grouping by `tid`; `trace_index`, each localization's
+  number in its trace (1, 2, ... by time), so a filter leaves out a trace's
+  creeping start (a still emitter's first 5-30 localizations, in 10-30 % of
+  traces: NOTES.md); *Id statistics* (n, spread per axis, duration,
+  statistics of `cfr`, `efo`, `dcr`, ...) as a region table; the region
+  filter on any of it; *Math parser* on its values.
 * **Two colours**: *Assign colours* reads `dcr` and `photons` as the two
   channels' photons -- simulated only, no two-colour data tried (NOTES.md).
-* **Not yet**: sequence QC (why traces end, from `sta`; traces per
-  iteration; localization rates), waiting for Imspector's specification of
-  the codes; FRC with block boundaries at trace starts (a small effect:
+* **Quality, from the final localizations**: any column's distribution per
+  layer (*Histogram*: `efo`, `cfr`, `dcr`, `fbg`); the filters ParaFlux
+  calls masks are layer filters on `time_s`, `dcr`, `efo`, `cfr`; per trace
+  the localizations per trace, the photons and the spread per axis (*Id
+  statistics*), the trace-std histogram from its region table.
+* **Not yet**: sequence QC -- everything that needs the rows that are not a
+  valid final localization (ParaFlux, below): the reader keeps `vld & fnl`
+  rows only (all `fnl` rows with *valid only* off), and of the earlier
+  iterations only `eco`, `efo`, `fbg` of the precision's own and the `cfr`
+  of the one that measures it.  Waiting for Imspector's specification of the
+  `sta` codes.  FRC with block boundaries at trace starts (a small effect:
   `frc.time_blocks` already keeps all but the boundary traces whole).
 
 ## The repositories
@@ -310,6 +323,75 @@ What exists, with where SMAPpy already has the generic part.
   `analyse_locrate`): trace durations, time between traces, traces per
   minute.  TCP cycles per localization `eco/(efo * dwell)` (Vogler et al.
   2025).
+* **ParaFlux** (Abberior's own quality tool, closed source; read from its
+  wiki page of 2025-08, wiki.abberior.rocks/ParaFlux: versions 0.x for
+  Imspector m2205, 1.x for m2410).  It attaches to a running Imspector,
+  live measurements included, or reads an `.msr`, and its plots are what a
+  MINFLUX user is told to look at.  All but the last two need every
+  iteration row, not only the final valid ones:
+  * *Iteration events* ("iteration efficiency"): of the events the pinhole
+    orbit found (`itr` 0, = 100 %), per iteration of the catching phase the
+    fraction passed, dark (photon limit not reached, signal under the
+    background threshold longer than `maxOffTime`), cfr-filtered, out of
+    range (outside the ROI); in 3D only the complete xy+z iterations.  A
+    pie of the outcome of the *headstart* iterations of valid bursts (vld,
+    dark, cfr).  Guidance: the last bar not far below 40-50 % (Alexa 647,
+    FLUX 640, sparse cells); large cfr losses = too many molecules on
+    (buffer), large dark losses = too little excitation, blinks too short,
+    microblinking (`maxOffTime`).  Below, the background (`fbg`) per
+    iteration, mean and std; the last two about 10-15 kHz.  PYME's
+    `Paraflux.py` is a reimplementation of this plot.
+  * *Burst statistics*: the mean offset (with std) of each catching
+    iteration's position from the burst's final one, per axis (over ~50 nm
+    = an imprecise pinhole orbit, one-sided = a misaligned pinhole, large
+    in z = a wrong phase delay); localizations per valid burst with an
+    exponential fit (mean ~15 for immunostained cells, higher for PAINT,
+    under 10 = molecules lost); photons per burst, dropped molecules'
+    included, with its median; the photons per valid burst split by
+    iteration (in a good measurement mostly final and headstart ones); 2D
+    histograms of `efo` against `cfr` for two iterations (the cfr limit and
+    the background limit drawn, cfr median and efo mode written) -- one
+    cluster at low cfr and well above the background; a second at higher
+    efo and cfr = two molecules on.
+  * *Localization maps*: per iteration revisited in a trace (from the
+    sequence's `headstart`), each localization's offset from its trace's
+    median position, xy, xz, yz; outliers out per axis where the deviation
+    is 5 or more times the median deviation (`reject_outliers`, rejectRange
+    5, only with more than 5 points); the covariance's ellipse and its
+    sigmas along the axes.  For tracking the steps between consecutive
+    localizations instead.  Traces of more than 1 (tracking 2) final
+    localizations.
+  * *Trace std*: histograms of each trace's std per axis and iteration,
+    unfiltered.
+  * *MBM*: each chosen bead's x against y, x, y, z against time, and its
+    intensity (`str`): a bead that moves or fades is dropped by hand.
+  * *dcr*: per final localization the photons of channel 1 against
+    channel 2 with lines of constant dcr, to pick a threshold; and the `efo`
+    histogram of the final iteration (double peaks = two emitters; a sharp
+    cut on the left = too little excitation or too much background).
+  * *Masks* applied before every plot: time windows, a dcr range, an efo
+    limit (the last cfr-check iteration, or the final one), a cfr limit;
+    `thi` (beta).  A sequence calculator: from the background and the
+    emitter's frequency, the background threshold at a significance and
+    the photons per dwell.  It writes the sequence of a measurement out
+    (*seq?*).
+
+  For SMAPpy: the last two plots and the masks exist in another form (a
+  layer filter, a *Histogram* of `efo`; *Assign colours*' preview draws the
+  histogram of the dcr with the boundary it would set, not the
+  channel-against-channel scatter).  *Trace std* is *Id statistics*' spread per trace on the final
+  iterations; per iteration it needs them.  The rest needs a table of all
+  iteration rows: a second, raw table per measurement (the m2410 rows as
+  they are, m2205 unnested, `sta`, `itr`, `bot`/`eot`, `tid`; a few times
+  the localizations) read beside the localizations, as the MBM beads are,
+  and a *Sequence QC* plugin of the plots above on it, its numbers -- the
+  passed fraction per iteration, the background, the mean offsets, the
+  per-trace counts -- as values a batch can compare across measurements
+  and a region table per trace (abort reason, photons, catching offsets)
+  the region filter reads.  The outcome categories need `sta`'s codes per
+  Imspector version (MFX_data_analysis's list above; ParaFlux's own names:
+  passed, dark, cfr-filtered, out of range).  Live use is MicroClaw's
+  (`gui/live_session.py`), not a link to Imspector.
 * **NPC**: PYME `Analysis/NPC.py` (2D segment counting with the binomial
   labelling-efficiency model; 3D ML template fit) used in the Soeller group's
   RyR2 paper ([Nat. Commun. 2025](https://doi.org/10.1038/s41467-025-67801-6)) for the
@@ -362,6 +444,13 @@ What exists, with where SMAPpy already has the generic part.
 4. **DCR channels.**
 5. **MBM registration** of two acquisitions as a transformation.
 6. Precision (trace std, CRLB), FRC on trace means, sequence QC.
+
+Where it stands (2026-10-20): 1-5 are done -- the reader, MBM drift with
+bead selection, grouping by trace and *Id statistics* with the region
+filter, DCR colours (untested on real two-colour data), MBM registration;
+the CRLB as `xy_err_nm`; `trace_index` for the creep.  Open: sequence QC
+(ParaFlux's plots, from a raw table of every iteration), the precision
+from trace std per iteration, FRC on trace means.
 
 Licences decide how: from the MIT/Apache/BSD repositories code can be ported
 with attribution in the module docstring; from the GPL ones (PYME-extra,
