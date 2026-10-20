@@ -392,6 +392,56 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
                    offsets, t, residuals, index, rounds)
 
 
+# ---------------------------------------------------------- as a region table
+#: the id column the bead plugins write, naming each bead's localizations
+BEAD_ID = "bead_id"
+
+
+def bead_values(beads: BeadSet, axes: Sequence[str]) -> Tuple[Dict[str, np.ndarray],
+                                                              Dict[str, Dict[str, str]]]:
+    """``(values, groups)`` per bead of ``beads``, in its order: what a region
+    table of the beads holds -- the metrics (`METRICS`), whether it was used
+    and its state as a bead list says it (`BeadSet.state`), its name, and its
+    offset per axis -- so the summaries, *Math parser* and the region filter
+    read what the bead selector shows.  The choice itself stays the
+    selector's: it is made inside the drift's fit, against the curve of the
+    other beads, which no filter of fixed values can be."""
+    n = len(beads)
+    values: Dict[str, np.ndarray] = {name: np.asarray(beads.metrics[name], float)
+                                     for name in METRICS}
+    values["n"] = values["n"].astype(np.int64)
+    values["used"] = np.asarray(beads.used, bool).astype(np.int64)
+    values["name"] = np.array(list(beads.names), dtype=object)
+    values["state"] = np.array([beads.state(b) for b in range(n)], dtype=object)
+    offsets = np.asarray(beads.offsets_nm, float)
+    for a, axis in enumerate(axes[:offsets.shape[1] if offsets.ndim == 2 else 0]):
+        values[f"offset_{axis}_nm"] = offsets[:, a]
+    groups = {"metrics": {m[:-3] if m.endswith("_nm") else m: m for m in METRICS},
+              "offset": {a: f"offset_{a}_nm" for a in axes if f"offset_{a}_nm" in values}}
+    return values, groups
+
+
+def with_bead_ids(locs, rows: np.ndarray, ids: np.ndarray) -> Tuple[object, int]:
+    """``locs`` with `BEAD_ID`: ``ids`` (1, 2, ... per bead, 0 for none) on
+    ``rows`` (a mask), offset past the ids the other rows already carry so
+    two files' beads never share one; the rest keep theirs.  A recipe with
+    the rule ``max``, so a merged blink keeps its bead.  Returns the table and
+    the offset."""
+    from .locs import Localizations
+    from .mathparse import remember
+    rows = np.asarray(rows, bool)
+    old = (np.asarray(locs[BEAD_ID], np.int64) if BEAD_ID in locs
+           else np.zeros(len(locs), np.int64))
+    others = old[~rows]
+    offset = int(others.max()) if others.size and others.max() > 0 else 0
+    column = old.copy()
+    ids = np.asarray(ids, np.int64)
+    column[rows] = np.where(ids > 0, ids + offset, 0)
+    out = Localizations({**locs.columns, BEAD_ID: column}, dict(locs.metadata))
+    remember(out, BEAD_ID, "", grouped="max")
+    return out, offset
+
+
 # -------------------------------------------------------------- for a window
 @dataclass
 class BeadView:

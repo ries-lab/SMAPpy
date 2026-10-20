@@ -17,19 +17,28 @@ implemented yet.
 
 ## What SMAPpy has today
 
-`src/smappy/io/formats.py`, `_load_minflux`: Imspector's `.npy`, `.json`
-or a `.zip` of one.  It assumes the **m2205** layout (one row per
-localization, iterations nested in `itr`), takes the last iteration of the
-valid rows, m -> nm, `eco` as photons, precision 150/sqrt(N).  Gaps:
+The state of 2026-10 (the gaps this section listed when it was written are
+closed):
 
-* **m2410 files (Imspector >= 24.10) are not read**: their `itr` is a scalar
-  `int32` column and the rows are iteration events, so `last["loc"]` fails.
-* No `.msr`, `.mat`, `.zarr` or `.zarr.zip`; no MBM; `lnc` (the position
-  before Imspector's drift correction) is dropped.
-* `cfr` is taken from the last iteration, where it is usually 0 -- it is only
-  computed at an earlier one (see "Which iteration a field comes from").
-* No z-scaling (refractive-index foreshortening) factor.
-* Precision: the per-trace std is the measured one; 150/sqrt(N) is a proxy.
+* **Reading**: both record layouts (m2205, m2410) from `.npy`, `.json`,
+  `.zip` and Abberior `.msr` (`io/minflux.py`, `io/msr.py`, `io/obf.py`,
+  `io/zarr_lite.py`), `vld & fnl` rows, `cfr` from the iteration that
+  measures it, `lnc` kept (`x_nc_nm` ...), a *z scale*, the sequence in the
+  metadata, `xy_err_nm` the Cramér-Rao bound of the beam pattern.  MBM
+  beads as a file of their own beside their measurement.
+* **MBM**: *MBM drift correction* (beads judged against each other,
+  `x = x_nc - d(t)`), *MBM registration* of two measurements (beads matched
+  by their shifts, translation or rigid), a region table per bead with the
+  bead file open.
+* **Per trace**: grouping by `tid`; *Id statistics* (n, spread per axis,
+  duration, statistics of `cfr`, `efo`, `dcr`, ...) as a region table; the
+  region filter on any of it; *Math parser* on its values.
+* **Two colours**: *Assign colours* reads `dcr` and `photons` as the two
+  channels' photons -- simulated only, no two-colour data tried (NOTES.md).
+* **Not yet**: sequence QC (why traces end, from `sta`; traces per
+  iteration; localization rates), waiting for Imspector's specification of
+  the codes; FRC with block boundaries at trace starts (a small effect:
+  `frc.time_blocks` already keeps all but the boundary traces whole).
 
 ## The repositories
 

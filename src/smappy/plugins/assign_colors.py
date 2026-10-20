@@ -28,6 +28,17 @@ up:
 `docs/dual_color_assignment.md` derives both, and in particular why the allowed
 crosstalk is an upper bound on the expected fraction of misassigned
 localizations among the assigned ones.
+
+**MINFLUX** records no photons per channel but their split, the detection
+channel ratio ``dcr = N1 / (N1 + N2)``, beside the photon count: where the
+table has no per-channel columns and has ``dcr``, the two counts are
+``dcr * photons`` and ``(1 - dcr) * photons`` (`DCR_PAIR`), so ``r = 2 dcr -
+1`` and the shot-noise model reads it as it reads a splitter's.  On a
+grouped layer, one row per trace, a trace is judged on all its photons --
+where minflux-viewer fits two Gaussians to the per-trace DCR and votes.  Not
+yet checked on two-colour MINFLUX data: Imspector's split includes the
+detectors' crosstalk and background, so whether the binomial noise holds
+there is open (NOTES.md).
 """
 from __future__ import annotations
 
@@ -70,11 +81,27 @@ def error_column(name: str) -> str:
     return f"{head}_err{sep}{tail}" if sep else f"{name}_err"
 
 
+#: MINFLUX's split and its total, standing for the two channels' photons
+#: where the table has no per-channel columns (`photon_pair`)
+DCR_PAIR = ("dcr", "photons")
+
+
+def photon_pair(locs: Localizations, one: str, two: str) -> Tuple[np.ndarray, np.ndarray]:
+    """The two channels' photons: the columns, or for `DCR_PAIR` the split
+    of the photons by the detection channel ratio."""
+    if (one, two) == DCR_PAIR:
+        dcr = np.clip(np.asarray(locs["dcr"], dtype=float), 0.0, 1.0)
+        total = np.asarray(locs["photons"], dtype=float)
+        return dcr * total, (1.0 - dcr) * total
+    return np.asarray(locs[one], dtype=float), np.asarray(locs[two], dtype=float)
+
+
 def channel_columns(locs: Localizations, first: Optional[str] = None,
                     second: Optional[str] = None) -> Tuple[str, str]:
     """Which two columns hold the per-channel photons.
 
-    Named explicitly, or the first pair of `CHANNEL_COLUMNS` the table has.
+    Named explicitly, or the first pair of `CHANNEL_COLUMNS` the table has,
+    or MINFLUX's `DCR_PAIR` where it has none of those.
     """
     if first or second:
         if not (first and second):
@@ -87,6 +114,8 @@ def channel_columns(locs: Localizations, first: Optional[str] = None,
     for pair in CHANNEL_COLUMNS:
         if all(name in locs for name in pair):
             return pair
+    if all(name in locs for name in DCR_PAIR):
+        return DCR_PAIR
     raise ValueError("no per-channel photon columns in the table: fit with "
                      "a two-colour fitter ('Localize/Gaussian 2D 2C' or "
                      "'Localize/Spline 3D 2C'), or name the columns yourself")
@@ -130,8 +159,7 @@ def ratios(locs: Localizations, first: Optional[str] = None,
            min_photons: float = 0.0) -> Ratios:
     """r, the total, and the effective photon number behind r."""
     one, two = channel_columns(locs, first, second)
-    n1 = np.asarray(locs[one], dtype=float)
-    n2 = np.asarray(locs[two], dtype=float)
+    n1, n2 = photon_pair(locs, one, two)
     total = n1 + n2
     valid = np.isfinite(n1) & np.isfinite(n2) & (total > 0)
     if min_photons > 0:
@@ -144,7 +172,8 @@ def ratios(locs: Localizations, first: Optional[str] = None,
     r = np.clip(r, -1.0, 1.0)
 
     errors = [error_column(one), error_column(two)]
-    fitted = use_errors and all(name in locs for name in errors)
+    fitted = (use_errors and (one, two) != DCR_PAIR
+              and all(name in locs for name in errors))
     if fitted:
         s1 = np.asarray(locs[errors[0]], dtype=float)
         s2 = np.asarray(locs[errors[1]], dtype=float)
@@ -164,7 +193,9 @@ def ratios(locs: Localizations, first: Optional[str] = None,
         n_eff = total.copy()
     n_eff = np.where(valid, n_eff, np.nan)
     return Ratios(r=r, total=total, n_eff=n_eff, valid=valid,
-                  columns=(one, two), fitted_errors=fitted, first=n1, second=n2)
+                  columns=(("dcr x photons", "(1 - dcr) x photons")
+                           if (one, two) == DCR_PAIR else (one, two)),
+                  fitted_errors=fitted, first=n1, second=n2)
 
 
 @dataclass

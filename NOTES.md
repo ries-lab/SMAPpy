@@ -1686,12 +1686,37 @@ measurements, four beads each) and checked by
   so a curve from them holds all Imspector corrected, and on top of `x_nm`
   it would count twice.  Run again, it gives the same table.  An earlier
   plan had a mode "on top of Imspector's"; it was dropped for this reason.
+* **A fixed emitter's first points are biased** (2026-10, from the lab's
+  experience): in MINFLUX a still fluorophore's first localizations of a
+  trace -- an MBM bead's as well -- creep into place over up to some 30
+  points, so its last points measure its position better than its first.
+  *MBM registration* leaves each bead's first 30 points out
+  (`mbm_registration.settled_positions`).  Not yet followed elsewhere: the
+  MBM drift curve is fitted through the beads' first points, so it follows
+  their common creep for the first minute -- its zero at the first bead
+  point offsets the whole measurement by that creep (a constant, harmless
+  alone and cancelling in a registration), and the localizations of that
+  first minute are corrected by a creep that is the beads', not the
+  sample's; a trace's mean and spread (*Id statistics*, the grouped layer)
+  include its creeping start.
 * **The beads are a file of their own** in the one table (`msr.bead_table`),
   with only columns the localizations have, so padding costs nothing; it is
   paired with its measurement by the `.msr`'s path and the measurements'
   `did`s (`msr.mbm_key`), never by file number or name.
 
 ## Open questions
+
+* **Two colours from MINFLUX's DCR, untried on real data.**  *Assign
+  colours* reads `dcr` and `photons` as the two channels' photons
+  (`assign_colors.DCR_PAIR`) and was tested only on simulated binomial
+  splits.  Imspector's split includes the detectors' crosstalk and
+  background, so whether the shot-noise model holds -- and whether the
+  *probabilistic* method's posteriors mean what they say -- is to be checked
+  on a two-colour `.msr` when one is available (none was, 2026-10).  Compare
+  against minflux-viewer's per-trace EM on the same file.
+* **MBM registration, untried on real washes.**  `mbm_registration` matches
+  beads by a vote on their shifts, not by name (slots are reused), and was
+  tested on simulated beads; a real sequential measurement should be checked.
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
   the mirror (-0.22 unmirrored, +0.26 mirrored) while y stays at -0.09.  A

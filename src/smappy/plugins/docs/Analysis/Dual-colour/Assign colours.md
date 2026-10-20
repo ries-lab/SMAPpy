@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors, smappy.plugins.assign_colors.decide, smappy.plugins.assign_colors.ColourRecipe]
+covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors, smappy.plugins.assign_colors.decide, smappy.plugins.assign_colors.ColourRecipe, smappy.plugins.assign_colors.photon_pair]
 ---
 
 ## What it does
@@ -54,6 +54,17 @@ are then given to every localization of the table.  A filter on `channel`
 itself is left out of that selection: after a first run the layers are
 usually set to one colour each, and the histogram still has to see both
 dyes.  It warns below 50 selected localizations.
+
+**MINFLUX** records no photons per channel but their split, the detection
+channel ratio `dcr` (the fraction of a molecule's photons in the first
+channel), beside the photon count.  Where the table has no per-channel
+columns but has `dcr`, the two numbers are `dcr` × `photons` and
+(1 − `dcr`) × `photons`, and everything below applies as to a splitter.  On
+the grouped layer, one row per [trace](plugin:Panels/Glossary), a trace is
+judged on all its photons at once.  This has been checked on simulated
+splits only; on real two-colour MINFLUX data the detectors' crosstalk and
+background may widen the split beyond the shot noise the *probabilistic*
+method assumes.
 
 ## How it works
 
