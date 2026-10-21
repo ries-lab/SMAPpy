@@ -67,18 +67,20 @@ def start_heights(model, focus_nm: float) -> np.ndarray:
 
 def localise_from_heights(model, shared: dict, batch, noise, heights) -> tuple[dict, torch.Tensor]:
     """Every emitter localised on the fixed ``shared`` parameters from each height in ``heights``, the best
-    kept: (its start, `Batch.start`'s keys, and its objective [E])."""
+    kept: (its start, `Batch.start`'s keys, and its objective [E]).  A linked blink (K frames) is one
+    emitter: one position from all its frames, its photons per frame with `PerObservation` ([E, K])."""
     batch = on_model_device(batch, model)
     rough = rough_start(batch, model.pixel_size_nm)
     best, found = None, None
     for h in heights:
         xyz = rough["xyz"].clone()
         xyz[:, 2] = float(h)
-        fit, problem = localise(model, shared, batch, noise, start={
-            "emitter.xyz": xyz, "emitter.photons": rough["photons"], "emitter.background": rough["background"]})
+        # Through the batch's start, so that every intensity model starts its own parameters from it.
+        fit, problem = localise(model, shared, replace(batch, start=dict(rough, xyz=xyz)), noise)
         obj = problem.objectives(fit.params)
         phys = fit.params.physical()
-        here = {"xyz": phys["emitter.xyz"].detach(), "photons": phys["emitter.photons"].detach(),
+        photons = phys["emitter.photons"] if "emitter.photons" in phys else phys["emitter.photons_per_slice"]
+        here = {"xyz": phys["emitter.xyz"].detach(), "photons": photons.detach(),
                 "background": phys["emitter.background"].detach()}
         if best is None:
             best, found = obj, here

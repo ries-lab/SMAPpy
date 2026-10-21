@@ -65,8 +65,10 @@ class PerSliceFactor(Bleaching):
 
 class PerObservation:
     def specs(self, batch, start) -> list[ParamSpec]:
+        """The start's photons are one count per emitter, or already one per observation ([E, K])."""
         K = batch.data.shape[2]
-        init = start["photons"][:, None].expand(-1, K)
+        init = start["photons"]
+        init = init if init.dim() == 2 else init[:, None].expand(-1, K)
         return [ParamSpec("emitter.photons_per_slice", (K,), "emitter", init=init, transform=Softplus())]
 
     def __call__(self, p, batch) -> torch.Tensor:

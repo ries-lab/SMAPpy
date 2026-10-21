@@ -1309,3 +1309,37 @@ relative to each other are well determined, their common offset only to the focu
 the coverslip edge (plan §9 M5) is to pin, and part of the depth, n_med and spherical study.  Held-out
 emitters are not in this step: the beads' held-out report fits slices of a stack, which a single frame
 does not have; the in situ one comes with selection (step 4).
+
+## M5, step 2: linked blinks (October 2026, plan §9 M5; `benchmarks/uipsf/synthetic/linked_blinks.py`)
+
+A blink seen in K frames is one emitter: `InSituGeometry` gives every frame its one position, and
+`PerObservation` its photons per frame.  The start needs nothing new (`rough_start` already places an
+emitter once over its frames); `localise_from_heights` now starts every intensity model through the
+batch's start, `PerObservation` takes a start per frame ([E, K]), and the emitters' photon score is their
+mean per frame (`score_beads`).  Four linked frames halve the height's CRLB, as four times the light
+should (`test_insitu.py`).
+
+**Localisation on the true pupil**: 60 emitters 0–1500 nm deep, focus 600 nm (in focus at ~530), 3 frames
+each, localised linked and frame by frame; the fraction within 100 nm of the true height and the median
+error (`linked_blinks.jsonl`, 2026-10-21):
+
+| photons per frame | distance from focus | linked: within 100 nm | median | single frames: within 100 nm | median |
+| --- | --- | --- | --- | --- | --- |
+| 500 | 0–300 nm | 94 % | 19 nm | 81 % | 45 nm |
+| 500 | 300–600 nm | 57 % | 36 nm | 44 % | 240 nm |
+| 500 | 600–1000 nm | 14 % | 650 nm | 5 % | 920 nm |
+| 1500 | 0–300 nm | 100 % | 11 nm | 96 % | 15 nm |
+| 1500 | 300–600 nm | 93 % | 21 nm | 77 % | 34 nm |
+| 1500 | 600–1000 nm | 50 % | 110 nm | 19 % | 380 nm |
+
+Linking matters where the decision was made for it: 300–1000 nm from focus it places 1.2–3 times as many
+emitters.  What it cannot rescue, the dim ones far from focus, is mislocated by hundreds of nanometres,
+far beyond the CRLB (77–170 nm): a localisation that ends on the wrong side or in a local minimum, from
+heights 150 nm apart, in a 13-pixel region the spot outgrows.  Selection (step 4) has to keep those out.
+
+**Learning** (`learn_insitu`, 30 blinks × 3 frames at 1500 photons per frame, start astigmatism +0.4,
+focus 720 nm started at 600): linked and the same 90 frames alone learn the pupil equally well, phase error
+0.016 rad rms against a CRLB of 0.016 for both; 20 s against 25 s, and 4 of the 90 single frames rejected.
+The focus came back 590 ± 114 and 553 ± 111 nm (the degeneracy of step 1), the twin test agreed (+56, +52
+nats).  So linking pays in localisation, the start, selection and the rounds, not in the joint fit, where
+the shared pupil already holds each frame in place.

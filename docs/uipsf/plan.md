@@ -1136,6 +1136,10 @@ heights on the start, the staged fit, the twin test.  On 40 simulated emitters t
 its CRLB and the twin test agrees by 62 nats; started with the wrong sign it learns the twin and warns
 (−54 nats).  Focus and heights share an offset to the focus's CRLB (architecture.md, "M5, step 1").
 
+*Done, step 2 (October 2026):* linked blinks, one position over K frames with photons per frame
+(`PerObservation`).  Four frames halve the height's CRLB; 300–1000 nm from focus, linking places 1.2–3× as
+many emitters within 100 nm; the joint fit's pupil is as precise either way (architecture.md, "M5, step 2").
+
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
 z bias), so it is not a step before it: build with the defaults below, then on simulations with known

@@ -129,8 +129,10 @@ def score_beads(model, params: Params, batch, noise) -> BeadScores:
     deviance = ((D * mask).flatten(1).sum(1) / mask.flatten(1).sum(1).clamp(min=1)).double().numpy()
     masked = 1 - mask.flatten(1).double().mean(1).numpy()
     phys = params.physical()
+    # With a count per observation (a linked blink's frames, `PerObservation`) the brightness is its mean.
+    N = phys["emitter.photons"] if "emitter.photons" in phys else model.intensity(phys, batch).mean(1)
     # a spot with no photons: huge, not inf
-    N = np.maximum(phys["emitter.photons"].detach().cpu().double().numpy(), 1e-3)
+    N = np.maximum(N.detach().cpu().double().numpy(), 1e-3)
     photons = np.abs(np.log(N / np.median(N)))
     with torch.no_grad():
         xyz = phys["emitter.xyz"][:, None]                       # the bead's own position, without drift
