@@ -259,11 +259,11 @@ src/uipsf/workflows/
 
 **For the GUI:** `Calibration.beads.as_dicts()` is one row per bead (state, reason, manual decision, every
 score and its final value); `learn_beads(..., decisions={bead: "include" | "exclude"}, warm_start=cal)`
-is *Recalculate*.  The window applies no rule of its own.
+is the window's *Calibrate* pressed again with only the marks changed.  The window applies no rule of its own.
 
 Tested (`test_rejection.py`): each planted outlier (a double bead, a 300 nm jump in z, 3× the photons,
 3 % saturated pixels) is rejected for its own reason and the fit then reaches its CRLB; 20 matched beads
-lose at most one; a warm *Recalculate* with manual decisions equals a cold fit of the same beads.
+lose at most one; a warm run with manual decisions equals a cold fit of the same beads.
 
 **On Zenodo `1ch_40nm_bead`** (v1's 20 candidates, camera frame, 21 e⁻, 116 × 127 nm, nothing held out;
 `benchmarks/uipsf/real/zenodo_1ch_rejection.py`, 18 min, rows in `benchmarks/uipsf/results/zenodo_1ch_rejection.jsonl`):

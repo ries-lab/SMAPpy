@@ -124,3 +124,22 @@ def test_the_zernike_table_holds_the_bars_numbers_and_colours_the_key_aberration
     assert all(row[start] == pytest.approx(row[columns.index("phase (rad)")]) for row in rows if row[1] in modes)
     for row, colour in zip(rows, colours, strict=True):
         assert colour == FAMILY_COLOURS.get(row[columns.index("aberration")])
+
+
+def test_the_phase_is_shown_in_rad_waves_or_nm_of_the_channels_wavelength(symmetric_fixed):
+    import numpy as np
+    from uipsf.diagnostics.figures import draw_zernikes, phase_scale, zernike_table, zernikes
+    assert phase_scale(symmetric_fixed, 0, "waves")[0] == pytest.approx(1 / (2 * np.pi))
+    assert phase_scale(symmetric_fixed, 0, "nm")[0] == pytest.approx(660 / (2 * np.pi))
+    modes, values, crlb = zernikes(symmetric_fixed, "phase")
+    fig = Figure()
+    draw_zernikes(fig, symmetric_fixed, units="nm")
+    heights = [bar.get_height() for bar in fig.axes[0].patches[:len(modes)]]
+    assert np.allclose(heights, values * 660 / (2 * np.pi))
+    assert fig.axes[0].get_ylabel() == "nm"
+    columns, rows, _ = zernike_table(symmetric_fixed)
+    for row in rows:
+        rad, err = row[columns.index("phase (rad)")], row[columns.index("± (rad)")]
+        assert row[columns.index("phase (waves)")] == pytest.approx(rad / (2 * np.pi), nan_ok=True)
+        assert row[columns.index("phase (nm)")] == pytest.approx(rad * 660 / (2 * np.pi), nan_ok=True)
+        assert row[columns.index("± (nm)")] == pytest.approx(err * 660 / (2 * np.pi), nan_ok=True)

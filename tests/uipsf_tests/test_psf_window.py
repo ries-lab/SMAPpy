@@ -165,10 +165,19 @@ def test_the_bead_average_calibrates_in_the_window_as_in_the_bead_calibration(st
     assert viewer.bead == sorted(run.extra["views"].beads)[1]
     window.bead_table.selectRow(2)
     window.toggle_beads()
-    window.rebuild()
+    window.run()                                                              # the same settings: warm
     wait()
     assert window.run_result.result.reasons[2] == "manual exclusion" and window.run_result.saved == run.saved
     assert window.marks == {2: "exclude"}                                       # kept for the next one
+    # a setting changed: Calibrate detects again with it, rather than reusing the last run's beads
+    distance = window.detection_form.fields["min_distance_px"].widget
+    distance.setText("22")
+    distance.editingFinished.emit()
+    assert window.detected is None
+    window.run()
+    wait()
+    assert window.run_result.extra["inputs"]["detection"].min_distance_px == 22
+    assert window.detected is not None and window.marks == {}                  # new beads: the marks went
     window.stack_viewer.close()
     window.close()
 
@@ -210,15 +219,15 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     assert window.selected_beads() == [3]
     window.bead_table.selectRow(0)
     window.toggle_beads()
-    assert window.marks == {0: "exclude"} and "exclude on Recalculate" in window.bead_table.item(0, 4).text()
-    window.rebuild()
+    assert window.marks == {0: "exclude"} and "exclude on Calibrate" in window.bead_table.item(0, 4).text()
+    window.run()                                                              # the same settings: warm
     wait()
     assert window.run_result.result.cal.beads.rows[0].state == "excluded" and window.run_result.saved == saved
     assert window.marks == {0: "exclude"}                                       # kept for the next one
     window.bead_table.clearSelection()
     window.bead_table.selectRow(1)
     window.toggle_beads()
-    window.rebuild()
+    window.run()                                                              # the same settings: warm
     wait()
     rows = window.run_result.result.cal.beads.rows
     assert rows[0].state == rows[1].state == "excluded"                          # the first stays out

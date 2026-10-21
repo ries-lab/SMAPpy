@@ -12,7 +12,7 @@ page (`stack_browser`), *mode* (single channel or dual colour), the two steps
 *Detect beads* and *Calibrate* with a progress bar and the time left, *save
 model* -- saved beside the stacks under the bead calibration's name and
 handed to the fitter -- *Save as...*, the bead table with its marks for the
-next *Recalculate*, the stack browser (`stack_view`, data beside the model)
+next *Calibrate*, the stack browser (`stack_view`, data beside the model)
 and the worker thread.
 
 torch is imported only by the pupil model's run: without it the window opens,
@@ -132,15 +132,11 @@ class PSFCalibrationWindow(QMainWindow):
         row = QHBoxLayout()
         self.toggle_button = QPushButton("Exclude / include")
         self.toggle_button.clicked.connect(self.toggle_beads)
-        self.rebuild_button = QPushButton("Recalculate")
-        self.rebuild_button.setToolTip("calibrate again from the same beads, with your marks")
-        self.rebuild_button.clicked.connect(self.rebuild)
         self.browse_button = QPushButton("Browse stacks...")
         self.browse_button.setToolTip("the beads beside the model and the residual, the average or one bead at "
                                       "a time, slice by slice in any direction, in its own window")
         self.browse_button.clicked.connect(self.browse_stack)
         row.addWidget(self.toggle_button)
-        row.addWidget(self.rebuild_button)
         row.addWidget(self.browse_button)
         row.addStretch(1)
         tlayout.addLayout(row)
@@ -302,7 +298,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.browse_button.setVisible(self.method.has_stack)
         self.table_hint.setText("beads - space marks a used bead to be excluded"
                                 + (" or a rejected one to be included" if self.method.marks_include else "")
-                                + ", then Recalculate")
+                                + ", then Calibrate")
         self.use_button.setText("Use in the Spline 3D 2C fitter" if self.is_dual else "Use in the Spline 3D fitter")
         self._update_buttons()
 
@@ -348,7 +344,6 @@ class PSFCalibrationWindow(QMainWindow):
         self.detect_button.setEnabled(ready and not self.busy)
         self.run_button.setEnabled(ready and not self.busy)
         self.stop_button.setEnabled(self.busy)
-        self.rebuild_button.setEnabled(ready and done and not self.busy)
         self.save_as_button.setEnabled(done and not self.busy)
         self.browse_button.setEnabled(done)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
@@ -503,7 +498,14 @@ class PSFCalibrationWindow(QMainWindow):
         self._work("detected", lambda progress: method.detect(paths, dual, inputs, progress))
 
     def run(self) -> None:
-        """Calibrate from the detected beads, detecting them first if they are not, then `Method.finish`."""
+        """Calibrate with the settings as they are: from the detected beads, detecting them first if
+        they are not (a setting detection reads drops them, `_undetect`), with the marks made on them, then
+        `Method.finish`.
+
+        One button for a first calibration and every one after it: a separate *Recalculate* reused the
+        last run's beads whatever the settings said, and which of the two to press was a question.
+        What it had over a new run is kept -- with every setting as the last run's and the same beads,
+        only the marks changed, the learning starts from the last fit (`previous`), which is quicker."""
         if not self.paths:
             QMessageBox.information(self, "no stacks", "add bead stacks first")
             return
@@ -513,10 +515,13 @@ class PSFCalibrationWindow(QMainWindow):
             self.error(error)
             return
         method, paths, dual, detected = self.method, list(self.paths), self.is_dual, self.detected
-        # the marks made on the detected beads leave them out of this calibration; a calibration's own are
-        # for its Recalculate
-        marks = dict(self.marks) if detected is not None and self.run_result is None else {}
-        self.status_bar.showMessage("calibrating..." if detected else "detecting beads...")
+        # the marks name beads of this detection; detecting again would number the beads anew
+        marks = dict(self.marks) if detected is not None else {}
+        last = self.run_result
+        again = (last is not None and detected is not None and last.dual == dual
+                 and last.extra.get("inputs") == inputs)
+        self.status_bar.showMessage("calibrating again from the last fit, with your marks..." if again else
+                                    "calibrating..." if detected else "detecting beads...")
 
         def work(progress):
             found = detected
@@ -524,23 +529,11 @@ class PSFCalibrationWindow(QMainWindow):
                 found = method.detect(paths, dual, inputs, progress)
                 progress({"message": found.text, "detected": found})
                 progress({"restart": True})        # one bar for the calibration; detection had its own
-            run = method.run(paths, dual, inputs, progress, self._cancel, detected=found, marks=marks or None)
+            run = method.run(paths, dual, inputs, progress, self._cancel, detected=found, marks=marks or None,
+                             previous=last if again else None)
+            run.extra["inputs"] = inputs           # what the next Calibrate compares its settings with
             return method.finish(run, progress)
         self._work("result", work)
-
-    def rebuild(self) -> None:
-        if self.run_result is None:
-            return
-        try:
-            inputs = self._inputs()
-        except ValueError as error:
-            self.error(error)
-            return
-        method, paths, previous, marks = self.method, list(self.paths), self.run_result, dict(self.marks)
-        self.status_bar.showMessage("calibrating again with your marks...")
-        self._work("result", lambda progress: method.finish(
-            method.run(paths, previous.dual, inputs, progress, self._cancel, previous=previous, marks=marks),
-            progress))
 
     # -------------------------------------------------------------- results
     def _clear_pages(self) -> None:
@@ -643,7 +636,7 @@ class PSFCalibrationWindow(QMainWindow):
             canvas = canvas_class()(figure)
             canvas.mpl_connect("pick_event", self.pick_pair)
             widget, boxes = self._page_widget(canvas, page)
-            for label, value in chosen.get(page.title, {}).items():      # the choices survive a Recalculate
+            for label, value in chosen.get(page.title, {}).items():      # the choices survive a new Calibrate
                 if label in boxes:
                     box = boxes[label]
                     box.setChecked(value) if isinstance(box, QCheckBox) else box.setCurrentText(value)
@@ -750,8 +743,8 @@ class PSFCalibrationWindow(QMainWindow):
         return sorted({index.row() for index in self.bead_table.selectionModel().selectedRows()})
 
     def toggle_beads(self) -> None:
-        """Mark the selected beads for the next Recalculate (`Method.mark`), or before any calibration to be
-        left out of the first; pressed again, unmark them."""
+        """Mark the selected beads for the next Calibrate (`Method.mark`): to be left out, or for the pupil
+        model a rejected one to be let in; pressed again, unmark them."""
         if self.run_result is None and self.detected is None:
             return
         for bead in self.selected_beads():

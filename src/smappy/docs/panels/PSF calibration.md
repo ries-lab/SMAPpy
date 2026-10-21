@@ -48,7 +48,8 @@ A calibration goes in two steps.  *Detect beads* finds the beads, rings them
 on the *Stacks* page and says how many there are and, for the pupil model,
 about how long learning them will take -- so a run of an afternoon is never
 started by accident.  *Calibrate* then learns from them; pressed first, it
-detects too.  A bar shows how far the run is and about how long it has left.
+detects too.  Pressed again after a change, it calibrates with the settings
+as they are then.  A bar shows how far the run is and about how long it has left.
 
 The pupil model needs PyTorch, an optional part of SMAPpy.  Without it, or
 with one too old, *Install PyTorch* installs the right build for the computer
@@ -95,10 +96,11 @@ about a factor of two: the number of iterations a fit needs depends on the
 beads.
 
 **Choosing beads by hand.**  The detected beads are listed in the table at
-once.  A bead marked there (*Exclude / include*) is left out of the first
-calibration; after one, a mark applies to the next *Recalculate*.  A bead
-excluded (or, for the pupil model, included) by hand stays so through every
-*Recalculate* until its mark is withdrawn.
+once.  A bead marked there (*Exclude / include*) is left out of the next
+calibration -- or, after one, for the pupil model a rejected bead let in.
+Press *Calibrate* again to apply the marks.  A bead excluded (or included) by
+hand stays so through every later *Calibrate* until its mark is withdrawn, as
+long as the beads are not detected again.
 
 **Learning** fits one model to all beads at once: the pupil's Zernike modes
 (shared), an extra blur of the image (shared), and each bead's position,
@@ -321,7 +323,13 @@ the *mode*, the *method* or a setting under *beads* drops the detection.
 
 ### Calibrate
 Makes the calibration from the detected beads, detecting them first if they
-are not; with *save model*, saves it.  The fit quality and the model against
+are not, with the settings as they are and the beads marked in the table;
+with *save model*, saves it.  After a calibration it is pressed again for
+anything: a setting under *beads* detects the beads anew (and the marks,
+which named the old ones, go); any other setting is used with the same
+beads.  When nothing but the marks changed, the pupil model starts from the
+last fit, which is quicker, and both methods save over that run's files;
+otherwise a new calibration saves to a new file.  The fit quality and the model against
 the data follow at once.  The bar under the buttons shows the fraction done
 and the time left; the status line counts the iterations.
 
@@ -349,25 +357,25 @@ Puts the saved calibration into the fitter again (it is put there when it is
 saved).  For dual colour, the Spline 3D 2C fitter.
 
 ### Exclude / include
-Marks the selected beads: before any calibration, to be left out of the
-first; after one, for the next *Recalculate*, a used bead to be excluded and
-for the pupil model a rejected one to be included.  Pressed again, the mark is
+Marks the selected beads for the next *Calibrate*: a bead to be left out,
+or, after a calibration, for the pupil model a rejected one to be included.  Pressed again, the mark is
 withdrawn; a choice by hand stays until then.  Space does the same.
-
-### Recalculate
-Calibrates again from the same beads with the marks applied (the pupil model
-from its current model) and saves over this run's files.
 
 ## Output
 
 *Stacks* is there from the start (*How it works*); the others appear after a
 calibration.  Both methods have:
 
-- **Model vs data**: each plane one picture of the data, the model and, if
-  chosen (*show*), the residual side by side, almost touching, the channels
-  one above the other; XY planes 100 or 150 nm apart, or a side section
-  through the centre (*section*: XZ, YZ).  Each image is on its own contrast,
-  so the shapes compare whatever the brightness.  With beads selected in the
+- **Model vs data**: XY planes 100 or 150 nm apart as columns, and three
+  rows almost touching: the data, the model and the residual (data − model),
+  a set of three per channel.  A plane's data and model share one contrast,
+  the data's peak in that plane, so a model too bright or too dim shows as
+  well as one of the wrong shape; each residual is on its own scale,
+  symmetric about 0 (red above, blue below), and under it is how large it is:
+  its largest |data − model| as a percentage of the plane's data peak (the
+  number the stack browser gives).  A side section through the centre
+  (*section*: XZ, YZ) is one picture instead, data, model and residual side
+  by side, each on its own contrast.  With beads selected in the
   table the first of them is shown alone, unless *average* is ticked;
   otherwise the average of the used beads.  A good model leaves a residual of
   noise, with no ring, lobe or tilt that repeats from plane to plane; a
@@ -377,11 +385,21 @@ The bead average's other pages are the bead calibration's (*Overview*,
 *Transformation* for dual colour, *Fit quality*, *Field diagnostics*, *Bead
 diagnostics*), explained on its page.  The pupil model's:
 
-- **Pupil and Zernikes**: on the left the learnt phase (radians) and
-  magnitude over the pupil.  The phase of an astigmatic PSF is a saddle; the
+- **Pupil and Zernikes**: on the left the learnt phase and magnitude over the
+  pupil, the phase in the *units* chosen above the page: radians, as the
+  model is fitted; waves, radians / 2π; or nm of wavefront, waves times the
+  *emission* wavelength.  (Maréchal's criterion for a near-perfect PSF is an
+  rms wavefront error below 1/14 of a wave.)  The phase of an astigmatic PSF is a saddle; the
   magnitude should be close to 1.  On the right every mode's coefficient with
-  its uncertainty (CRLB) as an error bar, beside the *start from* model's
-  when there is one.  The aberrations a calibration is read by have colours
+  its uncertainty as an error bar, beside the *start from* model's when
+  there is one.  The error bar is one standard deviation of the
+  coefficient's Cramér-Rao lower bound (CRLB; [Glossary](plugin:Panels/Glossary)):
+  from the Fisher information of the whole fit, all beads together, inverted
+  at the solution, so it already allows for each bead's position, photons and
+  background being unknown too.  It is the precision the beads' photon noise
+  allows if the model is right; an error of the model itself -- a wrong NA,
+  index or wavelength, or a bead that is not a point -- is not in it, so the
+  real uncertainty can be larger.  The aberrations a calibration is read by have colours
   of their own -- astigmatism, coma 1 and 2 (radial orders 3 and 5),
   spherical 1 and 2 (orders 4 and 6) -- and their phase values are written
   over the bars.  Each bar is
@@ -390,10 +408,10 @@ diagnostics*), explained on its page.  The pupil model's:
   so on, *x* for the cos term (astigmatism at 0°/90°) and *y* for the sin
   term (±45°), a leading *2* or *3* for the second or third order of the
   family (*2Sp* the secondary spherical); the line under the figure lists
-  them.  A
+  them, and the legend under the bars names the colours.  A
   difference far beyond the error bars is a change in the microscope.
-- **Zernike table**: the same numbers, every channel's phase and magnitude
-  with their uncertainties (and the *start from* model's), the key
+- **Zernike table**: the same numbers, every channel's phase -- in radians,
+  waves and nm -- and magnitude with their uncertainties (and the *start from* model's), the key
   aberrations' rows in their colours; *Copy* puts the table on the
   clipboard, tab-separated, for a spreadsheet.
 - **Residual atlas**: where the model and the data disagree, grouped by

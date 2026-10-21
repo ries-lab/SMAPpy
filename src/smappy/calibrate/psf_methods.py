@@ -2,7 +2,7 @@
 
 The window (`psf_window`) shows one method at a time and knows none of them:
 each entry says which of the window's sections it reads (`sections`), how a
-run and a *Recalculate* go, its result pages, its bead table and how it
+run goes, its result pages, its bead table and how it
 saves.  A method added later -- in situ learning from blinking molecules, a
 field-dependent model -- is one more entry, not a branch through the window
 (`docs/uipsf/plan.md` §7.5).  No Qt here: a test or a script uses an entry
@@ -14,8 +14,8 @@ as the window does.
 * **pupil model (uiPSF)**: `pupil.run_calibration` and uipsf's figures.
 
 Both save the same way: with *save model*, beside the stacks under the bead
-calibration's name, never over an existing file except this run's own on
-*Recalculate*.
+calibration's name, never over an existing file except the last run's own
+when *Calibrate* starts from it (the same beads and settings, other marks).
 
 A run goes in two steps, so that an afternoon's learning is never started by
 accident: *Detect beads* (`detect`) finds the beads and says how many and,
@@ -24,7 +24,7 @@ learns from what was detected.  After a calibration the method's `finish`
 adds what is shown with it -- the fit quality and the model against the data
 (`model_views`) -- in the same worker, so neither waits for a button.
 
-A bead's *mark* is the user's wish for the next *Recalculate*: "exclude" a
+A bead's *mark* is the user's wish for the next *Calibrate*: "exclude" a
 used bead, or, for the pupil model, "include" a rejected one (the bead
 average has no way to force a bead in: its rejection is part of the
 alignment).
@@ -40,7 +40,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from .model_views import SECTIONS, SHOW
+from .model_views import SECTIONS
 
 #: what only averaging reads, shown with the bead average's settings and hidden for the pupil model
 AVERAGE_ONLY = ("max_xy_shift_px", "max_z_shift_nm", "alignment_range_nm", "registration_iterations",
@@ -152,7 +152,7 @@ class Run:
 def _save_path(paths, dual, previous: Optional[Run]):
     from .pupil import default_save_path
     if previous is not None and previous.saved is not None:
-        return previous.saved, True                    # Recalculate replaces its own run's files
+        return previous.saved, True                    # a warm Calibrate replaces its own run's files
     return default_save_path(paths, dual), False
 
 
@@ -203,11 +203,10 @@ def _model_page(run: Run) -> Page:
             _not_yet(figure, "the model against the data is drawn after calibrating")
             return None
         bead = selected[0] if selected else None
-        return draw_model_vs_data(figure, views, bead, chosen["section"], chosen["show"],
-                                  average=chosen["average"])
+        return draw_model_vs_data(figure, views, bead, chosen["section"], average=chosen["average"])
     # average: the learnt average whatever the table's selection, so that a bead can be picked by its row
     # and compared with the average without losing the selection
-    return Page("Model vs data", draw, controls={"section": SECTIONS, "show": SHOW, "average": False})
+    return Page("Model vs data", draw, controls={"section": SECTIONS, "average": False})
 
 
 def _counted(report, start: float, end: float):
@@ -330,9 +329,9 @@ class BeadAverage:
                 state = "PSF + transformation" if result.accepted[i] else "transformation only: " + state
             wish = marks.get(i)
             if wish is not None and state != "manual exclusion":
-                state = f"{state} -> {wish} on Recalculate"
+                state = f"{state} -> {wish} on Calibrate"
             elif wish is None and state == "manual exclusion":
-                state = f"{state} -> include on Recalculate"         # the exclusion withdrawn
+                state = f"{state} -> include on Calibrate"         # the exclusion withdrawn
             out.append(((i, record["stack"] + 1, f"{record['x_px']}, {record['y_px']}",
                          f"{record['brightness_adu']:.4g}",
                          f"{result.shifts[i, 0] * result.calibration.dz:.1f}",
@@ -341,7 +340,7 @@ class BeadAverage:
         return out
 
     def initial_marks(self, run: Run) -> dict:
-        """A run's own manual exclusions stay marked, so a second Recalculate keeps them out."""
+        """A run's own manual exclusions stay marked, so the next Calibrate keeps them out."""
         return {i: "exclude" for i, reason in enumerate(run.result.reasons) if reason == "manual exclusion"}
 
     def mark(self, run: Run, bead: int) -> str:
@@ -424,8 +423,17 @@ class PupilModel:
 
         from . import plots
         cal = run.result.cal
-        pages = [Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False)
-                 for title, draw in figures(cal, reference=run.result.start).items() if title != "Beads"]
+        from uipsf.diagnostics.figures import PHASE_UNITS
+        pages = []
+        for title, draw in figures(cal, reference=run.result.start).items():
+            if title == "Beads":
+                continue
+            if title.startswith("Pupil and Zernikes"):
+                # the phase in rad, waves or nm: a choice above the page, as the Zernike table has all three
+                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
+                                  follows_selection=False, controls={"units": PHASE_UNITS}))
+            else:
+                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=run.result.start)))
 
@@ -451,9 +459,9 @@ class PupilModel:
             state = row.state
             wish = marks.get(row.bead)
             if wish is not None and wish != row.manual:
-                state = f"{state} -> {wish} on Recalculate"
+                state = f"{state} -> {wish} on Calibrate"
             elif row.manual and wish is None:
-                state = f"{state} -> automatic on Recalculate"         # a choice by hand withdrawn
+                state = f"{state} -> automatic on Calibrate"         # a choice by hand withdrawn
             out.append(((row.bead, record.get("stack", 0) + 1, f"{record.get('x_px', '')}, {record.get('y_px', '')}",
                          record.get("brightness_reason", ""), state, row.reason,
                          f"{final.get('deviance', row.scores.get('deviance', float('nan'))):.3f}",
@@ -463,7 +471,7 @@ class PupilModel:
         return out
 
     def initial_marks(self, run: Run) -> dict:
-        """A run's own choices by hand stay marked, so the next Recalculate keeps them: a bead excluded by
+        """A run's own choices by hand stay marked, so the next Calibrate keeps them: a bead excluded by
         hand stays out (and one included stays in) until it is unmarked."""
         return {row.bead: row.manual for row in run.result.cal.beads.rows if row.manual}
 

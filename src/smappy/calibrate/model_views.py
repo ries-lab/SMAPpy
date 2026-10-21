@@ -42,7 +42,6 @@ PLANE_STEP_NM = (100.0, 150.0)
 MAX_PLANES = 9
 
 SECTIONS = ("XY", "XZ", "YZ")
-SHOW = ("data, model, residual", "data, model", "data, residual")
 #: the background where a plane is blank: a bead's slices do not reach it
 BLANK = (0.85, 0.85, 0.85, 1.0)
 
@@ -248,8 +247,8 @@ def _rgba(image, residual: bool):
 
 
 def _cell(images, kinds, gap: int = 1):
-    """One plane as one picture: each channel a row of its images side by side, ``gap`` white pixels apart,
-    so that data and model are compared at a glance."""
+    """One section as one picture: each channel a row of its images side by side, ``gap`` white pixels
+    apart, so that data and model are compared at a glance."""
     rows = []
     for channel in images:
         parts = []
@@ -262,40 +261,85 @@ def _cell(images, kinds, gap: int = 1):
     return np.concatenate(rows[:-1], 0)
 
 
-def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY", show: str = SHOW[0],
-                       step_nm=None, average: bool = False) -> str:
-    """Each plane one picture: the data, the model and, if shown, the residual (data − model) side by
-    side, a channel to a row, each image on its own contrast (`_rgba`): XY planes ``step_nm`` apart
-    (`planes`), or a side section through the centre.  ``bead`` shows that bead alone unless ``average``.
-    Returns a status line."""
+def _colormap(name):
+    """``name`` with NaN -- where a bead's slices do not reach -- drawn grey."""
+    from matplotlib import colormaps
+    return colormaps[name].with_extremes(bad=BLANK)
+
+
+def residual_percent(data, model) -> float:
+    """The largest |data − model| of a plane as a percentage of the plane's data peak: the number under
+    each residual, as the stack browser gives it."""
+    data = np.asarray(data, float)
+    peak = float(np.nanmax(np.abs(data))) if np.isfinite(data).any() else 0.0
+    residual = data - np.asarray(model, float)
+    worst = float(np.nanmax(np.abs(residual))) if np.isfinite(residual).any() else 0.0
+    return 100.0 * worst / peak if peak else float("nan")
+
+
+def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY", step_nm=None,
+                       average: bool = False) -> str:
+    """XY planes ``step_nm`` apart (`planes`) as columns, and three rows almost touching: the data, the
+    model and the residual (data − model), a set of three per channel.  A plane's data and model share one contrast, the data's peak there, so a model
+    too bright or too dim shows as well as one of the wrong shape; the residual is symmetric about 0 on its
+    own scale, and under it how large it is, its largest |value| in % of the plane's data peak
+    (`residual_percent`).  A side section (XZ, YZ) through the centre is one picture instead, data, model and
+    residual side by side (`_cell`).  ``bead`` shows that bead alone unless ``average``.  Returns a status
+    line."""
     if average:
         bead = None
     data, model = views.of(bead)
-    kinds = {"data, model": ("data", "model"), "data, model, residual": ("data", "model", "residual"),
-             "data, residual": ("data", "residual")}[show]
-
-    def images(cut):
-        return [[cut({"data": d, "model": m, "residual": d - m}[k]) for k in kinds] for d, m in zip(data, model)]
     which = "the average of the used beads" if bead is None or bead not in views.beads else \
         f"bead {bead} ({views.states.get(bead, '')})"
-    legend = " | ".join(kinds) + (", main above secondary" if len(data) > 1 else "") + ", each on its own contrast"
+    kinds = ("data", "model", "residual")
+    # the page's figure is drawn again on every choice: the rows' tight spacing, or the engine's own
+    tight = section == "XY"
+    engine = figure.get_layout_engine()
+    if engine is not None and hasattr(engine, "set"):
+        engine.set(h_pad=0.005 if tight else 0.04167, w_pad=0.005 if tight else 0.04167,
+                   hspace=0.0 if tight else 0.02, wspace=0.02)
     if section != "XY":
+        # a side section stays one picture, data | model | residual side by side, each on its own contrast:
+        # tall and narrow, its three read best next to each other
         ax = figure.subplots()
-        cell = _cell(images(lambda v: _section(v, section)), kinds)
+        cell = _cell([[_section(v, section) for v in (d, m, d - m)] for d, m in zip(data, model)], kinds)
         z = views.z_nm
         ax.imshow(cell, aspect="auto", extent=(0, cell.shape[1], z[-1], z[0]), interpolation="nearest")
         ax.set_xticks([])
         ax.set_ylabel("emitter z (nm)")
+        legend = " | ".join(kinds) + (", main above secondary" if len(data) > 1 else "") + \
+            ", each on its own contrast"
         ax.set_title(f"{which}: {section} section through the centre\n{legend}", fontsize="small")
         return f"model vs data: {which}"
     picked = planes(views.z_nm, step_nm)
-    n = len(picked)
-    columns = max(1, min(n, int(round(np.sqrt(1.5 * n / len(kinds) * len(data))))))
-    grid = figure.subplots(int(np.ceil(n / columns)), columns, squeeze=False)
-    for ax in grid.flat:
-        ax.axis("off")
-    for ax, k in zip(grid.flat, picked):
-        ax.imshow(_cell(images(lambda v: v[k]), kinds), interpolation="nearest")
-        ax.set_title(f"{views.z_nm[k] + 0.0:.0f} nm".replace("-0 ", "0 "), fontsize="small")
-    figure.suptitle(f"{which}: XY planes\n{legend}", fontsize="small")
+    columns = [(f"{views.z_nm[k] + 0.0:.0f} nm".replace("-0 ", "0 "), lambda v, k=k: v[k]) for k in picked]
+    rows = len(kinds) * len(data)
+    grid = figure.subplots(rows, len(columns), squeeze=False)
+    inferno, diverging = _colormap("inferno"), _colormap("RdBu_r")
+    for c, (d_volume, m_volume) in enumerate(zip(data, model)):
+        for j, (title, cut) in enumerate(columns):
+            d, m = np.asarray(cut(d_volume), float), np.asarray(cut(m_volume), float)
+            peak = float(np.nanmax(np.abs(d))) if np.isfinite(d).any() else 0.0
+            r = d - m
+            limit = float(np.nanmax(np.abs(r))) if np.isfinite(r).any() else 0.0
+            images = ((d, dict(cmap=inferno, vmin=0, vmax=peak or 1.0)),
+                      (m, dict(cmap=inferno, vmin=0, vmax=peak or 1.0)),
+                      (r, dict(cmap=diverging, vmin=-(limit or 1.0), vmax=limit or 1.0)))
+            for i, (image, options) in enumerate(images):
+                ax = grid[c * len(kinds) + i, j]
+                ax.imshow(np.ma.masked_invalid(image), interpolation="nearest", **options)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                # square pixels leave spare height when the figure is wide: the three of a channel close
+                # up on the model, the spare height around them rather than between them
+                ax.set_anchor(("S", "C", "N")[i])
+                if j == 0:
+                    label = kinds[i] if len(data) == 1 else f"{kinds[i]}\n{views.titles[c]}"
+                    ax.set_ylabel(label, fontsize="small")
+                if c == 0 and i == 0:
+                    ax.set_title(title, fontsize="small")
+                if i == 2:
+                    ax.set_xlabel(f"±{residual_percent(d, m):.2g} %", fontsize="x-small", labelpad=1)
+    figure.suptitle(f"{which}: XY planes; data and model on one contrast per plane; residual: largest "
+                    "|data − model|, % of the plane's data peak", fontsize="small")
     return f"model vs data: {which}"

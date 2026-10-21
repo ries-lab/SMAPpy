@@ -595,7 +595,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
     """Bead files to a learnt pupil model and, with *save model*, its calibration on disk: the PSF
     calibration window's whole run, for a script too.
 
-    ``previous`` (the window's *Recalculate*): the same ROIs, its fit as the warm start, ``decisions``
+    ``previous`` (the window's *Calibrate* again with the same beads and settings): the same ROIs, its fit as the warm start, ``decisions``
     ({bead: "include" | "exclude"}) applied.  ``camera`` defaults to the first acquisition's, as a fit
     would resolve it.  ``save_to`` defaults to the bead calibration's name beside the stacks.  ``rois``,
     the beads found already (the window's *Detect beads*), skips finding them again."""
@@ -623,7 +623,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         roi = int(rois.batch.data.shape[-1])
         result.calibration = (dual_calibration(cal, dz, z_range, roi) if dual
                               else spline_calibration(cal, dz, z_range, roi, camera=rois.camera))
-        # *Recalculate* replaces its own run's files; a new run never overwrites
+        # a warm run (``previous``) replaces its own run's files; a new run never overwrites
         again = previous.saved if previous is not None else None
         path = Path(save_to) if save_to else again or default_save_path(paths, dual)
         result.saved, _ = save(path, cal, result.calibration, overwrite=bool(save_to or again))
