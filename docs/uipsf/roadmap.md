@@ -16,7 +16,7 @@ when a milestone lands or an item moves.
 | M4 | several channels | done: transform to 0.025 px of SMAPpy's and v1's |
 | M7 | speed | done: Zenodo 1ch (84 beads, order 8) in 45 s on a Mac GPU, 2ch in 1.4 min |
 | M6 | SMAPpy integration and release | mostly done: window, adapter, spline, acceptance tests; open below |
-| M5 | in situ (blinking molecules) | not started |
+| M5 | in situ (blinking molecules) | designed (plan §9, M5), not started |
 | M8 | physics where the atlas asks for it | ongoing: measured, not yet modelled |
 
 ## Done
@@ -65,8 +65,13 @@ when a milestone lands or an item moves.
 7. **Model the magnitude physically:** an effective NA plus supercritical transmission instead of free
    Zernikes, after a back-focal-plane image or beads in index-matched medium separate the two.
 8. **The z slope of 1.011** against the stage on Zenodo 1ch: model or stage.
-9. **In situ (M5):** learning from blinking molecules, depth and stage tilt (`FocalSurface`); the
-   window's *source* switch.  Zenodo `1ch_smlm_TP`, `1ch_smlm_tubulin`.
+9. **In situ (M5), designed** (plan §9, M5, with a review of v1's): inclusive detection at several widths
+   on absolute significance; an elliptical Gaussian on every candidate for photons and a z proxy; overlaps
+   by the spot's size, rejected or masked; blinks linked; per z bin a random draw from a brightness window
+   a factor 3 wide below the pairs' tail; ~10 % held out; v2's fit with the focus depth under a loose
+   prior and the coverslip's edge; rounds from the whole pool until stable; the sign explicit > data (twin
+   test) > database.  Astigmatic and 2D first; the window's *source* switch.  Zenodo `1ch_smlm_tubulin`
+   and simulations.  First a study: what separates depth, n_med and spherical aberration.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 
@@ -144,6 +149,9 @@ and excitation (the donuts of MINFLUX and STED, above).
 
 - **In situ with several channels**, then field dependent (Zenodo `2ch_smlm_nup96_WGA`,
   `1ch_FD_smlm_nup96`).
+- **In situ, after M5:** an initial pupil model as the first fit, for PSFs a Gaussian cannot sort by z
+  (double helix, tetrapod: Zenodo `1ch_smlm_TP`); the number of emitters per bin from the CRLB; selection
+  stratified in the field too; splines at other depths; stage tilt (`FocalSurface`).
 - **Field dependence:** `NodalPolynomial` (the NAT term table, Droste et al. 2025), a B-spline residual, the
   axis centre and the focal surface; Zenodo `1ch_FD_bead`.  (uiPSF v1's map export to FD-DeepLoc is
   misregistered by n/(n−1), review §E.)

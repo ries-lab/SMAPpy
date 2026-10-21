@@ -1,6 +1,6 @@
 # uiPSF v2: plan for a PyTorch re-implementation
 
-October 2026. Written as a proposal before any code; the code has since followed it (status in `docs/uipsf/roadmap.md`). Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4). Revision 6: the *PSF calibration* plugin, the v1 bridge removed, the microscope database (§7.5).
+October 2026. Written as a proposal before any code; the code has since followed it (status in `docs/uipsf/roadmap.md`). Revision 4: uiPSF v2 is built around SMAPpy; the decisions from the second and third reviews are in. Revision 5: uipsf moves into SMAPpy's repository (§7.4). Revision 6: the *PSF calibration* plugin, the v1 bridge removed, the microscope database (§7.5). Revision 7: in situ (M5) designed, with a review of v1's (§9, M5).
 
 **Status: see `docs/uipsf/roadmap.md`**, the short page of what is done, what is next and the ideas beyond; this plan keeps the reasoning, the decisions and the milestones' detail.  What exists is in `docs/uipsf/architecture.md`, the conventions as implemented in `docs/uipsf/conventions.md`.
 
@@ -1038,11 +1038,103 @@ GitHub Actions runs the CPU tiers.
   shares (0.164 / 0.836) are SMAPpy's `photon_normalization` for the same stacks (0.160 / 0.840).
 - `--slow -n auto`: 156 passed, 3 skipped (the gpu tier).
 
-**M5 In-situ, single channel** (3–4 weeks)
-- Detection, initial localisation, then a joint fit of pupil + emitters + stage position / focal surface + n_med, with selection stratified in z and field.
+**M5 In-situ, single channel** (3–4 weeks; designed with you, October 2026)
+- Detection, a first fit of every candidate, selection stratified in z, then a joint fit of pupil + emitters +
+  focus depth, repeated from the whole candidate pool until it is stable.  The design and the review of v1
+  it rests on follow.
 - *Tests:*
-  - simulated data with known aberrations and depths, including the cases SMAPpy's bridge failed (z scale and sign recovered within 2 %, from a poor start);
-  - Zenodo `1ch_smlm_TP` (small) and `1ch_smlm_tubulin` against v1's iterations.
+  - simulated blinking frames with known aberrations, depth, density and sign, including the cases
+    SMAPpy's bridge failed: aberrations within their CRLB, sign right, z scale within 2 %, from a poor start;
+  - Zenodo `1ch_smlm_tubulin` against v1's result.  `1ch_smlm_TP` (tetrapod) waits for the initial-pupil
+    work package below.
+
+*v1's in situ, as its code runs it* (`psflearninglib.iterlearn_psf`, `PSFZernikeBased_vector_smlm`,
+`PreprocessedImageDataSingleChannel_smlm`, `Fitter.relearn_smlm`):
+
+| step | what v1 does | its settings |
+| --- | --- | --- |
+| frames | `frame_range` (default the first 3000), flattened to K = 1 per emitter | `frame_range` |
+| background | each frame minus the mean of the next 100 | — |
+| detection | DoG (0.75σ − σ), 3×3 maximum filter, threshold **relative to the 99.99th percentile of the frame's maxima** | `gauss_sigma`, `max_kernel`, `peak_height` (0.2–0.3), `roi_size` |
+| overlaps | `remove_close_rois` drops every ROI with a neighbour closer than the ROI's diagonal (~30 px at 21 × 21) | — |
+| initial PSF | a model file; or Zernikes by hand (the demos: Noll 5, 0.5–1 rad); or a search over modes 4–20 at ±0.5 by median LL | `init_pupil_file`, `zernike_index`, `zernike_coeff`, `zkorder_rank` |
+| z origin | the stage position sets the defocus; the z range is centred on the aberration-free focus | `stage_pos`, `z_range` (2 µm) |
+| pre-selection | localised with the initial PSF (CUDA spline); 1 % tails in x, y, z cut, the lowest 10 % in LL, photons below the `min_photon` quantile (0.4) | `min_photon` |
+| stratification | 21 z bins over the histogram, at most 100 each, **ranked by LL against the initial model** | `partition_size` |
+| fit | MSE with heuristic weights, L-BFGS-B, 200 iterations; per emitter xyz, bg, I; shared Zernike magnitude and phase, blur, stage position | `var_stagepos`, `var_blur`, `n_max`, `iteration` |
+| reject, refit | the worst 20 % by MSE, the xyz tails, negative intensities; refitted | `rej_threshold` |
+| repeat | all again from the learnt model, `min_photon` lowered by 0.1 per round, the stage position carried | `repeat` (2) |
+
+Its geometry is `phiz = kz_med·z − kz_imm·stage_pos`; v2's `VectorPSF` has the same split already (`xyz`
+through k_z of the immersion, `depth_nm` through the medium's).
+
+*Where v1 works against in situ learning.*  The out-of-focus emitters carry most of what the PSF has to
+learn, and v1 loses them three times: the detection threshold is relative to the frame's brightest in-focus
+peak, so a defocused spot with as many photons falls out first; the `min_photon` cut and the ranking by LL
+against the initial model keep what that model already explains (and the z bins are that model's z); the
+overlap rule, by the ROI's size and not the spot's, removes defocused (large) spots most at blinking
+densities.  The sign of the even aberrations is set only by the Zernike typed in: for astigmatism and
+spherical aberration the twin Φ(k) → −Φ(−k) flips z, so the ±0.5 search cannot tell the two apart and picks
+one by noise.  What breaks the symmetry is the depth term (index mismatch) and the coverslip, a hard lower
+edge on z.
+
+*The design, decided:*
+- **Frames sampled over the whole movie**, in blocks, until every z bin has enough candidates; sparse
+  frames (late in the movie) are preferred, not the first, densest ones.
+- **Inclusive detection.**  A sliding temporal median as the background; a DoG at several widths
+  (σ ≈ 1.2, 2, 3 px) so that defocused spots are found at their own size; a candidate is kept on its
+  **absolute significance** (photons in a disc against the background's Poisson noise), never relative to
+  the frame.  SMAPpy's `detect.py` is the place for the filters.
+- **A first fit of every candidate: an elliptical Gaussian** (SMAPpy's C++ `gauss_xy`, as
+  `model/astig.py` uses for beads), giving photons, σx, σy, background, LL and the offset from the ROI
+  centre.  The z proxy is D = σx² − σy², linear in z for astigmatism (`astig.py`), or the spot's size, |z|,
+  for a 2D PSF.  *A work package of its own, later:* PSFs the Gaussian cannot sort by z (double helix,
+  tetrapod, the phase masks of `roadmap.md`) need the first fit to be an initial pupil model instead.
+- **Overlaps, by the spot's size, on the fly.**  A neighbour within r_i + r_j (r ≈ 3σ of each fitted spot)
+  rejects the candidate; pixels of farther neighbours that reach into the ROI are masked (`Batch`'s mask);
+  an emitter with too much of its ROI or its own expected photons masked (~20–30 %) is rejected.  Emitters
+  are plenty: be picky, as long as every z bin keeps enough.
+- **Blinks linked**, with SMAPpy's grouping (`group.connect`): one emitter seen in K consecutive frames is
+  one emitter with a shared xyz and photons per frame (`[E, C, K, Y, X]` with K > 1), which helps the dim,
+  defocused ones most.  Only blinks whose shape stays the same across their frames are kept.
+- **Selection in z bins, by a brightness window, not the brightest.**  The brightest of a bin are where
+  unresolved pairs collect, and with a Gaussian illumination they are the field's centre.  Per bin,
+  emitters are drawn at random from a window a factor 3 wide whose top is at the bin's ~90th percentile of
+  photons.  Pairs are also caught by: Gaussian widths or deviance far from the bin's typical (σx, σy);
+  photons that step between the frames of a linked blink (a neighbour switching); and, from the second
+  round, the model's deviance.  Stratified in z only for now, not in the field.
+- **How many:** ~2000 emitters to start, a setting.  Choosing the number per bin from the CRLB of the shared
+  parameters is a later round, a test first.
+- **Held out:** ~10 % of each z bin stays out of the fit; their deviance and z bias against the fitted ones
+  are reported, as held-out beads are.
+- **The fit is v2's:** Poisson / camera likelihood, priors and no weights, per-emitter blocks (5 parameters,
+  or K + 4 for a linked blink with photons per frame) through GN-LBFGS's Schur complement, low orders first
+  (`first_stage`), rejection by `rejection.py`'s scores.  Shared: the Zernikes, the blur, the focus depth;
+  n_med fixed from the settings, freed with a prior only as a diagnostic.
+- **The focus depth** (v1's `stage_pos`, the focal plane above the coverslip): entered by the user, then
+  fitted with a loose prior (~0.5 µm); emitters at the coverslip, the z histogram's lower edge, pin depth 0
+  (v1's `backgroundROI`, made automatic).
+- **Rounds until stable:** localise every candidate with the current model (Spline 3D from the sampled
+  model), reselect, learn; stop when the Zernikes move by less than their standard errors and the selection
+  barely changes, at most ~4 rounds.  v1's `repeat` reselected only from what the first round kept.
+- **The sign of the even aberrations, from four sources; explicit beats the data, the data beat the prior.**
+  The start is what the user gave: a bead model of the microscope (the window's *start from*) or Zernikes
+  typed in (v1's way, kept for unusual PSFs).  The twin test always runs: the mirrored model refitted as a
+  start, ΔLL reported; when the data clearly prefer the other sign it warns, never flips silently.  With
+  nothing explicit and the data undecided, the microscope's entry decides: the astigmatism's sign and
+  orientation, a field to add to the microscope database (§7.5).
+- **Scope:** astigmatic and 2D PSFs, one channel.
+- **The window:** the *source* switch (§10) offers a blinking movie; *Detect* shows the frames with the
+  candidates ringed by state (accepted, rejected for overlap, masked neighbour), the z proxy's histogram
+  with the bins and how many are taken from each, and the learning-time estimate, as for beads.
+- **Output:** the model file and a spline sampled at the fitted depth, for data imaged at that depth.
+  Splines at other depths later.
+
+*Open, a study before deciding:* **depth, n_med and spherical aberration trade against each other.**  On
+simulations with known truth (depths, n_med and radial Zernikes varied, the emitters' z range varied),
+measure which of them a fit can separate, how the covariance couples them, and what each bias does to z;
+then choose what is fitted, fixed or given a prior.  Until then: depth fitted, n_med fixed, the radial
+Zernikes free.
 
 **M6 SMAPpy integration and release** (3–4 weeks)
 - In SMAPpy: loading the model file, sampling it, the spline (§6) and the calibration window (§7).
