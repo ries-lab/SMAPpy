@@ -373,14 +373,14 @@ calibration.  Both methods have:
 
 - **Model vs data**: XY planes 100 or 150 nm apart as columns, and three
   rows almost touching: the data, the model and the residual (data − model),
-  a set of three per channel.  A plane's data and model share one contrast,
+  a set of three per channel, two channels side by side.  A plane's data and model share one contrast,
   the data's peak in that plane, so a model too bright or too dim shows as
   well as one of the wrong shape; each residual is on its own scale,
   symmetric about 0 (red above, blue below), and under it is how large it is:
   its largest |data − model| as a percentage of the plane's data peak (the
   number the stack browser gives).  A side section through the centre
   (*section*: XZ, YZ) is one picture instead, data, model and residual side
-  by side, each on its own contrast.  With beads selected in the
+  by side, each on its own contrast, and the second channel beside the first.  With beads selected in the
   table the first of them is shown alone, unless *average* is ticked;
   otherwise the average of the used beads.  A good model leaves a residual of
   noise, with no ring, lobe or tilt that repeats from plane to plane; a

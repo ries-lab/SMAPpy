@@ -429,9 +429,11 @@ class PupilModel:
             if title == "Beads":
                 continue
             if title.startswith("Pupil and Zernikes"):
-                # the phase in rad, waves or nm: a choice above the page, as the Zernike table has all three
+                # the phase in nm, waves or rad: a choice above the page, as the Zernike table has all three;
+                # nm first, the unit an optician reads (the first choice is the one shown)
+                units = ("nm",) + tuple(u for u in PHASE_UNITS if u != "nm")
                 pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
-                                  follows_selection=False, controls={"units": PHASE_UNITS}))
+                                  follows_selection=False, controls={"units": units}))
             else:
                 pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,

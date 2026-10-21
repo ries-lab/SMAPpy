@@ -247,18 +247,18 @@ def _rgba(image, residual: bool):
 
 
 def _cell(images, kinds, gap: int = 1):
-    """One section as one picture: each channel a row of its images side by side, ``gap`` white pixels
-    apart, so that data and model are compared at a glance."""
-    rows = []
+    """One section as one picture: each channel its images side by side, ``gap`` white pixels apart, and
+    the channels beside each other, four gaps apart, so that data and model are compared at a glance and
+    a tall, narrow section leaves no width unused."""
+    parts = []
     for channel in images:
-        parts = []
-        for image, kind in zip(channel, kinds):
-            if parts:
+        if parts:
+            parts.append(np.ones((channel[0].shape[0], 4 * gap, 4)))
+        for i, (image, kind) in enumerate(zip(channel, kinds)):
+            if i:
                 parts.append(np.ones((image.shape[0], gap, 4)))
             parts.append(_rgba(image, kind == "residual"))
-        rows.append(np.concatenate(parts, 1))
-        rows.append(np.ones((gap, rows[-1].shape[1], 4)))
-    return np.concatenate(rows[:-1], 0)
+    return np.concatenate(parts, 1)
 
 
 def _colormap(name):
@@ -280,11 +280,11 @@ def residual_percent(data, model) -> float:
 def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY", step_nm=None,
                        average: bool = False) -> str:
     """XY planes ``step_nm`` apart (`planes`) as columns, and three rows almost touching: the data, the
-    model and the residual (data − model), a set of three per channel.  A plane's data and model share one contrast, the data's peak there, so a model
+    model and the residual (data − model), a set of three per channel, the channels side by side.  A plane's data and model share one contrast, the data's peak there, so a model
     too bright or too dim shows as well as one of the wrong shape; the residual is symmetric about 0 on its
     own scale, and under it how large it is, its largest |value| in % of the plane's data peak
     (`residual_percent`).  A side section (XZ, YZ) through the centre is one picture instead, data, model and
-    residual side by side (`_cell`).  ``bead`` shows that bead alone unless ``average``.  Returns a status
+    residual side by side, the channels beside each other (`_cell`).  ``bead`` shows that bead alone unless ``average``.  Returns a status
     line."""
     if average:
         bead = None
@@ -307,16 +307,20 @@ def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY"
         ax.imshow(cell, aspect="auto", extent=(0, cell.shape[1], z[-1], z[0]), interpolation="nearest")
         ax.set_xticks([])
         ax.set_ylabel("emitter z (nm)")
-        legend = " | ".join(kinds) + (", main above secondary" if len(data) > 1 else "") + \
+        legend = " | ".join(kinds) + (f", {views.titles[0]} left, {views.titles[1]} right" if len(data) > 1 else "") + \
             ", each on its own contrast"
         ax.set_title(f"{which}: {section} section through the centre\n{legend}", fontsize="small")
         return f"model vs data: {which}"
     picked = planes(views.z_nm, step_nm)
     columns = [(f"{views.z_nm[k] + 0.0:.0f} nm".replace("-0 ", "0 "), lambda v, k=k: v[k]) for k in picked]
-    rows = len(kinds) * len(data)
-    grid = figure.subplots(rows, len(columns), squeeze=False)
+    # two channels side by side, a panel each: stacked, their six rows of square pixels left the wide
+    # figure mostly white
+    panels = [figure] if len(data) == 1 else list(figure.subfigures(1, len(data), wspace=0.03))
     inferno, diverging = _colormap("inferno"), _colormap("RdBu_r")
-    for c, (d_volume, m_volume) in enumerate(zip(data, model)):
+    for c, (panel, d_volume, m_volume) in enumerate(zip(panels, data, model)):
+        grid = panel.subplots(len(kinds), len(columns), squeeze=False)
+        if len(data) > 1:
+            panel.suptitle(views.titles[c], fontsize="small")
         for j, (title, cut) in enumerate(columns):
             d, m = np.asarray(cut(d_volume), float), np.asarray(cut(m_volume), float)
             peak = float(np.nanmax(np.abs(d))) if np.isfinite(d).any() else 0.0
@@ -326,17 +330,16 @@ def draw_model_vs_data(figure, views: ModelViews, bead=None, section: str = "XY"
                       (m, dict(cmap=inferno, vmin=0, vmax=peak or 1.0)),
                       (r, dict(cmap=diverging, vmin=-(limit or 1.0), vmax=limit or 1.0)))
             for i, (image, options) in enumerate(images):
-                ax = grid[c * len(kinds) + i, j]
+                ax = grid[i, j]
                 ax.imshow(np.ma.masked_invalid(image), interpolation="nearest", **options)
                 ax.set_xticks([])
                 ax.set_yticks([])
                 # square pixels leave spare height when the figure is wide: the three of a channel close
                 # up on the model, the spare height around them rather than between them
                 ax.set_anchor(("S", "C", "N")[i])
-                if j == 0:
-                    label = kinds[i] if len(data) == 1 else f"{kinds[i]}\n{views.titles[c]}"
-                    ax.set_ylabel(label, fontsize="small")
-                if c == 0 and i == 0:
+                if j == 0 and c == 0:
+                    ax.set_ylabel(kinds[i], fontsize="small")
+                if i == 0:
                     ax.set_title(title, fontsize="small")
                 if i == 2:
                     ax.set_xlabel(f"±{residual_percent(d, m):.2g} %", fontsize="x-small", labelpad=1)

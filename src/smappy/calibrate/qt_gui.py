@@ -312,20 +312,18 @@ class CalibrationWindow(QMainWindow):
         self.add_paths(paths)
 
     def add_directory(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Folder of bead stacks",
-                                                folders.start())
-        if not path:
+        paths = folders.choose_folders(self, "Folders of bead stacks")
+        if not paths:
             return
-        folders.remember(path)
         if self.subdirectories.isChecked():
             try:
-                found = [str(p) for p in discover_acquisitions([path])]
+                found = [str(p) for p in discover_acquisitions(paths)]
             except Exception as error:
                 self.error(error)
                 return
-            self.add_paths(found or [path])
+            self.add_paths(found or paths)
         else:
-            self.add_paths([path])
+            self.add_paths(paths)
 
     def remove_paths(self) -> None:
         for item in self.file_list.selectedItems():

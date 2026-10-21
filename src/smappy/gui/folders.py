@@ -41,3 +41,25 @@ def remember(paths: Union[str, Path, Iterable], stack: bool = False) -> None:
         config.remember_folder(first, up=up)
     except OSError:
         pass        # a read-only configuration must not lose the user's file
+
+
+def choose_folders(parent, title: str) -> list:
+    """Several folders at once, starting in the last one used; [] when cancelled.
+
+    `QFileDialog.getExistingDirectory` takes one, and the native dialog on
+    macOS cannot be talked into more, so this is Qt's own dialog with its
+    list and tree switched to extended selection (cmd- and shift-click).
+    """
+    from PySide6.QtWidgets import QAbstractItemView, QFileDialog, QListView, QTreeView
+    dialog = QFileDialog(parent, title, start())
+    dialog.setFileMode(QFileDialog.FileMode.Directory)
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+    for view in dialog.findChildren(QListView) + dialog.findChildren(QTreeView):
+        if view.objectName() in ("listView", "treeView"):
+            view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+    if not dialog.exec():
+        return []
+    paths = [p for p in dialog.selectedFiles() if p]
+    remember(paths)
+    return paths

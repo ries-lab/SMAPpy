@@ -165,8 +165,9 @@ def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]
     ``reference``'s beside them: the numbers of `draw_zernikes`, to read or copy, each key aberration's
     row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted."""
     from ..optics.zernike import noll_to_nm
-    columns = ["channel", "Noll", "name", "aberration", "n", "m", "phase (rad)", "± (rad)", "magnitude", "±",
-               "phase (waves)", "± (waves)", "phase (nm)", "± (nm)"]
+    # nm first, the unit an optician reads; rad, what the model fits, and waves after the magnitude
+    columns = ["channel", "Noll", "name", "aberration", "n", "m", "phase (nm)", "± (nm)", "magnitude", "±",
+               "phase (rad)", "± (rad)", "phase (waves)", "± (waves)"]
     if reference is not None:
         columns += ["start phase (rad)", "start magnitude"]
     rows = []
@@ -183,8 +184,8 @@ def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]
             radians = phase.get(j, nan)
             waves = tuple(v * phase_scale(source, c, "waves")[0] for v in radians)
             nm = tuple(v * phase_scale(source, c, "nm")[0] for v in radians)
-            row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *radians,
-                   *magnitude.get(j, nan), *waves, *nm)
+            row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *nm,
+                   *magnitude.get(j, nan), *radians, *waves)
             if reference is not None:
                 row += (start_phase.get(j, float("nan")), start_magnitude.get(j, float("nan")))
             rows.append(tuple(float(v) if isinstance(v, (np.floating, float)) else v for v in row))

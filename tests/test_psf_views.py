@@ -58,6 +58,24 @@ def test_model_vs_data_is_a_column_per_plane_and_rows_of_data_model_and_residual
     assert "average" in draw_model_vs_data(Figure(), views, 1, "XY", average=True)
 
 
+def test_model_vs_data_puts_the_second_channel_beside_the_first():
+    from dataclasses import replace
+
+    from test_bead_calibration import synthetic_collection
+    views = average_views(build_calibration(synthetic_collection()))
+    dual = replace(views, data=views.data * 2, model=views.model * 2, titles=["main", "secondary"])
+    figure = Figure(constrained_layout=True)
+    draw_model_vs_data(figure, dual, None, "XY")
+    picked = planes(views.z_nm)
+    panels = figure.subfigs
+    assert [p.get_suptitle() for p in panels] == ["main", "secondary"]
+    assert all(len(p.axes) == 3 * len(picked) for p in panels)            # three rows each, not six
+    figure = Figure()
+    draw_model_vs_data(figure, dual, None, "XZ")
+    width = views.data[0].shape[2]
+    assert figure.axes[0].images[0].get_array().shape[1] == 2 * (3 * width + 2) + 4
+
+
 def test_the_bar_follows_a_fit_whose_gain_falls_geometrically_and_never_goes_back():
     now = [0.0]
     tracker = LearningProgress(clock=lambda: now[0])

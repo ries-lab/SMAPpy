@@ -53,6 +53,17 @@ def to_cpu64(t: torch.Tensor) -> torch.Tensor:
 _COMPILED: dict = {}
 
 
+def _quiet_compiler() -> None:
+    """Silence two lines the compiler prints on Apple's GPU and that need nothing from the user: inductor's
+    "Not enough SMs to use max_autotune_gemm mode" (a CUDA count it applies to every GPU) and torch's own
+    use of the deprecated `torch.jit.script` (torch 2.14.1).  Both come at the first call, not here, so
+    the filters stay."""
+    import logging
+    import warnings
+    logging.getLogger("torch._inductor.utils").setLevel(logging.ERROR)
+    warnings.filterwarnings("ignore", message=r"`torch\.jit\.script` is deprecated", category=FutureWarning)
+
+
 def compiled(fn, device):
     """``fn`` through `torch.compile` on Apple's GPU, ``fn`` itself elsewhere; ``UIPSF_COMPILE=0`` turns
     it off, ``=1`` on for every device.
@@ -64,6 +75,7 @@ def compiled(fn, device):
     if flag == "0" or (flag != "1" and torch.device(device).type != "mps"):
         return fn
     if fn not in _COMPILED:
+        _quiet_compiler()
         _COMPILED[fn] = torch.compile(fn, dynamic=False)
     return _COMPILED[fn]
 
