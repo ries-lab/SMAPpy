@@ -71,7 +71,8 @@ when a milestone lands or an item moves.
    a factor 3 wide below the pairs' tail; ~10 % held out; v2's fit with the focus depth under a loose
    prior and the coverslip's edge; rounds from the whole pool until stable; the sign explicit > data (twin
    test) > database.  Astigmatic and 2D first; the window's *source* switch.  Zenodo `1ch_smlm_tubulin`
-   and simulations.  First a study: what separates depth, n_med and spherical aberration.
+   and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
+   aberration.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 

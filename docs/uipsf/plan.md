@@ -1130,11 +1130,12 @@ edge on z.
 - **Output:** the model file and a spline sampled at the fitted depth, for data imaged at that depth.
   Splines at other depths later.
 
-*Open, a study before deciding:* **depth, n_med and spherical aberration trade against each other.**  On
-simulations with known truth (depths, n_med and radial Zernikes varied, the emitters' z range varied),
-measure which of them a fit can separate, how the covariance couples them, and what each bias does to z;
-then choose what is fitted, fixed or given a prior.  Until then: depth fitted, n_med fixed, the radial
-Zernikes free.
+*Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
+other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
+z bias), so it is not a step before it: build with the defaults below, then on simulations with known
+truth (depths, n_med and radial Zernikes varied, the emitters' z range varied) measure which of them a fit
+can separate, how the covariance couples them and what each bias does to z, and choose what is fitted,
+fixed or given a prior.  The defaults until then: depth fitted, n_med fixed, the radial Zernikes free.
 
 **M6 SMAPpy integration and release** (3–4 weeks)
 - In SMAPpy: loading the model file, sampling it, the spline (§6) and the calibration window (§7).
