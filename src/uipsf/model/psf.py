@@ -118,7 +118,7 @@ class VectorPSF:
         stack is padded as uiPSF pads it, R // Δz + 2 planes on each side,
         continuing from the end planes.
         """
-        xyz, pad, dz = self._stack(xyz, z_step_nm)
+        xyz, pad, dz = self._stack(xyz, z_step_nm, depth_nm)
         return self._image(self.intensity(p, xyz, depth_nm), p["psf.sigma"], pad, dz)
 
     def pupil_linearisation(self, p, xyz: torch.Tensor, depth_nm: torch.Tensor | None = None,
@@ -140,7 +140,7 @@ class VectorPSF:
         per-tangent part goes through `torch.compile` (`device.compiled`), every batch padded to the
         first one's width so that one shape is compiled: 12 % off the normal equations at 20 beads.
         """
-        xyz, pad_z, dz = self._stack(xyz, z_step_nm)
+        xyz, pad_z, dz = self._stack(xyz, z_step_nm, depth_nm)
         sigma = p["psf.sigma"]
         with torch.no_grad():
             per_emitter = self.pupil_field(p).dim() == 3
@@ -172,18 +172,22 @@ class VectorPSF:
         return apply
 
     def _waves(self, xyz, depth_nm):
-        """exp(2πi k_z z) per emitter and observation, [E, K, P, P], with the depth term in-situ."""
+        """exp(2πi k_z z) per emitter and observation, [E, K, P, P], with the depth term in-situ: one
+        depth per emitter ([E]) or per emitter and observation ([E, K], `InSituGeometry`)."""
         z = xyz[..., 2][..., None, None].to(self.grid.kz_imm.dtype)
         wave = torch.exp(2j * math.pi * self.grid.kz_imm * z)
         if depth_nm is not None:
-            d = depth_nm.reshape(-1, 1, 1, 1).to(self.grid.kz_med.dtype)
+            d = depth_nm.to(self.grid.kz_med.dtype)
+            d = d[..., None, None] if d.dim() == 2 else d.reshape(-1, 1, 1, 1)
             wave = wave * torch.exp(2j * math.pi * self.grid.kz_med * d)
         return wave
 
-    def _stack(self, xyz, z_step_nm):
+    def _stack(self, xyz, z_step_nm, depth_nm=None):
         """The positions, padded along the stack for a bead kernel: (xyz, pad, Δz)."""
         if self.bead_radius_nm <= 0:
             return xyz, 0, None
+        if depth_nm is not None and depth_nm.dim() == 2:
+            raise ValueError("a bead kernel needs a z stack, not emitters in the sample (InSituGeometry)")
         if z_step_nm is None or xyz.shape[1] < 2:
             raise ValueError("a bead kernel needs a z stack: at least two planes and z_step_nm")
         dz = abs(float(z_step_nm))

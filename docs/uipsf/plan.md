@@ -1130,6 +1130,12 @@ edge on z.
 - **Output:** the model file and a spline sampled at the fitted depth, for data imaged at that depth.
   Splines at other depths later.
 
+*Done, step 1 (October 2026):* `InSituGeometry` (h through k_z,med, the focus through k_z,imm, both on the
+linearised Jacobian path) and `workflows.insitu.learn_insitu` on cut regions: localisation from several
+heights on the start, the staged fit, the twin test.  On 40 simulated emitters the pupil comes back within
+its CRLB and the twin test agrees by 62 nats; started with the wrong sign it learns the twin and warns
+(−54 nats).  Focus and heights share an offset to the focus's CRLB (architecture.md, "M5, step 1").
+
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
 z bias), so it is not a step before it: build with the defaults below, then on simulations with known

@@ -47,3 +47,41 @@ class BeadStackGeometry:
         z_k = z_k[None] if z_k.dim() == 1 else z_k                        # [1|E, K]
         stage = torch.stack([torch.zeros_like(z_k), torch.zeros_like(z_k), p["geometry.z_scale"] * z_k], -1)
         return xyz + stage + p["geometry.drift"]
+
+
+class InSituGeometry:
+    """Emitters in the sample, seen through a focus set somewhere above the coverslip (plan §9, M5).
+
+    An emitter's z is its height h above the coverslip (`docs/uipsf/conventions.md`), and the focus f
+    is where the objective puts its nominal focal plane: how far it was moved from the coverslip's
+    focus, v1's ``stage_pos``.  The defocus wave is exp(2πi (k_z,med h − k_z,imm f)) (uiPSF's in situ
+    model): h travels through the sample's index, f through the immersion's, and their difference is the
+    index mismatch's spherical aberration growing with depth.  The output carries the two apart, four
+    coordinates per observation, (x, y, z_k − f, h): the third is the bead stack's z (through k_z,imm,
+    with ``Batch.z_nm`` a nominal focus offset per observation, zero for one frame), the fourth the
+    PSF's ``depth_nm``.  Both enter only as factors of the pupil, so the emitter's h and the shared f
+    keep the solver's linearised Jacobian columns (`ForwardModel.emitter_linearisation`).
+
+    The focus has a loose prior, N(f₀, 500 nm) by default: the value the user enters is a stage
+    reading, often off by a few hundred nanometres (decided October 2026).  An emitter seen in K
+    frames (a linked blink) has one position in all of them.
+    """
+
+    def __init__(self, focus_nm: float, focus_prior_nm: float | None = 500.0, fit_focus: bool = True):
+        self.focus_nm, self.fit_focus = float(focus_nm), fit_focus
+        self.focus_prior_nm = None if focus_prior_nm is None else float(focus_prior_nm)
+
+    def specs(self, batch, start) -> list[ParamSpec]:
+        prior = None if self.focus_prior_nm is None else Gaussian(self.focus_nm, self.focus_prior_nm)
+        return [ParamSpec("emitter.xyz", (3,), "emitter", init=start["xyz"]),
+                ParamSpec("geometry.focus", (), init=self.focus_nm, prior=prior, fixed=not self.fit_focus)]
+
+    def __call__(self, p, batch) -> torch.Tensor:
+        """[E, K, 4] nm: x, y, the defocus through the immersion, the height in the sample."""
+        xyz = p["emitter.xyz"]
+        z_k = batch.z_nm.to(xyz.dtype)
+        z_k = z_k[None] if z_k.dim() == 1 else z_k                        # [1|E, K]
+        E, K = xyz.shape[0], z_k.shape[-1]
+        h = xyz[:, None, 2].expand(E, K)
+        return torch.stack([xyz[:, None, 0].expand(E, K), xyz[:, None, 1].expand(E, K),
+                            (z_k - p["geometry.focus"]).expand(E, K), h], -1)

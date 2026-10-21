@@ -16,7 +16,7 @@ when a milestone lands or an item moves.
 | M4 | several channels | done: transform to 0.025 px of SMAPpy's and v1's |
 | M7 | speed | done: Zenodo 1ch (84 beads, order 8) in 45 s on a Mac GPU, 2ch in 1.4 min |
 | M6 | SMAPpy integration and release | mostly done: window, adapter, spline, acceptance tests; open below |
-| M5 | in situ (blinking molecules) | designed (plan §9, M5), not started |
+| M5 | in situ (blinking molecules) | designed (plan §9, M5); step 1 done: the fit on cut regions, the twin test |
 | M8 | physics where the atlas asks for it | ongoing: measured, not yet modelled |
 
 ## Done
@@ -70,7 +70,9 @@ when a milestone lands or an item moves.
    by the spot's size, rejected or masked; blinks linked; per z bin a random draw from a brightness window
    a factor 3 wide below the pairs' tail; ~10 % held out; v2's fit with the focus depth under a loose
    prior and the coverslip's edge; rounds from the whole pool until stable; the sign explicit > data (twin
-   test) > database.  Astigmatic and 2D first; the window's *source* switch.  Zenodo `1ch_smlm_tubulin`
+   test) > database.  Astigmatic and 2D first; the window's *source* switch.  **Step 1 done**
+   (`InSituGeometry`, `workflows/insitu.py`, architecture.md): the fit on cut regions and the twin test;
+   next linked blinks, simulated movies, detection and selection, the rounds, the window.  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU

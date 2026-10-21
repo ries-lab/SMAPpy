@@ -22,6 +22,8 @@ Axes, signs, units and normalisation, as the code implements them. SMAPpy's conv
   - `SplineCalibration.z_index_to_nm(k) = −(k − z0)·dz`;
   - "a bead is below the focus by as much as the objective was raised" (Spline 3D page).
 - **In-situ depth** (`depth_nm`) is the emitter's depth in the sample above the coverslip. It adds the medium's axial phase, `k_z,med · depth`, to the stage defocus, `k_z,imm · z`. Light above the critical angle decays with depth. [`test_psf.py::test_depth_in_the_sample_loses_supercritical_light`]
+- **In situ, an emitter's z is its height h above the coverslip, and the focus f is the shared `geometry.focus`:** how far the objective moved its nominal focal plane up from the coverslip's focus (uiPSF v1's `stage_pos`). `InSituGeometry` hands the PSF z = −f (through `k_z,imm`) and depth = h (through `k_z,med`), so the defocus wave is `exp(2πi (k_z,med h − k_z,imm f))`. With matched indices this is a bead at z = h − f. [`test_insitu.py::test_with_matched_indices_an_emitter_in_the_sample_is_a_bead_at_its_height_above_the_focus`]
+- **The twin** of a pupil, `A*(−k)`, images the mirrored z: phase Zernikes `c_j → −(−1)^m c_j`, magnitude `c_j → (−1)^m c_j` (astigmatism and spherical flip, coma does not). Exact for scalar light with matched indices; the index mismatch is what tells the two apart in situ. [`test_insitu.py::test_with_matched_indices_the_twin_images_the_mirrored_height_exactly`]
 
 ## Phase convention
 

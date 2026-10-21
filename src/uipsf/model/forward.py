@@ -94,7 +94,7 @@ class ForwardModel:
         pxc = xyz.new_tensor(self.channels[c].pixel_size_nm)
         main = roi[:, None, 0] + xyz[..., :2] / px0
         local = (inverse_map(unpack_transform(p[pre + "transform"]), main) - roi[:, None, c]) * pxc
-        return torch.cat([local, (xyz[..., 2] + p[pre + "dz"])[..., None]], -1)
+        return torch.cat([local, (xyz[..., 2] + p[pre + "dz"])[..., None], xyz[..., 3:]], -1)
 
     def _z_step(self, psf, batch):
         return batch.z_step_nm if psf.bead_radius_nm > 0 else None
@@ -108,7 +108,8 @@ class ForwardModel:
         N = self.intensity(p, batch)[..., None, None]                  # [E, K, 1, 1]
         mu = []
         for c, ch in enumerate(self.channels):
-            I = ch.psf(view(p, c), self.positions(p, batch, xyz, c), z_step_nm=self._z_step(ch.psf, batch))
+            pos, depth = _split(self.positions(p, batch, xyz, c))
+            I = ch.psf(view(p, c), pos, depth, z_step_nm=self._z_step(ch.psf, batch))
             mu.append(self.share(p, c) * N * I)
         return torch.stack(mu, 1) + self.background(p, batch)
 
@@ -122,8 +123,8 @@ class ForwardModel:
         groups = []
         for c, ch in enumerate(self.channels):
             pc = view(p, c)
-            f = ch.psf.pupil_linearisation(pc, self.positions(p, batch, xyz, c),
-                                           z_step_nm=self._z_step(ch.psf, batch))
+            pos, depth = _split(self.positions(p, batch, xyz, c))
+            f = ch.psf.pupil_linearisation(pc, pos, depth, z_step_nm=self._z_step(ch.psf, batch))
             Nc = self.share(p, c) * N
             names = [prefix(c) + s.name for s in ch.psf.pupil.specs()]
             groups.append((c, names, lambda q, c=c, ch=ch: ch.psf.pupil_field(view(q, c)),
@@ -133,7 +134,9 @@ class ForwardModel:
     def emitter_linearisation(self, p: dict[str, torch.Tensor], batch):
         """(I, dI, parts): the PSFs I [E, C, K, Y, X], their derivatives dI [3, E, C, K, Y, X] with respect
         to each observation's own x, y and z in each channel, and ``parts(p) -> (xyz, N, b)``, the cheap
-        components: positions [E, C, K, 3], photons f_c·N [E, C, K] and background.
+        components: positions [E, C, K, 3], photons f_c·N [E, C, K] and background.  In situ the positions
+        have a fourth coordinate, the height in the sample, and dI a fourth derivative, its factor
+        2πi k_z,med (`InSituGeometry`).
 
         μ = N·I(xyz) + b, and an emitter's parameters act through xyz, N and b only, so a column of the
         emitter Jacobian is N·Σ_d (∂xyz_d/∂u)·dI_d + (∂N/∂u)·I + ∂b/∂u: three PSF tangents per channel for
@@ -148,16 +151,19 @@ class ForwardModel:
             xyz = self.geometry(p, batch)
             Is, dIs = [], []
             for c, ch in enumerate(self.channels):
-                pc, xyz_c, z_step = view(p, c), self.positions(p, batch, xyz, c), self._z_step(ch.psf, batch)
+                pc, z_step = view(p, c), self._z_step(ch.psf, batch)
+                xyz_c, depth = _split(self.positions(p, batch, xyz, c))
                 g = ch.psf.grid
-                Is.append(ch.psf(pc, xyz_c, z_step_nm=z_step))
+                Is.append(ch.psf(pc, xyz_c, depth, z_step_nm=z_step))
                 A = ch.psf.pupil_field(pc)                                   # [P, P] or [E, P, P]
                 two_pi_i = 2j * math.pi
-                factors = torch.stack([(-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm),
-                                       (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm),
-                                       two_pi_i * g.kz_imm]).to(A.dtype)      # [3, P, P]
+                factors = [(-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm),
+                           (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm), two_pi_i * g.kz_imm]
+                if depth is not None:                     # in situ: the height in the sample, through k_z,med
+                    factors.append(two_pi_i * g.kz_med)
+                factors = torch.stack(factors).to(A.dtype)                   # [3 | 4, P, P]
                 dA = factors[:, None] * A if A.dim() == 3 else factors * A
-                dIs.append(ch.psf.pupil_linearisation(pc, xyz_c, z_step_nm=z_step)(dA))
+                dIs.append(ch.psf.pupil_linearisation(pc, xyz_c, depth, z_step_nm=z_step)(dA))
             I, dI = torch.stack(Is, 1), torch.stack(dIs, 2)
 
         def parts(q):
@@ -168,6 +174,14 @@ class ForwardModel:
             return pos, Nc, self.background(q, batch)
 
         return I, dI, parts
+
+
+def _split(positions):
+    """(xyz [E, K, 3], depth [E, K] or None): a geometry's positions, with an in situ geometry's fourth
+    coordinate, the height in the sample, apart (`InSituGeometry`)."""
+    if positions.shape[-1] == 4:
+        return positions[..., :3], positions[..., 3]
+    return positions, None
 
 
 def _with_psf(channel, psf):

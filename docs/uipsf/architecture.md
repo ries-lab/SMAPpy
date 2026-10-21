@@ -1277,3 +1277,35 @@ Found on the way: the Zenodo 2ch folders `Pos0_..._Z_1` and `Pos1_..._Z_1` hold 
 same bytes as the `_Z_2` folders', so 12 of the 88 beads are copies of others (stacks 0 and 1, 4 and 5;
 beads 3 and 9 have the same data).  Every number on 2ch above includes them; left as they are (decided
 2026-10-21), a later study may leave one copy out.
+
+## M5, step 1: the in situ fit on cut regions (October 2026, plan §9 M5)
+
+The core of in situ learning, before detection: each emitter's region in, the pupil, the focus and every
+emitter's height out, with the sign of the even aberrations checked.
+
+- **`model.InSituGeometry`**: `emitter.xyz` holds x, y and the height h above the coverslip; the shared
+  `geometry.focus` (prior N(f₀, 500 nm)) is the focal plane's height.  It returns four coordinates per
+  observation, (x, y, z_k − f, h); `ForwardModel` passes the fourth to the PSF as `depth_nm` (per emitter
+  and observation now), and `emitter_linearisation` adds its tangent factor 2πi k_z,med.  So both the
+  emitters' heights and the focus keep the linearised Jacobian columns: the in situ normal equations
+  equal the JVPs' to 1e-10 (`test_insitu.py`).
+- **`workflows.insitu.learn_insitu`**: every emitter localised on the starting pupil from heights every
+  150 nm over ±900 nm about the height in focus, f·n_med/n_imm, the best kept (`localise_from_heights`);
+  then `learn_beads` with `start_stage1` (low orders first, the beads' rejection); then the twin test
+  (`twin_fit`): the learnt pupil's twin, every emitter localised on it again, fitted, and the optima
+  compared.  ±10 nats (`TWIN_DECISIVE_NATS`) decides; the sign the start gave is kept and a preference
+  for the twin is a warning (`InSituCalibration.warnings`).
+
+**Measured** (simulated, 40 emitters 0–1000 nm deep, one frame each, 3000–6000 photons, NA 1.43 oil into
+water, astigmatism 0.7 rad with coma and spherical, focus 720 nm started at 600; 4 CPU cores, ~9 s):
+
+| start | phase | focus | heights | twin test |
+| --- | --- | --- | --- | --- |
+| astigmatism +0.4 (right sign) | every mode within 1.5σ of the truth | 610 nm, σ 82 | −80 nm in common, 19 nm rms about it | agree, +62 nats |
+| astigmatism −0.4 (wrong sign) | the twin: astigmatism −0.69, spherical (Noll 11) +0.28 to make up for the mismatch | 664 nm, σ 114 | mirrored | prefer twin, −54 nats: warns |
+
+The focus and all heights move together, nearly degenerate (the focal shift n_med/n_imm): the heights
+relative to each other are well determined, their common offset only to the focus's CRLB.  That is what
+the coverslip edge (plan §9 M5) is to pin, and part of the depth, n_med and spherical study.  Held-out
+emitters are not in this step: the beads' held-out report fits slices of a stack, which a single frame
+does not have; the in situ one comes with selection (step 4).
