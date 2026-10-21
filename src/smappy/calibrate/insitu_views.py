@@ -120,7 +120,7 @@ def model_vs_data(result, bins: int = 6) -> ModelVsData:
     batch, noise = rois.batch(ids=used)
     batch = on_model_device(batch.to(dtype=cal.model.psf.grid.rho.dtype), cal.model)
     with torch.no_grad():
-        mu = Problem(cal.model, noise, batch).expected(cal.result.params)[:, 0, 0].double().numpy()
+        mu = Problem(cal.model, noise, batch, 256).expected(cal.result.params)[:, 0, 0].double().numpy()
     data = batch.data[:, 0, 0].cpu().double().numpy()
     mask = batch.mask[:, 0, 0].cpu().numpy() if batch.mask is not None else np.ones_like(data, bool)
     h = cal.result.params.physical()["emitter.xyz"][:, 2].detach().cpu().double().numpy()

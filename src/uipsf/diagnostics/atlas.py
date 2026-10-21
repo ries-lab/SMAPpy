@@ -105,13 +105,15 @@ def _group(name, labels, D, R, keep, var_D, keys=None):
     return Group(name, np.asarray(uniq), dev, sig, n, chi2)
 
 
-def residual_atlas(model, params, batch, noise, z_bin_nm: float = 100.0) -> Atlas:
-    """The atlas of a fit: ``params`` for every emitter of ``batch`` (shared ones fitted or fixed)."""
+def residual_atlas(model, params, batch, noise, z_bin_nm: float = 100.0, chunk_size=None) -> Atlas:
+    """The atlas of a fit: ``params`` for every emitter of ``batch`` (shared ones fitted or fixed); the expected
+    images ``chunk_size`` emitters at a time (`Problem`'s default: all, for bead stacks)."""
+    from ..solve import Problem
     batch = on_model_device(batch, model)
     with torch.no_grad():
         p = params.physical()
         # On the CPU in float64; copy, then cast (MPS has no float64, and one-call casts from it are wrong).
-        mu = model(p, batch).cpu().double()
+        mu = Problem(model, noise, batch, chunk_size).expected(params).double()
         main = model.geometry(p, batch)
         xyz = torch.stack([model.positions(p, batch, main, c) for c in range(model.n_channels)],
                           1).cpu().double()                          # [E, C, K, 3], each channel's own

@@ -48,6 +48,10 @@ from .scoring import localise, shared_values
 # The starting heights: every 150 nm over ±900 nm about the height in focus.  An astigmatic PSF changes
 # its shape over ~300 nm; a start within half of that of the truth converged in the tests.
 HEIGHT_SPAN_NM, HEIGHT_STEP_NM = 900.0, 150.0
+# At most this many emitters are computed at once.  A localisation needs 6–9 MB per emitter on Apple's GPU (a
+# pupil of 64 samples, 19-pixel regions): the whole pool of a dense movie, 5000 emitters in one chunk, took
+# 38 GB and swapped for twenty minutes.  256 is ~2 GB.  Bead stacks keep `Problem`'s own chunks.
+INSITU_CHUNK = 256
 # A difference of optima above this many nats is a clear preference for one sign; below it the data do not
 # decide.  Both fits have the same parameters, so it is a log likelihood ratio, and 10 is strong evidence.
 TWIN_DECISIVE_NATS = 10.0
@@ -88,7 +92,8 @@ def localise_from_starts(model, shared: dict, batch, noise, starts) -> tuple[dic
         xyz[:, 2] = torch.as_tensor(np.where(np.isfinite(column), column, np.nanmean(column)), dtype=xyz.dtype,
                                     device=xyz.device)
         # Through the batch's start, so that every intensity model starts its own parameters from it.
-        fit, problem = localise(model, shared, replace(batch, start=dict(rough, xyz=xyz)), noise)
+        fit, problem = localise(model, shared, replace(batch, start=dict(rough, xyz=xyz)), noise,
+                                chunk_size=INSITU_CHUNK)
         obj = problem.objectives(fit.params)
         obj = torch.where(torch.as_tensor(np.isfinite(column)), obj, torch.full_like(obj, float("inf")))
         phys = fit.params.physical()
@@ -226,6 +231,9 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
     """
     noise = noise if noise is not None else ShiftedPoisson()
     solver = solver if solver is not None else GaussNewtonLBFGS()
+    # Masked pixels are a neighbour's, masked on purpose and capped when the units were chosen; the beads'
+    # rule (1 %, for saturation) rejected every masked unit of a dense movie
+    rejection = rejection if rejection is not None else RejectionSettings(max_masked=1.0)
     batch = on_model_device(batch, model)
     dtype, device = batch.data.dtype, batch.data.device
     base = Params(model.specs(replace(batch, start=_placeholder(batch))), batch.n_emitters, dtype=dtype,
@@ -242,14 +250,15 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
         found, objectives = located, torch.full((batch.n_emitters,), float("nan"), dtype=torch.float64)
     located = replace(batch, start=found)
     cal = learn_beads(model, located, noise, rejection=rejection, first_order=first_order, solver=solver,
-                      chunk_size=chunk_size, progress=progress, cancel=cancel, start=shared, start_stage1=True)
+                      chunk_size=chunk_size or INSITU_CHUNK, progress=progress, cancel=cancel, start=shared,
+                      start_stage1=True)
     result = InSituCalibration(cal, objectives)
     if twin_test and cal.result.stop_reason != "cancelled":
-        result.twin = twin_fit(model, cal, located, noise, heights, solver, chunk_size)
+        result.twin = twin_fit(model, cal, located, noise, heights, solver, chunk_size or INSITU_CHUNK)
     return result
 
 
-def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=None,
+def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=INSITU_CHUNK,
              starts=None) -> TwinTest:
     """The twin of ``cal``'s pupil fitted to its used emitters, each localised on the twin first.
 

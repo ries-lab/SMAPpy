@@ -8,6 +8,9 @@ one-sided, only a fit worse than the bin's is out).  It then learns again from t
 emitters started where the localisation put them.  uiPSF v1 repeated too (``repeat``), but chose again
 only among what its first round had kept; here the whole pool is chosen from every round.
 
+**Which molecules the rounds look at.**  Not the whole pool: at most a few times *per bin* from each bin of
+the Gaussian's z proxy (`_capped_pool`), the same ones every round.
+
 **Where each molecule starts.**  Localising every molecule from ten to twenty heights was most of a run's
 time.  Each starts instead where the model's own widths match its Gaussian's (`insitu.width_starts`: the
 two best matches and the height in focus) and, from the second round, where it was found last.
@@ -42,6 +45,7 @@ import torch
 from ..model import InSituGeometry
 from ..noise import ShiftedPoisson
 from .insitu import (
+    INSITU_CHUNK,
     InSituCalibration,
     learn_insitu,
     localise_from_heights,
@@ -68,6 +72,8 @@ class RoundSettings:
     focus_floor_nm: float = 5.0        # the focus prior is never tighter than this
     stop_sd: float = 1.0               # stop when the rms change is below this many standard errors
     heights_step_nm: float = 200.0
+    max_xy_offset_px: float = 3.0      # a localisation farther from its region's centre is not chosen
+    pool_per_bin: float | None = 3.0   # the units localised each round: at most this times *per bin* per z bin
 
 
 @dataclass
@@ -181,13 +187,15 @@ def localise_units(model, shared: dict, rois, ids, noise, heights=None, starts=N
         found, _ = localise_from_starts(model, shared, batch, noise, starts)
     else:
         found, _ = localise_from_heights(model, shared, batch, noise, heights)
-    fit, _ = localise(model, shared, replace(batch, start=found), noise)
+    fit, _ = localise(model, shared, replace(batch, start=found), noise, chunk_size=INSITU_CHUNK)
     phys = fit.params.physical()
     photons = phys["emitter.photons"] if "emitter.photons" in phys else phys["emitter.photons_per_slice"].mean(1)
+    xy = phys["emitter.xyz"][:, :2].detach().cpu().double().numpy() / np.asarray(model.pixel_size_nm)
     return {"start": found, "h": phys["emitter.xyz"][:, 2].detach().cpu().double().numpy(),
+            "xy_offset_px": np.hypot(xy[:, 0], xy[:, 1]),
             "sd_h": fit.std["emitter.xyz"][:, 2].cpu().double().numpy(),
             "photons": photons.detach().cpu().double().numpy(),
-            "deviance": score_beads(model, fit.params, batch, noise).deviance}
+            "deviance": score_beads(model, fit.params, batch, noise, INSITU_CHUNK).deviance}
 
 
 def _focus_per_height(history, measured: float) -> float:
@@ -212,7 +220,7 @@ def _measured_ratio(model, shared: dict, rois, ids, start: dict, noise, paraxial
     h = []
     for f in (0.0, delta_nm):
         q = dict(shared, **{"geometry.focus": shared["geometry.focus"] + f})
-        fit, _ = localise(model, q, batch, noise)
+        fit, _ = localise(model, q, batch, noise, chunk_size=INSITU_CHUNK)
         h.append(fit.params.physical()["emitter.xyz"][:, 2].detach().cpu().double().numpy())
     moved = float(np.median(h[1] - h[0]))
     return float(np.clip(delta_nm / moved, 0.5 * paraxial, 4 * paraxial)) if moved > 1 else paraxial
@@ -267,7 +275,7 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
     run.rounds.append(Round(1, ids, cal, list(rois.state)))
     if _stopped(cal):
         return run
-    pool = np.flatnonzero(np.array([r is None for r in rois.units.reason]))
+    pool = _capped_pool(rois, sel, s.pool_per_bin)
     current = model
     history = []                       # (focus, edge shift) of every round that found the edge
     last_height: dict = {}             # each unit's height where it was last found, a start for the next round
@@ -300,7 +308,14 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         U = len(rois.units.reason)
         h, N, dev = (np.full(U, np.nan) for _ in range(3))
         h[pool], N[pool], dev[pool] = loc["h"] - shift, loc["photons"], loc["deviance"]
-        state, _, _ = select(rois.units, sel, proxy=h, photons=N, shape=dev, one_sided=True)
+        # A localisation that ended off its region's centre went to a neighbour or into the background; it can
+        # still fit well, so the deviance does not catch it.  In a dense movie (Zenodo tubulin) such units were
+        # most of round 2's choice, and learning then rejected or lost them.
+        rejected = [None] * U
+        for k, u in enumerate(pool):
+            if not loc["xy_offset_px"][k] <= s.max_xy_offset_px:
+                rejected[u] = "off centre"
+        state, _, _ = select(rois.units, sel, proxy=h, photons=N, shape=dev, rejected=rejected, one_sided=True)
         used = np.flatnonzero(np.array([st == "used" for st in state]))
         where = {int(u): k for k, u in enumerate(pool)}
         rows = torch.tensor([where[int(u)] for u in used])
@@ -329,6 +344,29 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
                         starts=width_starts(current, twin(current, learnt), _widths(rois, last.used), roi))
     run.model = current
     return run
+
+
+def _capped_pool(rois, sel, per_bin_factor: float) -> np.ndarray:
+    """The units each round localises: every one detection kept, but at most ``per_bin_factor`` times *per
+    bin* from each bin of the Gaussian's z proxy, drawn at random once, so the rounds see the same ones.
+    Localising the whole pool was 80 % of a run (Zenodo tubulin: ~5000 units, 280–350 s a round), when a
+    round draws only *per bin* from each bin; a few times that leaves the draw its choice and the
+    coverslip edge enough heights."""
+    from smappy.calibrate.insitu import z_proxy
+    pool = np.flatnonzero(np.array([r is None for r in rois.units.reason]))
+    if per_bin_factor is None or not len(pool):
+        return pool
+    cap = max(1, int(round(per_bin_factor * sel.per_bin)))
+    proxy = z_proxy(rois.units.gauss, sel.proxy)[pool]
+    finite = np.isfinite(proxy)
+    lo, hi = np.quantile(proxy[finite], [0.01, 0.99]) if finite.any() else (0.0, 1.0)
+    bins = np.clip(np.digitize(proxy, np.linspace(lo, hi, sel.bins + 1)) - 1, 0, sel.bins - 1)
+    rng = np.random.default_rng(sel.seed + 1)
+    keep = []
+    for b in range(sel.bins):
+        members = pool[(bins == b) & finite]
+        keep.append(rng.permutation(members)[:cap])
+    return np.sort(np.concatenate(keep)) if keep else pool
 
 
 def _widths(rois, ids) -> np.ndarray:

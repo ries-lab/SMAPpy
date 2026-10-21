@@ -1532,3 +1532,45 @@ over twenty-odd modes.
 the focus from 450 nm: 690 ± 29, 704, 700, 705 (± 5) over four rounds, phase within 2.6σ, twin +663 nats,
 558 s; none on the coverslip: 668 ± 34, then 678 ± 9, stopped, twin +568, 193 s.  The focus from the data
 before learning, from a guess of 1000 nm: 735 nm with molecules on the coverslip, 628 without.
+
+## M5 on real data: Zenodo `1ch_smlm_tubulin` against v1 (October 2026)
+
+v1's demo settings (`DM_Li`: NA 1.35 silicone, immersion and sample 1.406, coverslip 1.524, 670 nm, 108 nm
+pixels; gain 0.7471, offset 100; start 1 rad of Noll 6; the magnitude fixed), 4000 of the 10 000 frames
+(v1: 5000), regions of 19 pixels, Zernike order 6, three rounds, no coverslip edge (tubulin 1.5 µm deep).
+The movie is dense: 276 000 detections in 4000 frames, 66 000 of the frames rejected as overlaps.
+
+| | Noll 5 | 6 | 7 | 11 | 16 | 17 | rms over v1's 18 modes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v1 (1570 molecules, 39 min on the CPU) | 0.122 | 0.852 | −0.039 | −0.076 | −0.097 | −0.061 | |
+| v2, magnitude fixed (383 frames, 4 min) | 0.105 | 0.901 | −0.008 | −0.071 | −0.076 | −0.037 | 0.018 rad |
+| v2, magnitude free (689 frames, 13 min) | 0.100 | 0.866 | 0.011 | −0.054 | −0.080 | −0.034 | 0.023 rad |
+
+Every mode within 0.05 rad of v1's.  The twin test is *undecided* (+0.5 and −5.6 nats), as it must be with
+matched indices: the start's sign stands.  One difference: v2's blur σ is 75–83 nm, v1's ~38 nm.
+
+**Two bugs the real data found, fixed:**
+- *off-centre localisations chosen*: in a dense movie many pool units localise onto a neighbour or into the
+  background and still fit well; round 2 chose them (113 of 140 then rejected, and in the full run the
+  learning diverged, heights to 86 µm).  The rounds now reject a localisation more than 3 px off its
+  region's centre before choosing (`RoundSettings.max_xy_offset_px`);
+- *masks as saturation*: learning used the beads' rule, more than 1 % masked pixels is out, which rejected
+  every unit with a neighbour's pixels masked; in situ no longer counts masks (they are capped at selection).
+
+**Memory.**  Round 2 localised the pool (~5000 units) in one chunk: 6–9 MB per unit on Apple's GPU, 38 GB,
+twenty minutes of swapping.  In situ now computes at most 256 units at a time (`insitu.INSITU_CHUNK`, ~2 GB).
+
+**Where the time goes** (Apple M-series GPU, this movie):
+
+| step | magnitude free, whole pool | magnitude fixed, pool capped |
+| --- | --- | --- |
+| detection, 4000 frames | 83 s | 83 s |
+| round 1: localising, learning | 21 s, 12 s | 20 s, 13 s |
+| rounds 2 and 3: localising the pool | 285 s, 354 s | 43 s, 52 s |
+| rounds 2 and 3: learning | 17 s, 12 s | 12 s, 8 s |
+| twin test | 14 s | 12 s |
+| total | 13.3 min | 4.0 min |
+
+Detection was 300 s before: the disc sums only at the candidates, the background's median every 7 frames,
+the greedy merging in arrays (`smappy/calibrate/insitu.py`) took a 200-frame block from 14.5 to 3.9 s.  The
+pool is capped at 3 × *per bin* per z bin (`insitu_rounds._capped_pool`), the same units every round.

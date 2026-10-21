@@ -60,7 +60,7 @@ def shared_values(params: Params) -> dict:
     return {n: v for n, v in params.physical().items() if params.specs[n].scope == "shared"}
 
 
-def localise(model, shared: dict, batch, noise, start: dict | None = None, solver=None):
+def localise(model, shared: dict, batch, noise, start: dict | None = None, solver=None, chunk_size=None):
     """Every bead's stack fit on a fixed pupil: (`FitResult`, `Problem`).
 
     `BlockLM` by default: with the pupil fixed every bead is its own problem, and one shared damping let
@@ -72,7 +72,7 @@ def localise(model, shared: dict, batch, noise, start: dict | None = None, solve
     specs = model.specs(batch)
     p = Params(specs, batch.n_emitters, dtype=batch.data.dtype, device=batch.data.device, values=values)
     p = p.fix(*[s.name for s in specs if s.scope == "shared"])
-    problem = Problem(model, noise, batch)
+    problem = Problem(model, noise, batch, chunk_size)
     return (solver or BlockLM()).solve(problem, p), problem
 
 
@@ -120,10 +120,10 @@ def slice_fits(model, shared: dict, batch, noise, stack_fit: Params, photons: bo
     return found, crlb, xyz.cpu().double().numpy()
 
 
-def score_beads(model, params: Params, batch, noise) -> BeadScores:
+def score_beads(model, params: Params, batch, noise, chunk_size=None) -> BeadScores:
     """Every bead of ``batch`` scored from its fit ``params`` (module docstring)."""
     batch = on_model_device(batch, model)
-    D = Problem(model, noise, batch).deviance(params)
+    D = Problem(model, noise, batch, chunk_size).deviance(params)
     # D is on the CPU (`Problem.deviance`); so is everything below: copy, then cast (MPS has no float64).
     mask = torch.ones_like(D, dtype=torch.bool) if batch.mask is None else batch.mask.cpu().expand_as(D)
     deviance = ((D * mask).flatten(1).sum(1) / mask.flatten(1).sum(1).clamp(min=1)).double().numpy()

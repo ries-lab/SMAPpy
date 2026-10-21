@@ -257,6 +257,6 @@ def test_starting_every_emitter_at_the_same_heights_is_localising_from_those_hei
 
 def test_the_compiled_kernels_shapes_are_powers_of_two():
     from uipsf.model.psf import _bucket, _pad_dim0
-    assert [_bucket(n) for n in (1, 3, 4, 5, 300)] == [1, 4, 4, 8, 512]
+    assert [_bucket(n) for n in (1, 3, 4, 5, 300, 513, 1284)] == [1, 4, 4, 8, 512, 1024, 1536]
     padded = _pad_dim0(torch.ones(3, 2), 4)
     assert padded.shape == (4, 2) and float(padded[3].abs().sum()) == 0.0

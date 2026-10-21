@@ -82,7 +82,9 @@ when a milestone lands or an item moves.
    and the coverslip edge (`workflows/insitu_rounds.py`): a focus started 250 nm off back within a few nm
    with molecules on the coverslip, ~25 nm without.  **Step 6 done:** *in situ (blinking molecules)*, the PSF
    calibration window's third method (movies, the section *in situ*, the focus typed or from the data, its
-   pages, the spline above focus or above the coverslip).  Next Zenodo `1ch_smlm_tubulin` against v1.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   pages, the spline above focus or above the coverslip).  **Zenodo `1ch_smlm_tubulin` against v1:** every
+   mode within 0.05 rad, 0.018 rad rms, in 4 min on Apple's GPU (v1: 39 min on the CPU); the blur σ twice
+   v1's, open (architecture.md, "M5 on real data").  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.

@@ -226,8 +226,8 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         shape = {s.name: s.shape for s in model.specs(sub) if s.scope == "shared"}
         shared = {n: torch.as_tensor(v, dtype=dtype, device=device) for n, v in start.items()
                   if n in shape and tuple(torch.as_tensor(v).shape) == tuple(shape[n])}
-        loc, _ = localise(model, shared, sub, noise)
-        scores = merged(E, [(pool, score_beads(model, loc.params, sub, noise))])
+        loc, _ = localise(model, shared, sub, noise, chunk_size=chunk_size)
+        scores = merged(E, [(pool, score_beads(model, loc.params, sub, noise, chunk_size))])
         fitted, fit = pool, loc.params
     else:
         held = held_out(batch.field_xy, E, heldout)
@@ -246,7 +246,7 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
                                  cancel=cancel)
             full = first.params
         shared = shared_values(full)
-        scores = merged(E, [(pool, score_beads(model, full, sub, noise))])
+        scores = merged(E, [(pool, score_beads(model, full, sub, noise, chunk_size))])
         fitted, fit = pool, full
     table = decide(scores, rejection, held, decisions,
                    stack=None if batch.stack_id is None else batch.stack_id.tolist(),
@@ -260,11 +260,11 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
                           cancel=cancel)
     result.history = ([] if first is None else [dict(h, stage=1) for h in first.history]) + \
         [dict(h, stage=2) for h in result.history]
-    final = score_beads(model, result.params, sub, noise)
+    final = score_beads(model, result.params, sub, noise, chunk_size)
     for j, b in enumerate(used):
         table.rows[b].final = {n: float(getattr(final, n)[j]) for n in ("deviance", "photons")}
     from ..diagnostics import heldout_report, residual_atlas  # diagnostics build on workflows.scoring
-    atlas = residual_atlas(model, result.params, sub, noise)
+    atlas = residual_atlas(model, result.params, sub, noise, chunk_size=chunk_size)
     report = None
     if table.ids("held out"):
         ids = table.ids("held out")

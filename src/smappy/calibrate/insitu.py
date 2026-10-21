@@ -104,10 +104,22 @@ class InSituSettings:
 
 # ------------------------------------------------------------------ 1, 2: background and detection
 
-def temporal_background(frames: np.ndarray, window: int) -> np.ndarray:
-    """[T, Y, X]: each pixel's median over ``window`` frames about each frame (nearest at the ends)."""
-    from scipy.ndimage import median_filter
-    return median_filter(np.asarray(frames, np.float32), size=(int(window), 1, 1), mode="nearest")
+#: the background's median is taken every this many frames, each frame taking the nearest
+BACKGROUND_STEP = 7
+
+
+def temporal_background(frames: np.ndarray, window: int, step: int = BACKGROUND_STEP) -> np.ndarray:
+    """[T, Y, X]: each pixel's median over ``window`` frames, taken every ``step`` frames (the windows
+    clipped at the block's ends), each frame given the nearest.  A sliding median of every frame cost 4.6 s
+    for 200 frames of 336 × 248 pixels, a third of finding the molecules, for a background that changes
+    over tens of frames, not one."""
+    frames = np.asarray(frames, np.float32)
+    T = len(frames)
+    half = int(window) // 2
+    centres = np.arange(0, T, max(1, int(step)))
+    medians = np.stack([np.median(frames[max(0, c - half):min(T, c + half + 1)], axis=0) for c in centres])
+    nearest = np.clip(np.rint(np.arange(T) / max(1, int(step))).astype(int), 0, len(centres) - 1)
+    return medians[nearest]
 
 
 def _disc(radius: float) -> np.ndarray:
@@ -131,19 +143,30 @@ class Candidates:
         return Candidates(*(getattr(self, f)[index] for f in self.__dataclass_fields__))
 
 
+def _disc_sums(image: np.ndarray, f, y, x, radius: float) -> np.ndarray:
+    """The sum of ``image`` [T, Y, X] over a disc of ``radius`` about each (f, y, x), the edges repeated:
+    only where it is needed.  Convolving the whole block with the disc, twice per width, was 5.8 s of
+    14.5 for a block of the Zenodo tubulin movie."""
+    _, Y, X = image.shape
+    r = int(np.ceil(radius))
+    dy, dx = np.nonzero(_disc(radius))
+    dy, dx = dy - r, dx - r
+    yy = np.clip(np.asarray(y)[:, None] + dy, 0, Y - 1)
+    xx = np.clip(np.asarray(x)[:, None] + dx, 0, X - 1)
+    return image[np.asarray(f)[:, None], yy, xx].sum(1)
+
+
 def detect(frames: np.ndarray, background: np.ndarray, settings: InSituSettings,
            read_noise_var: float = 0.0) -> Candidates:
     """Every spot significant above the background at one of the widths (module docstring, 2)."""
-    from scipy.ndimage import convolve
-
     from ..detect import DoGFilter, local_maxima
     signal = np.asarray(frames, np.float32) - background
     found = []
     for s in settings.scales_px:
         f, y, x, _ = local_maxima(DoGFilter(float(s))(signal), threshold=0.0)
-        disc = _disc(max(1.5, 2.0 * s))[None]
-        S = convolve(signal, disc, mode="nearest")[f, y, x]
-        B = convolve(background, disc, mode="nearest")[f, y, x] + disc.sum() * read_noise_var
+        radius = max(1.5, 2.0 * s)
+        S = _disc_sums(signal, f, y, x, radius)
+        B = _disc_sums(background, f, y, x, radius) + _disc(radius).sum() * read_noise_var
         z = S / np.sqrt(np.maximum(B, 1e-6))
         keep = z >= settings.significance
         found.append((f[keep], x[keep], y[keep], np.full(keep.sum(), float(s)), z[keep]))
@@ -153,17 +176,30 @@ def detect(frames: np.ndarray, background: np.ndarray, settings: InSituSettings,
 
 def _strongest(c: Candidates) -> Candidates:
     """Of candidates of several widths at one place the most significant: within 1.5·max(σ) + 1 pixels."""
-    keep = np.zeros(len(c), bool)
-    order = np.lexsort((-c.significance, c.frame))
-    starts = np.flatnonzero(np.r_[True, np.diff(c.frame[order]) != 0])
+    keep = _greedy(c.frame, c.x.astype(float), c.y.astype(float), c.significance,
+                   lambda i, j: 1.5 * np.maximum(c.scale[i], c.scale[j]) + 1)
+    return c.take(keep)
+
+
+def _greedy(frame, x, y, score, distance) -> np.ndarray:
+    """Indices kept: per frame, highest ``score`` first, each dropping the others closer than
+    ``distance(i, others)`` -- with arrays per kept candidate, not a loop over pairs, which cost 1.9 s a
+    block of the tubulin movie."""
+    keep = []
+    order = np.lexsort((-np.asarray(score), frame))
+    starts = np.flatnonzero(np.r_[True, np.diff(np.asarray(frame)[order]) != 0])
     for a, b in zip(starts, np.r_[starts[1:], len(order)], strict=True):
-        idx = order[a:b]                                   # this frame's, most significant first
-        taken = []
-        for i in idx:
-            if all(np.hypot(c.x[i] - c.x[j], c.y[i] - c.y[j]) >= 1.5 * max(c.scale[i], c.scale[j]) + 1 for j in taken):
-                taken.append(i)
-        keep[taken] = True
-    return c.take(np.flatnonzero(keep))
+        idx = order[a:b]                                   # this frame's, best first
+        alive = np.ones(len(idx), bool)
+        for k in range(len(idx)):
+            if not alive[k]:
+                continue
+            i = idx[k]
+            keep.append(i)
+            rest = idx[k + 1:]
+            near = np.hypot(x[rest] - x[i], y[rest] - y[i]) < distance(i, rest)
+            alive[k + 1:] &= ~near
+    return np.sort(np.asarray(keep, int))
 
 
 # ------------------------------------------------------------------ 3: the first fit
@@ -222,16 +258,7 @@ def measure(frames: np.ndarray, cands: Candidates, settings: InSituSettings) -> 
 
 def _one_per_molecule(frame, x, y, significance, merge_px) -> np.ndarray:
     """Indices kept: per frame, most significant first, none within ``merge_px`` of one kept."""
-    keep = []
-    order = np.lexsort((-significance, frame))
-    starts = np.flatnonzero(np.r_[True, np.diff(frame[order]) != 0])
-    for a, b in zip(starts, np.r_[starts[1:], len(order)], strict=True):
-        taken = []
-        for i in order[a:b]:
-            if all(np.hypot(x[i] - x[j], y[i] - y[j]) >= merge_px for j in taken):
-                taken.append(i)
-        keep += taken
-    return np.sort(np.asarray(keep, int))
+    return _greedy(frame, x, y, significance, lambda i, rest: merge_px)
 
 
 # ------------------------------------------------------------------ 4, 5: blinks and overlaps
