@@ -1,3 +1,4 @@
+import dataclasses
 import os
 import sys
 
@@ -7,7 +8,7 @@ import torch
 import uipsf
 from uipsf.model import Bleaching, ForwardModel
 from uipsf.noise import Poisson
-from uipsf.params import Gaussian, Params, ParamSpec
+from uipsf.params import Gaussian, Params, ParamSpec, Softplus
 from uipsf.simulate import parameters, simulate, template
 from uipsf.solve import BlockLM, GaussNewtonCG, GaussNewtonLBFGS, LevenbergMarquardt, Problem, schur_solve
 from uipsf_tests.conftest import small_beads
@@ -121,6 +122,22 @@ def test_value_and_grad_equals_the_normal_equations_gradient_for_any_chunking(op
         assert torch.allclose(g_e, ne.g_e, rtol=1e-9, atol=1e-9)
 
 
+def test_value_and_grad_is_the_gradient_where_the_pupil_magnitude_dips_below_zero(optics):
+    # torch.polar's backward flips the gradient's sign where its magnitude is negative (torch 2.14), and
+    # 1 + Σ c_j Z_j is, at the rim, once the coefficients reach -0.1 to -0.2: L-BFGS's steps then failed
+    # and its damping ratcheted up until the step test stopped it, 1400 nats above the optimum (roadmap 4).
+    model, truth, batch = small_beads(optics, n=3)
+    values = truth.physical()
+    values["pupil.magnitude"] = torch.linspace(-0.25, 0.05, len(values["pupil.magnitude"]), dtype=f64)
+    magnitude, _ = model.psf.pupil(values)
+    assert (magnitude[model.psf.weight > 0] < 0).any()
+    p = Params(model.specs(batch), n_emitters=3, dtype=f64, values=values)
+    ne = Problem(model, Poisson(), batch).normal_equations(p)
+    _, g_s, g_e = Problem(model, Poisson(), batch).value_and_grad(p)
+    assert torch.allclose(g_s, ne.g_s, rtol=1e-9, atol=1e-6)
+    assert torch.allclose(g_e, ne.g_e, rtol=1e-9, atol=1e-6)
+
+
 @pytest.mark.parametrize("bead_radius_nm", [0.0, 50.0])
 def test_the_pupil_linearisation_gives_the_jvps_normal_equations(optics, bead_radius_nm):
     model, truth, batch = small_beads(optics, n=3)
@@ -197,6 +214,34 @@ def test_the_cheaper_solvers_reach_lms_optimum_whatever_the_units(optics, solver
                                                    "emitter.photons": 1e3}))
     for h0, h1 in zip(res.history, scaled.history, strict=True):
         assert abs(h0["objective"] - h1["objective"]) < 1e-8 * abs(h0["objective"])
+
+
+class WithLevel(Linear):
+    """`Linear` plus a positive level per emitter (a background), through softplus."""
+
+    def specs(self, batch, start=None):
+        return super().specs(batch) + [ParamSpec("emitter.level", (), "emitter", init=1e-3, transform=Softplus())]
+
+    def __call__(self, p, batch):
+        return super().__call__(p, batch) + p["emitter.level"][:, None, None, None, None]
+
+
+def test_a_step_into_softplus_flat_tail_holds_back_that_parameter_only():
+    # Roadmap item 4: three Zenodo 2ch backgrounds started at 10⁻³ and every step drove them further into
+    # softplus' tail; shortening the whole step until it did not held every parameter of the fit to
+    # α ≈ 2·10⁻⁴, and the step test then stopped stage 1, 22 M nats up.  Here the data ask for levels below
+    # zero: their steps are shortened, and the rest of the problem moves at the full step.
+    lin, noise, batch, _ = _linear()
+    model = WithLevel(lin.Xs, lin.Xe)
+    batch = dataclasses.replace(batch, data=batch.data - 1.0)
+    params = Params(model.specs(batch), n_emitters=4, dtype=f64)
+    first = GaussNewtonLBFGS(max_iter=1).solve(Problem(model, noise, batch), params)
+    best = LevenbergMarquardt(damping=0.0).solve(Problem(lin, noise, batch),
+                                                 Params(lin.specs(batch), n_emitters=4, dtype=f64))
+    F0, F1 = first.history[0]["objective"], first.history[1]["objective"]
+    assert first.history[1]["alpha"] == 1.0
+    assert F0 - F1 > 0.2 * (F0 - best.objective)
+    assert (first.params.physical()["emitter.level"] > 0).all()
 
 
 def test_chunk_size_changes_neither_the_sums_nor_the_fit(optics):

@@ -52,9 +52,13 @@ when a milestone lands or an item moves.
    iXon filed under M2; M5's pixel settled.  Needs the lab's metadata (`docs/uipsf/microscopes.md`).
 3. **Retire *Bead calibration*:** remove the old window and plugin, move the default GUI and the tutorial
    storyboard to *PSF calibration* (M6).
-4. **Fix: 2ch stalls** with the window's default indices (1.518 / 1.33) and converges with v1's 1.516 / 1.35.
-   Stage 1 stops after 4 iterations, 22 M nats up; a transform started from the beads' Gaussian positions
-   avoids it in these runs (plan §10, 5), the stall itself remains.
+4. **Done: the 2ch stall** (architecture.md, "Why Zenodo 2ch stalled").  Not the indices: the start put
+   50 of 88 dim channel-0 backgrounds at softplus' 10⁻³ floor, the saturation guard then shortened every
+   parameter's step for three of them (α = 2·10⁻⁴) until the step test stopped stage 1, and `torch.polar`'s
+   backward gave a wrong gradient wherever the pupil magnitude is negative.  Fixed in the start (a floor
+   of one photon), the guard (only the saturating components are shortened) and the pupil; every start
+   now reaches 2.98239 M, 52 000 nats below the old "best", cold in 66 s.  n_med 1.33 fits 31 000 nats
+   better than 1.35.
 5. **Drift per stack and file** in the bead model (plan §10, 7): a block per file.
 6. **Explain the blur σ** (report: 40–83 nm on M2, 0–32 on M5, cause open): where a blur-free model misses
    (core, wings, rings); a one-sided transfer trail on EMCCDs; at M2, beads at several clock settings.

@@ -1,7 +1,10 @@
+import dataclasses
+
 import torch
 
 import uipsf
 from uipsf.model import BeadStackGeometry, Bleaching, Constant, PerObservation, PerSliceFactor, Planar, rough_start
+from uipsf.model.start import BACKGROUND_FLOOR
 from uipsf.simulate import parameters, template
 from uipsf_tests.conftest import small_beads
 
@@ -111,6 +114,18 @@ def test_the_rough_start_finds_the_bead_near_its_true_place(optics):
     # 20 000–40 000 photons over a background of 10: the spot's wings still reach the border.
     assert (start["background"] / tru["emitter.background"]).max() < 2.5
     assert (start["photons"] / tru["emitter.photons"]).min() > 0.5
+
+
+def test_the_rough_start_keeps_a_dim_background_off_the_softplus_floor(optics):
+    # Roadmap item 4: Zenodo 2ch's dim channel, offset-subtracted in steps of the camera gain, has border
+    # medians of 0 or below in some slice for most beads.  Started at 10⁻³, where softplus' slope is 10⁻³,
+    # such a background froze stage 1; at the floor of one photon it is a background like any other.
+    model, truth, batch = small_beads(optics, n=4)
+    g = torch.Generator().manual_seed(0)
+    dark = torch.poisson(torch.full_like(batch.data, 2.0), generator=g) - 4.0    # an offset 4 photons too high
+    data = torch.round(dark / 4.7) * 4.7                                          # in steps of the gain
+    start = rough_start(dataclasses.replace(batch, data=data), model.pixel_size_nm)
+    assert (start["background"] == BACKGROUND_FLOOR).all()
 
 
 def test_a_simulation_is_the_model_plus_poisson_noise(optics):

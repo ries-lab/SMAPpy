@@ -84,7 +84,10 @@ class VectorPSF:
         """The complex pupil without the fields, magnitude rescaled to the reference energy; [..., P, P]."""
         magnitude, phase = self.pupil(p)
         scale = torch.sqrt(self.energy / (self.weight * magnitude ** 2).sum((-2, -1), keepdim=True))
-        return torch.polar(magnitude * scale, phase)
+        # Not torch.polar(magnitude, phase): the magnitude 1 + Σ c_j Z_j dips below zero at the rim once its
+        # coefficients grow, and polar's backward (torch 2.14) flips the gradient's sign there while its
+        # forward mode does not, so value_and_grad disagreed with the Jacobian and L-BFGS's steps failed.
+        return torch.polar(torch.ones_like(phase), phase) * (magnitude * scale)
 
     def intensity(self, p, xyz: torch.Tensor, depth_nm: torch.Tensor | None = None) -> torch.Tensor:
         """[E, K, uY, uX]: the sampled intensity before blur and pixel integration."""

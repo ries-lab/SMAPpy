@@ -1283,7 +1283,9 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
      (`calibrate.gaussian_transforms`, the pairing's kept when the beads do not fix it);
    - an angle for SMAPpy's elliptical Gaussian is not needed: the astigmatism of the lab's and Zenodo's
      data is Noll 6 to within 0.02 rad;
-   - the stage-1 stall on Zenodo 2ch is the solver's or the model's (n_med, roadmap 4), not the start's.
+   - the stage-1 stall on Zenodo 2ch was not the transform's: the start's backgrounds at softplus' floor,
+     a saturation guard that shortened every step for them and a wrong gradient from `torch.polar`
+     (roadmap 4, fixed); after the fix every start reaches one optimum, 52 000 nats below the one above.
 
 6. **Rejection by a fit?**  Since M7 bead rejection uses the learning fit's residuals only (deviance,
    photons, xy offset, saturation); the z bias (each slice localised alone, v1's ``msez``) is gone: on
@@ -1461,7 +1463,8 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
    | FD, whole field (30 brightest) | | 28 | (77, 105) | 0.102 (0.89) | 5.70 |
 
    - 2ch used v1's indices (1.516 / 1.35): with 1.518 / 1.33, the window's defaults, its fit stalls at
-     the start (deviance 20.8; a separate session is proposed).
+     the start (deviance 20.8).  Not the indices' doing: roadmap 4, fixed (architecture.md, "Why Zenodo
+     2ch stalled"), after which 1.33 fits better than 1.35.
    - FD: one stack of two, ±600 nm (slices 41–160, every 5th), since its 128-sample pupil at ±1 µm needed
      more than 9 GB.  The FD beads are fitted as points (v1's bead radius 0; their size is not recorded).
 

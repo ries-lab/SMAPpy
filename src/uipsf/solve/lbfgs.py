@@ -30,6 +30,8 @@ import dataclasses
 import math
 import time
 
+import torch
+
 from .lm import _cancelled, _clamped, _diagonals, _floor, _gain, _largest, schur_solve
 from .result import FitResult, covariance
 
@@ -105,8 +107,16 @@ class GaussNewtonLBFGS:
                 for _ in range(self.max_backtracks + 1):
                     trial_params = _moved(params, d * alpha)
                     if _saturates(params, trial_params):
-                        alpha *= 0.25
-                        continue
+                        # Shorten the step of the parameters that would saturate only, and move the rest at
+                        # the full length.  Shortening the whole step instead held every parameter to the
+                        # worst one: Zenodo 2ch backgrounds started at softplus' floor held stage 1 to
+                        # α ≈ 2·10⁻⁴ and the step test then stopped it, 22 M nats up (roadmap item 4).
+                        held = _held_back(params, d * alpha)
+                        if not g.dot(held) < 0:
+                            alpha *= 0.25
+                            continue
+                        d, slope, alpha = held, g.dot(held), 1.0
+                        trial_params = _moved(params, d)
                     F_new, gs_new, ge_new = problem.value_and_grad(trial_params)
                     evals += 1
                     if math.isfinite(F_new) and F_new <= F + 1e-4 * alpha * slope:
@@ -184,11 +194,30 @@ def _saturates(params, trial, factor: float = 100.0) -> bool:
     shrink a derivative by at most ``factor``, so a value can still approach
     its bound, over several steps.
     """
+    return _saturating(params, trial, factor) is not None
+
+
+def _saturating(params, trial, factor: float = 100.0):
+    """The masks (shared [P_s], emitter [E, P_e]) of the parameters `_saturates` objects to, or None."""
+    masks = []
     for scope in ("shared", "emitter"):
         before, after = params.derivative(scope).abs(), trial.derivative(scope).abs()
-        if before.numel() and bool((after * factor < before).any()):
-            return True
-    return False
+        masks.append(after * factor < before)
+    return None if not any(bool(m.any()) for m in masks) else tuple(masks)
+
+
+def _held_back(params, d: _Vec, tries: int = 8) -> _Vec:
+    """``d`` with each component that would saturate quartered until it does not (zero after ``tries``).
+
+    Every transform acts elementwise, so shortening one parameter's step changes no other's derivative:
+    the rest keep their full step."""
+    for i in range(tries + 1):
+        flat = _saturating(params, _moved(params, d))
+        if flat is None:
+            break
+        f = 0.0 if i == tries else 0.25
+        d = _Vec(torch.where(flat[0].to(d.s.device), d.s * f, d.s), torch.where(flat[1].to(d.e.device), d.e * f, d.e))
+    return d
 
 
 def _two_loop(g: _Vec, pairs, H0_solve) -> _Vec:

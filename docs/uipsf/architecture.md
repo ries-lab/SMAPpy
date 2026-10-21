@@ -1193,12 +1193,14 @@ transform saves no time.  The Gaussians' positions (each bead's mean over the sl
 each channel, a projective fit: `gaussian_start`'s ``transform``) start 0.11–0.25 px off, 2–3 × closer than
 the centroids, and every fit from them reached the optimum.
 
-Zenodo 2ch (71 pairs, n_med 1.33): the cold fit ends 22–26 M nats above the best, stage 1 stopping after 4
-iterations (the stall of roadmap item 4).  From the transform the cold fit itself ends with, or from the
+Zenodo 2ch (71 pairs, n_med 1.33), before the fixes of "Why Zenodo 2ch stalled" below, which every start
+now reaches the same optimum after (2.98239 M, below this paragraph's best): the cold fit ends 22–26 M nats
+above the best, stage 1 stopping after 4 iterations (the stall of roadmap item 4).  From the transform the cold fit itself ends with, or from the
 Gaussians', it reaches the best (to 70–110 nats over three runs, in 52–80 s); the astigmatism into stage 1
 as well stalled again (+13 M), the angled Gaussian's start ended +1 000.  Which basin the stalling stage 1
 falls into depends on small differences of path (the same start gave +0 and +113 nats in two runs):
-the start shifts the odds, the stall itself is the solver's or the model's to fix.
+the start shifts the odds, the stall itself is the solver's or the model's to fix -- it was both the start's
+backgrounds and the solver's (below).
 
 **The estimator** (`model/astig.py`).  Per slice the spot's covariance; through focus D = C_xx − C_yy and
 2C_xy are linear in the defocus (σ²_u − σ²_v = 4σ₀²c·z/d² in the astigmatic width model), so each bead's z
@@ -1221,3 +1223,57 @@ smallest spot it failed with 0.4 rad of spherical, where a fit far from focus co
 **Decided from it and built** (plan §10, 5): `calibrate_beads` takes a previous model into stage 1 and
 starts a pair's transform from the Gaussians' positions (above, "The calibration's entry point"); the
 Gaussian astigmatism and z are not used as a start.
+
+## Why Zenodo 2ch stalled (October 2026, roadmap item 4)
+
+The cold fit of `2ch_40nm_bead` (71 pairs, n_med 1.33) stopped stage 1 after 4 iterations, 70.06 M nats
+from a start of 70.13 M, and ended 22–26 M above the best.  Three things combined, each found in stage 1's
+history (objective, α, evaluations, damping, step per iteration) and fixed:
+
+1. **The start put backgrounds at softplus' floor** (`model/start.py`).  Channel 0 is dim: its border
+   median is around 11 photons and moves in steps of the camera's gain, 4.7 photons.  Its minimum over 40
+   slices, the start's background, was 0 or below for 50 of 88 beads and was clamped to 10⁻³, where the
+   softplus's d(value)/du is 10⁻³.  The start now floors it at one photon (slope 0.63), `BACKGROUND_FLOOR`.
+2. **The saturation guard shortened every parameter's step for one** (`solve/lbfgs.py`).  The first
+   Gauss–Newton step drove three of those backgrounds further down; `_saturates` refused any step that
+   shrinks a derivative more than 100-fold, and the line search quartered α for the whole step until it
+   did not: 6 quarterings without an evaluation, α = 2·10⁻⁴ for all 71 beads and the pupil, the next
+   iteration 9 quarterings and no step at all.  Then a step at α ≈ 4·10⁻⁶ moved no parameter by 0.1 of
+   its standard error and stage 1's step test (`STAGE1_XTOL`) stopped it as converged.  Now only the
+   components that would saturate are quartered (`_held_back`, zero after 8 tries); the rest keep the
+   full step.
+3. **The gradient was wrong where the pupil magnitude is negative** (`model/psf.py`).  1 + Σ c_j Z_j dips
+   below zero at the rim once magnitude coefficients reach −0.1 to −0.2, and `torch.polar`'s backward
+   (torch 2.14) flips the gradient's sign there while its forward mode (the Jacobian) and finite differences
+   do not.  `value_and_grad` then disagreed with `normal_equations` by up to 3 000 nats per unit in every
+   magnitude coefficient: each L-BFGS step after a rebuild failed its line search and the damping
+   ratcheted ×10 per refresh, until a small simulated fit stopped 1 400 nats above the optimum, "converged".
+   The pupil is now `polar(1, φ) · magnitude`.
+
+| code (cold start) | stage 1 | final objective | time |
+| --- | --- | --- | --- |
+| before | 4 iterations, *step* | 25 992 485 | 62 s |
+| the polar fix alone | 4, *step* | 25 762 666 | 53 s |
+| the floor alone | 22 | 2 982 389 | 62 s |
+| the polar fix and the guard, no floor | 35 | 2 982 389 | 135 s |
+| all three | 22 | 2 982 390 | 66 s |
+
+The floor removes the cause on this data, the guard keeps a parameter that reaches its bound mid-fit (the
+M7 backgrounds, 11 photons to 0) from holding back the rest, and the polar fix matters wherever the
+magnitude goes negative, Zenodo or not.  The step test is unchanged: with the guard fixed, a short step
+again means the line search found nothing better, and requiring a gain below `tol` as well cost stage 1
+17 more iterations here.
+
+**What it changes.**  Every start now reaches the same optimum, 2 982 389 ± 1 nats (`starts.jsonl`, run
+2026-10-21): cold in 66 s, the Gaussians' start (`gauss`) in 35 s, its positions in 37 s, its transform
+alone or the cold fit's final transform in 52–69 s.  The "best" of the start study above, 3.0346 M, was
+52 000 nats short: those fits started from the same floored backgrounds and kept many of them there.  So
+the transform start was never what prevented the stall; it changed the first steps' direction enough to
+miss the three saturating backgrounds.  n_med 1.35 (v1's) stalled in stage 1 the same way (70.08 M) and
+escaped in stage 2 by chance (3.065 M); with the fixes it ends at 3.013 M, 31 000 nats worse than 1.33:
+the data prefer water.
+
+Found on the way: the Zenodo 2ch folders `Pos0_..._Z_1` and `Pos1_..._Z_1` hold the `..._Z_2` file, the
+same bytes as the `_Z_2` folders', so 12 of the 88 beads are copies of others (stacks 0 and 1, 4 and 5;
+beads 3 and 9 have the same data).  Every number on 2ch above includes them; left as they are (decided
+2026-10-21), a later study may leave one copy out.
