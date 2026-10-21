@@ -1145,6 +1145,13 @@ many emitters within 100 nm; the joint fit's pupil is as precise either way (arc
 model's own PSF per spot (a spot cut from a frame is the fit's μ), a Gaussian illumination, molecules on
 the coverslip, a truth table (architecture.md, "M5, step 3").
 
+*Done, step 4 (October 2026):* detection and selection, `smappy/calibrate/insitu.py`, as decided, with two
+findings: detections whose Gaussians meet are one molecule (a defocused spot has several maxima), and a
+Gaussian wider than a third of its region is no detection.  **A linked blink is its frames summed** into
+one region (Poisson, (ΣN_k)·I + K·b), not K frames with photons per frame: every emitter then has K = 1
+and nothing is padded; step 2's per-frame model stays for when per-frame photons are wanted.  From a
+simulated movie to a pupil within ~2σ (architecture.md, "M5, step 4").
+
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
 z bias), so it is not a step before it: build with the defaults below, then on simulations with known

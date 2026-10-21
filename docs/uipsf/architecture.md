@@ -1370,3 +1370,40 @@ photons will be ~0.6 of them away from the coverslip.
 3 blinks each, P = 64, 4 CPU cores): 2000 molecules give 15 spots per frame (0.06 µm⁻²), 32 % of them
 with another within 1.5 µm, in 2.6 s; 6000 give 45 per frame (0.19 µm⁻²), 70 % with a neighbour, in
 5.8 s.
+
+## M5, step 4: detection and selection (October 2026, plan §9 M5; `smappy/calibrate/insitu.py`)
+
+A blinking movie in photons to the blinks `learn_insitu` learns from, in SMAPpy (detection and the
+fitters are SMAPpy's, src/uipsf/CLAUDE.md), torch-free; `InSituROIs.batch()` makes the `uipsf.Batch`.
+The steps as the plan decided them, with what the simulated movies changed:
+
+- **Background**: a sliding median over 21 frames per pixel.
+- **Detection**: DoG at σ 1.2, 2 and 3 px; a candidate is kept on its absolute significance (photons
+  above the background in a disc of radius 2σ against the background's Poisson noise, ≥ 6).  An in-focus
+  and a defocused molecule of the same photons are both found where the defocused one's DoG peak is
+  under 0.2 of the other's, below v1's relative threshold (`test_insitu_rois.py`).
+- **The first fit**, SMAPpy's elliptical Gaussian in a 15-pixel region.  *Found on the movies:* a
+  defocused, astigmatic spot has several local maxima, and a secondary one sums the molecule's own
+  photons, so it passes the significance test; half the detections were such, each rejecting its own
+  molecule as an overlap.  Detections whose Gaussians meet within 2 px are one molecule.  And a quarter
+  of what remained were Gaussians spread over the background (σ ~11 px against 2.7 for molecules), each
+  rejecting everything within 3σ: a fit wider than a third of the region is no detection.  With both,
+  96 % of the detections are molecules.
+- **Blinks**: SMAPpy's `group.connect`, no dark frame, the precision test with a floor of 0.5 px (the
+  Gaussian's CRLB, ~0.09 px, understates a fitted Gaussian's scatter on a PSF that is not one, ~0.2 px,
+  and split blinks).  A blink's frames are **summed** into one region about their mean position: Poisson
+  with mean (ΣN_k)·I + K·b, the read noise K times; K = 1 for every emitter, no padding.
+- **Overlaps** by 3σ of each spot, masks, photon steps (inner frames by more than 2×), as decided.
+- **Selection**: z proxy σx² − σy² (or σx² + σy²), 21 bins over its 1–99 % range, shape outliers out
+  (3 robust sds of σx², σy² in the bin), a random draw from the factor-3 brightness window below the
+  bin's 90th percentile, 10 % of the draw held out.  Every blink keeps its state and reason.
+
+**On a simulated movie** (128 × 128 px, 600 frames, 600 molecules 0–1400 nm deep, 10 % on the
+coverslip, focus 700 nm, Gaussian illumination of FWHM 160 px; astigmatism 0.7 rad with coma and
+spherical): 5725 detections, ~1400 blinks; ~510 rejected as overlaps, ~515 outside the brightness window,
+~86 for their shape; 230–280 used.  `learn_insitu` on them, started from astigmatism +0.4: every phase
+mode within ~2σ (σ 0.003–0.008 rad), the focus 717 ± 30 nm, the twin test +832 nats; 6 s for the
+selection, ~60 s for learning (4 cores).  The used blinks are molecules, 95 % within 3 px of one; spots
+600–700 nm from focus (σ 4–5 px) are placed 2–4 px off by the Gaussian, truncated by the region.  Their
+region is still about the molecule and the pupil fit places it; a larger region (17–21 px) would serve
+those spots better, to measure with real data.
