@@ -149,13 +149,15 @@ class InSituCalibration:
 def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=None,
                  rejection: RejectionSettings | None = None, first_order: int | None = 4, solver=None,
                  chunk_size: int | None = None, twin_test: bool = True, progress=None,
-                 cancel=None) -> InSituCalibration:
+                 cancel=None, located: dict | None = None) -> InSituCalibration:
     """Learn a pupil from emitters in the sample (module docstring).
 
     ``model`` has an `InSituGeometry`; ``batch`` holds each emitter's region, [E, 1, K, Y, X].  ``start``,
     physical shared values (a bead model of the microscope, `workflows.calibrate.start_values`, or
     Zernikes typed in), sets the pupil the emitters are first localised on and stage 1 starts from: it is
-    what gives the even aberrations their sign.  ``heights`` defaults to `start_heights`.
+    what gives the even aberrations their sign.  ``heights`` defaults to `start_heights`.  ``located``,
+    each emitter's start already localised on ``start`` (`localise_from_heights`'s), skips that step: the
+    rounds have it (`insitu_rounds`).
     """
     noise = noise if noise is not None else ShiftedPoisson()
     solver = solver if solver is not None else GaussNewtonLBFGS()
@@ -169,7 +171,10 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
             shared[n] = torch.as_tensor(v, dtype=dtype, device=device)
     if heights is None:
         heights = start_heights(model, float(shared["geometry.focus"]))
-    found, objectives = localise_from_heights(model, shared, batch, noise, heights)
+    if located is None:
+        found, objectives = localise_from_heights(model, shared, batch, noise, heights)
+    else:
+        found, objectives = located, torch.full((batch.n_emitters,), float("nan"), dtype=torch.float64)
     located = replace(batch, start=found)
     cal = learn_beads(model, located, noise, rejection=rejection, first_order=first_order, solver=solver,
                       chunk_size=chunk_size, progress=progress, cancel=cancel, start=shared, start_stage1=True)

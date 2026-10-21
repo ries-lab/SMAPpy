@@ -1407,3 +1407,61 @@ selection, ~60 s for learning (4 cores).  The used blinks are molecules, 95 % wi
 600–700 nm from focus (σ 4–5 px) are placed 2–4 px off by the Gaussian, truncated by the region.  Their
 region is still about the molecule and the pupil fit places it; a larger region (17–21 px) would serve
 those spots better, to measure with real data.
+
+**Frames, not summed blinks, are fitted** (decided October 2026, after the above): each selected frame
+is its own region about its own position (`InSituSettings.unit = "frame"`, v1's way); linking stays, so
+that overlaps and photon steps are judged on a blink's frames and a molecule's frames are used or held
+out together.  Summing (`unit = "blink"`) is the option, to be compared before it is the default.
+Learning on the summed blinks and on the frames gave the same pupil in step 2's benchmark, and the
+brightness window keeps a blink's bright central frames, drops its partial first and last.
+
+## M5, step 5: the rounds and the coverslip edge (October 2026, plan §9 M5; `workflows/insitu_rounds.py`)
+
+`calibrate_insitu(model, rois, start)`: round 1 learns from the Gaussian's selection; from round 2 every
+unit the detection kept is localised on the model, chosen again by the model's height (z bins), photons
+(brightness window) and deviance (shape, one-sided), and learnt again from the previous model with the
+emitters started where they were found.  It stops when the Zernikes and the focus moved by no more than
+their noise (rms of change / √(σ_new² + σ_old²) below 1: the largest of twenty changes is ~3 from noise
+alone, since each round learns from other molecules) and the edge sits at 0, or after 4 rounds.  The
+twin test runs once, at the end.
+
+**The coverslip edge** (`coverslip_edge`): the lowest 30 % of the localised heights, fitted by maximum
+likelihood as a flat density above an edge s, optionally a spike on it (kept if it gains > 6 nats), each
+height blurred by κ ≥ 1 times its CRLB, plus ≤ 5 % outliers uniform over the window.  Each part was
+found necessary on the simulated movies: at the true focus the molecules on the coverslip are localised
+at 1 nm (median, IQR 27), but a few lie hundreds of nanometres low and the scatter (~20 nm) exceeds the
+CRLB (17 nm), and without κ and the outliers the fit moved the edge 75 nm down to explain them; with a
+spike's weight free and no molecules on the coverslip, its bound made the edge 10–28 nm high; with 20 %
+outliers and a 2-nat threshold, a false spike 80 nm above the edge once in five.  On simulated heights
+(1500, uniform 0–1400 nm, 1.2× the CRLB's scatter, 1 % outliers):
+
+| on the coverslip | CRLB | bias | scatter | reported sd |
+| --- | --- | --- | --- | --- |
+| 20 % | 30 nm | −0.8 nm | 2.2 | 2.5 |
+| 20 % | 80 nm | −12 nm | 31 | 13 |
+| none | 30 nm | +1.7 nm | 10 | 8.6 |
+| none | 80 nm | +3.4 nm | 15 | 16 |
+| 5 % | 30 nm | −22 nm | 18 | 7.4 |
+| 5 % | 80 nm | −59 nm | 15 | (none) |
+
+A sparse pile-up is the weak case: neither model fits it, and the edge is pulled low.
+
+**From the edge to the focus.**  The edge's shift s says how far all heights moved together; the next
+round's focus prior is N(f − s·r, σ_s·r) with r the focus per height of the coverslip's molecules.  The
+paraxial r = n_imm/n_med = 1.14 is far off at NA 1.43 into water: a focus 120 nm high raised those
+molecules by 65 nm, not 106, so r ≈ 1.6–1.85 and a paraxial correction made only ~60 % of the way.  So r
+is measured (`_measured_ratio`: the window's molecules localised again with the focus 50 nm higher) and
+then refined by a secant on the rounds' (focus, edge) pairs.
+
+**On simulated movies** (as step 4's, the focus started at 450 nm against 700):
+
+| movie | round 1 | round 2 | then | twin |
+| --- | --- | --- | --- | --- |
+| 600 molecules, 20 % on the coverslip | 690 ± 29 | 699 ± 5 | 697, 702 (± 5) | +732 nats |
+| 300 molecules, 20 % on the coverslip | 655 ± 41 | 697 ± 5 (r measured) | stopped | +312 |
+| 600 molecules, none on the coverslip | 668 ± 34 | 675 ± 7 | stopped | +568 |
+
+The Zernikes stay within ~2σ of the truth in every round.  With a pile-up the edge pins the focus to a
+few nanometres; without one only to the flat edge's ~10–15 nm, and its reported error is optimistic
+(675 ± 7 against 700).  A round costs one localisation of every unit (~2000 here, ~10 heights each) and
+one learning: ~110 s on 4 cores at P = 32.

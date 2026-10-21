@@ -1150,7 +1150,17 @@ findings: detections whose Gaussians meet are one molecule (a defocused spot has
 Gaussian wider than a third of its region is no detection.  **A linked blink is its frames summed** into
 one region (Poisson, (ΣN_k)·I + K·b), not K frames with photons per frame: every emitter then has K = 1
 and nothing is padded; step 2's per-frame model stays for when per-frame photons are wanted.  From a
-simulated movie to a pupil within ~2σ (architecture.md, "M5, step 4").
+simulated movie to a pupil within ~2σ (architecture.md, "M5, step 4").  *Revised:* frames, not summed
+blinks, are fitted (``unit="frame"``, v1's way), linking kept for judging blinks and holding molecules
+out whole; summing stays an option, compared later.
+
+*Done, step 5 (October 2026):* the rounds and the coverslip edge, `workflows/insitu_rounds.py`.  Each
+round localises every kept unit on the model and chooses again by its height, photons and deviance;
+stop when the change is within the noise.  The edge of the localised heights (a flat density, a spike if
+it pays, κ on the CRLBs, outliers) becomes the next round's focus prior, through a focus per height that
+is measured, not the paraxial n_imm/n_med (1.14 against ~1.6–1.85 at NA 1.43).  A focus started 250 nm
+off comes back to within a few nanometres with molecules on the coverslip, ~25 nm without
+(architecture.md, "M5, step 5").
 
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out

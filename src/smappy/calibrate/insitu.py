@@ -17,25 +17,27 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
    photons, widths, position.  Model-free, so nothing favours the start's PSF.  Detections whose fits
    meet (within ``merge_px``) are one molecule: a defocused spot has several local maxima.  A Gaussian
    wider than a third of the region spread over the background and is no detection.
-4. **Blinks** (`link`): SMAPpy's grouping (`group.connect`) with its precision test and no dark frame:
-   one molecule's consecutive frames are one emitter.  Its frames are **summed** into one region about
-   their mean position: the molecule does not move, so the sum is Poisson with mean (ΣN_k)·I + K·b and
-   carries what the frames carry about the PSF, the background's level aside (decided October 2026, plan
-   §9 M5, step 4).  The sum is fitted with the Gaussian again.
-5. **Overlaps, by the spot's size** (`overlaps`): with r = ``overlap_k``·σ of each spot (3σ), a neighbour
-   in any frame of the blink closer than r_i + r_j rejects it; a farther one whose disc reaches into the
-   region masks those pixels, and a blink with more than ``max_masked`` of its region masked is rejected.
-   A blink whose inner frames' photons step by more than ``step_ratio`` (another molecule switching on or
-   off under it) is rejected too; its first and last frames are partial and not judged.
+4. **Blinks** (`link`): SMAPpy's grouping (`group.connect`) with its precision test and no dark frame,
+   so that what is judged about a molecule is judged on all its frames.  What is fitted is each **frame**
+   (``unit="frame"``, the default), its own region about its own position, as v1 does: the selection's
+   brightness window keeps the bright central frames and drops the partial first and last.  Summing a
+   blink's frames into one region (``unit="blink"``: Poisson with mean (ΣN_k)·I + K·b) is the option, to
+   be compared before it is the default (decided October 2026, plan §9 M5, step 4).
+5. **Overlaps, by the spot's size** (`overlaps`, `neighbour_mask`): with r = ``overlap_k``·σ of each spot
+   (3σ), a neighbour in any frame of the blink closer than r_i + r_j rejects all its frames; a farther
+   one's disc is masked in the frames it is on in, and a region with more than ``max_masked`` of it masked
+   is rejected.  A blink whose inner frames' photons step by more than ``step_ratio`` (another molecule
+   switching on or off under it) is rejected too; its first and last frames are partial and not judged.
 6. **Selection** (`select`): a **z proxy** from the summed spot's widths -- σx² − σy² for an astigmatic
    PSF, linear in z, or σx² + σy² for a 2D one, which says |z| -- split into ``bins`` bins.  Per bin:
    spots whose widths are far from the bin's typical ones (``shape_k`` robust sds) are out -- an
    unresolved pair is wider or elongated for its z; then a random draw of at most ``per_bin`` from a
    **brightness window** ``window_factor`` (3) wide below the bin's ``window_top`` (90th) percentile of
    photons, not the brightest: those are where unresolved pairs collect, and with a Gaussian
-   illumination they are the field's centre.  ``heldout`` (10 %) of each bin's draw is held out.
+   illumination they are the field's centre.  Of the molecules, ``heldout`` (10 %) are held out, all
+   their frames.
 
-Every blink is a record with its state (*used*, *held out*, *rejected*, *not drawn*) and the reason,
+Every unit is a record with its state (*used*, *held out*, *rejected*, *not drawn*) and the reason,
 as the beads are (`uipsf.workflows.rejection`).  `InSituROIs.batch` is the `uipsf.Batch` of the used
 ones.  torch is imported only there: this module is imported without torch.
 """
@@ -58,6 +60,7 @@ class InSituSettings:
     link_k: float = 2.5                # SMAPpy's precision test, in standard deviations
     link_dx_px: float = 1.5            # the largest step a blink may make between frames
     link_dx_min_px: float = 0.5        # always linked within this, whatever the precisions say
+    unit: str = "frame"                # what is fitted: each frame, or a blink's frames summed ("blink")
     step_ratio: float = 2.0
     proxy: str = "astigmatism"         # or "size" for a 2D PSF
     bins: int = 21
@@ -213,80 +216,101 @@ def link(frame, x_px, y_px, precision_px, settings: InSituSettings) -> np.ndarra
     return np.unique(ids, return_inverse=True)[1]
 
 
-def overlaps(centre_xy, frames_of, sigma_px, det_frame, det_xy, det_sigma, det_blink, blink_id,
-             settings: InSituSettings) -> tuple[str | None, np.ndarray]:
-    """One blink's verdict on its neighbours: (reason or None, its region's mask [roi, roi], True = used).
+def _others(frames_of, det_frame, det_blink, blink_id) -> np.ndarray:
+    return np.isin(det_frame, frames_of) & (det_blink != blink_id)
 
-    ``centre_xy`` the region's centre pixel, ``frames_of`` its frames, ``sigma_px`` its width; the
-    detections of the movie as (frame, xy, width, blink)."""
-    roi = settings.roi_px
-    h = roi // 2
-    mask = np.ones((roi, roi), bool)
+
+def overlaps(centre_xy, frames_of, sigma_px, det_frame, det_xy, det_sigma, det_blink, blink_id,
+             settings: InSituSettings) -> bool:
+    """Whether another molecule on in ``frames_of`` is closer than r_i + r_j (r = ``overlap_k``·σ of each).
+
+    ``centre_xy`` the position, ``sigma_px`` the width of the one judged; the detections of the movie as
+    (frame, xy, width, blink)."""
+    others = _others(frames_of, det_frame, det_blink, blink_id)
+    d = np.hypot(det_xy[others, 0] - centre_xy[0], det_xy[others, 1] - centre_xy[1])
+    return bool(np.any(d < settings.overlap_k * (sigma_px + det_sigma[others])))
+
+
+def neighbour_mask(centre_xy, frames_of, det_frame, det_xy, det_sigma, det_blink, blink_id,
+                   settings: InSituSettings) -> np.ndarray:
+    """[roi, roi] True = used: the region about ``centre_xy`` less every pixel within r_j of another
+    molecule on in ``frames_of``."""
+    h = settings.roi_px // 2
     yy, xx = np.mgrid[-h:h + 1, -h:h + 1]
-    r_i = settings.overlap_k * sigma_px
-    others = np.isin(det_frame, frames_of) & (det_blink != blink_id)
+    mask = np.ones(yy.shape, bool)
+    others = _others(frames_of, det_frame, det_blink, blink_id)
     for (nx, ny), s in zip(det_xy[others], det_sigma[others], strict=True):
-        r_j = settings.overlap_k * s
-        dx, dy = nx - centre_xy[0], ny - centre_xy[1]
-        if np.hypot(dx, dy) < r_i + r_j:
-            return "overlap", mask
-        mask &= np.hypot(xx - dx, yy - dy) >= r_j
-    if 1 - mask.mean() > settings.max_masked:
-        return "masked", mask
-    return None, mask
+        mask &= np.hypot(xx - (nx - centre_xy[0]), yy - (ny - centre_xy[1])) >= settings.overlap_k * s
+    return mask
 
 
 @dataclass
-class Blinks:
-    """One row per blink: the summed region, its Gaussian and its verdict."""
-    frames: list                 # [B] its frames
-    x_px: np.ndarray             # [B] mean position over its frames, image pixels
+class Units:
+    """What is fitted, one row each: a frame (the default) or a blink's frames summed (``unit="blink"``),
+    its region, its Gaussian and its verdict."""
+    frames: list                 # [U] the frames it holds: one, or the blink's
+    blink: np.ndarray            # [U] the molecule's blink: a blink's frames are used or held out together
+    x_px: np.ndarray             # [U] its position (a blink's: the mean over its frames), image pixels
     y_px: np.ndarray
-    centre: np.ndarray           # [B, 2] the region's centre pixel (x, y)
-    regions: np.ndarray          # [B, roi, roi] photons, summed over its frames
-    masks: np.ndarray            # [B, roi, roi] True = used
-    gauss: dict                  # the summed region's Gaussian (`gaussian`)
-    reason: list                 # [B] None, or why it is out
+    centre: np.ndarray           # [U, 2] the region's centre pixel (x, y)
+    regions: np.ndarray          # [U, roi, roi] photons
+    masks: np.ndarray            # [U, roi, roi] True = used
+    gauss: dict                  # the region's Gaussian (`gaussian`)
+    reason: list                 # [U] None, or why it is out
 
 
-def blinks(frames: np.ndarray, cands: Candidates, g: dict, settings: InSituSettings) -> Blinks:
-    """Link the detections into blinks, sum each blink's frames about its mean position, judge overlaps
-    and photon steps, and fit the sums (module docstring, 4 and 5)."""
+def units(frames: np.ndarray, cands: Candidates, g: dict, settings: InSituSettings) -> Units:
+    """Link the detections into blinks, judge each blink's overlaps and photon steps, and cut what is
+    fitted: every frame about its own position (``unit="frame"``), or a blink's frames summed about their
+    mean position (``"blink"``), each fitted with the Gaussian (module docstring, 4 and 5)."""
     precision = np.hypot(g["x_err_pix"], g["y_err_pix"]) / np.sqrt(2)
     ids = link(cands.frame, g["x_px"], g["y_px"], precision, settings)
     sigma = np.maximum(g["sigma_x_pix"], g["sigma_y_pix"])
     det_xy = np.stack([g["x_px"], g["y_px"]], 1)
     roi, h = settings.roi_px, settings.roi_px // 2
     _, Y, X = frames.shape
-    out_f, out_x, out_y, centres, regions, masks, reasons = [], [], [], [], [], [], []
+    rows_out = []                                  # (frames, blink, x, y, centre, region, mask, reason)
     order = np.argsort(ids, kind="stable")
     starts = np.flatnonzero(np.r_[True, np.diff(ids[order]) != 0])
     for a, b in zip(starts, np.r_[starts[1:], len(order)], strict=True):
         rows = order[a:b]
         rows = rows[np.argsort(cands.frame[rows])]
         fs = cands.frame[rows]
-        x, y = float(g["x_px"][rows].mean()), float(g["y_px"][rows].mean())
-        c = (int(np.rint(x)), int(np.rint(y)))
-        if not (h <= c[0] < X - h and h <= c[1] < Y - h):
-            continue
-        reason, mask = overlaps(c, fs, float(sigma[rows].max()), cands.frame, det_xy, sigma, ids, ids[rows[0]],
-                                settings)
         inner = g["photons"][rows][1:-1]
-        if reason is None and len(inner) >= 2 and inner.max() > settings.step_ratio * inner.min():
-            reason = "photon step"
-        region = frames[fs, c[1] - h:c[1] + h + 1, c[0] - h:c[0] + h + 1].sum(0)
-        out_f.append(fs)
-        out_x.append(x)
-        out_y.append(y)
-        centres.append(c)
-        regions.append(region)
-        masks.append(mask)
-        reasons.append(reason)
+        step = len(inner) >= 2 and inner.max() > settings.step_ratio * inner.min()
+        if settings.unit == "blink":
+            parts = [(rows, float(g["x_px"][rows].mean()), float(g["y_px"][rows].mean()))]
+        elif settings.unit == "frame":
+            parts = [(rows[k:k + 1], float(g["x_px"][r]), float(g["y_px"][r])) for k, r in enumerate(rows)]
+        else:
+            raise ValueError(f"unit {settings.unit!r}: frame or blink")
+        verdicts = []
+        for part, x, y in parts:
+            c = (int(np.rint(x)), int(np.rint(y)))
+            if not (h <= c[0] < X - h and h <= c[1] < Y - h):
+                verdicts.append(None)
+                continue
+            # judged on the whole blink: a molecule that overlaps it in any frame rejects all its frames
+            reason = "overlap" if overlaps((x, y), fs, float(sigma[rows].max()), cands.frame, det_xy, sigma, ids,
+                                           ids[rows[0]], settings) else None
+            mask = neighbour_mask(c, cands.frame[part], cands.frame, det_xy, sigma, ids, ids[rows[0]], settings)
+            if reason is None and 1 - mask.mean() > settings.max_masked:
+                reason = "masked"
+            if reason is None and step:
+                reason = "photon step"
+            region = frames[cands.frame[part], c[1] - h:c[1] + h + 1, c[0] - h:c[0] + h + 1].sum(0)
+            verdicts.append((cands.frame[part], ids[rows[0]], x, y, c, region, mask, reason))
+        rows_out += [v for v in verdicts if v is not None]
+    if rows_out:
+        fs, bl, xs, ys, cs, regions, masks, reasons = (list(t) for t in zip(*rows_out, strict=True))
+    else:
+        fs, bl, xs, ys, cs, regions, masks, reasons = [], [], [], [], [], [], [], []
     regions = np.asarray(regions, np.float32).reshape(-1, roi, roi)
-    summed = gaussian(regions)
-    reasons = [r if r is not None or np.isfinite(summed["photons"][i]) else "no fit" for i, r in enumerate(reasons)]
-    return Blinks(out_f, np.asarray(out_x), np.asarray(out_y), np.asarray(centres, int).reshape(-1, 2), regions,
-                  np.asarray(masks, bool).reshape(-1, roi, roi), summed, reasons)
+    fitted = gaussian(regions)
+    reasons = [r if r is not None or np.isfinite(fitted["photons"][i]) else "no fit" for i, r in enumerate(reasons)]
+    return Units(fs, np.asarray(bl, int), np.asarray(xs, float), np.asarray(ys, float),
+                 np.asarray(cs, int).reshape(-1, 2), regions, np.asarray(masks, bool).reshape(-1, roi, roi), fitted,
+                 reasons)
 
 
 # ------------------------------------------------------------------ 6: selection
@@ -301,18 +325,32 @@ def z_proxy(gauss: dict, proxy: str) -> np.ndarray:
     raise ValueError(f"z proxy {proxy!r}: astigmatism or size")
 
 
-def _robust_z(v: np.ndarray) -> np.ndarray:
+def _robust_z(v: np.ndarray, one_sided: bool = False) -> np.ndarray:
+    """|v − median| in robust standard deviations (1.4826·MAD); ``one_sided``: only above the median."""
     mad = 1.4826 * np.median(np.abs(v - np.median(v)))
-    return np.abs(v - np.median(v)) / max(mad, 1e-9)
+    d = v - np.median(v)
+    return (np.maximum(d, 0) if one_sided else np.abs(d)) / max(mad, 1e-9)
 
 
-def select(b: Blinks, settings: InSituSettings) -> tuple[list, np.ndarray, np.ndarray]:
-    """(state of each blink, its bin [B] (−1: none), the bin edges): the module docstring's 6."""
+def select(u: Units, settings: InSituSettings, proxy=None, photons=None, shape=None, rejected=None,
+           one_sided: bool = False):
+    """(state of each unit, its bin [U] (−1: none), the bin edges): the module docstring's 6.
+
+    By default from the units' Gaussians: the z proxy, the photons, and as the shape the widths σx², σy².
+    The rounds (`uipsf.workflows.insitu_rounds`) pass the model's instead: its heights, photons and
+    deviances, judged ``one_sided``: only a fit worse than the bin's is out.  ``rejected`` [U] (a reason or
+    None) adds to the units' own verdicts.  Held out are whole
+    molecules: a blink's frames are all held out or none, so that no held-out frame shows a molecule the
+    fit has seen."""
     rng = np.random.default_rng(settings.seed)
-    n = len(b.reason)
-    state = ["rejected: " + r if r else "candidate" for r in b.reason]
-    proxy = z_proxy(b.gauss, settings.proxy)
-    ok = np.array([s == "candidate" for s in state])
+    n = len(u.reason)
+    reasons = list(u.reason) if rejected is None else [a or b for a, b in zip(u.reason, rejected, strict=True)]
+    state = ["rejected: " + r if r else "candidate" for r in reasons]
+    proxy = z_proxy(u.gauss, settings.proxy) if proxy is None else np.asarray(proxy, float)
+    N = u.gauss["photons"] if photons is None else np.asarray(photons, float)
+    shape = (np.stack([u.gauss["sigma_x_pix"] ** 2, u.gauss["sigma_y_pix"] ** 2], 1) if shape is None
+             else np.asarray(shape, float).reshape(n, -1))
+    ok = np.array([st == "candidate" for st in state]) & np.isfinite(proxy) & np.isfinite(N)
     if not ok.any():
         return state, np.full(n, -1), np.array([])
     lo, hi = np.quantile(proxy[ok], [0.01, 0.99])
@@ -321,13 +359,14 @@ def select(b: Blinks, settings: InSituSettings) -> tuple[list, np.ndarray, np.nd
     bins[ok & ((proxy < lo) | (proxy > hi))] = -1
     for i in np.flatnonzero(ok & (bins < 0)):
         state[i] = "rejected: z range"
-    sx, sy, N = b.gauss["sigma_x_pix"], b.gauss["sigma_y_pix"], b.gauss["photons"]
+    blinks = np.unique(u.blink)
+    held = dict(zip(blinks.tolist(), (rng.random(len(blinks)) < settings.heldout).tolist(), strict=True))
     for k in range(settings.bins):
-        idx = np.flatnonzero((bins == k) & np.array([s == "candidate" for s in state]))
+        idx = np.flatnonzero((bins == k) & np.array([st == "candidate" for st in state]))
         if len(idx) == 0:
             continue
         if len(idx) >= 5:
-            odd = (_robust_z(sx[idx] ** 2) > settings.shape_k) | (_robust_z(sy[idx] ** 2) > settings.shape_k)
+            odd = np.any([_robust_z(shape[idx, m], one_sided) > settings.shape_k for m in range(shape.shape[1])], 0)
             for i in idx[odd]:
                 state[i] = "rejected: shape"
             idx = idx[~odd]
@@ -338,12 +377,10 @@ def select(b: Blinks, settings: InSituSettings) -> tuple[list, np.ndarray, np.nd
         for i in idx[~inside]:
             state[i] = "rejected: brightness"
         pool = idx[inside]
-        drawn = rng.permutation(pool)[:settings.per_bin]
         for i in pool:
             state[i] = "not drawn"
-        n_held = round(settings.heldout * len(drawn))
-        for j, i in enumerate(drawn):
-            state[i] = "held out" if j < n_held else "used"
+        for i in rng.permutation(pool)[:settings.per_bin]:
+            state[i] = "held out" if held[int(u.blink[i])] else "used"
     return state, bins, edges
 
 
@@ -351,7 +388,7 @@ def select(b: Blinks, settings: InSituSettings) -> tuple[list, np.ndarray, np.nd
 
 @dataclass
 class InSituROIs:
-    blinks: Blinks
+    units: Units
     state: list                  # [B] used / held out / not drawn / rejected: <reason>
     bins: np.ndarray             # [B]
     edges: np.ndarray
@@ -370,20 +407,20 @@ class InSituROIs:
             out[s] = out.get(s, 0) + 1
         return out
 
-    def batch(self, state: str = "used"):
-        """(`uipsf.Batch`, its noise) of the blinks in ``state``: the summed regions, [E, 1, 1, Y, X] photons,
-        their masks, the read noise of K summed frames, chip positions."""
+    def batch(self, state: str = "used", ids=None):
+        """(`uipsf.Batch`, its noise) of the units in ``state`` (or ``ids``): their regions, [E, 1, 1, Y, X]
+        photons, their masks, the read noise of the K frames each holds, chip positions."""
         import torch
 
         from uipsf import Batch, ShiftedPoisson
-        ids = self.ids(state)
-        b = self.blinks
-        K = np.array([len(b.frames[i]) for i in ids], float)
-        data = torch.tensor(b.regions[ids][:, None, None], dtype=torch.float32)
-        mask = torch.tensor(b.masks[ids][:, None, None])
+        ids = self.ids(state) if ids is None else np.asarray(ids, int)
+        u = self.units
+        K = np.array([len(u.frames[i]) for i in ids], float)
+        data = torch.tensor(u.regions[ids][:, None, None], dtype=torch.float32)
+        mask = torch.tensor(u.masks[ids][:, None, None])
         s = torch.tensor(K * self.read_noise_var, dtype=torch.float32).reshape(-1, 1, 1, 1, 1)
         batch = Batch(data=data, z_nm=torch.zeros(1), s=s, mask=mask,
-                      field_xy=torch.tensor(b.centre[ids].astype(float), dtype=torch.float32))
+                      field_xy=torch.tensor(u.centre[ids].astype(float), dtype=torch.float32))
         return batch, ShiftedPoisson(float(self.excess_noise))
 
 
@@ -395,9 +432,9 @@ def insitu_rois(frames: np.ndarray, pixel_size_nm, settings: InSituSettings | No
     bg = temporal_background(frames, s.background_frames) if background is None else np.asarray(background, np.float32)
     cands = detect(frames, bg, s, read_noise_var)
     kept, g = measure(frames, cands, s)
-    b = blinks(frames, kept, g, s)
-    state, bins, edges = select(b, s)
-    rois = InSituROIs(b, state, bins, edges, len(cands), tuple(pixel_size_nm), read_noise_var, excess_noise)
-    rois.messages.append(f"{len(cands)} detections, {len(b.reason)} blinks: " +
+    u = units(frames, kept, g, s)
+    state, bins, edges = select(u, s)
+    rois = InSituROIs(u, state, bins, edges, len(cands), tuple(pixel_size_nm), read_noise_var, excess_noise)
+    rois.messages.append(f"{len(cands)} detections, {len(np.unique(u.blink))} blinks, {len(u.reason)} {s.unit}s: " +
                          ", ".join(f"{v} {k}" for k, v in sorted(rois.counts().items())))
     return rois

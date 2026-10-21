@@ -16,7 +16,7 @@ when a milestone lands or an item moves.
 | M4 | several channels | done: transform to 0.025 px of SMAPpy's and v1's |
 | M7 | speed | done: Zenodo 1ch (84 beads, order 8) in 45 s on a Mac GPU, 2ch in 1.4 min |
 | M6 | SMAPpy integration and release | mostly done: window, adapter, spline, acceptance tests; open below |
-| M5 | in situ (blinking molecules) | designed (plan §9, M5); steps 1–4 done: the fit on cut regions, the twin test, linked blinks, simulated movies, detection and selection |
+| M5 | in situ (blinking molecules) | designed (plan §9, M5); steps 1–5 done: the fit on cut regions, the twin test, linked blinks, simulated movies, detection and selection, the rounds and the coverslip edge |
 | M8 | physics where the atlas asks for it | ongoing: measured, not yet modelled |
 
 ## Done
@@ -78,7 +78,11 @@ when a milestone lands or an item moves.
    revisit: the molecules' places from the simulation plugin's ground truth (`smappy.simulate.ground_truth`:
    structures, labelling, linkage, drift) and its camera, instead of the movie's uniform placement.
    **Step 4 done:** detection and selection (`smappy/calibrate/insitu.py`): from a simulated movie to a
-   pupil within its CRLB.  Next the rounds and the coverslip edge, then the window.  Zenodo `1ch_smlm_tubulin`
+   pupil within its CRLB.  Frames are fitted, summing a blink's frames an option.  **Step 5 done:** the rounds
+   and the coverslip edge (`workflows/insitu_rounds.py`): a focus started 250 nm off back within a few nm
+   with molecules on the coverslip, ~25 nm without.  Next the window (step 6), and Zenodo
+   `1ch_smlm_tubulin`.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
