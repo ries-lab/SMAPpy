@@ -95,9 +95,42 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
 - **4Pi:** a phase axis inside the channels (Zenodo `4pi_40nm_bead`, `4pi_smlm_nup96`).
 - **Lattice light-sheet:** a voxel model as the baseline (Zenodo `1ch_LLS_bead`).
 - **Polarisation:** a Jones pupil (2 × 2) for birefringence and a dichroic's s/p transmission.
-- **Engineered PSFs** (double helix, tetrapod, saddle point): a known phase mask in the pupil, fixed,
-  with the Zernikes learnt on top of it as the system's aberrations (noted October 2026).  The mask's
-  design pattern, its scale and its rotation and centring on the pupil are what to start from or fit.
+
+### Phase masks in the pupil (engineered PSFs, donuts)
+
+Masks with phase jumps cannot be written as Zernikes, so they are a pupil component of their own: the pupil
+phase is the mask's, placed on the pupil by a few fitted parameters, plus the Zernikes learnt on top of it as
+the system's aberrations (noted October 2026).  The same component serves detection (engineered PSFs for 3D)
+and excitation (the donuts of MINFLUX and STED, above).
+
+- **Shipped, pre-calculated:** the double helix, the 2D vortex (e^{iφ}, charge 1) and the 3D top-hat vortex
+  (a π step at a radius r_th); the tetrapod and saddle point are smooth enough for Zernikes but come as masks
+  too, since they need high orders.
+- **The user's own:** a phase image (PNG, TIFF or NumPy, with its scale relative to the pupil) or a formula
+  Φ(ρ, φ), stored with the model file and with the microscope's entry in the database, so every calibration
+  of that microscope starts from it.
+- **Fitted parameters:**
+  - its centre (x, y) on the pupil: the mask's misalignment;
+  - its rotation, which turns a double helix;
+  - a phase factor α (Φ → αΦ): a mask made for another wavelength does not delay by exactly π;
+  - a scale: the mask's size against the pupil's, when the relay's magnification is not known exactly or the
+    mask does not fill the pupil;
+  - for the top-hat, its step radius r_th.
+- **To work out:**
+  - *Gradients through a jump.* The derivative of a step with respect to its position is a line, not a
+    number on a grid: the mask's edges are drawn anti-aliased (each pupil sample takes the area-weighted
+    mean of exp(iΦ)), so centre, scale and rotation get finite derivatives.  The pupil grid may need more
+    than 64 samples to place an edge to a fraction of the aperture.
+  - *Phase wraps.* Written as a transmission exp(iαΦ), a vortex is smooth except at its centre; with α ≠ 1
+    its 2π wrap line becomes a real step, which is what an SLM's wrap does.
+  - *What trades with what.* A decentred mask looks like coma, a scale error like defocus and spherical
+    aberration, α like a share of the light left in the zero.  Fit the mask's parameters first with the
+    low Zernikes, then free the rest (the two-stage fit of beads, generalised); the covariance shows what is
+    left entangled.
+  - *A mask off the pupil plane* (a relay not quite conjugate) is a propagation, not a phase: out of scope
+    until data ask for it.
+  - *SMAPpy:* the double helix's large, rotating spot needs a wider bead box and spline; the window's
+    *model* section gets a *phase mask* choice, from the microscope database once it exists.
 
 ### Data and scope
 
