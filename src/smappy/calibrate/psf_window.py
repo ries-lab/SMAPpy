@@ -3,9 +3,11 @@
 Only widgets.  The methods are entries in `psf_methods` -- *bead average*
 (the bead calibration's) and *pupil model (uiPSF)* -- each saying which of
 the sections below it reads, how it runs, its pages and its bead table; the
-window shows the chosen one's and knows none of them.  In situ learning from
-blinking molecules will add a *source* choice and a method, not a branch
-here (`docs/uipsf/plan.md` §7.5).
+window shows the chosen one's and knows none of them (`docs/uipsf/plan.md` §7.5).
+
+A third method, *in situ (blinking molecules)*, learns from movies: its files are
+movies, its section *in situ*, its *Detect molecules* rings them on their frames,
+and its table counts them by state (`psf_methods.InSitu`).
 
 What every method shares is the window's: the stacks and their *Stacks*
 page (`stack_browser`), *mode* (single channel or dual colour), the two steps
@@ -38,6 +40,8 @@ from .core import CalibrationSettings
 from .dual import DualColorSettings
 from .input import discover_acquisitions
 from .psf_methods import AVERAGE_ONLY, METHODS, LearningProgress, duration
+from .insitu import InSituSettings
+from .insitu_run import InSituModelSettings
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
 from .qt_gui import _bead_specs
 
@@ -152,7 +156,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.resize(1400, 900)
         self._refresh_files()
         self._show_method()
-        for form in self.detection_forms.values():
+        for form in (*self.detection_forms.values(), self.insitu_detection_form):
             form.changed.connect(self._detection_changed)
 
     # ------------------------------------------------------------ controls
@@ -179,7 +183,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.subdirectories = QCheckBox("search subdirectories")
         self.subdirectories.setChecked(True)
         flayout.addWidget(self.subdirectories)
-        layout.addWidget(CollapsibleSection("bead stacks", files, expanded=True))
+        self.files_section = CollapsibleSection("bead stacks", files, expanded=True)
+        layout.addWidget(self.files_section)
 
         def choice(label, items, slot):
             line = QHBoxLayout()
@@ -215,8 +220,18 @@ class PSFCalibrationWindow(QMainWindow):
             form = SettingsForm(cls, _bead_specs(cls))
             hlayout.addWidget(form)
             self.detection_forms[cls] = form
+        # in situ: its own choices (the focus, the start, the coverslip, the rounds) and, under more, how the
+        # molecules are found and chosen
+        self.insitu_form = SettingsForm(InSituModelSettings)
+        self.insitu_detection_form = SettingsForm(InSituSettings)
+        insitu = QWidget()
+        ilayout = QVBoxLayout(insitu)
+        ilayout.setContentsMargins(0, 0, 0, 0)
+        ilayout.addWidget(self.insitu_form)
+        ilayout.addWidget(self.insitu_detection_form)
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=True),
                          "model": CollapsibleSection("model", model, expanded=True),
+                         "in situ": CollapsibleSection("in situ", insitu, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -280,15 +295,24 @@ class PSFCalibrationWindow(QMainWindow):
     def _show_method(self) -> None:
         """Show what the chosen method reads, and only that."""
         reads = self.method.sections
+        insitu = reads.get("in situ", False)
         for name in ("microscope", "model", "spline"):
             self.sections[name].setVisible(reads[name])
+        self.sections["in situ"].setVisible(insitu)
+        self.sections["beads"].setVisible(not insitu)
+        self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
+        self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
+        if insitu and self.is_dual:
+            self.mode_box.setCurrentText("Single channel")          # one channel only, for now
+        self.mode_box.setEnabled(not insitu)
+        self.stack_browser.set_movie(getattr(self.method, "files", "") == "movies")
         self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
         shared = {f.name for f in fields(CalibrationSettings)}
         for cls, form in self.detection_forms.items():
             form.setVisible(cls is wanted)
             form.set_shown({name: reads["averaging"] for name in AVERAGE_ONLY if name in shared})
-        pupil = self.method.key == "pupil"
+        pupil = self.method.key in ("pupil", "insitu")          # what needs torch
         missing = torch_missing()
         self.notice.setText(missing or "")
         self.notice.setVisible(pupil and missing is not None)
@@ -296,6 +320,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.install_button.setVisible(pupil and (missing is not None or self._installer is not None))
         self.stop_button.setVisible(pupil)
         self.browse_button.setVisible(self.method.has_stack)
+        self.toggle_button.setVisible(getattr(self.method, "marks", True))
         self.table_hint.setText("beads - space marks a used bead to be excluded"
                                 + (" or a rejected one to be included" if self.method.marks_include else "")
                                 + ", then Calibrate")
@@ -338,7 +363,7 @@ class PSFCalibrationWindow(QMainWindow):
         self._forget("mode changed; files and settings kept - calibrate again")
 
     def _update_buttons(self) -> None:
-        ready = not (self.method.key == "pupil" and torch_missing() is not None)
+        ready = not (self.method.key in ("pupil", "insitu") and torch_missing() is not None)
         done = self.run_result is not None
         self.toggle_button.setEnabled(done or self.detected is not None)
         self.detect_button.setEnabled(ready and not self.busy)
@@ -459,7 +484,10 @@ class PSFCalibrationWindow(QMainWindow):
     def _inputs(self) -> dict:
         run = self.run_form.value()
         run.start_from = self.start_form.value().start_from
-        inputs = dict(detection=self.detection_form.value(), run=run)
+        insitu = self.method.sections.get("in situ", False)
+        inputs = dict(detection=self.insitu_detection_form.value() if insitu else self.detection_form.value(), run=run)
+        if insitu:
+            inputs["insitu"] = self.insitu_form.value()
         if self.method.sections["microscope"]:
             inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
                           spline=self.spline_form.value())
@@ -478,7 +506,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.found_label.setText(detected.text)
         sources = getattr(detected.found, "sources", None) or []
         self.stack_browser.box_px = self._box_px()
-        self.stack_browser.set_marks(detected.positions, sources)
+        states = getattr(self.method, "detected_states", None)
+        self.stack_browser.set_marks(detected.positions, sources, states(detected) if states else None)
         self.refresh_table()
         self._update_buttons()
 
@@ -659,6 +688,9 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _positions(self) -> list:
         from .psf_methods import _positions
+        own = getattr(self.method, "positions", None)
+        if own is not None:
+            return own(self.run_result)
         records = getattr(getattr(self.run_result.result, "rois", None), "records", None)
         if records is None:
             records = self.run_result.result.beads.records
@@ -671,7 +703,11 @@ class PSFCalibrationWindow(QMainWindow):
         return list(getattr(found, "sources", None) or [])
 
     def _states(self) -> dict:
-        """Each bead's state for its ring, from the bead table's last column the methods share."""
+        """Each bead's state for its ring, from the bead table's last column the methods share; a method
+        whose table counts rather than lists (in situ) says them itself."""
+        own = getattr(self.method, "states", None)
+        if own is not None:
+            return own(self.run_result)
         rows = self.method.rows(self.run_result, {})
         state = self.method.columns.index("state")
         return {i: str(values[state]).split(":")[0] for i, (values, _) in enumerate(rows)}

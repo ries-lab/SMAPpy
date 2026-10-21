@@ -47,29 +47,59 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..plugins import param
+
+
+UNITS = (("frame", "frame"), ("blink", "blink, frames summed"))
+PROXIES = (("astigmatism", "astigmatism: σx² − σy²"), ("size", "size: σx² + σy²"))
+
 
 @dataclass
 class InSituSettings:
-    background_frames: int = 21
-    scales_px: tuple = (1.2, 2.0, 3.0)
-    significance: float = 6.0          # standard deviations of the background's noise in the disc
-    roi_px: int = 15
-    merge_px: float = 2.0              # detections whose Gaussians meet within this are one molecule
-    overlap_k: float = 3.0
-    max_masked: float = 0.25
-    link_k: float = 2.5                # SMAPpy's precision test, in standard deviations
-    link_dx_px: float = 1.5            # the largest step a blink may make between frames
-    link_dx_min_px: float = 0.5        # always linked within this, whatever the precisions say
-    unit: str = "frame"                # what is fitted: each frame, or a blink's frames summed ("blink")
-    step_ratio: float = 2.0
-    proxy: str = "astigmatism"         # or "size" for a 2D PSF
-    bins: int = 21
-    per_bin: int = 100
-    window_factor: float = 3.0
-    window_top: float = 0.9
-    shape_k: float = 3.0
-    heldout: float = 0.1
-    seed: int = 0
+    """How molecules are found and chosen; all under *more* in the window, the defaults decided in M5."""
+    frames: int = param(4000, label="frames per movie", min=100, advanced=True,
+                        help="frames read from each movie, in blocks spread over all of it")
+    block_frames: int = param(200, label="block", unit="frames", min=21, advanced=True,
+                              help="consecutive frames read at once: the background's median runs within one")
+    background_frames: int = param(21, label="background window", unit="frames", min=3, advanced=True,
+                                   help="the sliding median over time that is the background")
+    scales_px: tuple = param((1.2, 2.0, 3.0), label="DoG widths", hidden=True,
+                             help="the difference of Gaussians' widths a spot is looked for at, px")
+    significance: float = param(6.0, label="significance", min=1.0, advanced=True,
+                                help="photons above the background in a disc, in standard deviations of its "
+                                     "noise, for a detection")
+    roi_px: int = param(15, label="region", unit="px", min=7, advanced=True,
+                        help="the square region each molecule is fitted in (odd)")
+    merge_px: float = param(2.0, label="merge", unit="px", min=0.0, advanced=True,
+                            help="detections whose Gaussians meet within this are one molecule")
+    overlap_k: float = param(3.0, label="overlap", unit="σ", min=0.0, advanced=True,
+                             help="a neighbour within this many of each spot's σ, added, rejects a molecule")
+    max_masked: float = param(0.25, label="masked at most", min=0.0, max=1.0, advanced=True,
+                              help="the fraction of a region a neighbour's mask may cover")
+    link_k: float = param(2.5, label="linking", unit="sd", min=0.5, advanced=True,
+                          help="SMAPpy's precision test for a blink's frames")
+    link_dx_px: float = param(1.5, label="linking at most", unit="px", min=0.1, advanced=True,
+                              help="the largest step a blink may make between frames")
+    link_dx_min_px: float = param(0.5, label="linking at least", unit="px", min=0.0, advanced=True,
+                                  help="always linked within this, whatever the precisions say")
+    unit: str = param("frame", label="fitted", choices=UNITS, advanced=True,
+                      help="each frame its own region, or a blink's frames summed into one")
+    step_ratio: float = param(2.0, label="photon step", min=1.0, advanced=True,
+                              help="a blink whose inner frames' photons differ by more is out")
+    proxy: str = param("astigmatism", label="z proxy", choices=PROXIES, advanced=True,
+                       help="how the first round sorts by height: an astigmatic PSF's elongation, or a 2D "
+                            "PSF's size")
+    bins: int = param(21, label="z bins", min=1, advanced=True, help="the bins molecules are drawn from")
+    per_bin: int = param(100, label="per bin", min=1, advanced=True, help="at most this many from each bin")
+    window_factor: float = param(3.0, label="brightness window", min=1.0, advanced=True,
+                                 help="how wide, as a factor, below the bin's top")
+    window_top: float = param(0.9, label="window top", min=0.5, max=1.0, advanced=True,
+                              help="the quantile of the bin's photons the window starts below")
+    shape_k: float = param(3.0, label="shape", unit="sd", min=1.0, advanced=True,
+                           help="robust standard deviations from the bin's typical shape at which one is out")
+    heldout: float = param(0.1, label="held out", min=0.0, max=0.5, advanced=True,
+                           help="the fraction of molecules kept out of learning, for the held-out check")
+    seed: int = param(0, label="seed", hidden=True, help="the random draws' seed")
 
 
 # ------------------------------------------------------------------ 1, 2: background and detection
@@ -257,6 +287,7 @@ class Units:
     masks: np.ndarray            # [U, roi, roi] True = used
     gauss: dict                  # the region's Gaussian (`gaussian`)
     reason: list                 # [U] None, or why it is out
+    source: np.ndarray = None    # [U] which movie (`InSituROIs.sources`); frames are that movie's
 
 
 def units(frames: np.ndarray, cands: Candidates, g: dict, settings: InSituSettings) -> Units:
@@ -389,14 +420,16 @@ def select(u: Units, settings: InSituSettings, proxy=None, photons=None, shape=N
 @dataclass
 class InSituROIs:
     units: Units
-    state: list                  # [B] used / held out / not drawn / rejected: <reason>
-    bins: np.ndarray             # [B]
+    state: list                  # [U] used / held out / not drawn / rejected: <reason>
+    bins: np.ndarray             # [U]
     edges: np.ndarray
-    candidates: int              # detections in the movie
+    candidates: int              # detections in the movies
     pixel_size_nm: tuple
     read_noise_var: float = 0.0
     excess_noise: float = 1.0
     messages: list = field(default_factory=list)
+    sources: list = field(default_factory=list)      # per movie: its path and the frames read
+    camera: object = None
 
     def ids(self, state: str) -> np.ndarray:
         return np.flatnonzero(np.array([s == state for s in self.state]))
@@ -424,17 +457,58 @@ class InSituROIs:
         return batch, ShiftedPoisson(float(self.excess_noise))
 
 
+def insitu_units(frames: np.ndarray, settings: InSituSettings, read_noise_var: float = 0.0,
+                 background=None) -> tuple[Units, int]:
+    """One block of consecutive frames [T, Y, X] in photons to its units (steps 1–5) and how many
+    detections it had: the background runs within the block."""
+    frames = np.asarray(frames, np.float32)
+    bg = (temporal_background(frames, settings.background_frames) if background is None
+          else np.asarray(background, np.float32))
+    cands = detect(frames, bg, settings, read_noise_var)
+    kept, g = measure(frames, cands, settings)
+    return units(frames, kept, g, settings), len(cands)
+
+
+def concatenate(parts) -> Units:
+    """Units of several blocks and movies as one, from (units, first frame, movie): frames made the movie's,
+    blinks numbered apart."""
+    fs, bl, xs, ys, cs, regions, masks, gauss, reasons, source = [], [], [], [], [], [], [], [], [], []
+    offset = 0
+    for u, first, movie in parts:
+        fs += [np.asarray(f) + first for f in u.frames]
+        bl.append(u.blink + offset)
+        offset += int(u.blink.max()) + 1 if len(u.blink) else 0
+        xs.append(u.x_px)
+        ys.append(u.y_px)
+        cs.append(u.centre)
+        regions.append(u.regions)
+        masks.append(u.masks)
+        gauss.append(u.gauss)
+        reasons += list(u.reason)
+        source.append(np.full(len(u.reason), movie, int) if u.source is None else u.source)
+    keys = gauss[0].keys() if gauss else ()
+    cat = np.concatenate
+    return Units(fs, cat(bl) if bl else np.zeros(0, int), cat(xs) if xs else np.zeros(0),
+                 cat(ys) if ys else np.zeros(0), cat(cs) if cs else np.zeros((0, 2), int),
+                 cat(regions) if regions else np.zeros((0, 1, 1), np.float32),
+                 cat(masks) if masks else np.zeros((0, 1, 1), bool), {k: cat([g[k] for g in gauss]) for k in keys},
+                 reasons, cat(source) if source else np.zeros(0, int))
+
+
 def insitu_rois(frames: np.ndarray, pixel_size_nm, settings: InSituSettings | None = None,
                 read_noise_var: float = 0.0, excess_noise: float = 1.0, background=None) -> InSituROIs:
-    """A movie in photons [T, Y, X] to chosen blinks (module docstring)."""
+    """A movie in photons [T, Y, X] to chosen units (module docstring): one block, one movie."""
     s = settings or InSituSettings()
-    frames = np.asarray(frames, np.float32)
-    bg = temporal_background(frames, s.background_frames) if background is None else np.asarray(background, np.float32)
-    cands = detect(frames, bg, s, read_noise_var)
-    kept, g = measure(frames, cands, s)
-    u = units(frames, kept, g, s)
-    state, bins, edges = select(u, s)
-    rois = InSituROIs(u, state, bins, edges, len(cands), tuple(pixel_size_nm), read_noise_var, excess_noise)
-    rois.messages.append(f"{len(cands)} detections, {len(np.unique(u.blink))} blinks, {len(u.reason)} {s.unit}s: " +
-                         ", ".join(f"{v} {k}" for k, v in sorted(rois.counts().items())))
+    u, n = insitu_units(frames, s, read_noise_var, background)
+    return choose(concatenate([(u, 0, 0)]), n, pixel_size_nm, s, read_noise_var, excess_noise)
+
+
+def choose(u: Units, candidates: int, pixel_size_nm, settings: InSituSettings, read_noise_var: float = 0.0,
+           excess_noise: float = 1.0, sources=(), camera=None) -> InSituROIs:
+    """The units of every block chosen from at once (step 6)."""
+    state, bins, edges = select(u, settings)
+    rois = InSituROIs(u, state, bins, edges, candidates, tuple(pixel_size_nm), read_noise_var, excess_noise,
+                      sources=list(sources), camera=camera)
+    rois.messages.append(f"{candidates} detections, {len(np.unique(u.blink))} blinks, {len(u.reason)} "
+                         f"{settings.unit}s: " + ", ".join(f"{v} {k}" for k, v in sorted(rois.counts().items())))
     return rois

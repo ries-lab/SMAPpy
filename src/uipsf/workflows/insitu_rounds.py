@@ -144,11 +144,14 @@ class Round:
     edge: Edge | None = None           # the coverslip edge found before this round's learning
     focus_prior: tuple | None = None   # (mean, sd) nm, from the edge
     moved: float = float("inf")        # the rms change since the last round, in standard errors (`_moved`)
+    heights: np.ndarray | None = None  # every kept unit's height localised before this round (the edge's data)
+    heights_sd: np.ndarray | None = None
 
 
 @dataclass
 class InSituRun:
     rounds: list = field(default_factory=list)
+    model: object = None               # the model of the last round, its focus prior the edge's
 
     @property
     def final(self) -> InSituCalibration:
@@ -211,19 +214,21 @@ def _moved(new: dict, old: dict, std_new: dict, std_old: dict) -> float:
     z = []
     for n in ("pupil.phase", "pupil.magnitude", "geometry.focus"):
         if n in new and n in old and n in std_new and n in std_old:
-            d = (torch.as_tensor(new[n]) - torch.as_tensor(old[n])).double().cpu().reshape(-1)
-            sd = (std_new[n].double().cpu() ** 2 + std_old[n].double().cpu() ** 2).sqrt().reshape(-1)
+            d = (torch.as_tensor(new[n]) - torch.as_tensor(old[n])).cpu().double().reshape(-1)
+            sd = (std_new[n].cpu().double() ** 2 + std_old[n].cpu().double() ** 2).sqrt().reshape(-1)
             z.append(d / sd.clamp(min=1e-12))
     z = torch.cat(z) if z else torch.zeros(0)
     return float(z.pow(2).mean().sqrt()) if z.numel() else 0.0
 
 
 def calibrate_insitu(model, rois, start: dict | None = None, noise=None, settings: RoundSettings | None = None,
-                     selection=None, progress=None) -> InSituRun:
+                     selection=None, progress=None, cancel=None) -> InSituRun:
     """Learn from ``rois`` (`smappy.calibrate.insitu.InSituROIs`) in rounds (module docstring).
 
     ``selection`` is the `InSituSettings` the rounds choose by (default ``rois``' own: the first round's);
-    ``start`` the shared values to start from, which give the sign (`learn_insitu`)."""
+    ``start`` the shared values to start from, which give the sign (`learn_insitu`).  ``progress`` gets
+    every learning iteration's entry (`learn_insitu`) and a ``{"message", "round"}`` before each round;
+    ``cancel`` (an Event) stops after the current iteration, the twin test skipped."""
     from smappy.calibrate.insitu import InSituSettings, select
     s = settings or RoundSettings()
     sel = selection or InSituSettings()
@@ -233,13 +238,19 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
     run = InSituRun()
     ids = rois.ids("used")
     batch, _ = rois.batch(ids=ids)
-    cal = learn_insitu(model, batch.to(dtype=dtype), start=start, noise=noise, twin_test=False)
+    tell = progress or (lambda entry: None)
+    tell({"message": f"round 1: learning from {len(ids)} molecules", "round": 1})
+    cal = learn_insitu(model, batch.to(dtype=dtype), start=start, noise=noise, twin_test=False, progress=progress,
+                       cancel=cancel)
     run.rounds.append(Round(1, ids, cal, list(rois.state)))
+    if _stopped(cal):
+        return run
     pool = np.flatnonzero(np.array([r is None for r in rois.units.reason]))
     current = model
     history = []                       # (focus, edge shift) of every round that found the edge
     measured = None                    # focus per height of the coverslip's molecules (`_measured_ratio`)
     for index in range(2, s.max_rounds + 1):
+        tell({"message": f"round {index}: localising every molecule on the model", "round": index})
         shared = cal.calibration.shared()
         focus = float(shared["geometry.focus"])
         heights = start_heights(current, focus)[::max(1, round(s.heights_step_nm / 150.0))]
@@ -271,19 +282,72 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         located["xyz"] = located["xyz"].clone()
         located["xyz"][:, 2] -= shift
         batch, _ = rois.batch(ids=used)
+        tell({"message": f"round {index}: learning from {len(used)} molecules", "round": index})
         new = learn_insitu(current, batch.to(dtype=dtype), start=shared, noise=noise, located=located,
-                           twin_test=False)
+                           twin_test=False, progress=progress, cancel=cancel)
         moved = _moved(new.calibration.shared(), cal.calibration.shared(), new.calibration.result.std,
                        cal.calibration.result.std)
-        run.rounds.append(Round(index, used, new, state, edge, prior, moved))
+        run.rounds.append(Round(index, used, new, state, edge, prior, moved, loc["h"], loc["sd_h"]))
         cal = new
-        if progress is not None:
-            progress({"round": index, "moved": moved, "edge": edge})
+        if _stopped(cal):
+            return run
         if moved < s.stop_sd and (edge is None or abs(edge.shift_nm) <= max(edge.sd_nm, s.focus_floor_nm)):
             break
     last = run.rounds[-1]
+    tell({"message": "the twin test: the mirrored pupil fitted to the same molecules"})
     batch, _ = rois.batch(ids=last.used)
     located = replace(batch.to(dtype=dtype), start=None)
     heights = start_heights(current, float(cal.calibration.shared()["geometry.focus"]))
     cal.twin = twin_fit(current, cal.calibration, located, noise, heights)
+    run.model = current
     return run
+
+
+def _stopped(cal: InSituCalibration) -> bool:
+    return cal.calibration.result.stop_reason == "cancelled"
+
+
+#: the heights the focus is looked for over when it is estimated from the data (`focus_from_data`), the step
+#: between the heights each molecule is started from, and at most how many molecules: localising every chosen
+#: one from 21 heights took over 5 min on one CPU core, and the edge needs only a few hundred
+FOCUS_SEARCH_NM, FOCUS_SEARCH_STEP_NM, FOCUS_SEARCH_MOLECULES = (0.0, 3000.0), 250.0, 200
+
+
+def focus_from_data(model, rois, start: dict | None = None, noise=None, guess_nm: float = 1000.0,
+                    window: float = 0.3, molecules: int = FOCUS_SEARCH_MOLECULES) -> tuple[float, Edge]:
+    """The focus as the coverslip edge puts it, before any learning: (focus nm, the edge).
+
+    The units the first round would learn from are localised on the start pupil (a bead model or the
+    astigmatism typed in) with the focus at ``guess_nm``, from heights all over `FOCUS_SEARCH_NM` (at most
+    `FOCUS_SEARCH_MOLECULES` of them, drawn at random); the
+    lower edge of their heights is the coverslip (`coverslip_edge`), and the focus is moved by its shift
+    times the focus per height, measured (`_measured_ratio`).  The start pupil is rough, so this is a
+    start: the rounds and their edge refine it.  It needs molecules on or near the coverslip."""
+    noise = noise if noise is not None else ShiftedPoisson()
+    optics = model.psf.grid.optics
+    ids = rois.ids("used")
+    if len(ids) > molecules:
+        ids = np.sort(np.random.default_rng(0).choice(ids, molecules, replace=False))
+    batch, _ = rois.batch(ids=ids)
+    from ..params import Params
+    base = Params(model.specs(replace(batch, start=_blank(batch))), batch.n_emitters,
+                  dtype=model.psf.grid.rho.dtype)
+    shared = {n: v for n, v in base.physical().items() if base.specs[n].scope == "shared"}
+    shared.update({n: torch.as_tensor(v, dtype=shared[n].dtype) for n, v in (start or {}).items()
+                   if n in shared and tuple(torch.as_tensor(v).shape) == tuple(shared[n].shape)})
+    shared["geometry.focus"] = torch.as_tensor(float(guess_nm), dtype=shared["geometry.focus"].dtype)
+    heights = np.arange(FOCUS_SEARCH_NM[0], FOCUS_SEARCH_NM[1] + 1, FOCUS_SEARCH_STEP_NM)
+    loc = localise_units(model, shared, rois, ids, noise, heights)
+    edge = coverslip_edge(loc["h"], loc["sd_h"], window)
+    if edge is None or not np.isfinite(edge.sd_nm):
+        raise ValueError("the focus cannot be estimated from these molecules: too few, or no lower edge to "
+                         "their heights; give it")
+    low = np.flatnonzero(loc["h"] < np.quantile(loc["h"], window))
+    lowest = {k: v[torch.as_tensor(low)] for k, v in loc["start"].items()}
+    ratio = _measured_ratio(model, shared, rois, ids[low], lowest, noise, optics.n_imm / optics.n_med)
+    return float(guess_nm - edge.shift_nm * ratio), edge
+
+
+def _blank(batch) -> dict:
+    z = batch.data.new_zeros(batch.n_emitters)
+    return {"xyz": torch.stack([z, z, z], -1), "photons": z + 1, "background": z + 1}

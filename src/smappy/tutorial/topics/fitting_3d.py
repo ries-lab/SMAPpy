@@ -4,17 +4,18 @@ Why first, briefly: z is read from the shape of the spot, so the fit needs to
 know that shape at every z -- and a real microscope's PSF is not the Gaussian
 a formula would give it.  So the PSF is measured, on beads stepped through
 focus, and fitted as a spline: a model as realistic as the microscope it came
-from.  Then the Bead calibration window, as a user meets it, and the fit.
+from.  Then the PSF calibration window, as a user meets it, and the fit.
 
 Everything is simulated: `simulate.bead_stacks` draws the beads with the same
 astigmatic PSF `camera_frames` gives the acquisition, written as plain TIFFs
 -- which carry no z step, so the storyboard types it, as a user of such files
-must.  The save dialog is the one thing not driven: the calibration is saved
-where the dialog would have put it, and "Use in the Spline 3D fitter" takes
-it from there.  The fit is checked against the simulated z, as
+must.  The calibration is saved beside the stacks by *save model*, and "Use in
+the Spline 3D fitter" takes it from there.  The fit is checked against the simulated z, as
 `tests/test_camera_frames.py` checks the same path without a GUI.
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
@@ -104,6 +105,12 @@ def _wait(d, window, timeout: float = 300.0) -> None:
     d.settle()
 
 
+def _page(window, title: str) -> None:
+    """Bring the calibration window's page ``title`` to the front."""
+    titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
+    window.tabs.setCurrentIndex(titles.index(title))
+
+
 def _z_slope(locs, truth) -> float:
     """Fitted z against simulated z, molecule by molecule: 1 is right.
 
@@ -158,13 +165,13 @@ def make(d) -> None:
 
     d.chapter("The calibration window")
     localize = show_tab(d, "Localize")
-    _, panel = open_section(d, localize, "Bead calibration")
-    d.shot("The Bead calibration section of the Localize tab, beside the "
+    _, panel = open_section(d, localize, "PSF calibration")
+    d.shot("The PSF calibration section of the Localize tab, beside the "
            "fitters, opens its window.",
            spot=[panel.run_button], point=panel.run_button, click=True,
            zoom=d.around(panel, 700))
     panel.run_button.click()
-    window = control.calibration_window
+    window = control.psf_calibration_window
     window.resize(1540, 860)
     d.place(window, 30, 20)
     window.add_paths([str(p) for p in stacks])
@@ -173,7 +180,11 @@ def make(d) -> None:
            "one calibration, so more beads make a smoother model.",
            spot=[window.file_list], point=window.file_list,
            zoom=d.around(window.file_list, 760))
-    form = window.form
+    d.shot("The method: the bead average aligns the beads and averages them. "
+           "The pupil model learns the optics instead.",
+           spot=[window.method_box], point=window.method_box,
+           zoom=d.around(window.method_box, 700))
+    form = window.detection_form
     dz = form.fields["dz_nm"]
     dz.set(DZ_NM)
     dz.changed.emit()
@@ -187,46 +198,37 @@ def make(d) -> None:
            spot=[roi], zoom=d.around(roi, 700))
 
     d.chapter("Calibrate")
-    d.shot("Detect and calibrate finds the beads, aligns them in x, y and z, "
-           "and builds the model.",
+    d.shot("Calibrate finds the beads, aligns them in x, y and z, and builds "
+           "the model.",
            spot=[window.run_button], point=window.run_button, click=True,
            zoom=d.around(window.run_button, 700))
     window.run()
     _wait(d, window)
-    assert window.result is not None, "the calibration produced nothing"
+    assert window.run_result is not None, "the calibration produced nothing"
+    _page(window, "Overview")
+    d.settle()
     d.shot("Overview: the beads it found, green if used, and the averaged PSF "
            "seen from the side, narrowing through focus.",
            spot=[window.tabs], zoom=None)
     d.shot("Each bead is a row, with how well it matches the others. Outliers "
            "are left out by themselves; space excludes one by hand, then "
-           "Recalculate.",
-           spot=[window.bead_table, window.rebuild_button],
+           "Calibrate again.",
+           spot=[window.bead_table, window.toggle_button],
            point=window.bead_table)
 
     d.chapter("Check it")
-    d.shot("Calculate fit quality fits the beads back with the spline fitter, "
-           "as the data will be fitted.",
-           spot=[window.quality_button], point=window.quality_button, click=True,
-           zoom=d.around(window.quality_button, 700))
-    window.fit_quality()
-    _wait(d, window)
-    d.shot("The fitted z of each bead against where it was: on the line over "
-           "the range the calibration can be trusted.",
+    _page(window, "Fit quality")
+    d.settle()
+    d.shot("Calibrate also fits the beads back with the spline fitter, as the "
+           "data will be fitted: each bead's z against where it was, on the "
+           "line over the range the calibration can be trusted.",
            spot=[window.tabs])
 
     d.chapter("Save and use")
-    d.shot("Save the calibration next to the beads; the name says what it is.",
-           spot=[window.save_button], point=window.save_button, click=True,
-           zoom=d.around(window.save_button, 700))
-    from ...calibrate.core import calibration_save_defaults
-    from pathlib import Path
-    folder, name = calibration_save_defaults(window.paths, dual=False)
-    path = Path(folder) / (name + ".h5")
-    window.result.save(path, overwrite=True)
-    window.saved_path, window.saved_dual = str(path), False
-    window.use_button.setEnabled(True)
-    d.settle()
-    d.shot("Use in the Spline 3D fitter puts it straight into the fitter.",
+    path = window.run_result.saved
+    assert path is not None and path.exists(), "the calibration was not saved"
+    d.shot("Save model put the calibration next to the beads; the name says "
+           "what it is. Use in the Spline 3D fitter puts it into the fitter.",
            spot=[window.use_button], point=window.use_button, click=True,
            zoom=d.around(window.use_button, 700))
     window.use_button.click()
@@ -279,8 +281,8 @@ def make(d) -> None:
     d.chapter("Next")
     d.card("What to remember",
            "<ul><li>SMAPpy fits 3D with a <b>measured PSF</b>, from beads.</li>"
-           "<li><b>Bead calibration:</b> add the stacks, set the z step, "
-           "calibrate, check the fit quality, save.</li>"
+           "<li><b>PSF calibration:</b> add the stacks, set the z step, "
+           "calibrate, check the fit quality; it is saved beside them.</li>"
            "<li><b>Spline 3D:</b> the acquisition and the calibration; the rest "
            "as in 2D.</li>"
            "<li>Trust z over the calibrated range, and filter to it.</li></ul>",

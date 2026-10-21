@@ -1,25 +1,26 @@
 ---
 title: PSF calibration
-summary: Makes the PSF calibration the Spline 3D fitters read from bead z-stacks, by one of two methods -- the bead average, or a physical model of the microscope's pupil and aberrations learnt with uiPSF v2 -- and shows what each found and how well it fits.
+summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm]
+covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_starts, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
 
 A 3D fit needs to know what one molecule looks like at every height, the
-*point spread function* (PSF).  This window makes that calibration from
-z-stacks of beads, by one of two methods (*method*):
+*point spread function* (PSF).  This window makes that calibration by one of
+three methods (*method*):
 
 * **bead average**: the beads are aligned onto one another, averaged and
   smoothed -- the [bead calibration](plugin:Panels/Bead calibration)'s
   method, with its settings, pages and fit quality, explained on its page;
 * **pupil model (uiPSF)**: the PSF is learnt as a **model of the optics**,
-  explained here.
+  explained here;
+* **in situ (blinking molecules)**: the same model learnt from the blinking
+  molecules of a measurement itself, with no beads (*In situ*, below).
 
-Both write the same kind of file and hand it to the same fitter, so they can
-be compared on the same beads.  A later method will learn the model from the
-blinking molecules of a measurement itself, with no beads.
+All three write the same kind of file and hand it to the same fitter, so they
+can be compared.
 
 The pupil model: the light from a point is collected by the objective, and
 everything the microscope does to it -- the astigmatism of a cylindrical lens,
@@ -60,8 +61,9 @@ GPU where PyTorch finds one (NVIDIA, or Apple's).
 
 ## How it works
 
-This section and the next describe the pupil model; the bead average's are on
-the [bead calibration's page](plugin:Panels/Bead calibration).
+This section and the next describe the pupil model from beads; in situ
+learning has its own section after them, and the bead average's are on the
+[bead calibration's page](plugin:Panels/Bead calibration).
 
 **Looking at the stacks.**  The *Stacks* page shows each added file as it was
 recorded, one plane at a time, with a slider for the file and one for the
@@ -227,10 +229,61 @@ secondary channel placed where the learnt transform puts it and the photons
 free in each channel, so a wrong transform or channels whose z disagree show
 as they would in the data; one z per pair, and the photon ratio beside it.
 
+## In situ
+
+A PSF measured with beads on the coverslip is not quite the PSF of molecules
+in a cell: the light from deep in the sample crosses the index mismatch
+between the sample and the immersion oil, which adds spherical aberration that
+grows with depth, and the sample itself may add more.  In situ learning fits
+the pupil model to the molecules of the measurement instead (uiPSF's in situ
+learning, Liu et al. 2024).  A molecule's height in the sample is not known,
+unlike a bead's in a z-stack: it is learnt with the pupil, molecule by
+molecule, and the *focus* -- how far above the coverslip the objective put its
+focal plane -- with them.
+
+**Finding the molecules.**  From each movie *frames per movie* frames are read,
+in blocks spread over all of it.  In each block the background is a sliding
+median over time.  Spots are looked for at three sizes and kept when they
+hold significantly more photons than the background around them, never by
+comparison with the brightest spot of the frame: a molecule far from focus is
+dim per pixel but has as many photons, and it is these that tell most about
+the PSF.  Each spot is fitted with an elliptical Gaussian; a molecule's frames
+are linked into one blink.  A molecule with another closer than three widths
+of each (*overlap*) is rejected with all its frames; a farther neighbour's
+pixels are masked.
+
+**Choosing them.**  The molecules are sorted by an estimate of their height
+-- an astigmatic spot's elongation (*z proxy*) -- into *z bins*, and from each
+bin at most *per bin* frames are drawn at random from a window of brightness
+below its brightest: the very brightest are where two unresolved molecules
+collect.  A fraction of the molecules is *held out* of learning.  The *z bins*
+page shows what was chosen.
+
+**Learning, in rounds.**  The first round learns from the Gaussian's choice,
+started from *start from* or the *astigmatism* typed in -- the start sets the
+sign of astigmatism and spherical aberration, which the data alone can barely
+tell.  Each further round localises every molecule found on the model, chooses
+again by the model's height, photons and fit, and learns again from the last
+model, until nothing moves beyond its noise or after *rounds*.
+
+**The coverslip.**  The focus and all the heights can move together, changing
+the images only a little; the fit alone places the focus to some tens of
+nanometres.  With *on the coverslip*, the lowest molecules are taken to lie on
+the coverslip: the lower edge of the localised heights must be at 0, and
+where it is found moves the focus in the next round.  With molecules on the
+coverslip this pins the focus to a few nanometres.  On *auto* the *focus* is
+found this way before the first round.
+
+**The sign.**  After the last round the mirror image of the learnt pupil --
+astigmatism and spherical aberration of the other sign, the molecules
+mirrored about the focus -- is fitted too.  If the data clearly prefer it, the
+status bar warns: the start's sign may have been wrong.
+
 ## Controls
 
 ### bead stacks
-The files or folders of bead z-stacks.  All are learnt from together.
+The files or folders of bead z-stacks, all learnt from together; for *in situ*
+the section is *movies*, the measurements' movies.
 
 ### Add files...
 Adds stacks one by one.
@@ -245,8 +298,9 @@ Removes the selected entries.
 Whether *Add folder...* looks inside the folder's subfolders.
 
 ### method
-*bead average* or *pupil model (uiPSF)*.  The window shows only what the
-method reads.  Switching keeps the files and settings and clears the result.
+*bead average*, *pupil model (uiPSF)* or *in situ (blinking molecules)*.  The
+window shows only what the method reads.  Switching keeps the files and
+settings and clears the result.
 
 ### mode
 *Single channel*, or *Dual colour* for a camera split into two halves: a PSF
@@ -309,6 +363,64 @@ averaged: the bead calibration's settings, which its
 the finding; *bead box* is also the size of the boxes it learns from and of
 its spline.
 
+### in situ
+In situ learning's own settings; how molecules are found and chosen is under
+*more*.
+
+### focus
+How far above the coverslip the objective put its focal plane, as it was moved
+from the coverslip's focus.  A rough value is enough: the rounds learn it.
+*auto*: estimated from the molecules on the coverslip before learning.
+
+### astigmatism
+The start's vertical astigmatism in nm of wavefront, with the sign your
+microscope's cylindrical lens gives (read it from a bead calibration of the
+microscope).  Not used with *start from*, whose model starts instead.
+
+### on the coverslip
+Tick when the sample touches the coverslip, so that its lowest molecules lie
+on it: their edge pins the focus.  Untick for a sample that floats above it.
+
+### rounds
+At most this many rounds; most stop earlier, when nothing moves any more.
+
+### spline z
+What the spline's z means: the height above the plane in focus (z = 0 where
+the spot is sharpest, as for beads), or the height above the coverslip, so
+that Spline 3D reports where the molecule is in the sample.
+
+### frames per movie
+More frames, more molecules to choose from; reading and finding them took
+about ten seconds per thousand frames of 128 × 128 pixels on a laptop.
+
+### region
+The square each molecule is fitted in.  Spots 600 nm or more from focus
+outgrow 15 pixels; a larger region keeps them whole, at the cost of more
+neighbours inside it.
+
+### significance
+How far above the background's noise a spot must be.  Lower finds dimmer
+molecules, and more noise.
+
+### overlap
+How close, in widths of the two spots, another molecule may be.  Lower keeps
+more molecules in dense data, and more pairs.
+
+### per bin
+At most this many frames from each z bin: about 20 bins times this many
+frames are learnt from.
+
+### z proxy
+*astigmatism* for an astigmatic PSF; *size* for one without astigmatism,
+which sorts by distance from focus only.
+
+### fitted
+*frame*: every frame its own molecule, as uiPSF does; *blink, frames summed*:
+a molecule's frames added into one image.
+
+### held out
+The fraction of molecules kept out of learning.
+
 ### spline
 How the model is sampled into the spline the fitter reads.
 
@@ -320,7 +432,8 @@ How far above and below focus the spline reaches; auto, the range every used
 bead covers (*The ends of the stacks*).
 
 ### Detect beads
-Finds the beads, lists them in the table, rings them on the *Stacks* page and
+*Detect molecules* for *in situ*: finds the molecules, rings them on their
+frames and counts them by state in the table.  For beads: finds the beads, lists them in the table, rings them on the *Stacks* page and
 says how many there are and how long calibrating them will take (*How it
 works*).  A new detection drops an earlier calibration from the window; its
 files stay.  Changing the files,
@@ -442,6 +555,21 @@ For dual colour, *Pupil and Zernikes* comes once per channel.
 The bead average's table is the bead calibration's.  The pupil model's lists each bead with its brightness verdict (as the bead
 calibration would give it), its state, the reason for a rejection, and its
 deviance, photon score and offset from the box's centre.
+
+For *in situ* the table counts the frames and molecules in each state: used,
+held out, not drawn, and rejected with the reason.  Its pages are *Pupil and
+Zernikes*, *Zernike table* and *Residual atlas* as above, and:
+
+- **z bins**: the frames by their height -- the Gaussian's estimate before
+  calibrating, the model's after -- stacked by state.  A height with nothing
+  used is one the model learnt nothing at.
+- **Rounds and edge**: the focus each round with its uncertainty and the
+  coverslip's prior; how much the model changed from round to round (the rounds
+  stop below 1); and the lowest localised heights with the coverslip edge
+  found in them.  The twin test's verdict is under the figure.
+- **Model vs data**: the used frames in bins of their height, the mean of the
+  data beside the mean of the model for the same molecules, and the
+  difference; a good model leaves noise.
 
 ## References
 

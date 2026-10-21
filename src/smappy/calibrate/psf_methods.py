@@ -12,6 +12,8 @@ as the window does.
   `build_calibration`; `dual.collect_dual_beads`, `build_dual_calibration`),
   its pages (`plots`) and its fit quality (`validation`), called, not copied.
 * **pupil model (uiPSF)**: `pupil.run_calibration` and uipsf's figures.
+* **in situ (blinking molecules)**: `insitu_run.run_insitu` on movies, uipsf's figures and the in situ
+  pages (`insitu_views`); its table counts molecules by state, with no marks.
 
 Both save the same way: with *save model*, beside the stacks under the bead
 calibration's name, never over an existing file except the last run's own
@@ -495,4 +497,141 @@ class PupilModel:
         return f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used"
 
 
-METHODS = (BeadAverage(), PupilModel())
+class InSitu:
+    """In situ: the pupil learnt from the blinking molecules of the data themselves (`insitu_run`).
+
+    Its files are movies, not bead stacks; its sections the microscope, the model, *start from* and the
+    spline as the pupil model's, and its own (*in situ*: the focus, the start's astigmatism, the coverslip,
+    the rounds; the detection's settings under *more*).  One channel.  There is no table of molecules to
+    mark: thousands of them are chosen by rules, not by hand, so the table counts them by state."""
+    key, label = "insitu", "in situ (blinking molecules)"
+    sections = {"start from": True, "microscope": True, "model": True, "spline": True, "averaging": False,
+                "in situ": True}
+    columns = ("state", "units", "molecules")
+    marks_include = False
+    marks = False
+    has_stack = False
+    files = "movies"
+    finds = "molecules"
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .insitu_run import movie_rois
+        if dual:
+            raise ValueError("in situ learning is one channel only, for now")
+        rois = movie_rois(paths, inputs["detection"], progress=progress)
+        used = len(rois.ids("used"))
+        return Detected(rois, f"{used} frames of {len(np.unique(rois.units.blink[rois.ids('used')]))} molecules "
+                              f"to learn from ({'; '.join(rois.messages)}); learning takes minutes a round",
+                        _unit_positions(rois))
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _state_rows(detected.found.units, detected.found.state)
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .insitu_run import run_insitu
+        rois = detected.found if detected is not None else (previous.result.rois if previous is not None else None)
+        done = run_insitu(paths, inputs["optics"], inputs["model"], inputs["insitu"], inputs["detection"],
+                          inputs["spline"], inputs["run"], rois=rois, progress=progress, cancel=cancel,
+                          save_to=previous.saved if previous is not None else None)
+        return Run(done, False, done.saved)
+
+    def finish(self, run: Run, progress=None) -> Run:
+        """The model against the data per height, kept with the run; nothing after a stopped run."""
+        from .insitu_views import model_vs_data
+        if run.result.cal.result.stop_reason == "cancelled":
+            return run
+        (progress or (lambda entry: None))({"message": "the model against the data", "fraction": 0.97})
+        run.extra["views"] = model_vs_data(run.result)
+        return run
+
+    def save_as(self, run: Run, path) -> Path:
+        from .insitu_run import calibration_of
+        from .pupil import save
+        done = run.result
+        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)
+        run.saved = done.saved
+        return run.saved
+
+    def pages(self, run: Run) -> list:
+        from uipsf.diagnostics import figures
+        from uipsf.diagnostics.figures import PHASE_UNITS, zernike_table
+
+        from .insitu_views import draw_model_vs_data, draw_rounds, draw_z_bins
+        result = run.result
+        cal = result.cal
+        pages = [Page("z bins", lambda f, s, e: draw_z_bins(f, result.rois, result.run), follows_selection=False),
+                 Page("Rounds and edge", lambda f, s, e: draw_rounds(f, result.run), follows_selection=False)]
+        for title, draw in figures(cal, reference=result.start).items():
+            if title == "Beads":
+                continue
+            if title.startswith("Pupil and Zernikes"):
+                units = ("nm",) + tuple(u for u in PHASE_UNITS if u != "nm")
+                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
+                                  follows_selection=False, controls={"units": units}))
+            else:
+                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+        pages.append(Page("Zernike table", None, follows_selection=False,
+                          table=lambda: zernike_table(cal, reference=result.start)))
+
+        def versus(figure, selected, excluded):
+            views = run.extra.get("views")
+            if views is None:
+                _not_yet(figure, "the model against the data is drawn after calibrating")
+                return None
+            return draw_model_vs_data(figure, views)
+        pages.append(Page("Model vs data", versus, follows_selection=False))
+        return pages
+
+    def rows(self, run: Run, marks: dict) -> list:
+        last = run.result.run.rounds[-1]
+        return _state_rows(run.result.rois.units, last.state)
+
+    def initial_marks(self, run: Run) -> dict:
+        return {}
+
+    def mark(self, run: Run, bead: int):
+        return None
+
+    def stacks(self, run: Run):
+        return None, None
+
+    def summary(self, run: Run) -> str:
+        result = run.result
+        if result.cal.result.stop_reason == "cancelled":
+            return "stopped, nothing saved"
+        focus = float(result.cal.shared()["geometry.focus"])
+        twin = result.run.final.twin
+        text = (f"{len(result.cal.beads.used)} frames used, {len(result.run.rounds)} rounds, focus {focus:.0f} nm"
+                + ("" if twin is None else f", twin test: {twin.verdict}"))
+        return text + "".join(f"; {w}" for w in result.messages)
+
+    def states(self, run: Run) -> dict:
+        """Each unit's state, for its ring on the Stacks page: the last round's."""
+        return {i: s.split(":")[0] for i, s in enumerate(run.result.run.rounds[-1].state)}
+
+    def detected_states(self, detected: Detected) -> dict:
+        return {i: s.split(":")[0] for i, s in enumerate(detected.found.state)}
+
+    def positions(self, run: Run) -> list:
+        return _unit_positions(run.result.rois)
+
+
+def _unit_positions(rois) -> list:
+    """(movie, x, y, unit, frame) of every unit: the stack browser rings each on its frame."""
+    u = rois.units
+    return [(int(u.source[i]), float(u.x_px[i]), float(u.y_px[i]), i, int(u.frames[i][0]))
+            for i in range(len(u.reason))]
+
+
+def _state_rows(units, state) -> list:
+    """(values, greyed) per state: how many units (frames) and molecules (blinks) are in it."""
+    kinds: dict = {}
+    for i, s in enumerate(state):
+        kinds.setdefault(s, set()).add(i)
+    order = sorted(kinds, key=lambda s: (s.startswith("rejected"), s != "used", s != "held out", s))
+    return [((s, len(kinds[s]), len({int(units.blink[i]) for i in kinds[s]})), s.startswith("rejected"))
+            for s in order]
+
+
+METHODS = (BeadAverage(), PupilModel(), InSitu())

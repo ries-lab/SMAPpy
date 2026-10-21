@@ -14,7 +14,6 @@ tabs:
 - name: Localize
   header: localize
   instances:
-  - plugin: Localize/Bead calibration
   - plugin: Localize/PSF calibration
   - plugin: Localize/Gaussian 2D
   - plugin: Localize/Gaussian 2D 2C

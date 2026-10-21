@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QSpinBox,
 
 #: a ring's colour by the bead's state; a bead not yet calibrated is "found"
 COLOURS = {"found": "#00e5ff", "used": "#1f77b4", "accepted": "#1f77b4", "held out": "#2ca02c",
-           "excluded": "#7f7f7f", "manual exclusion": "#7f7f7f"}
+           "excluded": "#7f7f7f", "manual exclusion": "#7f7f7f", "candidate": "#00e5ff", "not drawn": "#bbbbbb"}
 REJECTED = "#d62728"
 #: files kept read
 CACHED = 2
@@ -45,6 +45,8 @@ class StackBrowser(QWidget):
         self.selected: set = set()
         self.dz_nm = None                    # the detection's z step; None: the files' own
         self.box_px = 15                     # a ring's diameter: the bead box
+        self.movie = False                   # movies (in situ): frames read one at a time, rings on their frame
+        self._sources: dict = {}             # movie mode: the open acquisitions
         self.on_pick = None                  # called with a bead when its ring is clicked
         self.figure = Figure(figsize=(8, 6), constrained_layout=True)
         self.canvas = canvas_class()(self.figure)
@@ -76,7 +78,9 @@ class StackBrowser(QWidget):
         self.stack_box.setToolTip("an acquisition of several stacks (channels, positions): which one")
         self.stack_box.valueChanged.connect(self.draw)
         line.insertWidget(2, self.stack_box)
-        _, self.plane_slider, self.plane_label = row("plane", "which plane of the stack; the mouse wheel too")
+        line, self.plane_slider, self.plane_label = row("plane", "which plane of the stack, or frame of the movie; "
+                                                                 "the mouse wheel too")
+        self.plane_caption = line.itemAt(0).widget()
         self.log_box = QCheckBox("log contrast")
         self.log_box.setToolTip("a logarithmic scale, so that faint beads and the rings of bright ones show")
         self.log_box.toggled.connect(self.draw)
@@ -101,6 +105,14 @@ class StackBrowser(QWidget):
             self.file_slider.setRange(0, max(len(found) - 1, 0))
             self.file_slider.blockSignals(False)
         self.draw()
+
+    def set_movie(self, movie: bool) -> None:
+        """Movies rather than bead stacks: a frame is read when it is shown, never the whole file, and a
+        ring is drawn on its own frame, (stack, x, y, unit, frame) in `set_marks`."""
+        if movie != self.movie:
+            self.movie, self._cache, self._sources = movie, {}, {}
+            self.plane_caption.setText("frame" if movie else "plane")
+            self.draw()
 
     def set_marks(self, positions, sources=(), states: Optional[dict] = None) -> None:
         """Ring the beads at ``positions`` ((stack, x, y, bead), the stack indexing ``sources``), coloured
@@ -150,6 +162,9 @@ class StackBrowser(QWidget):
             self.canvas.draw_idle()
             return
         a = int(np.clip(self.file_slider.value(), 0, len(self.acquisitions) - 1))
+        if self.movie:
+            self._draw_frame(a)
+            return
         try:
             stacks = self.stacks(a)
         except Exception as error:
@@ -198,6 +213,55 @@ class StackBrowser(QWidget):
         found = len({p[3] for p in here})
         self.title.setText(f"{self.acquisitions[a]}" + (f" - stack {k + 1}/{len(stacks)}" if len(stacks) > 1 else "")
                            + (f" - {found} beads ringed" if self.positions else ""))
+        self.canvas.draw_idle()
+
+    def _draw_frame(self, a: int) -> None:
+        """Movie mode: frame by frame, read when shown; rings only on the frame their unit is from."""
+        from matplotlib.patches import Circle
+
+        from ..io.tiff import open_stack
+        path = self.acquisitions[a]
+        try:
+            if path not in self._sources:
+                while len(self._sources) >= CACHED:
+                    self._sources.pop(next(iter(self._sources)))
+                self._sources[path] = open_stack(path)
+            src = self._sources[path]
+            n = src.n_frames
+            self.plane_slider.blockSignals(True)
+            if self.plane_slider.maximum() != n - 1:
+                self.plane_slider.setRange(0, n - 1)
+                self.plane_slider.setValue(0)
+            self.plane_slider.blockSignals(False)
+            f = int(np.clip(self.plane_slider.value(), 0, n - 1))
+            plane = np.asarray(src.frame(f), float)
+        except Exception as error:
+            self.title.setText(f"could not read {path}: {type(error).__name__}: {error}")
+            self.canvas.draw_idle()
+            return
+        self.stack_box.setVisible(False)
+        ax = self.figure.subplots()
+        low, high = np.percentile(plane, (1, 99.95))
+        if self.log_box.isChecked():
+            shown = np.log1p(np.maximum(plane - low, 0))
+            ax.imshow(shown, cmap="gray", vmin=0, vmax=max(float(shown.max()), 1e-9))
+        else:
+            ax.imshow(plane, cmap="gray", vmin=low, vmax=max(high, low + 1))
+        here = [p for p in self.positions if p[0] == a and len(p) > 4 and p[4] == f]
+        radius = self.box_px / 2
+        for _, x, y, unit, _ in here:
+            colour = COLOURS.get(self.states.get(unit, "found"), REJECTED)
+            ring = Circle((x, y), radius, fill=False, edgecolor=colour, picker=True,
+                          linewidth=2.5 if unit in self.selected else 1.0)
+            ring.pair_ids = np.array([unit])
+            ax.add_patch(ring)
+        ax.set_xlabel("x (px)")
+        ax.set_ylabel("y (px)")
+        self.plane_label.setText(f"frame {f + 1}/{n}")
+        self.file_label.setText(f"file {a + 1}/{len(self.acquisitions)}")
+        read = sorted({p[4] for p in self.positions if p[0] == a and len(p) > 4})
+        self.title.setText(f"{path} - {len(here)} molecules ringed on this frame"
+                           + (f"; frames with molecules: {read[0] + 1}-{read[-1] + 1}" if read else ""))
         self.canvas.draw_idle()
 
     def _picked(self, event) -> None:

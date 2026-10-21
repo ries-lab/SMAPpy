@@ -16,7 +16,7 @@ when a milestone lands or an item moves.
 | M4 | several channels | done: transform to 0.025 px of SMAPpy's and v1's |
 | M7 | speed | done: Zenodo 1ch (84 beads, order 8) in 45 s on a Mac GPU, 2ch in 1.4 min |
 | M6 | SMAPpy integration and release | mostly done: window, adapter, spline, acceptance tests; open below |
-| M5 | in situ (blinking molecules) | designed (plan §9, M5); steps 1–5 done: the fit on cut regions, the twin test, linked blinks, simulated movies, detection and selection, the rounds and the coverslip edge |
+| M5 | in situ (blinking molecules) | designed (plan §9, M5); steps 1–6 done: the fit on cut regions, the twin test, linked blinks, simulated movies, detection and selection, the rounds and the coverslip edge, the window's *in situ* method |
 | M8 | physics where the atlas asks for it | ongoing: measured, not yet modelled |
 
 ## Done
@@ -50,8 +50,8 @@ when a milestone lands or an item moves.
 2. **Microscope database** (plan §7.5): optics per microscope chosen by the file's metadata; the pixel
    size following the 3D lens (`camera_db` can map a tag already); read noise per readout mode; M2's
    iXon filed under M2; M5's pixel settled.  Needs the lab's metadata (`docs/uipsf/microscopes.md`).
-3. **Retire *Bead calibration*:** remove the old window and plugin, move the default GUI and the tutorial
-   storyboard to *PSF calibration* (M6).
+3. **Retire *Bead calibration*:** the default GUI and the tutorials (`fitting_3d`, `two_colour_3d`) use *PSF
+   calibration* (October 2026); the plugin and its window stay in the tree for now, to be removed (M6).
 4. **Done: the 2ch stall** (architecture.md, "Why Zenodo 2ch stalled").  Not the indices: the start put
    50 of 88 dim channel-0 backgrounds at softplus' 10⁻³ floor, the saturation guard then shortened every
    parameter's step for three of them (α = 2·10⁻⁴) until the step test stopped stage 1, and `torch.polar`'s
@@ -80,8 +80,9 @@ when a milestone lands or an item moves.
    **Step 4 done:** detection and selection (`smappy/calibrate/insitu.py`): from a simulated movie to a
    pupil within its CRLB.  Frames are fitted, summing a blink's frames an option.  **Step 5 done:** the rounds
    and the coverslip edge (`workflows/insitu_rounds.py`): a focus started 250 nm off back within a few nm
-   with molecules on the coverslip, ~25 nm without.  Next the window (step 6), and Zenodo
-   `1ch_smlm_tubulin`.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   with molecules on the coverslip, ~25 nm without.  **Step 6 done:** *in situ (blinking molecules)*, the PSF
+   calibration window's third method (movies, the section *in situ*, the focus typed or from the data, its
+   pages, the spline above focus or above the coverslip).  Next Zenodo `1ch_smlm_tubulin` against v1.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.

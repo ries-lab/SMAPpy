@@ -3,7 +3,6 @@
 The module is SMAPpy's (`smappy.calibrate.insitu`); its tests are here because the movies are uipsf's.
 """
 import numpy as np
-import pytest
 import torch
 from smappy.calibrate import insitu as I
 
@@ -156,36 +155,28 @@ def test_selection_rejects_a_spot_too_wide_for_its_bin():
     assert state[7] == "rejected: shape"
 
 
-@pytest.mark.slow
-def test_a_pupil_is_learnt_from_the_molecules_chosen_in_a_simulated_movie():
-    # 600 molecules 0-1400 nm deep, 600 frames, a Gaussian illumination; ~70 s on one core.
+def test_the_molecules_chosen_in_a_small_movie_are_molecules_at_every_height():
+    # Learning from them is test_insitu's and the benchmark's (benchmarks/uipsf/synthetic/insitu_movie.py).
     from smappy.simulate import BlinkingSettings
-
-    from uipsf.workflows.insitu import learn_insitu
-    model, shared = model_and_shared()
-    s = MovieSettings(size_px=(128, 128), n_frames=600, fluorophores=600, heights_nm=(0.0, 1400.0),
-                      on_coverslip=0.1, illumination_fwhm_px=160.0, seed=1,
+    model, shared = model_and_shared(P=24)
+    s = MovieSettings(size_px=(64, 64), n_frames=150, fluorophores=100, heights_nm=(0.0, 1400.0),
+                      on_coverslip=0.2, illumination_fwhm_px=100.0, seed=1,
                       blinking=BlinkingSettings(photons=6000.0, photons_std=3000.0, on_time=1.5, blinks=3.0))
     movie = simulate_movie(model, shared, s)
-    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, I.InSituSettings(per_bin=20))
+    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, I.InSituSettings(per_bin=3))
     used = rois.ids("used")
-    assert len(used) > 120
-    # every blink used is a molecule: near one on in its first frame.  A Gaussian truncated by the region
-    # misplaces the spots 600-700 nm from focus (σ 4-5 px) by 2-4 px, so 95 % within 3 px, all within 5.
+    assert len(used) > 25
+    # each used unit is a molecule (a Gaussian truncated by the region misplaces the farthest by 2–4 px), and
+    # the molecules used reach from the coverslip to well above the focus
     t, px, py = movie.truth, *OPTICS.pixel_size_nm
-    d = []
+    d, h = [], []
     for i in used:
-        on = t.frame == rois.units.frames[i][0]
-        d.append(np.hypot(t.x_nm[on] / px - rois.units.x_px[i], t.y_nm[on] / py - rois.units.y_px[i]).min())
-    assert np.mean(np.array(d) < 3) > 0.95 and max(d) < 5
-    batch, noise = rois.batch()
-    start = torch.zeros_like(shared["pupil.phase"])
-    start[1] = 0.4
-    result = learn_insitu(model, batch.to(dtype=f64), start={"pupil.phase": start}, noise=noise)
-    fit, learnt = result.calibration.result, result.calibration.shared()
-    assert torch.all((learnt["pupil.phase"] - shared["pupil.phase"]).abs() < 4 * fit.std["pupil.phase"])
-    assert abs(float(learnt["geometry.focus"]) - FOCUS) < 3 * float(fit.std["geometry.focus"])
-    assert result.twin.verdict == "agree"
+        on = np.flatnonzero(t.frame == rois.units.frames[i][0])
+        dist = np.hypot(t.x_nm[on] / px - rois.units.x_px[i], t.y_nm[on] / py - rois.units.y_px[i])
+        d.append(dist.min())
+        h.append(t.h_nm[on[np.argmin(dist)]])
+    assert np.mean(np.array(d) < 3) > 0.9 and max(d) < 5
+    assert min(h) < 200 and max(h) > 1100
 
 
 def test_a_molecules_frames_are_held_out_together():

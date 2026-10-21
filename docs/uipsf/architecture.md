@@ -1465,3 +1465,45 @@ The Zernikes stay within ~2σ of the truth in every round.  With a pile-up the e
 few nanometres; without one only to the flat edge's ~10–15 nm, and its reported error is optimistic
 (675 ± 7 against 700).  A round costs one localisation of every unit (~2000 here, ~10 heights each) and
 one learning: ~110 s on 4 cores at P = 32.
+
+## M5, step 6: in situ in the PSF calibration window (October 2026, plan §9 M5)
+
+A third method, *in situ (blinking molecules)* (`smappy.calibrate.psf_methods.InSitu`), beside the bead
+average and the pupil model; the window shows its section and knows nothing else of it.
+
+- **Files are movies** (`insitu_run.movie_rois`): *frames per movie* (4000) read in blocks of 200 spread
+  over each movie, through the camera as a fit resolves it; detection per block, the choice over all.  The
+  Stacks page reads one frame at a time in movie mode (`StackBrowser.set_movie`) and rings each unit on its
+  own frame, coloured by state.
+- **The section *in situ*** (`InSituModelSettings`): *focus* (a value, or *auto*: estimated from the
+  molecules on the coverslip before learning, `focus_from_data`), *astigmatism* (the start's Noll 6 in nm,
+  when there is no *start from*), *on the coverslip*, *rounds*, *spline z*; the detection's settings
+  (`InSituSettings`) under *more*.  One channel: *mode* is disabled.
+- **The table counts** frames and molecules by state; no marks (thousands of molecules are chosen by rule).
+- **Pages**: *z bins*, *Rounds and edge*, uipsf's *Pupil and Zernikes*, *Zernike table* and *Residual
+  atlas*, and *Model vs data* per height bin (`insitu_views`).
+- **Saved** as the pupil model is: the spline beside the movies under the bead calibration's name, the model
+  file beside it (its geometry *in situ*, the focus with it; `export.model_file`).  The spline samples the
+  model at the learnt focus through the used heights ± 100 nm, every 20 nm (`insitu_spline`); its z is the
+  height above the plane in focus (z = 0 at the sharpest plane) or above the coverslip (the grid then
+  reaching 0, since z0 must lie on it), recorded in its parameters with the focus and the offset.
+
+**Measured** (simulated movie, 300 frames, 300 molecules, a fifth on the coverslip, true focus 700 nm):
+a TIFF movie through the camera to a saved calibration, two rounds, focus 702 ± 5 nm from 450 given, every
+phase mode within 1.6σ; 3 min on 4 cores and Apple's GPU.  With the focus on *auto*, the estimate before
+learning was 774–780 nm (from a guess of 1000) and the rounds took it to 703 ± 5.  The estimate alone is a
+start, 75–80 nm off: the window's rounds and the edge refine it.  Bounded to 200 molecules started from
+heights every 250 nm over 0–3 µm, it takes ~100 s on one CPU core in float32.
+
+**Tests and benchmark** (October 2026): every in situ test takes seconds on one core -- learning on 8–16
+molecules with a pupil of 16 samples, a 64 × 64 movie of 150 frames, the window's run on a small model --
+and the full-size runs (movies of 600 molecules, the rounds, the focus from the data) are a benchmark run by
+hand, `benchmarks/uipsf/synthetic/insitu_movie.py`, whose numbers are the ones above.  The twin fit must
+converge to the solver's own tolerance: stopped at stage 1's looser one, its optimum stayed too high and a
+start of the wrong sign passed as agreeing.
+
+**Speed, open.**  A real run is slow: the window's model samples the pupil at 64 points, every unit is
+localised from 10–20 heights in each round and again for the twin, and on Apple's GPU `torch.compile`
+recompiles the tangents' kernel for every new number of emitters (`device.compiled` pads the tangents, not
+the emitters), which in situ changes all the time.  One round of 33 molecules took 38 s on the CPU, 45 s
+on the GPU.

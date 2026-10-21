@@ -12,7 +12,8 @@ Simulated with `simulate.dual_bead_stacks` and `dual_camera_frames` behind
 one `dual_transformation` and one astigmatism, so the storyboard checks that
 the calibration finds the transformation, that z comes back, and that the
 colours are the dyes -- the whole chain, beads to colours, which no other
-test runs end to end.  The save dialog is not driven, as in ``fitting_3d``.
+test runs end to end.  The calibration is saved beside the beads by *save
+model*, as in ``fitting_3d``.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from .common import field, open_section, section_of, show_tab, type_into
-from .fitting_3d import _wait, _z_slope
+from .fitting_3d import _page, _wait, _z_slope
 from .two_colour import after_the_fit, colours_and_layers
 
 TITLE = "Two colours in 3D: dual-colour calibration and Spline 3D 2C"
@@ -77,19 +78,19 @@ def make(d) -> None:
 
     d.chapter("Dual-colour calibration")
     localize = show_tab(d, "Localize")
-    _, panel = open_section(d, localize, "Bead calibration")
-    d.shot("The Bead calibration section of the Localize tab opens the "
+    _, panel = open_section(d, localize, "PSF calibration")
+    d.shot("The PSF calibration section of the Localize tab opens the "
            "calibration window.",
            spot=[panel.run_button], point=panel.run_button,
            click=True, zoom=d.around(panel, 700))
     panel.run_button.click()
-    window = control.calibration_window
+    window = control.psf_calibration_window
     window.mode_box.setCurrentText("Dual colour")
     assert window.is_dual, "the calibration window is not in dual-colour mode"
     window.resize(1540, 860)
     d.place(window, 30, 20)
     window.add_paths([str(p) for p in stacks])
-    form = window.form
+    form = window.detection_form
     geometry = form.fields["registration"]      # the split: a part of its own
     # set by hand: the simulated beads sit on a grid centred in each half,
     # which is its own mirror image, so *detect* could not tell the two apart
@@ -113,21 +114,23 @@ def make(d) -> None:
            spot=[layout, main], point=layout, zoom=d.around(layout, 700))
 
     d.chapter("Calibrate")
-    d.shot("Detect and calibrate pairs the beads across the halves, fits the "
-           "map, and builds a PSF for each half.",
+    d.shot("Calibrate pairs the beads across the halves, fits the map, and "
+           "builds a PSF for each half.",
            spot=[window.run_button], point=window.run_button, click=True,
            zoom=d.around(window.run_button, 700))
     window.run()
     _wait(d, window)
-    result = window.result
-    assert result is not None, "the dual calibration produced nothing"
+    assert window.run_result is not None, "the dual calibration produced nothing"
+    result = window.run_result.result
     # the words say the beads give the map between the halves
     error = _transformation_error(result.calibration)
     assert error < 0.2, f"the calibration's map is {error:.2f} px off"
+    _page(window, "Overview")
+    d.settle()
     d.shot("Overview: each bead and its partner in the other half, and where "
            "the pairs lie on the chip.",
            spot=[window.tabs])
-    window.tabs.setCurrentIndex(1)
+    _page(window, "Transformation")
     d.settle()
     d.shot("Transformation: how far each pair lands from where the map puts it. "
            "A tight cloud around zero is a good map.",
@@ -137,15 +140,11 @@ def make(d) -> None:
            spot=[window.bead_table], point=window.bead_table)
 
     d.chapter("Save and use")
-    from ...calibrate.core import calibration_save_defaults
-    folder, name = calibration_save_defaults(window.paths, dual=True)
-    path = Path(folder) / (name + ".h5")
-    result.save(path, overwrite=True)
-    window.saved_path, window.saved_dual = str(path), True
-    window.use_button.setEnabled(True)
-    d.settle()
-    d.shot("Save it, then Use in the fitter puts it into Spline 3D 2C.",
-           spot=[window.save_button, window.use_button], point=window.use_button,
+    path = window.run_result.saved
+    assert path is not None and path.exists(), "the dual calibration was not saved"
+    d.shot("It is saved beside the beads; Use in the fitter puts it into "
+           "Spline 3D 2C.",
+           spot=[window.use_button], point=window.use_button,
            click=True, zoom=d.around(window.use_button, 700))
     window.use_button.click()
     d.settle()

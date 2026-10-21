@@ -142,17 +142,23 @@ def test_every_emitter_is_found_on_the_true_pupil_from_the_heights_tried(optics)
     assert float((found["xyz"][:, 2] - h).abs().max()) < 60.0
 
 
+# A learning problem small enough for a few seconds on one core: 16 molecules, a pupil of 16 samples, 9-pixel
+# regions, started from heights 300 nm apart.  It keeps the verdicts of 40 molecules at 24 samples.
+SMALL = dict(n=16, P=16, roi=(9, 9), photons=4000.0, focus=600.0, true_focus=720.0)
+HEIGHTS = np.arange(0.0, 1300.0, 300.0)
+
+
 @pytest.mark.slow
 def test_the_pupil_and_focus_are_learnt_from_emitters_in_the_sample_and_the_twin_test_agrees(optics):
-    # The start: the right sign of astigmatism at half its size, the focus 120 nm off.  ~10 s on 4 cores.
-    model, truth, batch = insitu_emitters(optics, n=40, focus=600.0, true_focus=720.0)
+    # The start: the right sign of astigmatism at half its size, the focus 120 nm off.  ~4 s on one core.
+    model, truth, batch = insitu_emitters(optics, **SMALL)
     phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=f64)
     phase[1] = 0.4
-    result = learn_insitu(model, batch, start={"pupil.phase": phase})
+    result = learn_insitu(model, batch, start={"pupil.phase": phase}, heights=HEIGHTS)
     fit, sd = result.calibration.result, result.calibration.result.std
     shared = result.calibration.shared()
     true = truth.physical()
-    assert len(result.calibration.beads.used) >= 36
+    assert len(result.calibration.beads.used) >= 14
     assert torch.all((shared["pupil.phase"] - true["pupil.phase"]).abs() < 4 * sd["pupil.phase"])
     assert abs(float(shared["geometry.focus"]) - 720.0) < 3 * float(sd["geometry.focus"])
     used = torch.tensor(result.calibration.beads.used)
@@ -168,10 +174,10 @@ def test_the_pupil_and_focus_are_learnt_from_emitters_in_the_sample_and_the_twin
 def test_a_start_of_the_wrong_sign_learns_the_twin_and_the_twin_test_warns(optics):
     # Astigmatism started with the wrong sign: the fit settles in the twin (heights mirrored about the focus,
     # spherical bent to make up for the mismatch), and only the index mismatch tells the two apart.
-    model, truth, batch = insitu_emitters(optics, n=40, focus=600.0, true_focus=720.0)
+    model, truth, batch = insitu_emitters(optics, **SMALL)
     phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=f64)
     phase[1] = -0.4
-    result = learn_insitu(model, batch, start={"pupil.phase": phase})
+    result = learn_insitu(model, batch, start={"pupil.phase": phase}, heights=HEIGHTS)
     assert float(result.calibration.shared()["pupil.phase"][1]) < -0.5          # the sign it was given
     assert result.twin.verdict == "prefer twin"
     assert len(result.warnings) == 1 and "mirrored" in result.warnings[0]
@@ -218,11 +224,11 @@ def test_the_photons_of_each_frame_of_a_blink_come_back(optics):
 
 @pytest.mark.slow
 def test_the_pupil_is_learnt_from_linked_blinks_with_photons_per_frame(optics):
-    model, truth, batch = insitu_emitters(optics, n=20, frames=3, frame_factors=(1.0, 0.6, 1.3))
+    model, truth, batch = insitu_emitters(optics, **dict(SMALL, n=8), frames=3, frame_factors=(1.0, 0.6, 1.3))
     phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=f64)
     phase[1] = 0.4
-    result = learn_insitu(model, batch, start={"pupil.phase": phase})
+    result = learn_insitu(model, batch, start={"pupil.phase": phase}, heights=HEIGHTS)
     sd = result.calibration.result.std["pupil.phase"]
-    assert len(result.calibration.beads.used) >= 18
+    assert len(result.calibration.beads.used) >= 7
     assert torch.all((result.calibration.shared()["pupil.phase"] - truth.physical()["pupil.phase"]).abs() < 4 * sd)
     assert result.twin.verdict == "agree"

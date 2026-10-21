@@ -67,7 +67,7 @@ from ..model import (
     ZernikePupil,
 )
 from ..model.channels import Channel, prefix, unpack_transform, view
-from ..model.geometry import BeadStackGeometry
+from ..model.geometry import BeadStackGeometry, InSituGeometry
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
@@ -94,8 +94,11 @@ def _describe_channel(ch: Channel) -> dict:
 def describe(model: ForwardModel) -> dict:
     """The components of ``model`` and their settings, as plain data: what `build` needs."""
     g = model.geometry
-    geometry = dict(kind="bead stack", drift=g.drift, drift_prior_nm=g.drift_prior_nm, z_scale=g.z_scale,
-                    z_scale_prior=g.z_scale_prior)
+    if isinstance(g, InSituGeometry):
+        geometry = dict(kind="in situ", focus_nm=g.focus_nm, focus_prior_nm=g.focus_prior_nm, fit_focus=g.fit_focus)
+    else:
+        geometry = dict(kind="bead stack", drift=g.drift, drift_prior_nm=g.drift_prior_nm, z_scale=g.z_scale,
+                        z_scale_prior=g.z_scale_prior)
     i = model.intensity
     if isinstance(i, PerSliceFactor):
         intensity = dict(kind="per-slice factor", order=i.order, prior_sigma=i.prior_sigma)
@@ -133,7 +136,10 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     its entries at the top) too."""
     channels = [_build_channel(c, device, dtype) for c in config.get("channels", [config])]
     g = config["geometry"]
-    geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"])
+    if g.get("kind") == "in situ":
+        geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"])
+    else:
+        geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"])
     i = config["intensity"]
     intensity = {"bleaching": lambda: Bleaching(i["order"]),
                  "per-slice factor": lambda: PerSliceFactor(i["order"], i["prior_sigma"]),
@@ -160,7 +166,8 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     stage's z scale is not applied: z is the emitter's, not an objective position.  Pixels are
     integrated by summing ``upsample``² sub-samples (default the model's); sample the light at more
     of them for a spline that must not inherit the sampling's error.  ``roi_px`` is the region,
-    an int or (Y, X), default the model's.
+    an int or (Y, X), default the model's.  ``depth_nm``, the emitter's height in the sample (in situ,
+    `InSituGeometry`), is one value or one per position.
     """
     base = model.channels[channel].psf
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
@@ -179,10 +186,27 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
         if len(dz) == 0 or not torch.allclose(dz, dz[0].expand_as(dz), rtol=1e-4, atol=1e-3):
             raise ValueError("include_bead needs one stack with equal z steps")
         step = float(dz[0])
-    depth = None if depth_nm is None else torch.as_tensor(depth_nm, dtype=dt, device=dev).reshape(1)
+    depth = None
+    if depth_nm is not None:
+        depth = torch.as_tensor(depth_nm, dtype=dt, device=dev).reshape(-1)
+        # one depth for every position, or one per position (in situ: the heights through a fixed focus)
+        depth = depth.reshape(1) if depth.numel() == 1 else depth.reshape(1, -1)
     with torch.no_grad():
         # on the CPU, for NumPy, wherever it was computed
         return (model.share(shared, channel) * psf(p, xyz, depth, z_step_nm=step)[0]).cpu()
+
+
+def sample_heights(model: ForwardModel, shared: dict, heights_nm, roi_px=None, upsample: int | None = None,
+                   focus_nm: float | None = None) -> torch.Tensor:
+    """An in situ model's PSF for emitters on the region's centre at ``heights_nm`` above the coverslip,
+    seen through its focus (``focus_nm``, default the learnt ``geometry.focus``): [N, Y, X] on the CPU, as
+    `sample_psf`.  The focus enters as the stage defocus z = −f, the height as the depth in the sample
+    (`InSituGeometry`)."""
+    h = torch.as_tensor(heights_nm, dtype=torch.float64).reshape(-1)
+    f = float(shared["geometry.focus"] if focus_nm is None else focus_nm)
+    xyz = torch.zeros(len(h), 3, dtype=torch.float64)
+    xyz[:, 2] = -f
+    return sample_psf(model, shared, xyz, roi_px, h, upsample=upsample)
 
 
 @dataclass

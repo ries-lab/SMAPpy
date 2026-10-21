@@ -32,9 +32,9 @@ What it needs:
 
 * **A calibration** of this microscope, in this configuration: a z-stack of
   fluorescent beads on a coverslip, turned into a model with
-  the bead calibration window (the *Bead calibration* section of the
-  Localize tab opens it; saving the calibration puts it into this
-  plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well, and
+  the [PSF calibration window](plugin:Panels/PSF calibration) (the *PSF
+  calibration* section of the Localize tab opens it; saving the calibration
+  puts it into this plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well, and
   can be kept as an `.h5` by loading and saving it:
   `save_spline_calibration("beads.h5", load_spline_calibration("beads_3dcal.mat"))`,
   both from `smappy.io.calibration` (SMAP's averaged bead stack is not
@@ -96,7 +96,7 @@ different here is the model, and where it comes from.
 
 **1. The calibration.**  Beads are small and bright, so a bead's image *is*
 the PSF (the point spread function: what the microscope makes of a single
-point of light).  The Bead calibration tool steps the objective through focus
+point of light).  A bead calibration steps the objective through focus
 over a few beads, finds them, aligns their stacks to each other in x, y and z
 below a pixel, averages them, and smooths the average a little along z.  The
 result is the PSF sampled on a grid: one image every *dz* nanometres (the step

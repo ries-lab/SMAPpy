@@ -185,9 +185,12 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
 
 
 def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=None) -> TwinTest:
-    """The twin of ``cal``'s pupil fitted to its used emitters, each localised on the twin first."""
+    """The twin of ``cal``'s pupil fitted to its used emitters, each localised on the twin first.
+
+    Converged to the solver's own tolerance, not stage 1's looser one: stopped early, the twin's optimum is
+    too high, and a start of the wrong sign then passed as agreeing with the data."""
     solver = solver if solver is not None else GaussNewtonLBFGS()
-    sub = batch.subset(torch.tensor(cal.beads.used))
+    sub = on_model_device(batch, model).subset(torch.tensor(cal.beads.used))
     mirrored = twin(model, cal.shared())
     found, _ = localise_from_heights(model, mirrored, sub, noise, heights)
     sub = replace(sub, start=found)

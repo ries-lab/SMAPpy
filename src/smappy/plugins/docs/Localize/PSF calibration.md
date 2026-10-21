@@ -1,18 +1,22 @@
 ---
 version: "1"
-covers: [smappy.calibrate.pupil.run_calibration]
+covers: [smappy.calibrate.pupil.run_calibration, smappy.calibrate.insitu_run.run_insitu]
 ---
 
 ## What it does
 
 A 3D fit needs to know what one molecule looks like at every height: the
 **point spread function** (PSF).  The PSF calibration makes it from bead
-z-stacks by one of two methods: the **bead average** of the
+z-stacks by the **bead average** of the
 [bead calibration](plugin:Localize/Bead calibration), or a **model of the
 microscope's optics** learnt from the same stacks: the objective's pupil, with its
 aberrations written as Zernike modes, from which the PSF at any height follows.
 This is uiPSF (Liu et al. 2024, [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x)),
 re-implemented in PyTorch as uiPSF v2 and run inside SMAPpy.
+
+The same model can also be learnt **in situ**, from the blinking molecules of
+a measurement itself, with no beads: it then includes what the sample adds,
+the spherical aberration that grows with depth above all.
 
 A model is smooth without smoothing, says which aberrations the microscope
 has and how sure it is of each, and shows where it does not fit the data.
@@ -23,10 +27,11 @@ Saved, it is turned into the same kind of
 model file is kept beside it.
 
 This section only opens the [PSF calibration window](plugin:Panels/PSF calibration),
-whose page explains the methods, their settings and what they show.  It will
-replace the *Bead calibration* section once it does everything that one does.
-The pupil model needs PyTorch, an optional part of SMAPpy; without it the
-window says what to type to install it.
+whose page explains the methods, their settings and what they show.  It
+replaces the *Bead calibration* section in the shipped GUI; *Bead calibration*
+is still in the plugin tree (Plugins > Localize) for now.
+The pupil model, from beads or in situ, needs PyTorch, an optional part of
+SMAPpy; without it the window says what to type to install it.
 
 ## References
 

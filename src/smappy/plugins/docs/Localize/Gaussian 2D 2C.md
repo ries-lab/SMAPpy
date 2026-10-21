@@ -39,7 +39,7 @@ What it needs:
   imaged in both halves.  Or choose a file: one written by an earlier run of
   this plugin or by *Analysis/Register/Calibrate transform* (`*_2ct.h5`), or a
   dual-colour [bead calibration](plugin:Panels/Glossary) (a PSF model measured
-  on beads; the *Bead calibration* section of the Localize tab), whose
+  on beads; the *PSF calibration* section of the Localize tab), whose
   transformation is used and whose PSF models are not.  With neither, the run
   asks before it starts.
 

@@ -1,4 +1,7 @@
-"""In situ learning in rounds, and the coverslip edge that pins the focus (M5, step 5)."""
+"""In situ learning in rounds, and the coverslip edge that pins the focus (M5, step 5).
+
+The rounds on whole simulated movies -- a focus started 250 nm off brought back by the edge -- take minutes and
+are a benchmark, not a test: benchmarks/uipsf/synthetic/insitu_movie.py."""
 import numpy as np
 import pytest
 import torch
@@ -49,35 +52,3 @@ def test_moved_is_the_rms_change_in_standard_errors_of_the_change():
     old = {"pupil.phase": torch.zeros(4), "geometry.focus": torch.tensor(700.0)}
     new = {"pupil.phase": torch.tensor([0.01, -0.01, 0.0, 0.0]) * np.sqrt(2), "geometry.focus": torch.tensor(700.0)}
     assert _moved(new, old, sd, sd) == pytest.approx(np.sqrt(2 / 5))
-
-
-@pytest.mark.slow
-def test_the_coverslip_edge_brings_a_focus_started_250_nm_off_to_the_truth():
-    # 300 molecules 0–1400 nm deep, a fifth on the coverslip, 300 frames, the focus started at 450 nm against
-    # 700; two rounds.  ~2.5 min on one core.
-    from smappy.simulate import BlinkingSettings
-
-    import uipsf
-    from test_insitu_rois import FOCUS, OPTICS, I, model_and_shared
-    from uipsf.model import Bleaching, InSituGeometry
-    from uipsf.movie import MovieSettings, simulate_movie
-    from uipsf.workflows.insitu_rounds import RoundSettings, calibrate_insitu
-    model, shared = model_and_shared()
-    s = MovieSettings(size_px=(128, 128), n_frames=300, fluorophores=300, heights_nm=(0.0, 1400.0), on_coverslip=0.2,
-                      illumination_fwhm_px=160.0, seed=1,
-                      blinking=BlinkingSettings(photons=6000.0, photons_std=3000.0, on_time=1.5, blinks=3.0))
-    movie = simulate_movie(model, shared, s)
-    sel = I.InSituSettings(per_bin=10)
-    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, sel)
-    start_model = uipsf.ForwardModel(model.psf, geometry=InSituGeometry(450.0), intensity=Bleaching(order=0))
-    phase = torch.zeros_like(shared["pupil.phase"])
-    phase[1] = 0.4
-    run = calibrate_insitu(start_model, rois, start={"pupil.phase": phase}, selection=sel,
-                           settings=RoundSettings(max_rounds=2))
-    first, last = (r.calibration.calibration for r in (run.rounds[0], run.rounds[-1]))
-    f1, f2 = float(first.shared()["geometry.focus"]), float(last.shared()["geometry.focus"])
-    assert len(run.rounds) == 2 and run.rounds[-1].edge.spike > 0.1
-    assert abs(f2 - FOCUS) < 15 and abs(f2 - FOCUS) < abs(f1 - FOCUS) / 2
-    sd = last.result.std["pupil.phase"]
-    assert torch.all((last.shared()["pupil.phase"] - shared["pupil.phase"]).abs() < 4 * sd)
-    assert run.final.twin.verdict == "agree"

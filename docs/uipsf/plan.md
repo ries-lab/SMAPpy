@@ -1162,6 +1162,15 @@ is measured, not the paraxial n_imm/n_med (1.14 against ~1.6–1.85 at NA 1.43).
 off comes back to within a few nanometres with molecules on the coverslip, ~25 nm without
 (architecture.md, "M5, step 5").
 
+*Done, step 6 (October 2026):* the PSF calibration window's third method, *in situ (blinking molecules)*
+(`smappy.calibrate.psf_methods.InSitu`, `insitu_run`, `insitu_views`), decided with you: movies read in blocks
+(*frames per movie*, 4000); the focus required, with *auto* estimating it from the coverslip's molecules;
+the start's astigmatism as one field when there is no *start from*; *on the coverslip* and *rounds* in the
+form, the detection under *more*; a table of counts, no marks; pages *z bins*, *Rounds and edge*, the
+pupil's and *Model vs data* per height; the spline's z above focus or above the coverslip, a choice, over
+the used heights.  (*auto* is the focus field's empty state, so the field starts on it; required in the
+sense that a value or *auto* is always resolved, never a default.)
+
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
 z bias), so it is not a step before it: build with the defaults below, then on simulations with known

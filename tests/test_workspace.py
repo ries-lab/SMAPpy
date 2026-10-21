@@ -184,24 +184,26 @@ def test_the_window_opens_the_shipped_tabs(window):
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == \
         ["File", "Localize", "Render", "Analysis", "Regions"]
     localize = tab_named(window, "Localize")
-    assert {"Bead calibration", "Gaussian 2D", "Spline 3D"} <= \
-        {s.title for s in localize.sections}
+    titles = {s.title for s in localize.sections}
+    assert {"PSF calibration", "Gaussian 2D", "Spline 3D"} <= titles
+    # the old Bead calibration is a plugin still, no longer pinned: the PSF calibration does what it did
+    assert "Bead calibration" not in titles
 
 
-def test_the_bead_calibration_section_opens_the_window_as_it_was_left(window):
+def test_the_psf_calibration_section_opens_the_window_as_it_was_left(window):
     localize = tab_named(window, "Localize")
     instance = next(i for i in localize.tab.instances
-                    if i.plugin == "Localize/Bead calibration")
+                    if i.plugin == "Localize/PSF calibration")
     localize.open_section(instance.id)
     panel = localize.slots[instance.id].panel
     assert panel.run_button.text() == "Open"
-    assert not panel.form.fields          # single or dual is the window's to ask
+    assert not panel.form.fields          # everything is the window's to ask
     panel.run_button.click()
-    window.calibration_window.mode_box.setCurrentText("Dual colour")
-    window.calibration_window.hide()
+    window.psf_calibration_window.mode_box.setCurrentText("Dual colour")
+    window.psf_calibration_window.hide()
     panel.run_button.click()
-    assert window.calibration_window.isVisible()
-    assert window.calibration_window.is_dual
+    assert window.psf_calibration_window.isVisible()
+    assert window.psf_calibration_window.is_dual
 
 
 def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):

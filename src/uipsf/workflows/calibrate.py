@@ -108,6 +108,20 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     return ForwardModel(channels)
 
 
+def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 2000.0,
+                 device=None, dtype=torch.float32) -> ForwardModel:
+    """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as `bead_model`
+    makes them for a point (no bead's size), molecules in the sample seen through ``focus_nm``
+    (`InSituGeometry`), one photon count each.  The pupil sampling keeps defocus up to ``z_max_nm``, the
+    depths the molecules may be at, from aliasing."""
+    from dataclasses import replace as replaced
+
+    from ..model import Bleaching, InSituGeometry
+    beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0), roi_shape, z_max_nm=z_max_nm,
+                       device=device, dtype=dtype)
+    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm), intensity=Bleaching(order=0))
+
+
 def start_values(model: ForwardModel, previous) -> dict:
     """Shared start values for ``model`` from ``previous`` (a `LearnedPSF` or a `Calibration`).
 
