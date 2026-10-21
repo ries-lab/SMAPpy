@@ -276,14 +276,17 @@ def test_tangent_batches_change_neither_the_normal_equations_nor_the_fit(optics)
         for k in ("H_ss", "H_se", "H_ee", "g_s", "g_e"):
             assert torch.allclose(getattr(ne, k), getattr(ref, k), rtol=1e-11, atol=1e-11), k
     model32, truth32, batch32 = small_beads(optics, n=4, dtype=torch.float32)
-    for solver in (LevenbergMarquardt(), GaussNewtonLBFGS()):
+    # L-BFGS's gradient is summed per chunk in float32, so the fits stop at different points within its
+    # tolerance: a predicted gain below 10⁻³ nats is up to √(2·10⁻³) ≈ 0.045 standard errors from the optimum
+    # (0.005–0.007 on a Mac, 0.0103 on Windows' CI).  LM's chunks change nothing it sums.
+    for solver, bound in ((LevenbergMarquardt(), 0.01), (GaussNewtonLBFGS(), 0.05)):
         fits = [solver.solve(Problem(model32, Poisson(), batch32, chunk_size=c, tangents=t), truth32)
                 for c, t in ((4, 64), (1, 1), (2, 4))]
         a = fits[0].params.physical()
         for f in fits[1:]:
             b = f.params.physical()
             for k in fits[0].std:
-                assert ((a[k] - b[k]).double().abs() / fits[0].std[k]).max() < 0.01, (type(solver).__name__, k)
+                assert ((a[k] - b[k]).double().abs() / fits[0].std[k]).max() < bound, (type(solver).__name__, k)
 
 
 @pytest.fixture(scope="module")
