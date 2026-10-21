@@ -122,8 +122,9 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
             for xi, v, f in zip(x, values, families, strict=True):
                 if f is not None and np.isfinite(v):
                     # black: in the bar's own colour the pale ones (coma 2, spherical 2) could not be read
-                    ax.annotate(f"{v:.{decimals}f}", (xi, v), xytext=(0, 2 if v >= 0 else -2), textcoords="offset points",
-                                ha="center", va="bottom" if v >= 0 else "top", fontsize="x-small", color="k")
+                    ax.annotate(f"{v:.{decimals}f}", (xi, v), xytext=(0, 2 if v >= 0 else -2),
+                                textcoords="offset points", ha="center", va="bottom" if v >= 0 else "top",
+                                fontsize="x-small", color="k")
             ax.margins(y=0.15 if span else 0.05)
             from matplotlib.patches import Patch
             handles += [Patch(color=c, label=f) for f, c in FAMILY_COLOURS.items() if f in families]
