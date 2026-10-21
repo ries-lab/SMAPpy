@@ -137,8 +137,8 @@ class VectorPSF:
         As 1 476 small products per tangent (6 beads) the GPU ran at a few per cent of its peak; laid
         out wide, a tangent costs a fifth of a forward pass on Apple's GPU instead of one.  Sums over a
         middle axis are taken one axis at a time: over two axes at once MPS was 150× slower.  On MPS the
-        per-tangent part goes through `torch.compile` (`device.compiled`), every batch padded to the
-        first one's width so that one shape is compiled: 12 % off the normal equations at 20 beads.
+        per-tangent part goes through `torch.compile` (`device.compiled`), the tangents and emitters padded
+        to powers of two so that few shapes are compiled: 12 % off the normal equations at 20 beads.
         """
         xyz, pad_z, dz = self._stack(xyz, z_step_nm, depth_nm)
         sigma = p["psf.sigma"]
@@ -153,7 +153,13 @@ class VectorPSF:
             WF_im = torch.cat([-WF.imag, WF.real], 2)[:, :, :, None].contiguous()
             E2 = E2 * self.dft.scale
         tangent_intensity = compiled(_tangent_intensity, WF_re.device)
-        width = []
+        E = WF_re.shape[0]
+        fixed = (WF_re, WF_im, By, Bx, E2)
+        if tangent_intensity is not _tangent_intensity:
+            # Compiled for fixed shapes: the emitters padded with zeros to a power of two, so that a run whose
+            # batches come in many sizes (in situ: every localisation, round and twin) compiles a few shapes,
+            # not one per size -- after 8, torch gave up compiling and ran everything uncompiled.
+            fixed = tuple(_pad_dim0(t, _bucket(E)) for t in fixed)
 
         def apply(dA: torch.Tensor) -> torch.Tensor:
             # Built in place as [E, K, 2P, T, F, P], the layout `apply_wide` reads: no copy of the tangents.
@@ -162,11 +168,12 @@ class VectorPSF:
             # Contiguous parts first: strided .real/.imag views made this product 3.5× slower on MPS.
             dr, di = d.real.contiguous(), d.imag.contiguous()
             T = dA.shape[0]
-            if tangent_intensity is not _tangent_intensity:     # compiled: one shape, the first batch's
-                width.append(max(width[-1] if width else 0, T))
-                pad = width[-1] - T
+            if tangent_intensity is not _tangent_intensity:     # compiled: the tangents to a power of two too
+                pad = _bucket(T) - T
                 dr, di = (torch.nn.functional.pad(t, (0, 0, 0, 0, 0, pad)) for t in (dr, di))
-            dI = tangent_intensity(dr, di, WF_re, WF_im, By, Bx, E2)[:, :, :T]   # [E, K, T, Y, X]
+                if per_emitter:
+                    dr, di = (_pad_dim0(t, _bucket(E)) for t in (dr, di))
+            dI = tangent_intensity(dr, di, *fixed)[:E, :, :T]                   # [E, K, T, Y, X]
             return self._image(dI.movedim(2, 0), sigma, pad_z, dz)
 
         return apply
@@ -215,6 +222,18 @@ class VectorPSF:
         before = torch.cat([before[..., :2], (z[:, :1] - steps.flip(0))[..., None]], -1)
         after = torch.cat([after[..., :2], (z[:, -1:] + steps)[..., None]], -1)
         return torch.cat([before, xyz, after], 1)
+
+
+def _bucket(n: int) -> int:
+    """The power of two at or above ``n``: the sizes a compiled kernel is padded to."""
+    return 1 << max(0, int(n) - 1).bit_length()
+
+
+def _pad_dim0(t: torch.Tensor, n: int) -> torch.Tensor:
+    """``t`` with zeros appended along its first axis up to ``n``."""
+    if t.shape[0] >= n:
+        return t
+    return torch.cat([t, t.new_zeros((n - t.shape[0], *t.shape[1:]))])
 
 
 def _tangent_intensity(dr, di, WF_re, WF_im, By, Bx, E2):

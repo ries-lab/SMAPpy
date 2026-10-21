@@ -69,15 +69,28 @@ def localise_from_heights(model, shared: dict, batch, noise, heights) -> tuple[d
     """Every emitter localised on the fixed ``shared`` parameters from each height in ``heights``, the best
     kept: (its start, `Batch.start`'s keys, and its objective [E]).  A linked blink (K frames) is one
     emitter: one position from all its frames, its photons per frame with `PerObservation` ([E, K])."""
+    heights = np.asarray(heights, float)
+    return localise_from_starts(model, shared, batch, noise, np.broadcast_to(heights, (batch.n_emitters,
+                                                                                       len(heights))))
+
+
+def localise_from_starts(model, shared: dict, batch, noise, starts) -> tuple[dict, torch.Tensor]:
+    """`localise_from_heights` with each emitter's own starting heights, ``starts`` [E, S] (NaN: none)."""
     batch = on_model_device(batch, model)
     rough = rough_start(batch, model.pixel_size_nm)
+    starts = np.asarray(starts, float)
     best, found = None, None
-    for h in heights:
+    for k in range(starts.shape[1]):
+        column = starts[:, k]
+        if not np.isfinite(column).any():
+            continue
         xyz = rough["xyz"].clone()
-        xyz[:, 2] = float(h)
+        xyz[:, 2] = torch.as_tensor(np.where(np.isfinite(column), column, np.nanmean(column)), dtype=xyz.dtype,
+                                    device=xyz.device)
         # Through the batch's start, so that every intensity model starts its own parameters from it.
         fit, problem = localise(model, shared, replace(batch, start=dict(rough, xyz=xyz)), noise)
         obj = problem.objectives(fit.params)
+        obj = torch.where(torch.as_tensor(np.isfinite(column)), obj, torch.full_like(obj, float("inf")))
         phys = fit.params.physical()
         photons = phys["emitter.photons"] if "emitter.photons" in phys else phys["emitter.photons_per_slice"]
         here = {"xyz": phys["emitter.xyz"].detach(), "photons": photons.detach(),
@@ -88,8 +101,60 @@ def localise_from_heights(model, shared: dict, batch, noise, heights) -> tuple[d
         better = obj < best
         best = torch.where(better, obj, best)
         on = better.to(here["xyz"].device)
-        found = {k: torch.where(on.reshape(-1, *([1] * (v.dim() - 1))), here[k], v) for k, v in found.items()}
+        found = {k_: torch.where(on.reshape(-1, *([1] * (v.dim() - 1))), here[k_], v) for k_, v in found.items()}
     return found, best
+
+
+#: `width_starts`: the model's widths every this many nm, how many best matches each emitter starts from, and
+#: how far apart two of them must be
+WIDTH_STEP_NM, WIDTH_STARTS, WIDTH_SEPARATION_NM = 25.0, 2, 250.0
+
+
+def width_curve(model, shared: dict, heights, roi: int, photons: float = 3000.0, background: float = 10.0):
+    """(σx², σy²) [H] in px², of SMAPpy's elliptical Gaussian fitted to the model's own spot at ``heights``
+    (noise-free, ``photons`` on ``background`` per pixel): what an emitter's widths say of its height on
+    this model."""
+    from smappy.calibrate.insitu import gaussian
+
+    from ..export import sample_heights
+    spots = sample_heights(model, shared, heights, roi).double().numpy() * photons + background
+    g = gaussian(spots.astype(np.float32))
+    return g["sigma_x_pix"] ** 2, g["sigma_y_pix"] ** 2
+
+
+def width_starts(model, shared: dict, widths, roi: int, span_nm: float | None = None) -> np.ndarray:
+    """Each emitter's starting heights from its Gaussian widths ``widths`` [E, 2] (σx², σy², px², as
+    detection measured them): the `WIDTH_STARTS` heights at least `WIDTH_SEPARATION_NM` apart whose
+    widths on the model are nearest, and the height in focus; [E, WIDTH_STARTS + 1].
+
+    Localising from ten to twenty heights each was most of a run's time; the widths say where an emitter
+    is to within the model's error, and an astigmatic spot's two widths tell above from below focus.  The
+    second match catches what the model gets wrong while it is still rough, the height in focus a spot
+    the Gaussian misread."""
+    focus = float(shared["geometry.focus"])
+    centre = in_focus_height(model, focus)
+    span = HEIGHT_SPAN_NM if span_nm is None else float(span_nm)
+    grid = np.arange(max(0.0, centre - span), centre + span + 1, WIDTH_STEP_NM)
+    cx, cy = width_curve(model, shared, grid, roi)
+    w = np.asarray(widths, float)
+    ok = np.isfinite(cx) & np.isfinite(cy)
+    grid, cx, cy = grid[ok], cx[ok], cy[ok]
+    # relative distance in each width: a width is measured to a fraction of itself
+    d = ((w[:, None, 0] - cx[None]) / cx[None]) ** 2 + ((w[:, None, 1] - cy[None]) / cy[None]) ** 2
+    out = np.full((len(w), WIDTH_STARTS + 1), np.nan)
+    out[:, -1] = centre
+    for e in range(len(w)):
+        if not np.isfinite(d[e]).any():
+            continue
+        order = np.argsort(d[e])
+        taken = []
+        for i in order:
+            if all(abs(grid[i] - grid[j]) >= WIDTH_SEPARATION_NM for j in taken):
+                taken.append(i)
+            if len(taken) == WIDTH_STARTS:
+                break
+        out[e, :len(taken)] = grid[taken]
+    return out
 
 
 def twin(model, shared: dict) -> dict:
@@ -184,15 +249,20 @@ def learn_insitu(model, batch, start: dict | None = None, noise=None, heights=No
     return result
 
 
-def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=None) -> TwinTest:
+def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_size=None,
+             starts=None) -> TwinTest:
     """The twin of ``cal``'s pupil fitted to its used emitters, each localised on the twin first.
 
     Converged to the solver's own tolerance, not stage 1's looser one: stopped early, the twin's optimum is
-    too high, and a start of the wrong sign then passed as agreeing with the data."""
+    too high, and a start of the wrong sign then passed as agreeing with the data.  ``starts`` [E, S], per
+    emitter of ``batch``, replaces the common ``heights`` (`width_starts` on the twin)."""
     solver = solver if solver is not None else GaussNewtonLBFGS()
     sub = on_model_device(batch, model).subset(torch.tensor(cal.beads.used))
     mirrored = twin(model, cal.shared())
-    found, _ = localise_from_heights(model, mirrored, sub, noise, heights)
+    if starts is not None:          # per emitter of ``batch``, [E, S]
+        found, _ = localise_from_starts(model, mirrored, sub, noise, np.asarray(starts)[np.asarray(cal.beads.used)])
+    else:
+        found, _ = localise_from_heights(model, mirrored, sub, noise, heights)
     sub = replace(sub, start=found)
     p = Params(model.specs(sub), sub.n_emitters, dtype=sub.data.dtype, device=sub.data.device, values=mirrored)
     fit = solver.solve(Problem(model, noise, sub, chunk_size), p)

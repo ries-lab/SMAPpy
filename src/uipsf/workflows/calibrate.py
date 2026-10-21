@@ -108,12 +108,14 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     return ForwardModel(channels)
 
 
-def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 2000.0,
+def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
                  device=None, dtype=torch.float32) -> ForwardModel:
     """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as `bead_model`
     makes them for a point (no bead's size), molecules in the sample seen through ``focus_nm``
-    (`InSituGeometry`), one photon count each.  The pupil sampling keeps defocus up to ``z_max_nm``, the
-    depths the molecules may be at, from aliasing."""
+    (`InSituGeometry`), one photon count each.  The pupil sampling keeps defocus up to ``z_max_nm`` from
+    aliasing: the molecules' distance from the plane in focus, not their depth, since the depth's and the
+    focus's waves largely cancel there and the light beyond the critical angle decays rather than
+    aliases.  ±1 µm needs 64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, InSituGeometry

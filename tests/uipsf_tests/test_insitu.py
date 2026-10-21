@@ -232,3 +232,31 @@ def test_the_pupil_is_learnt_from_linked_blinks_with_photons_per_frame(optics):
     assert len(result.calibration.beads.used) >= 7
     assert torch.all((result.calibration.shared()["pupil.phase"] - truth.physical()["pupil.phase"]).abs() < 4 * sd)
     assert result.twin.verdict == "agree"
+
+
+def test_an_emitters_widths_start_it_near_its_height_on_the_true_model(optics):
+    from smappy.calibrate.insitu import gaussian
+
+    from uipsf.workflows.insitu import width_starts
+    model, truth, batch = insitu_emitters(optics, n=12, P=16, roi=(15, 15), photons=4000.0)
+    g = gaussian(batch.data[:, 0, 0].numpy().astype(np.float32))
+    starts = width_starts(model, _shared(truth), np.c_[g["sigma_x_pix"] ** 2, g["sigma_y_pix"] ** 2], 15)
+    h = truth.physical()["emitter.xyz"][:, 2].numpy()
+    nearest = np.nanmin(np.abs(starts - h[:, None]), axis=1)
+    assert starts.shape == (12, 3) and np.mean(nearest < 150) >= 0.9
+
+
+def test_starting_every_emitter_at_the_same_heights_is_localising_from_those_heights(optics):
+    from uipsf.workflows.insitu import localise_from_starts
+    model, truth, batch = insitu_emitters(optics, n=4, P=16, roi=(9, 9))
+    heights = np.array([200.0, 600.0])
+    a, oa = localise_from_heights(model, _shared(truth), batch, Poisson(), heights)
+    b, ob = localise_from_starts(model, _shared(truth), batch, Poisson(), np.tile(heights, (4, 1)))
+    assert torch.allclose(a["xyz"], b["xyz"]) and torch.allclose(oa, ob)
+
+
+def test_the_compiled_kernels_shapes_are_powers_of_two():
+    from uipsf.model.psf import _bucket, _pad_dim0
+    assert [_bucket(n) for n in (1, 3, 4, 5, 300)] == [1, 4, 4, 8, 512]
+    padded = _pad_dim0(torch.ones(3, 2), 4)
+    assert padded.shape == (4, 2) and float(padded[3].abs().sum()) == 0.0

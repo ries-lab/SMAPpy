@@ -1510,11 +1510,23 @@ hand, `benchmarks/uipsf/synthetic/insitu_movie.py`, whose numbers are the ones a
 converge to the solver's own tolerance: stopped at stage 1's looser one, its optimum stayed too high and a
 start of the wrong sign passed as agreeing.
 
-**Speed, open.**  A real run is slow: the window's model samples the pupil at 64 points, every unit is
-localised from 10–20 heights in each round and again for the twin, and on Apple's GPU `torch.compile`
-recompiles the tangents' kernel for every new number of emitters (`device.compiled` pads the tangents, not
-the emitters), which in situ changes all the time.  One round of 33 molecules took 38 s on the CPU, 45 s
-on the GPU.
+**Speed** (October 2026).  A window-sized run -- the window's model, ~300 molecules learnt, ~1500 kept,
+two rounds -- ran for over 40 minutes on Apple's GPU, for three reasons, each fixed:
+
+- *the pupil's sampling*: `insitu_model` asked for defocus up to 2 µm without aliasing, 96 samples; what
+  must not alias is the molecules' distance from the plane in focus (the depth's and the focus's waves
+  largely cancel there), ±1 µm: 64 samples, 2.25 times less work;
+- *recompiling*: on Apple's GPU the tangents' kernel is compiled for fixed shapes, and in situ calls it with
+  a new number of emitters at every localisation, round and twin; after 8 shapes torch stopped compiling.
+  The emitters and tangents are now padded to powers of two (`model.psf._bucket`);
+- *the starts*: every unit was localised from 10–20 heights, the whole pool every round.  Each now starts
+  where the model's own Gaussian widths match its own (`insitu.width_starts`: the two best matches and the
+  height in focus) and where it was found last: 3–4 starts.
+
+After: the same run in 69 s (two rounds, focus 707 nm from 450, truth 700): localising the pool 23 s, the
+first round's localisation 10 s, learning 6 s.  The benchmark (P = 32, CPU) went from 558 s to 96 s and
+from 193 s to 60 s with the same answers -- focus 702 ± 5 and 676 ± 9 nm, the largest Zernike error 3.3σ
+over twenty-odd modes.
 
 **The benchmark's run** (`insitu_movie.jsonl`, 2026-10-21, 4 CPU cores, P = 32): a fifth on the coverslip,
 the focus from 450 nm: 690 ± 29, 704, 700, 705 (± 5) over four rounds, phase within 2.6σ, twin +663 nats,

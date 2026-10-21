@@ -8,6 +8,10 @@ one-sided, only a fit worse than the bin's is out).  It then learns again from t
 emitters started where the localisation put them.  uiPSF v1 repeated too (``repeat``), but chose again
 only among what its first round had kept; here the whole pool is chosen from every round.
 
+**Where each molecule starts.**  Localising every molecule from ten to twenty heights was most of a run's
+time.  Each starts instead where the model's own widths match its Gaussian's (`insitu.width_starts`: the
+two best matches and the height in focus) and, from the second round, where it was found last.
+
 **Stopping.**  When the Zernikes and the focus moved since the last round by no more than their noise,
 rms over them below ``stop_sd`` (1) standard errors of the change, and the edge sits at 0 within its
 error; or after ``max_rounds``.  The twin test runs once, on the last round.
@@ -37,7 +41,16 @@ import torch
 
 from ..model import InSituGeometry
 from ..noise import ShiftedPoisson
-from .insitu import InSituCalibration, learn_insitu, localise_from_heights, start_heights, twin_fit
+from .insitu import (
+    InSituCalibration,
+    learn_insitu,
+    localise_from_heights,
+    localise_from_starts,
+    start_heights,
+    twin,
+    twin_fit,
+    width_starts,
+)
 from .scoring import localise, score_beads
 
 # The edge's outliers are at most 5 %, and a spike must gain 6 nats.  With 20 % and Akaike's 2 the fit
@@ -158,12 +171,16 @@ class InSituRun:
         return self.rounds[-1].calibration
 
 
-def localise_units(model, shared: dict, rois, ids, noise, heights) -> dict:
-    """Every unit ``ids`` of ``rois`` localised on the model's ``shared`` values: its start (`Batch.start`
-    keys), its height and CRLB, photons and mean deviance per pixel."""
+def localise_units(model, shared: dict, rois, ids, noise, heights=None, starts=None) -> dict:
+    """Every unit ``ids`` of ``rois`` localised on the model's ``shared`` values, from ``heights`` (common to
+    all) or ``starts`` [len(ids), S] (each its own): its start (`Batch.start` keys), its height and CRLB,
+    photons and mean deviance per pixel."""
     batch, _ = rois.batch(ids=ids)
     batch = batch.to(dtype=model.psf.grid.rho.dtype)
-    found, _ = localise_from_heights(model, shared, batch, noise, heights)
+    if starts is not None:
+        found, _ = localise_from_starts(model, shared, batch, noise, starts)
+    else:
+        found, _ = localise_from_heights(model, shared, batch, noise, heights)
     fit, _ = localise(model, shared, replace(batch, start=found), noise)
     phys = fit.params.physical()
     photons = phys["emitter.photons"] if "emitter.photons" in phys else phys["emitter.photons_per_slice"].mean(1)
@@ -238,23 +255,32 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
     run = InSituRun()
     ids = rois.ids("used")
     batch, _ = rois.batch(ids=ids)
+    batch = batch.to(dtype=dtype)
+    roi = int(rois.units.regions.shape[-1])
     tell = progress or (lambda entry: None)
+    tell({"message": f"round 1: localising {len(ids)} molecules from their widths", "round": 1})
+    first = full_start(model, batch, start)
+    located, _ = localise_from_starts(model, first, batch, noise, width_starts(model, first, _widths(rois, ids), roi))
     tell({"message": f"round 1: learning from {len(ids)} molecules", "round": 1})
-    cal = learn_insitu(model, batch.to(dtype=dtype), start=start, noise=noise, twin_test=False, progress=progress,
-                       cancel=cancel)
+    cal = learn_insitu(model, batch, start=start, noise=noise, twin_test=False, progress=progress,
+                       cancel=cancel, located=located)
     run.rounds.append(Round(1, ids, cal, list(rois.state)))
     if _stopped(cal):
         return run
     pool = np.flatnonzero(np.array([r is None for r in rois.units.reason]))
     current = model
     history = []                       # (focus, edge shift) of every round that found the edge
+    last_height: dict = {}             # each unit's height where it was last found, a start for the next round
     measured = None                    # focus per height of the coverslip's molecules (`_measured_ratio`)
     for index in range(2, s.max_rounds + 1):
         tell({"message": f"round {index}: localising every molecule on the model", "round": index})
         shared = cal.calibration.shared()
         focus = float(shared["geometry.focus"])
-        heights = start_heights(current, focus)[::max(1, round(s.heights_step_nm / 150.0))]
-        loc = localise_units(current, shared, rois, pool, noise, heights)
+        # each unit from where the model's widths put it, and from where it was found last
+        starts = width_starts(current, shared, _widths(rois, pool), roi)
+        previous = np.array([last_height.get(int(u), np.nan) for u in pool])
+        loc = localise_units(current, shared, rois, pool, noise, starts=np.c_[starts, previous])
+        last_height.update({int(u): float(h) for u, h in zip(pool, loc["h"], strict=True)})
         edge, prior = None, None
         shift = 0.0
         if s.coverslip:
@@ -297,10 +323,31 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
     tell({"message": "the twin test: the mirrored pupil fitted to the same molecules"})
     batch, _ = rois.batch(ids=last.used)
     located = replace(batch.to(dtype=dtype), start=None)
-    heights = start_heights(current, float(cal.calibration.shared()["geometry.focus"]))
-    cal.twin = twin_fit(current, cal.calibration, located, noise, heights)
+    learnt = cal.calibration.shared()
+    heights = start_heights(current, float(learnt["geometry.focus"]))
+    cal.twin = twin_fit(current, cal.calibration, located, noise, heights,
+                        starts=width_starts(current, twin(current, learnt), _widths(rois, last.used), roi))
     run.model = current
     return run
+
+
+def _widths(rois, ids) -> np.ndarray:
+    """[len(ids), 2] the units' Gaussian widths σx², σy² (px²) as detection measured them."""
+    g = rois.units.gauss
+    ids = np.asarray(ids, int)
+    return np.c_[g["sigma_x_pix"][ids] ** 2, g["sigma_y_pix"][ids] ** 2]
+
+
+def full_start(model, batch, start: dict | None) -> dict:
+    """Every shared value of ``model`` for ``batch``, ``start``'s where it gives them (`learn_insitu`'s)."""
+    from ..params import Params
+    base = Params(model.specs(replace(batch, start=_blank(batch))), batch.n_emitters, dtype=model.psf.grid.rho.dtype,
+                  device=model.psf.grid.rho.device)
+    shared = {n: v for n, v in base.physical().items() if base.specs[n].scope == "shared"}
+    for n, v in (start or {}).items():
+        if n in shared and tuple(torch.as_tensor(v).shape) == tuple(shared[n].shape):
+            shared[n] = torch.as_tensor(v, dtype=shared[n].dtype, device=shared[n].device)
+    return shared
 
 
 def _stopped(cal: InSituCalibration) -> bool:
