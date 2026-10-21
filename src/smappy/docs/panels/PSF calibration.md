@@ -415,6 +415,11 @@ molecules, and more noise.
 How close, in widths of the two spots, another molecule may be.  Lower keeps
 more molecules in dense data, and more pairs.
 
+### neighbour light
+A neighbour dimmer than this fraction of a molecule neither rejects it nor is masked in its region.  Lower
+counts more of the faint detections, which on dense data are often background; higher keeps more molecules
+next to dim neighbours.
+
 ### per bin
 At most this many frames from each z bin: about 20 bins times this many
 frames are learnt from.

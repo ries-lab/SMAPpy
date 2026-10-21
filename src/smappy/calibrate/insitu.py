@@ -26,7 +26,9 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
 5. **Overlaps, by the spot's size** (`overlaps`, `neighbour_mask`): with r = ``overlap_k``·σ of each spot
    (3σ), a neighbour in any frame of the blink closer than r_i + r_j rejects all its frames; a farther
    one's disc is masked in the frames it is on in, and a region with more than ``max_masked`` of it masked
-   is rejected.  A blink whose inner frames' photons step by more than ``step_ratio`` (another molecule
+   is rejected.  Only neighbours with at least ``neighbour_fraction`` (a fifth) of the molecule's photons
+   count: on dense real data false detections on the background and faint diffuse patches otherwise did
+   most of the rejecting.  A blink whose inner frames' photons step by more than ``step_ratio`` (another molecule
    switching on or off under it) is rejected too; its first and last frames are partial and not judged.
 6. **Selection** (`select`): a **z proxy** from the summed spot's widths -- σx² − σy² for an astigmatic
    PSF, linear in z, or σx² + σy² for a 2D one, which says |z| -- split into ``bins`` bins.  Per bin:
@@ -76,6 +78,9 @@ class InSituSettings:
                              help="a neighbour within this many of each spot's σ, added, rejects a molecule")
     max_masked: float = param(0.25, label="masked at most", min=0.0, max=1.0, advanced=True,
                               help="the fraction of a region a neighbour's mask may cover")
+    neighbour_fraction: float = param(0.2, label="neighbour light", min=0.0, max=1.0, advanced=True,
+                                      help="a neighbour dimmer than this fraction of the molecule neither "
+                                           "rejects it nor is masked")
     link_k: float = param(2.5, label="linking", unit="sd", min=0.5, advanced=True,
                           help="SMAPpy's precision test for a blink's frames")
     link_dx_px: float = param(1.5, label="linking at most", unit="px", min=0.1, advanced=True,
@@ -273,29 +278,38 @@ def link(frame, x_px, y_px, precision_px, settings: InSituSettings) -> np.ndarra
     return np.unique(ids, return_inverse=True)[1]
 
 
-def _others(frames_of, det_frame, det_blink, blink_id) -> np.ndarray:
-    return np.isin(det_frame, frames_of) & (det_blink != blink_id)
+def _others(frames_of, det_frame, det_blink, blink_id, det_photons=None, photons=None,
+            fraction: float = 0.0) -> np.ndarray:
+    """The detections that count as neighbours: on in ``frames_of``, not of this blink, and -- given the
+    photons -- at least ``fraction`` of this molecule's own."""
+    others = np.isin(det_frame, frames_of) & (det_blink != blink_id)
+    if det_photons is not None and photons is not None and fraction > 0:
+        others &= np.asarray(det_photons) >= fraction * float(photons)
+    return others
 
 
 def overlaps(centre_xy, frames_of, sigma_px, det_frame, det_xy, det_sigma, det_blink, blink_id,
-             settings: InSituSettings) -> bool:
+             settings: InSituSettings, det_photons=None, photons=None) -> bool:
     """Whether another molecule on in ``frames_of`` is closer than r_i + r_j (r = ``overlap_k``·σ of each).
 
     ``centre_xy`` the position, ``sigma_px`` the width of the one judged; the detections of the movie as
-    (frame, xy, width, blink)."""
-    others = _others(frames_of, det_frame, det_blink, blink_id)
+    (frame, xy, width, blink).  Given the photons (``det_photons`` of every detection, ``photons`` this
+    molecule's), a neighbour dimmer than ``neighbour_fraction`` of it does not count: on the dense Zenodo
+    tubulin movie most rejections were by false detections on the background and by clusters of faint
+    ones on a diffuse patch, whose light at the molecule is a few per cent of its own."""
+    others = _others(frames_of, det_frame, det_blink, blink_id, det_photons, photons, settings.neighbour_fraction)
     d = np.hypot(det_xy[others, 0] - centre_xy[0], det_xy[others, 1] - centre_xy[1])
     return bool(np.any(d < settings.overlap_k * (sigma_px + det_sigma[others])))
 
 
 def neighbour_mask(centre_xy, frames_of, det_frame, det_xy, det_sigma, det_blink, blink_id,
-                   settings: InSituSettings) -> np.ndarray:
+                   settings: InSituSettings, det_photons=None, photons=None) -> np.ndarray:
     """[roi, roi] True = used: the region about ``centre_xy`` less every pixel within r_j of another
-    molecule on in ``frames_of``."""
+    molecule on in ``frames_of`` -- one bright enough to count (`overlaps`)."""
     h = settings.roi_px // 2
     yy, xx = np.mgrid[-h:h + 1, -h:h + 1]
     mask = np.ones(yy.shape, bool)
-    others = _others(frames_of, det_frame, det_blink, blink_id)
+    others = _others(frames_of, det_frame, det_blink, blink_id, det_photons, photons, settings.neighbour_fraction)
     for (nx, ny), s in zip(det_xy[others], det_sigma[others], strict=True):
         mask &= np.hypot(xx - (nx - centre_xy[0]), yy - (ny - centre_xy[1])) >= settings.overlap_k * s
     return mask
@@ -350,8 +364,9 @@ def units(frames: np.ndarray, cands: Candidates, g: dict, settings: InSituSettin
                 continue
             # judged on the whole blink: a molecule that overlaps it in any frame rejects all its frames
             reason = "overlap" if overlaps((x, y), fs, float(sigma[rows].max()), cands.frame, det_xy, sigma, ids,
-                                           ids[rows[0]], settings) else None
-            mask = neighbour_mask(c, cands.frame[part], cands.frame, det_xy, sigma, ids, ids[rows[0]], settings)
+                                           ids[rows[0]], settings, g["photons"], g["photons"][rows].max()) else None
+            mask = neighbour_mask(c, cands.frame[part], cands.frame, det_xy, sigma, ids, ids[rows[0]], settings,
+                                  g["photons"], g["photons"][part].max())
             if reason is None and 1 - mask.mean() > settings.max_masked:
                 reason = "masked"
             if reason is None and step:

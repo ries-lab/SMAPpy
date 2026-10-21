@@ -188,3 +188,14 @@ def test_a_molecules_frames_are_held_out_together():
     state = np.array(state).reshape(-1, 3)
     held, used = (state == "held out").any(1), (state == "used").any(1)
     assert held.any() and not (held & used).any()
+
+
+def test_a_neighbour_much_dimmer_than_the_molecule_neither_rejects_nor_masks_it():
+    s = I.InSituSettings()
+    near = dict(det_frame=np.array([0]), det_xy=np.array([[27.0, 20.0]]), det_sigma=np.array([1.5]),
+                det_blink=np.array([1]), blink_id=0, settings=s)
+    assert not I.overlaps((20, 20), np.array([0]), 1.5, **near, det_photons=np.array([100.0]), photons=1000.0)
+    assert I.overlaps((20, 20), np.array([0]), 1.5, **near, det_photons=np.array([500.0]), photons=1000.0)
+    far = dict(near, det_xy=np.array([[29.0, 20.0]]), det_sigma=np.array([1.0]))
+    assert I.neighbour_mask((20, 20), np.array([0]), **far, det_photons=np.array([100.0]), photons=1000.0).all()
+    assert not I.neighbour_mask((20, 20), np.array([0]), **far, det_photons=np.array([500.0]), photons=1000.0).all()

@@ -1604,3 +1604,12 @@ v1 settles at 38 nm with the same data is not known; its pupil, fixed magnitude 
 fit differently, and its 4 bright spots per frame are mostly in focus.
 
 The rounds can keep to heights near focus (`RoundSettings.z_range_nm`, off by default), added for these runs.
+
+**The overlap rule on dense data** (October 2026): a neighbour now counts only with at least a fifth of the
+molecule's photons (`InSituSettings.neighbour_fraction`, *neighbour light*); dimmer ones neither reject nor
+mask.  On tubulin the overlap rejections fell by 9 % (66 369 to 60 598) and the candidates rose by a third,
+with the learnt pupil unchanged (rms against v1 0.021, σ 76/81 nm); on a simulated movie of 1200 molecules
+the used ones stayed molecules (98.8 % against 99.4 %), 13 % with a bright true neighbour within 1.5 µm
+against 10 %, the pupil and focus as before.  So most of the rejections on tubulin are by neighbours at
+least a fifth as bright: the molecules are crowded, or the background's false detections are not much
+dimmer than its dim molecules.

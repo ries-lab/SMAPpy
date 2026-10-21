@@ -87,7 +87,8 @@ when a milestone lands or an item moves.
    v1's, open: measured to be in the in-focus spots, not aliasing, the sample index, our learning or the
    wings; next an NA scan (architecture.md, "Why in situ's blur σ is twice v1's").  Detection on dense
    real data: false detections on background still count as neighbours, and a faint patch splits into
-   several detections that reject each other -- a neighbour should reject only with light of its own.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   several detections that reject each other.  A neighbour now counts only with a fifth of the molecule's
+   light: 9 % fewer overlap rejections on tubulin, a third more candidates, the pupil unchanged.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.
