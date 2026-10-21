@@ -1507,3 +1507,8 @@ localised from 10–20 heights in each round and again for the twin, and on Appl
 recompiles the tangents' kernel for every new number of emitters (`device.compiled` pads the tangents, not
 the emitters), which in situ changes all the time.  One round of 33 molecules took 38 s on the CPU, 45 s
 on the GPU.
+
+**The benchmark's run** (`insitu_movie.jsonl`, 2026-10-21, 4 CPU cores, P = 32): a fifth on the coverslip,
+the focus from 450 nm: 690 ± 29, 704, 700, 705 (± 5) over four rounds, phase within 2.6σ, twin +663 nats,
+558 s; none on the coverslip: 668 ± 34, then 678 ± 9, stopped, twin +568, 193 s.  The focus from the data
+before learning, from a guess of 1000 nm: 735 nm with molecules on the coverslip, 628 without.
