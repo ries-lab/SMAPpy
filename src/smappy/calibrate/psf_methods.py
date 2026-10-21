@@ -233,6 +233,7 @@ class BeadAverage:
     columns = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation", "residual", "state")
     marks_include = False
     has_stack = True
+    has_halves = False              # no Zernikes to give an uncertainty of
 
     def detect(self, paths, dual, inputs, progress=None) -> Detected:
         from .core import collect_beads
@@ -367,6 +368,34 @@ class PupilModel:
                "xy offset (px)")
     marks_include = True
     has_stack = True
+    has_halves = True
+
+    def halves_needed(self, run: Run) -> Optional[str]:
+        """Why *Uncertainty from halves* cannot run on ``run``, or None if it can."""
+        from uipsf.diagnostics import MIN_BEADS
+        used = len(run.result.cal.beads.used)
+        if used < MIN_BEADS:
+            return f"{used} used beads: halves need at least {MIN_BEADS}"
+        return None
+
+    def halves_seconds(self, run: Run, inputs: dict) -> Optional[float]:
+        """About how long one split takes: its two halves are about one calibration of all the beads."""
+        from .pupil import estimate_seconds
+        try:
+            return estimate_seconds(run.result.rois, inputs["optics"], inputs["model"])
+        except Exception:                # an estimate, never a reason not to offer the run
+            return None
+
+    def halves(self, run: Run, inputs: dict, splits: int, progress=None, cancel=None):
+        """`pupil.half_split_uncertainty` of the run, with the optics it was made with; kept on its
+        calibration (``cal.halves``), and saved again into its files when it was saved, so the numbers
+        are in the model file."""
+        from .pupil import half_split_uncertainty
+        optics = run.extra.get("inputs", inputs)["optics"]
+        halves = half_split_uncertainty(run.result, optics, splits, progress=progress, cancel=cancel)
+        if halves is not None and run.saved is not None:
+            self.save_as(run, run.saved)
+        return halves
 
     def detect(self, paths, dual, inputs, progress=None) -> Detected:
         from .pupil import bead_rois, estimate_seconds
@@ -427,7 +456,8 @@ class PupilModel:
         cal = run.result.cal
         from uipsf.diagnostics.figures import PHASE_UNITS
         pages = []
-        for title, draw in figures(cal, reference=run.result.start).items():
+        halves = getattr(cal, "halves", None)            # after *Uncertainty from halves*
+        for title, draw in figures(cal, reference=run.result.start, halves=halves).items():
             if title == "Beads":
                 continue
             if title.startswith("Pupil and Zernikes"):
@@ -439,7 +469,7 @@ class PupilModel:
             else:
                 pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,
-                          table=lambda: zernike_table(cal, reference=run.result.start)))
+                          table=lambda: zernike_table(cal, reference=run.result.start, halves=halves)))
 
         def quality(figure, selected, excluded):
             found = run.extra.get("quality")

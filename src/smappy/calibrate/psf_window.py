@@ -88,6 +88,7 @@ class PSFCalibrationWindow(QMainWindow):
         attach_help(self, "Panels/PSF calibration")
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("SMAPpy - PSF calibration")
+        self.setAcceptDrops(True)           # stacks dropped on it are added (`add_dropped`)
         self.paths: List[str] = [str(p) for p in paths]
         self.method = METHODS[0]
         self.run_result = None
@@ -140,8 +141,15 @@ class PSFCalibrationWindow(QMainWindow):
         self.browse_button.setToolTip("the beads beside the model and the residual, the average or one bead at "
                                       "a time, slice by slice in any direction, in its own window")
         self.browse_button.clicked.connect(self.browse_stack)
+        self.halves_button = QPushButton("Uncertainty from halves...")
+        self._halves_tip = ("learn the calibration again on random halves of its used beads, each from the "
+                            "run's own start, and show how far they disagree beside the CRLB: an error bar "
+                            "that bead-to-bead differences are in too")
+        self.halves_button.setToolTip(self._halves_tip)
+        self.halves_button.clicked.connect(self.halves)
         row.addWidget(self.toggle_button)
         row.addWidget(self.browse_button)
+        row.addWidget(self.halves_button)
         row.addStretch(1)
         tlayout.addLayout(row)
         right.addWidget(table_side)
@@ -170,6 +178,7 @@ class PSFCalibrationWindow(QMainWindow):
         flayout = QVBoxLayout(files)
         flayout.setContentsMargins(0, 0, 0, 0)
         self.file_list = QListWidget()
+        self.file_list.setToolTip("the bead stacks; drop files or folders here (several at once) to add them")
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_list.setMaximumHeight(120)
         flayout.addWidget(self.file_list)
@@ -321,6 +330,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.stop_button.setVisible(pupil)
         self.browse_button.setVisible(self.method.has_stack)
         self.toggle_button.setVisible(getattr(self.method, "marks", True))
+        self.halves_button.setVisible(getattr(self.method, "has_halves", False))
         self.table_hint.setText("beads - space marks a used bead to be excluded"
                                 + (" or a rejected one to be included" if self.method.marks_include else "")
                                 + ", then Calibrate")
@@ -371,6 +381,9 @@ class PSFCalibrationWindow(QMainWindow):
         self.stop_button.setEnabled(self.busy)
         self.save_as_button.setEnabled(done and not self.busy)
         self.browse_button.setEnabled(done)
+        why = self.method.halves_needed(self.run_result) if done and getattr(self.method, "has_halves", False) else None
+        self.halves_button.setEnabled(done and not self.busy and why is None)
+        self.halves_button.setToolTip(why or self._halves_tip)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
 
     # --------------------------------------------------------------- files
@@ -401,6 +414,14 @@ class PSFCalibrationWindow(QMainWindow):
         self._refresh_files()
 
     def add_files(self) -> None:
+        """On a Mac the system's open panel, files and folders together, several at once (`mac_panel`),
+        each sorted as a drop is (`add_dropped`); elsewhere, or should the panel fail, Qt's file dialog."""
+        from ..gui import mac_panel
+        chosen = mac_panel.choose_files_and_folders("Bead stacks: files or folders, several at once",
+                                                    folders.start())
+        if chosen is not None:
+            self.add_dropped(chosen)
+            return
         paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", folders.start(),
                                                 "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)")
         folders.remember(paths, stack=True)
@@ -419,6 +440,38 @@ class PSFCalibrationWindow(QMainWindow):
             self.add_paths(found or paths)
         else:
             self.add_paths(paths)
+
+    def add_dropped(self, paths) -> None:
+        """Files and folders dropped on the window, several at once: what no folder dialog does -- the
+        Mac's and Qt's both take one folder.  Each is searched as *Add folder...* searches (a folder that is
+        a stack is that stack; *search subdirectories* goes deeper); one in which nothing is found is added
+        as it is, for the detection to say what is wrong with it."""
+        paths = [str(p) for p in paths]
+        if not paths:
+            return
+        folders.remember(paths, stack=True)
+        found = []
+        for path in paths:
+            try:
+                hits = [str(p) for p in discover_acquisitions([path], recursive=self.subdirectories.isChecked())]
+            except Exception as error:
+                self.error(error)
+                return
+            found += hits or [path]
+        self.add_paths(found)
+        self.status_bar.showMessage(f"{len(found)} stack{'s' if len(found) != 1 else ''} added from "
+                                    f"{len(paths)} dropped")
+
+    def dragEnterEvent(self, event) -> None:
+        from ..gui import drops
+        if drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        from ..gui import drops
+        paths = drops.local_paths(event.mimeData())
+        event.acceptProposedAction()
+        self.add_dropped(paths)
 
     def remove_paths(self) -> None:
         for item in self.file_list.selectedItems():
@@ -469,6 +522,17 @@ class PSFCalibrationWindow(QMainWindow):
         if kind == "error":
             self._update_buttons()
             self.error(value)
+            return
+        if kind == "halves":
+            self._update_buttons()
+            if value is None:
+                self.status_bar.showMessage("stopped: no uncertainty from halves")
+                return
+            self.status_bar.showMessage(f"uncertainty from {value.n_splits} splits into halves"
+                                        + (f"; saved into {self.run_result.saved.name}"
+                                           if self.run_result.saved is not None else ""))
+            self._show_result(focus=next((t for t in (self.tabs.tabText(i) for i in range(self.tabs.count()))
+                                          if t.startswith("Pupil and Zernikes")), None))
             return
         if kind == "detected":
             self._show_detected(value)
@@ -562,6 +626,37 @@ class PSFCalibrationWindow(QMainWindow):
             run.extra["inputs"] = inputs           # what the next Calibrate compares its settings with
             return method.finish(run, progress)
         self._work("result", work)
+
+    def halves(self, splits=None) -> None:
+        """*Uncertainty from halves*: how many splits, with what it will cost, then 2 x splits cold fits
+        in the worker (`Method.halves`), *Stop* as for a calibration.  ``splits`` given (a test, a
+        script) asks nothing."""
+        run = self.run_result
+        if run is None or not getattr(self.method, "has_halves", False) or self.busy:
+            return
+        why = self.method.halves_needed(run)
+        if why:
+            self.error(ValueError(why))
+            return
+        try:
+            inputs = self._inputs()
+        except ValueError as error:
+            self.error(error)
+            return
+        if splits is None:
+            from PySide6.QtWidgets import QInputDialog
+            per = self.method.halves_seconds(run, run.extra.get("inputs", inputs))
+            cost = f"about {duration(per)} a split, " if per else ""
+            used = len(run.result.cal.beads.used)
+            splits, ok = QInputDialog.getInt(
+                self, "Uncertainty from halves",
+                f"Splits of the {used} used beads into two halves, each half learnt from the run's own start "
+                f"({cost}two fits each).\n3 gives the error bar to about ±40 %, 5 to about ±30 %.", 3, 2, 10)
+            if not ok:
+                return
+        method = self.method
+        self.status_bar.showMessage(f"learning {2 * splits} halves...")
+        self._work("halves", lambda progress: method.halves(run, inputs, int(splits), progress, self._cancel))
 
     # -------------------------------------------------------------- results
     def _clear_pages(self) -> None:

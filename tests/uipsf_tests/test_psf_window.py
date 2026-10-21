@@ -231,6 +231,20 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     wait()
     rows = window.run_result.result.cal.beads.rows
     assert rows[0].state == rows[1].state == "excluded"                          # the first stays out
+    # Uncertainty from halves: on the calibration, its pages, and saved into its model file
+    assert not window.halves_button.isHidden() and window.halves_button.isEnabled()
+    window.halves(splits=2)
+    wait()
+    halves = window.run_result.result.cal.halves
+    assert halves is not None and halves.n_splits == 2
+    used = window.run_result.result.cal.beads.used
+    assert all(sorted(a + b) == sorted(used) for a, b in halves.splits)
+    table = next(page for _, _, page in window.pages if page.title == "Zernike table")
+    columns, rows, *_ = table.table()
+    assert "± halves (rad)" in columns and np.isfinite([r[columns.index("± halves (rad)")] for r in rows]).any()
+    _every_page_draws(window)
+    from uipsf.export import load_model
+    assert load_model(model_path(window.run_result.saved), device="cpu").halves.n_splits == 2
     window.close()
 
 
@@ -239,3 +253,48 @@ def test_the_plugin_opens_the_window_and_refuses_to_run_without_it():
     assert PSFCalibration.window == "psf calibration" and PSFCalibration.changes_locs is False
     with pytest.raises(ValueError, match="run_calibration"):
         PSFCalibration().run(None, PSFCalibration.Settings())
+
+
+def test_several_stack_folders_dropped_together_are_each_added(tmp_path):
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    QApplication.instance() or QApplication([])
+    stacks = []
+    for name in ("bead_z1", "bead_z2", "bead_z3"):
+        folder = tmp_path / name
+        folder.mkdir()
+        tifffile.imwrite(folder / f"{name}.tif", np.zeros((5, 16, 16), np.uint16))
+        stacks.append(folder)
+    window = PSFCalibrationWindow()
+    window.add_dropped(stacks[:2])                       # two folders at once, each a stack
+    assert len(window.paths) == 2
+    assert all(Path(p).parent in stacks[:2] or Path(p) in stacks[:2] for p in window.paths)
+    window.subdirectories.setChecked(True)
+    window.add_dropped([tmp_path])                       # their parent, searched: the third is added
+    assert len(window.paths) == 3
+    window.close()
+
+
+def test_add_files_takes_the_macs_files_and_folders_or_falls_back_to_qts_dialog(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from smappy.gui import mac_panel
+    QApplication.instance() or QApplication([])
+    folder = tmp_path / "bead_z1"
+    folder.mkdir()
+    tifffile.imwrite(folder / "bead_z1.tif", np.zeros((5, 16, 16), np.uint16))
+    single = tmp_path / "bead_z2.tif"
+    tifffile.imwrite(single, np.zeros((5, 16, 16), np.uint16))
+    window = PSFCalibrationWindow()
+    monkeypatch.setattr(mac_panel, "choose_files_and_folders", lambda title="", start="": [str(folder), str(single)])
+    window.add_files()                                   # a folder and a file in one choice
+    assert len(window.paths) == 2
+    asked = []
+    monkeypatch.setattr(mac_panel, "choose_files_and_folders", lambda title="", start="": None)
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames",
+                        lambda *args, **kwargs: asked.append(args) or ([str(tmp_path / "other.tif")], ""))
+    window.add_files()                                   # no panel: Qt's dialog, as before
+    assert len(asked) == 1 and window.paths[-1].endswith("other.tif")
+    window.close()

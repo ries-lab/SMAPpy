@@ -630,6 +630,23 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
     return result
 
 
+def half_split_uncertainty(run: PupilRun, optics: OpticsSettings, splits: int = 3, seed: int = 0,
+                           progress=None, cancel=None):
+    """The window's *Uncertainty from halves*: ``run``'s calibration learnt again on halves of its used
+    beads, ``splits`` complementary pairs, each from the run's own start -- the same ROIs, noise, transforms
+    and settings (`uipsf.diagnostics.half_splits`, which says why).  ``optics`` are the settings the run was
+    made with.  None if cancelled; kept on the calibration (``cal.halves``), so a save writes it."""
+    from uipsf.diagnostics import half_splits
+    rois, cal = run.rois, run.cal
+    halves = half_splits(rois.batch, optics.optics(rois.camera, 2 if run.dual else 1), cal.options,
+                         cal.beads.used, splits=splits, seed=seed,
+                         transforms=[None, rois.transform] if run.dual else None, geometry=rois.geometry,
+                         start=run.start, noise=rois.noise, progress=progress, cancel=cancel)
+    if halves is not None:
+        cal.halves = halves
+    return halves
+
+
 # ------------------------------------------------------------------ fit quality: the beads, refitted
 
 def covered_z_nm(cal, batch) -> tuple[float, float]:

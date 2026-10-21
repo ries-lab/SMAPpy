@@ -875,7 +875,15 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
 - **Figures** (`diagnostics.figures`): `draw_pupil`, `draw_zernikes` (with CRLBs, beside a reference
   model mode by mode), `draw_atlas`, `draw_beads`, each drawing on a figure it is given; `figures(cal,
   reference)` gives them as {title: draw}, for tabs that draw lazily.  They read a `Calibration` or a
-  `LearnedPSF` alike through `zernikes` and `pupil_maps`.
+  `LearnedPSF` alike through `zernikes` and `pupil_maps`.  The phase is drawn in rad, waves or nm
+  (`PHASE_UNITS`, `phase_scale`), and with a `HalfSplits` the half-split uncertainty beside the CRLB.
+- **Half-split uncertainty** (`diagnostics.halves`): `half_splits` learns the calibration again on K
+  complementary random halves of its used beads, each cold from the run's own start with every bead of
+  the half pinned in by a decision, and estimates the full fit's standard deviation as the root mean
+  square of (A − B)/2 (`half_spread`); at least `MIN_BEADS` = 8 used beads.  It sees bead-to-bead
+  differences and an optimiser that does not land in one place, which the CRLB cannot; on simulated
+  beads with an exact model it agrees with the CRLB (median ratio 0.8–0.9 at 3–5 splits).  Kept on the
+  `Calibration` (``halves``) and in the model file (``/model/halves``).
 - Tests: `tests/uipsf_tests/test_calibrate.py`.
 - **smappy makes the batch** (`smappy.calibrate.pupil`, step 2 of §7.5): `read_bead_stacks`, the camera as
   a fit resolves it (`camera_for`), `camera.to_photons`, the read noise and EM excess from `CameraMetadata`

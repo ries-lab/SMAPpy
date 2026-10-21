@@ -152,6 +152,7 @@ class Calibration:
     geometry: dict | None = None           # a split chip as SMAPpy records it (`calibrate.pupil.BeadROIs.geometry`)
     options: object = None                 # the choices it was learnt with (`calibrate.BeadSettings`)
     transform_start: dict | None = None    # pairs: each secondary's transform start, "gaussian" or "pairing"
+    halves: object = None                  # diagnostics.HalfSplits, once asked for: the half-split uncertainty
 
     def shared(self) -> dict:
         return shared_values(self.result.params)

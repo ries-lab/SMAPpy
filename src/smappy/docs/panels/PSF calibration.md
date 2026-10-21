@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_starts, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_starts, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
@@ -283,19 +283,28 @@ status bar warns: the start's sign may have been wrong.
 
 ### bead stacks
 The files or folders of bead z-stacks, all learnt from together; for *in situ*
-the section is *movies*, the measurements' movies.
+the section is *movies*, the measurements' movies.  Several at once -- the
+folders of a few z-stacks, say -- with *Add folder...* (Cmd- or
+Ctrl-click), by dropping files or folders from the Finder or Explorer on the
+window, or on a Mac with *Add files...*, which takes files and folders
+together.
 
 ### Add files...
-Adds stacks one by one.
+Adds stacks.  On a Mac the system's open panel takes files and folders
+together, several at once (Cmd- or Shift-click), so the folders of a few
+z-stacks are added in one go, each searched as *Add folder...* searches it.
+On Windows and Linux it takes files only; drop folders on the window instead.
 
 ### Add folder...
-Adds a folder; with *search subdirectories* ticked, every acquisition inside it.
+Adds folders, several at once; with *search subdirectories* ticked, every
+acquisition inside them.
 
 ### Remove
 Removes the selected entries.
 
 ### search subdirectories
-Whether *Add folder...* looks inside the folder's subfolders.
+Whether *Add folder...*, and a folder dropped on the window, looks inside the
+folder's subfolders.
 
 ### method
 *bead average*, *pupil model (uiPSF)* or *in situ (blinking molecules)*.  The
@@ -470,6 +479,28 @@ as ticked (*model*, *residual*), each on its own contrast.  With *average* the
 average of the used beads; without, a second slider steps through the beads
 one at a time, each moved onto the model as the average is.
 
+### Uncertainty from halves...
+Pupil model, after a calibration, with at least 8 used beads.  Asks how many
+splits (3 by default, 2 to 10) and says about how long one takes, then
+splits the used beads at random into two halves that many times and learns
+each half on its own, from the same start as the run -- its *start from*
+model, or none -- through the same stages, never from the finished fit.  A
+split's two halves are two calibrations from different beads; how far they
+disagree is the uncertainty: each half has twice the full fit's variance, so
+((A − B) / 2)² estimates the full fit's, and the root of its mean over the
+splits is shown.  Inside a half nothing is rejected or held out, so every
+half measures the same beads.  A split costs about one calibration (two
+fits of half the beads); 3 splits give the error bar to about ±40 %, 5 to
+about ±30 %, and more add little when the beads are few, since the splits
+then overlap.  *Stop* stops it.  The result goes into the *Pupil and
+Zernikes* pages and the *Zernike table*, and, when the calibration was
+saved, into its model file.
+
+Against the CRLB it shows what the CRLB leaves out: beads that differ from
+one another, and a learning that does not end in one place from one start.
+It cannot show an error every half shares -- a wrong NA, index or
+wavelength.
+
 ### Use in the Spline 3D fitter
 Puts the saved calibration into the fitter again (it is put there when it is
 saved).  For dual colour, the Spline 3D 2C fitter.
@@ -517,7 +548,12 @@ diagnostics*), explained on its page.  The pupil model's:
   background being unknown too.  It is the precision the beads' photon noise
   allows if the model is right; an error of the model itself -- a wrong NA,
   index or wavelength, or a bead that is not a point -- is not in it, so the
-  real uncertainty can be larger.  The aberrations a calibration is read by have colours
+  real uncertainty can be larger.  After *Uncertainty from halves...* each
+  bar has a second, wider grey whisker, the uncertainty from the halves, and
+  a dot beside it for every half's own value: the whisker says how large the
+  error is, the dots whether one half went its own way.  A grey whisker much
+  longer than the black one says the beads differ more than photon noise
+  explains.  The aberrations a calibration is read by have colours
   of their own -- astigmatism, coma 1 and 2 (radial orders 3 and 5),
   spherical 1 and 2 (orders 4 and 6) -- and their phase values are written
   over the bars.  Each bar is
@@ -529,7 +565,10 @@ diagnostics*), explained on its page.  The pupil model's:
   them, and the legend under the bars names the colours.  A
   difference far beyond the error bars is a change in the microscope.
 - **Zernike table**: the same numbers, every channel's phase -- in radians,
-  waves and nm -- and magnitude with their uncertainties (and the *start from* model's), the key
+  waves and nm -- and magnitude with their uncertainties (and the *start from* model's); after
+  *Uncertainty from halves...* also the halves' uncertainty (*± halves*, in
+  rad and nm, and for the magnitude) and *halves / CRLB*, above 1 where the
+  CRLB is optimistic.  The key
   aberrations' rows in their colours; *Copy* puts the table on the
   clipboard, tab-separated, for a spreadsheet.
 - **Residual atlas**: where the model and the data disagree, grouped by

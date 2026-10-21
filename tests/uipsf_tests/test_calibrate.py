@@ -150,3 +150,37 @@ def test_the_phase_is_shown_in_rad_waves_or_nm_of_the_channels_wavelength(symmet
         assert row[columns.index("phase (waves)")] == pytest.approx(rad / (2 * np.pi), nan_ok=True)
         assert row[columns.index("phase (nm)")] == pytest.approx(rad * 660 / (2 * np.pi), nan_ok=True)
         assert row[columns.index("± (nm)")] == pytest.approx(err * 660 / (2 * np.pi), nan_ok=True)
+
+
+@pytest.mark.slow
+def test_halves_of_simulated_beads_scatter_as_the_crlb_says_and_are_kept_in_the_model_file(beads, tmp_path):
+    import numpy as np
+
+    from uipsf.diagnostics import MIN_BEADS, half_splits, split_beads
+    from uipsf.diagnostics.figures import draw_zernikes, zernike_table
+    from uipsf.export import load_model, save_model
+    settings = BeadSettings(zernike_order=4, magnitude="fixed", blur="fixed", blur_nm=SIGMA)
+    cal = calibrate_beads(beads, OPTICS, settings, device="cpu")
+    used = cal.beads.used
+    pairs = split_beads(used, 3, seed=1)
+    assert all(sorted(a + b) == sorted(used) and not set(a) & set(b) for a, b in pairs)   # complementary
+    assert len({frozenset(map(frozenset, pair)) for pair in pairs}) == 3                     # all different
+    halves = half_splits(beads, OPTICS, cal.options, used, splits=3, seed=1, device="cpu")
+    spread = halves.std["pupil.phase"]
+    crlb = cal.result.std["pupil.phase"].double().numpy()
+    assert halves.values["pupil.phase"].shape == (3, 2, len(crlb)) and np.all(np.isfinite(spread))
+    # an exact model and photon noise only: the halves agree with the CRLB, to the estimate's own ±40 %
+    # at 3 splits (and the few beads); a factor of 3 either way is far outside that
+    ratio = np.median(spread / crlb)
+    assert 1 / 3 < ratio < 3
+    fig = Figure()
+    draw_zernikes(fig, cal, halves=halves)
+    assert fig.axes
+    columns, rows, _ = zernike_table(cal, halves=halves)
+    assert "halves / CRLB" in columns
+    cal.halves = halves
+    save_model(cal, tmp_path / "model.h5")
+    back = load_model(tmp_path / "model.h5", device="cpu").halves
+    assert back.splits == [tuple(p) for p in halves.splits] and np.allclose(back.std["pupil.phase"], spread)
+    with pytest.raises(ValueError, match="at least"):
+        half_splits(beads, OPTICS, cal.options, used[:MIN_BEADS - 1], device="cpu")

@@ -98,11 +98,25 @@ def draw_pupil(fig, source, channel: int = 0, vertical: bool = False, units: str
         ax.set_yticks([])
 
 
+def half_values(halves, source, which: str = "phase", channel: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """(the full fit's sd from the halves [M], every half's value [2K, M]) of ``which`` of ``channel``, in
+    the order of `zernikes`; NaN, and no values, where ``halves`` (a `HalfSplits`) has none."""
+    modes = zernikes(source, which, channel)[0]
+    name = prefix(channel) + f"pupil.{which}"
+    if halves is None or name not in halves.std or not modes:      # no modes: an empty parameter
+        return np.full(len(modes), np.nan), np.zeros((0, len(modes)))
+    return np.asarray(halves.std[name], float), np.asarray(halves.values[name], float).reshape(-1, len(modes))
+
+
 def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label: str = "start",
-                  units: str = "rad") -> None:
+                  units: str = "rad", halves=None) -> None:
     """The phase (in ``units``, `PHASE_UNITS`) and, where there are any, the magnitude Zernikes with their
     CRLBs as error bars; ``reference`` (another `Calibration` or `LearnedPSF`) drawn beside them, mode by
-    mode.  The key aberrations' legend goes below the bars, out of their way."""
+    mode.  The key aberrations' legend goes below the bars, out of their way.
+
+    With ``halves`` (`halves.HalfSplits`), a second, wider whisker on each bar is the uncertainty from the
+    half-split fits, and every half's own value is a dot beside the bar: the whisker says how large, the
+    dots whether one half went its own way."""
     which = [w for w in ("phase", "magnitude") if zernikes(source, w, channel)[0]]
     axes = np.atleast_1d(fig.subplots(len(which), 1, squeeze=False)[:, 0])
     handles = []
@@ -115,6 +129,13 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
         families = [zernike_family(j) for j in modes]
         colours = [FAMILY_COLOURS.get(f, OTHER) for f in families]
         ax.bar(x, values, width, yerr=crlb, capsize=2, color=colours)
+        if halves is not None:
+            spread, each = half_values(halves, source, w, channel)
+            if np.isfinite(spread).any():
+                ax.errorbar(x, values, yerr=spread * factor, fmt="none", ecolor="#444444", elinewidth=2.5,
+                            capsize=6, capthick=1.5, alpha=0.6)
+                for row in each * factor:
+                    ax.plot(x - width / 3, row, ".", color="k", markersize=3, alpha=0.7)
         if w == "phase":
             decimals = {"rad": 2, "waves": 3, "nm": 1}[units]
             # the key aberrations' values on their bars: the numbers a calibration is read by
@@ -139,6 +160,12 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
         if w == "phase" and reference is not None:
             from matplotlib.patches import Patch
             handles.append(Patch(color="#555555", label=reference_label))
+        if w == "phase" and halves is not None:
+            from matplotlib.lines import Line2D
+            handles += [Line2D([], [], color="k", lw=1, label="± CRLB"),
+                        Line2D([], [], color="#444444", lw=2.5, alpha=0.6,
+                               label=f"± halves ({halves.n_splits} splits)"),
+                        Line2D([], [], color="k", marker=".", lw=0, label="each half")]
         ax.axhline(0, color="k", lw=0.5)
         ax.set_xticks(x + (width / 2 if reference is not None else 0))
         ax.set_xticklabels([_label(j) for j in modes], fontsize="small")
@@ -152,15 +179,15 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
 
 
 def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, reference_label: str = "start",
-                            units: str = "rad") -> None:
+                            units: str = "rad", halves=None) -> None:
     """The pupil (`draw_pupil`, one map above the other) on the left, its Zernikes (`draw_zernikes`) on the
     right: the picture and the numbers it is made of, read together, the phase in ``units``."""
     left, right = fig.subfigures(1, 2, width_ratios=[1, 2.4])
     draw_pupil(left, source, channel, vertical=True, units=units)
-    draw_zernikes(right, source, channel, reference, reference_label, units=units)
+    draw_zernikes(right, source, channel, reference, reference_label, units=units, halves=halves)
 
 
-def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]:
+def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[tuple], list]:
     """(columns, rows, colours) of every channel's Zernike coefficients with their CRLBs, and
     ``reference``'s beside them: the numbers of `draw_zernikes`, to read or copy, each key aberration's
     row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted."""
@@ -168,6 +195,9 @@ def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]
     # nm first, the unit an optician reads; rad, what the model fits, and waves after the magnitude
     columns = ["channel", "Noll", "name", "aberration", "n", "m", "phase (nm)", "± (nm)", "magnitude", "±",
                "phase (rad)", "± (rad)", "phase (waves)", "± (waves)"]
+    if halves is not None:
+        # the half-split uncertainty beside the CRLB, and how many CRLBs it is: above 1, the CRLB is optimistic
+        columns += ["± halves (nm)", "± halves (rad)", "halves / CRLB", "magnitude ± halves"]
     if reference is not None:
         columns += ["start phase (rad)", "start magnitude"]
     rows = []
@@ -175,6 +205,10 @@ def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]
         phase = {j: (v, e) for j, v, e in zip(*zernikes(source, "phase", c), strict=True)}
         magnitude = {j: (v, e) for j, v, e in zip(*zernikes(source, "magnitude", c), strict=True)}
         start_phase = start_magnitude = {}
+        half_phase = dict(zip(zernikes(source, "phase", c)[0], half_values(halves, source, "phase", c)[0],
+                              strict=True))
+        half_magnitude = dict(zip(zernikes(source, "magnitude", c)[0],
+                                  half_values(halves, source, "magnitude", c)[0], strict=True))
         if reference is not None:
             start_phase = {j: v for j, v, _ in zip(*zernikes(reference, "phase", c), strict=True)}
             start_magnitude = {j: v for j, v, _ in zip(*zernikes(reference, "magnitude", c), strict=True)}
@@ -186,6 +220,10 @@ def zernike_table(source, reference=None) -> tuple[list[str], list[tuple], list]
             nm = tuple(v * phase_scale(source, c, "nm")[0] for v in radians)
             row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *nm,
                    *magnitude.get(j, nan), *radians, *waves)
+            if halves is not None:
+                spread = half_phase.get(j, float("nan"))
+                row += (spread * phase_scale(source, c, "nm")[0], spread, spread / radians[1],
+                        half_magnitude.get(j, float("nan")))
             if reference is not None:
                 row += (start_phase.get(j, float("nan")), start_magnitude.get(j, float("nan")))
             rows.append(tuple(float(v) if isinstance(v, (np.floating, float)) else v for v in row))
@@ -237,14 +275,14 @@ def draw_beads(fig, cal, selected=()) -> None:
     ax.legend(fontsize="small")
 
 
-def figures(cal, reference=None) -> dict:
+def figures(cal, reference=None, halves=None) -> dict:
     """{title: draw(fig)} for every figure of ``cal``, each a closure that draws when asked, so tabs
     draw lazily; ``reference`` is the model it started from, if any."""
     out = {}
     for c in range(cal.model.n_channels):
         tag = "" if cal.model.n_channels == 1 else f" {c + 1}"
         out[f"Pupil and Zernikes{tag}"] = lambda fig, c=c, units="rad": draw_pupil_and_zernikes(
-            fig, cal, c, reference, units=units)
+            fig, cal, c, reference, units=units, halves=halves)
     if cal.atlas is not None:
         out["Residual atlas"] = lambda fig: draw_atlas(fig, cal.atlas)
     if any(r.field_xy is not None for r in cal.beads.rows):

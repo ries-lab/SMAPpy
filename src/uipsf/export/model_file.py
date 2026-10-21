@@ -38,6 +38,10 @@ read.
 - ``/beads``: the bead table (JSON, `BeadTable.as_dicts`), its thresholds
   and the rejection settings.
 - ``/diagnostics``: the residual atlas and the held-out report (JSON).
+- ``/model/halves``, optional, once a half-split uncertainty was learnt (`diagnostics.halves`): per
+  shared parameter its standard deviation from the halves (``<name>``) and every half's value
+  (``<name>.values``, [K, 2, ...]); the splits' bead ids and the seed as attributes.  A file without it
+  reads as before, so it needs no new version.
 
 JSON rather than one dataset per number: the tables are small and their
 fields grow; a reader of another language still finds plain text.  NaN is
@@ -223,6 +227,7 @@ class LearnedPSF:
     emitters: dict[str, np.ndarray] = field(default_factory=dict)
     geometry: dict | None = None                    # a split chip, as SMAPpy's dual calibration records it
     options: dict = field(default_factory=dict)     # the choices it was learnt with (`BeadSettings`)
+    halves: object = None                           # diagnostics.HalfSplits, if the file has them
 
     def psf(self, xyz_nm, roi_px=None, depth_nm=None, include_bead=False, upsample=None,
             channel: int = 0) -> torch.Tensor:
@@ -302,6 +307,14 @@ def save_model(cal, path) -> None:
             pg[n] = _np(v)
             if n in res.std:
                 cg[n] = _np(res.std[n])
+        halves = getattr(cal, "halves", None)
+        if halves is not None:
+            # optional: a file without it is read as before, so the format's version stays
+            hg = m.create_group("halves")
+            hg.attrs.update(splits=_json(halves.splits), seed=int(halves.seed))
+            for n, v in halves.std.items():
+                hg[n] = np.asarray(v, float)
+                hg[n + ".values"] = np.asarray(halves.values[n], float)
         fg = f.create_group("fit")
         fg.attrs.update(objective=float(res.objective), stop_reason=res.stop_reason, converged=bool(res.converged),
                         iterations=res.iterations, condition=float(res.condition), remaining=float(res.remaining),
@@ -342,6 +355,14 @@ def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
         dev = model.psf.grid.rho.device
         shared = {n: torch.as_tensor(np.asarray(d), dtype=dtype, device=dev) for n, d in f["model/params"].items()}
         crlb = {n: torch.as_tensor(np.asarray(d), dtype=torch.float64) for n, d in f["model/crlb"].items()}
+        halves = None
+        if "halves" in f["model"]:
+            from ..diagnostics.halves import HalfSplits
+            hg = f["model/halves"]
+            names = [n for n in hg if not n.endswith(".values")]
+            halves = HalfSplits([tuple(pair) for pair in _read(hg.attrs["splits"])],
+                                {n: np.asarray(hg[n + ".values"]) for n in names},
+                                {n: np.asarray(hg[n]) for n in names}, int(hg.attrs["seed"]))
         fa = f["fit"].attrs
         fit = dict(objective=float(fa["objective"]), stop_reason=str(fa["stop_reason"]),
                    converged=bool(fa["converged"]), iterations=int(fa["iterations"]),
@@ -355,4 +376,4 @@ def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
                            heldout=_read(f["diagnostics"].attrs["heldout"]),
                            rejection=_read(ba["settings"]), heldout_beads=_read(ba["heldout"]))
     return LearnedPSF(model, shared, crlb, config, fit, beads, thresholds,
-                      diagnostics, emitters, geometry, options)
+                      diagnostics, emitters, geometry, options, halves)
