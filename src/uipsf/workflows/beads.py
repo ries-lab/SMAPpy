@@ -151,6 +151,7 @@ class Calibration:
     heldout_report: object = None          # diagnostics.HeldOutReport, when beads were held out
     geometry: dict | None = None           # a split chip as SMAPpy records it (`calibrate.pupil.BeadROIs.geometry`)
     options: object = None                 # the choices it was learnt with (`calibrate.BeadSettings`)
+    transform_start: dict | None = None    # pairs: each secondary's transform start, "gaussian" or "pairing"
 
     def shared(self) -> dict:
         return shared_values(self.result.params)
@@ -191,8 +192,9 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
     is kept with the calibration and its model file (`smappy.calibrate.pupil.BeadROIs.geometry`).
 
     ``start``, shared values of a previous model of the same microscope (`workflows.calibrate.
-    start_values`), replaces stage 1: every bead is localised on that pupil (`scoring.localise`), scored
-    and judged from that fit, and stage 2 starts from it.  Stage 1 exists to place the beads before the
+    start_values`), replaces stage 1 (`calibrate_beads` passes ``start_stage1`` instead): every bead
+    is localised on that pupil (`scoring.localise`), scored and judged from that fit, and stage 2
+    starts from it.  Stage 1 exists to place the beads before the
     high modes are free (module docstring); a pupil already close to the truth places them better than
     a truncated one, and its scores judge the beads on the whole model.  ``start_stage1`` instead takes
     ``start`` into stage 1, which then runs as without it, from those values (cut to its modes): for a

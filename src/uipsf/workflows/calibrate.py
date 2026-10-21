@@ -21,7 +21,21 @@ microscope database, so that no form offers a default for it.
 **Starting from a previous model** (`start_values`): its coefficients go
 where the new pupil has the same Noll modes, so a model learnt with
 another order or another magnitude choice still starts the new one; what
-the new model fixes (a fixed blur) keeps the new settings' value.
+the new model fixes (a fixed blur) keeps the new settings' value.  It
+starts stage 1 rather than replacing it (`learn_beads(start_stage1=True)`):
+on the lab's M2, each acquisition from each other's model, that took 0.5-0.8
+of a cold fit's time and always reached the optimum, while replacing stage 1
+was slower from a model 0.26 rad off (another camera) and once ended 159 000
+nats up (docs/uipsf/architecture.md, "How a bead fit starts").
+
+**A pair's transform starts from the beads' Gaussian positions**
+(`model.astig.gaussian_start`), not from the pairing's centroids: 2-3x
+closer on simulated pairs (0.11-0.25 px against 0.37-0.59), where a start
+2.5 px off already fails on mirrored pairs; on Zenodo 2ch it kept stage 1
+from stalling.  It replaces a previous model's transform too, which a
+splitter can lose between sessions.  The pairing's stays when too few beads
+give positions in both channels or they fit badly (`GAUSS_MIN_PAIRS`,
+`GAUSS_MAX_RMS_PX`).
 """
 from __future__ import annotations
 
@@ -36,6 +50,28 @@ from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
 from .beads import Calibration, learn_beads
 from .rejection import RejectionSettings
+
+# The Gaussian transform needs enough beads to fix eight entries well, and positions that agree with it:
+# simulated and Zenodo pairs fit it to 0.02-0.1 px, so half a pixel means a bead the Gaussians misread.
+GAUSS_MIN_PAIRS = 6
+GAUSS_MAX_RMS_PX = 0.5
+
+
+def gaussian_transforms(model, batch) -> dict:
+    """Each secondary channel's transform from the beads' Gaussian positions ({c: 3 × 3}), only for the
+    channels where it is trustworthy (`GAUSS_MIN_PAIRS`, `GAUSS_MAX_RMS_PX`); {} for one channel."""
+    if model.n_channels < 2:
+        return {}
+    from ..device import on_model_device
+    from ..model.astig import gaussian_start
+    from .beads import MAX_DZ_NM
+    try:
+        g = gaussian_start(model, on_model_device(batch, model).thinned(MAX_DZ_NM))
+    except (ValueError, RuntimeError):          # a degenerate set of beads: the pairing's stays
+        return {}
+    return {c: H for c, H in g["transform"].items()
+            if g["transform_fit"][c]["pairs"] >= GAUSS_MIN_PAIRS
+            and g["transform_fit"][c]["rms_px"] <= GAUSS_MAX_RMS_PX}
 
 
 def magnitude_modes(n_max: int, kind: str) -> list[int]:
@@ -114,9 +150,10 @@ def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, tran
 
     ``batch`` holds every channel's ROIs ([E, C, K, Y, X], photons; SMAPpy's `calibrate.pupil` makes
     it); ``optics`` one `Optics` per channel; ``transforms`` each secondary channel's starting map to
-    the main one, ``geometry`` the split as SMAPpy records it.  ``start``, a previous model (a
-    `LearnedPSF` or `Calibration` of the same microscope), replaces the first stage
-    (`learn_beads`).  ``warm_start`` is the window's *Recalculate*: the same beads, the previous fit
+    the main one (refitted from the beads' Gaussian positions where they allow it: the module
+    docstring), ``geometry`` the split as SMAPpy records it.  ``start``, a previous model (a
+    `LearnedPSF` or `Calibration` of the same microscope), starts stage 1 (`learn_beads`).
+    ``warm_start`` is the window's *Recalculate*: the same beads, the previous fit
     of this calibration.  ``decisions``, ``progress`` and ``cancel`` as in `learn_beads`."""
     settings = settings if settings is not None else BeadSettings()
     if warm_start is not None:
@@ -126,10 +163,20 @@ def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, tran
         model = bead_model(optics, settings, tuple(batch.data.shape[-2:]), transforms, z_max, device, dtype)
     if model.n_channels != batch.data.shape[1]:
         raise ValueError(f"{model.n_channels} channels of optics for a batch of {batch.data.shape[1]}")
+    found = {}
+    if warm_start is None:
+        found = gaussian_transforms(model, batch)
+        for c, H in found.items():
+            model.channels[c].transform = H
     values = None if start is None or warm_start is not None else start_values(model, start)
+    if values is not None:
+        for c in found:                         # the beads' own transform over the previous model's
+            values.pop(prefix(c) + "transform", None)
     rejection = RejectionSettings(k=settings.rejection_k)
     cal = learn_beads(model, batch, noise, decisions=decisions, warm_start=warm_start, rejection=rejection,
                       heldout=settings.heldout, progress=progress, cancel=cancel, geometry=geometry,
-                      start=values)
+                      start=values, start_stage1=values is not None)
     cal.options = settings
+    if warm_start is None and model.n_channels > 1:
+        cal.transform_start = {c: "gaussian" if c in found else "pairing" for c in range(1, model.n_channels)}
     return cal

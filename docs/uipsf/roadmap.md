@@ -35,6 +35,8 @@ when a milestone lands or an item moves.
   timed); *Calibrate* with a progress bar and the time left; the fit quality and *Model vs data*
   (`calibrate.model_views`: the beads aligned onto the model by their fitted geometry, data, model and
   residual on one scale) after every run, for both methods; Zernikes named by short abbreviations.
+- **How a bead fit starts** (October 2026, plan §10, 5): measured; a previous model starts stage 1, a
+  pair's transform starts from the beads' Gaussian positions (`model/astig.py`).
 - **M6 acceptance:** z slope 0.999 through the whole chain, photons 0.2 % from the bead average's; Spline
   3D and uipsf's own localisation 0.6 nm rms apart on Zenodo.
 - **Studies** (report-2026-10.md): the model choices measured; σ and the magnitude on Zenodo and on the
@@ -53,8 +55,6 @@ when a milestone lands or an item moves.
 4. **Fix: 2ch stalls** with the window's default indices (1.518 / 1.33) and converges with v1's 1.516 / 1.35.
    Stage 1 stops after 4 iterations, 22 M nats up; a transform started from the beads' Gaussian positions
    avoids it in these runs (plan §10, 5), the stall itself remains.
-4a. **Decide the starts** (measured, plan §10, 5): *start from* a previous model into stage 1
-   (`start_stage1`); a pair's transform from the Gaussian positions (`model.astig.gaussian_start`).
 5. **Drift per stack and file** in the bead model (plan §10, 7): a block per file.
 6. **Explain the blur σ** (report: 40–83 nm on M2, 0–32 on M5, cause open): where a blur-free model misses
    (core, wings, rings); a one-sided transfer trail on EMCCDs; at M2, beads at several clock settings.

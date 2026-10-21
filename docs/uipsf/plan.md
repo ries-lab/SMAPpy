@@ -1274,12 +1274,13 @@ The cheap stage terms are defined as components in M2–M3 already, because the 
    - a previous model of the same microscope: **into stage 1** (`learn_beads(start_stage1=True)`), 0.5–0.8
      of the cold fit's time on M2 and always at the optimum, also from a model across a camera change;
      replacing stage 1, as *start from* does now, was slower from a model 0.26 rad off and once ended in a
-     wrong minimum.  Proposed: *start from* takes it into stage 1.  A 665LP model started the 676/37
+     wrong minimum.  Decided and built: *start from* takes it into stage 1.  A 665LP model started the 676/37
      acquisitions as well as their own: no wavelength rescaling needed;
    - two channels: the transform matters.  A start 2.5 px off fails on mirrored pairs, 4.5 px off always;
      the Gaussians' positions start 2–3 × closer than the centroids (0.11–0.25 px) and every fit from
      them converged; on Zenodo 2ch, where the cold fit stalls in stage 1 (roadmap 4), they reached the
-     optimum to ~100 nats.  Proposed: the pairing's transform refitted from the Gaussians' positions;
+     optimum to ~100 nats.  Decided and built: the pairing's transform refitted from the Gaussians' positions
+     (`calibrate.gaussian_transforms`, the pairing's kept when the beads do not fix it);
    - an angle for SMAPpy's elliptical Gaussian is not needed: the astigmatism of the lab's and Zenodo's
      data is Noll 6 to within 0.02 rad;
    - the stage-1 stall on Zenodo 2ch is the solver's or the model's (n_med, roadmap 4), not the start's.

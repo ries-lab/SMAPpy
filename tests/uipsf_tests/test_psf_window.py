@@ -59,7 +59,7 @@ def test_a_run_learns_saves_beside_the_stacks_and_recalculates_into_the_same_fil
     assert off.saved is None and off.calibration is None
     started = run_calibration([stack_file], False, OPTICS, BeadSettings(zernike_order=6), DETECTION, camera=CAMERA,
                               run=RunSettings(start_from=str(run.saved), save_model=False))
-    assert started.start is not None and started.cal.first is None              # its pupil replaced stage 1
+    assert started.start is not None and started.cal.first is not None          # its pupil started stage 1
 
 
 def _window(stack_file, monkeypatch, method):

@@ -92,10 +92,16 @@ def test_a_previous_model_starts_a_higher_order_by_its_noll_modes(symmetric_fixe
     assert "psf.sigma" not in start_values(fixed, symmetric_fixed)   # a fixed blur keeps the settings' value
 
 
-def test_starting_from_a_previous_model_replaces_the_first_stage_and_lands_on_the_truth(beads, symmetric_fixed):
+@pytest.mark.slow
+def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads, symmetric_fixed):
+    """Into stage 1, not instead of it: on the lab's M2 that was faster and never failed, where replacing
+    stage 1 from another camera's model once did (docs/uipsf/architecture.md, "How a bead fit starts")."""
     cal = calibrate_beads(beads, OPTICS, BeadSettings(zernike_order=6), start=symmetric_fixed, device="cpu")
-    assert cal.first is None
-    assert {h["stage"] for h in cal.result.history} == {2}
+    assert cal.first is not None
+    assert {h["stage"] for h in cal.result.history} == {1, 2}
+    # stage 1 began at the previous model's low modes, not at zero
+    assert cal.first.history[0]["objective"] < calibrate_beads(
+        beads, OPTICS, BeadSettings(zernike_order=6), device="cpu").first.history[0]["objective"]
     assert torch.allclose(cal.shared()["pupil.phase"][:4].cpu(), PHASE, atol=0.01)
 
 
@@ -128,6 +134,7 @@ def test_the_zernike_table_holds_the_bars_numbers_and_colours_the_key_aberration
 
 def test_the_phase_is_shown_in_rad_waves_or_nm_of_the_channels_wavelength(symmetric_fixed):
     import numpy as np
+
     from uipsf.diagnostics.figures import draw_zernikes, phase_scale, zernike_table, zernikes
     assert phase_scale(symmetric_fixed, 0, "waves")[0] == pytest.approx(1 / (2 * np.pi))
     assert phase_scale(symmetric_fixed, 0, "nm")[0] == pytest.approx(660 / (2 * np.pi))

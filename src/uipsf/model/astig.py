@@ -351,8 +351,9 @@ def gaussian_start(model, batch, method: str = "gauss_xy", window_nm: float = 50
     `rough_start` dict with each bead's z from the main channel's through-focus fit and x, y the
     Gaussians' mean position over the slices near focus; with several channels its ``dz`` from the
     channels' z), ``transform`` (each secondary channel's map to the main chip from the beads' Gaussian
-    positions in both, a projective fit as SMAPpy's pairing makes it), and ``per_channel`` (the
-    estimates)."""
+    positions in both, a projective fit as SMAPpy's pairing makes it, refitted once without the pairs it
+    fits worst; missing for a channel with fewer than four pairs), ``transform_fit`` (its pairs and RMS
+    residual, px) and ``per_channel`` (the estimates)."""
     from .start import rough_start
     z_nm = batch.z_nm if batch.z_nm.dim() == 1 else batch.z_nm[0]
     px = model.pixel_size_nm
@@ -388,10 +389,23 @@ def gaussian_start(model, batch, method: str = "gauss_xy", window_nm: float = 50
         from smappy.calibrate.dual import fit_projective
         emitters["dz"] = {c: float((found[c]["z"] - main["z"]).median()) for c in range(model.n_channels)}
         pix = torch.tensor(px, dtype=torch.float64)
-        chip0 = batch.roi_xy[:, 0].cpu().double() + xy0 / pix
-        out["transform"] = {}
+        # a bead places the transform only where every channel measured it near focus
+        valid = (w_all.sum(1) > 0).numpy()
+        chip0 = (batch.roi_xy[:, 0].cpu().double() + xy0 / pix).numpy()
+        out["transform"], out["transform_fit"] = {}, {}
         for c in range(1, model.n_channels):
-            chip = batch.roi_xy[:, c].cpu().double() + position(found[c], w_all) / pix
-            h = np.asarray(fit_projective(chip.numpy(), chip0.numpy()), float)
-            out["transform"][c] = h / h[2, 2]
+            chip = (batch.roi_xy[:, c].cpu().double() + position(found[c], w_all) / pix).numpy()
+            keep = valid.copy()
+            for _ in range(2):          # once more without the pairs the first fit leaves > 3 median residuals
+                if keep.sum() < 4:
+                    break
+                h = np.asarray(fit_projective(chip[keep], chip0[keep]), float)
+                h = h / h[2, 2]
+                q = np.c_[chip, np.ones(len(chip))] @ h.T
+                residual = np.linalg.norm(q[:, :2] / q[:, 2:] - chip0, axis=1)
+                keep = valid & (residual <= max(3 * float(np.median(residual[keep])), 0.1))
+            if keep.sum() >= 4:
+                out["transform"][c] = h
+                out["transform_fit"][c] = dict(pairs=int(keep.sum()), of=int(valid.size),
+                                               rms_px=float(np.sqrt(np.mean(residual[keep] ** 2))))
     return out

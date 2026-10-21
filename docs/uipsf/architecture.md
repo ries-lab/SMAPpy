@@ -864,9 +864,14 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
 - **A start from a previous model** (`start=`, a `LearnedPSF` or `Calibration`): `start_values` places its
   coefficients by Noll index, so a model of another order or magnitude choice starts the new one; a free
   blur, the channel transforms, shares and offsets carry over, a fixed blur keeps the settings' value.
-  In `learn_beads` it replaces stage 1: every bead is localised on that pupil (`scoring.localise`),
-  scored and judged from that fit, and stage 2 starts there.  On simulated beads (10 beads, 21 slices,
-  n_max 4 → 6) it reaches the truth to 0.002 rad in 1.9 s against 3.1 s from the data, on the CPU.
+  `calibrate_beads` takes it into stage 1 (`learn_beads(start_stage1=True)`, since October 2026: "How a
+  bead fit starts" below); `learn_beads(start=)` alone still replaces stage 1, every bead localised on
+  that pupil (`scoring.localise`), which is what a richer model started from a simpler one's solution
+  wants.  On simulated beads (10 beads, 21 slices, n_max 4 → 6) replacing stage 1 reached the truth to
+  0.002 rad in 1.9 s against 3.1 s from the data, on the CPU.
+- **A pair's transform** starts from the beads' Gaussian positions (`gaussian_transforms`,
+  `model.astig.gaussian_start`) when at least `GAUSS_MIN_PAIRS` beads give one in both channels and they
+  fit it to `GAUSS_MAX_RMS_PX`, else from the pairing's; `Calibration.transform_start` says which.
 - **Figures** (`diagnostics.figures`): `draw_pupil`, `draw_zernikes` (with CRLBs, beside a reference
   model mode by mode), `draw_atlas`, `draw_beads`, each drawing on a figure it is given; `figures(cal,
   reference)` gives them as {title: draw}, for tabs that draw lazily.  They read a `Calibration` or a
@@ -1213,5 +1218,6 @@ smallest spot it failed with 0.4 rad of spherical, where a fit far from focus co
 - *Bead z:* within 5–15 nm (bright) and 15–30 nm (dim) of the truth, with a common offset of up to 60 nm
   where spherical shifts the focus.
 
-**Decided from it** (proposed, plan §10, 5): a previous model goes into stage 1; the transform of a pair
-starts from the Gaussians' positions; the Gaussian astigmatism and z are not used as a pupil start.
+**Decided from it and built** (plan §10, 5): `calibrate_beads` takes a previous model into stage 1 and
+starts a pair's transform from the Gaussians' positions (above, "The calibration's entry point"); the
+Gaussian astigmatism and z are not used as a start.

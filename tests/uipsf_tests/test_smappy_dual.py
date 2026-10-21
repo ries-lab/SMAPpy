@@ -144,6 +144,7 @@ def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_
     cal = calibrate_beads(batch, [optics, redder], BeadSettings(zernike_order=4),
                           transforms=[None, _from_centroids(batch, None)],
                           geometry={"layout": "up-down mirrored", "main_channel": "upper"}, device="cpu")
+    assert cal.transform_start == {1: "gaussian"}         # refitted from the beads, not the centroids
     run = PupilRun(BeadROIs(batch, None, None, optics.pixel_size_nm, [], []), cal, dual=True)
     q = fit_quality(run)
     K = batch.data.shape[2]

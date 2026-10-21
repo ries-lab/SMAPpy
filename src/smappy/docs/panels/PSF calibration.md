@@ -105,9 +105,14 @@ long as the beads are not detected again.
 **Learning** fits one model to all beads at once: the pupil's Zernike modes
 (shared), an extra blur of the image (shared), and each bead's position,
 brightness and background.  It runs in two stages, the low orders first, then
-all of them.  With *start from*, a previous model of the microscope replaces
-the first stage: every bead is placed on that model's pupil, and learning
-continues from there.
+all of them.  With *start from*, a previous model of the microscope starts
+the first stage: its low orders move with the beads before the higher ones are
+freed, which saves a third to half of the time and is safe even from a model
+of another camera.  For two channels the transformation starts from where an
+elliptical Gaussian fit puts each bead in both channels, slice by slice --
+closer than the bead centres the detection pairs, and never from the previous
+model's, which a splitter can lose between sessions -- unless too few beads
+give a position in both.
 
 **Rejecting beads** by their fit: a bead whose residuals, brightness or
 position stand out from the others by more than *rejection (k)* robust
