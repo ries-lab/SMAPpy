@@ -1343,3 +1343,30 @@ focus 720 nm started at 600): linked and the same 90 frames alone learn the pupi
 The focus came back 590 ± 114 and 553 ± 111 nm (the degeneracy of step 1), the twin test agreed (+56, +52
 nats).  So linking pays in localisation, the start, selection and the rounds, not in the joint fit, where
 the shared pupil already holds each frame in place.
+
+## M5, step 3: simulated blinking movies (October 2026, plan §9 M5; `uipsf/movie.py`)
+
+`movie.simulate_movie(model, shared, MovieSettings)` makes the test data of the steps to come: whole
+frames of molecules blinking at random places and heights, with a truth table (`MovieTruth`: frame,
+molecule, blink, x, y, height, photons).
+
+- *Molecules* uniform over the field, heights uniform in a range, a fraction exactly on the coverslip
+  (`on_coverslip`, for the edge that is to pin the focus).
+- *Blinking* is SMAPpy's model (`smappy.simulate.kinetics.blink` and `emission`), not a second one:
+  continuous-time on, off and bleaching, a frame's photons by the time on in it.
+- *Illumination*: a Gaussian profile on the molecules' photons, not on the background.
+- *Spots*: the model's own PSF, pupil, blur and focus through `InSituGeometry`, rendered in a region of
+  `spot_px` (25) pixels about each spot's pixel; flat background, Poisson noise, optional read noise.
+  Frames are photons.
+
+**A spot cut from the movie is the fit's μ** for that emitter (`test_movie.py`), up to the fit region's
+circular blur: an 11-pixel region is 0.2–0.6 % of the peak off at its edges, under 10⁻⁴ in its centre;
+renders in 25 and 41 pixels agree to 10⁻⁶.  An emitter in water imaged at NA 1.43 puts only ~60 % of its
+"photons" in the frame: the normalisation counts the supercritical light of an emitter at the coverslip,
+which one in the sample never emits.  Photons in the truth are therefore the model's, and a detection's
+photons will be ~0.6 of them away from the coverslip.
+
+**Size and density** (128 × 128 pixels, 1000 frames, 5000 ± 2500 photons per blink over 1.5 frames,
+3 blinks each, P = 64, 4 CPU cores): 2000 molecules give 15 spots per frame (0.06 µm⁻²), 32 % of them
+with another within 1.5 µm, in 2.6 s; 6000 give 45 per frame (0.19 µm⁻²), 70 % with a neighbour, in
+5.8 s.

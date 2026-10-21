@@ -106,6 +106,7 @@ uiPSF2/
 │   │   ├── model_file.py     #   the model file: every Zernike, setting, parameter, diagnostics
 │   │   └── zernike.py        #   conversions to v1 uiPSF / vecfit Zernike conventions
 │   ├── simulate.py           # synthetic data from the ForwardModel, plus the mismatch effects of review §B
+│   ├── movie.py              # blinking movies imaged with a model: in situ's test data (M5)
 │   ├── config/
 │   │   ├── schema.py         #   settings dataclasses (also what SMAPpy builds its form from)
 │   │   ├── build.py          #   settings -> ForwardModel, Problem
@@ -1139,6 +1140,10 @@ its CRLB and the twin test agrees by 62 nats; started with the wrong sign it lea
 *Done, step 2 (October 2026):* linked blinks, one position over K frames with photons per frame
 (`PerObservation`).  Four frames halve the height's CRLB; 300–1000 nm from focus, linking places 1.2–3× as
 many emitters within 100 nm; the joint fit's pupil is as precise either way (architecture.md, "M5, step 2").
+
+*Done, step 3 (October 2026):* simulated blinking movies, `uipsf/movie.py`: SMAPpy's blinking model, the
+model's own PSF per spot (a spot cut from a frame is the fit's μ), a Gaussian illumination, molecules on
+the coverslip, a truth table (architecture.md, "M5, step 3").
 
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
