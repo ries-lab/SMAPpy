@@ -47,6 +47,7 @@ from ..noise import ShiftedPoisson
 from .insitu import (
     INSITU_CHUNK,
     InSituCalibration,
+    in_focus_height,
     learn_insitu,
     localise_from_heights,
     localise_from_starts,
@@ -74,6 +75,7 @@ class RoundSettings:
     heights_step_nm: float = 200.0
     max_xy_offset_px: float = 3.0      # a localisation farther from its region's centre is not chosen
     pool_per_bin: float | None = 3.0   # the units localised each round: at most this times *per bin* per z bin
+    z_range_nm: float | None = None    # only units within this of the height in focus are chosen (None: all)
 
 
 @dataclass
@@ -312,9 +314,12 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         # still fit well, so the deviance does not catch it.  In a dense movie (Zenodo tubulin) such units were
         # most of round 2's choice, and learning then rejected or lost them.
         rejected = [None] * U
+        centre = in_focus_height(current, float(shared["geometry.focus"]))
         for k, u in enumerate(pool):
             if not loc["xy_offset_px"][k] <= s.max_xy_offset_px:
                 rejected[u] = "off centre"
+            elif s.z_range_nm is not None and abs(loc["h"][k] - shift - centre) > s.z_range_nm:
+                rejected[u] = "z range"
         state, _, _ = select(rois.units, sel, proxy=h, photons=N, shape=dev, rejected=rejected, one_sided=True)
         used = np.flatnonzero(np.array([st == "used" for st in state]))
         where = {int(u): k for k, u in enumerate(pool)}

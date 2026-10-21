@@ -1574,3 +1574,33 @@ twenty minutes of swapping.  In situ now computes at most 256 units at a time (`
 Detection was 300 s before: the disc sums only at the candidates, the background's median every 7 frames,
 the greedy merging in arrays (`smappy/calibrate/insitu.py`) took a 200-frame block from 14.5 to 3.9 s.  The
 pool is capped at 3 × *per bin* per z bin (`insitu_rounds._capped_pool`), the same units every round.
+
+## Why in situ's blur σ is twice v1's on tubulin (October 2026, open)
+
+v2's blur σ on Zenodo tubulin is 68–85 nm, v1's ~38 nm (its σ_v1/π · pixel / bin).  What was measured, on the
+same detected molecules (cached, ~1300 frames, per bin 100):
+
+- *Not the model's options.*  σx/σy: magnitude fixed 78/85, symmetric 66/80 (and Noll 6 moved to 1.08 against
+  v1's 0.85: the symmetric magnitude trades with astigmatism here), pixels integrated 2 × 2 as v1 62/76 (the
+  pixel's share, √(p²/12) ≈ 31 nm, is a small part), Zernike order 8 63/77, bright and isolated molecules
+  only 59/71.
+- *Not aliasing.*  Only molecules within ±1.2 µm of focus, the pupil sized for it (80 samples): 77/84.
+- *Not the sample's index.*  Scanned 1.33–1.406 on the same molecules: the matched 1.406 has the best optimum
+  (by 70 nats over 1.39), the lower ones put molecules below the coverslip; σ 67–75 at every index.
+- *Not our learning.*  With v1's own pupil held, letting σ go free gains 2 900 nats and lands at 71/75;
+  holding ours at 38 nm costs 2 500 nats.
+- *Not the dim wings.*  σ fitted with v1's pupil on the spots' central pixels only (radius 2.5, 3.5, 5 px):
+  51/72, 66/83, 59/72.
+- *It is the in-focus spots.*  Per molecule, σ 73 against 38 with v1's pupil: better by 4–8 nats per molecule
+  within 300 nm of focus (for 82–85 % of them), by 0.4 at 600–1000 nm, not at all beyond 1 µm.
+
+σ refitted per third of heights is anisotropic and grows away from focus (e.g. 35/78, 72/81, 119/130), so a
+single σ is a compromise; but the largest gain of the big σ is at focus.  The candidate left: **a lower
+effective NA** -- less light at the pupil's rim widens the in-focus spot and barely changes a defocused one.
+The system relays the pupil onto a deformable mirror (`DM_Li`) whose aperture can clip it, and the
+silicone objective may transmit less at its steepest angles; with the magnitude fixed the model cannot
+narrow the aperture, so σ does.  Next: scan the NA (1.20–1.35) with σ fitted on the same molecules.  Why
+v1 settles at 38 nm with the same data is not known; its pupil, fixed magnitude and least-squares loss
+fit differently, and its 4 bright spots per frame are mostly in focus.
+
+The rounds can keep to heights near focus (`RoundSettings.z_range_nm`, off by default), added for these runs.

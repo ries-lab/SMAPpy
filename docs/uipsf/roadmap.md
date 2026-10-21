@@ -84,7 +84,10 @@ when a milestone lands or an item moves.
    calibration window's third method (movies, the section *in situ*, the focus typed or from the data, its
    pages, the spline above focus or above the coverslip).  **Zenodo `1ch_smlm_tubulin` against v1:** every
    mode within 0.05 rad, 0.018 rad rms, in 4 min on Apple's GPU (v1: 39 min on the CPU); the blur σ twice
-   v1's, open (architecture.md, "M5 on real data").  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   v1's, open: measured to be in the in-focus spots, not aliasing, the sample index, our learning or the
+   wings; next an NA scan (architecture.md, "Why in situ's blur σ is twice v1's").  Detection on dense
+   real data: false detections on background still count as neighbours, and a faint patch splits into
+   several detections that reject each other -- a neighbour should reject only with light of its own.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.
