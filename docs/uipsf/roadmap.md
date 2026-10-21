@@ -113,8 +113,9 @@ and excitation (the donuts of MINFLUX and STED, above).
   - its centre (x, y) on the pupil: the mask's misalignment;
   - its rotation, which turns a double helix;
   - a phase factor α (Φ → αΦ): a mask made for another wavelength does not delay by exactly π;
-  - a scale: the mask's size against the pupil's, when the relay's magnification is not known exactly or the
-    mask does not fill the pupil;
+  - a scale: the mask's size against the pupil's.  Not for the vortex, which looks the same at any size.  For
+    the others it can be calibrated carefully, so it is fixed by default and freed as a diagnostic: a fitted
+    scale far from the calibrated one says the relay or the mask is not what it should be;
   - for the top-hat, its step radius r_th.
 - **To work out:**
   - *Gradients through a jump.* The derivative of a step with respect to its position is a line, not a
@@ -124,9 +125,12 @@ and excitation (the donuts of MINFLUX and STED, above).
   - *Phase wraps.* Written as a transmission exp(iαΦ), a vortex is smooth except at its centre; with α ≠ 1
     its 2π wrap line becomes a real step, which is what an SLM's wrap does.
   - *What trades with what.* A decentred mask looks like coma, a scale error like defocus and spherical
-    aberration, α like a share of the light left in the zero.  Fit the mask's parameters first with the
-    low Zernikes, then free the rest (the two-stage fit of beads, generalised); the covariance shows what is
-    left entangled.
+    aberration, α like a share of the light left in the zero.  **Separate them by taking two calibrations:**
+    one with the mask out, which gives the microscope's own aberrations, then one with the mask in, started
+    from the first with its Zernikes held fixed, fitting only the mask's parameters (centre, rotation, α,
+    and the scale as a diagnostic).  The window's *start from* gets a *keep its aberrations* tick for this.
+    Without a mask-free calibration: fit the mask's parameters with the low Zernikes first, then free the
+    rest (the two-stage fit of beads, generalised); the covariance shows what is left entangled.
   - *A mask off the pupil plane* (a relay not quite conjugate) is a propagation, not a phase: out of scope
     until data ask for it.
   - *SMAPpy:* the double helix's large, rotating spot needs a wider bead box and spline; the window's
