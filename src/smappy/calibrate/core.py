@@ -59,6 +59,12 @@ class CalibrationSettings:
                                             unit="ADU", advanced=True,
                                             help="auto: the integer type's "
                                                  "maximum")
+    # Not in the window yet: a script's, for one channel of a split chip
+    # calibrated as a single channel (M2's 665LP stacks, October 2026)
+    region: Optional[tuple] = param(None, label="region", hidden=True,
+                                    help="(x, y, width, height) in the "
+                                         "stack's pixels: only beads found "
+                                         "inside are used")
 
     @property
     def padding_px(self) -> int:
@@ -268,8 +274,18 @@ def find_peaks(images, settings):
     labels, n = ndimage.label(peaks)
     centers = ndimage.center_of_mass(filtered, labels, np.arange(1, n + 1)) if n else []
     yx = np.rint(centers).astype(int).reshape(-1, 2)
+    region = getattr(settings, "region", None)
+    if region is not None:
+        yx = yx[in_region(yx[:, 1], yx[:, 0], region)]
     heights = filtered[yx[:, 0], yx[:, 1]] - background if len(yx) else np.zeros(0)
     return yx, projection, heights
+
+
+def in_region(x, y, region) -> np.ndarray:
+    """Which of the pixels (x, y) lie in ``region``, (x0, y0, width, height) in the image's pixels."""
+    x0, y0, w, h = region
+    x, y = np.asarray(x), np.asarray(y)
+    return (x >= x0) & (x < x0 + w) & (y >= y0) & (y < y0 + h)
 
 
 def measure_peaks(images, yx, settings, saturation=None, heights=None):

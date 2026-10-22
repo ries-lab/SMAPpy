@@ -48,6 +48,7 @@ ones.  torch is imported only there: this module is imported without torch.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 
@@ -107,6 +108,10 @@ class InSituSettings:
     heldout: float = param(0.1, label="held out", min=0.0, max=0.5, advanced=True,
                            help="the fraction of molecules kept out of learning, for the held-out check")
     seed: int = param(0, label="seed", hidden=True, help="the random draws' seed")
+    # Not in the window yet: a script's, for one channel of a split chip (M2's 665LP movies, October 2026)
+    region: Optional[tuple] = param(None, label="region", hidden=True,
+                                    help="(x, y, width, height) in the movie's pixels: only molecules inside "
+                                         "are used")
 
 
 # ------------------------------------------------------------------ 1, 2: background and detection
@@ -516,7 +521,14 @@ def insitu_units(frames: np.ndarray, settings: InSituSettings, read_noise_var: f
           else np.asarray(background, np.float32))
     cands = detect(frames, bg, settings, read_noise_var)
     kept, g = measure(frames, cands, settings)
-    return units(frames, kept, g, settings), len(cands)
+    u = units(frames, kept, g, settings)
+    if settings.region is not None:
+        # outside a region is a reason like any other: detection and the overlap rule still see the
+        # whole frame, so a molecule inside is judged against its neighbours outside
+        from .core import in_region
+        inside = in_region(u.x_px, u.y_px, settings.region)
+        u.reason = [r if r is not None or ok else "outside the region" for r, ok in zip(u.reason, inside)]
+    return u, len(cands)
 
 
 def concatenate(parts) -> Units:

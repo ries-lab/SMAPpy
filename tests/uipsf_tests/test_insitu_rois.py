@@ -216,3 +216,17 @@ def test_a_neighbour_much_dimmer_than_the_molecule_neither_rejects_nor_masks_it(
     far = dict(near, det_xy=np.array([[29.0, 20.0]]), det_sigma=np.array([1.0]))
     assert I.neighbour_mask((20, 20), np.array([0]), **far, det_photons=np.array([100.0]), photons=1000.0).all()
     assert not I.neighbour_mask((20, 20), np.array([0]), **far, det_photons=np.array([500.0]), photons=1000.0).all()
+
+
+def test_a_region_keeps_only_the_molecules_inside_it_and_judges_them_against_the_whole_frame():
+    # One channel of a split chip: two molecules left, one right, the region the right half.  The left ones
+    # are out for the region, and nothing else changes for the right one.
+    frames = frames_with([(0, 10, 24, IN_FOCUS, 3000.0), (0, 14, 12, IN_FOCUS, 3000.0),
+                          (0, 36, 24, IN_FOCUS, 3000.0)])
+    bg = np.full_like(frames, 10.0)
+    whole, _ = I.insitu_units(frames, I.InSituSettings(), background=bg)
+    half, _ = I.insitu_units(frames, I.InSituSettings(region=(24, 0, 24, 48)), background=bg)
+    right = half.x_px >= 24
+    assert right.sum() == 1 and len(half.reason) == len(whole.reason) == 3
+    assert all(r == "outside the region" for r in np.array(half.reason, object)[~right])
+    assert half.reason[int(np.flatnonzero(right)[0])] == whole.reason[int(np.flatnonzero(whole.x_px >= 24)[0])]
