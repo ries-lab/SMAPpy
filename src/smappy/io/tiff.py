@@ -263,18 +263,12 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
     }
 
 
-def with_microscope(resolution: Resolution, tags: Dict[str, str],
-                    microscope: str = "") -> Resolution:
-    """`resolution` with the file's microscope attached, and its pixel laid
-    over the file's where the entry gives one for the devices' state."""
+def with_microscope(resolution: Resolution, found) -> Resolution:
+    """`resolution` with the file's microscope (a `MicroscopeResolution`) attached, and its
+    pixel laid over the file's where the entry gives one for the devices' state."""
     from dataclasses import replace
 
     from ..camera_db import Source
-    from ..microscope_db import database as microscopes
-    found = microscopes().resolve(tags, microscope=microscope,
-                                  camera=resolution.camera_name, channels=2)
-    if found.microscope is None:
-        return resolution
     resolution = replace(resolution, microscope=found)
     pixel = found.pixel_nm
     if pixel is None:
@@ -310,7 +304,9 @@ def resolve_camera(source: ImageSource, camera: str = "",
 
     `camera` names a database entry to use instead of identifying one, which
     is what a file whose camera carries no identifying tag needs;
-    `microscope` names a microscope the same way.
+    `microscope` names a microscope the same way.  A recognised (or named)
+    microscope brings its camera: a file whose camera says nothing that
+    identifies it is read with the camera the microscope is set up with.
 
     Every camera smappy resolves is resolved here: the fitters through
     `CameraSettings.resolution`, a script through `camera_metadata`.
@@ -318,6 +314,16 @@ def resolve_camera(source: ImageSource, camera: str = "",
     from ..camera_db import Source, database
 
     tags = camera_tags(source)
+    simulated = getattr(source, "camera", None)
+    scope = None
+    if not simulated:
+        from ..microscope_db import database as microscopes
+        known = camera or getattr(database().identify(tags), "name", "")
+        scope = microscopes().resolve(tags, microscope=microscope, camera=known, channels=2)
+        if scope.microscope is None:
+            scope = None
+        elif not camera and not known:
+            camera = scope.camera          # the microscope's camera, for a file that names none
     resolution = database().resolve(tags, camera=camera)
 
     generic = _generic_values(tags)
@@ -334,12 +340,11 @@ def resolve_camera(source: ImageSource, camera: str = "",
         resolution = resolution.overlaid_with(
             {"camera_name": generic.get("camera_name")},
             Source("metadata", "the Micro-Manager device"))
-    simulated = getattr(source, "camera", None)
     if simulated:
         # a simulation knows its camera exactly, which beats any guess
         resolution = resolution.overlaid_with(simulated, SIMULATED)
-    else:
-        resolution = with_microscope(resolution, tags, microscope)
+    elif scope is not None:
+        resolution = with_microscope(resolution, scope)
     if overrides:
         values = overrides if isinstance(overrides, dict) else overrides.to_dict()
         resolution = resolution.overlaid_with(

@@ -104,14 +104,21 @@ device: `state: value; ...`, or `from the name` for a filter.
 The arms of a split, the transmitted one first -- it is the one used alone,
 when the splitting dichroic is out.  Each names the device that holds its
 filter and the half of the chip it lands on: `left`, `right`, `upper`,
-`lower`, or per camera (`iXon 1: right; Evolve 1: upper`), since a camera
-mounted turned puts the arm on another side.  Find it from a dual-colour
+`lower`, for this camera: a camera mounted turned puts the arm on another
+side, which is why a new camera is a new setup.  Find it from a dual-colour
 acquisition of two far-red dyes: the transmitted half is the brighter.
 
-### cameras
-The cameras this microscope has had, by their name in the camera database,
-each with what depends on the pair -- the pixel per state of the 3D lens.  A
-camera's own numbers (conversion, offset) stay in the camera database.
+### camera
+The camera the microscope is set up with, from the camera database.  The pixel
+per state of the 3D lens and the sides of the split are for this camera.  A
+new camera is a new setup: change the camera, the pixel and the sides, save,
+and the setup before is kept as a version for older files.  A file taken with
+a camera the entry's day does not have is read with the setup that had it,
+with a warning.
+
+### Edit camera...
+The camera editor on the chosen camera, and on the file being checked with:
+the camera's own numbers, its conversion and offset per readout mode.
 
 ### Add row
 A row in the table shown.

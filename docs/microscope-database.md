@@ -65,6 +65,57 @@ one, before the Mojo FPGA became MicroFPGA).
   116 × 127 nm, that "700/100" is 700 nm, the NA, the immersion -- these are typed once,
   whatever the import.
 
+## Second round (2026-10-22): one microscope, one control
+
+After using the first GUI, the user's direction, which replaces the per-camera tables of
+the entry and the GUI below wherever they differ:
+
+* **The user sees one thing, the microscope**, and only the parts the function at hand
+  uses.  The camera database stays, as a library of cameras the microscope is set up
+  with; nobody chooses between a camera and a microscope in a fitter.
+* **A microscope has one camera.**  A new camera is a reprogramming of the microscope --
+  the camera, the pixel per state of the 3D lens, the sides of the split -- and the
+  setup as it was is kept as a dated version, so older files are read as they were
+  taken.  M2: the iXon now, the Evolve as a version until 2026-07-15.  The camera that
+  took a file is still recognised by its serial number: when it is not the version's,
+  the file's camera wins, with a warning (a camera swapped before the entry was).
+* **The split lives in the microscope**: the arms, each one's filter and its half of the
+  chip.  Single or dual is still the function's choice.
+* **Read noise is the camera's**, shown only where a fit uses it: the fitters add it to
+  the likelihood for a camera without EM gain (`CameraMetadata.readout_variance`, zero
+  with EM gain on purpose); if a fit comes to use it with EM gain too, there as well.
+  **Frame time is metadata**: kept with the table, no setting.
+* **One control everywhere** -- *PSF calibration*, every fitter, in situ -- replacing the
+  fitters' camera part: a line, *M2 · iXon 1 · 3DA on · 127 × 116 nm*, grey when all
+  that the function uses is known, orange when something is missing, marked when no
+  microscope was recognised and **the last one used** stands in.  *Microscope...* opens
+  one window, the same everywhere: the microscope (recognised, chosen, or the last
+  used), the camera (the microscope's, or chosen when the file's is not known), and
+  **only the values the function uses**, each with its value and its source.  They are
+  locked; **a lock opens the editing** -- one small lock, not a tick per value -- and an
+  edited value is shown in another colour, kept with the run's settings (chains and
+  batches), the rest still resolved.  *Microscope manager...* below.  Expanded in a
+  fitter, the control shows the same rows.
+* **What each function uses**, declared by it:
+
+  | function | shown |
+  |---|---|
+  | Gaussian and other 2D fitters | conversion, offset, EM gain, pixel; read noise for a camera without EM gain |
+  | Spline 3D, bead-average calibration | the same |
+  | a fit with a uiPSF model | the same: the model carries the optics |
+  | PSF calibration (beads) | NA, immersion, emission per arm, pixel, the camera's numbers |
+  | in situ | as the beads |
+
+  Every fit with a calibration -- spline or uiPSF model -- checks the calibration's
+  microscope state against the data's and **warns, naming what differs**; it runs
+  anyway.  A missing value blocks only a function that uses it.  Parameters to come
+  (a microscope's default pupil magnitude for in situ) join this table when they exist.
+* **The manager**, from the menu: per microscope its identifying tags, its **camera**
+  (chosen from the library, *Edit camera...* a button away), devices, parameters, the
+  split, versions.  The camera buttons leave the Localize tab.
+* **Old settings still read**: a chain's or a GUI file's `camera.conversion` and the like
+  become edited values of the new control, its `camera.camera` the camera chosen.
+
 ## The decision: a microscope database beside the camera database
 
 **It does not replace the camera database; it sits above it.**  What belongs to the camera
@@ -114,17 +165,16 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
    "NA": 1.43,
    "n_immersion": 1.518,
    "wavelength_nm": {"device": "filter", "values": "from the name"},
-   "modality": {"device": "3D lens", "values": {"in": "astigmatic", "out": "2D"}}},
+   "modality": {"device": "3D lens", "values": {"in": "astigmatic", "out": "2D"}},
+   "pixel_nm": {"device": "3D lens", "values": {"in": [127, 116], "out": [127, 127]}}},
  "channels": {"transmitted": {"filter": "2C transmitted", "side": "right"},
               "reflected":   {"filter": "2C reflected",   "side": "left"}},
- "cameras": {
-   "Evolve 1": {"pixel_nm": {"device": "3D lens",
-                             "values": {"in": [116, 127], "out": [127, 127]}}},
-   "iXon 1":   {"pixel_nm": {"device": "3D lens",
-                             "values": {"in": [127, 116], "out": [127, 127]}}}},
- "versions": [{"until": "2025-12-31", "devices": {"3D lens": {"tag": "Servos-Position1",
-                                                             "read": "nearest",
-                                                             "states": {"in": 37000, "out": 4000}}}}]}
+ "camera": "iXon 1",
+ "versions": [{"until": "2026-07-15", "camera": "Evolve 1",
+               "parameters": {"pixel_nm": {"device": "3D lens",
+                                           "values": {"in": [116, 127], "out": [127, 127]}}},
+               "channels": {"transmitted": {"filter": "2C transmitted", "side": "upper"},
+                            "reflected": {"filter": "2C reflected", "side": "lower"}}}]}
 ```
 
 * **`identify`**: tags that must all match, chosen from devices that stay with the
@@ -162,11 +212,10 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   channel's over the whole chip, the dichroic being out.  A microscope without a split
   has no `channels` and takes the `wavelength_nm` parameter.  Telling the two apart from
   the images (two copies of each spot, side by side) is possible and left out.
-* **`cameras`**: the cameras this microscope has had, by their name in the camera
-  database, each with the parameters that depend on the pair -- the pixel and its
-  orientation.  They override the microscope's.  Which one applies is read from the file:
-  the camera database recognises the camera by its serial number, so no dates are typed.
-  A camera's name is ours to choose and is not a microscope's: *iXon 1*, *iXon 2*,
+* **`camera`** (second round; first `cameras`, a table per camera): the camera the
+  microscope is set up with, by its name in the camera database.  The pixel per state of
+  the 3D lens and the sides of the split are the microscope's own parameters, for that
+  camera; a new camera is a new version.  A camera's name is ours to choose and is not a microscope's: *iXon 1*, *iXon 2*,
   *Evolve 1*.  The shipped entries named by microscope (*M1 Andor*, the iXon 8172 now on
   M2) are renamed so, the old name kept as an alias that saved settings and chains still
   find.
@@ -177,8 +226,8 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   kept.  The date is the new EMU configuration file's modification date when the import
   reads one cleanly -- closer to when the microscope changed than the day smappy is told
   -- and otherwise the day it is saved; either is editable.  Midpoint splitting absorbs a small re-trim without any of this; a version is for
-  the change it does not absorb.  (The example's version is the old M2 configuration's
-  3DA; its date is illustrative -- the January 2026 files already read 28000.)
+  the change it does not absorb.  A version may hold the camera too: the example's is M2
+  with the Evolve, until the iXon came (between 2026-07-09 and 07-23).
 
 **What is resolved**: the NA, the immersion, sample and coverslip indices, the wavelength
 (per channel), the pixel per axis, the modality (2D, astigmatic, later a phase mask), and
@@ -190,9 +239,8 @@ because it is what a calibration is matched by.
 1. **Which microscope**: the entry whose `identify` the file matches, or the one chosen;
    and **which version of it**: the current one, or the oldest whose `until` is after the
    file's `StartTime` (a file without a date gets the current one, and says so).
-2. **Which camera**: the camera database's, as now; its name picks the entry's camera
-   parameters.  A camera the entry does not list is a warning (the pixel is then the
-   camera database's), not an error.
+2. **Which camera**: the version's.  The camera database still recognises the file's by
+   its serial number; when that is another one, the file's wins, with a warning.
 3. **Each device's state**, by name, with its source: `3D lens: in (Servos-Position1 =
    28000)`.
 4. **Each parameter**, from its value or its device's state.
@@ -359,7 +407,7 @@ completed by hand, checked against the bead stacks of 260105, 260821, 260829, 26
   another state ("3DA: on for the beads, off for the data"); lasers and lamps are not
   compared (`io.calibration.microscope_differences`).
 
-## The GUI (decided and built 2026-10-22)
+## The GUI (first round, built 2026-10-22; replaced by the second round above)
 
 Little space where files are opened, the manager elsewhere:
 

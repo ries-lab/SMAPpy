@@ -458,7 +458,7 @@
   "microscopes": [
     {
       "name": "M2",
-      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. The pixel per camera and lens state was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000.",
+      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. Set up with the iXon since July 2026 (the last Evolve stack 2026-07-09, the first iXon one 07-23; the Evolve kept as a version until 07-15). The pixel per lens state, for each camera, was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000.",
       "identify": {
         "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644"
       },
@@ -575,56 +575,63 @@
             "on": "astigmatic",
             "off": "2D"
           }
+        },
+        "pixel_nm": {
+          "device": "3DA",
+          "values": {
+            "on": [
+              127,
+              116
+            ],
+            "off": [
+              127,
+              127
+            ]
+          }
         }
       },
       "channels": {
         "transmitted": {
           "filter": "Channel 1 (transmitted)",
-          "side": {
-            "iXon 1": "right",
-            "Evolve 1": "upper"
-          }
+          "side": "right"
         },
         "reflected": {
           "filter": "Channel 2 (reflected)",
-          "side": {
-            "iXon 1": "left",
-            "Evolve 1": "lower"
-          }
+          "side": "left"
         }
       },
-      "cameras": {
-        "iXon 1": {
-          "pixel_nm": {
-            "device": "3DA",
-            "values": {
-              "on": [
-                127,
-                116
-              ],
-              "off": [
-                127,
-                127
-              ]
+      "camera": "iXon 1",
+      "versions": [
+        {
+          "until": "2026-07-15",
+          "camera": "Evolve 1",
+          "parameters": {
+            "pixel_nm": {
+              "device": "3DA",
+              "values": {
+                "on": [
+                  116,
+                  127
+                ],
+                "off": [
+                  127,
+                  127
+                ]
+              }
             }
-          }
-        },
-        "Evolve 1": {
-          "pixel_nm": {
-            "device": "3DA",
-            "values": {
-              "on": [
-                116,
-                127
-              ],
-              "off": [
-                127,
-                127
-              ]
+          },
+          "channels": {
+            "transmitted": {
+              "filter": "Channel 1 (transmitted)",
+              "side": "upper"
+            },
+            "reflected": {
+              "filter": "Channel 2 (reflected)",
+              "side": "lower"
             }
           }
         }
-      }
+      ]
     },
     {
       "name": "M5",
@@ -746,9 +753,7 @@
           "filter": "filter wheel 2"
         }
       },
-      "cameras": {
-        "Fusion BT 1": {}
-      }
+      "camera": "Fusion BT 1"
     }
   ]
 }

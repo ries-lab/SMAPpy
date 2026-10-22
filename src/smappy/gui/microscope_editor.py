@@ -127,11 +127,8 @@ TABS = (
      "NA, n_immersion, wavelength_nm, pixel_nm, modality ...: a value, or a device it follows "
      "and 'state: value; ...' ('from the name' reads a filter's band)"),
     ("channels", ["arm", "filter", "side"],
-     "the arms of a split, transmitted first: the filter device each follows and the half of "
-     "the chip it lands on (left, right, upper, lower), per camera as 'iXon 1: right; ...'"),
-    ("cameras", ["camera", "parameter", "follows", "value"],
-     "the cameras this microscope has had, by their name in the camera database, with what "
-     "depends on the pair (the pixel per state of the 3D lens)"),
+     "the split: its arms, transmitted first, the filter device each follows and the half of "
+     "the chip it lands on with this camera (left, right, upper, lower)"),
 )
 
 
@@ -174,7 +171,22 @@ class MicroscopeManager(QWidget):
         form.addRow("name", self.name)
         self.comment = QLineEdit()
         form.addRow("comment", self.comment)
+        camera_row = QHBoxLayout()
+        self.camera = QComboBox()
+        self.camera.setToolTip("the camera the microscope is set up with, from the camera "
+                               "database; a new camera is a new setup: save, and the old one is "
+                               "kept for older files")
+        camera_row.addWidget(self.camera, 1)
+        self.camera_button = QPushButton("Edit camera...")
+        self.camera_button.setToolTip("the camera editor: the camera's conversion and offset per "
+                                      "readout mode, on the file being checked with")
+        self.camera_button.clicked.connect(self.edit_camera)
+        camera_row.addWidget(self.camera_button)
+        form.addRow("camera", camera_row)
         right.addLayout(form)
+        self._fill_cameras("")
+        self.camera.activated.connect(lambda _: self.check())
+        self._camera_editor = None
 
         self.tabs = QTabWidget()
         self.tables: Dict[str, QTableWidget] = {}
@@ -237,6 +249,31 @@ class MicroscopeManager(QWidget):
             self.check_file(path)
         self.resize(1000, 640)
 
+    def _fill_cameras(self, current: str) -> None:
+        from ..camera_db import database as cameras
+        self.camera.clear()
+        self.camera.addItem("(none)", "")
+        names = cameras(reload=False).names()
+        for name in names:
+            self.camera.addItem(name, name)
+        if current and current not in names:
+            found = cameras().get(current)             # a former name of a camera
+            current = found.name if found is not None else current
+            if self.camera.findData(current) < 0:
+                self.camera.addItem(current, current)
+        self.camera.setCurrentIndex(max(self.camera.findData(current), 0))
+
+    def edit_camera(self) -> None:
+        """The camera editor on the chosen camera and the file being checked with."""
+        from ..camera_db import database as cameras
+        from .camera_editor import open_editor
+        first = self._camera_editor is None
+        self._camera_editor = open_editor(self._metadata or None,
+                                          cameras().get(self.camera.currentData() or ""),
+                                          self, self._camera_editor)
+        if first:
+            self._camera_editor.saved.connect(lambda name: (self._fill_cameras(name), self.check()))
+
     # -------------------------------------------------------------- the list
     def refresh_list(self, select: str = "") -> None:
         mine = set()
@@ -279,11 +316,7 @@ class MicroscopeManager(QWidget):
         for channel in entry.channels:
             side = map_text(channel.side) if isinstance(channel.side, dict) else channel.side
             _put(self.tables["channels"], [channel.name, channel.filter, side])
-        for camera, parameters in entry.cameras.items():
-            if not parameters:
-                _put(self.tables["cameras"], [camera, "", "", ""])
-            for name, raw in parameters.items():
-                _put(self.tables["cameras"], [camera, name, *follows_text(raw)])
+        self._fill_cameras(entry.camera)
         for table in self.tables.values():
             table.blockSignals(False)
         self._versions = list(entry.versions)
@@ -308,12 +341,6 @@ class MicroscopeManager(QWidget):
                 "read": read.strip() or "exact", "states": parse_map(states, values=False),
                 **({"tolerance": float(tolerance)} if tolerance.strip() else {}),
                 **({"emu": emu.strip()} if emu.strip() else {})}
-        cameras: Dict[str, Dict[str, Any]] = {}
-        for camera, name, device, value in rows("cameras"):
-            if camera.strip():
-                table = cameras.setdefault(camera.strip(), {})
-                if name.strip():
-                    table[name.strip()] = parse_follows(device, value)
         raw = {
             "name": self.name.text().strip(), "comment": self.comment.text().strip(),
             "identify": {tag.strip(): value.strip() for tag, value in rows("identify") if tag.strip()},
@@ -324,7 +351,7 @@ class MicroscopeManager(QWidget):
                                        "side": parse_map(side, values=False) if ":" in side
                                        else side.strip()}
                          for arm, filter_, side in rows("channels") if arm.strip()},
-            "cameras": cameras, "versions": self._versions,
+            "camera": self.camera.currentData() or "", "versions": self._versions,
         }
         return Microscope.from_dict(raw)
 

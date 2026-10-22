@@ -161,28 +161,50 @@ def test_a_filter_without_a_band_in_its_name_is_missing():
 
 # ------------------------------------------------------- cameras, channels
 
-def test_the_camera_that_took_the_file_sets_the_pixel():
-    scope = a_microscope(cameras={
-        "iXon 1": {"pixel_nm": {"device": "3D lens",
-                                "values": {"in": [127, 116], "out": [127, 127]}}},
-        "Evolve 1": {"pixel_nm": {"device": "3D lens",
-                                  "values": {"in": [116, 127], "out": [127, 127]}}}})
-    assert scope.resolve(M2_BEADS, camera="iXon 1").pixel_nm == (127.0, 116.0)
-    evolve = scope.resolve(M2_EVOLVE, camera="Evolve 1")
-    assert evolve.pixel_nm == (116.0, 127.0)
-    assert "with Evolve 1" in evolve.sources["pixel_nm"].detail
+def setups(**kwargs) -> Microscope:
+    """Set up with the iXon now, with the Evolve until 2026-07-15 -- M2's history."""
+    return a_microscope(camera="iXon 1", versions=[{
+        "until": "2026-07-15", "camera": "Evolve 1",
+        "parameters": {"pixel_nm": {"device": "3D lens",
+                                    "values": {"in": [116, 127], "out": [127, 127]}}}}],
+        **kwargs)
 
 
-def test_a_camera_is_found_under_the_name_it_had_before():
-    scope = a_microscope(cameras={"M1 Andor": {"pixel_nm": [1, 2]}})
-    assert scope.resolve(M2_BEADS, camera="iXon 1").pixel_nm == (1.0, 2.0)
+def test_a_file_is_read_with_the_setup_of_its_day():
+    scope = setups()
+    now = scope.resolve(M2_BEADS, camera="iXon 1")
+    assert now.pixel_nm == (127.0, 116.0) and now.camera == "iXon 1" and now.warnings() == []
+    january = scope.resolve(M2_EVOLVE, camera="Evolve 1")
+    assert january.pixel_nm == (116.0, 127.0) and january.version == "2026-07-15"
+    assert january.warnings() == []
 
 
-def test_a_camera_the_microscope_does_not_list_is_a_warning():
-    scope = a_microscope(cameras={"Evolve 1": {}})
-    found = scope.resolve(M2_BEADS, camera="iXon 1")
-    assert found.pixel_nm == (127.0, 116.0)        # the microscope's own
-    assert "iXon 1 is not one of scope's cameras" in found.warnings()[0]
+def test_a_camera_swapped_before_the_entry_was_finds_its_setup():
+    scope = setups()
+    # the iXon already in on 2026-07-10, the entry saying Evolve until the 15th
+    early = scope.resolve(dict(M2_BEADS, StartTime="2026-07-10 10:00:00 +0200"), camera="iXon 1")
+    assert early.pixel_nm == (127.0, 116.0) and early.camera == "iXon 1"
+    assert early.warnings() == ["taken with iXon 1, not Evolve 1: read as scope was set up "
+                                "with iXon 1"]
+
+
+def test_a_camera_the_microscope_never_had_is_a_warning():
+    found = setups().resolve(M2_BEADS, camera="Fusion BT 1")
+    assert found.pixel_nm == (127.0, 116.0)               # the setup of its day, still
+    assert "never set up with" in found.warnings()[0]
+
+
+def test_a_camera_is_the_same_under_the_name_it_had_before():
+    scope = a_microscope(camera="M1 Andor")
+    assert scope.resolve(M2_BEADS, camera="iXon 1").warnings() == []
+
+
+def test_a_file_whose_camera_names_itself_nowhere_gets_the_microscopes():
+    from smappy.io.tiff import resolve_camera
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Andor-Camera"}
+    found = resolve_camera(a_file(tags))
+    assert found.camera_name == "iXon 1"
+    assert found.values["conversion"] == 15.8              # the iXon's, for its readout mode
 
 
 def two_arms(**kwargs) -> Microscope:
@@ -193,8 +215,8 @@ def two_arms(**kwargs) -> Microscope:
                                     states={"Empty": "Position 0", "676/37": "Position 1",
                                             "600/60": "Position 3"}))
     return a_microscope(devices=devices, channels=[
-        Channel("transmitted", "transmitted", {"iXon 1": "right"}),
-        Channel("reflected", "reflected", {"iXon 1": "left"})], **kwargs)
+        Channel("transmitted", "transmitted", "right"),
+        Channel("reflected", "reflected", "left")], **kwargs)
 
 
 def test_dual_channel_data_gets_a_wavelength_per_side():
@@ -361,7 +383,7 @@ def test_the_lens_state_sets_the_pixel_over_the_files_square_one():
     from smappy.io.tiff import resolve_camera
     beads = resolve_camera(a_file(M2_BEADS))
     assert beads.values["pixelsize_um"] == [0.127, 0.116]       # the file says 0.127 square
-    assert str(beads.sources["pixelsize_um"]) == "microscope: M2, 3DA is on, with iXon 1"
+    assert str(beads.sources["pixelsize_um"]) == "microscope: M2, 3DA is on"
     movie = resolve_camera(a_file(M2_MOVIE)).camera_metadata()
     assert movie.pixelsize_um_xy == (0.127, 0.127)
     assert movie.microscope["states"]["3DA"] == "off"

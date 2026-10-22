@@ -76,7 +76,7 @@ def test_the_manager_shows_an_entry_as_tables_and_reads_it_back(app):
         shipped = microscope_db.database().get(name)
         manager.load(name)
         back = manager.entry().to_dict()
-        for part in ("identify", "devices", "parameters", "channels", "cameras"):
+        for part in ("identify", "devices", "parameters", "channels", "camera", "versions"):
             assert back.get(part) == shipped.to_dict().get(part), (name, part)
     manager.close()
 
@@ -122,7 +122,9 @@ def test_saving_writes_the_users_file_and_keeps_the_old_entry_dated(app, config)
     stored = json.loads((config / "microscopes.json").read_text())["microscopes"]
     assert [m["name"] for m in stored] == ["M2"]
     assert stored[0]["parameters"]["NA"] == 1.45
-    assert stored[0]["versions"] == [{"until": "2026-10-01", "parameters": {"NA": 1.43}}]
+    # the Evolve setup it shipped with, then what this save replaced
+    assert stored[0]["versions"][0]["camera"] == "Evolve 1"
+    assert stored[0]["versions"][-1] == {"until": "2026-10-01", "parameters": {"NA": 1.43}}
     assert microscope_db.database().get("M2").parameters["NA"] == 1.45
     assert "(yours)" in manager.entries.currentItem().text()
     manager.close()

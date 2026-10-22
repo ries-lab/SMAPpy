@@ -239,8 +239,20 @@ def read_date(text: Any) -> Optional[_dt.date]:
         return None
 
 
-#: the parts of an entry a version can hold, each a table by name
-SECTIONS = ("devices", "parameters", "channels", "cameras")
+#: the parts of an entry a version can hold: tables by name, and the camera
+SECTIONS = ("devices", "parameters", "channels")
+SCALARS = ("camera",)
+
+
+def same_camera(a: str, b: str) -> bool:
+    """Whether two names are one camera of the camera database (a former name counts)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    from .camera_db import database
+    found = database().get(a)
+    return found is not None and found.answers_to(b)
 
 
 @dataclass
@@ -249,10 +261,10 @@ class Microscope:
 
     `identify` are tags that must all match, taken from devices that stay
     with the microscope (a laser's serial number), not from the camera,
-    which moves between microscopes.  `cameras` are the ones it has had,
-    by their name in the camera database, each with the parameters that
-    depend on the pair -- the pixel, which the cylindrical lens changes and
-    the camera's mounting turns -- overriding the microscope's.
+    which moves between microscopes.  `camera` is the one it is set up with,
+    by its name in the camera database: the pixel per state of the 3D lens
+    and the sides of the split are for that camera, so a new camera is a
+    reprogramming of the microscope, the setup before kept as a version.
     `versions` are what the entry said before it was last changed, each with
     the day it applied until (`as_of`).
     """
@@ -262,7 +274,7 @@ class Microscope:
     devices: Dict[str, Device] = field(default_factory=dict)
     parameters: Dict[str, Any] = field(default_factory=dict)
     channels: List[Channel] = field(default_factory=list)
-    cameras: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    camera: str = ""
     versions: List[Dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------ identifying
@@ -288,6 +300,9 @@ class Microscope:
             return self
         raw = self.to_dict()
         for version in older:
+            for scalar in SCALARS:
+                if scalar in version:
+                    raw[scalar] = version[scalar]
             for section in SECTIONS:
                 if section not in version:
                     continue
@@ -309,13 +324,25 @@ class Microscope:
                        if d is not None and d > day)
         return dates[0].isoformat() if dates else None
 
+    def setups(self):
+        """``(until, entry)`` of every setup this microscope has had, newest first: the current
+        one (until None), then each version's as it stood."""
+        yield None, self
+        for day in sorted({d for d in (read_date(v.get("until")) for v in self.versions) if d},
+                          reverse=True):
+            yield day.isoformat(), self.as_of(day - _dt.timedelta(days=1))
+
+    def with_camera(self, camera: str):
+        """``(until, entry)`` of the newest setup with `camera`, or None."""
+        return next(((until, entry) for until, entry in self.setups()
+                     if same_camera(camera, entry.camera)), None)
+
     # ------------------------------------------------------------- resolving
     def followed(self) -> List[str]:
-        """The devices a parameter, a camera's parameter or a channel follows: the ones whose state
-        changes the PSF or its scale, which a calibration and its data must agree on.  A laser or a
-        bright-field lamp is read and kept, and never compared."""
-        tables = [self.parameters] + list(self.cameras.values())
-        names = {raw["device"] for table in tables for raw in table.values()
+        """The devices a parameter or a channel follows: the ones whose state changes the PSF or
+        its scale, which a calibration and its data must agree on.  A laser or a bright-field
+        lamp is read and kept, and never compared."""
+        names = {raw["device"] for raw in self.parameters.values()
                  if isinstance(raw, dict) and "device" in raw}
         names |= {c.filter for c in self.channels if c.filter}
         return [name for name in self.devices if name in names]
@@ -327,47 +354,35 @@ class Microscope:
                 channels: int = 1) -> "MicroscopeResolution":
         """Every parameter of this entry for this file, with its source.
 
-        `camera` is the camera database's name for the camera that took the
-        file; its parameters override the microscope's.  `channels` is 1 or
-        2, chosen by whoever asks: nothing records whether the splitting
-        dichroic is in.
+        The setup is the one of the file's day (`as_of`).  `camera` is the camera that took the
+        file, as the camera database recognised it: when it is not that setup's, the file is
+        read with the newest setup that had it -- a camera swapped before the entry was -- and
+        a warning says so.  `channels` is 1 or 2, chosen by whoever asks: nothing records
+        whether the splitting dichroic is in.
         """
         day = acquisition_date(metadata)
-        entry = self.as_of(day)
+        entry, version, note = self.as_of(day), self.until(day), ""
+        if camera and entry.camera and not same_camera(camera, entry.camera):
+            dated, other = entry.camera, self.with_camera(camera)
+            if other is not None:
+                version, entry = other
+                note = (f"taken with {camera}, not {dated}: read as {self.name} was set up "
+                        f"with {camera}")
+            else:
+                note = (f"taken with {camera}, which {self.name} was never set up with: its pixel "
+                        f"and its split may not fit")
         states = entry.device_states(metadata)
-        parameters = dict(entry.parameters)
-        camera_key = entry.camera_key(camera)
-        if camera_key is not None:
-            parameters.update(entry.cameras[camera_key])
         values: Dict[str, Any] = {}
         sources: Dict[str, Source] = {}
-        for name, parameter in parameters.items():
-            value, source = resolve_parameter(parameter_from(parameter), metadata, states)
-            if camera_key is not None and name in entry.cameras[camera_key]:
-                source = Source(source.kind, f"{source.detail}, with {camera_key}"
-                                if source.detail else f"with {camera_key}")
-            values[name] = value
-            sources[name] = source
+        for name, parameter in entry.parameters.items():
+            values[name], sources[name] = resolve_parameter(parameter_from(parameter), metadata,
+                                                            states)
+        used = camera or entry.camera
         resolved = MicroscopeResolution(
-            microscope=self, version=self.until(day), camera=camera_key or camera,
-            camera_listed=camera_key is not None or not camera,
+            microscope=self, version=version, camera=used, camera_note=note,
             states=states, values=values, sources=sources, metadata=metadata)
-        resolved.channels = entry.resolve_channels(resolved, metadata, states, channels,
-                                                   camera_key or camera)
+        resolved.channels = entry.resolve_channels(resolved, metadata, states, channels, used)
         return resolved
-
-    def camera_key(self, camera: str) -> Optional[str]:
-        """The entry's name for `camera`: by name, or by a former name of
-        that camera in the camera database (an entry saved before a rename)."""
-        if not camera:
-            return None
-        if camera in self.cameras:
-            return camera
-        from .camera_db import database
-        found = database().get(camera)
-        if found is None:
-            return None
-        return next((k for k in self.cameras if found.answers_to(k)), None)
 
     def resolve_channels(self, resolved, metadata, states, count: int, camera: str):
         """A wavelength per channel used.
@@ -408,7 +423,7 @@ class Microscope:
                      for k, v in (raw.get("devices") or {}).items()},
             parameters=dict(raw.get("parameters") or {}),
             channels=[Channel.from_dict(str(k), v) for k, v in channels.items()],
-            cameras={str(k): dict(v or {}) for k, v in (raw.get("cameras") or {}).items()},
+            camera=str(raw.get("camera", "")),
             versions=[dict(v) for v in (raw.get("versions") or [])],
         )
 
@@ -421,8 +436,8 @@ class Microscope:
         out["parameters"] = {k: copy.deepcopy(v) for k, v in self.parameters.items()}
         if self.channels:
             out["channels"] = {c.name: c.to_dict() for c in self.channels}
-        if self.cameras:
-            out["cameras"] = copy.deepcopy(self.cameras)
+        if self.camera:
+            out["camera"] = self.camera
         if self.versions:
             out["versions"] = copy.deepcopy(self.versions)
         return out
@@ -448,7 +463,7 @@ class MicroscopeResolution:
     microscope: Optional[Microscope] = None
     version: Optional[str] = None
     camera: str = ""
-    camera_listed: bool = True
+    camera_note: str = ""
     states: Dict[str, Tuple[Optional[str], Any, Source]] = field(default_factory=dict)
     values: Dict[str, Any] = field(default_factory=dict)
     sources: Dict[str, Source] = field(default_factory=dict)
@@ -485,11 +500,7 @@ class MicroscopeResolution:
                               "wavelength_nm": c.wavelength_nm} for c in self.channels]}
 
     def warnings(self) -> List[str]:
-        out = []
-        if self.microscope is not None and not self.camera_listed:
-            out.append(f"{self.camera} is not one of {self.name}'s cameras: "
-                       f"the pixel is the camera database's")
-        return out
+        return [self.camera_note] if self.microscope is not None and self.camera_note else []
 
     def rows(self) -> List[tuple]:
         """``(what, value, source)``, devices then parameters, for showing."""
@@ -634,7 +645,8 @@ def changes(old: Microscope, new: Microscope) -> Dict[str, Dict[str, Any]]:
     """What `old` said that `new` does not, section by section and by name:
     a version.  A name `new` added is None in it -- it did not exist yet."""
     before, after = old.to_dict(), new.to_dict()
-    out: Dict[str, Dict[str, Any]] = {}
+    out: Dict[str, Any] = {scalar: before.get(scalar, "") for scalar in SCALARS
+                           if before.get(scalar, "") != after.get(scalar, "")}
     for section in SECTIONS:
         a, b = before.get(section) or {}, after.get(section) or {}
         diff = {k: copy.deepcopy(a.get(k)) for k in set(a) | set(b) if a.get(k) != b.get(k)}
