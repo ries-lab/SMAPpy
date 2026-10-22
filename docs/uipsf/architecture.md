@@ -1616,6 +1616,17 @@ dimmer than its dim molecules.
 
 ## In situ on M2 with the same day's beads: the magnitude held from beads (October 2026, open)
 
+**Caveat: probably a mismatched pair.**  The movie's bright spots are round, the beads' are not: log₂(σx/σy)
+of the brightest 20 % of its 107 000 detections spans −0.08 to +0.13 (25–75 %), against −0.57 to +0.70 for
+the bead stack's middle third and −0.93 to +0.90 for all its slices, and they are narrower (1.28 against
+~1.5 px) than the beads' least-confused middle.  So the movie was most likely taken without the cylindrical
+lens, and the beads' astigmatic pupil (Noll 6 +0.55 rad) cannot match it.  That alone could explain the
+phase astigmatism ranging −0.29 to +0.61, the magnitude taking it over, the focus not settling and the bead
+model fitting worst.  The 1727 molecules chosen spread −1 to +1 in that ratio only because detection draws
+up to 100 per bin of the astigmatism proxy, filling the sparse elongated bins with pairs and odd spots.
+Read what follows as measured on this pair, not as a property of in situ learning; it is to be repeated on a
+confirmed astigmatic movie.
+
 `benchmarks/uipsf/real/insitu_magnitude.py`, `results/insitu_magnitude.jsonl`.  Beads
 (`260829_AA_BeadsCalZ_638_SingleMode`, 11 beads, 100 nm taken out) and a clathrin movie (`260829_AA_U2OS_CLC-SNAP_AF647_TIRF_1`,
 200 000 frames, 4000 read) of the same day on M2's iXon: the same clocks (10 MHz, 3.3 µs vertical shift), EM

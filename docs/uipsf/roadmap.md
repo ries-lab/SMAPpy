@@ -89,7 +89,9 @@ when a milestone lands or an item moves.
    real data: false detections on background still count as neighbours, and a faint patch splits into
    several detections that reject each other.  A neighbour now counts only with a fifth of the molecule's
    light: 9 % fewer overlap rejections on tubulin, a third more candidates, the pupil unchanged.  **M2 with the
-   same day's beads** (architecture.md, "In situ on M2"): the beads' whole magnitude held costs 1–2 nats per
+   same day's beads** (architecture.md, "In situ on M2"), probably a mismatched pair: the movie's bright spots
+   are round (log₂(σx/σy) −0.08 to +0.13, beads −0.57 to +0.70), likely taken without the cylindrical lens; to
+   be repeated on a confirmed astigmatic movie.  As measured: the beads' whole magnitude held costs 1–2 nats per
    molecule, its symmetric part nothing, neither brings σ to the beads'; a free magnitude trades its
    astigmatism with the phase's; the focus is barely determined.  Next: hold the m ≠ 0 magnitude modes.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
