@@ -102,10 +102,13 @@ def _every_page_draws(window):
 
 def test_the_window_shows_each_method_its_own_sections_only(stack_file, monkeypatch):
     window, _, _ = _window(stack_file, monkeypatch, "bead average")
-    assert window.sections["microscope"].isHidden() and window.sections["model"].isHidden()
+    # the camera and the pixel for every method; the optics only for a model
+    assert not window.sections["microscope"].isHidden() and window.sections["model"].isHidden()
+    assert not window.optics_form._shown("NA") and window.optics_form._shown("pixel_x_nm")
     assert not window.sections["beads"].isHidden() and window.browse_button.isVisibleTo(window)
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert not window.sections["microscope"].isHidden() and not window.sections["model"].isHidden()
+    assert window.optics_form._shown("NA")
     assert window.start_form.isVisibleTo(window)                              # start from: in the model
     assert not window.run_form.fields["start_from"].isVisibleTo(window)
     assert not window.install_button.isVisibleTo(window)                      # torch is here and recent

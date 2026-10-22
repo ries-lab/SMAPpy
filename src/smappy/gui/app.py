@@ -438,24 +438,9 @@ class ControlWindow(QMainWindow):
         if name == "roi":
             self.roi_tab = ROIHeader(self.session, self.render_window.view)
             return self.roi_tab
-        if name != "localize":
-            return None
-        box = QWidget()
-        row = QHBoxLayout(box)
-        row.setContentsMargins(0, 0, 0, 0)
-        camera = QPushButton("Camera parameters...")
-        camera.setToolTip("what the fit thinks the camera is, and where every "
-                          "value came from: this file's tags, the readout mode "
-                          "the database recognised, or what you set here")
-        camera.clicked.connect(self.open_camera_parameters)
-        row.addWidget(camera)
-        editor = QPushButton("Camera editor...")
-        editor.setToolTip("add the camera of the file being fitted to your camera "
-                          "database, or give a known camera another readout mode")
-        editor.clicked.connect(lambda: self.open_camera_editor())
-        row.addWidget(editor)
-        row.addStretch(1)
-        return box
+        # the Localize tab has no header: the camera is part of each fitter's microscope
+        # control (`gui.microscope_form`), the camera editor a button of the microscope manager
+        return None
 
     def open_camera_parameters(self) -> None:
         """Show the camera behind the fit that is set up in this tab.

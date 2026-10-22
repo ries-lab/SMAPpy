@@ -133,6 +133,16 @@ def camera_for(path, camera_settings=None):
     return settings.resolve(open_stack(path))
 
 
+def _microscope_choices():
+    from ..microscope_db import choices
+    return choices()
+
+
+def _camera_choices():
+    from ..plugins.fit import _camera_choices as cameras
+    return cameras()
+
+
 def main_half(rois) -> Optional[str]:
     """The half of the chip the dual calibration made its main channel, or None for one channel."""
     return (getattr(rois, "geometry", None) or {}).get("main_channel")
@@ -468,7 +478,15 @@ class OpticsSettings:
     """The microscope.  Each field on *auto* takes the microscope database's value for the file's
     microscope (`microscope_db`, carried in `CameraMetadata.microscope`): its NA, its immersion, the
     emission of each arm from the filter it was set to.  A value typed beats it.  There is no default for
-    the NA and the emission: without a microscope that gives them, a run refuses to start."""
+    the NA and the emission: without a microscope that gives them, a run refuses to start.
+
+    Shown as the microscope control (`gui.microscope_form`): one line, the values in a window,
+    locked until unlocked.  The microscope and the camera are chosen here for stacks nothing
+    recognises; the camera's numbers here win over the camera database's, as a fitter's do."""
+    microscope: str = param("", label="microscope", choices=lambda: _microscope_choices(),
+                            help="auto: recognised from the stacks' metadata, else the last one used")
+    camera: str = param("", label="camera", choices=lambda: _camera_choices(),
+                        help="auto: identified from the stacks' metadata, else the microscope's")
     NA: Optional[float] = param(None, label="NA", min=0.1, max=1.7,
                                 help="the objective's numerical aperture; auto: the microscope's (required "
                                      "without one)")
@@ -486,11 +504,20 @@ class OpticsSettings:
                                  "the immersion's (index matched)")
     n_coverslip: Optional[float] = param(None, label="coverslip index", min=1.0, max=2.0, advanced=True,
                                          help="auto: the immersion's")
-    pixel_x_nm: Optional[float] = param(None, label="pixel x", unit="nm", min=1.0, advanced=True,
-                                        help="on the sample; auto: the camera's, or the microscope's for its "
-                                             "3D lens")
-    pixel_y_nm: Optional[float] = param(None, label="pixel y", unit="nm", min=1.0, advanced=True,
-                                        help="auto: as x, or the camera's")
+    pixel_x_nm: Optional[float] = param(None, label="pixel x", unit="nm", min=1.0,
+                                        help="on the sample; auto: the microscope's for its 3D lens, or "
+                                             "the camera's")
+    pixel_y_nm: Optional[float] = param(None, label="pixel y", unit="nm", min=1.0,
+                                        help="auto: as x, or the microscope's")
+    conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
+                                        help="photoelectrons per count; auto: the camera database's")
+    offset: Optional[float] = param(None, unit="ADU", help="the count of a pixel that saw no light")
+    emgain: Optional[float] = param(None, label="EM gain", min=0, help="auto: from the stacks")
+
+    def camera_overrides(self) -> dict:
+        """The camera's numbers typed here, for `io.tiff.camera_metadata`."""
+        return {k: v for k, v in (("conversion", self.conversion), ("offset", self.offset),
+                                  ("emgain", self.emgain)) if v is not None}
 
     def resolved(self, camera, channels: int = 1, main: Optional[str] = None) -> dict:
         """The values a run uses: ``NA``, ``n_immersion``, ``wavelengths`` (one per channel, None where

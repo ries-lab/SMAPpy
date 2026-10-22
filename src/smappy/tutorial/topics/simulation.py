@@ -136,15 +136,14 @@ def make(d) -> None:
     d.shot("The Localize tab opens on the fitter, with the recipe as its file.",
            spot=[field(fit, "source.path")], point=field(fit, "source.path"),
            zoom=d.around(field(fit, "source.path"), 760))
-    button = next(b for b in control.findChildren(type(fit.run_button))
-                  if b.text().startswith("Camera parameters"))
-    button.click()
+    section_of(fit, "camera").set_expanded(True)
+    microscope = fit.form.fields["camera"]
+    microscope.open_window()
     d.settle()
-    window = control._camera_window
-    place_beside(d, window, 0.8)
+    place_beside(d, microscope.window, 0.8)
     d.shot("The camera comes from the simulation: nothing to type in.",
-           spot=[d.window_rect(window)])
-    window.hide()
+           spot=[d.window_rect(microscope.window)])
+    microscope.window.hide()
     d.shot("Run.", spot=[fit.run_button], point=fit.run_button, click=True,
            zoom=d.around(fit.run_button, 760))
     _run(d, fit)

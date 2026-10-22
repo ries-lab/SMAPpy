@@ -65,42 +65,46 @@ class SourceSettings:
 
 @dataclass
 class CameraSettings:
-    """ADU -> photons and pixel -> nm.  Empty fields come from the file."""
-    # the camera is normally recognised from the file's own tags; this is for
-    # the file whose camera carries no tag to recognise it by
-    camera: str = param("", label="camera", choices=lambda: _camera_choices(),
-                        help="auto: identified from the file's metadata")
-    # recognised from the file's devices as the camera is; chosen for a file
-    # no entry recognises.  Its pixel for the 3D lens's state beats the file's
+    """The microscope and its camera: ADU -> photons and pixel -> nm.  Empty fields come from
+    the file, the camera database and the microscope database; shown as one line and a window
+    (`gui.microscope_form`), the values locked until unlocked."""
+    # recognised from the file's devices; chosen for a file no entry recognises, and else the
+    # last one used stands in.  It brings its camera, and its pixel for the 3D lens's state
     microscope: str = param("", label="microscope", choices=lambda: _microscope_choices(),
-                            advanced=True,
-                            help="auto: identified from the file's metadata; it sets the pixel "
-                                 "per state of its 3D lens")
+                            help="auto: recognised from the file's metadata, else the last one "
+                                 "used")
+    # the camera is normally recognised from the file's own tags, else the microscope's; this
+    # is for the file whose camera carries no tag to recognise it by
+    camera: str = param("", label="camera", choices=lambda: _camera_choices(),
+                        help="auto: identified from the file's metadata, else the microscope's")
     conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
                                         help="photoelectrons per count; auto: "
                                              "from the file or the camera "
                                              "database")
     offset: Optional[float] = param(None, unit="ADU",
                                     help="the count of a pixel that saw no light")
-    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="µm", min=0,
-                                          help="the pixel's size in the sample, "
-                                               "after the magnification")
-    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="µm",
-                                            min=0, advanced=True,
-                                            help="auto: square pixels, the same "
-                                                 "as in x")
     em_on: Optional[bool] = param(None, label="EM gain on",
                                   help="an EMCCD with its electron multiplication "
                                        "on: the counts are divided by the gain, "
                                        "and the noise is doubled")
     emgain: Optional[float] = param(None, label="EM gain", min=0,
                                     help="the EM gain the camera was set to")
+    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="µm", min=0,
+                                          help="the pixel's size in the sample, "
+                                               "after the magnification")
+    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="µm",
+                                            min=0,
+                                            help="auto: square pixels, the same "
+                                                 "as in x, or the microscope's")
+    # the fit adds it to the likelihood without EM gain only (`CameraMetadata.
+    # readout_variance`), so it is shown only there (`_FitPlugin.describe`)
     read_noise_e: Optional[float] = param(None, label="read noise", unit="e-",
-                                          min=0, advanced=True,
-                                          help="rms per pixel; auto: 1 without "
-                                               "EM gain (an sCMOS), 0 with it")
+                                          min=0,
+                                          help="rms per pixel; auto: the camera's, else 1 "
+                                               "(an sCMOS)")
+    # metadata, not a setting: kept so a chain that set it still reads (hidden)
     frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
-                                           min=0, advanced=True,
+                                           min=0, hidden=True,
                                            help="from one frame to the next, kept "
                                                 "with the table; auto: from the "
                                                 "file, else the exposure")
@@ -122,9 +126,16 @@ class CameraSettings:
         view and the camera editor all come through
         here, so that none of them can disagree with the fit about a camera.
         """
+        from .. import config
         from ..io.tiff import resolve_camera
-        return resolve_camera(source, camera=self.camera, overrides=self.overrides(),
-                              microscope=self.microscope)
+        resolved = resolve_camera(source, camera=self.camera, overrides=self.overrides(),
+                                  microscope=self.microscope,
+                                  fallback=str(config.get("last_microscope", "") or ""))
+        scope = resolved.microscope
+        if scope is not None and not scope.fallback and \
+                config.get("last_microscope") != scope.name:
+            config.set("last_microscope", scope.name)
+        return resolved
 
     def resolve(self, source, require: bool = True) -> CameraMetadata:
         """The camera the fit uses: `resolution`'s values, or with no file
@@ -615,6 +626,13 @@ class _FitPlugin(Plugin):
             state.titles = {"camera": self._camera_title(settings)}
         except Exception:
             pass
+        try:
+            details, shown = self._microscope_details(settings)
+            if details is not None:
+                state.hints["camera"] = details
+                state.shown.update(shown)
+        except Exception:
+            pass
         region = getattr(settings, "region", None)
         if region is not None:
             state.titles["region"] = region.summary()
@@ -673,27 +691,63 @@ class _FitPlugin(Plugin):
         return None
 
     def _camera_title(self, settings) -> str:
-        """The camera part's title while it is folded: which camera, and the
-        numbers that turn counts into photons and pixels into nm."""
+        """The microscope part's title while it is folded: the microscope, its state, its camera
+        and its pixel, in one line (`microscope_db.one_line`)."""
+        from ..microscope_db import one_line
         resolved = self.resolution(settings)
-        camera = (resolved.camera_metadata() if resolved is not None
-                  else settings.camera.resolve(None, require=False))
-        bits = []
-        name = ((resolved.camera_name or resolved.values.get("camera_name"))
-                if resolved is not None else "")
-        if name:
-            bits.append(str(name))
+        if resolved is None:
+            return "microscope: no file"
+        camera = resolved.camera_metadata()
+        if camera.microscope:
+            return one_line(camera.microscope)
+        bits = [str(resolved.camera_name or resolved.values.get("camera_name") or "")]
         if camera.conversion is not None:
             bits.append(f"{camera.conversion:.3g} e-/ADU")
         sizes = camera.pixelsize_um_xy
         if sizes is not None:
             bits.append(f"{1000 * sizes[0]:.4g} nm" if sizes[0] == sizes[1]
                         else f"{1000 * sizes[0]:.4g}\u00d7{1000 * sizes[1]:.4g} nm")
-        if camera.microscope:
-            from ..microscope_db import one_line
-            bits.append(one_line(camera.microscope, short=True))
-        head = f"camera: {settings.camera.camera or 'auto'}"
-        return head + (" \u2013 " + ", ".join(bits) if bits else "")
+        return "no microscope recognised \u00b7 " + " \u00b7 ".join(b for b in bits if b)
+
+    def _microscope_details(self, settings):
+        """``(details, shown)`` for the microscope control: the line, its status, the values the
+        fit uses in a sentence and each one's source; and which rows the fit shows -- the read
+        noise only without EM gain, where the fit uses it."""
+        resolved = self.resolution(settings)
+        if resolved is None:
+            return None, {}                    # no file: the control says so by itself
+        camera = resolved.camera_metadata()
+        title = self._camera_title(settings)
+        scope = resolved.microscope
+        status = ("missing" if resolved.missing else
+                  "fallback" if scope is not None and scope.fallback else
+                  "unrecognised" if scope is None else "ok")
+        sizes = camera.pixelsize_um_xy
+        bits = []
+        if camera.conversion is not None:
+            bits.append(f"{camera.conversion:g} e-/ADU")
+        if camera.offset is not None:
+            bits.append(f"offset {camera.offset:g}")
+        if camera.is_em:
+            bits.append(f"EM gain {camera.emgain:g}" if camera.emgain else "EM gain ?")
+        if sizes is not None:
+            bits.append(f"pixel {1000 * sizes[0]:.4g} nm" if sizes[0] == sizes[1]
+                        else f"pixel {1000 * sizes[0]:.4g}\u00d7{1000 * sizes[1]:.4g} nm")
+        if resolved.missing:
+            bits.append("missing: " + ", ".join(resolved.missing))
+        sources = {name: str(resolved.sources[key]) for name, key in (
+            ("conversion", "conversion"), ("offset", "offset"), ("em_on", "em_on"),
+            ("emgain", "emgain"), ("pixelsize_um", "pixelsize_um"),
+            ("read_noise_e", "read_noise_e")) if key in resolved.sources}
+        if scope is not None:
+            sources["microscope"] = ("the last one used: nothing in the file recognises one"
+                                     if scope.fallback else f"recognised: {scope.name}")
+            for warning in scope.warnings():
+                sources["camera"] = warning
+        shown = {"camera.read_noise_e": not camera.is_em,
+                 "camera.emgain": camera.is_em}
+        return {"line": title, "status": status, "values": ", ".join(bits),
+                "sources": sources}, shown
 
     def unknown_camera(self, settings) -> Optional[str]:
         """The question at Run for a camera that is in no database and
@@ -1184,8 +1238,8 @@ class _Reading:
     source: SourceSettings = field(default_factory=SourceSettings)
     # folded, its title a one-line summary (`_FitPlugin._camera_title`): the
     # camera is read far more often than it is set
-    camera: CameraSettings = param(default_factory=CameraSettings, label="camera",
-                                   collapsed=True)
+    camera: CameraSettings = param(default_factory=CameraSettings, label="microscope",
+                                   collapsed=True, kind="microscope")
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     # folded, its title what is drawn: most fits use the whole frame
     region: FitRegionSettings = param(default_factory=FitRegionSettings,

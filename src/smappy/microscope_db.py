@@ -464,6 +464,8 @@ class MicroscopeResolution:
     version: Optional[str] = None
     camera: str = ""
     camera_note: str = ""
+    #: True when no microscope was recognised and the last one used stands in
+    fallback: bool = False
     states: Dict[str, Tuple[Optional[str], Any, Source]] = field(default_factory=dict)
     values: Dict[str, Any] = field(default_factory=dict)
     sources: Dict[str, Source] = field(default_factory=dict)
@@ -494,6 +496,7 @@ class MicroscopeResolution:
         values = {k: (list(v) if isinstance(v, tuple) else v)
                   for k, v in self.values.items() if v is not None}
         return {"name": self.name, "version": self.version, "camera": self.camera,
+                "fallback": self.fallback,
                 "states": self.state_names(), "values": values,
                 "followed": self.microscope.followed() if self.microscope else [],
                 "channels": [{"name": c.name, "side": c.side,
@@ -516,22 +519,22 @@ class MicroscopeResolution:
 
 def one_line(summary: Optional[Dict[str, Any]], short: bool = False) -> str:
     """A microscope summary (`MicroscopeResolution.summary`) in one line, for where a file is opened:
-    *M2 · 3DA on · 700/100 · iXon 1 · 127 × 116 nm*; ``short``, the name and the modality alone
-    (*M2, astigmatic*), for a folded title.  The followed devices' states, the filters among them."""
+    *M2 · 3DA on · iXon 1 · 127 × 116 nm*; ``short``, the name and the modality alone
+    (*M2, astigmatic*).  The switches a parameter follows; the filters are left to the window."""
     if not summary:
         return "no microscope recognised"
     values = summary.get("values") or {}
     if short:
         return ", ".join(str(v) for v in (summary.get("name"), values.get("modality")) if v)
     states = summary.get("states") or {}
-    bits = [str(summary.get("name"))]
+    bits = [str(summary.get("name")) + (" (last used: none recognised)"
+                                        if summary.get("fallback") else "")]
     for device in summary.get("followed") or []:
         state = states.get(device)
-        if state is None:
+        # the switches (the 3D lens); the filters are in the window, the line stays short
+        if state is None or wavelength_from_name(state) or state.lower() in ("none", "empty"):
             continue
-        # a filter's state is its name; a switch's says nothing without the device
-        bits.append(str(state) if wavelength_from_name(state) or state.lower() in (
-            "none", "empty") else f"{device} {state}")
+        bits.append(f"{device} {state}")
     if summary.get("camera"):
         bits.append(str(summary["camera"]))
     pixel = values.get("pixel_nm")
@@ -592,7 +595,7 @@ class MicroscopeDatabase:
         return next((m for m in self.microscopes if m.identifies(metadata)), None)
 
     def resolve(self, metadata: Dict[str, Any], microscope: str = "", camera: str = "",
-                channels: int = 1) -> MicroscopeResolution:
+                channels: int = 1, fallback: str = "") -> MicroscopeResolution:
         """This file's microscope parameters.
 
         `microscope` names one instead of recognising it -- a microscope that
@@ -601,13 +604,18 @@ class MicroscopeDatabase:
         """
         metadata = dict(metadata or {})
         found = self.get(microscope) if microscope else self.identify(metadata)
+        stand_in = found is None and bool(fallback) and self.get(fallback) is not None
+        if stand_in:
+            found = self.get(fallback)
         if found is None:
             return MicroscopeResolution(metadata=metadata)
         if not camera:
             from .camera_db import database
             known = database().identify(metadata)
             camera = known.name if known is not None else ""
-        return found.resolve(metadata, camera=camera, channels=channels)
+        resolved = found.resolve(metadata, camera=camera, channels=channels)
+        resolved.fallback = stand_in
+        return resolved
 
 
 # ------------------------------------------------------------------ the default

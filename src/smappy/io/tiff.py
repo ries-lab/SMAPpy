@@ -263,14 +263,25 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
     }
 
 
-def with_microscope(resolution: Resolution, found) -> Resolution:
+def _could_be(scope, tags: Dict[str, str], cameras) -> bool:
+    """Whether the microscope's camera could have taken a file whose camera is not identified:
+    recognised or chosen, yes; a stand-in, only if the file's Micro-Manager camera device is the
+    one that camera is driven by (an iXon's ``Andor``), so a Prime95B is never read as an iXon."""
+    if not scope.fallback:
+        return True
+    entry = cameras.get(scope.camera)
+    device = str(tags.get("Core-Camera") or "").strip()
+    return entry is not None and bool(device) and device == entry.prefix
+
+
+def with_microscope(resolution: Resolution, found, pixel: bool = True) -> Resolution:
     """`resolution` with the file's microscope (a `MicroscopeResolution`) attached, and its
-    pixel laid over the file's where the entry gives one for the devices' state."""
+    pixel laid over the file's where the entry gives one for the devices' state (and `pixel`)."""
     from dataclasses import replace
 
     from ..camera_db import Source
     resolution = replace(resolution, microscope=found)
-    pixel = found.pixel_nm
+    pixel = found.pixel_nm if pixel else None
     if pixel is None:
         return resolution
     source = found.sources["pixel_nm"]
@@ -285,7 +296,7 @@ SIMULATED = ("metadata", "the simulation")
 
 
 def resolve_camera(source: ImageSource, camera: str = "",
-                   overrides=None, microscope: str = "") -> Resolution:
+                   overrides=None, microscope: str = "", fallback: str = "") -> Resolution:
     """Everything known about the camera behind this stack, and from where.
 
     Four layers, each winning over the one before it:
@@ -304,7 +315,9 @@ def resolve_camera(source: ImageSource, camera: str = "",
 
     `camera` names a database entry to use instead of identifying one, which
     is what a file whose camera carries no identifying tag needs;
-    `microscope` names a microscope the same way.  A recognised (or named)
+    `microscope` names a microscope the same way; `fallback` is one to stand in
+    when none is named or recognised (the last one used), marked as such
+    (`MicroscopeResolution.fallback`).  A recognised (or named)
     microscope brings its camera: a file whose camera says nothing that
     identifies it is read with the camera the microscope is set up with.
 
@@ -319,10 +332,11 @@ def resolve_camera(source: ImageSource, camera: str = "",
     if not simulated:
         from ..microscope_db import database as microscopes
         known = camera or getattr(database().identify(tags), "name", "")
-        scope = microscopes().resolve(tags, microscope=microscope, camera=known, channels=2)
+        scope = microscopes().resolve(tags, microscope=microscope, camera=known, channels=2,
+                                      fallback=fallback)
         if scope.microscope is None:
             scope = None
-        elif not camera and not known:
+        elif not camera and not known and _could_be(scope, tags, database()):
             camera = scope.camera          # the microscope's camera, for a file that names none
     resolution = database().resolve(tags, camera=camera)
 
@@ -344,7 +358,10 @@ def resolve_camera(source: ImageSource, camera: str = "",
         # a simulation knows its camera exactly, which beats any guess
         resolution = resolution.overlaid_with(simulated, SIMULATED)
     elif scope is not None:
-        resolution = with_microscope(resolution, scope)
+        # a stand-in microscope (the last one used) speaks for the pixel only if its camera
+        # could have taken the file; else it names the optics and leaves the file's pixel
+        resolution = with_microscope(resolution, scope,
+                                     pixel=not scope.fallback or _could_be(scope, tags, database()))
     if overrides:
         values = overrides if isinstance(overrides, dict) else overrides.to_dict()
         resolution = resolution.overlaid_with(
@@ -355,7 +372,7 @@ def resolve_camera(source: ImageSource, camera: str = "",
 
 def camera_metadata(source: ImageSource, overrides=None,
                     require: bool = True, camera: str = "",
-                    microscope: str = "") -> CameraMetadata:
+                    microscope: str = "", fallback: str = "") -> CameraMetadata:
     """Camera metadata for a stack: the database, the file, then the user.
 
     `resolve_camera`'s values, for a script.  ``overrides`` may be a
@@ -374,7 +391,7 @@ def camera_metadata(source: ImageSource, overrides=None,
     if isinstance(overrides, CameraMetadata):
         overrides = {k: v for k, v in overrides.to_dict().items() if v is not None}
     meta = resolve_camera(source, camera=camera, overrides=overrides,
-                          microscope=microscope).camera_metadata()
+                          microscope=microscope, fallback=fallback).camera_metadata()
     if require:
         meta.require()
     return meta

@@ -307,5 +307,6 @@ def test_the_camera_part_is_folded_and_titled_by_what_it_resolves_to(stack):
     panel.form.set_values({"source.path": str(stack), "camera.conversion": 0.5,
                            "camera.pixelsize_um": 0.108})
     panel._describe()
-    assert section.title == "camera: auto – 0.5 e-/ADU, 108 nm"
+    # no microscope recognises a simulated stack: the camera's numbers stand in the line
+    assert section.title.startswith("no microscope recognised \u00b7 0.5 e-/ADU \u00b7 108")
     assert GaussianFit.specs()["output"].children["show_tags"].info.advanced

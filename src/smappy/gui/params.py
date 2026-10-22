@@ -670,7 +670,12 @@ class SettingsForm(QWidget):
             if spec.info.hidden:
                 continue
             if spec.children is not None:
-                part = SettingsForm(spec.type, spec.children)
+                if spec.info.kind == "microscope":
+                    # one line here, the rows in a window (`gui.microscope_form`)
+                    from .microscope_form import MicroscopeForm
+                    part = MicroscopeForm(spec.type, spec.children)
+                else:
+                    part = SettingsForm(spec.type, spec.children)
                 part.field_changed.connect(lambda sub, n=name: self.field_changed.emit(f"{n}.{sub}"))
                 part.changed.connect(self.changed)
                 self.fields[name] = part
@@ -778,6 +783,9 @@ class SettingsForm(QWidget):
                 continue
             if hasattr(field, "set_hint"):
                 field.set_hint(value)
+            elif hasattr(field, "set_details"):
+                # a part that shows what the function found (`gui.microscope_form`)
+                field.set_details(value)
 
     def set_choices(self, lists: Dict[str, Any]) -> None:
         """Replace, by dotted name, the lists of fields whose choices the

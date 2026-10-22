@@ -89,42 +89,47 @@ def make(d) -> None:
            say="A fitter converts the camera's counts to photons, finds the "
                "spots, fits each one, and writes the table.")
 
-    d.chapter("The camera")
+    d.chapter("The microscope")
     localize = show_tab(d, "Localize")
     sec, panel = open_section(d, localize, "Gaussian 2D")
     type_into(panel, "source.path", str(flat))
     d.settle()
     d.shot("The acquisition goes into source. A Micro-Manager or NDTiff file "
-           "also tells SMAPpy which camera took it.",
+           "also tells SMAPpy which microscope and camera took it.",
            spot=[field(panel, "source.path")], point=field(panel, "source.path"),
            zoom=d.around(field(panel, "source.path"), 760))
     camera = section_of(panel, "camera")
-    d.shot("The camera section starts folded: its title says which camera and "
-           "which numbers the fit will use.",
+    d.shot("The microscope section starts folded: its title says which "
+           "microscope and camera, and the pixel size.",
            spot=[camera.button], point=camera.button, click=True,
            zoom=d.around(camera, 760))
     camera.set_expanded(True)
     d.settle()
-    d.shot("For a recognised camera these stay on auto: the numbers come from "
-           "the file and from SMAPpy's camera database.",
-           spot=[camera], zoom=d.around(camera, 760))
+    control = panel.form.fields["camera"]
+    d.shot("Open, it lists the numbers the fit uses. For a known microscope "
+           "they come from the file and from SMAPpy's database.",
+           spot=[control.line, control.values_line], zoom=d.around(camera, 760))
+    d.shot("Microscope shows each number and where it came from.",
+           spot=[control.button], point=control.button, click=True,
+           zoom=d.around(control.button, 760))
+    control.open_window()
+    d.settle()
+    place_beside(d, control.window, 0.8)
+    d.shot("The numbers are locked: the lock opens them for typing, so that "
+           "overriding the file is a decision.",
+           spot=[control.lock], point=control.lock, click=True,
+           zoom=d.around(control.lock, 760))
+    control.lock.setChecked(False)
     _camera(panel)
     d.settle()
-    button = next(b for b in control.findChildren(type(panel.run_button))
-                  if b.text().startswith("Camera parameters"))
     d.shot("This file has no camera information, so the values are typed in. "
-           "Camera parameters shows what the fit will use.",
+           "A typed value is marked, and kept with the fitter's settings.",
            spot=[d.union(*[field(panel, f"camera.{n}")
-                           for n in ("conversion", "offset", "pixelsize_um")]), button],
-           point=button, click=True, zoom=d.around(button, 760))
-    button.click()
-    d.settle()
-    window = control._camera_window
-    place_beside(d, window, 0.8)
-    d.shot("Every number, and where it came from. A wrong conversion still fits "
-           "well but gives wrong photon counts, so check it once per camera.",
-           spot=[d.window_rect(window)])
-    window.hide()
+                           for n in ("conversion", "offset", "pixelsize_um")])])
+    d.shot("A wrong conversion still fits well but gives wrong photon counts, so "
+           "check it once per camera.",
+           spot=[d.window_rect(control.window)])
+    control.window.hide()
 
     d.chapter("Finding the spots")
     detection = section_of(panel, "detection")

@@ -28,8 +28,9 @@ mode...* for a known camera recorded in a mode it has no numbers for.  A
 camera the database does not know, whose numbers are not typed in either, is
 asked about again at Run, and *Open camera editor* there opens this window
 instead of fitting.  It
-also opens from *Camera editor...* at the top of the Localize tab, and from
-*Add to camera database...* in the *Camera parameters* window.
+also opens from *Edit camera...* in the
+[Microscope manager](plugin:Panels/Microscope manager), on the camera a
+microscope is set up with.
 
 The window starts from **the file the fitter is set to**: its tags already
 say which device took it, its serial number, which tags carry the
@@ -75,7 +76,7 @@ tags read in this file.
 
 **3. Checking.**  Below, the window shows what the entry, as it stands, makes
 of this file: every parameter, its value, and where it came from.  It is the
-table the *Camera parameters* window shows, so the entry can be checked
+table of values a fitter's *Microscope...* window draws on, so the entry can be checked
 against the file before it is saved.  Under the table, in orange, is
 whatever is still wrong: a parameter the fit needs that is still unknown, a
 recognising tag this file does not match, a file another camera already
@@ -84,7 +85,8 @@ claims.
 **4. Saving.**  The camera goes into your `microscopes.json`, replacing one
 of the same name there.  The database is then read again, and every open fitter
 re-reads its file: its line disappears, its *auto* fields show the new
-numbers, and the camera is offered under *camera*.
+numbers, and the camera is offered under *camera* in each fitter's
+*Microscope...* window.
 
 ## In detail
 
@@ -113,7 +115,8 @@ mode, or a wrong number is corrected.  When the editor is opened for a file
 whose camera was recognised, that camera is chosen already.
 
 ### name
-What the camera is called under *camera* in the fitters.  An entry is saved
+What the camera is called under *camera* in the fitters' *Microscope...*
+window and in the microscope manager.  An entry is saved
 under its name, so saving under a new name makes a second camera.
 
 ### device

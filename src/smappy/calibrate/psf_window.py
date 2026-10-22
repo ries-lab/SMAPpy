@@ -192,23 +192,6 @@ class PSFCalibrationWindow(QMainWindow):
         self.subdirectories = QCheckBox("search subdirectories")
         self.subdirectories.setChecked(True)
         flayout.addWidget(self.subdirectories)
-        # the microscope the first stack was taken on, found from its metadata, in one line; the
-        # button shows what was found and lets one be chosen by hand (`gui.microscope_view`)
-        mrow = QHBoxLayout()
-        self.microscope_line = QLabel("no microscope recognised")
-        self.microscope_line.setWordWrap(True)
-        self.microscope_line.setStyleSheet("color: gray")
-        self.microscope_line.setToolTip("the microscope and its state, found from the first stack's metadata")
-        mrow.addWidget(self.microscope_line, 1)
-        self.microscope_button = QPushButton("Microscope...")
-        self.microscope_button.setToolTip("what was found, where each value comes from; choose a microscope "
-                                          "by hand; the microscope manager")
-        self.microscope_button.clicked.connect(self.show_microscope)
-        mrow.addWidget(self.microscope_button)
-        flayout.addLayout(mrow)
-        self.microscope_choice = ""             # "" : recognised from the files
-        self.found_microscope = None
-        self._microscope_window = None
         self.files_section = CollapsibleSection("bead stacks", files, expanded=True)
         layout.addWidget(self.files_section)
 
@@ -230,7 +213,12 @@ class PSFCalibrationWindow(QMainWindow):
         layout.addWidget(self.run_form)
         self.start_form = SettingsForm(RunSettings)
         self.start_form.set_shown({"save_model": False})
-        self.optics_form = SettingsForm(OpticsSettings)
+        # the microscope control (`gui.microscope_form`): the first stack's microscope in one
+        # line, its values a button away, locked until unlocked
+        from ..gui.microscope_form import MicroscopeForm
+        self.optics_form = MicroscopeForm(OpticsSettings)
+        self.optics_form.field_changed.connect(self._optics_changed)
+        self.optics_camera = None
         self.model_form = SettingsForm(BeadSettings)
         model = QWidget()
         mlayout = QVBoxLayout(model)
@@ -322,8 +310,12 @@ class PSFCalibrationWindow(QMainWindow):
         """Show what the chosen method reads, and only that."""
         reads = self.method.sections
         insitu = reads.get("in situ", False)
-        for name in ("microscope", "model", "spline"):
+        for name in ("model", "spline"):
             self.sections[name].setVisible(reads[name])
+        # every method reads the camera and the pixel; a model the optics too (`_show_optics`)
+        self.sections["microscope"].setVisible(True)
+        if hasattr(self, "paths"):
+            self._show_optics()
         self.sections["in situ"].setVisible(insitu)
         self.sections["beads"].setVisible(not insitu)
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
@@ -390,23 +382,12 @@ class PSFCalibrationWindow(QMainWindow):
         self._forget("mode changed; files and settings kept - calibrate again")
         self._show_optics()
 
-    def show_microscope(self) -> None:
-        """What was found for the first stack, with a microscope chosen by hand (`microscope_view`)."""
-        from ..gui.microscope_view import open_found
-        first = self._microscope_window is None
-        self._microscope_window = open_found(self.found_microscope, self.microscope_choice, self,
-                                             self._microscope_window)
-        if first:
-            self._microscope_window.chosen.connect(self.choose_microscope)
-            opener = getattr(self, "open_manager", None)
-            if opener is not None:
-                self._microscope_window.open_manager = opener
-
-    def choose_microscope(self, name: str) -> None:
-        """A microscope by hand ("" : recognised from the files), for this window's runs."""
-        self.microscope_choice = name
-        self._undetect("the microscope changed")
-        self._show_optics()
+    def _optics_changed(self, name: str) -> None:
+        """A microscope, a camera or a camera number chosen: the stacks read again, the beads found
+        before dropped (their photons and pixel may change)."""
+        if name in ("microscope", "camera", "conversion", "offset", "emgain", "pixel_x_nm", "pixel_y_nm"):
+            self._undetect("the microscope changed")
+            self._show_optics()
 
     def _main_half(self):
         """The dual calibration's main half as set, or None on *auto*."""
@@ -418,32 +399,83 @@ class PSFCalibrationWindow(QMainWindow):
             return None
         return None if main == "auto" else main
 
+    def _stacks_camera(self, require: bool = False):
+        """The first stack's camera, resolved with the microscope and the camera chosen here and the
+        camera numbers typed here -- what every run of this window uses."""
+        from ..io.tiff import open_stack
+        from ..plugins.fit import CameraSettings
+        from . import pupil
+        try:
+            optics = self.optics_form.value()
+        except ValueError:
+            optics = OpticsSettings()
+        # a fitter's camera settings: the same resolution, the last microscope used included
+        settings = CameraSettings(microscope=optics.microscope, camera=optics.camera,
+                                  **optics.camera_overrides())
+        path = discover_acquisitions(self.paths[:1])[0]
+        if require:
+            return pupil.camera_for(path, settings)
+        return settings.resolve(open_stack(path), require=False)
+
     def _show_optics(self) -> None:
-        """The first stack's camera and microscope (`microscope_db`), and the optics they give shown
-        greyed in the form's *auto* fields: what a run takes unless a value is typed."""
+        """The first stack's camera and microscope (`microscope_db`): the line, the optics on *auto*
+        greyed in the window, and only the rows the method uses."""
         from ..microscope_db import one_line
         self.optics_camera = None
-        self.found_microscope = None
-        hints = {}
+        hints, details = {}, {"line": "no stacks", "status": "ok"}
+        channels = 2 if self.is_dual else 1
         if self.paths:
             try:
-                from ..io.tiff import open_stack, resolve_camera
-                resolved = resolve_camera(open_stack(discover_acquisitions(self.paths[:1])[0]),
-                                          microscope=self.microscope_choice)
-                self.optics_camera = resolved.camera_metadata()
-                self.found_microscope = resolved.microscope
-                hints = OpticsSettings().hints(self.optics_camera, 2 if self.is_dual else 1,
-                                               self._main_half())
+                camera = self.optics_camera = self._stacks_camera()
+                hints = OpticsSettings().hints(camera, channels, self._main_half())
+                hints.update({k: getattr(camera, k) for k in ("conversion", "offset", "emgain")})
+                scope = camera.microscope
+                missing = self._optics_missing(camera)
+                status = ("missing" if missing else "fallback" if scope and scope.get("fallback")
+                          else "unrecognised" if not scope else "ok")
+                details = {"line": one_line(scope) if scope else "no microscope recognised",
+                           "status": status, "values": self._optics_sentence(hints, missing),
+                           "sources": {"microscope": (f"recognised: {scope['name']}" if scope and
+                                                      not scope.get("fallback") else
+                                                      "the last one used" if scope else "none")}}
             except Exception as error:               # a file that cannot be read says so when it is run
                 print(f"PSF calibration: the stacks' camera: {error}")
-        self.microscope_line.setText(
-            one_line(self.optics_camera.microscope if self.optics_camera is not None else None)
-            if self.paths else "no stacks")
-        if self._microscope_window is not None and self._microscope_window.isVisible():
-            self._microscope_window.show_resolution(self.found_microscope, self.microscope_choice)
+                details = {"line": f"the stacks cannot be read: {error}", "status": "missing"}
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
-                                     "pixel_x_nm", "pixel_y_nm")})
+                                     "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain")})
+        self.optics_form.set_details(details)
+        optics = self.method.sections.get("microscope", False)      # a model: the optics too
+        self.optics_form.set_shown({"NA": optics, "n_immersion": optics, "wavelength_nm": optics,
+                                    "wavelength2_nm": optics and self.is_dual, "n_medium": optics,
+                                    "n_coverslip": optics,
+                                    "emgain": bool(self.optics_camera is not None
+                                                   and self.optics_camera.is_em)})
+
+    def _optics_missing(self, camera) -> list:
+        if not self.method.sections.get("microscope", False):
+            return []
+        try:
+            optics = self.optics_form.value()
+        except ValueError:
+            return []
+        return optics.missing(camera, 2 if self.is_dual else 1, self._main_half())
+
+    def _optics_sentence(self, hints: dict, missing: list) -> str:
+        bits = []
+        if self.method.sections.get("microscope", False):
+            for key, text in (("NA", "NA {:g}"), ("n_immersion", "immersion {:g}"),
+                              ("wavelength_nm", "emission {:g} nm"), ("wavelength2_nm", "2nd {:g} nm")):
+                if hints.get(key) is not None and (key != "wavelength2_nm" or self.is_dual):
+                    bits.append(text.format(hints[key]))
+        if hints.get("pixel_x_nm") is not None:
+            x, y = hints["pixel_x_nm"], hints.get("pixel_y_nm", hints["pixel_x_nm"])
+            bits.append(f"pixel {x:g} nm" if x == y else f"pixel {x:g}\u00d7{y:g} nm")
+        if hints.get("conversion") is not None:
+            bits.append(f"{hints['conversion']:g} e-/ADU")
+        if missing:
+            bits.append("missing: " + ", ".join(missing))
+        return ", ".join(bits)
 
     def _update_buttons(self) -> None:
         ready = not (self.method.key in ("pupil", "insitu") and torch_missing() is not None)
@@ -626,11 +658,13 @@ class PSFCalibrationWindow(QMainWindow):
         inputs = dict(detection=self.insitu_detection_form.value() if insitu else self.detection_form.value(), run=run)
         if insitu:
             inputs["insitu"] = self.insitu_form.value()
-        if self.microscope_choice and self.paths:
-            # chosen by hand: the runs take the camera resolved with it (on auto they resolve their own)
-            from ..io.tiff import camera_metadata, open_stack
-            inputs["camera"] = camera_metadata(open_stack(discover_acquisitions(self.paths[:1])[0]),
-                                               microscope=self.microscope_choice)
+        if self.paths:
+            # the camera every run takes: as this window resolved it, chosen and typed values
+            # included.  Incomplete, the method resolves its own and says what is missing
+            try:
+                inputs["camera"] = self._stacks_camera(require=True)
+            except ValueError:
+                pass
         if self.method.sections["microscope"]:
             inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
                           spline=self.spline_form.value())

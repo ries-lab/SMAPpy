@@ -21,23 +21,25 @@ each microscope, the tags that recognise it, the few devices that matter
 with their states named, and the values that follow from them.  A file is
 then read with its microscope's optics wherever it is opened:
 
-- *PSF calibration* shows the microscope it found for the first stack in one
-  line under the stacks -- *M2 · 3DA on · 700/100 · iXon 1 · 127 × 116 nm* --
-  and fills its optics on *auto* from it.  *Microscope...* beside the line
-  shows every value and where it came from, and lets a microscope be chosen
-  by hand for a file none recognises.
-- The fitters use the microscope's pixel for the state of its 3D lens, over
-  the file's own pixel size, which Micro-Manager does not tie to the lens.
-  The camera's folded title names the microscope; *Camera parameters...*
-  lists its devices and values; *microscope*, under the camera's advanced
-  settings, chooses one by hand.
+- Wherever a stack is opened -- every fitter, *PSF calibration* -- the same
+  control shows it: one line, *M2 · 3DA on · iXon 1 · 127 × 116 nm*, grey
+  when everything the function uses is known and orange when not, the
+  numbers used below it, and *Microscope...*.  That window shows the
+  microscope and the camera, recognised or chosen by hand, and only the
+  values the function uses, each with where it comes from.  The values are
+  locked; the lock opens them, and a value typed over the file's is marked
+  and kept with the run's settings.  When nothing recognises a file, the
+  last microscope used stands in, and the line says so.
+- A microscope brings its camera: a file whose camera says nothing that
+  identifies it is read with the camera the microscope is set up with.  The
+  fitters use the microscope's pixel for the state of its 3D lens, over the
+  file's own pixel size, which Micro-Manager does not tie to the lens.
 - A calibration keeps the state its beads were taken in, and a fit warns when
   its data were taken otherwise: the 3D lens out where the beads had it in,
   another filter, another microscope.
 
 This window is where the entries are made.  Opened from *File > Microscope
-manager...*, from *Microscope...* in *PSF calibration*, or from *Camera
-parameters...*.  A value typed where a file is opened (an NA in *PSF
+manager...*, or from *Microscope manager...* in any *Microscope...* window.  A value typed where a file is opened (an NA in *PSF
 calibration*, a pixel size in the fitter) still wins over the entry, for that
 run.
 

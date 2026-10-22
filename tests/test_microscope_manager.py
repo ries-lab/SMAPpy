@@ -61,8 +61,9 @@ def test_what_a_cell_shows_reads_back_as_it_was():
 
 def test_one_line_says_the_microscope_its_state_and_its_pixel():
     from test_microscope_db import camera_of
+    # the switches a parameter follows; the filters are left to the window
     assert one_line(camera_of(M2_BEADS).microscope) == \
-        "M2 · 700/100 · empty · Empty · 3DA on · iXon 1 · 127 × 116 nm"
+        "M2 \u00b7 3DA on \u00b7 iXon 1 \u00b7 127 \u00d7 116 nm"
     assert one_line(camera_of(M2_MOVIE).microscope, short=True) == "M2, 2D"
     assert one_line(None) == "no microscope recognised"
 
@@ -157,32 +158,61 @@ def test_the_found_microscope_shows_its_rows_and_offers_a_choice(app):
     window.close()
 
 
-def test_psf_calibration_names_the_stacks_microscope_and_takes_one_chosen(app, tmp_path):
+def test_psf_calibration_names_the_stacks_microscope_and_takes_one_chosen(app, tmp_path, config):
     from smappy.calibrate.psf_window import PSFCalibrationWindow
     window = PSFCalibrationWindow()
     tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
     window.add_paths([a_tiff(tmp_path / "beads_MMStack.ome.tif", tags)])
-    assert window.microscope_line.text() == "no microscope recognised"
-    window.choose_microscope("M2")                           # by hand
-    assert window.microscope_line.text().startswith("M2 ·")
+    form = window.optics_form
+    assert form.line.text() == "no microscope recognised"
+    form.fields["microscope"].set("M2")                       # by hand, in the control
+    form.fields["microscope"].changed.emit()
+    assert form.line.text().startswith("M2 \u00b7")
     assert window.optics_camera.pixelsize_um_xy == (0.127, 0.116)
-    window.show_microscope()
-    assert window._microscope_window.choice.currentData() == "M2"
+    assert form.fields["NA"]._hint == "1.43"
     window.close()
 
 
-def test_the_fitter_names_the_microscope_and_takes_one_chosen(app, tmp_path):
+def test_the_fitter_names_the_microscope_and_takes_one_chosen(app, tmp_path, config):
     from smappy.plugins.fit import GaussianFit
     plugin = GaussianFit()
     settings = plugin.Settings()
     settings.source.path = a_tiff(tmp_path / "beads_MMStack.ome.tif", M2_BEADS)
-    assert "M2, astigmatic" in plugin.describe(None, settings).titles["camera"]
-    assert "127×116 nm" in plugin.describe(None, settings).titles["camera"]
+    state = plugin.describe(None, settings)
+    assert state.titles["camera"] == "M2 \u00b7 3DA on \u00b7 iXon 1 \u00b7 127 \u00d7 116 nm"
+    assert state.hints["camera"]["status"] == "ok"
+    assert state.shown["camera.read_noise_e"] is False          # EM gain on: the fit ignores it
+    assert microscope_db.database() and \
+        __import__("smappy.config", fromlist=["get"]).get("last_microscope") == "M2"
+    # a file nothing recognises: the last microscope used stands in, and says so
     settings.source.path = a_tiff(tmp_path / "m5_MMStack.ome.tif",
                                   {k: v for k, v in M5_BEADS.items() if "iChrome" not in k})
-    assert plugin.resolution(settings).microscope is None
+    found = plugin.resolution(settings).microscope
+    assert found.name == "M2" and found.fallback
+    assert plugin.describe(None, settings).hints["camera"]["status"] == "fallback"
     settings.camera.microscope = "M5"
     assert plugin.resolution(settings).microscope.name == "M5"
+
+
+def test_the_microscope_control_locks_its_values_and_colours_an_edit(app, tmp_path, config):
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+    panel = PluginPanel(GaussianFit, Session())
+    panel.form.set_values({"source.path": a_tiff(tmp_path / "beads_MMStack.ome.tif", M2_BEADS)})
+    panel._describe()
+    control = panel.form.fields["camera"]
+    assert control.line.text().startswith("M2 \u00b7 3DA on")
+    assert "15.8 e-/ADU" in control.values_line.text()
+    assert not control.fields["conversion"].isEnabled() and control.fields["microscope"].isEnabled()
+    control.lock.setChecked(False)
+    control.fields["conversion"].set(12.0)
+    control.fields["conversion"].changed.emit()
+    assert control.labels["conversion"].styleSheet().startswith("color: #1d5fb4")
+    assert panel.form.values()["camera.conversion"] == 12.0      # stored as before
+    control.open_window()
+    assert control.window.isVisible()
+    control.window.close()
 
 
 def test_the_menu_opens_the_manager(app, config):

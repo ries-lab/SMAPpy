@@ -68,7 +68,12 @@ one, before the Mojo FPGA became MicroFPGA).
 ## Second round (2026-10-22): one microscope, one control
 
 After using the first GUI, the user's direction, which replaces the per-camera tables of
-the entry and the GUI below wherever they differ:
+the entry and the GUI below wherever they differ.  **Built**: one camera per setup and
+versions (`microscope_db`), the control (`gui/microscope_form.MicroscopeForm`, a settings
+part of kind `"microscope"`: the fitters' `camera` part and *PSF calibration*'s optics),
+the last microscope used standing in (config `last_microscope`; it brings its camera and
+pixel only when the file's Micro-Manager camera device is that camera's), the manager's
+camera field, the Localize tab without its camera buttons:
 
 * **The user sees one thing, the microscope**, and only the parts the function at hand
   uses.  The camera database stays, as a library of cameras the microscope is set up
