@@ -401,7 +401,7 @@ class PupilModel:
         from .pupil import bead_rois, estimate_seconds
         tell = progress or (lambda entry: None)
         tell({"message": "reading the stacks and finding the beads", "fraction": 0.0})
-        rois = bead_rois(paths, None, dual=dual, settings=inputs["detection"])
+        rois = bead_rois(paths, inputs.get("camera"), dual=dual, settings=inputs["detection"])
         tell({"message": "timing the model on a few beads", "fraction": 0.7})
         seconds = estimate_seconds(rois, inputs["optics"], inputs["model"])
         what = "pairs" if dual else "beads"
@@ -416,7 +416,7 @@ class PupilModel:
             marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
         from .pupil import run_calibration
         done = run_calibration(paths, dual, inputs["optics"], inputs["model"], inputs["detection"],
-                               inputs["spline"], inputs["run"],
+                               inputs["spline"], inputs["run"], camera=inputs.get("camera"),
                                previous=None if previous is None else previous.result, decisions=marks or None,
                                progress=progress, cancel=cancel, rois=None if detected is None else detected.found)
         return Run(done, dual, done.saved)
@@ -548,7 +548,7 @@ class InSitu:
         from .insitu_run import movie_rois
         if dual:
             raise ValueError("in situ learning is one channel only, for now")
-        rois = movie_rois(paths, inputs["detection"], progress=progress)
+        rois = movie_rois(paths, inputs["detection"], inputs.get("camera"), progress=progress)
         used = len(rois.ids("used"))
         return Detected(rois, f"{used} frames of {len(np.unique(rois.units.blink[rois.ids('used')]))} molecules "
                               f"to learn from ({'; '.join(rois.messages)}); learning takes minutes a round",
@@ -562,7 +562,8 @@ class InSitu:
         from .insitu_run import run_insitu
         rois = detected.found if detected is not None else (previous.result.rois if previous is not None else None)
         done = run_insitu(paths, inputs["optics"], inputs["model"], inputs["insitu"], inputs["detection"],
-                          inputs["spline"], inputs["run"], rois=rois, progress=progress, cancel=cancel,
+                          inputs["spline"], inputs["run"], camera=inputs.get("camera"), rois=rois,
+                          progress=progress, cancel=cancel,
                           save_to=previous.saved if previous is not None else None)
         return Run(done, False, done.saved)
 

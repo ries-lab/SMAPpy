@@ -70,6 +70,12 @@ class CameraSettings:
     # the file whose camera carries no tag to recognise it by
     camera: str = param("", label="camera", choices=lambda: _camera_choices(),
                         help="auto: identified from the file's metadata")
+    # recognised from the file's devices as the camera is; chosen for a file
+    # no entry recognises.  Its pixel for the 3D lens's state beats the file's
+    microscope: str = param("", label="microscope", choices=lambda: _microscope_choices(),
+                            advanced=True,
+                            help="auto: identified from the file's metadata; it sets the pixel "
+                                 "per state of its 3D lens")
     conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
                                         help="photoelectrons per count; auto: "
                                              "from the file or the camera "
@@ -102,7 +108,7 @@ class CameraSettings:
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
         out = {k: v for k, v in asdict(self).items()
-               if k not in ("camera", "pixelsize_y_um") and v is not None}
+               if k not in ("camera", "microscope", "pixelsize_y_um") and v is not None}
         if self.pixelsize_y_um and self.pixelsize_um:
             out["pixelsize_um"] = [self.pixelsize_um, self.pixelsize_y_um]
         return out
@@ -117,7 +123,8 @@ class CameraSettings:
         here, so that none of them can disagree with the fit about a camera.
         """
         from ..io.tiff import resolve_camera
-        return resolve_camera(source, camera=self.camera, overrides=self.overrides())
+        return resolve_camera(source, camera=self.camera, overrides=self.overrides(),
+                              microscope=self.microscope)
 
     def resolve(self, source, require: bool = True) -> CameraMetadata:
         """The camera the fit uses: `resolution`'s values, or with no file
@@ -466,6 +473,11 @@ def _camera_choices() -> List:
     return [("", "auto")] + [(name, name) for name in names]
 
 
+def _microscope_choices() -> List:
+    from ..microscope_db import choices
+    return choices()
+
+
 def camera_resolution(settings):
     """The camera behind a fitter's settings: the database, the file, the
     user's fields -- or None when the source cannot be opened.
@@ -568,12 +580,13 @@ class _FitPlugin(Plugin):
         opens the acquisition and the GUI asks after every keystroke.
         """
         from ..camera_db import revision
+        from ..microscope_db import revision as microscope_revision
         path = settings.source.path
         if not path:
             return None
-        key = (path, settings.camera.camera, tuple(
+        key = (path, settings.camera.camera, settings.camera.microscope, tuple(
             getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
-            settings.camera.pixelsize_y_um, revision())
+            settings.camera.pixelsize_y_um, revision(), microscope_revision())
         if getattr(self, "_camera_key", None) == key:
             return self._camera_value
         resolved = camera_resolution(settings)
@@ -588,7 +601,8 @@ class _FitPlugin(Plugin):
         database does not know.  Best effort: working these out opens the
         file, which may be missing, half-written or not an image at all, and
         none of that is worth an error in a field still being typed."""
-        state = FormState(choices={"camera.camera": _camera_choices()})
+        state = FormState(choices={"camera.camera": _camera_choices(),
+                                   "camera.microscope": _microscope_choices()})
         try:
             state.hints = self._hints(settings) or {}
         except Exception:
@@ -673,7 +687,11 @@ class _FitPlugin(Plugin):
             bits.append(f"{camera.conversion:.3g} e-/ADU")
         sizes = camera.pixelsize_um_xy
         if sizes is not None:
-            bits.append(f"{1000 * sizes[0]:.4g} nm")
+            bits.append(f"{1000 * sizes[0]:.4g} nm" if sizes[0] == sizes[1]
+                        else f"{1000 * sizes[0]:.4g}\u00d7{1000 * sizes[1]:.4g} nm")
+        if camera.microscope:
+            from ..microscope_db import one_line
+            bits.append(one_line(camera.microscope, short=True))
         head = f"camera: {settings.camera.camera or 'auto'}"
         return head + (" \u2013 " + ", ".join(bits) if bits else "")
 

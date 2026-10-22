@@ -349,7 +349,8 @@ def resolve_camera(source: ImageSource, camera: str = "",
 
 
 def camera_metadata(source: ImageSource, overrides=None,
-                    require: bool = True, camera: str = "") -> CameraMetadata:
+                    require: bool = True, camera: str = "",
+                    microscope: str = "") -> CameraMetadata:
     """Camera metadata for a stack: the database, the file, then the user.
 
     `resolve_camera`'s values, for a script.  ``overrides`` may be a
@@ -367,8 +368,8 @@ def camera_metadata(source: ImageSource, overrides=None,
         overrides = CameraMetadata.from_yaml(overrides)
     if isinstance(overrides, CameraMetadata):
         overrides = {k: v for k, v in overrides.to_dict().items() if v is not None}
-    meta = resolve_camera(source, camera=camera,
-                          overrides=overrides).camera_metadata()
+    meta = resolve_camera(source, camera=camera, overrides=overrides,
+                          microscope=microscope).camera_metadata()
     if require:
         meta.require()
     return meta

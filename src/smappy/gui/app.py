@@ -272,6 +272,10 @@ class ControlWindow(QMainWindow):
                 self.recent_gui_menu.aboutToShow.connect(self._fill_recent_guis)
             else:
                 self._action(self.workspace_menu, text, None, slot).setToolTip(tip)
+        self._action(menu, "Microscope manager...", None,
+                     lambda: self.open_microscope_manager()).setToolTip(
+            "the microscope entries: which devices set the pixel and the optics; "
+            "EMU configurations to start them from")
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences)
         menu.addSeparator()
@@ -360,6 +364,9 @@ class ControlWindow(QMainWindow):
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
+        # what a file opener's found microscope offers (`gui.microscope_view`)
+        session.window_openers["microscope manager"] = \
+            lambda settings=None: self.open_microscope_manager()
         # a written simulation offers this (`SimulateBlinks.describe`), with the
         # file's path: into a fitter as a dropped stack goes
         session.window_openers["fit file"] = self.fit_file
@@ -476,6 +483,17 @@ class ControlWindow(QMainWindow):
         self._camera_window = open_for(panel.plugin, settings, self,
                                        getattr(self, "_camera_window", None))
         self._camera_window.open_editor = self.edit_camera
+        self._camera_window.open_manager = self.open_microscope_manager
+
+    def open_microscope_manager(self) -> None:
+        """The microscope manager, made once; a saved entry is read again by every fitter, as a
+        saved camera is."""
+        from .microscope_editor import MicroscopeManager
+        if getattr(self, "_microscope_manager", None) is None:
+            self._microscope_manager = MicroscopeManager(parent=self)
+            self._microscope_manager.saved.connect(lambda name: self._camera_saved(name))
+        self._microscope_manager.show()
+        self._microscope_manager.raise_()
 
     def open_camera_editor(self, settings=None) -> None:
         """The camera editor, on the file a fitter is set to.
@@ -516,6 +534,9 @@ class ControlWindow(QMainWindow):
         window = getattr(self, "_camera_window", None)
         if window is not None and window.isVisible():
             window.refresh()
+        psf = getattr(self, "psf_calibration_window", None)
+        if psf is not None:
+            psf._show_optics()                  # a saved microscope changes what its stacks resolve to
 
     def _fitting_panel(self):
         """The first open panel that knows how to resolve a camera."""
@@ -1161,6 +1182,7 @@ class ControlWindow(QMainWindow):
         if self.psf_calibration_window is None:
             self.psf_calibration_window = PSFCalibrationWindow(parent=self)
             self.psf_calibration_window.calibrated.connect(self.use_calibration)
+            self.psf_calibration_window.open_manager = self.open_microscope_manager
         self.psf_calibration_window.show()
         self.psf_calibration_window.raise_()
 

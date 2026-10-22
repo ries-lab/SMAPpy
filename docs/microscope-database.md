@@ -359,7 +359,7 @@ completed by hand, checked against the bead stacks of 260105, 260821, 260829, 26
   another state ("3DA: on for the beads, off for the data"); lasers and lamps are not
   compared (`io.calibration.microscope_differences`).
 
-## The GUI (decided 2026-10-22, to build)
+## The GUI (decided and built 2026-10-22)
 
 Little space where files are opened, the manager elsewhere:
 
@@ -384,12 +384,33 @@ Little space where files are opened, the manager elsewhere:
   whose band only it bounds (260821's transmitted arm, an empty slider behind 665LP) has
   its wavelength typed in the entry for that choice, or in the run.
 
+Built as: *File > Microscope manager...* (`gui/microscope_editor.py`, its page
+`docs/panels/Microscope manager.md`), the tables typed as the camera editor types a map;
+*PSF calibration*'s line under the stacks with *Microscope...*
+(`gui/microscope_view.FoundMicroscope`), a microscope chosen there handed to the run as its
+camera; in the fitters, the microscope in the camera's folded title (*M2, astigmatic*), its
+rows and a *Microscope manager...* button in *Camera parameters...*, and *microscope* under
+the camera's advanced settings to choose one by hand.
+
+**A missing value blocks only what reads it.**  A fit needs the camera's conversion, offset
+and pixel, as before; the NA, the emission and the immersion are read by *PSF calibration*
+and in situ learning alone, which refuse without them.  A microscope nobody recognises, or a
+device in no state, blocks nothing: the pixel falls back to the camera's or the file's.
+
 ## Next
 
-1. **The found-settings line and its dialog** in *PSF calibration* and the fitters;
-   choosing a microscope by hand.  Manual elements wait: single or dual is already
-   chosen where a file is opened, and an arm only a dichroic bounds is typed there.
-2. **The manager**, from the menu, with the EMU import; its help page.
+* Manual elements, when needed (above).
+* **Files attached to an entry** (the user, 2026-10-22): what is measured once per
+  microscope or camera and used by many runs -- an objective's pupil magnitude, learnt on
+  beads and held for in situ learning; an sCMOS camera's offset, gain and noise maps.  An
+  entry would name the file and the state it was measured in, kept beside the user's
+  `microscopes.json`, and resolved like any parameter.
+* **The last PSF calibration per state** (the user, 2026-10-22): a calibration already keeps
+  its beads' microscope and device states (`parameters["microscope"]`).  Saving one could
+  register it with the entry under that state, and a fitter's calibration on *auto* would
+  take the newest one whose followed devices match the data's -- the 3D lens in and the
+  same filter -- so the right calibration is found as the camera is, and a mismatch cannot
+  happen by picking the wrong file.
 
 ## Still open
 

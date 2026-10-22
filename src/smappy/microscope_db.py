@@ -503,6 +503,41 @@ class MicroscopeResolution:
         return out
 
 
+def one_line(summary: Optional[Dict[str, Any]], short: bool = False) -> str:
+    """A microscope summary (`MicroscopeResolution.summary`) in one line, for where a file is opened:
+    *M2 · 3DA on · 700/100 · iXon 1 · 127 × 116 nm*; ``short``, the name and the modality alone
+    (*M2, astigmatic*), for a folded title.  The followed devices' states, the filters among them."""
+    if not summary:
+        return "no microscope recognised"
+    values = summary.get("values") or {}
+    if short:
+        return ", ".join(str(v) for v in (summary.get("name"), values.get("modality")) if v)
+    states = summary.get("states") or {}
+    bits = [str(summary.get("name"))]
+    for device in summary.get("followed") or []:
+        state = states.get(device)
+        if state is None:
+            continue
+        # a filter's state is its name; a switch's says nothing without the device
+        bits.append(str(state) if wavelength_from_name(state) or state.lower() in (
+            "none", "empty") else f"{device} {state}")
+    if summary.get("camera"):
+        bits.append(str(summary["camera"]))
+    pixel = values.get("pixel_nm")
+    if isinstance(pixel, (list, tuple)) and len(pixel) == 2:
+        bits.append(f"{pixel[0]:g} \u00d7 {pixel[1]:g} nm" if pixel[0] != pixel[1] else f"{pixel[0]:g} nm")
+    return " \u00b7 ".join(bits)
+
+
+def choices() -> List[Tuple[str, str]]:
+    """``(value, label)`` for a microscope chooser: *auto*, then the database's."""
+    try:
+        names = database().names()
+    except Exception:
+        names = []
+    return [("", "auto")] + [(name, name) for name in names]
+
+
 # ---------------------------------------------------------------- database
 
 class MicroscopeDatabase:

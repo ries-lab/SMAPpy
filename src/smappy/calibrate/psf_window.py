@@ -192,6 +192,23 @@ class PSFCalibrationWindow(QMainWindow):
         self.subdirectories = QCheckBox("search subdirectories")
         self.subdirectories.setChecked(True)
         flayout.addWidget(self.subdirectories)
+        # the microscope the first stack was taken on, found from its metadata, in one line; the
+        # button shows what was found and lets one be chosen by hand (`gui.microscope_view`)
+        mrow = QHBoxLayout()
+        self.microscope_line = QLabel("no microscope recognised")
+        self.microscope_line.setWordWrap(True)
+        self.microscope_line.setStyleSheet("color: gray")
+        self.microscope_line.setToolTip("the microscope and its state, found from the first stack's metadata")
+        mrow.addWidget(self.microscope_line, 1)
+        self.microscope_button = QPushButton("Microscope...")
+        self.microscope_button.setToolTip("what was found, where each value comes from; choose a microscope "
+                                          "by hand; the microscope manager")
+        self.microscope_button.clicked.connect(self.show_microscope)
+        mrow.addWidget(self.microscope_button)
+        flayout.addLayout(mrow)
+        self.microscope_choice = ""             # "" : recognised from the files
+        self.found_microscope = None
+        self._microscope_window = None
         self.files_section = CollapsibleSection("bead stacks", files, expanded=True)
         layout.addWidget(self.files_section)
 
@@ -373,6 +390,24 @@ class PSFCalibrationWindow(QMainWindow):
         self._forget("mode changed; files and settings kept - calibrate again")
         self._show_optics()
 
+    def show_microscope(self) -> None:
+        """What was found for the first stack, with a microscope chosen by hand (`microscope_view`)."""
+        from ..gui.microscope_view import open_found
+        first = self._microscope_window is None
+        self._microscope_window = open_found(self.found_microscope, self.microscope_choice, self,
+                                             self._microscope_window)
+        if first:
+            self._microscope_window.chosen.connect(self.choose_microscope)
+            opener = getattr(self, "open_manager", None)
+            if opener is not None:
+                self._microscope_window.open_manager = opener
+
+    def choose_microscope(self, name: str) -> None:
+        """A microscope by hand ("" : recognised from the files), for this window's runs."""
+        self.microscope_choice = name
+        self._undetect("the microscope changed")
+        self._show_optics()
+
     def _main_half(self):
         """The dual calibration's main half as set, or None on *auto*."""
         if not self.is_dual:
@@ -386,17 +421,26 @@ class PSFCalibrationWindow(QMainWindow):
     def _show_optics(self) -> None:
         """The first stack's camera and microscope (`microscope_db`), and the optics they give shown
         greyed in the form's *auto* fields: what a run takes unless a value is typed."""
+        from ..microscope_db import one_line
         self.optics_camera = None
+        self.found_microscope = None
         hints = {}
         if self.paths:
             try:
-                from ..io.tiff import camera_metadata, open_stack
-                self.optics_camera = camera_metadata(open_stack(discover_acquisitions(self.paths[:1])[0]),
-                                                     require=False)
+                from ..io.tiff import open_stack, resolve_camera
+                resolved = resolve_camera(open_stack(discover_acquisitions(self.paths[:1])[0]),
+                                          microscope=self.microscope_choice)
+                self.optics_camera = resolved.camera_metadata()
+                self.found_microscope = resolved.microscope
                 hints = OpticsSettings().hints(self.optics_camera, 2 if self.is_dual else 1,
                                                self._main_half())
             except Exception as error:               # a file that cannot be read says so when it is run
                 print(f"PSF calibration: the stacks' camera: {error}")
+        self.microscope_line.setText(
+            one_line(self.optics_camera.microscope if self.optics_camera is not None else None)
+            if self.paths else "no stacks")
+        if self._microscope_window is not None and self._microscope_window.isVisible():
+            self._microscope_window.show_resolution(self.found_microscope, self.microscope_choice)
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
                                      "pixel_x_nm", "pixel_y_nm")})
@@ -582,6 +626,11 @@ class PSFCalibrationWindow(QMainWindow):
         inputs = dict(detection=self.insitu_detection_form.value() if insitu else self.detection_form.value(), run=run)
         if insitu:
             inputs["insitu"] = self.insitu_form.value()
+        if self.microscope_choice and self.paths:
+            # chosen by hand: the runs take the camera resolved with it (on auto they resolve their own)
+            from ..io.tiff import camera_metadata, open_stack
+            inputs["camera"] = camera_metadata(open_stack(discover_acquisitions(self.paths[:1])[0]),
+                                               microscope=self.microscope_choice)
         if self.method.sections["microscope"]:
             inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
                           spline=self.spline_form.value())

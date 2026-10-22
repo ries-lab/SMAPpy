@@ -328,6 +328,13 @@ the stacks, named as the bead calibration names it and never over another
 file, and handed to the fitter.  Off: the figures only; *Save as...* still
 saves.
 
+### Microscope...
+Beside the line under the stacks that names the microscope found for the first
+one (*M2 · 3DA on · 700/100 · iXon 1 · 127 × 116 nm*): every device's state
+and every value with where it came from, a microscope chosen by hand for
+stacks no entry recognises -- for this window's runs, not the entry -- and
+the [Microscope manager](plugin:Panels/Microscope manager).
+
 ### microscope
 The optics.  On *auto* each comes from the microscope database for the
 microscope that took the first stack (recognised from its metadata) and the

@@ -67,11 +67,18 @@ class CameraParameters(QWidget):
         self.add_button.clicked.connect(self.edit)
         self.add_button.hide()
         buttons.addWidget(self.add_button)
+        self.manager_button = QPushButton("Microscope manager...")
+        self.manager_button.setToolTip("the microscope entries: which devices set the pixel "
+                                       "and the optics, and in which state")
+        self.manager_button.clicked.connect(self.manage)
+        buttons.addWidget(self.manager_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         # what opens the editor: the main window's, which tells the fitters
         # when a camera is added; a view on its own opens its own
         self.open_editor = None
+        self.open_manager = None
+        self._manager = None
         self._resolved = None
         self._editor = None
         self.resize(620, 420)
@@ -134,6 +141,11 @@ class CameraParameters(QWidget):
                 f"<br>identified by {resolved.camera.identified_by(resolved.metadata)}"
                 f"{state}")
 
+        from .. import microscope_db
+        scope = resolved.microscope
+        self.summary.setText(self.summary.text() + "<br>microscope: " + microscope_db.one_line(
+            scope.summary() if scope is not None else None))
+
         rows = resolved.rows()
         self.table.setRowCount(len(rows))
         for row, (name, value, source, used) in enumerate(rows):
@@ -150,6 +162,16 @@ class CameraParameters(QWidget):
                     cell.setForeground(Qt.gray)
                     cell.setToolTip("known, but not something the fit reads")
 
+        if scope is not None:
+            from .microscope_view import fill_rows
+            first = self.table.rowCount()
+            fill_rows(self.table, [(f"microscope: {what}", value, source)
+                                   for what, value, source in scope.rows()], first)
+            for row in range(first, self.table.rowCount()):
+                for column in range(3):
+                    self.table.item(row, column).setToolTip(
+                        "the microscope's: the pixel above follows it")
+
         missing = resolved.missing
         if missing:
             self.note.setText(
@@ -163,6 +185,17 @@ class CameraParameters(QWidget):
                               "does not read.")
             self.note.setStyleSheet("color: gray")
 
+
+    def manage(self) -> None:
+        """The microscope manager: the main window's, or one of this view's own."""
+        if self.open_manager is not None:
+            self.open_manager()
+            return
+        from .microscope_editor import MicroscopeManager
+        if self._manager is None:
+            self._manager = MicroscopeManager(parent=self)
+        self._manager.show()
+        self._manager.raise_()
 
     def edit(self) -> None:
         """The camera editor on the file this view is showing."""
