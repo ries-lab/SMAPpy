@@ -141,7 +141,11 @@ class DriftSettings:
                                                    "auto: a third of max "
                                                    "drift",
                                               advanced=True)
+    # The bound is for the panel as much as for sense: an unbounded spin box
+    # is sized for ten digits, which took COMET's panel past the control
+    # column (`tests/test_control_width.py`) once the fields were styled.
     boxcar_width: int = param(1, label="smoothing", unit="windows", min=1,
+                              max=1000,
                               help="running mean over this many windows "
                                    "between refinement steps; 1 is none; "
                                    "time-window fit only",

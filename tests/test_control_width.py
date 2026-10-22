@@ -19,8 +19,14 @@ SLACK = 40
 
 @pytest.fixture(scope="module")
 def app():
+    # styled as every window of the app is (`gui.make_app`): the field style's
+    # border and padding widen a spin box by a few pixels, so measured without
+    # it a panel passed alone and failed after any test that had made the app
     from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
+    from smappy.gui.widgets import apply_style
+    app = QApplication.instance() or QApplication([])
+    apply_style(app)
+    return app
 
 
 def _panel(cls):
