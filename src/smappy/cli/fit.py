@@ -16,7 +16,7 @@ import warnings
 
 from ..api import OLD_ABSOLUTE_FROM, peak_cutoff
 from ..detect import DoGFilter, GaussFilter, PeakFinder
-from ..io.calibration import load_spline_calibration, warn_on_em_mismatch
+from ..io.calibration import load_spline_calibration, warn_on_em_mismatch, warn_on_microscope_mismatch
 from ..io.hdf5 import LocalizationWriter, save_images
 from ..io.tiff import open_stack
 from ..pipeline import FitSettings, fit_stack, provenance
@@ -53,6 +53,7 @@ def main() -> None:
     if a.cal:
         cal = load_spline_calibration(a.cal)
         warn_on_em_mismatch(cal, cam.em_on)
+        warn_on_microscope_mismatch(cal, cam.microscope)
         model = SplinePSF(cal)
     else:
         model = GaussianPSF(sigma=a.sigma)

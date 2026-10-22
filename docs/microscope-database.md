@@ -152,7 +152,8 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   filter's name (`676/37` → 676, `665LP` → nothing, to be typed): the names are already
   the data.
 * **`channels`**, for a microscope with a split: each channel names the filter device it
-  follows and the side of the chip it lands on (`left`, `right`, `top`, `bottom`), so a
+  follows and the half of the chip it lands on (`left`, `right`, `upper`, `lower`, the dual
+  calibration's words), so a
   dual-channel file gets a wavelength per half -- *transmitted, right*.  The pairing is
   fixed per microscope.  **Whether the split is in is not recorded**: the splitting
   dichroic is put in by hand.  So single or dual channel is the choice the calibration
@@ -195,15 +196,11 @@ because it is what a calibration is matched by.
 3. **Each device's state**, by name, with its source: `3D lens: in (Servos-Position1 =
    28000)`.
 4. **Each parameter**, from its value or its device's state.
-5. **Layers, as in `io.tiff.resolve_camera`**: the database, then the file, then the user,
-   each winning over the one before.  **The file wins over the entry, the pixel size
-   included.**  The consequence on M2 today: its files say `PixelSizeUm = 0.127`, square,
-   with the lens in, so they resolve to 127 × 127 nm and the entry's 127 × 116 applies
-   only to a file without a pixel size.  The lens-dependent pixel reaches M2's files when
-   Micro-Manager's pixel-size configurations are tied to the 3DA state (a pixel
-   configuration can be, with an affine transform for the two axes), or when the user
-   types it.  The table shows the entry's value beside the file's, so the disagreement is
-   visible.
+5. **Layers, as in `io.tiff.resolve_camera`**: the camera database, the file, the
+   microscope's pixel, the user, each winning over the one before.  The microscope's pixel
+   beats the file's because Micro-Manager's is not tied to the lens: M2's files say
+   `PixelSizeUm = 0.127`, square, with the lens in, where the pixel is 127 × 116 nm.  Any
+   other value of the file still wins over the entry.
 
 The result is a `Resolution` with more rows; the camera parameter view shows it as it shows
 a camera now, and `CameraMetadata.pixelsize_um` takes the pair it already accepts.
@@ -260,9 +257,8 @@ channel, a wavelength for a filter whose name is not one.
 new file, and never written.
 
 `smappy/microscope_db.py` beside `camera_db.py`, using its `Parameter` and `Source`;
-`io/emu.py` the importer, Qt-free; the editor to be `gui/microscope_editor.py`, opened from
-the camera parameter view and from *PSF calibration*.  The camera editor stays and opens
-on its own as now.
+`io/emu.py` the importer, Qt-free; the manager to be `gui/microscope_editor.py`, opened
+from the menu (see "The GUI").  The camera editor stays and opens on its own as now.
 
 **Camera names**: *iXon 1* (the iXon 8172, *M1 Andor* before), *Evolve 1* (M2's Evolve,
 *M2 Evolve*), *Evolve 2* (*M3 Evolve*), *Fusion BT 1* (*M5 Fusion BT*); the old names are
@@ -327,7 +323,8 @@ completed by hand, checked against the bead stacks of 260105, 260821, 260829, 26
    whole chip.
 2. **One device per parameter.**  M1 has a filter in the common path and one in each
    arm, which together set a channel's band; that waits until it is needed.
-3. **The file wins**, the pixel size included (above, for what it means on M2).
+3. **The file wins**, except for a pixel the entry ties to a device's state, which wins
+   over the file's (changed the same day, "Wired in").
 4. **Two-state devices split at the midpoint.**  A continuous device such as a TIRF angle
    may be recorded (`value`); nothing follows it yet.
 5. **EMU is not changed**: the import asks which device is the 3D lens.
@@ -340,14 +337,59 @@ completed by hand, checked against the bead stacks of 260105, 260821, 260829, 26
    (the three in `smappy test` all read 2026-10-22), so the date stays editable.
 9. **One file holds a lab's cameras and microscopes.**
 
+## Wired in
+
+* **The pixel**: `io.tiff.resolve_camera` has a layer between the file and the user: the
+  pixel the entry gives for the devices' state (M2's 3DA) beats the file's `PixelSizeUm`
+  -- decided 2026-10-22, replacing "the file wins" for the pixel, since Micro-Manager's
+  pixel is not tied to the lens and M2's files say 127 square with it in.  A value typed
+  still wins.  Everything the fit and the calibration resolve goes through it.
+* **What travels**: `CameraMetadata.microscope`, the resolution's `summary()` -- name,
+  devices' states, the devices a parameter follows (`followed`), values, the arms with
+  their sides -- so the table keeps it (`metadata["camera"]["microscope"]`) and a
+  calibration made from beads keeps the beads' (`parameters["microscope"]`, saved with it;
+  in situ, the movie's).
+* **PSF calibration**: *NA*, *emission*, *emission, 2nd* and *immersion index* are on
+  *auto*, shown greyed from the first stack's microscope (`OpticsSettings.hints`); a run
+  without a microscope that gives them refuses with the reason.  Dual colour: the main
+  channel is the arm on the calibration's `main_channel` half (*auto*: left or upper, as the
+  dual calibration picks it).  Single colour: the first arm, the transmitted one.
+* **The warning**: every place that warns about the EM state warns too when the beads'
+  microscope differs from the data's -- another microscope, or a followed device in
+  another state ("3DA: on for the beads, off for the data"); lasers and lamps are not
+  compared (`io.calibration.microscope_differences`).
+
+## The GUI (decided 2026-10-22, to build)
+
+Little space where files are opened, the manager elsewhere:
+
+* **The microscope manager** is opened from the menu (beside the camera editor), not from
+  *PSF calibration*: the entries -- devices, parameters, channels, cameras, versions --
+  with *Import EMU configuration…* (asking which device is the 3D lens), started from a
+  file, showing live what the entry makes of it.  Its own help page.
+* **Wherever a file is opened** -- *PSF calibration*, the fitters -- the microscope and its
+  state are found automatically and shown in one line: *M2 · 3DA on · 700/100 · 127 × 116
+  nm*, or *no microscope recognised*.  A small button beside it opens what was found: the
+  values with their sources, each one overridable, a microscope chosen by hand for a file
+  none recognises, the manual elements below set, and a link to the manager.  What is
+  chosen there is a setting of the run (as a camera chosen by hand is), not a change of
+  the entry.
+* **Manual elements** (later, when needed -- not in the next step): what is put in by
+  hand and so never in the metadata -- above all
+  the dichroic that splits the channels (M2's 665LP, 640LP), which EMU does not control
+  and should not.  An entry lists them with their choices (*none*, *640LP*, *665LP*); the
+  found settings show them to be set, and a calibration keeps what was set like any
+  device's state.  The splitting dichroic answers single or dual too: *none* is one
+  channel over the whole chip.  A long-pass sets no centre wavelength by itself: an arm
+  whose band only it bounds (260821's transmitted arm, an empty slider behind 665LP) has
+  its wavelength typed in the entry for that choice, or in the run.
+
 ## Next
 
-1. **Wire it in**: `io.tiff.resolve_camera` takes the microscope's pixel where the file has
-   none; *PSF calibration*'s optics fields start on *auto* from it; the table keeps the
-   device states (`metadata["microscope"]`), and a calibration its beads', so a fit and in
-   situ learning warn when the data's differ.
-2. **The editor**, with *Import EMU configuration…* (asking which device is the 3D lens),
-   and its help page.
+1. **The found-settings line and its dialog** in *PSF calibration* and the fitters;
+   choosing a microscope by hand.  Manual elements wait: single or dual is already
+   chosen where a file is opened, and an arm only a dichroic bounds is typed there.
+2. **The manager**, from the menu, with the EMU import; its help page.
 
 ## Still open
 

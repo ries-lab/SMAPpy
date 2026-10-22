@@ -277,12 +277,14 @@ class SplineModelSettings:
 
     def model(self, camera: Optional[CameraMetadata] = None,
               roisize: Optional[int] = None) -> SplinePSF:
-        from ..io.calibration import load_spline_calibration, warn_on_em_mismatch
+        from ..io.calibration import (load_spline_calibration, warn_on_em_mismatch,
+                                      warn_on_microscope_mismatch)
         if not self.calibration:
             raise ValueError("a spline fit needs a bead calibration file")
         calibration = load_spline_calibration(self.calibration)
         if camera is not None:
             warn_on_em_mismatch(calibration, camera.em_on)
+            warn_on_microscope_mismatch(calibration, camera.microscope)
         if roisize is not None:
             # the ROI sits in the middle of the calibration grid, and a fit that
             # starts up to a pixel off centre reaches one further: any larger
@@ -1260,10 +1262,11 @@ class DualModelSettings(_LinkedChannels):
         return load_dual_color_calibration(self.calibration)
 
     def model(self, calibration, camera: Optional[CameraMetadata] = None):
-        from ..io.calibration import warn_on_em_mismatch
+        from ..io.calibration import warn_on_em_mismatch, warn_on_microscope_mismatch
         from ..psf import GlobalSplinePSF
         if camera is not None:
             warn_on_em_mismatch(calibration.main, camera.em_on)
+            warn_on_microscope_mismatch(calibration.main, camera.microscope)
         return GlobalSplinePSF((calibration.main, calibration.secondary),
                                self.shared())
 

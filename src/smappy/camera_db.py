@@ -350,6 +350,9 @@ class Resolution:
     values: Dict[str, Any] = field(default_factory=dict)
     sources: Dict[str, Source] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    #: the `microscope_db.MicroscopeResolution` of the same file, if one was
+    #: recognised: `io.tiff.resolve_camera` lays its pixel over the file's
+    microscope: Any = None
 
     @property
     def camera_name(self) -> str:
@@ -391,7 +394,7 @@ class Resolution:
             merged[name] = value
             sources[name] = source if isinstance(source, Source) else Source(*source)
         return Resolution(camera=self.camera, state=self.state, values=merged,
-                          sources=sources, metadata=self.metadata)
+                          sources=sources, metadata=self.metadata, microscope=self.microscope)
 
     def camera_metadata(self) -> CameraMetadata:
         """The part of this the fitter reads.
@@ -406,7 +409,8 @@ class Resolution:
             # four whole pixels, however the tag wrote them
             known["roi"] = tuple(int(v) for v in known["roi"])
         name = self.camera_name or self.values.get("camera_name")
-        return CameraMetadata(camera_name=name or None, **known)
+        microscope = self.microscope.summary() if self.microscope is not None else None
+        return CameraMetadata(camera_name=name or None, microscope=microscope, **known)
 
     def rows(self) -> List[tuple]:
         """``(parameter, value, source, used for fitting)``, for showing."""

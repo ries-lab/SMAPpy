@@ -162,6 +162,8 @@ def insitu_spline(model, shared: dict, heights_nm: tuple, dz_nm: float, roi_size
                   "focus_nm": focus, "in_focus_height_nm": sharpest, "z_offset_nm": reference,
                   "sampling": {"dz_nm": float(dz_nm), "heights_nm": [float(heights[-1]), high],
                                "roi_size": int(roi_size), "upsample": int(up)}}
+    if getattr(camera, "microscope", None):
+        parameters["microscope"] = dict(camera.microscope)    # the movie's: what the model describes
     psf = psf.astype(np.float32)
     return SplineCalibration(spline_coefficients(psf), float(dz_nm), float(z0), x0=(roi_size - 1) / 2, psf=psf,
                              em_on=None if camera is None else bool(camera.is_em),

@@ -64,6 +64,11 @@ class CameraMetadata:
     read_noise_e: Optional[float] = None
     camera_name: Optional[str] = None
     comment: str = ""
+    # the microscope that took the file, as `microscope_db` resolved it: its
+    # name, its devices' states, its optics.  Kept with the table and with a
+    # calibration, because data and beads are compared by it (`microscope_db.
+    # MicroscopeResolution.summary`); None where no microscope was recognised
+    microscope: Optional[dict] = None
 
     # ---------------------------------------------------------------- factors
     @property

@@ -371,6 +371,35 @@ class PSFCalibrationWindow(QMainWindow):
 
     def mode_changed(self, _text: str) -> None:
         self._forget("mode changed; files and settings kept - calibrate again")
+        self._show_optics()
+
+    def _main_half(self):
+        """The dual calibration's main half as set, or None on *auto*."""
+        if not self.is_dual:
+            return None
+        try:
+            main = self.detection_form.value().registration.main_channel
+        except (ValueError, AttributeError):
+            return None
+        return None if main == "auto" else main
+
+    def _show_optics(self) -> None:
+        """The first stack's camera and microscope (`microscope_db`), and the optics they give shown
+        greyed in the form's *auto* fields: what a run takes unless a value is typed."""
+        self.optics_camera = None
+        hints = {}
+        if self.paths:
+            try:
+                from ..io.tiff import camera_metadata, open_stack
+                self.optics_camera = camera_metadata(open_stack(discover_acquisitions(self.paths[:1])[0]),
+                                                     require=False)
+                hints = OpticsSettings().hints(self.optics_camera, 2 if self.is_dual else 1,
+                                               self._main_half())
+            except Exception as error:               # a file that cannot be read says so when it is run
+                print(f"PSF calibration: the stacks' camera: {error}")
+        self.optics_form.set_hints({name: hints.get(name) for name in
+                                    ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
+                                     "pixel_x_nm", "pixel_y_nm")})
 
     def _update_buttons(self) -> None:
         ready = not (self.method.key in ("pupil", "insitu") and torch_missing() is not None)
@@ -393,6 +422,7 @@ class PSFCalibrationWindow(QMainWindow):
             self.file_list.addItem(path)
         self.stack_browser.set_paths(self.paths, self._dz_nm())
         self._undetect("the files changed")
+        self._show_optics()
 
     def _box_px(self) -> int:
         try:
@@ -555,8 +585,13 @@ class PSFCalibrationWindow(QMainWindow):
         if self.method.sections["microscope"]:
             inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
                           spline=self.spline_form.value())
-            if not inputs["optics"].NA or not inputs["optics"].wavelength_nm:
-                raise ValueError("give the microscope's NA and emission wavelength: there is no default for them")
+            camera = getattr(self, "optics_camera", None)
+            missing = inputs["optics"].missing(camera, 2 if self.is_dual else 1, self._main_half())
+            if missing:
+                scope = (getattr(camera, "microscope", None) or {}).get("name")
+                raise ValueError(f"give the microscope's {' and '.join(missing)}: "
+                                 + (f"{scope} does not give it for these stacks" if scope else
+                                    "no microscope in the database recognises these stacks"))
         return inputs
 
     def _show_detected(self, detected) -> None:

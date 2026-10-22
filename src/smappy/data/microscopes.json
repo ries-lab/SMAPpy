@@ -582,14 +582,14 @@
           "filter": "Channel 1 (transmitted)",
           "side": {
             "iXon 1": "right",
-            "Evolve 1": "top"
+            "Evolve 1": "upper"
           }
         },
         "reflected": {
           "filter": "Channel 2 (reflected)",
           "side": {
             "iXon 1": "left",
-            "Evolve 1": "bottom"
+            "Evolve 1": "lower"
           }
         }
       },

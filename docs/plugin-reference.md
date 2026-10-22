@@ -273,6 +273,13 @@ record of that file (`metadata["files"]`), else the camera's
 offers a *frame time* setting on *auto* to override it (Time Course,
 Blinking); MINFLUX's `time_s` is a clock of its own.
 
+**The microscope.**  A fitted file's `metadata["camera"]["microscope"]` is
+the microscope the database recognised (`microscope_db`), or None: its
+`name`, each device's state by name (`states`, e.g. `{"3DA": "on"}`), the
+devices the optics follow (`followed`), its `values` (`NA`, `n_immersion`,
+`wavelength_nm`, `pixel_nm`, `modality`) and its arms with their halves of
+the chip (`channels`).  A plugin that needs the optics reads them there.
+
 ## What the picture's axes are
 
 The render grid is normally the table's positions, and usually a plugin can

@@ -231,9 +231,11 @@ def _model(calibration, sigma: float, cam: CameraMetadata) -> PSFModel:
     if isinstance(calibration, PSFModel):
         return calibration
     if isinstance(calibration, (str, Path)):
-        from .io.calibration import load_spline_calibration, warn_on_em_mismatch
+        from .io.calibration import (load_spline_calibration, warn_on_em_mismatch,
+                                     warn_on_microscope_mismatch)
         calibration = load_spline_calibration(calibration)
         warn_on_em_mismatch(calibration, cam.em_on)
+        warn_on_microscope_mismatch(calibration, cam.microscope)
     return SplinePSF(calibration)
 
 

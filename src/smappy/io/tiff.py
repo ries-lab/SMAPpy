@@ -263,26 +263,54 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
     }
 
 
+def with_microscope(resolution: Resolution, tags: Dict[str, str],
+                    microscope: str = "") -> Resolution:
+    """`resolution` with the file's microscope attached, and its pixel laid
+    over the file's where the entry gives one for the devices' state."""
+    from dataclasses import replace
+
+    from ..camera_db import Source
+    from ..microscope_db import database as microscopes
+    found = microscopes().resolve(tags, microscope=microscope,
+                                  camera=resolution.camera_name, channels=2)
+    if found.microscope is None:
+        return resolution
+    resolution = replace(resolution, microscope=found)
+    pixel = found.pixel_nm
+    if pixel is None:
+        return resolution
+    source = found.sources["pixel_nm"]
+    return resolution.overlaid_with(
+        {"pixelsize_um": [pixel[0] / 1000.0, pixel[1] / 1000.0]},
+        Source("microscope", f"{found.name}, {source.detail}" if source.detail else found.name))
+
+
 # where a simulation's camera came from: the camera window names it rather
 # than calling a camera it knows exactly "not recognised"
 SIMULATED = ("metadata", "the simulation")
 
 
 def resolve_camera(source: ImageSource, camera: str = "",
-                   overrides=None) -> Resolution:
+                   overrides=None, microscope: str = "") -> Resolution:
     """Everything known about the camera behind this stack, and from where.
 
-    Three layers, each winning over the one before it:
+    Four layers, each winning over the one before it:
 
     1. what the camera database says this camera's parameters are -- the
        conversion for the readout mode it recognises, the pixel size, the
        baseline an iXon never reports;
     2. what the file itself says, because a value the acquisition recorded
        beats a value someone stored months ago;
-    3. what the user set, which beats both and is the end of the argument.
+    3. the pixel the microscope's entry gives for the state its devices were
+       in (`microscope_db`): Micro-Manager's pixel size is not tied to the
+       cylindrical lens, so M2's files say 127 nm square with the lens in,
+       where the pixel is 127 x 116;
+    4. what the user set, which beats all of them and is the end of the
+       argument.
 
     `camera` names a database entry to use instead of identifying one, which
-    is what a file whose camera carries no identifying tag needs.
+    is what a file whose camera carries no identifying tag needs;
+    `microscope` names a microscope the same way.
 
     Every camera smappy resolves is resolved here: the fitters through
     `CameraSettings.resolution`, a script through `camera_metadata`.
@@ -310,6 +338,8 @@ def resolve_camera(source: ImageSource, camera: str = "",
     if simulated:
         # a simulation knows its camera exactly, which beats any guess
         resolution = resolution.overlaid_with(simulated, SIMULATED)
+    else:
+        resolution = with_microscope(resolution, tags, microscope)
     if overrides:
         values = overrides if isinstance(overrides, dict) else overrides.to_dict()
         resolution = resolution.overlaid_with(

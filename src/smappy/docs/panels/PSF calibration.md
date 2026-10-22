@@ -329,21 +329,32 @@ file, and handed to the fitter.  Off: the figures only; *Save as...* still
 saves.
 
 ### microscope
-The optics, typed in until SMAPpy's microscope database supplies them.  There
-is no default for the NA and the wavelength: a wrong value cannot be noticed
-in the result, only in a model that does not fit.
+The optics.  On *auto* each comes from the microscope database for the
+microscope that took the first stack (recognised from its metadata) and the
+state its devices were in: shown greyed in the field once stacks are added.  A
+value typed wins.  There is no default for the NA and the wavelength: a
+microscope the database does not know needs them typed, because a wrong value
+cannot be noticed in the result, only in a model that does not fit.  The
+calibration keeps the microscope's state -- which filter, the 3D lens in or
+out -- and a fit warns when its data were taken otherwise.
 
 ### NA
 The objective's numerical aperture, as engraved on it.
 
 ### emission
-The beads' emission wavelength, the centre of the filter's band.
+The beads' emission wavelength, the centre of the filter's band.  On *auto*
+read from the name of the filter the microscope was set to (676/37: 676 nm);
+with a filter whose name is not a band (a long-pass) it has to be typed.
 
 ### emission, 2nd
-For dual colour, the secondary channel's; auto: the same as *emission*.
+For dual colour, the secondary channel's; auto: the microscope's arm on the
+other half of the chip.  An arm whose filter gives no wavelength (an empty
+slider, the band set by the splitting dichroic) has to be typed; a microscope
+with no second arm takes the same as *emission*.
 
 ### immersion index
-The immersion oil's refractive index (1.518 for standard oil).
+The immersion oil's refractive index; auto: the microscope's, else 1.518 (the
+standard oils of Olympus, Leica and Zeiss).
 
 ### model
 The choices of the model, explained under *In detail*.

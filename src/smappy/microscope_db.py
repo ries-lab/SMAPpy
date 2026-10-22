@@ -47,8 +47,9 @@ READS = ("exact", "nearest", "value")
 #: what a parameter that follows a filter reads from its state's name
 FROM_NAME = "from the name"
 
-#: chip sides a channel of a split lands on
-SIDES = ("left", "right", "top", "bottom")
+#: chip halves a channel of a split lands on, in the words of the dual-channel
+#: calibration's ``main_channel`` (`calibrate.dual`), so the two meet
+SIDES = ("left", "right", "upper", "lower")
 
 
 # ------------------------------------------------------------------ devices
@@ -309,6 +310,16 @@ class Microscope:
         return dates[0].isoformat() if dates else None
 
     # ------------------------------------------------------------- resolving
+    def followed(self) -> List[str]:
+        """The devices a parameter, a camera's parameter or a channel follows: the ones whose state
+        changes the PSF or its scale, which a calibration and its data must agree on.  A laser or a
+        bright-field lamp is read and kept, and never compared."""
+        tables = [self.parameters] + list(self.cameras.values())
+        names = {raw["device"] for table in tables for raw in table.values()
+                 if isinstance(raw, dict) and "device" in raw}
+        names |= {c.filter for c in self.channels if c.filter}
+        return [name for name in self.devices if name in names]
+
     def device_states(self, metadata: Dict[str, Any]):
         return {name: device.state(metadata) for name, device in self.devices.items()}
 
@@ -460,6 +471,18 @@ class MicroscopeResolution:
     def state_names(self) -> Dict[str, Optional[str]]:
         """``{device: state}``, what is kept with a table."""
         return {name: state for name, (state, _, _) in self.states.items()}
+
+    def summary(self) -> Dict[str, Any]:
+        """What travels with the file's `CameraMetadata` into the table and
+        a calibration: plain values, no sources.  ``channels`` are every arm
+        with its side for this camera; single-channel data is the first."""
+        values = {k: (list(v) if isinstance(v, tuple) else v)
+                  for k, v in self.values.items() if v is not None}
+        return {"name": self.name, "version": self.version, "camera": self.camera,
+                "states": self.state_names(), "values": values,
+                "followed": self.microscope.followed() if self.microscope else [],
+                "channels": [{"name": c.name, "side": c.side,
+                              "wavelength_nm": c.wavelength_nm} for c in self.channels]}
 
     def warnings(self) -> List[str]:
         out = []

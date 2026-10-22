@@ -303,6 +303,37 @@ def evaluate_spline(cal: SplineCalibration, x: float, y: float, z: float,
     return np.tensordot(delta.astype(np.float32), block, axes=(0, 0))
 
 
+def keep_microscope(cal, camera) -> None:
+    """Record the beads' microscope -- its devices' states -- with a calibration made from them
+    (``parameters["microscope"]``, saved with it), so a fit can tell data taken another way."""
+    scope = getattr(camera, "microscope", None)
+    if scope:
+        cal.parameters["microscope"] = dict(scope)
+
+
+def microscope_differences(cal_scope: Optional[dict], data_scope: Optional[dict]) -> list:
+    """How the beads' microscope and the data's differ, in words: another microscope, or a device
+    the PSF follows (the 3D lens, a filter) in another state.  Empty when either is unknown."""
+    if not cal_scope or not data_scope:
+        return []
+    if cal_scope.get("name") != data_scope.get("name"):
+        return [f"the beads were taken on {cal_scope.get('name')}, the data on {data_scope.get('name')}"]
+    before, now = cal_scope.get("states") or {}, data_scope.get("states") or {}
+    return [f"{device}: {before[device]} for the beads, {now[device]} for the data"
+            for device in cal_scope.get("followed") or []
+            if before.get(device) is not None and now.get(device) is not None
+            and before[device] != now[device]]
+
+
+def warn_on_microscope_mismatch(cal, data_scope: Optional[dict]) -> None:
+    """Warn if the calibration's beads were taken with the microscope set otherwise than the data:
+    a model of an astigmatic PSF does not describe data taken with the cylindrical lens out."""
+    found = microscope_differences((getattr(cal, "parameters", None) or {}).get("microscope"), data_scope)
+    if found:
+        warnings.warn("the calibration does not match the data's microscope: " + "; ".join(found)
+                      + ".  Use beads taken as the data were.", stacklevel=2)
+
+
 def warn_on_em_mismatch(cal: SplineCalibration, data_em_on: Optional[bool]) -> None:
     """Warn if bead calibration and data were taken with different EM settings."""
     if cal.em_on is None or data_em_on is None:

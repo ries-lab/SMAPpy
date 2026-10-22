@@ -133,6 +133,11 @@ def camera_for(path, camera_settings=None):
     return settings.resolve(open_stack(path))
 
 
+def main_half(rois) -> Optional[str]:
+    """The half of the chip the dual calibration made its main channel, or None for one channel."""
+    return (getattr(rois, "geometry", None) or {}).get("main_channel")
+
+
 def pixel_size_nm(camera) -> tuple:
     p = camera.pixelsize_um
     if p is None:
@@ -390,6 +395,8 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
     parameters = dict(_record(learned, dz_nm, z_range_nm, roi_size, upsample),
                       normalization="maximum plane sum = 1")
     psf = psf.astype(np.float32)
+    if getattr(camera, "microscope", None):
+        parameters["microscope"] = dict(camera.microscope)
     return SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
                              em_on=None if camera is None else bool(camera.is_em),
                              pixelsize_um=None if camera is None or camera.pixelsize_um is None
@@ -458,38 +465,100 @@ def save(path, cal, calibration, overwrite: bool = False) -> tuple[Path, Path]:
 
 @dataclass
 class OpticsSettings:
-    """The microscope, typed in until the microscope database supplies it (`docs/uipsf/plan.md` §7.5).
-    No defaults for what must be right: the NA and the wavelength start at 0, "not given", and a run
-    refuses them so (0 rather than None, which the form would offer as *auto*)."""
-    NA: float = param(0.0, label="NA", min=0.0, max=1.7,
-                      help="the objective's numerical aperture; required (0: not given)")
-    wavelength_nm: float = param(0.0, label="emission", unit="nm", min=0.0, max=1200.0,
-                                 help="the beads' emission wavelength; required (0: not given)")
+    """The microscope.  Each field on *auto* takes the microscope database's value for the file's
+    microscope (`microscope_db`, carried in `CameraMetadata.microscope`): its NA, its immersion, the
+    emission of each arm from the filter it was set to.  A value typed beats it.  There is no default for
+    the NA and the emission: without a microscope that gives them, a run refuses to start."""
+    NA: Optional[float] = param(None, label="NA", min=0.1, max=1.7,
+                                help="the objective's numerical aperture; auto: the microscope's (required "
+                                     "without one)")
+    wavelength_nm: Optional[float] = param(None, label="emission", unit="nm", min=300.0, max=1200.0,
+                                           help="the beads' emission wavelength; auto: from the microscope's "
+                                                "filter (required without one)")
     wavelength2_nm: Optional[float] = param(None, label="emission, 2nd", unit="nm", min=300.0, max=1200.0,
-                                            help="dual colour: the secondary channel's; auto: the same")
-    n_immersion: float = param(1.518, label="immersion index", min=1.0, max=2.0,
-                               help="the immersion medium's refractive index (oil 1.518)")
+                                            help="dual colour: the secondary channel's; auto: the "
+                                                 "microscope's other arm, or the same without one")
+    n_immersion: Optional[float] = param(None, label="immersion index", min=1.0, max=2.0,
+                                         help="the immersion medium's refractive index; auto: the "
+                                              "microscope's, else oil's 1.518")
     n_medium: float = param(1.33, label="sample index", min=1.0, max=2.0, advanced=True,
                             help="the beads' medium: water 1.33, air 1.0, a mounting medium up to "
                                  "the immersion's (index matched)")
     n_coverslip: Optional[float] = param(None, label="coverslip index", min=1.0, max=2.0, advanced=True,
                                          help="auto: the immersion's")
     pixel_x_nm: Optional[float] = param(None, label="pixel x", unit="nm", min=1.0, advanced=True,
-                                        help="on the sample; auto: the camera's")
+                                        help="on the sample; auto: the camera's, or the microscope's for its "
+                                             "3D lens")
     pixel_y_nm: Optional[float] = param(None, label="pixel y", unit="nm", min=1.0, advanced=True,
                                         help="auto: as x, or the camera's")
 
-    def optics(self, camera, channels: int = 1) -> list:
+    def resolved(self, camera, channels: int = 1, main: Optional[str] = None) -> dict:
+        """The values a run uses: ``NA``, ``n_immersion``, ``wavelengths`` (one per channel, None where
+        nothing gives one) and ``pixel`` (x, y), each typed or from the microscope and the camera.
+
+        Dual colour: the main channel is the arm on ``main``'s half of the chip (``left``, ``right``,
+        ``upper``, ``lower``, the dual calibration's ``main_channel``); on *auto* the left or the upper,
+        as the dual calibration chooses it.  Single colour: the microscope's first arm, the transmitted
+        one, over the whole chip -- nothing records whether the splitting dichroic was in."""
+        scope = getattr(camera, "microscope", None) or {}
+        values = scope.get("values") or {}
+        arms = list(scope.get("channels") or [])
+        if channels > 1 and arms:
+            sides = [arm.get("side") for arm in arms]
+            if main is None:
+                main = next((s for s in ("left", "upper") if any(
+                    x in (s, {"left": "right", "upper": "lower"}[s]) for x in sides)), None)
+            if main in sides:
+                arms.sort(key=lambda arm: arm.get("side") != main)
+        found = [arm.get("wavelength_nm") for arm in arms] or [values.get("wavelength_nm")]
+        waves = [self.wavelength_nm or found[0]]
+        if channels > 1:
+            # an arm the microscope has but cannot name a wavelength for (an empty slider behind a
+            # dichroic it does not record) is missing, not the first's: only a microscope with one
+            # arm, or none known, means the same light on both halves
+            second = found[1] if len(found) > 1 else waves[0]
+            waves.append(self.wavelength2_nm or second)
+        try:
+            pixel = pixel_size_nm(camera)
+        except (ValueError, AttributeError):         # no pixel, or no stacks yet
+            pixel = None
+        if self.pixel_x_nm is not None:
+            pixel = (self.pixel_x_nm, self.pixel_y_nm or self.pixel_x_nm)
+        return dict(NA=self.NA or values.get("NA"),
+                    n_immersion=self.n_immersion or values.get("n_immersion") or 1.518,
+                    wavelengths=waves, pixel=pixel, microscope=scope.get("name"))
+
+    def missing(self, camera, channels: int = 1, main: Optional[str] = None) -> list:
+        """What a run would lack, in words: empty when it can start."""
+        found = self.resolved(camera, channels, main)
+        out = [] if found["NA"] else ["NA"]
+        out += [("emission" if i == 0 else "emission, 2nd") for i, w in enumerate(found["wavelengths"]) if not w]
+        return out
+
+    def optics(self, camera, channels: int = 1, main: Optional[str] = None) -> list:
         """One `uipsf.Optics` per channel; a ValueError naming what is missing."""
-        missing = [name for name, v in (("NA", self.NA), ("emission", self.wavelength_nm)) if not v]
+        missing = self.missing(camera, channels, main)
         if missing:
-            raise ValueError(f"give the microscope's {' and '.join(missing)}: there is no default for them")
+            scope = getattr(camera, "microscope", None)
+            why = (f"{scope['name']} does not give it for this file" if scope
+                   else "no microscope in the database recognises this file")
+            raise ValueError(f"give the microscope's {' and '.join(missing)}: {why}")
         from uipsf import Optics
-        px, py = pixel_size_nm(camera) if self.pixel_x_nm is None else (self.pixel_x_nm,
-                                                                         self.pixel_y_nm or self.pixel_x_nm)
-        waves = [self.wavelength_nm, self.wavelength2_nm or self.wavelength_nm][:channels]
-        return [Optics(NA=self.NA, wavelength_nm=w, n_imm=self.n_immersion, n_med=self.n_medium,
-                       pixel_size_nm=(px, py), n_cov=self.n_coverslip) for w in waves]
+        found = self.resolved(camera, channels, main)
+        if found["pixel"] is None:
+            pixel_size_nm(camera)                    # its error names what is missing
+        return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"], n_med=self.n_medium,
+                       pixel_size_nm=found["pixel"], n_cov=self.n_coverslip) for w in found["wavelengths"]]
+
+    def hints(self, camera, channels: int = 1, main: Optional[str] = None) -> dict:
+        """What the form shows greyed in its *auto* fields for this camera: `SettingsForm.set_hints`."""
+        found = self.resolved(camera, channels, main)
+        out = {"NA": found["NA"], "n_immersion": found["n_immersion"], "wavelength_nm": found["wavelengths"][0]}
+        if channels > 1:
+            out["wavelength2_nm"] = found["wavelengths"][1]
+        if found["pixel"] is not None:
+            out.update(pixel_x_nm=found["pixel"][0], pixel_y_nm=found["pixel"][1])
+        return {k: v for k, v in out.items() if v is not None}
 
 
 @dataclass
@@ -571,7 +640,7 @@ def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings
     from uipsf.workflows.calibrate import bead_model
     batch = rois.batch
     channels = batch.data.shape[1]
-    learnt = bead_model(optics.optics(rois.camera, channels), model, tuple(batch.data.shape[-2:]),
+    learnt = bead_model(optics.optics(rois.camera, channels, main_half(rois)), model, tuple(batch.data.shape[-2:]),
                         [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()))
     one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
     start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
@@ -612,7 +681,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         start = load_start(run.start_from) if run.start_from else None
         warm = None
     channels = 2 if dual else 1
-    cal = calibrate_beads(rois.batch, optics.optics(rois.camera, channels), model,
+    cal = calibrate_beads(rois.batch, optics.optics(rois.camera, channels, main_half(rois)), model,
                           transforms=[None, rois.transform] if dual else None, geometry=rois.geometry,
                           start=start, noise=rois.noise, decisions=decisions, warm_start=warm,
                           progress=progress, cancel=cancel)
@@ -623,6 +692,10 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         roi = int(rois.batch.data.shape[-1])
         result.calibration = (dual_calibration(cal, dz, z_range, roi) if dual
                               else spline_calibration(cal, dz, z_range, roi, camera=rois.camera))
+        if dual:
+            from ..io.calibration import keep_microscope
+            for channel in (result.calibration.main, result.calibration.secondary):
+                keep_microscope(channel, rois.camera)
         # a warm run (``previous``) replaces its own run's files; a new run never overwrites
         again = previous.saved if previous is not None else None
         path = Path(save_to) if save_to else again or default_save_path(paths, dual)
@@ -638,7 +711,7 @@ def half_split_uncertainty(run: PupilRun, optics: OpticsSettings, splits: int = 
     made with.  None if cancelled; kept on the calibration (``cal.halves``), so a save writes it."""
     from uipsf.diagnostics import half_splits
     rois, cal = run.rois, run.cal
-    halves = half_splits(rois.batch, optics.optics(rois.camera, 2 if run.dual else 1), cal.options,
+    halves = half_splits(rois.batch, optics.optics(rois.camera, 2 if run.dual else 1, main_half(rois)), cal.options,
                          cal.beads.used, splits=splits, seed=seed,
                          transforms=[None, rois.transform] if run.dual else None, geometry=rois.geometry,
                          start=run.start, noise=rois.noise, progress=progress, cancel=cancel)

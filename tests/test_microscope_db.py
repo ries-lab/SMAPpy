@@ -329,10 +329,10 @@ def test_the_shipped_m2_puts_the_transmitted_arm_on_the_ixons_right():
     found = microscope_db.database(reload=True).resolve(M2_BEADS, channels=2)
     assert [(c.name, c.side) for c in found.channels] == [("transmitted", "right"),
                                                           ("reflected", "left")]
-    # the Evolve is turned by 90 degrees against the iXon: the split runs top and bottom
+    # the Evolve is turned by 90 degrees against the iXon: the split runs upper and lower
     evolve = microscope_db.database().resolve(M2_EVOLVE, channels=2)
-    assert [(c.name, c.side) for c in evolve.channels] == [("transmitted", "top"),
-                                                           ("reflected", "bottom")]
+    assert [(c.name, c.side) for c in evolve.channels] == [("transmitted", "upper"),
+                                                           ("reflected", "lower")]
 
 
 def test_the_shipped_m5_has_its_3d_lens_on_a_stage():
@@ -347,3 +347,132 @@ def test_the_shipped_m5_has_its_3d_lens_on_a_stage():
     assert out.values["modality"] == "2D"
     assert found.pixel_nm is None          # not the microscope's: the camera's
     assert found.warnings() == []
+
+
+# ------------------------------------------------- what the fit and calibration read
+
+def a_file(tags):
+    """What `io.tiff.resolve_camera` reads of a stack: its tags, and no simulated camera."""
+    from types import SimpleNamespace
+    return SimpleNamespace(summary=dict(tags), mm_metadata={}, camera=None)
+
+
+def test_the_lens_state_sets_the_pixel_over_the_files_square_one():
+    from smappy.io.tiff import resolve_camera
+    beads = resolve_camera(a_file(M2_BEADS))
+    assert beads.values["pixelsize_um"] == [0.127, 0.116]       # the file says 0.127 square
+    assert str(beads.sources["pixelsize_um"]) == "microscope: M2, 3DA is on, with iXon 1"
+    movie = resolve_camera(a_file(M2_MOVIE)).camera_metadata()
+    assert movie.pixelsize_um_xy == (0.127, 0.127)
+    assert movie.microscope["states"]["3DA"] == "off"
+
+
+def test_the_users_pixel_still_wins_over_the_microscope():
+    from smappy.io.tiff import resolve_camera
+    found = resolve_camera(a_file(M2_BEADS), overrides={"pixelsize_um": 0.1})
+    assert found.values["pixelsize_um"] == 0.1
+
+
+def test_a_file_no_microscope_recognises_keeps_the_files_pixel():
+    from smappy.io.tiff import resolve_camera
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
+    found = resolve_camera(a_file(tags))
+    assert found.microscope is None
+    assert found.values["pixelsize_um"] == 0.127
+    assert found.camera_metadata().microscope is None
+
+
+def test_the_microscope_travels_with_the_camera_metadata():
+    from smappy.io.tiff import resolve_camera
+    scope = resolve_camera(a_file(M2_BEADS)).camera_metadata().microscope
+    assert scope["name"] == "M2" and scope["camera"] == "iXon 1"
+    assert scope["values"]["NA"] == 1.43 and scope["values"]["modality"] == "astigmatic"
+    assert "3DA" in scope["followed"] and "laser 638" not in scope["followed"]
+    assert [(c["name"], c["side"]) for c in scope["channels"]] == [("transmitted", "right"),
+                                                                   ("reflected", "left")]
+    json.dumps(scope)                                           # it is saved as JSON
+
+
+def camera_of(tags):
+    from smappy.io.tiff import resolve_camera
+    return resolve_camera(a_file(tags)).camera_metadata()
+
+
+def test_psf_calibration_takes_the_optics_from_the_microscope_on_auto():
+    from smappy.calibrate.pupil import OpticsSettings
+    camera = camera_of(M2_BEADS)
+    found = OpticsSettings().resolved(camera)
+    # one channel: the transmitted arm's slider is empty, so the filter wheel's 700/100
+    assert found["NA"] == 1.43 and found["n_immersion"] == 1.518
+    assert found["wavelengths"] == [700.0]
+    assert found["pixel"] == (127.0, 116.0)
+    typed = OpticsSettings(NA=1.4, wavelength_nm=650.0, n_immersion=1.515).resolved(camera)
+    assert (typed["NA"], typed["wavelengths"], typed["n_immersion"]) == (1.4, [650.0], 1.515)
+
+
+def test_dual_colour_puts_the_arm_on_the_main_half_first():
+    from smappy.calibrate.pupil import OpticsSettings
+    tags = dict(M2_BEADS, **{"Servos-Position0": "20000", "Thorlabs ELL9-Label": "Position 3"})
+    camera = camera_of(tags)                     # transmitted 676/37 on the right, reflected 600/60 left
+    auto = OpticsSettings().resolved(camera, 2)  # auto: the left half is the main channel
+    assert auto["wavelengths"] == [600.0, 676.0]
+    assert OpticsSettings().resolved(camera, 2, main="right")["wavelengths"] == [676.0, 600.0]
+    assert OpticsSettings().hints(camera, 2)["wavelength2_nm"] == 676.0
+
+
+def test_without_a_microscope_the_na_and_emission_must_be_typed():
+    from smappy.calibrate.pupil import OpticsSettings
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
+    camera = camera_of(tags)
+    assert OpticsSettings().missing(camera) == ["NA", "emission"]
+    assert OpticsSettings(NA=1.43, wavelength_nm=670.0).missing(camera) == []
+    assert OpticsSettings().resolved(camera)["n_immersion"] == 1.518
+    assert OpticsSettings().missing(None) == ["NA", "emission"]      # no stacks yet
+
+
+# ------------------------------------------------- calibration against data
+
+def test_beads_with_the_lens_and_data_without_it_are_told_apart():
+    from smappy.io.calibration import microscope_differences
+    beads, movie = camera_of(M2_BEADS).microscope, camera_of(M2_MOVIE).microscope
+    assert microscope_differences(beads, movie) == ["3DA: on for the beads, off for the data"]
+    assert microscope_differences(beads, camera_of(M2_BEADS).microscope) == []
+    lasers = dict(M2_BEADS, **{"Luxx638-Laser Operation Select": "Off"})
+    assert microscope_differences(beads, camera_of(lasers).microscope) == []
+    assert microscope_differences(beads, camera_of(M5_BEADS).microscope) == [
+        "the beads were taken on M2, the data on M5"]
+    assert microscope_differences(None, movie) == []
+
+
+def test_a_saved_calibration_keeps_its_beads_microscope(tmp_path):
+    import warnings
+
+    import numpy as np
+
+    from smappy.io.calibration import (SplineCalibration, keep_microscope, load_spline_calibration,
+                                       save_spline_calibration, warn_on_microscope_mismatch)
+    cal = SplineCalibration(np.zeros((64, 4, 4, 4), np.float32), 50.0, 2.0)
+    keep_microscope(cal, camera_of(M2_BEADS))
+    path = tmp_path / "beads_3dcal.h5"
+    save_spline_calibration(path, cal)
+    loaded = load_spline_calibration(path)
+    assert loaded.parameters["microscope"]["states"]["3DA"] == "on"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        warn_on_microscope_mismatch(loaded, camera_of(M2_MOVIE).microscope)
+    assert any("3DA: on for the beads, off for the data" in str(w.message) for w in caught)
+
+
+def test_an_arm_without_a_wavelength_is_missing_not_the_others():
+    from smappy.calibrate.pupil import OpticsSettings
+    # 260821: the transmitted slider empty, the wheel at None -- the band is the splitting
+    # dichroic's, which nothing records
+    tags = dict(M2_BEADS, **{"Servos-Position3": "57000", "Thorlabs ELL9-Label": "Position 1"})
+    camera = camera_of(tags)
+    assert OpticsSettings().resolved(camera, 2)["wavelengths"] == [676.0, None]
+    assert OpticsSettings().missing(camera, 2) == ["emission, 2nd"]
+    assert OpticsSettings(wavelength2_nm=700.0).missing(camera, 2) == []
+    # a microscope with no second arm: the same light on both halves
+    one_arm = camera_of(M5_BEADS)
+    one_arm.microscope["channels"] = one_arm.microscope["channels"][:1]
+    assert OpticsSettings().resolved(one_arm, 2)["wavelengths"] == [685.0, 685.0]

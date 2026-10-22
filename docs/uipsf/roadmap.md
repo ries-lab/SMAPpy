@@ -50,9 +50,11 @@ when a milestone lands or an item moves.
 2. **Microscope database** (plan §7.5): optics per microscope chosen by the file's metadata; the pixel
    size following the 3D lens (`camera_db` can map a tag already); read noise per readout mode; M2's
    iXon filed under M2; M5's pixel settled.  Needs the lab's metadata (`docs/uipsf/microscopes.md`).
-   `docs/microscope-database.md`: the core is built (`microscope_db`, the EMU importer, M2 and M5
-   shipped, cameras named for themselves in the same file); next, *PSF calibration* and the fit
-   reading it, then the editor.
+   `docs/microscope-database.md`: built and wired in (`microscope_db`, the EMU importer, M2 and M5
+   shipped, cameras named for themselves in the same file; the lens-tied pixel over the file's,
+   *PSF calibration*'s optics on *auto*, a calibration's microscope state and the fit's warning);
+   next, the found-settings line where files are opened, manual elements (the splitting dichroic),
+   then the manager from the menu.
 3. **Retire *Bead calibration*:** the default GUI and the tutorials (`fitting_3d`, `two_colour_3d`) use *PSF
    calibration* (October 2026); the plugin and its window stay in the tree for now, to be removed (M6).
 4. **Done: the 2ch stall** (architecture.md, "Why Zenodo 2ch stalled").  Not the indices: the start put
