@@ -138,7 +138,7 @@ def beads(args):
     from smappy.calibrate.pupil import BeadSettings, RunSettings, run_calibration
     files = sorted(glob.glob(os.path.join(args.acquisition, "*", "*.ome.tif")))
     t0 = time.perf_counter()
-    model = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free", bead_diameter_nm=BEAD_NM)
+    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur="free", bead_diameter_nm=BEAD_NM)
     from smappy.calibrate.core import CalibrationSettings
     detection = CalibrationSettings(region=tuple(args.region)) if args.region else None
     # the model file alone: a spline needs a z range every bead covers, and beads at heights more than
@@ -227,12 +227,16 @@ def learn(args):
               messages=result.messages), args.out)
     # what `score` needs: the learnt values and the molecules this run ended with
     torch.save({"shared": {k: torch.as_tensor(v).detach().cpu() for k, v in cal.shared().items()},
-                "used": np.asarray(result.run.rounds[-1].used), "magnitude_kind": args.magnitude, "start": args.start},
-               run_path(args.rois, args.magnitude, args.start))
+                "used": np.asarray(result.run.rounds[-1].used), "magnitude_kind": args.magnitude, "start": args.start,
+                "model": args.model},
+               run_path(args.rois, args.magnitude, args.start, args.model))
 
 
-def run_path(rois, magnitude, start):
-    return f"{os.path.splitext(rois)[0]}_{magnitude}_{start}.pt"
+def run_path(rois, magnitude, start, model=None):
+    """Where a run's values are kept; a bead model other than ``beads.uipsf.h5`` adds its name."""
+    stem = "" if model is None else os.path.basename(model).split(".")[0]
+    tag = "" if stem in ("", "beads") else f"_{stem}"
+    return f"{os.path.splitext(rois)[0]}_{magnitude}_{start}{tag}.pt"
 
 
 def score(args):
@@ -245,7 +249,7 @@ def score(args):
     held = bead_magnitude(previous)
     with open(args.rois, "rb") as f:
         rois = pickle.load(f)
-    runs = [torch.load(run_path(args.rois, m, s), weights_only=False) for m, s in args.runs]
+    runs = [torch.load(run_path(args.rois, *r), weights_only=False) for r in args.runs]
     if args.set == "common":                # the molecules every run ended with
         ids = runs[0]["used"]
         for r in runs[1:]:
@@ -259,7 +263,8 @@ def score(args):
     settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
     for r in runs:
         wf.insitu_model = original
-        patch_insitu_model(r["magnitude_kind"], held)
+        # a run held its own bead model's magnitude
+        patch_insitu_model(r["magnitude_kind"], bead_magnitude(load_start(r["model"])) if "model" in r else held)
         focus = float(r["shared"]["geometry.focus"])
         model = wf.insitu_model(o, settings, (roi, roi), focus, device=args.device)
         loc, d, pixels = deviances(model, r["shared"], rois, ids)
@@ -319,13 +324,15 @@ def beadfit(args):
                   sigma_nm=_np(shared["psf.sigma"]).round(2), **summary(loc, d, pixels)), args.out)
 
 def main():
-    global WAVELENGTH_NM
+    global WAVELENGTH_NM, PIXEL
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="step", required=True)
     b = sub.add_parser("beads")
     b.add_argument("acquisition")
     b.add_argument("--model", required=True, help="the model file saved (.uipsf.h5)")
     b.add_argument("--halves", type=int, default=0, help="this many half-split pairs: the beads' own spread")
+    b.add_argument("--magnitude", choices=("free", "symmetric", "fixed"), default="free",
+                   help="the beads' magnitude: symmetric learns only its m = 0 modes")
     d = sub.add_parser("detect")
     d.add_argument("movie")
     d.add_argument("--rois", required=True)
@@ -342,7 +349,8 @@ def main():
     sc = sub.add_parser("score")
     sc.add_argument("--rois", required=True)
     sc.add_argument("--model", required=True)
-    sc.add_argument("--runs", nargs=2, action="append", metavar=("MAGNITUDE", "START"), required=True)
+    sc.add_argument("--runs", nargs="+", action="append", metavar="MAGNITUDE START [MODEL]", required=True,
+                    help="a run by its magnitude, start and, if not beads.uipsf.h5, its bead model")
     sc.add_argument("--set", choices=("common", "heldout", "detected"), default="common",
                     help="common: those every run used; heldout: held out at detection; detected: round 1's")
     sc.add_argument("--limit", type=int, default=None, help="only the first this many molecules: a quick check")
@@ -360,10 +368,12 @@ def main():
                        help="only beads / molecules inside, in the file's pixels: one channel of a split chip")
     for p in (b, d, le, sc, bf):
         p.add_argument("--wavelength", type=float, default=WAVELENGTH_NM, help="emission, nm")
+        p.add_argument("--pixel", type=float, nargs=2, default=PIXEL, metavar=("X", "Y"),
+                       help="nm on the sample: 127 116 for M2's iXon, 116 127 for its Evolve")
         p.add_argument("--out", default=None)
         p.add_argument("--memory", type=float, default=0.3, help="MPS memory fraction (the Mac is shared)")
     args = ap.parse_args()
-    WAVELENGTH_NM = args.wavelength
+    WAVELENGTH_NM, PIXEL = args.wavelength, tuple(args.pixel)
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     {"beads": beads, "detect": detect, "learn": learn, "score": score, "beadfit": beadfit}[args.step](args)
