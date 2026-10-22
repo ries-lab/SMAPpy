@@ -50,6 +50,8 @@ when a milestone lands or an item moves.
 2. **Microscope database** (plan §7.5): optics per microscope chosen by the file's metadata; the pixel
    size following the 3D lens (`camera_db` can map a tag already); read noise per readout mode; M2's
    iXon filed under M2; M5's pixel settled.  Needs the lab's metadata (`docs/uipsf/microscopes.md`).
+   Designed, for discussion: `docs/microscope-database.md` (devices named from an EMU configuration,
+   each parameter following one device).
 3. **Retire *Bead calibration*:** the default GUI and the tutorials (`fitting_3d`, `two_colour_3d`) use *PSF
    calibration* (October 2026); the plugin and its window stay in the tree for now, to be removed (M6).
 4. **Done: the 2ch stall** (architecture.md, "Why Zenodo 2ch stalled").  Not the indices: the start put
@@ -89,9 +91,9 @@ when a milestone lands or an item moves.
    real data: false detections on background still count as neighbours, and a faint patch splits into
    several detections that reject each other.  A neighbour now counts only with a fifth of the molecule's
    light: 9 % fewer overlap rejections on tubulin, a third more candidates, the pupil unchanged.  **M2 with the
-   same day's beads** (architecture.md, "In situ on M2"), probably a mismatched pair: the movie's bright spots
-   are round (log₂(σx/σy) −0.08 to +0.13, beads −0.57 to +0.70), likely taken without the cylindrical lens; to
-   be repeated on a confirmed astigmatic movie.  As measured: the beads' whole magnitude held costs 1–2 nats per
+   same day's beads** (architecture.md, "In situ on M2"), a mismatched pair: the movie was taken without the
+   cylindrical lens (its metadata: 3DA out, the beads' in), its bright spots round (log₂(σx/σy) −0.08 to +0.13,
+   beads −0.57 to +0.70); to be repeated on 260821's 3D movie and beads, both with the lens in.  As measured: the beads' whole magnitude held costs 1–2 nats per
    molecule, its symmetric part nothing, neither brings σ to the beads'; a free magnitude trades its
    astigmatism with the phase's; the focus is barely determined.  Next: hold the m ≠ 0 magnitude modes.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`

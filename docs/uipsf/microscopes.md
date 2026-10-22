@@ -57,6 +57,6 @@ median).
   wheels are recorded only by position (M2's ELL9 *Reflected Slider* and *BFP*; M5's ELL6, ELL17/20 and two
   Thorlabs wheels as "Filter-N"), and the emission filter only in the free-text comment, sometimes wrong.
   A microscope database needs a table from position to element per microscope, or labelled positions in
-  Micro-Manager.
+  Micro-Manager.  EMU's configurations name them (`docs/microscope-database.md`, which decodes these files with them).
 - **The values used** (from the user, 2026-10-20): M2 NA 1.43, oil 1.516; M5 Olympus NA 1.50 TIRF (nominal),
   oil 1.518; TetraSpeck beads of 100 nm in water (1.33), the 676/37 channel, taken as 676 nm.

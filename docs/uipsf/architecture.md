@@ -1616,16 +1616,20 @@ dimmer than its dim molecules.
 
 ## In situ on M2 with the same day's beads: the magnitude held from beads (October 2026, open)
 
-**Caveat: probably a mismatched pair.**  The movie's bright spots are round, the beads' are not: log₂(σx/σy)
+**Caveat: a mismatched pair, confirmed by the metadata.**  The movie was taken without the cylindrical lens and
+the beads with it.  M2's ht-SMLM configuration (EMU) names the lens *3DA*, two-state device 2 on
+`Servos-Position1`, in at 28000 and out at 4000: the bead stacks read 28000, the movie and every other movie of
+that session (`TIRF_p05`, `sweep`, `phase2_test200`) 4000.  The spots said so first: log₂(σx/σy)
 of the brightest 20 % of its 107 000 detections spans −0.08 to +0.13 (25–75 %), against −0.57 to +0.70 for
 the bead stack's middle third and −0.93 to +0.90 for all its slices, and they are narrower (1.28 against
-~1.5 px) than the beads' least-confused middle.  So the movie was most likely taken without the cylindrical
-lens, and the beads' astigmatic pupil (Noll 6 +0.55 rad) cannot match it.  That alone could explain the
+~1.5 px) than the beads' least-confused middle.  The beads' astigmatic pupil (Noll 6 +0.55 rad) cannot
+match it.  That alone could explain the
 phase astigmatism ranging −0.29 to +0.61, the magnitude taking it over, the focus not settling and the bead
 model fitting worst.  The 1727 molecules chosen spread −1 to +1 in that ratio only because detection draws
 up to 100 per bin of the astigmatism proxy, filling the sparse elongated bins with pairs and odd spots.
-Read what follows as measured on this pair, not as a property of in situ learning; it is to be repeated on a
-confirmed astigmatic movie.
+Read what follows as measured on this pair, not as a property of in situ learning; it is to be repeated on an
+astigmatic movie.  A matched M2 pair: `260821_AASJ_sun1_mRuby_pS8_CF_him8_A647_3D_2` and
+`260821_AASJ_BeadsCalZ_638_665LP`, both at 638 nm, both with 3DA in (`docs/microscope-database.md`).
 
 `benchmarks/uipsf/real/insitu_magnitude.py`, `results/insitu_magnitude.jsonl`.  Beads
 (`260829_AA_BeadsCalZ_638_SingleMode`, 11 beads, 100 nm taken out) and a clathrin movie (`260829_AA_U2OS_CLC-SNAP_AF647_TIRF_1`,
