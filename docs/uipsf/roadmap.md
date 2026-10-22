@@ -88,7 +88,10 @@ when a milestone lands or an item moves.
    wings; next an NA scan (architecture.md, "Why in situ's blur σ is twice v1's").  Detection on dense
    real data: false detections on background still count as neighbours, and a faint patch splits into
    several detections that reject each other.  A neighbour now counts only with a fifth of the molecule's
-   light: 9 % fewer overlap rejections on tubulin, a third more candidates, the pupil unchanged.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   light: 9 % fewer overlap rejections on tubulin, a third more candidates, the pupil unchanged.  **M2 with the
+   same day's beads** (architecture.md, "In situ on M2"): the beads' whole magnitude held costs 1–2 nats per
+   molecule, its symmetric part nothing, neither brings σ to the beads'; a free magnitude trades its
+   astigmatism with the phase's; the focus is barely determined.  Next: hold the m ≠ 0 magnitude modes.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.

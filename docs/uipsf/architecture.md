@@ -1613,3 +1613,52 @@ the used ones stayed molecules (98.8 % against 99.4 %), 13 % with a bright true 
 against 10 %, the pupil and focus as before.  So most of the rejections on tubulin are by neighbours at
 least a fifth as bright: the molecules are crowded, or the background's false detections are not much
 dimmer than its dim molecules.
+
+## In situ on M2 with the same day's beads: the magnitude held from beads (October 2026, open)
+
+`benchmarks/uipsf/real/insitu_magnitude.py`, `results/insitu_magnitude.jsonl`.  Beads
+(`260829_AA_BeadsCalZ_638_SingleMode`, 11 beads, 100 nm taken out) and a clathrin movie (`260829_AA_U2OS_CLC-SNAP_AF647_TIRF_1`,
+200 000 frames, 4000 read) of the same day on M2's iXon: the same clocks (10 MHz, 3.3 µs vertical shift), EM
+gain 25 for the beads and 100 for the movie; NA 1.43, 127 × 116 nm, 676 nm, order 8 for both.  The beads learn
+σ 67/54 nm.  1727 molecules were found once and cached; every run learns from them.
+
+The idea: the magnitude is mostly the objective's transmission, so it should hold from day to day and could
+be calibrated on beads and held in situ, taking the parameters that trade with σ out.  Over the five iXon
+bead days its symmetric modes barely move (Noll 11, 22, 37 within ±0.01; Noll 4 −0.04 to −0.14, against σ).
+A held magnitude is a fixed map added to the pupil's (`BasedPupil` in the script; nothing in uipsf changed):
+*free*, *bead-symmetric* (the m = 0 modes held, the others learnt), *bead* (all held); each from the beads'
+pupil and σ, and *cold* from their Noll 6 alone.  The rounds choose different molecules per run (36 in common
+of ~1300), so every model is scored on the 204 held out at detection, which no run learnt from, each
+molecule localised on it from the same heights (Δnats = Δdeviance / 2 against the best):
+
+| magnitude, start | σx/σy (nm) | focus (nm) | Δnats, 204 held out | Δnats, 1727 of round 1 |
+|---|---|---|---|---|
+| bead-symmetric, cold | 99/51 | 1162 | 0 | 835 |
+| free, bead | 94/55 | 1129 | 10 | 0 |
+| bead-symmetric, bead | 107/46 | 1192 | 153 | 219 |
+| free, cold | 97/61 | 1460 | 187 | 2 001 |
+| bead, cold | 81/26 | 787 | 265 | 1 867 |
+| bead, bead | 74/26 | 544 | 391 | 1 699 |
+| the bead model as it is, the focus scanned | 67/54 | 1100 (best) | 553 | – |
+
+- *The whole bead magnitude held* brings σx to about the beads' and σy to half of theirs, and costs 1–2 nats
+  per molecule: the data do not take it.
+- *The symmetric part held* costs nothing measurable, and σ stays high: the symmetric modes are not what
+  makes the blur.
+- *A free magnitude trades its astigmatism with the phase's.*  Beads: phase Noll 6 +0.55, magnitude +0.015.
+  In situ free from the beads: phase −0.29, magnitude −0.67; from cold, magnitude Noll 5/6 +1.4/−2.3, no
+  transmission.  Holding the m = 0 modes leaves this open; the m ≠ 0 magnitude modes are the ones to hold
+  (next).
+- *The starts end in different optima*: free from cold is 177 / 2 000 nats behind free from the beads, and
+  the phase Zernikes differ between runs by 0.2–0.6 rad against CRLBs of ~0.01.  The CRLBs say nothing about
+  how loosely in situ fixes the pupil, so its Zernikes cannot be compared with the beads' mode by mode.
+- *The bead model as it is* (pupil and σ, only the focus fitted) is the worst: in situ learning gains ~2.7
+  nats per molecule over it.  Every model fits at 1.00–1.02 deviance per pixel, so all of this is small per
+  molecule.
+- *The focus is barely determined*: the bead model's deviance changes by 240 over a focus of 100–1700 nm,
+  the heights shift with it.  So the learnt focus ends anywhere in 544–1460 nm, still moving after the four
+  rounds in every run (the coverslip edge shifting 100–500 nm a round).
+- *Not a thin layer*: the molecules' heights span ~1.5 µm (5–95 %), so this is HILO or includes vesicles
+  in the cell; the coverslip is not where most of them are.
+
+One set of molecules only; the spread between subsets is not measured.
