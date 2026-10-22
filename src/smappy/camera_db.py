@@ -20,8 +20,10 @@ from.  Three sources:
 
 SMAP keeps the same model in ``settings/*_cameras.mat``; this is that concept
 in JSON, so that adding a camera is editing a file rather than a MATLAB
-struct.  The Ries lab's file was ported once, into the shipped
-``data/cameras.json``; smappy does not read SMAP's files.
+struct.  The Ries lab's file was ported once; smappy does not read SMAP's
+files.  The cameras are the ``cameras`` list of a lab's ``microscopes.json``,
+whose ``microscopes`` list is `microscope_db`'s: one file per lab, shipped
+(``data/microscopes.json``) and the user's own.
 
 **Nothing here overrides the file.**  A value the metadata gives is the value
 used; the database supplies what the metadata does not carry, and what it
@@ -51,7 +53,7 @@ FITTING_PARAMETERS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
 RENAMED = {"frame_interval_ms": "frame_time_ms"}
 
 DATA = Path(__file__).resolve().parent / "data"
-SHIPPED = DATA / "cameras.json"
+SHIPPED = DATA / "microscopes.json"
 
 
 # --------------------------------------------------------------- reading a tag
@@ -238,10 +240,17 @@ class Camera:
     identify: Optional[Parameter] = None      # None: chosen by hand only
     prefix: str = ""
     comment: str = ""
+    #: names it went by before: a camera is named for itself (*iXon 1*), and
+    #: settings, chains and user files saved under a microscope's name for it
+    #: (*M1 Andor*) still find it
+    aliases: List[str] = field(default_factory=list)
     parameters: Dict[str, Parameter] = field(default_factory=dict)
     states: List[State] = field(default_factory=list)
 
     # ------------------------------------------------------------ identifying
+    def answers_to(self, name: str) -> bool:
+        return bool(name) and (name == self.name or name in self.aliases)
+
     def identifies(self, metadata: Dict[str, Any]) -> bool:
         if self.identify is None or not self.identify.tag:
             return False
@@ -297,6 +306,7 @@ class Camera:
             name=str(raw.get("name", "")),
             prefix=str(raw.get("prefix", "")),
             comment=str(raw.get("comment", "")),
+            aliases=[str(a) for a in (raw.get("aliases") or [])],
             identify=(None if not identify else
                       Parameter(tag=str(identify.get("tag", "")),
                                 read=str(identify.get("match", "exact")),
@@ -308,6 +318,8 @@ class Camera:
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"name": self.name}
+        if self.aliases:
+            out["aliases"] = list(self.aliases)
         if self.prefix:
             out["prefix"] = self.prefix
         if self.comment:
@@ -427,10 +439,9 @@ class CameraDatabase:
         return {"version": 1, "cameras": [c.to_dict() for c in self.cameras]}
 
     def save(self, path) -> Path:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
-        return path
+        """Write the cameras into `path`, keeping whatever else the file holds:
+        a lab's ``microscopes.json`` carries its microscopes beside them."""
+        return write_section(path, "cameras", self.to_dict()["cameras"])
 
     # --------------------------------------------------------------- reading
     def __len__(self) -> int:
@@ -440,16 +451,33 @@ class CameraDatabase:
         return [c.name for c in self.cameras]
 
     def get(self, name: str) -> Optional[Camera]:
-        return next((c for c in self.cameras if c.name == name), None)
+        """The camera of that name, or of that former name (`Camera.aliases`)."""
+        return (next((c for c in self.cameras if c.name == name), None)
+                or next((c for c in self.cameras if c.answers_to(name)), None))
 
     def joined_with(self, other: "CameraDatabase") -> "CameraDatabase":
         """This database, with `other`'s cameras added -- theirs winning.
 
-        By name: a user file that defines "M1 Andor" replaces the shipped one
-        rather than shadowing it from somewhere in the middle of a list.
+        By name: a user file that defines "iXon 1" replaces the shipped one
+        rather than shadowing it from somewhere in the middle of a list -- and
+        so does one that defines it under a name it has since dropped, a copy
+        saved as "M1 Andor" before the camera was renamed.
         """
-        cameras = [c for c in self.cameras if other.get(c.name) is None]
-        return CameraDatabase(list(other.cameras) + cameras,
+        import copy
+        theirs = [copy.deepcopy(c) for c in other.cameras]
+        kept = []
+        for camera in self.cameras:
+            replacement = next((c for c in theirs if camera.answers_to(c.name)
+                                or c.answers_to(camera.name)), None)
+            if replacement is None:
+                kept.append(camera)
+                continue
+            # the copy answers to every name the shipped camera did, so a
+            # microscope that names "iXon 1" finds a user's "M1 Andor"
+            for name in [camera.name] + camera.aliases:
+                if name != replacement.name and name not in replacement.aliases:
+                    replacement.aliases.append(name)
+        return CameraDatabase(theirs + kept,
                               list(other.sources) + list(self.sources))
 
     def identify(self, metadata: Dict[str, Any]) -> Optional[Camera]:
@@ -477,9 +505,39 @@ _revision = 0
 
 
 def user_file() -> Path:
-    """Where a lab's own cameras live: ``<config dir>/cameras.json``."""
+    """Where a lab's own cameras live: ``<config dir>/microscopes.json``,
+    beside its microscopes."""
+    from . import config
+    return config.config_dir() / "microscopes.json"
+
+
+def legacy_user_file() -> Path:
+    """``<config dir>/cameras.json``, where cameras were saved before they
+    shared a file with the microscopes: still read, below `user_file`, and
+    never written."""
     from . import config
     return config.config_dir() / "cameras.json"
+
+
+def read_file(path) -> Dict[str, Any]:
+    """A lab's file as a dict, or an empty one if there is none."""
+    path = Path(path)
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def write_section(path, key: str, entries: List[Dict[str, Any]]) -> Path:
+    """Replace one list of a lab's file and keep the rest of it.
+
+    The cameras and the microscopes share the file, and each database writes
+    only its own list: saving a camera must not drop the microscopes.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = read_file(path)
+    data["version"] = 1
+    data[key] = entries
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    return path
 
 
 def database(reload: bool = False) -> CameraDatabase:
@@ -499,13 +557,13 @@ def database(reload: bool = False) -> CameraDatabase:
             shipped = CameraDatabase.load(SHIPPED)
         except (OSError, ValueError):
             shipped = CameraDatabase()
-    path = user_file()
-    if path.exists():
-        try:
-            shipped = shipped.joined_with(CameraDatabase.load(path))
-        except (OSError, ValueError) as error:
-            import warnings
-            warnings.warn(f"{path} could not be read: {error}", stacklevel=2)
+    for path in (legacy_user_file(), user_file()):     # the newer one wins
+        if path.exists():
+            try:
+                shipped = shipped.joined_with(CameraDatabase.load(path))
+            except (OSError, ValueError) as error:
+                import warnings
+                warnings.warn(f"{path} could not be read: {error}", stacklevel=2)
     _cache = shipped
     return _cache
 
@@ -719,7 +777,7 @@ def save_camera(camera: Camera, path=None) -> Path:
     path = Path(path) if path is not None else user_file()
     mine = CameraDatabase.load(path) if path.exists() else CameraDatabase()
     for i, existing in enumerate(mine.cameras):
-        if existing.name == camera.name:
+        if existing.name == camera.name or camera.answers_to(existing.name):
             mine.cameras[i] = camera
             break
     else:

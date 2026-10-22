@@ -1,6 +1,10 @@
 # The microscope database
 
-A design note, 2026-10, not yet built, for discussion.  uiPSF needs the optics of the
+A design note, 2026-10.  **Built so far** (the core, no GUI): `smappy/microscope_db.py`,
+the importer `smappy/io/emu.py`, the lab's M2 and M5 in `data/microscopes.json`, the
+cameras in the same file and named for themselves; tests in `tests/test_microscope_db.py`
+and `tests/test_emu.py`.  **Not yet**: the fit and *PSF calibration* reading it, the
+calibration's device states, the editor (see "Next").  uiPSF needs the optics of the
 microscope that took a file -- the NA, the immersion index, the emission wavelength, the
 pixel per axis -- and today they are typed into *PSF calibration* every time
 (`calibrate.pupil.OpticsSettings`).  Most of them are fixed per microscope; the rest follow
@@ -108,7 +112,7 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
                       "emu": "Slider 2"}},
  "parameters": {
    "NA": 1.43,
-   "n_immersion": 1.516,
+   "n_immersion": 1.518,
    "wavelength_nm": {"device": "filter", "values": "from the name"},
    "modality": {"device": "3D lens", "values": {"in": "astigmatic", "out": "2D"}}},
  "channels": {"transmitted": {"filter": "2C transmitted", "side": "right"},
@@ -248,16 +252,72 @@ channel, a wavelength for a filter whose name is not one.
 
 ## Where it lives
 
-`smappy/microscope_db.py` beside `camera_db.py`, sharing its `Parameter`, `Source` and
-joining (moved to a small common module if they need to be); `data/microscopes.json`
-shipped, `<config dir>/microscopes.json` the user's; `io/emu.py` the importer, Qt-free;
-the editor in `gui/microscope_editor.py`, opened from the camera parameter view and from
-*PSF calibration*.  The camera editor stays and opens on its own as now.
+**One file per lab, cameras and microscopes together**: `data/microscopes.json` shipped
+(it replaced `data/cameras.json`), `<config dir>/microscopes.json` the user's, each with a
+`cameras` list and a `microscopes` list.  `camera_db` reads and writes the one,
+`microscope_db` the other, and each keeps the other's list when it saves
+(`camera_db.write_section`).  A user's `cameras.json` from before is still read, below the
+new file, and never written.
 
-**What ships**: the Ries lab's microscopes, all of them, in `data/microscopes.json`, as
-its cameras are in `data/cameras.json` -- smappy is used by a few groups at first; others
-keep theirs in their own file, which wins by name.  Later one of them may stay as the
-example and the rest move out.
+`smappy/microscope_db.py` beside `camera_db.py`, using its `Parameter` and `Source`;
+`io/emu.py` the importer, Qt-free; the editor to be `gui/microscope_editor.py`, opened from
+the camera parameter view and from *PSF calibration*.  The camera editor stays and opens
+on its own as now.
+
+**Camera names**: *iXon 1* (the iXon 8172, *M1 Andor* before), *Evolve 1* (M2's Evolve,
+*M2 Evolve*), *Evolve 2* (*M3 Evolve*), *Fusion BT 1* (*M5 Fusion BT*); the old names are
+`aliases`, which `CameraDatabase.get` answers to and which a user's copy saved under an
+old name replaces, so saved settings, chains and user files keep working.
+
+**What ships**: the Ries lab's microscopes, all of them -- smappy is used by a few groups
+at first; others keep theirs in their own file, which wins by name.  Later one of them may
+stay as the example and the rest move out.
+
+## The shipped entries
+
+Made by `emu.draft` from `M2-config.uicfg` and `M5_config.uicfg` (October 2026) and
+completed by hand, checked against the bead stacks of 260105, 260821, 260829, 260917 and
+261012 (M2) and 260901 (M5):
+
+* **M2**, recognised by its focus-lock laser (`Focus-lock-Serial ID`), which stayed when the
+  camera and the SmarAct stage changed.  NA 1.43, immersion 1.518 (Olympus, Leica and
+  Zeiss type F oils are all specified at 1.518).  The cylindrical lens is EMU's *3DA*
+  (`Servos-Position1`, on 28000, off 4000).  The pixel per camera, as learnt on beads
+  (`benchmarks/uipsf/results/lab_beads_pixel.jsonl`, the lower negative log-likelihood):
+  *iXon 1* 127 × 116 nm with the lens on, *Evolve 1* 116 × 127, both 127 square with it off.
+  The transmitted arm lands on the right of the iXon's chip, the reflected on the left:
+  the brighter half of the 260821 dual-channel beads (91 against 22 counts above
+  background) and movie (1816 against 145), two far-red dyes.  The split runs between chip
+  columns ~259 and ~275; every single-channel M2 acquisition since the iXon (the 561 nm
+  beads of 260917 at x 279–479, the 638 nm ones of 260829 and 260904 from x 300) sits in
+  the right field, so its light took the transmitted arm.  On the Evolve the split ran top
+  and bottom (a dark band at chip row ~267, `260311_PD_BeadsCal_640LP_2D`), the dual-channel
+  ROIs tall (`203-11-212-489`), and the transmitted arm on top: in the Album of
+  `260401_AASJ_2837_pSun1-AF647_antiGFP-Zym2-CF660C` (two far-red dyes, the Evolve) the
+  top half is the brighter, 444 against 115 counts above background -- the camera turned
+  by 90° against the iXon, as its pixel is (116 × 127 against 127 × 116).  The ELL9 sliders keep the names they had until September (`Thorlabs ELL9`, the
+  reflected arm; `Thorlabs ELL9-1`, the BFP lens: the same serial numbers) as second tags.
+* **M2's transmitted slider has 685/70 and empty at the same value**, 10000, in EMU's
+  configuration.  The entry puts *empty* first, so 10000 reads as empty and the filter
+  wheel decides: the 561 nm beads of 260917 read 10000 behind a 600/60 wheel filter, and
+  the single-mode stacks whose comment says 700/100 read 10000 too.  Where 685/70 really
+  sits is to be found and EMU's configuration corrected.
+* **M5**, recognised by its iChrome laser's serial number.  NA 1.50, immersion 1.518.  The
+  3D lens is EMU's *3D*, the ELL20 stage (in at 0 µm, out at 50000); it does not change
+  the pixel, which is the camera's.  Two filter wheels, the transmitted arm's on top in
+  EMU; the sides of the split are not known.
+
+## Two controls, two states, one value
+
+* **Two states at one value** (M2's slider above): the state listed first wins, every
+  time; the import warns, and the order is the entry's, so it is changed in the entry
+  (or, better, the configuration is fixed).  What a file read cannot tell two states
+  apart; nothing in the file says which button was pressed.
+* **Two controls on one property** (M5's ELL20 is both the *3D* two-state device and the
+  *3D Lens* linear stage; M2's UV pulse durations share a property): each control the
+  import takes is a device of its own, named by its button.  The import leaves out the
+  linear stages, the triggers and the pulse durations, so on M5 and M2 only one device
+  reads each property.
 
 ## Decided (2026-10-22)
 
@@ -273,10 +333,21 @@ example and the rest move out.
 5. **EMU is not changed**: the import asks which device is the 3D lens.
 6. **The camera comes from the file**, through the camera database, by its serial
    number.  Cameras are named for themselves (*iXon 1*), not for a microscope.
+7. **All the lab's microscopes ship.**
 8. **Versions**: changing an entry keeps the old one, dated, for older files; the date
    is the EMU configuration file's modification date where it can be read, else the day
-   of the change.
-7. **All the lab's microscopes ship.**
+   of the change.  A configuration copied to another computer gets the day it was copied
+   (the three in `smappy test` all read 2026-10-22), so the date stays editable.
+9. **One file holds a lab's cameras and microscopes.**
+
+## Next
+
+1. **Wire it in**: `io.tiff.resolve_camera` takes the microscope's pixel where the file has
+   none; *PSF calibration*'s optics fields start on *auto* from it; the table keeps the
+   device states (`metadata["microscope"]`), and a calibration its beads', so a fit and in
+   situ learning warn when the data's differ.
+2. **The editor**, with *Import EMU configuration…* (asking which device is the 3D lens),
+   and its help page.
 
 ## Still open
 

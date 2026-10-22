@@ -2,7 +2,10 @@
   "version": 1,
   "cameras": [
     {
-      "name": "M1 Andor",
+      "name": "iXon 1",
+      "aliases": [
+        "M1 Andor"
+      ],
       "prefix": "Andor",
       "identify": {
         "tag": "{prefix}-Camera",
@@ -132,7 +135,10 @@
       ]
     },
     {
-      "name": "M2 Evolve",
+      "name": "Evolve 1",
+      "aliases": [
+        "M2 Evolve"
+      ],
       "prefix": "Evolve512",
       "identify": {
         "tag": "{prefix}-SerialNumber",
@@ -262,7 +268,10 @@
       }
     },
     {
-      "name": "M3 Evolve",
+      "name": "Evolve 2",
+      "aliases": [
+        "M3 Evolve"
+      ],
       "prefix": "Evolve",
       "identify": {
         "tag": "{prefix}-SerialNumber",
@@ -403,7 +412,10 @@
       }
     },
     {
-      "name": "M5 Fusion BT",
+      "name": "Fusion BT 1",
+      "aliases": [
+        "M5 Fusion BT"
+      ],
       "prefix": "HamamatsuHam_DCAM",
       "identify": {
         "tag": "{prefix}-CameraID",
@@ -440,6 +452,302 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         }
+      }
+    }
+  ],
+  "microscopes": [
+    {
+      "name": "M2",
+      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. The pixel per camera and lens state was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000.",
+      "identify": {
+        "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644"
+      },
+      "devices": {
+        "filter wheel": {
+          "tag": "Servos-Position3",
+          "read": "nearest",
+          "states": {
+            "440/40": "5000",
+            "525/50": "12000",
+            "600/60": "23500",
+            "700/100": "32000",
+            "676/37": "40000",
+            "None": "57000"
+          },
+          "emu": "Filter wheel"
+        },
+        "Channel 1 (transmitted)": {
+          "tag": "Servos-Position0",
+          "read": "nearest",
+          "states": {
+            "empty": "10000",
+            "676/37": "20000",
+            "700/100": "32000",
+            "685/70": "10000"
+          },
+          "emu": "Slider 1"
+        },
+        "Channel 2 (reflected)": {
+          "tag": [
+            "ELL9 - Reflected Slider-Label",
+            "Thorlabs ELL9-Label"
+          ],
+          "states": {
+            "600/60": "Position 3",
+            "Empty": "Position 0",
+            "525/50": "Position 2",
+            "676/37": "Position 1"
+          },
+          "emu": "Slider 2"
+        },
+        "BFP": {
+          "tag": [
+            "ELL9 BFP-Label",
+            "Thorlabs ELL9-1-Label"
+          ],
+          "states": {
+            "on": "Position 1",
+            "off": "Position 0"
+          },
+          "emu": "Two-state device 1"
+        },
+        "3DA": {
+          "tag": "Servos-Position1",
+          "read": "nearest",
+          "states": {
+            "on": "28000",
+            "off": "4000"
+          },
+          "emu": "Two-state device 2"
+        },
+        "Brightfield": {
+          "tag": "TTL-State0",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Two-state device 3"
+        },
+        "laser UV": {
+          "tag": "Luxx405-Laser Operation Select",
+          "states": {
+            "on": "On",
+            "off": "Off"
+          },
+          "emu": "Laser 0"
+        },
+        "laser 488": {
+          "tag": "Luxx488-Laser Operation Select",
+          "states": {
+            "on": "On",
+            "off": "Off"
+          },
+          "emu": "Laser 1"
+        },
+        "laser 561": {
+          "tag": "Cobolt561-Laser",
+          "states": {
+            "on": "On",
+            "off": "Off"
+          },
+          "emu": "Laser 2"
+        },
+        "laser 638": {
+          "tag": "Luxx638-Laser Operation Select",
+          "states": {
+            "on": "On",
+            "off": "Off"
+          },
+          "emu": "Laser 3"
+        }
+      },
+      "parameters": {
+        "NA": 1.43,
+        "n_immersion": 1.518,
+        "wavelength_nm": {
+          "device": "filter wheel",
+          "values": "from the name"
+        },
+        "modality": {
+          "device": "3DA",
+          "values": {
+            "on": "astigmatic",
+            "off": "2D"
+          }
+        }
+      },
+      "channels": {
+        "transmitted": {
+          "filter": "Channel 1 (transmitted)",
+          "side": {
+            "iXon 1": "right",
+            "Evolve 1": "top"
+          }
+        },
+        "reflected": {
+          "filter": "Channel 2 (reflected)",
+          "side": {
+            "iXon 1": "left",
+            "Evolve 1": "bottom"
+          }
+        }
+      },
+      "cameras": {
+        "iXon 1": {
+          "pixel_nm": {
+            "device": "3DA",
+            "values": {
+              "on": [
+                127,
+                116
+              ],
+              "off": [
+                127,
+                127
+              ]
+            }
+          }
+        },
+        "Evolve 1": {
+          "pixel_nm": {
+            "device": "3DA",
+            "values": {
+              "on": [
+                116,
+                127
+              ],
+              "off": [
+                127,
+                127
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "M5",
+      "comment": "Imported from M5's EMU configuration (October 2026), the optics added by hand. Two filter wheels, the transmitted arm's on top in EMU; the pixel does not depend on the 3D lens and is the camera's.",
+      "identify": {
+        "iChrome-MLE-TCP-System: Serial Number": "iCHROME-MLE-L-CD_30087"
+      },
+      "devices": {
+        "filter wheel": {
+          "tag": "Thorlabs Filter Wheel-State",
+          "read": "nearest",
+          "states": {
+            "525/45": "0",
+            "600/60": "1",
+            "676/37": "2",
+            "685/70": "3",
+            "452/45": "4",
+            "None": "5"
+          },
+          "emu": "Filter wheel"
+        },
+        "filter wheel 2": {
+          "tag": "Thorlabs Filter Wheel-1-State",
+          "read": "nearest",
+          "states": {
+            "525/50": "0",
+            "600/52": "1",
+            "676/37": "2",
+            "685/70": "3",
+            "457/15": "4",
+            "None": "5"
+          },
+          "emu": "Filter wheel 2"
+        },
+        "3D": {
+          "tag": "Thorlabs ELL20-Position (um)",
+          "read": "nearest",
+          "states": {
+            "on": "0",
+            "off": "50000"
+          },
+          "emu": "Two-state device 1"
+        },
+        "TIRF": {
+          "tag": "Thorlabs ELL17/ELL20-Position (um)",
+          "read": "nearest",
+          "states": {
+            "on": "19839",
+            "off": "21094"
+          },
+          "emu": "Two-state device 2"
+        },
+        "BFP": {
+          "tag": "Thorlabs ELL6-State",
+          "read": "nearest",
+          "states": {
+            "on": "0",
+            "off": "1"
+          },
+          "emu": "Two-state device 3"
+        },
+        "laser 405": {
+          "tag": "iChrome-MLE-TCP-Laser 4: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 0"
+        },
+        "laser 488": {
+          "tag": "iChrome-MLE-TCP-Laser 3: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 1"
+        },
+        "laser 561": {
+          "tag": "iChrome-MLE-TCP-Laser 2: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 2"
+        },
+        "laser 640": {
+          "tag": "iChrome-MLE-TCP-Laser 1: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 3"
+        }
+      },
+      "parameters": {
+        "NA": 1.5,
+        "n_immersion": 1.518,
+        "wavelength_nm": {
+          "device": "filter wheel",
+          "values": "from the name"
+        },
+        "modality": {
+          "device": "3D",
+          "values": {
+            "on": "astigmatic",
+            "off": "2D"
+          }
+        }
+      },
+      "channels": {
+        "transmitted": {
+          "filter": "filter wheel"
+        },
+        "reflected": {
+          "filter": "filter wheel 2"
+        }
+      },
+      "cameras": {
+        "Fusion BT 1": {}
       }
     }
   ]

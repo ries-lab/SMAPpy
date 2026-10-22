@@ -52,7 +52,7 @@ def test_the_view_says_which_camera_and_which_readout_mode(app):
 
     window = CameraParameters()
     window.show_for(FakeFitter(a_source(**EVOLVE)), settings=object())
-    assert "M2 Evolve" in window.summary.text()
+    assert "Evolve 1" in window.summary.text()
     assert "A14G150010" in window.summary.text()        # identified by this
     assert "10MHz 16bit" in window.summary.text()       # and set up like this
 
@@ -95,8 +95,8 @@ def test_a_camera_can_be_chosen_when_the_file_identifies_none(app):
 
     source = a_source(**{"Core-Camera": "unknown"})
     window = CameraParameters()
-    window.show_for(FakeFitter(source, camera="M5 Fusion BT"), settings=object())
-    assert "M5 Fusion BT" in window.summary.text()
+    window.show_for(FakeFitter(source, camera="Fusion BT 1"), settings=object())
+    assert "Fusion BT 1" in window.summary.text()
     rows = {window.table.item(r, 0).text(): window.table.item(r, 1).text()
             for r in range(window.table.rowCount())}
     assert rows["conversion"] == "0.24"
@@ -118,7 +118,7 @@ def test_the_fit_plugin_offers_the_databases_cameras(app):
 
     choices = _camera_choices()
     assert choices[0] == ("", "auto")
-    assert ("M1 Andor", "M1 Andor") in choices
+    assert ("iXon 1", "iXon 1") in choices
     specs = CameraSettings.__dataclass_fields__
     assert "camera" in specs and "pixelsize_y_um" in specs
 
@@ -175,7 +175,7 @@ def test_a_real_acquisition_reaches_the_view_through_the_fitter(app, tmp_path):
     from smappy.gui.camera_view import CameraParameters
     window = CameraParameters()
     window.show_for(plugin, settings)
-    assert "M1 Andor" in window.summary.text()
+    assert "iXon 1" in window.summary.text()
     rows = {window.table.item(r, 0).text(): window.table.item(r, 1).text()
             for r in range(window.table.rowCount())}
     # the two Micro-Manager never records, from the mode that it does

@@ -42,7 +42,7 @@ def config(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------- the draft
 
-@pytest.mark.parametrize("tags, shipped", [(EVOLVE, "M2 Evolve"), (IXON, "M1 Andor")])
+@pytest.mark.parametrize("tags, shipped", [(EVOLVE, "Evolve 1"), (IXON, "iXon 1")])
 def test_a_draft_from_a_files_tags_is_the_entry_written_by_hand(tags, shipped):
     """The two shipped EMCCDs were entered by hand from SMAP's file; drafted
     from their tags alone, they come out the same but for the numbers."""
@@ -80,7 +80,7 @@ def test_a_file_with_no_device_drafts_an_entry_chosen_by_hand():
 # ---------------------------------------------------------------- the mode
 
 def test_a_new_readout_mode_is_added_and_the_others_are_kept():
-    evolve = camera_db.database().get("M2 Evolve")
+    evolve = camera_db.database().get("Evolve 1")
     tags = dict(EVOLVE, **{"Evolve512-ReadoutRate": "100MHz 16bit"})
     assert evolve.state_for(tags) is None
     added = with_mode(evolve, tags, camera_db.mode_tags(evolve),
@@ -92,7 +92,7 @@ def test_a_new_readout_mode_is_added_and_the_others_are_kept():
 
 
 def test_the_mode_a_file_already_matches_is_corrected_in_place():
-    evolve = camera_db.database().get("M2 Evolve")
+    evolve = camera_db.database().get("Evolve 1")
     fixed = with_mode(evolve, EVOLVE, camera_db.mode_tags(evolve),
                       {"conversion": 7.0, "offset": 400.0})
     assert len(fixed.states) == len(evolve.states)
@@ -111,7 +111,7 @@ def test_a_saved_camera_is_recognised_by_the_next_file(config):
                        {"conversion": 1.2, "offset": 100.0})
     assert camera_db.database().identify(PRIME) is None
     path = save_camera(camera)
-    assert path == config / "cameras.json"
+    assert path == config / "microscopes.json"
     found = camera_db.database().resolve(PRIME)
     assert found.camera_name == "Prime95B" and found.missing == []
     assert found.values["conversion"] == 1.2
@@ -121,22 +121,22 @@ def test_saving_again_replaces_the_camera_by_name_and_keeps_the_others(config):
     save_camera(Camera(name="Other", parameters={"offset": Parameter(fixed=5.0)}))
     save_camera(Camera(name="Mine", parameters={"offset": Parameter(fixed=1.0)}))
     save_camera(Camera(name="Mine", parameters={"offset": Parameter(fixed=2.0)}))
-    stored = json.loads((config / "cameras.json").read_text())["cameras"]
+    stored = json.loads((config / "microscopes.json").read_text())["cameras"]
     assert [c["name"] for c in stored] == ["Other", "Mine"]
     assert stored[1]["parameters"]["offset"] == {"fixed": 2.0}
 
 
 def test_a_shipped_camera_saved_by_the_user_takes_its_place(config):
-    evolve = camera_db.database().get("M2 Evolve")
+    evolve = camera_db.database().get("Evolve 1")
     tags = dict(EVOLVE, **{"Evolve512-ReadoutRate": "100MHz 16bit"})
     save_camera(with_mode(evolve, tags, camera_db.mode_tags(evolve),
                           {"conversion": 3.1, "offset": 120.0}))
     known = camera_db.database()
-    assert known.names().count("M2 Evolve") == 1
+    assert known.names().count("Evolve 1") == 1
     assert known.resolve(tags).values["conversion"] == 3.1
     assert known.resolve(EVOLVE).values["conversion"] == 6.7
     # the shipped file is not what was written
-    shipped = CameraDatabase.load(camera_db.SHIPPED).get("M2 Evolve")
+    shipped = CameraDatabase.load(camera_db.SHIPPED).get("Evolve 1")
     assert len(shipped.states) == len(evolve.states)
 
 
@@ -190,7 +190,7 @@ def test_the_fitter_offers_a_readout_mode_the_database_lacks(config, tmp_path):
                                   dict(EVOLVE, **{"Evolve512-ReadoutRate": "1MHz"}))
     notice = plugin.describe(None, settings).notice
     assert notice.action == "Add readout mode..."
-    assert "M2 Evolve" in notice.text and "conversion" in notice.text
+    assert "Evolve 1" in notice.text and "conversion" in notice.text
 
     settings.source.path = a_tiff(tmp_path / "known_MMStack.ome.tif", EVOLVE)
     assert plugin.describe(None, settings).notice is None
@@ -236,9 +236,9 @@ def test_the_editor_starts_from_the_file_and_saves_what_is_typed(app, config):
 def test_the_editor_gives_a_known_camera_the_mode_it_lacked(app, config):
     from smappy.gui.camera_editor import CameraEditor
     tags = dict(EVOLVE, **{"Evolve512-ReadoutRate": "1MHz"})
-    evolve = camera_db.database().get("M2 Evolve")
+    evolve = camera_db.database().get("Evolve 1")
     editor = CameraEditor(tags, evolve)
-    assert editor.start_from.currentData() == "M2 Evolve"
+    assert editor.start_from.currentData() == "Evolve 1"
     assert set(editor.ticked()) == {"Evolve512-Gain", "Evolve512-Port",
                                     "Evolve512-ReadoutRate"}
     assert "6 other readout modes" in editor.modes_note.text()
@@ -246,7 +246,7 @@ def test_the_editor_gives_a_known_camera_the_mode_it_lacked(app, config):
     editor.rows["conversion"].value.setText("12.5")
     editor.rows["offset"].value.setText("400")
     editor.save()
-    known = camera_db.database().get("M2 Evolve")
+    known = camera_db.database().get("Evolve 1")
     assert len(known.states) == len(evolve.states) + 1
     assert known.resolve(tags).values["conversion"] == 12.5
 

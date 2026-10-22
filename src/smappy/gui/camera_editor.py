@@ -9,7 +9,7 @@ number, the tags that carry the gain and the readout mode.  What it cannot
 say -- the conversion and the baseline -- is typed here, once per readout
 mode, from the camera's data sheet or a calibration.
 
-What is saved goes into the user's ``cameras.json`` (`camera_db.save_camera`),
+What is saved goes into the user's ``microscopes.json`` (`camera_db.save_camera`),
 never into the shipped list an update would overwrite.  A shipped camera that
 is edited here -- given a readout mode it lacked -- is saved as the user's own
 copy under the same name, which then takes the shipped one's place.
@@ -330,7 +330,7 @@ class CameraEditor(QWidget):
         self.where.setWordWrap(True)
         buttons.addWidget(self.where, 1)
         self.save_button = QPushButton("Save")
-        self.save_button.setToolTip("write this camera into your cameras.json; "
+        self.save_button.setToolTip("write this camera into your microscopes.json; "
                                     "the next file it took is recognised")
         self.save_button.clicked.connect(self.save)
         buttons.addWidget(self.save_button)
@@ -489,7 +489,7 @@ class CameraEditor(QWidget):
         found = camera_db.problems(camera, self.metadata, camera_db.database())
         if _replaces_shipped(camera.name):
             found.append(f"{camera.name} is a shipped camera: your copy in "
-                         "cameras.json will take its place")
+                         "microscopes.json will take its place")
         self.problems.setText("\n".join(found))
         self.save_button.setEnabled(bool(camera.name))
 

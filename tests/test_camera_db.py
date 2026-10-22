@@ -167,9 +167,9 @@ def test_a_database_round_trips_through_json(tmp_path):
 
 def test_the_shipped_database_reads_and_identifies_an_ixon():
     db = database(reload=True)
-    assert "M1 Andor" in db.names()
+    assert "iXon 1" in db.names()
     resolution = db.resolve(IXON)
-    assert resolution.camera_name == "M1 Andor"
+    assert resolution.camera_name == "iXon 1"
     # the two the metadata does not carry, from the readout mode that it does
     assert resolution.values["conversion"] == 15.8
     assert resolution.values["offset"] == 196.0
@@ -190,10 +190,49 @@ def test_a_users_file_joins_the_shipped_one(tmp_path, monkeypatch):
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
     from smappy import config
     config.load(reload=True)
-    CameraDatabase([a_camera(name="mine")]).save(tmp_path / "cameras.json")
+    CameraDatabase([a_camera(name="mine")]).save(tmp_path / "microscopes.json")
     db = database(reload=True)
-    assert "mine" in db.names() and "M1 Andor" in db.names()
+    assert "mine" in db.names() and "iXon 1" in db.names()
     assert db.resolve(a_file()).camera_name == "mine"
+
+
+def test_a_camera_is_found_by_the_name_it_went_by_before():
+    db = database(reload=True)
+    assert db.get("M1 Andor").name == "iXon 1"
+    assert db.resolve(IXON, camera="M1 Andor").camera_name == "iXon 1"
+
+
+def test_a_users_copy_under_a_former_name_replaces_the_shipped_camera():
+    shipped = CameraDatabase([a_camera(name="iXon 1", aliases=["M1 Andor"])])
+    mine = CameraDatabase([a_camera(name="M1 Andor",
+                                    parameters={"conversion": Parameter(fixed=1.0)})])
+    joined = shipped.joined_with(mine)
+    assert joined.names() == ["M1 Andor"]
+    assert joined.get("iXon 1").parameters["conversion"].fixed == 1.0
+
+
+def test_the_old_cameras_json_is_still_read_below_the_new_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
+    from smappy import config
+    config.load(reload=True)
+    old = {"version": 1, "cameras": [a_camera(name="old").to_dict(),
+                                     a_camera(name="both").to_dict()]}
+    (tmp_path / "cameras.json").write_text(json.dumps(old))
+    newer = a_camera(name="both", parameters={"conversion": Parameter(fixed=2.0)})
+    CameraDatabase([newer]).save(tmp_path / "microscopes.json")
+    db = database(reload=True)
+    assert "old" in db.names()
+    assert db.get("both").parameters["conversion"].fixed == 2.0
+
+
+def test_saving_cameras_keeps_the_microscopes_of_the_same_file(tmp_path):
+    path = tmp_path / "microscopes.json"
+    path.write_text(json.dumps({"version": 1, "cameras": [],
+                                "microscopes": [{"name": "M9"}]}))
+    CameraDatabase([a_camera()]).save(path)
+    stored = json.loads(path.read_text())
+    assert stored["microscopes"] == [{"name": "M9"}]
+    assert [c["name"] for c in stored["cameras"]] == ["test"]
 
 
 # -------------------------------------------------------------- pixel sizes
@@ -233,7 +272,7 @@ def test_nm_coordinates_use_each_axis_pixel_size():
 
 
 def test_the_shipped_camera_with_two_pixel_sizes_keeps_both():
-    camera = database(reload=True).get("M5 Fusion BT")
+    camera = database(reload=True).get("Fusion BT 1")
     assert camera.parameters["pixelsize_um"].fixed == [0.102, 0.103]
 
 

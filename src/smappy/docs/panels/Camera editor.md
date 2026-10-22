@@ -44,9 +44,10 @@ in that mode is recognised.  A camera with several readout modes is given
 them one file at a time: open a file taken in the next mode, and the editor
 adds that mode to the camera and keeps the others.
 
-The entries are saved in **your own** `cameras.json`, in smappy's settings
-folder (the window shows where), never in the list that comes with smappy,
-which an update replaces.  The database and the fitter's own camera fields
+The entries are saved in **your own** `microscopes.json`, in smappy's
+settings folder (the window shows where), never in the list that comes with
+smappy, which an update replaces.  The file holds your lab's cameras and its
+microscopes; a `cameras.json` saved there by an older smappy is still read.  The database and the fitter's own camera fields
 are the only two places a camera's numbers come from: smappy reads neither
 camera YAML presets nor SMAP's `settings/*_cameras.mat`.  The cameras of the
 Ries lab's SMAP file are in the list that comes with smappy.
@@ -80,8 +81,8 @@ whatever is still wrong: a parameter the fit needs that is still unknown, a
 recognising tag this file does not match, a file another camera already
 claims.
 
-**4. Saving.**  The camera goes into your `cameras.json`, replacing one of the
-same name there.  The database is then read again, and every open fitter
+**4. Saving.**  The camera goes into your `microscopes.json`, replacing one
+of the same name there.  The database is then read again, and every open fitter
 re-reads its file: its line disappears, its *auto* fields show the new
 numbers, and the camera is offered under *camera*.
 
@@ -181,14 +182,14 @@ What the entry, as it stands, makes of the file: value and source of every
 parameter, red where a value the fit needs is missing.
 
 ### Save
-Writes the camera into your `cameras.json` and reads the database again.
+Writes the camera into your `microscopes.json` and reads the database again.
 
 ### Close
 Closes the window without saving what was changed since the last *Save*.
 
 ## Output
 
-A camera in `cameras.json`, in smappy's settings folder.  It is plain JSON,
-one entry per camera, so it can be copied to another computer or handed to
+A camera in `microscopes.json`, in smappy's settings folder.  It is plain
+JSON, one entry per camera in its `cameras` list, so it can be copied to another computer or handed to
 a colleague.  An entry that every smappy installation should have can be
 sent to the developers for the shipped list.
