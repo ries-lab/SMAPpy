@@ -57,10 +57,11 @@ class ImageSource:
         buffer: List[np.ndarray] = []
         buffer_start = start
 
+        stop = self.n_frames if stop is None else min(stop, self.n_frames)
         for path in self.files:
             with tifffile.TiffFile(path) as tf:
                 for page in tf.pages:
-                    if stop is not None and index >= stop:
+                    if index >= stop:
                         break
                     if index < start:
                         index += 1
@@ -73,7 +74,7 @@ class ImageSource:
                         buffer_start += len(buffer)
                         buffer = []
                     index += 1
-            if stop is not None and index >= stop:
+            if index >= stop:
                 break
 
         if buffer:
@@ -128,11 +129,6 @@ def open_stack(path) -> ImageSource:
 
     files = _series_files(path)
 
-    n_frames = 0
-    for f in files:
-        with tifffile.TiffFile(f) as tf:
-            n_frames += len(tf.pages)
-
     with tifffile.TiffFile(files[0]) as tf:
         page = tf.pages[0]
         shape, dtype = tuple(page.shape), page.dtype
@@ -144,6 +140,16 @@ def open_stack(path) -> ImageSource:
         tag = page.tags.get("MicroManagerMetadata")
         if tag is not None and isinstance(tag.value, dict):
             plane = tag.value
+
+    n_frames = 0
+    for k, f in enumerate(files):
+        with tifffile.TiffFile(f) as tf:
+            n = len(tf.pages)
+            # An acquisition stopped while writing leaves a last page that is not a frame (a DNA-PAINT
+            # movie of M2's, 2026-09-17: shape ()); counted, it broke every block that reached it
+            while k == len(files) - 1 and n and tuple(tf.pages[n - 1].shape) != shape:
+                n -= 1
+            n_frames += n
 
     declared = summary.get("Frames")
     return ImageSource(
