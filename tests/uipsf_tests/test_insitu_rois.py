@@ -122,6 +122,23 @@ def test_a_blink_whose_photons_step_between_inner_frames_is_rejected():
     assert u.reason == ["photon step"] * 5 and len(set(u.blink.tolist())) == 1
 
 
+def test_a_unit_whose_own_fit_runs_wider_than_a_third_of_its_region_is_rejected(monkeypatch):
+    # On Windows one unit's masked fit ran to σx 16 px (5 on macOS) and set the z proxy's range on its own.
+    frames = frames_with(BLINK, n_frames=10)
+    s = I.InSituSettings()
+    kept, g = I.measure(frames, I.detect(frames, np.full_like(frames, 10.0), s), s)
+    fit = I.gaussian
+
+    def one_wide(regions):
+        out = fit(regions)
+        out["sigma_x_pix"][0] = s.roi_px / 3 + 0.5
+        return out
+
+    monkeypatch.setattr(I, "gaussian", one_wide)
+    u = I.units(frames, kept, g, s)
+    assert u.reason[0] == "wide" and u.reason[1:] == [None] * (len(u.reason) - 1)
+
+
 def _fake_units(sx, sy, photons, blink=None):
     n = len(sx)
     gauss = {"sigma_x_pix": np.asarray(sx, float), "sigma_y_pix": np.asarray(sy, float),

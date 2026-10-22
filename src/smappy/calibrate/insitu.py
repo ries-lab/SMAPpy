@@ -30,6 +30,8 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
    count: on dense real data false detections on the background and faint diffuse patches otherwise did
    most of the rejecting.  A blink whose inner frames' photons step by more than ``step_ratio`` (another molecule
    switching on or off under it) is rejected too; its first and last frames are partial and not judged.
+   A unit whose own Gaussian, fitted with the mask, is wider than a third of the region is out (*wide*),
+   as a detection is in step 3.
 6. **Selection** (`select`): a **z proxy** from the summed spot's widths -- σx² − σy² for an astigmatic
    PSF, linear in z, or σx² + σy² for a 2D one, which says |z| -- split into ``bins`` bins.  Per bin:
    spots whose widths are far from the bin's typical ones (``shape_k`` robust sds) are out -- an
@@ -381,6 +383,12 @@ def units(frames: np.ndarray, cands: Candidates, g: dict, settings: InSituSettin
     regions = np.asarray(regions, np.float32).reshape(-1, roi, roi)
     fitted = gaussian(regions)
     reasons = [r if r is not None or np.isfinite(fitted["photons"][i]) else "no fit" for i, r in enumerate(reasons)]
+    # The unit's own fit, with its neighbours masked, is held to `measure`'s rule too: one that ran wide
+    # sets the z proxy's range on its own.  On a simulated movie of 168 candidates one unit fitted σx 5 px
+    # on macOS and 16 on Windows, which moved the 99th percentile of σx² − σy² from 35 to 116 px² and
+    # halved the molecules used.
+    wide = np.fmax(fitted["sigma_x_pix"], fitted["sigma_y_pix"]) > roi / 3
+    reasons = [r if r is not None or not wide[i] else "wide" for i, r in enumerate(reasons)]
     return Units(fs, np.asarray(bl, int), np.asarray(xs, float), np.asarray(ys, float),
                  np.asarray(cs, int).reshape(-1, 2), regions, np.asarray(masks, bool).reshape(-1, roi, roi), fitted,
                  reasons)

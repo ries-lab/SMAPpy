@@ -48,7 +48,11 @@ Running the tests -- two tiers:
   tutorials, the pages' figures, the large numerical checks) that are two
   thirds of the suite's time, and they are where a GUI or docs change breaks.
   The summary's "skipped" count includes them, so a run without `--slow` has
-  not checked them; say so if you stop short of it.  No CI runs the tests.
+  not checked them; say so if you stop short of it.  CI runs only uipsf's
+  fast tier (`tests/uipsf_tests`, `.github/workflows/uipsf.yml`) on Linux,
+  macOS and Windows, on a push that touches uipsf or its tests -- not on a
+  change to `src/smappy/` alone, though those tests use `smappy.calibrate`.
+  The rest of the suite is run by hand.
 * **A PR description states the `--slow` run's result** on a line of its own
   -- "`--slow -n auto`: 1321 passed, 4 skipped" -- or says plainly that it was
   not run and why, so a reviewer can see from the PR whether it was done.
