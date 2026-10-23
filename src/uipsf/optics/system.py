@@ -3,6 +3,13 @@
 Lengths are nanometres throughout (`docs/uipsf/conventions.md`).  The pixel size is
 given for x and y separately: cameras behind a cylindrical lens or an
 anamorphic relay have non-square pixels (the paper's M2 data: 127 × 116 nm).
+
+**Layers.**  Light crosses the sample (``n_med``), the coverslip (``n_cov``, ``d_cov_nm`` thick) and the
+immersion (``n_imm``).  The objective is designed for a coverslip ``d_cov_design_nm`` thick, 170 µm, and
+corrects the plate's spherical aberration for that thickness; a plate of another thickness, or one tilted
+(`optics.layers`), leaves the difference.  With an oil objective the coverslip is the immersion
+(n_cov = n_imm) and neither thickness matters.  Both are held, never learnt: the ±5 µm a coverslip varies is
+a spherical aberration that does not change with depth, which the pupil takes up.
 """
 from __future__ import annotations
 
@@ -18,6 +25,8 @@ class Optics:
     n_med: float                     # sample medium (water: 1.33)
     pixel_size_nm: tuple[float, float]   # (x, y) on the sample
     n_cov: float | None = None       # coverslip; None means the same as the immersion
+    d_cov_nm: float = 170_000.0      # the coverslip's thickness
+    d_cov_design_nm: float = 170_000.0   # the thickness the objective corrects for
 
     def __post_init__(self):
         if self.n_cov is None:
@@ -27,6 +36,19 @@ class Optics:
         if self.wavelength_nm <= 0 or min(self.pixel_size_nm) <= 0:
             raise ValueError("wavelength and pixel size must be positive (nanometres)")
         object.__setattr__(self, "pixel_size_nm", tuple(float(p) for p in self.pixel_size_nm))
+        if self.d_cov_nm < 0 or self.d_cov_design_nm < 0:
+            raise ValueError("coverslip thicknesses must not be negative (nanometres)")
+
+    @property
+    def coverslip_matters(self) -> bool:
+        """Whether the coverslip is a layer of its own (an index other than the immersion's): only then do its
+        thickness and tilt change the PSF."""
+        return self.n_cov != self.n_imm
+
+    @property
+    def layered(self) -> bool:
+        """Whether the coverslip is off its design thickness in a way that changes the PSF at zero tilt."""
+        return self.coverslip_matters and self.d_cov_nm != self.d_cov_design_nm
 
     @property
     def k_max(self) -> float:

@@ -1810,3 +1810,91 @@ magnitude is never learnt in situ.  *focus fit*: *learnt*, *from the coverslip* 
 fitted) or *typed*; with the magnitude learnt (*hold* nothing, or nothing to hold) the focus is pinned, and
 a run says when no coverslip edge was found.  Order 8 stays an expert setting.  The stricter shape test
 (1.5 sd) cost nothing on January (≤ 0.03 nats per molecule, the starts' focus within 2 nm).
+
+## The layered model and a tilted coverslip (October 2026; `optics/layers.py`)
+
+*Why:* in situ on M2 learns a primary astigmatism 0.3–0.4 rad stronger than the same day's beads, growing at
+high angles (previous section); a coverslip tilt, with the oil → water mismatch, was the suspect.  And water
+and silicone objectives with a coverslip of another index need the plate in the model anyway.
+
+**The model.**  Sample (n_med, the emitter h above the glass), coverslip (n_cov, `Optics.d_cov_nm`, design
+thickness `d_cov_design_nm`, both 170 µm by default and held), immersion (n_imm).  The interfaces are tilted by
+t = (t_x, t_y), normal ∝ (t_x, t_y, 1).  The tangential wave vector is kept across them, so the normal
+component in layer ℓ is k_n,ℓ = √(n_ℓ²/λ² − n_imm²/λ² + k_n,imm²) with k_n,imm = (k_z,imm − t·k)/√(1 + t²),
+and the layers add
+
+    φ(k) = [k_n,med(t) − k_n,imm]·h + [k_n,cov(t) − k_n,imm]·d_cov − [k_z,cov − k_z,imm]·d_cov,design
+
+on top of the emitter's own exp(2πi(−k·r)) in the microscope's axes.  At t = 0 it is today's model exactly;
+with oil (n_cov = n_imm) the coverslip term is zero at every tilt.  `geometry.tilt` is a shared parameter of
+both geometries, declared only with `fit_tilt` or a held `tilt_rad`, with a prior N(0, 0.05 rad); off by
+default for both (for beads with oil it cannot be seen at all).  `workflows.calibrate.insitu_model(…,
+fit_tilt=True)` learns it in situ; a bead model's tilt starts an in situ one that learns it.
+
+Three choices, each forced by a failure:
+
+- *The brief's phase, k_z,med(t)·h + k_z,cov(t)·d_cov − k_z,imm·f, without the k_n,imm terms*, moves every
+  emitter by d_cov·t: 1.7 µm at 0.01 rad.  With them the positions stay in the microscope's axes.
+- *What is left of the shift is taken out.*  A molecule seen through the tilted glass appears displaced along
+  the normal (+31 nm at 1°, 1 µm deep, oil), and through a tilted plate a water objective's beads move by
+  −730 nm per degree: out of their regions, and the PSF off the centre SMAPpy samples.  A shift is exactly a
+  lateral position, so its least-squares part a·k_x + b·k_y over the aperture is removed from both terms.
+- *The critical angle's root is smoothed*, √(a + iε·exp(−a²/ε²)) with ε a 64th of a's step between samples.
+  A tilt moves the critical ring through the pupil's samples, and each crossing put a kink in the objective:
+  from a level start an in situ fit (24 molecules, 24 samples) stopped 28 nats above the optimum, the
+  objective rough along the way.  Smoothed, level and true starts reach one optimum.  It must stay that
+  small, because the samples near the critical angle carry most of what an oil objective sees: at 64 samples
+  the coma of 1° at 1 µm is −0.189 rad smoothed against −0.187 converged exactly; ε 64 times larger gave
+  −0.005.
+
+**The solver** gets the tilt's Jacobian columns from the linearisation like the focus's: the waves'
+derivative is the tangent pupil 2πi (h·∂c_h/∂t + ∂c_0/∂t)·A, its two parts emitter-independent, h weighing
+the first (`ForwardModel.emitter_linearisation`); carried as two more coordinates of the positions, they
+become columns as the transform's do.  Two tangents per component for beads, four in situ, and none while
+the tilt is fixed (a localisation).  Normal equations equal the JVPs' to 10⁻⁹ (`test_tilt.py`).  A tilt
+freed without `fit_tilt` falls back to JVPs through the whole model.
+
+**The twin** keeps the tilt: to first order its phase is odd in k (coma, m = 1), and the twin of an odd
+phase is itself; its second order, an even astigmatism ∝ t², cannot be mirrored and is ≤ 0.03 rad at 1°.
+
+**The model file** writes the tilt's settings in the geometry's entry and the coverslip's thicknesses in the
+optics only where they are not the defaults, and is version 3 only for a model that has either: every other
+model is still written as version 2, readable by older SMAPpy, and a version-3 file is refused by them
+rather than computed without its tilt.
+
+**What a tilt does** (`benchmarks/uipsf/synthetic/tilt_aberrations.py`, `optics.layers.aberrations`): the
+added phase in Noll-normalised Zernikes (rad), fitted beside piston, shift and the exact defocus; tilt along
+x, so coma is Noll 8 and astigmatism Noll 6 (along y the same in Noll 7 and 5).  Oil NA 1.43, sample 1.33
+(beads on the coverslip: nothing), 670 nm:
+
+| tilt | depth | Noll 8 coma | Noll 16 2nd coma | Noll 6 astig. | Noll 11 spherical | shift (nm) |
+|---|---|---|---|---|---|---|
+| 0.5° | 0.5 µm | −0.053 | −0.037 | −0.001 | −0.002 | +8.6 |
+| 0.5° | 1 µm | −0.106 | −0.074 | −0.003 | −0.005 | +17 |
+| 1° | 0.5 µm | −0.092 | −0.062 | −0.004 | −0.005 | +15 |
+| 1° | 1 µm | −0.183 | −0.124 | −0.007 | −0.011 | +31 |
+| 2° | 0.5 µm | −0.154 | −0.099 | −0.010 | −0.009 | +27 |
+| 2° | 1 µm | −0.307 | −0.198 | −0.020 | −0.018 | +54 |
+
+Water NA 1.2 through 170 µm of glass (n 1.52), the same at every depth (sample and immersion are both
+water):
+
+| tilt | Noll 8 coma | Noll 16 2nd coma | Noll 6 astig. | Noll 11 | Noll 12 2nd astig. | shift (nm) |
+|---|---|---|---|---|---|---|
+| 0.5° | +0.549 | +0.153 | +0.008 | +0.002 | +0.002 | −364 |
+| 1° | +1.097 | +0.305 | +0.031 | +0.007 | +0.009 | −728 |
+| 2° | +2.196 | +0.611 | +0.123 | +0.027 | +0.036 | −1457 |
+
+So a tilt is coma, linear in it, and astigmatism only at second order.  **It does not explain M2's in situ
+astigmatism:** with oil, 2° at 1 µm gives 0.02 rad of Noll 6 against the 0.3–0.4 rad in situ learns beyond
+the beads; even a tilt the coma would show plainly leaves the astigmatism alone.  With oil, the coma grows
+with depth and near-critical rays carry most of it, so in situ separates it from the pupil's own coma by
+depth: 24 molecules from 0 to 1.5 µm at 8000 photons find a tilt of (2.0°, −1.4°) to ±0.15–0.2°
+(`test_tilt.py`).  With a water objective the plate's coma is depth-independent, a pupil aberration like
+any other: it is identifiable apart from the pupil only through modes the pupil does not have (in the test,
+secondary coma beyond n = 4), so for water beads it says what the pupil's coma is made of rather than
+changing the PSF.  A silicone objective (n_imm 1.40) into water has both.
+
+Not modelled: where the tilted coverslip lies over the field (each molecule's h and the shared focus absorb
+a coverslip ±100 nm higher at ±20 µm and 0.005 rad), the Fresnel coefficients' and apodisation's change with
+the tilt (first order only at the aperture's edge), and a wedge (the two faces not parallel).

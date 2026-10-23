@@ -18,6 +18,16 @@ least likely cause; an effective NA 0.013 below nominal or an emission
 that keeps it sane where the data say nothing (a single frame).
 The drift has a prior of 5 nm per slice and per axis, which also pins its
 mean, otherwise exactly degenerate with the beads' positions.
+
+**The tilt** of the coverslip, ``geometry.tilt`` = (t_x, t_y) in radians, is shared by every emitter
+and read by the PSF, not by the positions: it bends the layers' phase (`optics.layers`).  Both
+geometries declare it only when asked -- ``fit_tilt``, or a held value ``tilt_rad`` -- so that a model
+without it is today's model exactly.  Its prior is weak, N(0, 0.05 rad), 3°: a coverslip in a holder
+is rarely tilted by more than a degree, and the prior only keeps the tilt at zero where the data say
+nothing.  For beads it is off by default: with an oil objective beads on the coverslip do not see it
+at all (nothing but immersion between them and the objective), and it is identifiable only with a
+water or silicone objective, through the plate.  In situ, molecules above the glass see it through the
+glass–sample interface, the more the deeper they are.
 """
 from __future__ import annotations
 
@@ -25,12 +35,38 @@ import torch
 
 from ..params import Gaussian, ParamSpec
 
+#: the tilt's prior, radians per axis (module docstring)
+TILT_PRIOR_RAD = 0.05
 
-class BeadStackGeometry:
+
+def tilt_spec(fit_tilt: bool, tilt_rad, prior_rad: float | None) -> list[ParamSpec]:
+    """``geometry.tilt``'s spec, or none when it is neither fitted nor held at a value."""
+    if not fit_tilt and tilt_rad is None:
+        return []
+    init = torch.zeros(2) if tilt_rad is None else torch.as_tensor(tilt_rad, dtype=torch.float32).reshape(2)
+    prior = None if prior_rad is None else Gaussian(0.0, float(prior_rad))
+    return [ParamSpec("geometry.tilt", (2,), init=init, prior=prior, fixed=not fit_tilt)]
+
+
+class _Tilted:
+    """The tilt's settings, shared by both geometries."""
+
+    def _tilt_settings(self, fit_tilt, tilt_rad, tilt_prior_rad):
+        self.fit_tilt = bool(fit_tilt)
+        self.tilt_rad = None if tilt_rad is None else tuple(float(v) for v in tilt_rad)
+        self.tilt_prior_rad = None if tilt_prior_rad is None else float(tilt_prior_rad)
+
+    def _tilt_specs(self):
+        return tilt_spec(self.fit_tilt, self.tilt_rad, self.tilt_prior_rad)
+
+
+class BeadStackGeometry(_Tilted):
     def __init__(self, drift: bool = False, drift_prior_nm: float = 5.0, z_scale: bool = False,
-                 z_scale_prior: float = 0.1):
+                 z_scale_prior: float = 0.1, fit_tilt: bool = False, tilt_rad=None,
+                 tilt_prior_rad: float | None = TILT_PRIOR_RAD):
         self.drift, self.drift_prior_nm, self.z_scale = drift, float(drift_prior_nm), z_scale
         self.z_scale_prior = float(z_scale_prior)
+        self._tilt_settings(fit_tilt, tilt_rad, tilt_prior_rad)
 
     def specs(self, batch, start) -> list[ParamSpec]:
         K = batch.data.shape[2]
@@ -38,7 +74,7 @@ class BeadStackGeometry:
                 ParamSpec("geometry.drift", (K, 3), init=0.0, prior=Gaussian(0.0, self.drift_prior_nm),
                           fixed=not self.drift),
                 ParamSpec("geometry.z_scale", (), init=1.0, prior=Gaussian(1.0, self.z_scale_prior),
-                          fixed=not self.z_scale)]
+                          fixed=not self.z_scale)] + self._tilt_specs()
 
     def __call__(self, p, batch) -> torch.Tensor:
         """[E, K, 3] nm."""
@@ -49,7 +85,7 @@ class BeadStackGeometry:
         return xyz + stage + p["geometry.drift"]
 
 
-class InSituGeometry:
+class InSituGeometry(_Tilted):
     """Emitters in the sample, seen through a focus set somewhere above the coverslip (plan §9, M5).
 
     An emitter's z is its height h above the coverslip (`docs/uipsf/conventions.md`), and the focus f
@@ -64,17 +100,29 @@ class InSituGeometry:
 
     The focus has a loose prior, N(f₀, 500 nm) by default: the value the user enters is a stage
     reading, often off by a few hundred nanometres (decided October 2026).  An emitter seen in K
-    frames (a linked blink) has one position in all of them.
+    frames (a linked blink) has one position in all of them.  ``fit_tilt`` learns the coverslip's tilt
+    (module docstring), ``tilt_rad`` holds it at a value.
     """
 
-    def __init__(self, focus_nm: float, focus_prior_nm: float | None = 500.0, fit_focus: bool = True):
+    def __init__(self, focus_nm: float, focus_prior_nm: float | None = 500.0, fit_focus: bool = True,
+                 fit_tilt: bool = False, tilt_rad=None, tilt_prior_rad: float | None = TILT_PRIOR_RAD):
         self.focus_nm, self.fit_focus = float(focus_nm), fit_focus
         self.focus_prior_nm = None if focus_prior_nm is None else float(focus_prior_nm)
+        self._tilt_settings(fit_tilt, tilt_rad, tilt_prior_rad)
+
+    def with_focus(self, focus_nm: float, focus_prior_nm: float | None) -> InSituGeometry:
+        """The same geometry with another focus and prior: its tilt's settings kept."""
+        import copy
+        new = copy.copy(self)
+        new.focus_nm = float(focus_nm)
+        new.focus_prior_nm = None if focus_prior_nm is None else float(focus_prior_nm)
+        return new
 
     def specs(self, batch, start) -> list[ParamSpec]:
         prior = None if self.focus_prior_nm is None else Gaussian(self.focus_nm, self.focus_prior_nm)
         return [ParamSpec("emitter.xyz", (3,), "emitter", init=start["xyz"]),
-                ParamSpec("geometry.focus", (), init=self.focus_nm, prior=prior, fixed=not self.fit_focus)]
+                ParamSpec("geometry.focus", (), init=self.focus_nm, prior=prior, fixed=not self.fit_focus)
+                ] + self._tilt_specs()
 
     def __call__(self, p, batch) -> torch.Tensor:
         """[E, K, 4] nm: x, y, the defocus through the immersion, the height in the sample."""

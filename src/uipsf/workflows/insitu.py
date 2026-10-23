@@ -164,7 +164,14 @@ def width_starts(model, shared: dict, widths, roi: int, span_nm: float | None = 
 
 def twin(model, shared: dict) -> dict:
     """The twin of the pupils in ``shared``, A'(k) = A*(−k) (module docstring): phase c_j → −(−1)^m c_j,
-    magnitude c_j → (−1)^m c_j; everything else unchanged."""
+    magnitude c_j → (−1)^m c_j; everything else unchanged.
+
+    The coverslip's tilt too: the layers' phase φ(k; t) (`optics.layers`) is, to first order in t, odd in
+    k (coma, and a lateral shift), and its twin −φ(−k; t) is then φ(k; t) itself -- the tilt is a mode of
+    m = 1, kept as coma is.  Its second order, an astigmatism ∝ t², is even and would flip, which no tilt
+    can do: at 1° it is 0.007 rad of astigmatism for a molecule 1 µm deep (oil) and 0.03 rad through the
+    plate of a water objective (`optics.layers.aberrations`), against the tenths of a radian the twin test
+    is about."""
     out = dict(shared)
     for c, ch in enumerate(model.channels):
         pupil = ch.psf.pupil

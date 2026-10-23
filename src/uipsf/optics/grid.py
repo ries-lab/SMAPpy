@@ -42,6 +42,7 @@ class PupilGrid:
     ky: torch.Tensor           # [P] of each row
     kz_imm: torch.Tensor       # [P, P] complex, cycles/nm
     kz_med: torch.Tensor       # [P, P] complex
+    kz_cov: torch.Tensor       # [P, P] complex, in the coverslip (`optics.layers`)
     cos_imm: torch.Tensor      # [P, P] complex
     cos_med: torch.Tensor
     cos_cov: torch.Tensor
@@ -80,6 +81,7 @@ class PupilGrid:
         return cls(optics=optics, size=P, u=real(u), v=real(v), rho=real(rho), phi=real(phi),
                    aperture=real(rho < 1), kx=real(c * optics.NA / lam), ky=real(c * optics.NA / lam),
                    kz_imm=cplx(n_imm / lam * cos_imm), kz_med=cplx(n_med / lam * cos_med),
+                   kz_cov=cplx(n_cov / lam * cos_cov),
                    cos_imm=cplx(cos_imm), cos_med=cplx(cos_med), cos_cov=cplx(cos_cov),
                    fresnel_p=cplx(tp), fresnel_s=cplx(ts), apodisation=cplx(apod),
                    dk=2 * optics.NA / lam / P)

@@ -26,6 +26,7 @@ import math
 
 import torch
 
+from ..optics import layers
 from ..params import ParamSpec
 from .background import Constant
 from .channels import Channel, inverse_map, prefix, unpack_transform, view
@@ -71,8 +72,14 @@ class ForwardModel:
 
     def psf_names(self) -> set[str]:
         """The parameters that enter the PSFs themselves (pupils, blur), as opposed to where the emitter
-        is and how bright: the solver differentiates the latter through `emitter_linearisation`."""
-        return {prefix(c) + s.name for c, ch in enumerate(self.channels) for s in ch.psf.specs()}
+        is and how bright: the solver differentiates the latter through `emitter_linearisation`.  The
+        coverslip's tilt enters the PSFs, but `emitter_linearisation` carries its columns when the
+        geometry fits it; freed otherwise, it is differentiated through the whole model."""
+        names = {prefix(c) + s.name for c, ch in enumerate(self.channels) for s in ch.psf.specs()}
+        return names if self._tilt_linear() else names | {"geometry.tilt"}
+
+    def _tilt_linear(self) -> bool:
+        return bool(getattr(self.geometry, "fit_tilt", False))
 
     def share(self, p, c: int) -> torch.Tensor | float:
         """f_c: the fraction of the emitter's photons in channel ``c``."""
@@ -131,12 +138,12 @@ class ForwardModel:
                            lambda dA, f=f, Nc=Nc: Nc * f(dA)))
         return groups
 
-    def emitter_linearisation(self, p: dict[str, torch.Tensor], batch):
+    def emitter_linearisation(self, p: dict[str, torch.Tensor], batch, shared_free=None):
         """(I, dI, parts): the PSFs I [E, C, K, Y, X], their derivatives dI [3, E, C, K, Y, X] with respect
         to each observation's own x, y and z in each channel, and ``parts(p) -> (xyz, N, b)``, the cheap
         components: positions [E, C, K, 3], photons f_c·N [E, C, K] and background.  In situ the positions
         have a fourth coordinate, the height in the sample, and dI a fourth derivative, its factor
-        2πi k_z,med (`InSituGeometry`).
+        2πi k_z,med (`InSituGeometry`), or 2πi c_h with a tilt (`optics.layers`).
 
         μ = N·I(xyz) + b, and an emitter's parameters act through xyz, N and b only, so a column of the
         emitter Jacobian is N·Σ_d (∂xyz_d/∂u)·dI_d + (∂N/∂u)·I + ∂b/∂u: three PSF tangents per channel for
@@ -146,7 +153,17 @@ class ForwardModel:
         `VectorPSF.pupil_linearisation` takes them as tangent pupils (plan §9 M7).  The same holds for any
         shared parameter that acts through xyz, N and b alone (the transform, shares, offsets, a per-slice
         factor): `Problem` builds those columns from it too.
+
+        **The tilt** enters the waves as a factor too, exp(2πi (c_h(t)·h + c_0(t))) (`optics.layers`), so
+        its derivative is the tangent pupil 2πi (h·∂c_h/∂t + ∂c_0/∂t)·A.  h is each observation's own, so
+        the two parts are taken apart, each emitter-independent, and h weighs the first: two tangents per
+        component for beads (no h), four in situ.  They are carried as two more coordinates of the
+        positions, the tilt itself, so that `Problem` builds the tilt's columns as it builds the
+        transform's.  Only when the geometry fits the tilt (`psf_names`) and ``shared_free``, the names of
+        the free shared parameters if given, holds it: a localisation on a fixed model pays nothing.
         """
+        tilted = (self._tilt_linear() and "geometry.tilt" in p
+                  and (shared_free is None or "geometry.tilt" in shared_free))
         with torch.no_grad():
             xyz = self.geometry(p, batch)
             Is, dIs = [], []
@@ -160,16 +177,32 @@ class ForwardModel:
                 factors = [(-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm),
                            (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm), two_pi_i * g.kz_imm]
                 if depth is not None:                     # in situ: the height in the sample, through k_z,med
-                    factors.append(two_pi_i * g.kz_med)
-                factors = torch.stack(factors).to(A.dtype)                   # [3 | 4, P, P]
+                    c_h = (layers.coefficients(g, p.get("geometry.tilt"))[0] if layers.layered(g, p)
+                           else g.kz_med)
+                    factors.append(two_pi_i * c_h)
+                if tilted:
+                    dc_h, dc_0 = layers.derivatives(g, p["geometry.tilt"])           # [2, P, P] each
+                    factors += [two_pi_i * dc_0[0], two_pi_i * dc_0[1]]
+                    if depth is not None:
+                        factors += [two_pi_i * dc_h[0], two_pi_i * dc_h[1]]
+                factors = torch.stack(factors).to(A.dtype)                   # [D, P, P]
                 dA = factors[:, None] * A if A.dim() == 3 else factors * A
-                dIs.append(ch.psf.pupil_linearisation(pc, xyz_c, depth, z_step_nm=z_step)(dA))
+                dI = ch.psf.pupil_linearisation(pc, xyz_c, depth, z_step_nm=z_step)(dA)
+                if tilted:
+                    n = 3 if depth is None else 4
+                    d_t = dI[n:n + 2]
+                    if depth is not None:
+                        d_t = d_t + depth.to(dI.dtype)[None, :, :, None, None] * dI[n + 2:n + 4]
+                    dI = torch.cat([dI[:n], d_t])
+                dIs.append(dI)
             I, dI = torch.stack(Is, 1), torch.stack(dIs, 2)
 
         def parts(q):
             xyz = self.geometry(q, batch)
             N = self.intensity(q, batch)
             pos = torch.stack([self.positions(q, batch, xyz, c) for c in range(self.n_channels)], 1)
+            if tilted:                      # the tilt as two coordinates more, for its columns (docstring)
+                pos = torch.cat([pos, q["geometry.tilt"].to(pos.dtype).expand(*pos.shape[:-1], 2)], -1)
             Nc = torch.stack([self.share(q, c) * N for c in range(self.n_channels)], 1)
             return pos, Nc, self.background(q, batch)
 

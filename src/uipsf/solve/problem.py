@@ -261,7 +261,8 @@ class Problem:
         eye_e = torch.eye(Pe, dtype=ue.dtype, device=ue.device)[:, None, :].expand(Pe, E, Pe)
         with torch.no_grad():
             linear = getattr(self.model, "emitter_linearisation", None) if self.linearise else None
-            lin = linear(pc.physical(), b) if linear is not None else None
+            free = {n for n, _, _ in pc.layout("shared")}
+            lin = linear(pc.physical(), b, shared_free=free) if linear is not None else None
             J_s = self._shared_columns(pc, b, us, ue, mu_of, mu, lin)
             if lin is not None and Pe:
                 J_e = self._parts_columns(lin, lambda v: pc.replace(shared=us, emitter=v).physical(), ue,

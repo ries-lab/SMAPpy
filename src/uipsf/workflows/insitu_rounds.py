@@ -42,7 +42,6 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import torch
 
-from ..model import InSituGeometry
 from ..noise import ShiftedPoisson
 from .insitu import (
     INSITU_CHUNK,
@@ -230,7 +229,7 @@ def _measured_ratio(model, shared: dict, rois, ids, start: dict, noise, paraxial
 
 def _with_focus_prior(model, mean: float, sd: float):
     m = copy.copy(model)
-    m.geometry = InSituGeometry(mean, sd, model.geometry.fit_focus)
+    m.geometry = model.geometry.with_focus(mean, sd)          # the tilt's settings kept
     return m
 
 

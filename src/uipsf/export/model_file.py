@@ -29,9 +29,13 @@ calibrations, which its global fitter reads: each channel sampled with
 channel's share), the secondary's spline in the camera's orientation, and
 `LearnedPSF.transform(1)` as its ``transformation``.
 
-**Versions.**  2 (M4): the ``channels`` list and the geometry.  1: one
-channel, its optics, pupil and PSF at the top of the description; still
-read.
+**Versions.**  3: a layered model, written only when the model needs it --
+a coverslip tilt (``geometry.tilt``, its settings in the geometry's entry)
+or a coverslip off its design thickness (``d_cov_nm``, ``d_cov_design_nm``
+in the optics) -- so that an older reader refuses a PSF it would compute
+without them; any other model is still written as 2.  2 (M4): the
+``channels`` list and the geometry.  1: one channel, its optics, pupil and
+PSF at the top of the description; still read.
 - ``/fit``: objective, stop reason, iterations, condition, the history
   (JSON), the shared covariance with its layout, and the used beads' own
   parameters and CRLBs (``/fit/emitters/<name>``).
@@ -71,11 +75,14 @@ from ..model import (
     ZernikePupil,
 )
 from ..model.channels import Channel, prefix, unpack_transform, view
-from ..model.geometry import BeadStackGeometry, InSituGeometry
+from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
-VERSION = 2
+VERSION = 3
+#: the coverslip's entries of the optics, left out where they are the defaults so that a version-2 reader
+#: still builds the optics of a model that does not need them
+_COVERSLIP = {"d_cov_nm": 170_000.0, "d_cov_design_nm": 170_000.0}
 CONVENTIONS = 1          # docs/uipsf/conventions.md: axes, signs and units of the stored numbers
 
 
@@ -93,7 +100,8 @@ def _describe_channel(ch: Channel) -> dict:
         pup = dict(kind="pixel")
     else:
         raise TypeError(f"no model-file entry for the pupil {type(pupil).__name__}")
-    return dict(name=ch.name, optics=dataclasses.asdict(psf.grid.optics), pupil_size=psf.grid.size, pupil=pup,
+    optics = {k: v for k, v in dataclasses.asdict(psf.grid.optics).items() if _COVERSLIP.get(k, None) != v}
+    return dict(name=ch.name, optics=optics, pupil_size=psf.grid.size, pupil=pup,
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
                          sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma),
@@ -108,6 +116,8 @@ def describe(model: ForwardModel) -> dict:
     else:
         geometry = dict(kind="bead stack", drift=g.drift, drift_prior_nm=g.drift_prior_nm, z_scale=g.z_scale,
                         z_scale_prior=g.z_scale_prior)
+    if g.fit_tilt or g.tilt_rad is not None:            # absent in older files: no tilt
+        geometry.update(fit_tilt=g.fit_tilt, tilt_rad=g.tilt_rad, tilt_prior_rad=g.tilt_prior_rad)
     i = model.intensity
     if isinstance(i, PerSliceFactor):
         intensity = dict(kind="per-slice factor", order=i.order, prior_sigma=i.prior_sigma)
@@ -146,10 +156,12 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     its entries at the top) too."""
     channels = [_build_channel(c, device, dtype) for c in config.get("channels", [config])]
     g = config["geometry"]
+    tilt = dict(fit_tilt=g.get("fit_tilt", False), tilt_rad=g.get("tilt_rad"),
+                tilt_prior_rad=g.get("tilt_prior_rad", TILT_PRIOR_RAD))
     if g.get("kind") == "in situ":
-        geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"])
+        geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"], **tilt)
     else:
-        geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"])
+        geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt)
     i = config["intensity"]
     intensity = {"bleaching": lambda: Bleaching(i["order"]),
                  "per-slice factor": lambda: PerSliceFactor(i["order"], i["prior_sigma"]),
@@ -304,7 +316,8 @@ def save_model(cal, path) -> None:
     res = cal.result
     params = res.params
     with h5py.File(path, "w") as f:
-        f.attrs.update(format=FORMAT, version=VERSION, conventions=CONVENTIONS, uipsf=__version__)
+        f.attrs.update(format=FORMAT, version=VERSION if _layered(cal) else 2, conventions=CONVENTIONS,
+                       uipsf=__version__)
         m = f.create_group("model")
         m.attrs["config"] = _json(describe(cal.model))
         if getattr(cal, "geometry", None) is not None:
@@ -343,6 +356,14 @@ def save_model(cal, path) -> None:
         dg.attrs["atlas"] = _json(_atlas(cal.atlas))
         rep = cal.heldout_report
         dg.attrs["heldout"] = _json(None if rep is None else dict(dataclasses.asdict(rep), summary=rep.summary()))
+
+
+def _layered(cal) -> bool:
+    """Whether the model needs version 3 to be read right (module docstring)."""
+    g = cal.model.geometry
+    return (getattr(g, "fit_tilt", False) or getattr(g, "tilt_rad", None) is not None
+            or "geometry.tilt" in cal.shared()
+            or any(getattr(ch.psf.grid.optics, k) != v for ch in cal.model.channels for k, v in _COVERSLIP.items()))
 
 
 def _read(attr):

@@ -19,7 +19,9 @@ light falling outside the region, make the sum over a region less than 1.
 region's centre, z the emitter's height above the focal plane.  In a bead
 stack z = −(objective position), and z enters through the immersion's k_z;
 ``depth_nm`` (in-situ) adds the emitter's depth in the sample through the
-medium's k_z.
+medium's k_z.  With a tilted coverslip (``geometry.tilt``) or one off its design
+thickness, the depth and the coverslip enter through the layered model's
+phase instead (`optics.layers`).
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ import math
 import torch
 
 from ..device import compiled
+from ..optics import layers
 from ..optics.grid import PupilGrid
 from ..optics.kernels import bin_pixels, blur_bin_matrices, gaussian_otf, sphere_otf
 from ..optics.mdft import MatrixDFT, wide_product
@@ -101,7 +104,7 @@ class VectorPSF:
         A = self.pupil_field(p)
         if A.dim() == 3:                                      # one pupil per emitter (field dependence)
             A = A[:, None]
-        a = (A * self._waves(xyz, depth_nm))[..., :, None, :]                       # [E, K, P_y, 1, P_x]
+        a = (A * self._waves(p, xyz, depth_nm))[..., :, None, :]                       # [E, K, P_y, 1, P_x]
         a = torch.cat([a, a], -3)
         # Contiguous parts: strided .real/.imag views were 3.5× slower on MPS.
         f = torch.addcmul(a.real.contiguous() * self._fields_re, a.imag.contiguous(), self._fields_im)
@@ -148,7 +151,7 @@ class VectorPSF:
             E2 = (2 * self.norm) * h[:, :, None]                               # [E, K, 1, F, Y, 2, X]
             # W·F as [Re; Im] along P_y, [E, K, 2P, 1, F, P]: Re dA multiplies [Re WF; Im WF], Im dA
             # multiplies [−Im WF; Re WF].  Multiplied out once: 15 % faster on MPS than per tangent.
-            WF = self._waves(xyz, depth_nm)[..., :, None, :] * self.fields.permute(1, 0, 2)
+            WF = self._waves(p, xyz, depth_nm)[..., :, None, :] * self.fields.permute(1, 0, 2)
             WF_re = torch.cat([WF.real, WF.imag], 2)[:, :, :, None].contiguous()
             WF_im = torch.cat([-WF.imag, WF.real], 2)[:, :, :, None].contiguous()
             E2 = E2 * self.dft.scale
@@ -178,16 +181,22 @@ class VectorPSF:
 
         return apply
 
-    def _waves(self, xyz, depth_nm):
+    def _waves(self, p, xyz, depth_nm):
         """exp(2πi k_z z) per emitter and observation, [E, K, P, P], with the depth term in-situ: one
-        depth per emitter ([E]) or per emitter and observation ([E, K], `InSituGeometry`)."""
+        depth per emitter ([E]) or per emitter and observation ([E, K], `InSituGeometry`).  With a tilt of
+        the interfaces (``geometry.tilt``) or a coverslip off its design thickness the depth term and the
+        coverslip's are the layered model's (`optics.layers`); without, the wave is the untilted one."""
         z = xyz[..., 2][..., None, None].to(self.grid.kz_imm.dtype)
-        wave = torch.exp(2j * math.pi * self.grid.kz_imm * z)
+        if not layers.layered(self.grid, p):
+            wave = torch.exp(2j * math.pi * self.grid.kz_imm * z)
+            if depth_nm is not None:
+                wave = wave * torch.exp(2j * math.pi * self.grid.kz_med * _depth(depth_nm, self.grid))
+            return wave
+        c_h, c_0 = layers.coefficients(self.grid, p.get("geometry.tilt"))
+        phase = self.grid.kz_imm * z + c_0
         if depth_nm is not None:
-            d = depth_nm.to(self.grid.kz_med.dtype)
-            d = d[..., None, None] if d.dim() == 2 else d.reshape(-1, 1, 1, 1)
-            wave = wave * torch.exp(2j * math.pi * self.grid.kz_med * d)
-        return wave
+            phase = phase + c_h * _depth(depth_nm, self.grid)
+        return torch.exp(2j * math.pi * phase)
 
     def _stack(self, xyz, z_step_nm, depth_nm=None):
         """The positions, padded along the stack for a bead kernel: (xyz, pad, Δz)."""
@@ -222,6 +231,12 @@ class VectorPSF:
         before = torch.cat([before[..., :2], (z[:, :1] - steps.flip(0))[..., None]], -1)
         after = torch.cat([after[..., :2], (z[:, -1:] + steps)[..., None]], -1)
         return torch.cat([before, xyz, after], 1)
+
+
+def _depth(depth_nm, grid):
+    """The emitters' heights in the sample as [E, K, 1, 1] or [E, 1, 1, 1], complex."""
+    d = depth_nm.to(grid.kz_med.dtype)
+    return d[..., None, None] if d.dim() == 2 else d.reshape(-1, 1, 1, 1)
 
 
 def _bucket(n: int) -> int:

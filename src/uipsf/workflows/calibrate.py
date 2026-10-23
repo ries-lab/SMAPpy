@@ -113,10 +113,11 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
 
 def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
                  device=None, dtype=torch.float32, held_phase: dict | None = None,
-                 held_magnitude: dict | None = None, fit_focus: bool = True) -> ForwardModel:
+                 held_magnitude: dict | None = None, fit_focus: bool = True, fit_tilt: bool = False) -> ForwardModel:
     """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as `bead_model`
     makes them for a point (no bead's size), molecules in the sample seen through ``focus_nm``
-    (`InSituGeometry`; held there with ``fit_focus`` off), one photon count each.  ``held_phase`` /
+    (`InSituGeometry`; held there with ``fit_focus`` off, the coverslip's tilt learnt with ``fit_tilt``), one
+    photon count each.  ``held_phase`` /
     ``held_magnitude`` hold modes at given values (`ZernikePupil`): a bead model's symmetric magnitude and
     high orders.  The pupil sampling keeps defocus up to ``z_max_nm`` from
     aliasing: the molecules' distance from the plane in focus, not their depth, since the depth's and the
@@ -127,7 +128,7 @@ def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_m
     from ..model import Bleaching, InSituGeometry
     beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0), roi_shape, z_max_nm=z_max_nm,
                        device=device, dtype=dtype, held_phase=held_phase, held_magnitude=held_magnitude)
-    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus),
+    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
 
 
@@ -162,6 +163,8 @@ def start_values(model: ForwardModel, previous) -> dict:
             for n in ("share", "dz") + (("transform",) if new.fit_transform else ()):
                 if pre + n in shared:
                     out[pre + n] = shared[pre + n]
+    if "geometry.tilt" in shared and getattr(model.geometry, "fit_tilt", False):
+        out["geometry.tilt"] = shared["geometry.tilt"]       # the coverslip's, where this model learns one
     return {n: torch.as_tensor(v).detach().cpu() for n, v in out.items()}
 
 
