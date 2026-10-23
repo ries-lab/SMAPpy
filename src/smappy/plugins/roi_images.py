@@ -26,7 +26,8 @@ number and the chosen values of what was measured in it -- read as every
 summary reads results (`SiteAnalysisPlugin.rows`), so only the ROIs whose
 results still describe them have numbers.
 
-**Written.**  A PDF (matplotlib's ``PdfPages``): a grid of *columns* x
+**Written**, as *format* says, beside the localization file and named
+after it unless a file is set.  A PDF (matplotlib's ``PdfPages``): a grid of *columns* x
 *rows* per page, the outline and lines as vector paths over each picture,
 the scale bar's length at the foot of each page.  A TIFF: an RGB stack, one
 plane per ROI with the outline and lines drawn in, the pixel size in its
@@ -49,6 +50,8 @@ PAGES = {"A4": (8.27, 11.69), "letter": (8.5, 11.0)}
 OUTLINE_COLOUR = (255, 255, 0)          # as the ROI manager draws an ROI
 LINE_COLOURS = ((0, 200, 255), (255, 80, 200), (120, 255, 120), (255, 160, 0))
 NO_LINE = ""                            # *turn to*: as the ROI lies
+FORMATS = (("pdf", "PDF pages"), ("tiff", "TIFF stack"))
+SUFFIX = {"pdf": ".pdf", "tiff": ".tif"}
 
 
 @dataclass
@@ -255,9 +258,13 @@ def _line_choices(ctx) -> List[Tuple[str, str]]:
 
 @dataclass
 class RoiImagesSettings:
+    format: str = param("pdf", label="format", choices=FORMATS,
+                        help="pages of pictures in a grid, or a stack with one "
+                             "ROI per plane")
     path: str = param("", label="file", kind="save_file",
                       file_filter="PDF (*.pdf);;TIFF stack (*.tif)",
-                      help=".pdf: a page of pictures; .tif: a stack, one ROI per plane")
+                      help="where to write; its extension follows the format; "
+                           "empty: beside the localization file, named after it")
     size_nm: Optional[float] = param(None, label="size", unit="nm", min=1.0,
                                      help="the square each picture shows round its "
                                           "ROI's centre; auto: the ROI manager's image")
@@ -284,8 +291,23 @@ class RoiImagesSettings:
                             help="the measurement whose values go in the titles; "
                                  "auto: everything measured on the ROIs")
     title_columns: list = param(default_factory=list, label="title", kind="columns",
+                                empty_is_all=False,
                                 help="values in each title after the ROI's number; "
                                      "none ticked: the number alone")
+
+
+def output_path(settings: "RoiImagesSettings", session=None) -> Optional[Path]:
+    """Where the pictures go: the file set, its extension the format's; or,
+    with none set, beside the session's localization file, named after it
+    (``cells.h5`` -> ``cells_rois.pdf``).  None when neither says."""
+    suffix = SUFFIX.get(settings.format, ".pdf")
+    if settings.path:
+        return Path(settings.path).with_suffix(suffix)
+    source = getattr(session, "path", None) if session is not None else None
+    if not source:
+        return None
+    source = Path(source)
+    return source.with_name(f"{source.stem}_rois{suffix}")
 
 
 @register("File/Export/ROI images")
@@ -315,10 +337,12 @@ class RoiImages(SiteAnalysisPlugin):
 
     def describe(self, ctx: Optional[Context], settings: RoiImagesSettings) -> FormState:
         state = super().describe(ctx, settings)
-        pdf = Path(settings.path).suffix.lower() != ".tif" and \
-            Path(settings.path).suffix.lower() != ".tiff"
+        pdf = settings.format == "pdf"
         for name in ("columns", "rows", "page"):
             state.active[name] = pdf
+        suggested = output_path(settings, getattr(ctx, "session", None))
+        if suggested is not None and not settings.path:
+            state.hints["path"] = str(suggested)
         if ctx is None or ctx.rois is None:
             return state
         state.choices["turn_to"] = _line_choices(ctx)
@@ -342,8 +366,6 @@ class RoiImages(SiteAnalysisPlugin):
     def run(self, ctx: Context, settings: RoiImagesSettings) -> Result:
         from ..layer_state import snapshot_layers
         from ..picture import auto_bar
-        if not settings.path:
-            raise ValueError("choose where to save")
         project, session = ctx.rois, ctx.session
         if project is None or session is None:
             raise ValueError("no ROIs: segment or draw them in the ROI manager first")
@@ -354,6 +376,10 @@ class RoiImages(SiteAnalysisPlugin):
         if not chosen:
             raise ValueError("no ROI to draw" + (": none is ticked to use"
                                                  if settings.rois == "used" else ""))
+        path = output_path(settings, session)
+        if path is None:
+            raise ValueError("choose where to save: there is no localization "
+                             "file to name it after")
         layers = snapshot_layers(session.layers)
         if not any(l.visible and not l.is_image for l in layers):
             raise ValueError("no localization layer is visible")
@@ -372,12 +398,9 @@ class RoiImages(SiteAnalysisPlugin):
                 ctx.report(f"ROI images: {k + 1} of {len(chosen)}")
             pictures.append(roi_picture(project, layers, roi, size, settings,
                                         values.get(str(roi.number))))
-        path = Path(settings.path)
-        if path.suffix.lower() in (".tif", ".tiff"):
+        if settings.format == "tiff":
             written = write_tiff(path, pictures, bar)
         else:
-            if path.suffix.lower() != ".pdf":
-                path = path.with_suffix(".pdf")
             written = write_pdf(path, pictures, settings.columns, settings.rows,
                                 settings.page, bar, heading=session.display_name)
         if not pictures:

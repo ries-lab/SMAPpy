@@ -29,6 +29,10 @@ class ParamInfo:
     # written rather than dialled -- an expression, a list of names
     kind: Optional[str] = None
     file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
+    # for "columns": [] means every name -- an export's columns, which stay
+    # all of them for a table that has more -- or, False, none ticked: a
+    # list of extras, such as the values in a title
+    empty_is_all: bool = True
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False

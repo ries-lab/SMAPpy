@@ -87,8 +87,8 @@ def test_the_pdf_has_a_page_per_grid_and_the_tiff_a_plane_per_roi(tmp_path):
     assert pdf.startswith(b"%PDF") and pdf.count(b"/Type /Page\n") + \
         pdf.count(b"/Type /Page ") + pdf.count(b"/Type/Page") >= 3     # 11 ROIs, 4 a page
     assert len(result.data["pictures"]) == 11
-    settings.path = str(tmp_path / "rois.tif")
-    session.run(RoiImages(), settings)
+    settings.format = "tiff"
+    session.run(RoiImages(), settings)       # the extension follows the format
     with tifffile.TiffFile(tmp_path / "rois.tif") as tif:
         stack = tif.asarray()
         labels = tif.imagej_metadata["Labels"]
@@ -116,7 +116,7 @@ def test_the_form_counts_the_pictures_and_offers_the_lines(tmp_path):
                                  RoiImagesSettings(path="x.pdf", pixelsize_nm=5.0))
     assert "4 ROIs of 150 x 150 pixels, 1 page" in state.notice.text   # 3 x 250 nm
     assert ("direction", "direction") in state.choices["turn_to"]
-    tiff = RoiImages().describe(session.context(), RoiImagesSettings(path="x.tif"))
+    tiff = RoiImages().describe(session.context(), RoiImagesSettings(format="tiff"))
     assert not tiff.active["columns"]
 
 
@@ -124,3 +124,67 @@ def test_without_rois_it_says_where_they_come_from(tmp_path):
     session = Session(simulate(SimulationSettings(n_frames=200)))
     with pytest.raises(ValueError, match="no ROI"):
         session.run(RoiImages(), RoiImagesSettings(path=str(tmp_path / "x.pdf")))
+
+
+def test_without_a_file_the_pictures_go_beside_the_localizations(tmp_path):
+    from smappy.plugins.roi_images import output_path
+    session = arrows(tmp_path, n=4)
+    session.path = tmp_path / "cells.h5"
+    settings = RoiImagesSettings(pixelsize_nm=5.0)
+    assert output_path(settings, session) == tmp_path / "cells_rois.pdf"
+    state = RoiImages().describe(session.context(), settings)
+    assert state.hints["path"] == str(tmp_path / "cells_rois.pdf")
+    settings.format = "tiff"
+    session.run(RoiImages(), settings)
+    assert (tmp_path / "cells_rois.tif").is_file()
+    # a file set keeps its name; the format sets its extension
+    settings.path = str(tmp_path / "gallery.pdf")
+    assert output_path(settings, session) == tmp_path / "gallery.tif"
+    session.path = None
+    assert output_path(RoiImagesSettings(), session) is None
+
+
+def test_the_title_is_the_number_alone_until_values_are_ticked(app_qt):
+    from smappy.gui.params import ColumnsField
+    from smappy.plugins import param_specs
+    field = ColumnsField(param_specs(RoiImagesSettings)["title_columns"])
+    field.set_choices(["n_localizations", "radius_nm"])
+    assert field.value() == []                       # none by default
+    field._tick_all(True)
+    assert field.value() == ["n_localizations", "radius_nm"]
+    field._tick_all(False)
+    field.set_choices(["n_localizations", "radius_nm"])     # a refresh
+    assert field.value() == []
+
+
+def test_none_on_an_export_list_stays_none_until_one_is_ticked(app_qt):
+    from PySide6.QtCore import Qt
+    from smappy.gui.params import ColumnsField
+    from smappy.plugins import param_specs
+    from smappy.plugins.file import ExportSettings
+    field = ColumnsField(param_specs(ExportSettings)["columns"])
+    field.set_choices(["x_nm", "y_nm", "frame"])
+    assert field.value() == []                       # all
+    field._tick_all(False)
+    field.set_choices(["x_nm", "y_nm", "frame"])     # the refresh that ticked them all
+    ticked = [field.list.item(i).checkState() for i in range(field.list.count())]
+    assert all(t == Qt.Unchecked for t in ticked)
+    field.list.item(2).setCheckState(Qt.Checked)
+    assert field.value() == ["frame"]
+
+
+@pytest.fixture(scope="module")
+def app_qt():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def test_the_form_shows_where_the_pictures_will_go(app_qt, tmp_path):
+    from smappy.gui.plugin_panel import PluginPanel
+    session = arrows(tmp_path, n=4)
+    session.path = tmp_path / "cells.h5"
+    panel = PluginPanel(RoiImages, session)
+    field = panel.form.fields["path"]
+    assert field.widget.text() == ""
+    assert field.widget.placeholderText() == str(tmp_path / "cells_rois.pdf")

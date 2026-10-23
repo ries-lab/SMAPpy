@@ -276,8 +276,10 @@ class _Field(QWidget):
             shown = labels.get(value, None if value is None else str(value))
             self.widget.setItemText(0, f"auto ({shown})" if shown else "auto")
             return
-        if self.spec.info.kind in ("open_file", "dir") and isinstance(self.widget, QLineEdit):
-            # an empty path that something stands in for: said in grey, inside the field
+        if self.spec.info.kind in ("open_file", "save_file", "dir") \
+                and isinstance(self.widget, QLineEdit):
+            # an empty path that something stands in for: said in grey, inside
+            # the field -- for a file to write, the name a run would use
             self.widget.setPlaceholderText("" if value is None else str(value))
             return
         if self.auto is None or not isinstance(self.widget, QLineEdit):
@@ -292,7 +294,9 @@ class _Field(QWidget):
 
     def _browse(self) -> None:
         kind, name_filter = self.spec.info.kind, self.spec.info.file_filter
-        current = self.widget.text()
+        # empty: what the plugin suggests (`set_hint`), the localization
+        # file's folder and name for a file to write
+        current = self.widget.text() or self.widget.placeholderText()
         if not current or Path(current).parent == Path("."):
             current = folders.start(current)    # nothing better to go on
         if kind == "open_file":
@@ -649,9 +653,16 @@ class ColumnsField(QWidget):
 
     The value is the ticked names, or ``[]`` when every one is ticked: "all
     columns" then stays all of them for a table that has more, rather than
-    becoming the list this table happened to have.  The names come from the
-    session (`FormState.choices`); a name in the value that the session does
-    not offer is kept, ticked, and marked as not there.
+    becoming the list this table happened to have.  With the field's
+    ``empty_is_all`` off, ``[]`` is none ticked instead, for a list of
+    extras.  The names come from the session (`FormState.choices`); a name
+    in the value that the session does not offer is kept, ticked, and
+    marked as not there.
+
+    *none* on a list where ``[]`` is all has nothing to say as a value: it
+    leaves every name unticked on screen (``_none``) until one is ticked,
+    rather than the next refresh ticking them all again, which is what made
+    it look like a second *all*.
     """
 
     changed = Signal()
@@ -678,8 +689,11 @@ class ColumnsField(QWidget):
         self._names: List[str] = []
         self._value: List[str] = list(spec.default() if callable(spec.default)
                                       else spec.default or [])
+        self.empty_is_all = getattr(spec.info, "empty_is_all", True)
+        self._none = False
 
     def _tick_all(self, on: bool) -> None:
+        self._none = not on
         blocked = self.list.blockSignals(True)
         for i in range(self.list.count()):
             self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
@@ -690,7 +704,7 @@ class ColumnsField(QWidget):
         from PySide6.QtWidgets import QListWidgetItem
         blocked = self.list.blockSignals(True)
         self.list.clear()
-        everything = not ticked
+        everything = self.empty_is_all and not ticked and not self._none
         shown = list(names) + [n for n in ticked if n not in names]
         for name in shown:
             item = QListWidgetItem(name if name in names else f"{name} (not there)")
@@ -713,6 +727,7 @@ class ColumnsField(QWidget):
         pass
 
     def set(self, value) -> None:
+        self._none = False
         self._fill(self._names, list(value or []))
 
     def value(self) -> List[str]:
@@ -720,6 +735,10 @@ class ColumnsField(QWidget):
         if not items:
             return list(self._value)
         ticked = [it.data(Qt.UserRole) for it in items if it.checkState() == Qt.Checked]
+        if not self.empty_is_all:
+            return ticked
+        if ticked:
+            self._none = False
         return [] if len(ticked) == len(items) else ticked
 
 

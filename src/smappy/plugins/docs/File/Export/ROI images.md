@@ -6,8 +6,11 @@ covers: [smappy.plugins.roi_images.roi_layers, smappy.plugins.roi_images.render_
 ## What it does
 
 Draws every ROI of the [ROI manager](plugin:Panels/ROI manager) as a picture,
-all at the same size and pixel, and writes them out: as a **PDF**, a grid of
-pictures on each page, or as a **TIFF stack**, one ROI per plane.
+all at the same size and pixel, and writes them out, as *format* says: as a
+**PDF**, a grid of pictures on each page, or as a **TIFF stack**, one ROI
+per plane.  Left empty, the file goes beside the localization file, named
+after it (`cells.h5` gives `cells_rois.pdf`); the field shows that name in
+grey.
 
 Use it for a gallery of the sites a segmentation found, to look through
 before trusting what was measured in them; for a figure of many structures
@@ -117,9 +120,12 @@ detail.
 ### turn_to
 Lists the line names of the ROI manager.
 
+### path
+A file set keeps its name and takes the format's extension.
+
 ### title_columns
-Lists the columns of the chosen results.  None ticked: the titles are the
-ROI numbers alone, and no results are read.
+Lists the columns of the chosen results.  None are ticked to begin with:
+the titles are the ROI numbers alone, and no results are read.
 
 ### columns
 With *rows*, how many pictures share a page: the size of each picture on
