@@ -31,6 +31,25 @@ To install from a checkout, which builds the C++ extensions (pip 21.3 or newer):
     python -m venv .venv
     .venv/bin/python -m pip install -e .
 
+## Update
+
+Close SMAPpy first: on Windows, pip cannot replace the program files of a
+running SMAPpy. Then, in the same environment you installed it into:
+
+    pip install --upgrade smappy-smlm
+
+`pip show smappy-smlm` tells you which version you have; the newest is on
+[PyPI](https://pypi.org/project/smappy-smlm/). If you installed it with uv,
+run `uv tool upgrade smappy-smlm` instead. In a checkout, run `git pull`, then
+`.venv/bin/python -m pip install -e .` again, which rebuilds the C++
+extensions.
+
+SMAPpy itself looks for a newer version once a day when it starts and, if
+there is one, says so at the bottom right of the control window. *Help → Check
+for updates...* asks at any time and gives the command for your installation.
+Nothing is installed for you, and the *General* tab of *Preferences...* turns the daily
+check off.
+
 ## Start
 
     smappy-gui
