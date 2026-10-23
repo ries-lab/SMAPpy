@@ -46,9 +46,11 @@ extensions.
 
 SMAPpy itself looks for a newer version once a day when it starts and, if
 there is one, says so at the bottom right of the control window. *Help → Check
-for updates...* asks at any time and gives the command for your installation.
-Nothing is installed for you, and the *General* tab of *Preferences...* turns the daily
-check off.
+for updates...* asks at any time. Its *Update and restart* closes SMAPpy,
+installs the new version with pip (or uv) and starts SMAPpy again; *Copy
+command* gives the command for your installation instead, and a checkout is
+always updated by hand. The daily check is turned off in the *General* tab of
+*Preferences...*.
 
 ## Start
 

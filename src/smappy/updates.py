@@ -218,3 +218,36 @@ def known_newer() -> Optional[str]:
     if isinstance(newest, str) and is_newer(newest, installed()):
         return newest
     return None
+
+
+# ------------------------------------------------- update and restart's trace
+
+def result_file() -> Path:
+    return config.config_dir() / "update-result.json"
+
+
+def log_file() -> Path:
+    return config.config_dir() / "update.log"
+
+
+def last_update() -> Optional[dict]:
+    """What the helper of *Update and restart* left (`smappy.updater`), once:
+    the file is removed as it is read, so the next start says nothing."""
+    path = result_file()
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return data if isinstance(data, dict) else None
+
+
+def log_tail(lines: int = 15) -> str:
+    try:
+        text = log_file().read_text(errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.strip().splitlines()[-lines:])
