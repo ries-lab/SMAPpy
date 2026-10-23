@@ -237,7 +237,9 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   with the Evolve, until the iXon came (between 2026-07-09 and 07-23).
 
 **What is resolved**: the NA, the immersion, sample and coverslip indices, the wavelength
-(per channel), the pixel per axis, the modality (2D, astigmatic, later a phase mask), and
+(per channel), the pixel per axis, the modality (2D, astigmatic, later a phase mask), the
+astigmatism in situ learning starts from (`astigmatism_nm`, Noll 6 in nm per state of the 3D
+lens, from bead models: the sign of z when no model starts it; 2026-10-23), and
 every device's state by name -- the last kept with the table (`metadata["microscope"]`),
 because it is what a calibration is matched by.
 

@@ -1171,6 +1171,17 @@ pupil's and *Model vs data* per height; the spline's z above focus or above the 
 the used heights.  (*auto* is the focus field's empty state, so the field starts on it; required in the
 sense that a value or *auto* is always resolved, never a default.)
 
+*Changed, 2026-10-23 (decided with you):* **molecules, not frames.**  *frames per movie* and *per bin* gave
+way to one setting, *molecules* (2000: spots fitted, each frame of a blink one); the movies are read block by
+block, coarse to fine over each (`insitu_run.block_order`, the van der Corput order), at least ten blocks of
+each, until every z bin has its share passing or one has twenty times it (`enough`); a bin short of its share
+gives all it has and the others make up the number (`insitu.quotas`).  The detection's settings are hidden
+but *significance*, *region* and *z proxy*.  The Stacks page steps through the frames with molecules only.
+*The start's astigmatism* went under *more*, on *auto* the microscope entry's for its 3D lens's state
+(`astigmatism_nm`: M2 +62 nm with the iXon, −73 with the Evolve, M5 +65, from the bead models of
+`results/lab_beads.jsonl`), shown and asked for only when neither the entry nor *start from* gives it
+(`insitu_run.start_astigmatism`): §7.5's "the microscope's entry decides", made.
+
 *Open, optimised once the framework runs:* **depth, n_med and spherical aberration trade against each
 other.**  The study needs M5 itself (simulated blinking frames, the joint fit with a depth, the held-out
 z bias), so it is not a step before it: build with the defaults below, then on simulations with known

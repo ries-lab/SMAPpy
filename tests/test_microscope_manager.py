@@ -16,7 +16,7 @@ from smappy.gui.microscope_editor import (map_text, parse_follows, parse_map, pa
 from smappy.microscope_db import FROM_NAME, one_line
 
 from test_emu import M2 as EMU_M2, write as write_emu
-from test_microscope_db import M2_BEADS, M2_MOVIE, M5_BEADS
+from test_microscope_db import M2_BEADS, M2_EVOLVE, M2_MOVIE, M5_BEADS
 
 pytest.importorskip("PySide6")
 
@@ -272,3 +272,43 @@ def test_a_gaussian_fit_runs_without_the_optics_a_psf_model_needs(app, tmp_path)
     from smappy.calibrate.pupil import OpticsSettings
     assert OpticsSettings().missing(camera) == []      # NA and emission from M2 anyway
 
+
+# ------------------------------------------- in situ's start astigmatism, from the entry
+
+@pytest.mark.parametrize("tags, expected", [(M2_BEADS, 62.0), (M2_MOVIE, 0.0), (M2_EVOLVE, -73.0)])
+def test_in_situ_starts_from_the_astigmatism_of_the_microscopes_3d_lens_state(tmp_path, config, tags, expected):
+    # the iXon's sign, the Evolve's mounted turned by 90 degrees the other; the lens out none
+    from smappy.calibrate.insitu_run import InSituModelSettings, start_astigmatism
+    from smappy.io.tiff import open_stack
+    from smappy.plugins.fit import CameraSettings
+    camera = CameraSettings().resolve(open_stack(a_tiff(tmp_path / "x_MMStack.ome.tif", tags)), require=False)
+    assert start_astigmatism(InSituModelSettings(), camera)[0] == expected
+    assert start_astigmatism(InSituModelSettings(astigmatism_nm=-40.0), camera) == (-40.0, "typed")
+
+
+def test_the_astigmatism_field_shows_only_when_neither_the_entry_nor_a_start_model_gives_it(app, tmp_path,
+                                                                                            config):
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    window = PSFCalibrationWindow()
+    window.method_box.setCurrentText("in situ (blinking molecules)")
+    window._ask = lambda box: None
+    form = window.insitu_form
+    window.add_paths([a_tiff(tmp_path / "movie_MMStack.ome.tif", M2_BEADS)])
+    field = form.fields["astigmatism_nm"]
+    assert field.widget.text() == "62" and form.labels["astigmatism_nm"].styleSheet() == ""
+    assert not form.more_section.button.isChecked()                     # under more, closed
+    # a start model: the field is not used, so not shown
+    window.start_form.set_values({"start_from": str(tmp_path / "m.uipsf.h5")})
+    window.start_form.changed.emit()
+    assert not form.row_layouts["astigmatism_nm"].isRowVisible(field)
+    # no start model and a microscope nobody knows: shown, orange, more opened
+    window.start_form.set_values({"start_from": ""})
+    window.paths.clear()
+    unknown = {k: v for k, v in M5_BEADS.items() if "iChrome" not in k}
+    window.optics_form.fields["microscope"].set("")
+    window.add_paths([a_tiff(tmp_path / "other_MMStack.ome.tif", unknown)])
+    window.optics_camera = type("Camera", (), {"microscope": {}})()   # nothing recognised, no fallback
+    window._show_astigmatism()
+    assert form.labels["astigmatism_nm"].styleSheet() == "color: #c07000"
+    assert form.more_section.button.isChecked() and form.row_layouts["astigmatism_nm"].isRowVisible(field)
+    window.close()

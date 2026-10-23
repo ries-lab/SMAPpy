@@ -38,7 +38,7 @@ from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from .core import CalibrationSettings
 from .dual import DualColorSettings
-from .input import discover_acquisitions
+from .input import acquisition_kind, discover_acquisitions
 from .psf_methods import AVERAGE_ONLY, METHODS, LearningProgress, duration
 from .insitu import InSituSettings
 from .insitu_run import InSituModelSettings
@@ -237,13 +237,15 @@ class PSFCalibrationWindow(QMainWindow):
         # in situ: its own choices (the focus, the start, the coverslip, the rounds) and, under more, how the
         # molecules are found and chosen
         self.insitu_form = SettingsForm(InSituModelSettings)
+        self.insitu_form.changed.connect(self._show_astigmatism)
+        self.start_form.changed.connect(self._show_astigmatism)
         self.insitu_detection_form = SettingsForm(InSituSettings)
         insitu = QWidget()
         ilayout = QVBoxLayout(insitu)
         ilayout.setContentsMargins(0, 0, 0, 0)
         ilayout.addWidget(self.insitu_form)
         ilayout.addWidget(self.insitu_detection_form)
-        self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=True),
+        self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=False),
                          "model": CollapsibleSection("model", model, expanded=True),
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
@@ -361,6 +363,7 @@ class PSFCalibrationWindow(QMainWindow):
     def _detection_changed(self) -> None:
         self.stack_browser.set_paths(self.paths, self._dz_nm())
         self._undetect("detection settings changed")
+        self._show_optics()               # a dual's main half chooses the pixel and the emission
 
     def _undetect(self, why) -> None:
         """Drop what Detect beads found: the files or a setting it read changed.  A calibration made from
@@ -422,13 +425,14 @@ class PSFCalibrationWindow(QMainWindow):
         greyed in the window, and only the rows the method uses."""
         from ..microscope_db import one_line
         self.optics_camera = None
-        hints, details = {}, {"line": "no stacks", "status": "ok"}
+        hints, details = {}, {"line": "microscope: no stacks", "status": "ok"}
         channels = 2 if self.is_dual else 1
         if self.paths:
             try:
                 camera = self.optics_camera = self._stacks_camera()
                 hints = OpticsSettings().hints(camera, channels, self._main_half())
                 hints.update({k: getattr(camera, k) for k in ("conversion", "offset", "emgain")})
+                hints["camera"] = camera.camera_name or None
                 scope = camera.microscope
                 missing = self._optics_missing(camera)
                 status = ("missing" if missing else "fallback" if scope and scope.get("fallback")
@@ -443,14 +447,39 @@ class PSFCalibrationWindow(QMainWindow):
                 details = {"line": f"the stacks cannot be read: {error}", "status": "missing"}
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
-                                     "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain")})
+                                     "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain",
+                                     "camera")})
         self.optics_form.set_details(details)
+        self._show_astigmatism()
         optics = self.method.sections.get("microscope", False)      # a model: the optics too
         self.optics_form.set_shown({"NA": optics, "n_immersion": optics, "wavelength_nm": optics,
                                     "wavelength2_nm": optics and self.is_dual, "n_medium": optics,
                                     "n_coverslip": optics,
                                     "emgain": bool(self.optics_camera is not None
                                                    and self.optics_camera.is_em)})
+
+    def _show_astigmatism(self) -> None:
+        """In situ's start astigmatism: the microscope entry's for its 3D lens, as the field's *auto*, under
+        *more*; gone with *start from*, whose model starts instead; and *more* opened, the label orange, when
+        neither gives one -- a microscope the database does not know -- since the run then needs it typed
+        (`insitu_run.start_astigmatism`)."""
+        from .insitu_run import start_astigmatism
+        try:
+            start_from = self.start_form.value().start_from
+            typed = self.insitu_form.value().astigmatism_nm
+        except ValueError:
+            return
+        found, why = start_astigmatism(InSituModelSettings(), self.optics_camera)
+        self.insitu_form.set_hints({"astigmatism_nm": found})
+        self.insitu_form.set_shown({"astigmatism_nm": not start_from})
+        # said only once there are movies to judge: before, nothing is known to be missing
+        needed = bool(getattr(self, "paths", None)) and not start_from and found is None and typed is None
+        label = self.insitu_form.labels.get("astigmatism_nm")
+        if label is not None:
+            label.setStyleSheet("color: #c07000" if needed else "")
+            label.setToolTip(f"needed: {why}" if needed else (f"found: {why}" if found is not None else ""))
+        if needed and self.insitu_form.more_section is not None:
+            self.insitu_form.more_section.set_expanded(True)
 
     def _optics_missing(self, camera) -> list:
         if not self.method.sections.get("microscope", False):
@@ -514,10 +543,47 @@ class PSFCalibrationWindow(QMainWindow):
             return self.stack_browser.dz_nm
 
     def add_paths(self, paths) -> None:
+        new = []
         for path in paths:
             if path and str(path) not in self.paths:
                 self.paths.append(str(path))
+                new.append(str(path))
+        self._check_kind(new)
         self._refresh_files()
+
+    def _check_kind(self, paths) -> None:
+        """A movie added to a bead method, or a bead z-stack to in situ: said at once, with the method that
+        reads it offered (`input.acquisition_kind`).  A movie read as a bead stack read every page into
+        memory and ended in a refusal long enough to widen the window."""
+        movies = getattr(self.method, "files", "") == "movies"
+        wrong = []
+        for path in paths:
+            kind, n = acquisition_kind(path)
+            if kind == ("stack" if movies else "movie"):
+                wrong.append((path, n))
+        if not wrong:
+            return
+        names = "\n".join(Path(p).name for p, _ in wrong[:5]) + ("\n..." if len(wrong) > 5 else "")
+        other = next(m for m in METHODS if (getattr(m, "files", "") == "movies") != movies)
+        what = ("bead z-stacks, not blinking movies" if movies else
+                f"blinking movies ({wrong[0][1]} frames, no z steps), not bead z-stacks")
+        box = QMessageBox(QMessageBox.Warning, "PSF calibration",
+                          f"{'This looks like' if len(wrong) == 1 else 'These look like'} {what}:\n\n{names}\n\n"
+                          f"{self.method.label} cannot learn from {'it' if len(wrong) == 1 else 'them'}.", parent=self)
+        switch = box.addButton(f"Use {other.label}", QMessageBox.AcceptRole)
+        remove = box.addButton("Remove", QMessageBox.DestructiveRole)
+        box.addButton("Keep", QMessageBox.RejectRole)
+        box.setDefaultButton(switch)
+        self._ask(box)
+        if box.clickedButton() is switch:
+            self.method_box.setCurrentText(other.label)
+        elif box.clickedButton() is remove:
+            for path, _ in wrong:
+                self.paths.remove(path)
+
+    def _ask(self, box) -> None:
+        """Show a question and wait (a test replaces it with a click)."""
+        box.exec()
 
     def add_files(self) -> None:
         """On a Mac the system's open panel, files and folders together, several at once (`mac_panel`),
@@ -659,6 +725,9 @@ class PSFCalibrationWindow(QMainWindow):
         if insitu:
             inputs["insitu"] = self.insitu_form.value()
         if self.paths:
+            # a value typed that will not do stops the run, naming it: `_stacks_camera` would
+            # otherwise put the file's in its place without a word
+            self.optics_form.value()
             # the camera every run takes: as this window resolved it, chosen and typed values
             # included.  Incomplete, the method resolves its own and says what is missing
             try:

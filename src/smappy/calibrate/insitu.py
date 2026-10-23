@@ -35,7 +35,7 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
 6. **Selection** (`select`): a **z proxy** from the summed spot's widths -- σx² − σy² for an astigmatic
    PSF, linear in z, or σx² + σy² for a 2D one, which says |z| -- split into ``bins`` bins.  Per bin:
    spots whose widths are far from the bin's typical ones (``shape_k`` robust sds) are out -- an
-   unresolved pair is wider or elongated for its z; then a random draw of at most ``per_bin`` from a
+   unresolved pair is wider or elongated for its z; then a random draw of the bin's share of ``molecules`` (`quotas`) from a
    **brightness window** ``window_factor`` (3) wide below the bin's ``window_top`` (90th) percentile of
    photons, not the brightest: those are where unresolved pairs collect, and with a Gaussian
    illumination they are the field's centre.  Of the molecules, ``heldout`` (10 %) are held out, all
@@ -47,6 +47,7 @@ ones.  torch is imported only there: this module is imported without torch.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -61,57 +62,63 @@ PROXIES = (("astigmatism", "astigmatism: σx² − σy²"), ("size", "size: σx�
 
 @dataclass
 class InSituSettings:
-    """How molecules are found and chosen; all under *more* in the window, the defaults decided in M5."""
-    frames: int = param(4000, label="frames per movie", min=100, advanced=True,
-                        help="frames read from each movie, in blocks spread over all of it")
-    block_frames: int = param(200, label="block", unit="frames", min=21, advanced=True,
-                              help="consecutive frames read at once: the background's median runs within one")
-    background_frames: int = param(21, label="background window", unit="frames", min=3, advanced=True,
-                                   help="the sliding median over time that is the background")
-    scales_px: tuple = param((1.2, 2.0, 3.0), label="DoG widths", hidden=True,
-                             help="the difference of Gaussians' widths a spot is looked for at, px")
+    """How molecules are found and chosen.  One number to set, *molecules*; under *more* the few that depend
+    on the data; the rest hidden, the defaults decided in M5 (a script or a chain still sets them)."""
+    molecules: int = param(2000, label="molecules", min=21,
+                           help="how many spots to learn from, each frame of a blink one: the movies are "
+                                "read until this many pass the selection")
     significance: float = param(6.0, label="significance", min=1.0, advanced=True,
                                 help="photons above the background in a disc, in standard deviations of its "
                                      "noise, for a detection")
     roi_px: int = param(15, label="region", unit="px", min=7, advanced=True,
                         help="the square region each molecule is fitted in (odd)")
-    merge_px: float = param(2.0, label="merge", unit="px", min=0.0, advanced=True,
-                            help="detections whose Gaussians meet within this are one molecule")
-    overlap_k: float = param(3.0, label="overlap", unit="σ", min=0.0, advanced=True,
-                             help="a neighbour within this many of each spot's σ, added, rejects a molecule")
-    max_masked: float = param(0.25, label="masked at most", min=0.0, max=1.0, advanced=True,
-                              help="the fraction of a region a neighbour's mask may cover")
-    neighbour_fraction: float = param(0.2, label="neighbour light", min=0.0, max=1.0, advanced=True,
-                                      help="a neighbour dimmer than this fraction of the molecule neither "
-                                           "rejects it nor is masked")
-    link_k: float = param(2.5, label="linking", unit="sd", min=0.5, advanced=True,
-                          help="SMAPpy's precision test for a blink's frames")
-    link_dx_px: float = param(1.5, label="linking at most", unit="px", min=0.1, advanced=True,
-                              help="the largest step a blink may make between frames")
-    link_dx_min_px: float = param(0.5, label="linking at least", unit="px", min=0.0, advanced=True,
-                                  help="always linked within this, whatever the precisions say")
-    unit: str = param("frame", label="fitted", choices=UNITS, advanced=True,
-                      help="each frame its own region, or a blink's frames summed into one")
-    step_ratio: float = param(2.0, label="photon step", min=1.0, advanced=True,
-                              help="a blink whose inner frames' photons differ by more is out")
     proxy: str = param("astigmatism", label="z proxy", choices=PROXIES, advanced=True,
                        help="how the first round sorts by height: an astigmatic PSF's elongation, or a 2D "
                             "PSF's size")
-    bins: int = param(21, label="z bins", min=1, advanced=True, help="the bins molecules are drawn from")
-    per_bin: int = param(100, label="per bin", min=1, advanced=True, help="at most this many from each bin")
-    window_factor: float = param(3.0, label="brightness window", min=1.0, advanced=True,
+    block_frames: int = param(200, label="block", unit="frames", min=21, hidden=True,
+                              help="consecutive frames read at once: the background's median runs within one")
+    background_frames: int = param(21, label="background window", unit="frames", min=3, hidden=True,
+                                   help="the sliding median over time that is the background")
+    scales_px: tuple = param((1.2, 2.0, 3.0), label="DoG widths", hidden=True,
+                             help="the difference of Gaussians' widths a spot is looked for at, px")
+    merge_px: float = param(2.0, label="merge", unit="px", min=0.0, hidden=True,
+                            help="detections whose Gaussians meet within this are one molecule")
+    overlap_k: float = param(3.0, label="overlap", unit="σ", min=0.0, hidden=True,
+                             help="a neighbour within this many of each spot's σ, added, rejects a molecule")
+    max_masked: float = param(0.25, label="masked at most", min=0.0, max=1.0, hidden=True,
+                              help="the fraction of a region a neighbour's mask may cover")
+    neighbour_fraction: float = param(0.2, label="neighbour light", min=0.0, max=1.0, hidden=True,
+                                      help="a neighbour dimmer than this fraction of the molecule neither "
+                                           "rejects it nor is masked")
+    link_k: float = param(2.5, label="linking", unit="sd", min=0.5, hidden=True,
+                          help="SMAPpy's precision test for a blink's frames")
+    link_dx_px: float = param(1.5, label="linking at most", unit="px", min=0.1, hidden=True,
+                              help="the largest step a blink may make between frames")
+    link_dx_min_px: float = param(0.5, label="linking at least", unit="px", min=0.0, hidden=True,
+                                  help="always linked within this, whatever the precisions say")
+    unit: str = param("frame", label="fitted", choices=UNITS, hidden=True,
+                      help="each frame its own region, or a blink's frames summed into one")
+    step_ratio: float = param(2.0, label="photon step", min=1.0, hidden=True,
+                              help="a blink whose inner frames' photons differ by more is out")
+    bins: int = param(21, label="z bins", min=1, hidden=True, help="the bins molecules are drawn from")
+    window_factor: float = param(3.0, label="brightness window", min=1.0, hidden=True,
                                  help="how wide, as a factor, below the bin's top")
-    window_top: float = param(0.9, label="window top", min=0.5, max=1.0, advanced=True,
+    window_top: float = param(0.9, label="window top", min=0.5, max=1.0, hidden=True,
                               help="the quantile of the bin's photons the window starts below")
-    shape_k: float = param(3.0, label="shape", unit="sd", min=1.0, advanced=True,
+    shape_k: float = param(3.0, label="shape", unit="sd", min=1.0, hidden=True,
                            help="robust standard deviations from the bin's typical shape at which one is out")
-    heldout: float = param(0.1, label="held out", min=0.0, max=0.5, advanced=True,
+    heldout: float = param(0.1, label="held out", min=0.0, max=0.5, hidden=True,
                            help="the fraction of molecules kept out of learning, for the held-out check")
     seed: int = param(0, label="seed", hidden=True, help="the random draws' seed")
     # Not in the window yet: a script's, for one channel of a split chip (M2's 665LP movies, October 2026)
     region: Optional[tuple] = param(None, label="region", hidden=True,
                                     help="(x, y, width, height) in the movie's pixels: only molecules inside "
                                          "are used")
+
+    @property
+    def per_bin(self) -> int:
+        """A z bin's share of *molecules*; a bin with fewer passes its shortfall on (`quotas`)."""
+        return max(1, math.ceil(self.molecules / max(1, self.bins)))
 
 
 # ------------------------------------------------------------------ 1, 2: background and detection
@@ -447,6 +454,7 @@ def select(u: Units, settings: InSituSettings, proxy=None, photons=None, shape=N
         state[i] = "rejected: z range"
     blinks = np.unique(u.blink)
     held = dict(zip(blinks.tolist(), (rng.random(len(blinks)) < settings.heldout).tolist(), strict=True))
+    pools = {}
     for k in range(settings.bins):
         idx = np.flatnonzero((bins == k) & np.array([st == "candidate" for st in state]))
         if len(idx) == 0:
@@ -462,12 +470,38 @@ def select(u: Units, settings: InSituSettings, proxy=None, photons=None, shape=N
         inside = (N[idx] <= top) & (N[idx] >= top / settings.window_factor)
         for i in idx[~inside]:
             state[i] = "rejected: brightness"
-        pool = idx[inside]
-        for i in pool:
+        pools[k] = idx[inside]
+        for i in pools[k]:
             state[i] = "not drawn"
-        for i in rng.permutation(pool)[:settings.per_bin]:
+    take = quotas([len(pools.get(k, ())) for k in range(settings.bins)], settings.molecules)
+    for k, pool in pools.items():
+        for i in rng.permutation(pool)[:take[k]]:
             state[i] = "held out" if held[int(u.blink[i])] else "used"
     return state, bins, edges
+
+
+def quotas(pools, total: int) -> list:
+    """How many to draw from each bin: ``total`` shared equally, a bin with fewer than its share giving all
+    it has and the rest shared among the others (water-filling).  Molecules below the coverslip do not
+    exist and the outermost heights are rare in most data: their bins stay emptier and the inner ones make
+    up the number, so that what is learnt from is *molecules* wherever the data allow."""
+    pools = [int(p) for p in pools]
+    take = [0] * len(pools)
+    open_, left = [k for k, p in enumerate(pools) if p > 0], int(total)
+    while open_ and left > 0:
+        share = left / len(open_)
+        short = [k for k in open_ if pools[k] <= share]
+        if short:                                       # all they have; the rest shared again
+            for k in short:
+                take[k] = pools[k]
+                left -= pools[k]
+            open_ = [k for k in open_ if k not in short]
+            continue
+        base, extra = divmod(left, len(open_))          # every open bin has more than its share
+        for j, k in enumerate(open_):
+            take[k] = base + (j < extra)
+        left = 0
+    return take
 
 
 # ------------------------------------------------------------------ the whole step

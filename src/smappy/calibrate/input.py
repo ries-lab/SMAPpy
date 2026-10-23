@@ -142,6 +142,36 @@ def _assemble(records, summary, source, dz_nm):
     return stacks
 
 
+#: frames past which an acquisition that does not say what it is counts as a movie: a bead stack is a
+#: few hundred planes, a blinking movie tens of thousands of frames
+MOVIE_FRAMES = 2000
+
+
+def acquisition_kind(path):
+    """``("movie" | "stack" | None, frames)``: a blinking movie or a bead z-stack, judged without reading a
+    frame.  By Micro-Manager's summary where there is one -- a z-stack has *Slices* above 1, a movie only
+    *Frames* (M2's and M5's bead stacks: 101 slices, 1 frame; their movies 100 000 to 750 000 frames, 1
+    slice) -- else by length.  None when it cannot tell, or the file cannot be opened.  So that a movie
+    added to a bead method is said at once (`psf_window`), not after every page of it was read into
+    memory and the stack assembly failed."""
+    from ..io.tiff import open_stack
+    try:
+        source = open_stack(path)
+    except Exception:
+        return None, 0
+    summary = getattr(source, "summary", None) or {}
+    n = int(source.n_frames)
+    try:
+        slices, frames = int(summary.get("Slices") or 0), int(summary.get("Frames") or 0)
+    except (TypeError, ValueError):
+        slices, frames = 0, 0
+    if slices > 1:
+        return "stack", n
+    if slices == 1 and frames > 1:
+        return "movie", n
+    return ("movie" if n > MOVIE_FRAMES else None), n
+
+
 def read_bead_stacks(path, dz_nm=None):
     """Read all distinct channel/position/repeat z-stacks in one acquisition.
 

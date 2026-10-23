@@ -5,14 +5,16 @@ chosen here (`insitu`), uipsf learns the pupil in rounds (`uipsf.workflows.insit
 result is saved as the bead calibration's are -- a spline the fitter reads, the model file beside it.
 What differs from beads (`docs/uipsf/plan.md` §9, M5):
 
-* **Frames, not stacks.**  A movie is thousands of frames; ``frames`` of them are read from each, in
-  blocks of ``block_frames`` spread over the whole movie, so that the late, sparse frames count as much
-  as the dense first ones.  The background's median runs within a block.
+* **Frames, not stacks.**  A movie is thousands of frames, read in blocks of ``block_frames``, coarse to
+  fine over the whole movie, until ``molecules`` spots pass the selection (`movie_rois`): how many frames
+  that takes depends on the density and the field, which a number of frames did not.  The background's
+  median runs within a block.
 * **The focus** -- where the objective put its focal plane above the coverslip -- is given, or on
   *auto* estimated from the molecules on the coverslip before learning (`focus_from_data`); the rounds
   refine it either way.
 * **The start gives the sign** of astigmatism and spherical aberration: a bead model of the microscope
-  (*start from*), or the vertical astigmatism typed in, with the microscope's sign.  The twin test
+  (*start from*), or the vertical astigmatism -- the microscope entry's for its 3D lens's state
+  (`start_astigmatism`), or typed in, with the microscope's sign.  The twin test
   warns when the data clearly want the other.
 * **The spline** is the model sampled at the learnt focus through the heights the molecules were at
   (`insitu_spline`), its z either the height above the coverslip or the height above the plane in
@@ -30,7 +32,7 @@ from typing import Optional
 import numpy as np
 
 from ..plugins import param
-from .insitu import InSituROIs, InSituSettings, choose, concatenate, insitu_units
+from .insitu import InSituROIs, InSituSettings, choose, concatenate, insitu_units, select
 
 SPLINE_Z = (("focus", "above the plane in focus"), ("height", "above the coverslip"))
 #: the spline's z step on auto, nm: a molecule's PSF changes over ~100 nm
@@ -45,9 +47,12 @@ class InSituModelSettings:
     focus_nm: Optional[float] = param(None, label="focus", unit="nm", min=0.0,
                                       help="the focal plane's height above the coverslip, as the objective was "
                                            "moved from it; auto: estimated from the molecules on the coverslip")
-    astigmatism_nm: float = param(0.0, label="astigmatism", unit="nm",
-                                  help="the start's vertical astigmatism (Noll 6), with the microscope's sign; "
-                                       "not used with start from")
+    # the start's sign is the data's z: from the microscope's entry for its 3D lens's state, so that it is
+    # typed only for a microscope the database does not know (shown then, `psf_window`)
+    astigmatism_nm: Optional[float] = param(None, label="astigmatism", unit="nm", advanced=True,
+                                            help="the start's vertical astigmatism (Noll 6), with the "
+                                                 "microscope's sign; auto: the microscope's, for its 3D lens; "
+                                                 "not used with start from")
     coverslip: bool = param(True, label="on the coverslip",
                             help="the sample touches the coverslip: its lowest molecules pin the focus")
     max_rounds: int = param(4, label="rounds", min=1, max=8,
@@ -59,18 +64,50 @@ class InSituModelSettings:
 
 # ------------------------------------------------------------------ reading the movies
 
-def block_starts(n_frames: int, frames: int, block: int) -> list[int]:
-    """The first frames of the blocks read from a movie of ``n_frames``: ⌈frames/block⌉ blocks spread
-    evenly over it, all of it when it is shorter."""
-    if n_frames <= frames:
-        return list(range(0, n_frames, block))
-    n = max(1, math.ceil(frames / block))
-    return sorted({int(round(s)) for s in np.linspace(0, n_frames - block, n)})
+#: blocks read from each movie before the selection is asked whether it has enough: spread over the whole
+#: movie, so that a movie dense enough to fill every bin from its first block is still sampled through its
+#: whole length -- its bleaching, its drift of focus, the late sparse frames
+MIN_BLOCKS = 10
+#: reading stops, with z bins still short, once one bin has this many times its share passing: the short ones
+#: are short in these data (below the coverslip, the outermost heights), not for want of frames read
+SPARSE_FACTOR = 20
+
+
+def block_order(n_frames: int, block: int) -> list[int]:
+    """Every block's first frame in the order they are read: coarse to fine over the whole movie (the van der
+    Corput sequence: 0, ½, ¼, ¾, ⅛, ...), so that wherever reading stops, what was read is spread over all
+    of it.  A movie shorter than a block is one block."""
+    n = max(1, n_frames // block)
+    order, seen, i = [], set(), 0
+    while len(order) < n:
+        v, f, k = 0.0, 0.5, i
+        while k:
+            v, k, f = v + f * (k & 1), k >> 1, f / 2
+        b = int(v * n)
+        if b not in seen:
+            seen.add(b)
+            order.append(b * block)
+        i += 1
+    return order
+
+
+def enough(units, settings: InSituSettings) -> tuple[bool, int]:
+    """(whether reading can stop, how many pass the selection): every z bin has its share passing, or one
+    has `SPARSE_FACTOR` times it (`quotas` then fills from the others)."""
+    state, bins, _ = select(units, settings)
+    passing = np.array([st in ("used", "held out", "not drawn") for st in state], bool)
+    if not passing.any():
+        return False, 0
+    pools = np.bincount(bins[passing], minlength=settings.bins)
+    need = settings.per_bin
+    return bool((pools >= need).all() or pools.max() >= SPARSE_FACTOR * need), int(passing.sum())
 
 
 def movie_rois(paths, settings: InSituSettings | None = None, camera=None, progress=None) -> InSituROIs:
-    """The molecules of the movies at ``paths``, found per block and chosen over all of them at once.
-    ``camera`` defaults to the first movie's, as a fit would resolve it (`pupil.camera_for`)."""
+    """The molecules of the movies at ``paths``, found per block and chosen over all of them at once.  Blocks
+    are read from all movies in turn, each coarse to fine (`block_order`), at least `MIN_BLOCKS` of each, until
+    the selection has enough (`enough`) or the movies are read.  ``camera`` defaults to the first movie's, as a
+    fit would resolve it (`pupil.camera_for`)."""
     from ..camera import to_photons
     from ..io.tiff import open_stack
     from .pupil import camera_for, pixel_size_nm
@@ -82,26 +119,52 @@ def movie_rois(paths, settings: InSituSettings | None = None, camera=None, progr
         raise ValueError("no movies")
     camera = camera if camera is not None else camera_for(paths[0])
     read_noise = float(camera.readout_variance)
-    parts, candidates, sources = [], 0, []
     plan = [(m, path, open_stack(path)) for m, path in enumerate(paths)]
-    blocks = [(m, path, src, start) for m, path, src in plan for start in block_starts(src.n_frames, s.frames,
-                                                                                       s.block_frames)]
-    for k, (m, path, src, start) in enumerate(blocks):
+    orders = [block_order(src.n_frames, s.block_frames) for _, _, src in plan]
+    # the movies in turn, block by block: a short movie runs out and the others go on
+    blocks = [(m, orders[m][j]) for j in range(max(map(len, orders))) for m in range(len(plan))
+              if j < len(orders[m])]
+    first = sum(min(MIN_BLOCKS, len(o)) for o in orders)
+    parts, candidates, read = [], 0, {m: [] for m in range(len(plan))}
+    passing = 0
+    for k, (m, start) in enumerate(blocks):
         if progress is not None:
-            progress({"message": f"finding molecules: block {k + 1}/{len(blocks)}", "fraction": k / len(blocks)})
+            progress({"message": f"finding molecules: block {k + 1}, {passing} of {s.molecules} so far",
+                      "fraction": min(0.99, max(k / len(blocks), passing / s.molecules))})
+        src = plan[m][2]
         stop = min(start + s.block_frames, src.n_frames)
         frames = np.concatenate([b for _, b in src.frames(chunk=s.block_frames, start=start, stop=stop)])
         u, n = insitu_units(to_photons(frames, camera), s, read_noise)
         parts.append((u, start, m))
+        read[m].append(start)
         candidates += n
-    for m, path, src in plan:
-        sources.append({"path": path, "frames": src.n_frames,
-                        "read": [b for mm, _, _, b in blocks if mm == m], "block": s.block_frames})
-    return choose(concatenate(parts), candidates, pixel_size_nm(camera), s, read_noise,
+        if k + 1 >= first:
+            done, passing = enough(concatenate(parts), s)
+            if done:
+                break
+    sources = [{"path": path, "frames": src.n_frames, "read": sorted(read[m]), "block": s.block_frames}
+               for m, path, src in plan]
+    rois = choose(concatenate(parts), candidates, pixel_size_nm(camera), s, read_noise,
                   float(camera.excess_noise), sources, camera)
+    rois.messages.append(f"{len(parts)} of {len(blocks)} blocks of {s.block_frames} frames read")
+    return rois
 
 
 # ------------------------------------------------------------------ the model and its start
+
+def start_astigmatism(insitu: InSituModelSettings, camera=None) -> tuple[Optional[float], str]:
+    """(the start's vertical astigmatism in nm, where it comes from): typed, else the microscope entry's for
+    the state its 3D lens was in (``astigmatism_nm``, from bead models of it), else (None, why).  It is what
+    sets the sign of z: the twin, every even aberration of the other sign, sees the same molecules mirrored."""
+    if insitu.astigmatism_nm is not None:
+        return float(insitu.astigmatism_nm), "typed"
+    scope = getattr(camera, "microscope", None) or {}
+    value = (scope.get("values") or {}).get("astigmatism_nm")
+    if value is not None:
+        return float(value), f"{scope.get('name')}'s, for its 3D lens"
+    return None, (f"{scope.get('name')}'s entry gives none" if scope.get("name")
+                  else "no microscope recognised")
+
 
 def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_nm: float):
     """(shared start values, the start model or None): a previous model's (*start from*), else the vertical
@@ -219,7 +282,10 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     roi = int(rois.units.regions.shape[-1])
     guess = 1000.0 if insitu.focus_nm is None else float(insitu.focus_nm)
     learnt = insitu_model(o, model, (roi, roi), guess, device=device)
-    start, previous = start_shared(learnt, run.start_from, insitu.astigmatism_nm, o.wavelength_nm)
+    astigmatism, why = start_astigmatism(insitu, rois.camera)
+    if astigmatism is None and not run.start_from:
+        raise ValueError(f"give the start's astigmatism (in situ, more) or a model to start from: {why}")
+    start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm)
     result_focus = None
     if insitu.focus_nm is None:
         tell({"message": "estimating the focus from the molecules on the coverslip"})

@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_starts, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
@@ -241,22 +241,30 @@ unlike a bead's in a z-stack: it is learnt with the pupil, molecule by
 molecule, and the *focus* -- how far above the coverslip the objective put its
 focal plane -- with them.
 
-**Finding the molecules.**  From each movie *frames per movie* frames are read,
-in blocks spread over all of it.  In each block the background is a sliding
+**Finding the molecules.**  The movies are read in blocks of 200 frames,
+coarse to fine over the whole of each -- first ten blocks spread from its
+start to its end, then the blocks between them -- until *molecules* spots pass
+the selection below, or the movies are read.  How many frames that takes
+depends on how dense the molecules are and how large the field, which is why
+it is a number of molecules that is set and not of frames.  Reading stops
+with some z bins still short once another holds twenty times its share: those
+heights are rare in the data (below the coverslip there is nothing), and
+reading on would not fill them.  In each block the background is a sliding
 median over time.  Spots are looked for at three sizes and kept when they
 hold significantly more photons than the background around them, never by
 comparison with the brightest spot of the frame: a molecule far from focus is
 dim per pixel but has as many photons, and it is these that tell most about
 the PSF.  Each spot is fitted with an elliptical Gaussian; a molecule's frames
 are linked into one blink.  A molecule with another closer than three widths
-of each (*overlap*) is rejected with all its frames; a farther neighbour's
-pixels are masked.
+of each is rejected with all its frames; a farther neighbour's pixels are
+masked, unless it has less than a fifth of the molecule's photons.
 
 **Choosing them.**  The molecules are sorted by an estimate of their height
--- an astigmatic spot's elongation (*z proxy*) -- into *z bins*, and from each
-bin at most *per bin* frames are drawn at random from a window of brightness
-below its brightest: the very brightest are where two unresolved molecules
-collect.  A fraction of the molecules is *held out* of learning.  The *z bins*
+-- an astigmatic spot's elongation (*z proxy*) -- into 21 z bins, and each bin's
+share of *molecules* is drawn at random from a window of brightness below its
+brightest: the very brightest are where two unresolved molecules collect.  A
+bin with fewer than its share gives all it has, and the others make up the
+number.  A tenth of the molecules is held out of learning.  The *z bins*
 page shows what was chosen.
 
 **Learning, in rounds.**  The first round learns from the Gaussian's choice,
@@ -287,7 +295,10 @@ the section is *movies*, the measurements' movies.  Several at once -- the
 folders of a few z-stacks, say -- with *Add folder...* (Cmd- or
 Ctrl-click), by dropping files or folders from the Finder or Explorer on the
 window, or on a Mac with *Add files...*, which takes files and folders
-together.
+together.  A blinking movie added for a bead method, or a bead z-stack for
+*in situ*, is said at once -- told apart by what Micro-Manager wrote, z
+slices or time points, else by length -- with the method that reads it
+offered, or the file removed.
 
 ### Add files...
 Adds stacks.  On a Mac the system's open panel takes files and folders
@@ -393,8 +404,8 @@ the finding; *bead box* is also the size of the boxes it learns from and of
 its spline.
 
 ### in situ
-In situ learning's own settings; how molecules are found and chosen is under
-*more*.
+In situ learning's own settings, and how many molecules to learn from; the
+few settings of how they are found that depend on the data are under *more*.
 
 ### focus
 How far above the coverslip the objective put its focal plane, as it was moved
@@ -402,9 +413,15 @@ from the coverslip's focus.  A rough value is enough: the rounds learn it.
 *auto*: estimated from the molecules on the coverslip before learning.
 
 ### astigmatism
-The start's vertical astigmatism in nm of wavefront, with the sign your
-microscope's cylindrical lens gives (read it from a bead calibration of the
-microscope).  Not used with *start from*, whose model starts instead.
+Under *more*, and rarely typed: on *auto* the microscope database gives it, for
+the state the 3D lens was in (the entry's `astigmatism_nm`, read from bead
+models of the microscope).  It is the start's vertical astigmatism in nm of
+wavefront, and what it really sets is the sign: the same molecules are
+explained by the mirror-image pupil with z flipped, and the start decides
+which of the two is learnt.  For a microscope the database does not know,
+*more* opens with the field in orange and calibrating asks for it: read it
+from a bead calibration of the microscope, or give a model under *start
+from*, with which the field is not used and not shown.
 
 ### on the coverslip
 Tick when the sample touches the coverslip, so that its lowest molecules lie
@@ -418,9 +435,11 @@ What the spline's z means: the height above the plane in focus (z = 0 where
 the spot is sharpest, as for beads), or the height above the coverslip, so
 that Spline 3D reports where the molecule is in the sample.
 
-### frames per movie
-More frames, more molecules to choose from; reading and finding them took
-about ten seconds per thousand frames of 128 × 128 pixels on a laptop.
+### molecules
+Each frame of a blink counts as one: it is fitted as one.  About 2000 is
+enough for the Zernikes up to the default order; more costs learning time in
+proportion.  Reading and finding them took about ten seconds per thousand
+frames of 128 × 128 pixels on a laptop.
 
 ### region
 The square each molecule is fitted in.  Spots 600 nm or more from focus
@@ -431,29 +450,9 @@ neighbours inside it.
 How far above the background's noise a spot must be.  Lower finds dimmer
 molecules, and more noise.
 
-### overlap
-How close, in widths of the two spots, another molecule may be.  Lower keeps
-more molecules in dense data, and more pairs.
-
-### neighbour light
-A neighbour dimmer than this fraction of a molecule neither rejects it nor is masked in its region.  Lower
-counts more of the faint detections, which on dense data are often background; higher keeps more molecules
-next to dim neighbours.
-
-### per bin
-At most this many frames from each z bin: about 20 bins times this many
-frames are learnt from.
-
 ### z proxy
 *astigmatism* for an astigmatic PSF; *size* for one without astigmatism,
 which sorts by distance from focus only.
-
-### fitted
-*frame*: every frame its own molecule, as uiPSF does; *blink, frames summed*:
-a molecule's frames added into one image.
-
-### held out
-The fraction of molecules kept out of learning.
 
 ### spline
 How the model is sampled into the spline the fitter reads.
@@ -467,7 +466,9 @@ bead covers (*The ends of the stacks*).
 
 ### Detect beads
 *Detect molecules* for *in situ*: finds the molecules, rings them on their
-frames and counts them by state in the table.  For beads: finds the beads, lists them in the table, rings them on the *Stacks* page and
+frames and counts them by state in the table; the *Stacks* page then steps
+through the frames molecules were found on, and before it shows a movie's
+first frame only.  For beads: finds the beads, lists them in the table, rings them on the *Stacks* page and
 says how many there are and how long calibrating them will take (*How it
 works*).  A new detection drops an earlier calibration from the window; its
 files stay.  Changing the files,

@@ -4,7 +4,7 @@ import pytest
 import tifffile
 import torch
 from smappy.calibrate.insitu import InSituSettings
-from smappy.calibrate.insitu_run import InSituModelSettings, block_starts, insitu_spline, movie_rois
+from smappy.calibrate.insitu_run import InSituModelSettings, block_order, insitu_spline, movie_rois
 from smappy.calibrate.pupil import BeadSettings, OpticsSettings
 from smappy.metadata import CameraMetadata
 
@@ -34,7 +34,7 @@ def movie_file(tmp_path_factory):
     return path, movie
 
 
-SELECTION = InSituSettings(frames=150, block_frames=150, per_bin=3)
+SELECTION = InSituSettings(block_frames=150, molecules=63)          # 3 a bin
 
 
 def small_model(optics, settings, roi_shape, focus_nm, z_max_nm=2000.0, device=None, dtype=torch.float32):
@@ -49,10 +49,12 @@ def small_model(optics, settings, roi_shape, focus_nm, z_max_nm=2000.0, device=N
                               intensity=uipsf.model.Bleaching(order=0))
 
 
-def test_blocks_are_spread_over_the_whole_movie_and_a_short_one_is_read_whole():
-    assert block_starts(300, 4000, 200) == [0, 200]
-    starts = block_starts(10000, 1000, 200)
-    assert len(starts) == 5 and starts[0] == 0 and starts[-1] == 9800
+def test_blocks_are_read_coarse_to_fine_over_the_whole_movie_and_a_short_one_whole():
+    assert block_order(150, 200) == [0]
+    starts = block_order(10000, 200)
+    assert sorted(starts) == list(range(0, 10000, 200))               # every block, once
+    # wherever reading stops, it has been spread over the movie: the first ten span it
+    assert starts[:2] == [0, 5000] and max(starts[:10]) - min(starts[:10]) > 8000
 
 
 def test_molecules_are_found_in_a_movie_through_the_camera(movie_file):
@@ -172,7 +174,7 @@ def test_the_window_offers_in_situ_with_its_own_section_and_finds_molecules_in_a
     assert shown["in situ"] and not shown["beads"] and window.detect_button.text() == "Detect molecules"
     assert window.files_section.button.text() == "movies" and not window.mode_box.isEnabled()
     window.optics_form.set_values(dict(NA=1.43, wavelength_nm=680.0, n_immersion=1.516, n_medium=1.335))
-    window.insitu_detection_form.set_values(dict(per_bin=3, frames=150, block_frames=150))
+    window.insitu_detection_form.set_values(dict(molecules=63))
     window.detect()
     start = time.time()
     while window.busy and time.time() - start < 60:

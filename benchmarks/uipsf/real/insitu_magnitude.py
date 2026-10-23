@@ -2,7 +2,7 @@
 TIRF clathrin movie (AF647) of the same day, microscope and camera.
 
     python benchmarks/uipsf/real/insitu_magnitude.py beads BEAD_ACQUISITION --model M.uipsf.h5
-    python benchmarks/uipsf/real/insitu_magnitude.py detect MOVIE_FOLDER --rois R.pkl [--frames 4000]
+    python benchmarks/uipsf/real/insitu_magnitude.py detect MOVIE_FOLDER --rois R.pkl [--molecules 2000]
     python benchmarks/uipsf/real/insitu_magnitude.py learn --rois R.pkl --model M.uipsf.h5 \\
         --magnitude free|bead|bead-symmetric --start bead|cold [--out results/insitu_magnitude.jsonl]
     python benchmarks/uipsf/real/insitu_magnitude.py score --rois R.pkl --model M.uipsf.h5 \
@@ -190,12 +190,12 @@ def detect(args):
     from smappy.calibrate.insitu import InSituSettings
     from smappy.calibrate.insitu_run import movie_rois
     t0 = time.perf_counter()
-    rois = movie_rois([args.movie], InSituSettings(frames=args.frames, seed=args.seed,
+    rois = movie_rois([args.movie], InSituSettings(molecules=args.molecules, seed=args.seed,
                                                      region=tuple(args.region) if args.region else None),
                       progress=lambda e: print(e.get("message", ""), flush=True))
     with open(args.rois, "wb") as f:
         pickle.dump(rois, f)
-    emit(dict(step="detect", movie=os.path.basename(os.path.normpath(args.movie)), frames=args.frames,
+    emit(dict(step="detect", movie=os.path.basename(os.path.normpath(args.movie)), molecules=args.molecules,
               candidates=rois.candidates, counts=rois.counts(), minutes=round((time.perf_counter() - t0) / 60, 2)),
          args.out)
 
@@ -418,7 +418,7 @@ def main():
     d = sub.add_parser("detect")
     d.add_argument("movie")
     d.add_argument("--rois", required=True)
-    d.add_argument("--frames", type=int, default=4000)
+    d.add_argument("--molecules", type=int, default=2000)
     d.add_argument("--seed", type=int, default=0)
     le = sub.add_parser("learn")
     le.add_argument("--rois", required=True)

@@ -19,7 +19,8 @@ from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSlider, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QSlider, QSpinBox, QVBoxLayout,
+                               QWidget)
 
 #: a ring's colour by the bead's state; a bead not yet calibrated is "found"
 COLOURS = {"found": "#00e5ff", "used": "#1f77b4", "accepted": "#1f77b4", "held out": "#2ca02c",
@@ -56,6 +57,9 @@ class StackBrowser(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         self.title = QLabel("add bead stacks: they are shown here")
         self.title.setStyleSheet("color: gray")
+        # a long path or error wraps or is cut, never widens the window
+        self.title.setWordWrap(True)
+        self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.title.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.title)
         layout.addWidget(self.canvas, 1)
@@ -126,9 +130,13 @@ class StackBrowser(QWidget):
 
     def stacks(self, index: int) -> list:
         """The stacks of acquisition ``index``, read once and kept for a while."""
-        from .input import read_bead_stacks
+        from .input import acquisition_kind, read_bead_stacks
         path = self.acquisitions[index]
         if path not in self._cache:
+            # never read a whole movie as one stack: every page of it in memory, then a long refusal
+            kind, n = acquisition_kind(path)
+            if kind == "movie":
+                raise ValueError(f"a movie of {n} frames, not a bead z-stack: in situ learns from movies")
             while len(self._cache) >= CACHED:
                 self._cache.pop(next(iter(self._cache)))
             try:
@@ -171,6 +179,7 @@ class StackBrowser(QWidget):
             self.title.setText(f"could not read {self.acquisitions[a]}: {type(error).__name__}: {error}")
             self.canvas.draw_idle()
             return
+        self.plane_slider.setEnabled(True)
         self.stack_box.blockSignals(True)
         self.stack_box.setMaximum(max(len(stacks), 1))
         self.stack_box.setVisible(len(stacks) > 1)
@@ -216,24 +225,29 @@ class StackBrowser(QWidget):
         self.canvas.draw_idle()
 
     def _draw_frame(self, a: int) -> None:
-        """Movie mode: frame by frame, read when shown; rings only on the frame their unit is from."""
+        """Movie mode: only the frames molecules were found on, once they are, each read when shown; before
+        detection the first frame alone, to see that the movie is the right one.  A slider over every frame
+        of a movie of 300 000 was a slider nobody could aim, over frames mostly never read."""
         from matplotlib.patches import Circle
 
         from ..io.tiff import open_stack
         path = self.acquisitions[a]
+        found = sorted({p[4] for p in self.positions if p[0] == a and len(p) > 4})
         try:
             if path not in self._sources:
                 while len(self._sources) >= CACHED:
                     self._sources.pop(next(iter(self._sources)))
                 self._sources[path] = open_stack(path)
             src = self._sources[path]
-            n = src.n_frames
+            shown = found or [0]
             self.plane_slider.blockSignals(True)
-            if self.plane_slider.maximum() != n - 1:
-                self.plane_slider.setRange(0, n - 1)
+            if self.plane_slider.maximum() != len(shown) - 1:
+                self.plane_slider.setRange(0, len(shown) - 1)
                 self.plane_slider.setValue(0)
+            self.plane_slider.setEnabled(len(shown) > 1)
             self.plane_slider.blockSignals(False)
-            f = int(np.clip(self.plane_slider.value(), 0, n - 1))
+            k = int(np.clip(self.plane_slider.value(), 0, len(shown) - 1))
+            f = shown[k]
             plane = np.asarray(src.frame(f), float)
         except Exception as error:
             self.title.setText(f"could not read {path}: {type(error).__name__}: {error}")
@@ -257,11 +271,12 @@ class StackBrowser(QWidget):
             ax.add_patch(ring)
         ax.set_xlabel("x (px)")
         ax.set_ylabel("y (px)")
-        self.plane_label.setText(f"frame {f + 1}/{n}")
+        self.plane_label.setText(f"{k + 1}/{len(found)}: frame {f + 1} of {src.n_frames}" if found
+                                 else f"frame 1 of {src.n_frames}")
         self.file_label.setText(f"file {a + 1}/{len(self.acquisitions)}")
-        read = sorted({p[4] for p in self.positions if p[0] == a and len(p) > 4})
-        self.title.setText(f"{path} - {len(here)} molecules ringed on this frame"
-                           + (f"; frames with molecules: {read[0] + 1}-{read[-1] + 1}" if read else ""))
+        self.title.setText(f"{path} - {len(here)} molecules ringed on this frame; "
+                           f"{len(found)} frames with molecules" if found
+                           else f"{path} - its first frame: Detect molecules shows the frames they are on")
         self.canvas.draw_idle()
 
     def _picked(self, event) -> None:

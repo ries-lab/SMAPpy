@@ -100,7 +100,12 @@ it came from.  When two states share one reading, the first listed wins.
 
 ### parameters
 One row per value: `NA`, `n_immersion`, `wavelength_nm`, `pixel_nm`
-(`127 116`: x and y), `modality`.  *follows* empty: the value.  *follows* a
+(`127 116`: x and y), `modality`, `astigmatism_nm`.  *follows* empty: the value.
+`astigmatism_nm` is where *PSF calibration*'s in situ learning starts without a
+model: the vertical astigmatism (Noll 6) in nm of wavefront, read from a bead
+model of the microscope, per state of the 3D lens (`on: 62; off: 0`).  Its sign
+is what decides which way is up, so a camera mounted turned by 90 degrees has
+the other.  *follows* a
 device: `state: value; ...`, or `from the name` for a filter.
 
 ### channels

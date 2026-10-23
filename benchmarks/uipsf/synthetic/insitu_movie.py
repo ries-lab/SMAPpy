@@ -56,7 +56,7 @@ def case(on_coverslip: float, fluorophores: int = 600, frames: int = 600, per_bi
         size_px=(128, 128), n_frames=frames, fluorophores=fluorophores, heights_nm=(0.0, 1400.0),
         on_coverslip=on_coverslip, illumination_fwhm_px=160.0, seed=seed,
         blinking=BlinkingSettings(photons=6000.0, photons_std=3000.0, on_time=1.5, blinks=3.0)))
-    sel = selection.InSituSettings(per_bin=per_bin)
+    sel = selection.InSituSettings(molecules=per_bin * selection.InSituSettings().bins)
     rois = selection.insitu_rois(movie.frames, OPTICS.pixel_size_nm, sel)
     start = torch.zeros_like(shared["pupil.phase"])
     start[1] = 0.4

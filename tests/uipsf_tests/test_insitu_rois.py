@@ -153,7 +153,7 @@ def test_selection_draws_from_a_brightness_window_below_the_bright_tail_and_hold
     n = 2000
     sx, sy = 1.5 + 0.02 * rng.standard_normal(n), 1.5 + 0.02 * rng.standard_normal(n)
     N = rng.uniform(100, 3000, n)
-    s = I.InSituSettings(bins=4, per_bin=50, proxy="astigmatism")
+    s = I.InSituSettings(bins=4, molecules=200, proxy="astigmatism")
     state, bins, _ = I.select(_fake_units(sx, sy, N), s)
     state = np.array(state)
     drawn = np.isin(state, ["used", "held out"])
@@ -162,6 +162,22 @@ def test_selection_draws_from_a_brightness_window_below_the_bright_tail_and_hold
         top = np.quantile(N[(bins == k) & ~np.char.startswith(state, "rejected: shape")], 0.9)
         assert N[drawn & (bins == k)].max() <= top + 1e-9 and N[drawn & (bins == k)].min() >= top / 3 - 1e-9
     assert np.all(np.char.startswith(state[N > 2950], "rejected"))
+
+
+def test_bins_short_of_their_share_give_all_they_have_and_the_others_make_up_the_number():
+    # below the coverslip there is nothing, and the outermost heights are rare
+    assert I.quotas([0, 5, 100, 100, 100, 3], 60) == [0, 5, 18, 17, 17, 3]
+    assert I.quotas([1, 2, 3], 100) == [1, 2, 3]                    # all there is
+    rng = np.random.default_rng(3)
+    n = 3000
+    # astigmatism skewed: one end of the z range sparsely populated
+    d = rng.exponential(1.0, n)
+    sx, sy = np.sqrt(2.25 + 0.5 * d), np.full(n, 1.5)
+    s = I.InSituSettings(bins=6, molecules=600)
+    state, bins, _ = I.select(_fake_units(sx, sy, rng.uniform(800, 1200, n)), s)
+    drawn = np.isin(state, ["used", "held out"])
+    per_bin = np.bincount(bins[drawn], minlength=6)
+    assert drawn.sum() == 600 and per_bin[-1] < 100 and per_bin.max() > 100
 
 
 def test_selection_rejects_a_spot_too_wide_for_its_bin():
@@ -180,7 +196,7 @@ def test_the_molecules_chosen_in_a_small_movie_are_molecules_at_every_height():
                       on_coverslip=0.2, illumination_fwhm_px=100.0, seed=1,
                       blinking=BlinkingSettings(photons=6000.0, photons_std=3000.0, on_time=1.5, blinks=3.0))
     movie = simulate_movie(model, shared, s)
-    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, I.InSituSettings(per_bin=3))
+    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, I.InSituSettings(molecules=63))
     used = rois.ids("used")
     assert len(used) > 25
     # each used unit is a molecule (a Gaussian truncated by the region misplaces the farthest by 2–4 px), and
@@ -201,7 +217,7 @@ def test_a_molecules_frames_are_held_out_together():
     n = 900
     sx, sy = 1.5 + 0.02 * rng.standard_normal(n), 1.5 + 0.02 * rng.standard_normal(n)
     state, _, _ = I.select(_fake_units(sx, sy, np.full(n, 1000.0), blink=np.arange(n) // 3),
-                           I.InSituSettings(bins=1, per_bin=n, window_top=1.0))
+                           I.InSituSettings(bins=1, molecules=max(n, 21), window_top=1.0))
     state = np.array(state).reshape(-1, 3)
     held, used = (state == "held out").any(1), (state == "used").any(1)
     assert held.any() and not (held & used).any()
@@ -230,3 +246,32 @@ def test_a_region_keeps_only_the_molecules_inside_it_and_judges_them_against_the
     assert right.sum() == 1 and len(half.reason) == len(whole.reason) == 3
     assert all(r == "outside the region" for r in np.array(half.reason, object)[~right])
     assert half.reason[int(np.flatnonzero(right)[0])] == whole.reason[int(np.flatnonzero(whole.x_px >= 24)[0])]
+
+
+def test_movies_are_read_until_enough_pass_but_always_spread_over_the_whole_movie(tmp_path, monkeypatch):
+    # every block yields 80 spots over the z range, about 60 of them passing: 300 needed, a first pass of ten
+    # blocks spread over the movie gives twice that, so reading stops there -- not after the first block,
+    # though it alone nearly has enough, nor after all 50
+    import tifffile
+
+    from smappy.calibrate import insitu_run
+    from smappy.camera import CameraMetadata
+    path = tmp_path / "movie.tif"
+    with tifffile.TiffWriter(path) as w:
+        for _ in range(50 * 21):
+            w.write(np.zeros((4, 4), np.uint16), contiguous=False)
+    rng = np.random.default_rng(4)
+
+    def units(frames, s, read_noise):
+        d = rng.uniform(-1, 1, 80)
+        return _fake_units(np.sqrt(3 + d / 2), np.sqrt(3 - d / 2), rng.uniform(900, 1100, 80)), 80
+    monkeypatch.setattr(insitu_run, "insitu_units", units)
+    camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
+    s = I.InSituSettings(molecules=300, block_frames=21, bins=5)
+    rois = insitu_run.movie_rois([path], s, camera)
+    read = rois.sources[0]["read"]
+    assert len(read) == insitu_run.MIN_BLOCKS and max(read) - min(read) > 0.8 * 50 * 21
+    assert len(rois.ids("used")) + len(rois.ids("held out")) == 300
+    # wanting more than the movie has reads all of it
+    rois = insitu_run.movie_rois([path], I.InSituSettings(molecules=5000, block_frames=21, bins=5), camera)
+    assert len(rois.sources[0]["read"]) == 50
