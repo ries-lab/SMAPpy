@@ -75,6 +75,9 @@ class RoundSettings:
     max_xy_offset_px: float = 3.0      # a localisation farther from its region's centre is not chosen
     pool_per_bin: float | None = 3.0   # the units localised each round: at most this times *per bin* per z bin
     z_range_nm: float | None = None    # only units within this of the height in focus are chosen (None: all)
+    # only units whose height above the coverslip lies in (low, high) nm are chosen from round 2 (None: all): to
+    # learn from molecules near the coverslip or deep in the sample apart (M2, October 2026)
+    height_range_nm: tuple | None = None
 
 
 @dataclass
@@ -317,6 +320,9 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         for k, u in enumerate(pool):
             if not loc["xy_offset_px"][k] <= s.max_xy_offset_px:
                 rejected[u] = "off centre"
+            elif s.height_range_nm is not None and not (
+                    s.height_range_nm[0] <= loc["h"][k] - shift <= s.height_range_nm[1]):
+                rejected[u] = "height range"
             elif s.z_range_nm is not None and abs(loc["h"][k] - shift - centre) > s.z_range_nm:
                 rejected[u] = "z range"
         state, _, _ = select(rois.units, sel, proxy=h, photons=N, shape=dev, rejected=rejected, one_sided=True)

@@ -1802,6 +1802,19 @@ the coverslip fill with poorly localised molecules (heights are not bounded at 0
 known height); why σ in situ is below the beads' (bead size?); the residual 1.3 per pixel of clean DNA-PAINT
 molecules.
 
+**The region size biases the astigmatism (found October 2026, to be redone properly).**  On January the in situ
+primary astigmatism came out 0.3–0.4 rad stronger than the beads' (Noll 6 −1.01 … −1.15 against −0.68, with
+secondary Noll 12 ≈ −0.2) in every variant at the default 15 px region: not the depth (0–300 and 700–1500 nm
+alike), the sample index (1.36), a coverslip tilt (learnt 0.3°/0.6°, no gain), σ (held round at 63 or 76 nm), the
+magnitude or the noise model (plain Poisson).  uiPSF v1 on the same pair agrees with its beads (in situ Noll 6
+−0.70, beads −0.67; v1's M2 file uses 25 px), and v2 at 25 px does too (−0.66, Noll 12 −0.05; also with 6000
+molecules).  A spot 0.5–1 µm from focus is about as long as a 15 px region (1.7 × 1.9 µm): its ends fall on the
+edge pixels that fix each molecule's flat background, and the fit trades elongation against background.  On
+Zenodo's thin Nup96 layer (focus 266 nm) 15 px does no harm.  So results above at 15 px on January and the
+dual-channel pair (the order cross-validation, the magnitude scores, the bead model's cost) are to be redone at
+a region sized to the spot at the heights learnt.  v1 against v2's other settings (`benchmarks/uipsf/real/
+v1_pair.py`): v1 also keeps molecules within ±1 µm of focus and rejects 10–20 % more outliers -- the next to test.
+
 **Implemented (decided with the user, October 2026).**  `ZernikePupil` holds modes (`held_phase`,
 `held_magnitude`): fixed maps, no parameters, written to the model file and mirrored by the twin test
 (`insitu.twin_model`).  In situ's *hold* (default *the start's*) holds the symmetric magnitude and the phase

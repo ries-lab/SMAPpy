@@ -94,14 +94,15 @@ def bead_magnitude(previous):
     return dict(zip(pupil.magnitude_modes, _np(previous.shared["pupil.magnitude"]).tolist(), strict=True))
 
 
-KINDS = ("free", "bead", "bead-symmetric", "bead-nonsymmetric")
+KINDS = ("free", "bead", "bead-symmetric", "bead-nonsymmetric", "uniform")
 
 
 def held_mode(kind: str, j: int) -> bool:
     """Whether ``kind`` holds the beads' magnitude mode ``j``: all, the m = 0 ones, or the m ≠ 0 ones."""
     from uipsf.optics.zernike import noll_to_nm
     m = noll_to_nm(j)[1]
-    return {"free": False, "bead": True, "bead-symmetric": m == 0, "bead-nonsymmetric": m != 0}[kind]
+    return {"free": False, "bead": True, "bead-symmetric": m == 0, "bead-nonsymmetric": m != 0,
+            "uniform": False}[kind]
 
 
 def fixed_map(grid, coefficients: dict):
@@ -129,7 +130,8 @@ def patch_insitu_model(kind: str, coefficients: dict, phase_above: int | None = 
     def model(o, settings, roi_shape, focus_nm, **kw):
         from dataclasses import replace
         held = {j: c for j, c in coefficients.items() if held_mode(kind, j)}
-        free = [] if kind == "bead" else magnitude_modes(ORDER, "free")
+        # uniform: no magnitude modes at all, none held (v1's in situ, const_pupilmag)
+        free = [] if kind in ("bead", "uniform") else magnitude_modes(ORDER, "free")
         free = [j for j in free if j not in held]
         m = original(o, replace(settings, magnitude="fixed"), roi_shape, focus_nm, **kw)
         for ch in m.channels:
@@ -156,16 +158,27 @@ def patch_insitu_model(kind: str, coefficients: dict, phase_above: int | None = 
 
 # ------------------------------------------------------------------ steps
 
+def camera_of(args):
+    """The camera given (--camera conversion offset), for files the database does not know; else None."""
+    if args.camera is None:
+        return None
+    from smappy.metadata import CameraMetadata
+    return CameraMetadata(conversion=args.camera[0], offset=args.camera[1], read_noise_e=1.6,
+                          pixelsize_um=[PIXEL[0] / 1000, PIXEL[1] / 1000])
+
+
 def beads(args):
     from smappy.calibrate.pupil import BeadSettings, RunSettings, run_calibration
     files = sorted(glob.glob(os.path.join(args.acquisition, "*", "*.ome.tif")))
     t0 = time.perf_counter()
-    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur="free", bead_diameter_nm=BEAD_NM)
+    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur="free",
+                         bead_diameter_nm=args.bead_diameter)
     from smappy.calibrate.core import CalibrationSettings
     detection = CalibrationSettings(region=tuple(args.region)) if args.region else None
     # the model file alone: a spline needs a z range every bead covers, and beads at heights more than
     # a micrometre apart (the 665LP stacks) leave too little of one
-    run = run_calibration(files, False, optics(), model, detection=detection, run=RunSettings(save_model=False))
+    run = run_calibration(files, False, optics(), model, detection=detection, run=RunSettings(save_model=False),
+                          camera=camera_of(args))
     cal = run.cal
     import uipsf
     uipsf.save_model(cal, args.model)
@@ -195,9 +208,9 @@ def detect(args):
     from smappy.calibrate.insitu import InSituSettings
     from smappy.calibrate.insitu_run import movie_rois
     t0 = time.perf_counter()
-    rois = movie_rois([args.movie], InSituSettings(molecules=args.molecules, seed=args.seed,
+    rois = movie_rois([args.movie], InSituSettings(molecules=args.molecules, seed=args.seed, roi_px=args.roi,
                                                      region=tuple(args.region) if args.region else None),
-                      progress=lambda e: print(e.get("message", ""), flush=True))
+                      camera=camera_of(args), progress=lambda e: print(e.get("message", ""), flush=True))
     with open(args.rois, "wb") as f:
         pickle.dump(rois, f)
     emit(dict(step="detect", movie=os.path.basename(os.path.normpath(args.movie)), molecules=args.molecules,
@@ -216,19 +229,31 @@ def learn(args):
         rois = pickle.load(f)
     if args.subsets > 1:
         keep_subset(rois, args.subset, args.subsets)
+    if args.poisson:
+        # plain Poisson, as v1 treats the data: no EM excess noise (`InSituROIs.batch` reads it)
+        rois.excess_noise = 1.0
     if args.max_haze is not None:
         drop_hazy(rois, args.max_haze)
     astig_nm = bead_phase[6] * WAVELENGTH_NM / (2 * math.pi)
-    model = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
+    # a blur held round at a value (--blur-fixed): does in situ's extra astigmatism trade with σx != σy?
+    model = (BeadSettings(zernike_order=ORDER, magnitude="free", blur="free") if args.blur_fixed is None else
+             BeadSettings(zernike_order=ORDER, magnitude="free", blur="fixed", blur_nm=args.blur_fixed))
+    from dataclasses import replace as replaced
+    model = replaced(model, fit_tilt=args.fit_tilt)          # the coverslip's tilt learnt (uipsf 774472e)
     insitu = InSituModelSettings(focus_nm=args.focus, astigmatism_nm=astig_nm, max_rounds=args.rounds,
                                  coverslip=not args.no_coverslip)
     run = RunSettings(start_from=args.model if args.start == "bead" else "", save_model=False)
     t0 = time.perf_counter()
-    from smappy.calibrate.insitu import InSituSettings
     import smappy.calibrate.insitu_run as insitu_run
+    from smappy.calibrate.insitu import InSituSettings
     # this script holds the pupil its own way (`patch_insitu_model`); `run_insitu`'s own holding (its *hold*,
     # the start's) is switched off, with a source named so that the focus stays learnt, as in these runs
     insitu_run.held_pupil = lambda *a, **k: ({}, {}, "this script's held maps")
+    if args.height_range is not None:
+        # the rounds from the second on choose only molecules at these heights above the coverslip
+        import uipsf.workflows.insitu_rounds as rounds
+        base = rounds.RoundSettings
+        rounds.RoundSettings = lambda **k: base(**{"height_range_nm": tuple(args.height_range), **k})
     # the rounds choose by the detection's settings: a stricter shape test after the first round
     selection = InSituSettings() if args.shape_k is None else InSituSettings(shape_k=args.shape_k)
     result = run_insitu(None, optics(), model, insitu, detection=selection, run=run, rois=rois)
@@ -249,21 +274,29 @@ def learn(args):
               objective_per_unit=float(cal.result.objective) / max(1, len(result.run.rounds[-1].used)),
               minutes=round(minutes, 2), focus_nm=round(float(cal.shared()["geometry.focus"]), 1),
               focus_estimate_nm=result.focus_estimate,
-              sigma_nm=sigma.round(2), sigma_crlb_nm=_np(std["psf.sigma"]).round(2),
+              sigma_nm=sigma.round(2), sigma_crlb_nm=_np(std["psf.sigma"]).round(2) if "psf.sigma" in std else None,
               sigma_optics_nm=sigma_optics(sigma),
               phase=dict(zip(pupil.phase_modes, _np(p["pupil.phase"]).round(4).tolist(), strict=True)),
               phase_crlb=dict(zip(pupil.phase_modes, _np(std["pupil.phase"]).round(4).tolist(), strict=True)),
               magnitude=mag, magnitude_held=None if args.magnitude == "free" else
               {j: round(c, 4) for j, c in held.items() if held_mode(args.magnitude, j)},
               twin_delta_nats=None if twin is None else round(twin.delta_nats, 1), rounds=rounds,
+              tilt_deg=tilt_of(cal),
               messages=result.messages), args.out)
     # what `score` needs: the learnt values and the molecules this run ended with
     torch.save({"shared": {k: torch.as_tensor(v).detach().cpu() for k, v in cal.shared().items()},
                 "used": np.asarray(result.run.rounds[-1].used), "magnitude_kind": args.magnitude, "start": args.start,
                 "model": args.model, "order": ORDER, "hold_phase_above": args.hold_phase_above,
                 "subset": [args.subset, args.subsets], "max_haze": args.max_haze, "shape_k": args.shape_k,
-                "background": BACKGROUND},
+                "background": BACKGROUND, "n_medium": N_MED},
                run_path(args.rois, args.magnitude, args.start, args.model, run_tag(args)))
+
+
+def tilt_of(cal):
+    """The learnt coverslip tilt, [[t_x, CRLB], [t_y, CRLB]] in degrees, or None."""
+    from uipsf.diagnostics import coverslip_tilt
+    tilt = coverslip_tilt(cal)
+    return None if tilt is None else [[round(float(v), 3), round(float(e), 3)] for v, e in zip(*tilt, strict=True)]
 
 
 def run_tag(args) -> str:
@@ -272,6 +305,11 @@ def run_tag(args) -> str:
     tag += "" if args.max_haze is None else f"_haze{args.max_haze:g}"
     tag += "" if args.shape_k is None else f"_shape{args.shape_k:g}"
     tag += "" if BACKGROUND == "constant" else f"_{BACKGROUND}"
+    tag += "" if args.height_range is None else f"_hr{args.height_range[0]:g}-{args.height_range[1]:g}"
+    tag += "" if N_MED == 1.33 else f"_n{N_MED:g}"
+    tag += "" if args.blur_fixed is None else f"_sigma{args.blur_fixed:g}"
+    tag += "_tilt" if args.fit_tilt else ""
+    tag += "_poisson" if args.poisson else ""
     tag += "" if args.hold_phase_above is None else f"_h{args.hold_phase_above}"
     return tag + ("" if args.subsets <= 1 else f"_s{args.subset}of{args.subsets}")
 
@@ -325,7 +363,7 @@ def run_path(rois, magnitude, start, model=None, extra=""):
 def score(args):
     """Every saved run's model on one set of molecules (*set*), each molecule localised on it from the
     same heights: the deviance says which model the data prefer, Δnats = Δdeviance / 2."""
-    global ORDER
+    global ORDER, N_MED
     from smappy.calibrate.pupil import BeadSettings, load_start
 
     import uipsf.workflows as wf
@@ -348,15 +386,21 @@ def score(args):
     o = optics().optics(rois.camera)[0]
     roi = int(rois.units.regions.shape[-1])
     settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
+    scored_n = N_MED
     for r in runs:
         wf.insitu_model = original
         ORDER = r.get("order", 8)
+        # each run with the sample index it learnt with (the score's own for runs from before it was kept)
+        N_MED = r.get("n_medium", scored_n)
+        o = optics().optics(rois.camera)[0]
         settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
         # a run held its own bead model's magnitude, and its high phase orders
         own = load_start(r["model"]) if "model" in r else previous
         patch_insitu_model(r["magnitude_kind"], bead_magnitude(own), r.get("hold_phase_above"), bead_phases(own))
         focus = float(r["shared"]["geometry.focus"])
-        model = wf.insitu_model(o, settings, (roi, roi), focus, device=args.device)
+        # a run that learnt the coverslip's tilt is scored with it
+        model = wf.insitu_model(o, settings, (roi, roi), focus, device=args.device,
+                                fit_tilt="geometry.tilt" in r["shared"])
         loc, d, pixels = deviances(model, r["shared"], rois, ids)
         emit(dict(step="score", set=args.set, magnitude_kind=r["magnitude_kind"], start=r["start"], molecules=len(ids),
                   model=os.path.basename(r.get("model", args.model)), order=ORDER,
@@ -418,19 +462,21 @@ def beadfit(args):
                   sigma_nm=_np(shared["psf.sigma"]).round(2), **summary(loc, d, pixels)), args.out)
 
 def main():
-    global WAVELENGTH_NM, PIXEL, ORDER, BACKGROUND
+    global WAVELENGTH_NM, PIXEL, ORDER, BACKGROUND, N_MED, NA
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="step", required=True)
     b = sub.add_parser("beads")
     b.add_argument("acquisition")
     b.add_argument("--model", required=True, help="the model file saved (.uipsf.h5)")
     b.add_argument("--halves", type=int, default=0, help="this many half-split pairs: the beads' own spread")
+    b.add_argument("--bead-diameter", type=float, default=BEAD_NM, help="nm, taken out of the model")
     b.add_argument("--magnitude", choices=("free", "symmetric", "fixed"), default="free",
                    help="the beads' magnitude: symmetric learns only its m = 0 modes")
     d = sub.add_parser("detect")
     d.add_argument("movie")
     d.add_argument("--rois", required=True)
     d.add_argument("--molecules", type=int, default=2000)
+    d.add_argument("--roi", type=int, default=15, help="each molecule's region, px (v1: 25)")
     d.add_argument("--seed", type=int, default=0)
     le = sub.add_parser("learn")
     le.add_argument("--rois", required=True)
@@ -444,6 +490,11 @@ def main():
                     help="the beads' phase modes of radial order above this held; only the lower ones learnt")
     le.add_argument("--subset", type=int, default=0, help="learn only from molecule subset k (of --subsets)")
     le.add_argument("--subsets", type=int, default=1)
+    le.add_argument("--fit-tilt", action="store_true", help="learn the coverslip's tilt")
+    le.add_argument("--poisson", action="store_true", help="plain Poisson noise (no EM excess), as v1")
+    le.add_argument("--blur-fixed", type=float, default=None, help="the blur held round at this σ, nm")
+    le.add_argument("--height-range", type=float, nargs=2, default=None, metavar=("LOW", "HIGH"),
+                    help="from round 2 learn only from molecules this high above the coverslip, nm")
     le.add_argument("--max-haze", type=float, default=None,
                     help="learn only from molecules whose background scatters at most this times the noise")
     le.add_argument("--shape-k", type=float, default=None,
@@ -469,9 +520,13 @@ def main():
     for p in (b, d):
         p.add_argument("--region", type=int, nargs=4, default=None, metavar=("X", "Y", "W", "H"),
                        help="only beads / molecules inside, in the file's pixels: one channel of a split chip")
+        p.add_argument("--camera", type=float, nargs=2, default=None, metavar=("CONVERSION", "OFFSET"),
+                       help="e-/ADU and offset, for a camera the database does not know")
     for p in (b, d, le, sc, bf):
         p.add_argument("--wavelength", type=float, default=WAVELENGTH_NM, help="emission, nm")
         p.add_argument("--order", type=int, default=ORDER, help="the Zernike order of the model learnt")
+        p.add_argument("--n-medium", type=float, default=N_MED, help="the sample's refractive index")
+        p.add_argument("--na", type=float, default=NA, help="the objective's NA")
         p.add_argument("--background", choices=("constant", "planar"), default=BACKGROUND,
                        help="each molecule's background: a level, or a level and a slope (learning and scoring)")
         p.add_argument("--pixel", type=float, nargs=2, default=PIXEL, metavar=("X", "Y"),
@@ -480,6 +535,7 @@ def main():
         p.add_argument("--memory", type=float, default=0.3, help="MPS memory fraction (the Mac is shared)")
     args = ap.parse_args()
     WAVELENGTH_NM, PIXEL, ORDER, BACKGROUND = args.wavelength, tuple(args.pixel), args.order, args.background
+    N_MED, NA = args.n_medium, args.na
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     {"beads": beads, "detect": detect, "learn": learn, "score": score, "beadfit": beadfit}[args.step](args)
