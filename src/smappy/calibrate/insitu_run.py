@@ -35,6 +35,8 @@ from ..plugins import param
 from .insitu import InSituROIs, InSituSettings, choose, concatenate, insitu_units, select
 
 SPLINE_Z = (("focus", "above the plane in focus"), ("height", "above the coverslip"))
+HOLDS = (("start", "the start's"), ("nothing", "nothing"))
+FOCUS_FITS = (("learnt", "learnt"), ("coverslip", "from the coverslip"), ("typed", "typed"))
 #: the spline's z step on auto, nm: a molecule's PSF changes over ~100 nm
 SPLINE_DZ_NM = 20.0
 #: the heights the spline reaches beyond the used molecules', nm
@@ -53,6 +55,13 @@ class InSituModelSettings:
                                             help="the start's vertical astigmatism (Noll 6), with the "
                                                  "microscope's sign; auto: the microscope's, for its 3D lens; "
                                                  "not used with start from")
+    hold: str = param("start", label="hold", choices=HOLDS,
+                      help="the start's: the symmetric magnitude and the phase above the order held from start "
+                           "from or the microscope's pupil; nothing: the symmetric magnitude learnt, the focus "
+                           "then pinned")
+    focus_fit: str = param("learnt", label="focus fit", choices=FOCUS_FITS,
+                           help="learnt with the pupil; from the coverslip: set by the lowest molecules' edge "
+                                "each round, not fitted; typed: held at focus")
     coverslip: bool = param(True, label="on the coverslip",
                             help="the sample touches the coverslip: its lowest molecules pin the focus")
     max_rounds: int = param(4, label="rounds", min=1, max=8,
@@ -202,6 +211,39 @@ def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_n
     return out, None
 
 
+def held_pupil(previous, kept, order: int, wavelength_nm: float) -> tuple[dict, dict, str]:
+    """(phase held {Noll: rad}, magnitude held {Noll: value}, where from) for in situ's *hold* the start's:
+    the start model's (``previous``, a `LearnedPSF`) or else the microscope's kept pupil (``kept``,
+    `microscope_db.pupil_of`) symmetric magnitude and its phase above ``order``; empty with neither.
+
+    Why these (`docs/uipsf/architecture.md`, "In situ on matched M2 pairs"): the symmetric magnitude is the
+    objective's transmission, the same over days and colours, and learnt from molecules it trades with the
+    focus; the phase above order 6 gains little over the beads' and scatters between molecule sets.  The
+    phase goes through nm of wavefront, so that a pupil learnt at another emission holds at this one."""
+    import math
+
+    from uipsf.optics.zernike import noll_to_nm
+    if previous is not None:
+        model = previous.model
+        pupil = model.channels[0].psf.pupil if hasattr(model, "channels") else model.psf.pupil
+        shared = previous.shared() if callable(getattr(previous, "shared", None)) else previous.shared
+        if not hasattr(pupil, "coefficients"):
+            return {}, {}, ""
+        own = float(pupil.grid.optics.wavelength_nm)
+        phase_nm = {j: v * own / (2 * math.pi) for j, v in pupil.coefficients(shared, "phase").items()}
+        magnitude = pupil.coefficients(shared, "magnitude") if "pupil.magnitude" in shared else {}
+        source = "the start model"
+    elif kept:
+        phase_nm = {int(j): float(v) for j, v in (kept.get("phase_nm") or {}).items()}
+        magnitude = {int(j): float(v) for j, v in (kept.get("magnitude") or {}).items()}
+        source = "the microscope's pupil"
+    else:
+        return {}, {}, ""
+    phase = {j: 2 * math.pi * nm / float(wavelength_nm) for j, nm in phase_nm.items() if noll_to_nm(j)[0] > order}
+    symmetric = {j: v for j, v in magnitude.items() if noll_to_nm(j)[1] == 0 and j > 1}
+    return phase, symmetric, source
+
+
 # ------------------------------------------------------------------ the spline
 
 def used_heights(run) -> tuple[float, float]:
@@ -300,23 +342,59 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     o = optics.optics(rois.camera, 1)[0]
     roi = int(rois.units.regions.shape[-1])
     guess = 1000.0 if insitu.focus_nm is None else float(insitu.focus_nm)
-    learnt = insitu_model(o, model, (roi, roi), guess, device=device)
     astigmatism, why = start_astigmatism(insitu, rois.camera)
     if astigmatism is None and not run.start_from:
         raise ValueError(f"give the start's astigmatism (in situ, more) or a model to start from: {why}")
+    from dataclasses import replace
+
     from ..microscope_db import pupil_of
-    start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm,
-                                   pupil_of(getattr(rois.camera, "microscope", None)))
+    from .pupil import AUTO_ORDER, load_start
+    kept = pupil_of(getattr(rois.camera, "microscope", None))
+    messages = []
+    # what is held: the start's symmetric magnitude and high orders, or nothing; the m != 0 magnitude is
+    # never learnt in situ, where it took the astigmatism over from the phase
+    held_phase, held_magnitude, source = {}, {}, ""
+    if insitu.hold == "start":
+        order = model.zernike_order or AUTO_ORDER
+        held_phase, held_magnitude, source = held_pupil(load_start(run.start_from) if run.start_from else None,
+                                                        kept, order, o.wavelength_nm)
+        if not source:
+            messages.append("nothing to hold: no start model and no pupil kept with the microscope; the "
+                            "symmetric magnitude is learnt and the focus pinned")
+    model = replace(model, magnitude="fixed" if source else "symmetric")
+    focus_fit = insitu.focus_fit
+    if not source and focus_fit == "learnt":
+        # a learnt symmetric magnitude and a learnt focus trade (140 nm between starts on M2's data)
+        focus_fit = "coverslip"
+        messages.append("the focus is pinned to the coverslip: with the magnitude learnt it cannot be learnt too")
+    if focus_fit == "typed" and insitu.focus_nm is None:
+        raise ValueError("a typed focus needs the focus: type it in, or choose the focus from the coverslip")
+    edge = insitu.coverslip and focus_fit != "typed"
+    if focus_fit == "coverslip" and not insitu.coverslip:
+        raise ValueError("a focus from the coverslip needs the sample on the coverslip: type the focus instead")
+
+    def make(focus):
+        return insitu_model(o, model, (roi, roi), focus, device=device, held_phase=held_phase,
+                            held_magnitude=held_magnitude, fit_focus=focus_fit == "learnt")
+    learnt = make(guess)
+    start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm, kept)
     result_focus = None
     if insitu.focus_nm is None:
         tell({"message": "estimating the focus from the molecules on the coverslip"})
         result_focus, _ = focus_from_data(learnt, rois, start, rois.batch()[1], guess)
-        learnt = insitu_model(o, model, (roi, roi), result_focus, device=device)
+        learnt = make(result_focus)
     start = dict(start, **{"geometry.focus": torch.tensor(learnt.geometry.focus_nm)})
     learned = calibrate_insitu(learnt, rois, start, rois.batch()[1],
-                               RoundSettings(max_rounds=insitu.max_rounds, coverslip=insitu.coverslip),
+                               RoundSettings(max_rounds=insitu.max_rounds, coverslip=edge),
                                selection=detection, progress=progress, cancel=cancel)
     result = InSituRunResult(rois, learned, learned.model or learnt, previous, result_focus)
+    if source:
+        messages.insert(0, f"held from {source}: the symmetric magnitude and the phase above order "
+                           f"{model.zernike_order or AUTO_ORDER}")
+    if edge and not any(r.focus_prior is not None for r in learned.rounds[1:]) and len(learned.rounds) > 1:
+        messages.append("no coverslip edge found: the molecules may lie too deep; the focus is not pinned by "
+                        "the coverslip -- type it if it is known")
+    result.messages += messages
     cal = learned.final
     if cal.twin is not None:
         result.messages += cal.warnings

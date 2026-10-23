@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
@@ -274,6 +274,23 @@ tell.  Each further round localises every molecule found on the model, chooses
 again by the model's height, photons and fit, and learns again from the last
 model, until nothing moves beyond its noise or after *rounds*.
 
+**What is held.**  Molecules tell less about the pupil than beads do, and two
+parts of it are better taken from the microscope than learnt from them.  The
+pupil's *magnitude* -- how much light the objective passes at each angle -- is
+the objective's own: on M2 its rotationally symmetric part was the same over
+eight bead calibrations of different days, cameras and colours, and it is what
+keeps a bead's z straight through focus.  Learnt from molecules, it trades
+with the focus, so that two starts end a hundred nanometres apart.  And the
+finest aberrations, above the *Zernike order*, gain little over a bead
+model's.  So with *hold* on *the start's*, in situ takes the symmetric
+magnitude and the phase above the order from *start from*, or else from the
+objective's pupil kept with the microscope (*Add to microscope...*), and learns
+the rest: the phase up to the order, the blur, the focus.  The magnitude's
+other modes are never learnt in situ: there they took over the astigmatism
+from the phase.  With *hold* on *nothing*, or when there is neither a start
+model nor a kept pupil, the symmetric magnitude is learnt, and the focus is
+then pinned (*focus fit*), since the two cannot both be learnt.
+
 **The coverslip.**  The focus and all the heights can move together, changing
 the images only a little; the fit alone places the focus to some tens of
 nanometres.  With *on the coverslip*, the lowest molecules are taken to lie on
@@ -384,7 +401,8 @@ The highest radial order of the pupil's modes.  Higher orders describe finer
 aberrations and cost more time and more beads.
 
 ### pupil magnitude
-*free*, *symmetric* or *fixed* (the apodisation only).
+*free*, *symmetric* or *fixed* (the apodisation only).  Not shown for *in
+situ*, which decides it by its *hold*.
 
 ### blur
 Whether the extra blur is learnt or held at *blur σ*.
@@ -410,7 +428,23 @@ few settings of how they are found that depend on the data are under *more*.
 ### focus
 How far above the coverslip the objective put its focal plane, as it was moved
 from the coverslip's focus.  A rough value is enough: the rounds learn it.
-*auto*: estimated from the molecules on the coverslip before learning.
+*auto*: estimated from the molecules on the coverslip before learning.  With
+*focus fit* on *typed* it is the focus, held.
+
+### hold
+*the start's*: the symmetric magnitude and the phase above the *Zernike
+order* held from *start from*, or else from the microscope's kept pupil (the
+default; see *What is held*).  *nothing*: the symmetric magnitude learnt from
+the molecules, for a microscope with no pupil kept and no model to start
+from; the focus is then pinned to the coverslip unless *focus fit* says
+*typed*.
+
+### focus fit
+*learnt*: with the pupil, the lowest molecules' edge as its guide (the
+default).  *from the coverslip*: set each round where the lowest molecules'
+edge puts it, not fitted.  *typed*: held at *focus*.  When no coverslip edge
+is found -- the molecules lie too deep, or none touch the coverslip -- the
+status bar says so: type the focus if it is known.
 
 ### astigmatism
 Under *more*, and rarely typed: on *auto* the microscope database gives it, for

@@ -225,6 +225,10 @@ def learn(args):
     run = RunSettings(start_from=args.model if args.start == "bead" else "", save_model=False)
     t0 = time.perf_counter()
     from smappy.calibrate.insitu import InSituSettings
+    import smappy.calibrate.insitu_run as insitu_run
+    # this script holds the pupil its own way (`patch_insitu_model`); `run_insitu`'s own holding (its *hold*,
+    # the start's) is switched off, with a source named so that the focus stays learnt, as in these runs
+    insitu_run.held_pupil = lambda *a, **k: ({}, {}, "this script's held maps")
     # the rounds choose by the detection's settings: a stricter shape test after the first round
     selection = InSituSettings() if args.shape_k is None else InSituSettings(shape_k=args.shape_k)
     result = run_insitu(None, optics(), model, insitu, detection=selection, run=run, rois=rois)

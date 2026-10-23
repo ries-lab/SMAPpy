@@ -1800,4 +1800,13 @@ the coverslip fill with poorly localised molecules (heights are not bounded at 0
 
 **Open**: which focus is right (held and free magnitude differ by ~100 nm on January; needs a sample of
 known height); why σ in situ is below the beads' (bead size?); the residual 1.3 per pixel of clean DNA-PAINT
-molecules; holding the symmetric magnitude in the PSF calibration window (now script-only).
+molecules.
+
+**Implemented (decided with the user, October 2026).**  `ZernikePupil` holds modes (`held_phase`,
+`held_magnitude`): fixed maps, no parameters, written to the model file and mirrored by the twin test
+(`insitu.twin_model`).  In situ's *hold* (default *the start's*) holds the symmetric magnitude and the phase
+above the order from *start from* or else the microscope's kept pupil (`insitu_run.held_pupil`); the m ≠ 0
+magnitude is never learnt in situ.  *focus fit*: *learnt*, *from the coverslip* (the edge each round, not
+fitted) or *typed*; with the magnitude learnt (*hold* nothing, or nothing to hold) the focus is pinned, and
+a run says when no coverslip edge was found.  Order 8 stays an expert setting.  The stricter shape test
+(1.5 sd) cost nothing on January (≤ 0.03 nats per molecule, the starts' focus within 2 nm).

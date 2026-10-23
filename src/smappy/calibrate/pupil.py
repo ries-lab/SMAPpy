@@ -458,16 +458,16 @@ def objective_pupil(cal, source: str = "") -> dict:
     shared = cal.shared()
     optics = psf.grid.optics
     wavelength = float(optics.wavelength_nm)
-    phase = np.asarray(shared["pupil.phase"].detach().cpu(), float)
-    out = {"phase_nm": {str(j): round(float(v) * wavelength / (2 * math.pi), 3)
-                        for j, v in zip(psf.pupil.phase_modes, phase, strict=True)},
+    # every mode, the held ones among them (`ZernikePupil.coefficients`): a pupil held from the microscope's
+    # and kept again is the whole pupil, not its learnt part
+    phase = psf.pupil.coefficients(shared, "phase")
+    out = {"phase_nm": {str(j): round(float(v) * wavelength / (2 * math.pi), 3) for j, v in phase.items()},
            "magnitude": {}, "wavelength_nm": wavelength, "NA": float(optics.NA),
            "n_immersion": float(optics.n_imm), "source": str(source),
            "date": _dt.date.today().isoformat()}
     if "pupil.magnitude" in shared:
-        magnitude = np.asarray(shared["pupil.magnitude"].detach().cpu(), float)
         out["magnitude"] = {str(j): round(float(v), 5)
-                            for j, v in zip(psf.pupil.magnitude_modes, magnitude, strict=True)}
+                            for j, v in psf.pupil.coefficients(shared, "magnitude").items()}
     if "psf.sigma" in shared:
         out["sigma_nm"] = [round(float(v), 2) for v in np.asarray(shared["psf.sigma"].detach().cpu()).ravel()]
     return out

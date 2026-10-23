@@ -325,6 +325,8 @@ class PSFCalibrationWindow(QMainWindow):
             self._show_optics()
         self.sections["in situ"].setVisible(insitu)
         self.sections["beads"].setVisible(not insitu)
+        # in situ decides the magnitude itself, by its *hold*: held from the start, or symmetric and learnt
+        self.model_form.set_shown({"magnitude": not insitu})
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
         if insitu and self.is_dual:

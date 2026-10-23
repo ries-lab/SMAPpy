@@ -88,11 +88,13 @@ def magnitude_modes(n_max: int, kind: str) -> list[int]:
 
 
 def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max_nm: float = 0.0,
-               device=None, dtype=torch.float32) -> ForwardModel:
+               device=None, dtype=torch.float32, held_phase: dict | None = None,
+               held_magnitude: dict | None = None) -> ForwardModel:
     """The model a bead calibration learns: one channel per `Optics` in ``optics`` (one, or a list, the
     main channel first), each with its own pupil, started at ``transforms`` (secondary → main chip
     pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to ``z_max_nm`` from
-    aliasing (`choose_pupil_size`, never below 64)."""
+    aliasing (`choose_pupil_size`, never below 64).  ``held_phase`` / ``held_magnitude``: modes held at
+    given values (`ZernikePupil`)."""
     optics = [optics] if not isinstance(optics, (list, tuple)) else list(optics)
     transforms = list(transforms) if transforms is not None else [None] * len(optics)
     if len(transforms) != len(optics):
@@ -101,7 +103,8 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     channels = []
     for o, H in zip(optics, transforms, strict=True):
         grid = PupilGrid.build(o, choose_pupil_size(o, z_max_nm), device=device, dtype=dtype)
-        pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude))
+        pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude),
+                             held_phase=held_phase, held_magnitude=held_magnitude)
         psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
                         sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur == "free")
         channels.append(Channel(psf, transform=H))
@@ -109,10 +112,13 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
 
 
 def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
-                 device=None, dtype=torch.float32) -> ForwardModel:
+                 device=None, dtype=torch.float32, held_phase: dict | None = None,
+                 held_magnitude: dict | None = None, fit_focus: bool = True) -> ForwardModel:
     """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as `bead_model`
     makes them for a point (no bead's size), molecules in the sample seen through ``focus_nm``
-    (`InSituGeometry`), one photon count each.  The pupil sampling keeps defocus up to ``z_max_nm`` from
+    (`InSituGeometry`; held there with ``fit_focus`` off), one photon count each.  ``held_phase`` /
+    ``held_magnitude`` hold modes at given values (`ZernikePupil`): a bead model's symmetric magnitude and
+    high orders.  The pupil sampling keeps defocus up to ``z_max_nm`` from
     aliasing: the molecules' distance from the plane in focus, not their depth, since the depth's and the
     focus's waves largely cancel there and the light beyond the critical angle decays rather than
     aliases.  ±1 µm needs 64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work."""
@@ -120,8 +126,9 @@ def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_m
 
     from ..model import Bleaching, InSituGeometry
     beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0), roi_shape, z_max_nm=z_max_nm,
-                       device=device, dtype=dtype)
-    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm), intensity=Bleaching(order=0))
+                       device=device, dtype=dtype, held_phase=held_phase, held_magnitude=held_magnitude)
+    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus),
+                        intensity=Bleaching(order=0))
 
 
 def start_values(model: ForwardModel, previous) -> dict:

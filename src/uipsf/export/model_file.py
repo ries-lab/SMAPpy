@@ -84,6 +84,11 @@ def _describe_channel(ch: Channel) -> dict:
     if isinstance(pupil, ZernikePupil):
         pup = dict(kind="zernike", phase_modes=list(pupil.phase_modes),
                    magnitude_modes=list(pupil.magnitude_modes), high_na=bool(pupil.high_na))
+        # held modes are part of the model, not parameters: written here, absent in older files
+        if pupil.held_phase:
+            pup["held_phase"] = {str(j): v for j, v in pupil.held_phase.items()}
+        if pupil.held_magnitude:
+            pup["held_magnitude"] = {str(j): v for j, v in pupil.held_magnitude.items()}
     elif isinstance(pupil, PixelPupil):
         pup = dict(kind="pixel")
     else:
@@ -124,7 +129,8 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     pup = config["pupil"]
     if pup["kind"] == "zernike":
         pupil = ZernikePupil(grid, phase_modes=pup["phase_modes"], magnitude_modes=pup["magnitude_modes"],
-                             high_na=pup["high_na"])
+                             high_na=pup["high_na"], held_phase=pup.get("held_phase"),
+                             held_magnitude=pup.get("held_magnitude"))
     else:
         pupil = PixelPupil(grid)
     s = config["psf"]
@@ -254,13 +260,16 @@ class LearnedPSF:
         return 0.0 if channel == 0 else float(_np(self.shared[prefix(channel) + "dz"]))
 
     def zernikes(self, which: str = "phase", channel: int = 0) -> list[tuple[int, float, float]]:
-        """(Noll index, coefficient, CRLB) of every ``which`` ("phase", rad, or "magnitude") mode."""
+        """(Noll index, coefficient, CRLB) of every ``which`` ("phase", rad, or "magnitude") mode, the held
+        ones (`ZernikePupil`) among them with a CRLB of 0, in Noll order."""
         config = self.config["channels"][channel] if "channels" in self.config else self.config
         modes = config["pupil"].get(f"{which}_modes", [])
         name = prefix(channel) + f"pupil.{which}"
         c = _np(self.shared[name])
         s = _np(self.crlb[name]) if name in self.crlb else np.full(len(modes), np.nan)
-        return [(int(j), float(v), float(e)) for j, v, e in zip(modes, c, s, strict=True)]
+        out = [(int(j), float(v), float(e)) for j, v, e in zip(modes, c, s, strict=True)]
+        out += [(int(j), float(v), 0.0) for j, v in (config["pupil"].get(f"held_{which}") or {}).items()]
+        return sorted(out)
 
 
 def _json(obj) -> str:

@@ -180,6 +180,30 @@ def twin(model, shared: dict) -> dict:
     return out
 
 
+def twin_model(model):
+    """``model`` with its pupils' held modes mirrored as `twin` mirrors the learnt ones: a pupil held from a
+    bead model is the twin's too, or the test compares a mirrored pupil with an unmirrored part."""
+    import copy
+    if not any(isinstance(ch.psf.pupil, ZernikePupil) and (ch.psf.pupil.held_phase or ch.psf.pupil.held_magnitude)
+               for ch in model.channels):
+        return model
+    new = copy.copy(model)
+    new.channels = []
+    for ch in model.channels:
+        pupil = ch.psf.pupil
+        if isinstance(pupil, ZernikePupil) and (pupil.held_phase or pupil.held_magnitude):
+            mirrored = copy.copy(pupil)
+            mirrored.held_phase = {j: -((-1.0) ** abs(noll_to_nm(j)[1])) * v for j, v in pupil.held_phase.items()}
+            mirrored.held_magnitude = {j: ((-1.0) ** abs(noll_to_nm(j)[1])) * v
+                                       for j, v in pupil.held_magnitude.items()}
+            mirrored._held_maps()
+            ch = copy.copy(ch)
+            ch.psf = copy.copy(ch.psf)
+            ch.psf.pupil = mirrored
+        new.channels.append(ch)
+    return new
+
+
 @dataclass
 class TwinTest:
     """The learnt pupil against its twin, each fitted to the same emitters."""
@@ -268,6 +292,7 @@ def twin_fit(model, cal: Calibration, batch, noise, heights, solver=None, chunk_
     solver = solver if solver is not None else GaussNewtonLBFGS()
     sub = on_model_device(batch, model).subset(torch.tensor(cal.beads.used))
     mirrored = twin(model, cal.shared())
+    model = twin_model(model)
     if starts is not None:          # per emitter of ``batch``, [E, S]
         found, _ = localise_from_starts(model, mirrored, sub, noise, np.asarray(starts)[np.asarray(cal.beads.used)])
     else:
