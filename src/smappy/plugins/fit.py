@@ -285,10 +285,10 @@ class GaussianModelSettings:
 class SplineModelSettings:
     """An experimental PSF from a bead calibration (.h5, or SMAP's ``_3dcal.mat``): adds z."""
     calibration: str = param("", label="calibration", kind="open_file",
-                             file_filter="Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat)",
-                             help="the bead calibration of this microscope: an "
-                                  ".h5 from the Localize tab's Bead calibration, or a "
-                                  "SMAP _3dcal.mat")
+                             file_filter="Bead calibrations or fitted files (*.h5 *.hdf5 *_3dcal.mat *.mat)",
+                             help="empty: auto, the calibration listed for this file's microscope "
+                                  "and state (the menu: all found); a bead calibration .h5 or a SMAP "
+                                  "_3dcal.mat; or a fitted .h5, for the calibration it was fitted with")
     z_start_nm: float = param(0.0, label="start z", unit="nm", advanced=True,
                               help="where each fit starts in z, relative to "
                                    "the calibration's focal plane")
@@ -518,6 +518,77 @@ class _FitPlugin(Plugin):
     def model(self, settings, camera: CameraMetadata):
         raise NotImplementedError
 
+    # ---------------------------------------------------------- the calibration on auto
+    #: "single" or "dual" for a fitter that reads a bead calibration (`model.calibration`): then an
+    #: empty field is *auto* (`calibration_list`), and a fitted file stands for its calibration
+    calibration_kind: Optional[str] = None
+
+    def found_calibrations(self, settings) -> list:
+        """``[(entry, matching)]`` for this file (`calibration_list.find`): the data's microscope,
+        its devices' states, its camera and EM gain, and the day it was taken.  Kept per file and
+        state of the list, since the form asks with every change."""
+        from .. import calibration_list
+        from ..microscope_db import acquisition_date
+        path = settings.source.path
+        listed = calibration_list.list_path()
+        stamp = listed.stat().st_mtime if listed.exists() else 0
+        key = (path, stamp, settings.camera.microscope, settings.camera.camera)
+        if getattr(self, "_found_key", None) == key:
+            return self._found_value
+        scope, em_on, day = None, None, None
+        try:
+            resolved = self.resolution(settings)
+        except Exception:
+            resolved = None
+        if resolved is not None:
+            camera = resolved.camera_metadata()
+            scope, em_on = camera.microscope, camera.em_on
+            if resolved.microscope is not None:
+                day = acquisition_date(resolved.microscope.metadata or {})
+        found = calibration_list.find(scope, em_on, self.calibration_kind == "dual", path, day)
+        self._found_key, self._found_value = key, found
+        return found
+
+    def with_calibration(self, settings, ctx: Optional[Context] = None):
+        """``settings`` with the calibration this run fits with written in: *auto*'s pick for an
+        empty field, the calibration a fitted file was fitted with for one of those.  The settings
+        handed back (and so the history and the file) name the file used, never "auto"."""
+        if self.calibration_kind is None or not settings.source.path:
+            return settings
+        from .. import calibration_list
+        chosen = settings.model.calibration
+        tell = ctx.report if ctx is not None else (lambda text: None)
+        if chosen:
+            recorded = calibration_list.recorded_calibration(chosen)
+            if recorded is None:
+                return settings
+            if not Path(recorded).is_file():
+                raise ValueError(f"{Path(chosen).name} was fitted with {recorded}, which is not "
+                                 f"there any more")
+            tell(f"calibration: {Path(recorded).name}, as {Path(chosen).name} was fitted with")
+            return replace(settings, model=replace(settings.model, calibration=recorded))
+        found = self.found_calibrations(settings)
+        if not found or not found[0][1]:
+            kind = "dual-colour" if self.calibration_kind == "dual" else "bead"
+            others = (f"; {len(found)} other{'s' if len(found) != 1 else ''} listed, for "
+                      f"another microscope or state (choose one from the menu)" if found else "")
+            raise ValueError(f"no {kind} calibration listed for this file's microscope and state"
+                             f"{others}: make one with PSF calibration, or choose a file")
+        entry = found[0][0]
+        tell(f"calibration on auto: {entry.label()}")
+        return replace(settings, model=replace(settings.model, calibration=entry.path))
+
+    def _calibration_form(self, settings, state) -> None:
+        """What the form shows for *auto*: the pick as the field's hint, every one found in its menu."""
+        if self.calibration_kind is None or not settings.source.path:
+            return
+        found = self.found_calibrations(settings)
+        state.choices["model.calibration"] = [
+            (e.path, e.label() if ok else f"{e.label()} -- not this microscope or state")
+            for e, ok in found]
+        state.hints["model.calibration"] = (f"auto: {found[0][0].label()}" if found and found[0][1]
+                                            else "auto: none listed for this microscope and state")
+
     def _model_telling(self, ctx: Context, settings, camera: CameraMetadata):
         """`model`, with what it warned about said where the user reads it.
 
@@ -620,6 +691,10 @@ class _FitPlugin(Plugin):
             pass
         try:
             state.notice = self._notice(settings)
+        except Exception:
+            pass
+        try:
+            self._calibration_form(settings, state)
         except Exception:
             pass
         try:
@@ -875,6 +950,10 @@ class _FitPlugin(Plugin):
         """
         from ..camera import to_photons
 
+        try:
+            settings = self.with_calibration(settings)
+        except ValueError:
+            pass                       # the model says why, below, and the candidates still show
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
@@ -1013,6 +1092,7 @@ class _FitPlugin(Plugin):
         from ..io.hdf5 import LocalizationWriter
         from ..live import camera_extent
 
+        settings = self.with_calibration(settings, ctx)
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
@@ -1060,6 +1140,9 @@ class _FitPlugin(Plugin):
         ctx.emit("start", {"extent": camera_extent(camera, source.shape),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
+        if self.calibration_kind is not None and "calibration" not in record:
+            # a two-channel model is two splines and records neither: the file it came from
+            record["calibration"] = {"file": str(settings.model.calibration)}
         record["acquisition"] = acquisition(source)
         writer = None
         if out is not None:
@@ -1319,8 +1402,11 @@ class DualModelSettings(_LinkedChannels):
     """A dual-colour calibration, and which parameters the channels share."""
     FIFTH_LINK = "link_z"
     calibration: str = param("", label="calibration", kind="open_file",
-                             file_filter="Dual-colour calibration (*.h5 *.hdf5)",
-                             help="from Bead calibration in *Dual colour* mode")
+                             file_filter="Dual-colour calibrations or fitted files (*.h5 *.hdf5)",
+                             help="empty: auto, the dual-colour calibration listed for this file's "
+                                  "microscope and state (the menu: all found); one from PSF "
+                                  "calibration in Dual colour mode; or a fitted .h5, for the one it "
+                                  "was fitted with")
     link_xy: bool = _link_xy()
     link_z: bool = param(True, label="link z",
                          help="one z for both channels: this is the sqrt(2)")
@@ -1346,7 +1432,14 @@ class DualModelSettings(_LinkedChannels):
 
 
 @dataclass
-class DualSplineFitSettings(_Finishing, _Writing, _Reading):
+class _SplineTransform:
+    """Spline 3D 2C's registration, where the 2D form has its own (`_Transform`); the class is defined
+    below, with the 2D form's: the calibration's PSFs, another registration."""
+    transform: SplineTransformSettings = field(default_factory=lambda: SplineTransformSettings())
+
+
+@dataclass
+class DualSplineFitSettings(_Finishing, _Writing, _SplineTransform, _Reading):
     model: DualModelSettings = field(default_factory=DualModelSettings)
 
 
@@ -1375,6 +1468,7 @@ class SplineFit(_FitPlugin):
     # 4: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
     # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     version = "5"
+    calibration_kind = "single"
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
@@ -1437,15 +1531,130 @@ class _TwoChannelFit(_FitPlugin):
             self._loaded = None
 
     def run(self, ctx: Context, settings) -> Result:
+        settings = self.with_calibration(settings, ctx)
         measured = self.measure(ctx, settings)
         return self._reading_once(
             settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
             measured)
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        try:
+            settings = self.with_calibration(settings)
+        except ValueError:
+            pass
         return self._reading_once(
             settings, lambda: super(_TwoChannelFit, self).preview(ctx, settings,
                                                                   frame))
+
+    # ------------------------------------------------------------ calibrate
+    def _calibrate(self, ctx: Context, settings):
+        """Fit the first frames plainly, register the pairs, save the result.
+
+        Deliberately the *same* detection and camera settings as the real fit:
+        the registration has to describe the peaks the fit will go on to pair,
+        and a threshold set here and not there would register on a different
+        population than it serves.
+        """
+        from ..calibrate.transform import register_channels
+
+        from ..locs import concat
+
+        src = settings.source
+        provisional = settings.transform.provisional_split(settings)
+        source = _open(replace(src, live=False), watch=False)
+        camera = settings.camera.resolve(source)
+        last = min(src.stop, source.n_frames) if src.stop else source.n_frames
+        blocks = calibration_blocks(src.start, last,
+                                    settings.transform.calibrate_frames,
+                                    settings.transform.calibrate_blocks,
+                                    settings.transform.calibrate_skip)
+        ctx.report("calibrating the channel transformation")
+
+        # a context of its own: the calibration pass must not push its blocks
+        # into the live view the real fit is about to draw into
+        quiet = Context(progress=lambda _: None)
+        want = int(settings.transform.calibrate_locs)
+
+        def fit_range(start, stop):
+            plain = GaussianFitSettings(
+                source=replace(src, start=start, stop=stop, live=False),
+                camera=settings.camera, detection=settings.detection,
+                model=GaussianModelSettings(sigma=self._start_sigma(settings)),
+                # a transformation is a statement about the camera, and is
+                # fitted in chip pixels: the nm columns over the pixel size
+                fit=settings.fit,
+                output=OutputSettings(save=False, raw_frames=0))
+            # the provisional split only decides which half a localization is
+            # in, for the threshold and for the count; the seam the fit will
+            # actually use is measured by the registration afterwards
+            plain_fit = GaussianFit()
+            plain_fit.finder = lambda s, c, sp=provisional: _replace_split(
+                s.detection.finder(s.fit.n_threads), sp, c)
+            return plain_fit.run(quiet, plain).locs
+
+        # One small block first, only to find out how dense this sample is.
+        # Stopping early once the count is reached would be the obvious thing
+        # and is wrong: on a bright dataset the very first block satisfies it,
+        # and the frames then all come from one place -- which is exactly the
+        # spreading this went to the trouble of arranging.  So the probe sets
+        # how *many* frames are needed, and they are spread regardless.
+        probe_start, probe_stop = blocks[0][0], min(blocks[0][0] + 100, last)
+        probe = fit_range(probe_start, probe_stop)
+        rate = (_dim_channel_count([probe], provisional)
+                / max(probe_stop - probe_start, 1)) if probe is not None else 0
+        if rate > 0:
+            needed = int(min(max(want / rate, 100),
+                             settings.transform.calibrate_frames))
+            blocks = calibration_blocks(src.start, last, needed,
+                                        settings.transform.calibrate_blocks,
+                                        settings.transform.calibrate_skip)
+        ctx.report(f"{rate:.0f} localizations per frame in the dimmer channel: "
+                   f"taking {sum(b - a for a, b in blocks):,} frames in "
+                   f"{len(blocks)} block(s) between {blocks[0][0]:,} and "
+                   f"{blocks[-1][1]:,}")
+
+        parts, used, dim = [], 0, 0
+        for start, stop in blocks:
+            part = fit_range(start, stop)
+            used += stop - start
+            if part is not None and len(part):
+                parts.append(part)
+        dim = _dim_channel_count(parts, provisional) if parts else 0
+        if not parts:
+            raise ValueError("the calibration pass found no localizations; check "
+                             "the detection cutoff")
+        locs = concat(parts) if len(parts) > 1 else parts[0]
+        enough = "" if dim >= want else f" -- wanted {want:,}, the movie ran out"
+        ctx.report(f"registering {len(locs):,} localizations from {used:,} frames "
+                   f"({dim:,} in the dimmer channel{enough})")
+        # in chip pixels, which the table records the size of
+        from ..locs import in_pixels
+        x, y = in_pixels(locs, "x_pix", "y_pix")
+        result = register_channels(
+            x, y, np.asarray(locs["frame"]), source.shape[-2:],
+            camera.roi, settings=settings.transform.registration,
+            progress=ctx.report,
+            precision=(in_pixels(locs, "xy_err_pix")
+                       if "xy_err_nm" in locs else None))
+
+        if settings.transform.save_calibration:
+            out = settings.output.resolve(src.path)
+            if out is None:
+                # saving the localizations is off, but the transformation was
+                # still asked for: it belongs beside the movie it describes,
+                # not in whatever directory the process happens to be in
+                out = default_output_path(src.path)
+            path = out.with_name(out.name.rsplit(".", 1)[0] + "_2ct.h5")
+            result.save(path, overwrite=True)
+            ctx.report(f"transformation saved to {path}")
+        p = result.transform.parameters
+        ctx.report(f"registered on {p['n_inliers']:,} pairs, residual "
+                   f"dx {p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
+        return result.transform
+
+    def _start_sigma(self, settings) -> float:
+        """The Gaussian width the calibration pass's plain fit starts from, px."""
+        return 1.3
 
     def region_counterparts(self, settings, camera, shapes) -> list:
         """A shape drawn on one half applies to both (`dualfit.region_counterparts`).
@@ -1519,13 +1728,34 @@ class DualSplineFit(_TwoChannelFit):
     # 8: a fit region drawn on one half applies to both
     version = "8"
     Settings = DualSplineFitSettings
+    calibration_kind = "dual"
 
     def registration_path(self, settings) -> str:
-        return settings.model.calibration
+        return f"{settings.model.calibration}|{settings.transform.path}"
 
     def read_registration(self, settings):
-        """The dual-colour calibration: the registration and both PSFs."""
-        return settings.model.load()
+        """The dual-colour calibration: both PSFs, and its registration or the file's in place of it."""
+        from ..calibrate.dual import with_registration
+        calibration = settings.model.load()
+        if settings.transform.path:
+            return with_registration(calibration, settings.transform.load())
+        return calibration
+
+    def measure(self, ctx: Context, settings):
+        """The calibration's PSFs with the registration measured from this movie, when asked: the
+        splitter moves between bead calibrations, the PSFs hardly.  Measured with the calibration's
+        layout and main channel, so that each PSF stays on the half it was made from
+        (`dual.with_registration` refuses one that does not)."""
+        if not settings.transform.calibrate:
+            return None
+        from ..calibrate.dual import with_registration
+        calibration = settings.model.load()
+        g = calibration.geometry
+        given = settings.transform.registration
+        fixed = replace(settings, transform=replace(settings.transform, registration=replace(
+            given, layout=g.get("layout", given.layout), main_channel=g.get("main_channel",
+                                                                           given.main_channel))))
+        return with_registration(calibration, self._calibrate(ctx, fixed))
 
     def model(self, settings, camera):
         return settings.model.model(self.registration(settings), camera)
@@ -1731,6 +1961,18 @@ class DualGaussianModelSettings(_LinkedChannels):
 
 
 @dataclass
+class SplineTransformSettings(ChannelTransformSettings):
+    """Spline 3D 2C's registration: the calibration's own, a file's, or one measured from the movie;
+    the PSFs are always the calibration's."""
+    path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
+                      help="empty: the calibration's own; a _2ct.h5 to use instead, with the "
+                           "calibration's PSFs")
+    calibrate: bool = param(False, label="measure from this movie",
+                            help="keep the calibration's PSFs and measure where the second channel is "
+                                 "from this movie: for a splitter moved since the beads")
+
+
+@dataclass
 class _Transform:
     """The part only the 2D two-colour form has, between its two halves."""
     transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
@@ -1790,6 +2032,9 @@ class DualGaussianFit(_TwoChannelFit):
         """
         return self._calibrate(ctx, settings) if settings.transform.calibrate else None
 
+    def _start_sigma(self, settings) -> float:
+        return float(settings.model.sigma)
+
     def preflight(self, ctx: Context, settings):
         """No plain "start anyway": without a transformation the fit cannot
         pair the channels and fails at once, so the one useful answer besides
@@ -1809,109 +2054,3 @@ class DualGaussianFit(_TwoChannelFit):
             "cancel and choose a file.",
             choices=(PreflightChoice("Calibrate from this movie", calibrated),),
             run_label="")
-
-    # ------------------------------------------------------------ calibrate
-    def _calibrate(self, ctx: Context, settings):
-        """Fit the first frames plainly, register the pairs, save the result.
-
-        Deliberately the *same* detection and camera settings as the real fit:
-        the registration has to describe the peaks the fit will go on to pair,
-        and a threshold set here and not there would register on a different
-        population than it serves.
-        """
-        from ..calibrate.transform import register_channels
-
-        from ..locs import concat
-
-        src = settings.source
-        provisional = settings.transform.provisional_split(settings)
-        source = _open(replace(src, live=False), watch=False)
-        camera = settings.camera.resolve(source)
-        last = min(src.stop, source.n_frames) if src.stop else source.n_frames
-        blocks = calibration_blocks(src.start, last,
-                                    settings.transform.calibrate_frames,
-                                    settings.transform.calibrate_blocks,
-                                    settings.transform.calibrate_skip)
-        ctx.report("calibrating the channel transformation")
-
-        # a context of its own: the calibration pass must not push its blocks
-        # into the live view the real fit is about to draw into
-        quiet = Context(progress=lambda _: None)
-        want = int(settings.transform.calibrate_locs)
-
-        def fit_range(start, stop):
-            plain = GaussianFitSettings(
-                source=replace(src, start=start, stop=stop, live=False),
-                camera=settings.camera, detection=settings.detection,
-                model=GaussianModelSettings(sigma=settings.model.sigma),
-                # a transformation is a statement about the camera, and is
-                # fitted in chip pixels: the nm columns over the pixel size
-                fit=settings.fit,
-                output=OutputSettings(save=False, raw_frames=0))
-            # the provisional split only decides which half a localization is
-            # in, for the threshold and for the count; the seam the fit will
-            # actually use is measured by the registration afterwards
-            plain_fit = GaussianFit()
-            plain_fit.finder = lambda s, c, sp=provisional: _replace_split(
-                s.detection.finder(s.fit.n_threads), sp, c)
-            return plain_fit.run(quiet, plain).locs
-
-        # One small block first, only to find out how dense this sample is.
-        # Stopping early once the count is reached would be the obvious thing
-        # and is wrong: on a bright dataset the very first block satisfies it,
-        # and the frames then all come from one place -- which is exactly the
-        # spreading this went to the trouble of arranging.  So the probe sets
-        # how *many* frames are needed, and they are spread regardless.
-        probe_start, probe_stop = blocks[0][0], min(blocks[0][0] + 100, last)
-        probe = fit_range(probe_start, probe_stop)
-        rate = (_dim_channel_count([probe], provisional)
-                / max(probe_stop - probe_start, 1)) if probe is not None else 0
-        if rate > 0:
-            needed = int(min(max(want / rate, 100),
-                             settings.transform.calibrate_frames))
-            blocks = calibration_blocks(src.start, last, needed,
-                                        settings.transform.calibrate_blocks,
-                                        settings.transform.calibrate_skip)
-        ctx.report(f"{rate:.0f} localizations per frame in the dimmer channel: "
-                   f"taking {sum(b - a for a, b in blocks):,} frames in "
-                   f"{len(blocks)} block(s) between {blocks[0][0]:,} and "
-                   f"{blocks[-1][1]:,}")
-
-        parts, used, dim = [], 0, 0
-        for start, stop in blocks:
-            part = fit_range(start, stop)
-            used += stop - start
-            if part is not None and len(part):
-                parts.append(part)
-        dim = _dim_channel_count(parts, provisional) if parts else 0
-        if not parts:
-            raise ValueError("the calibration pass found no localizations; check "
-                             "the detection cutoff")
-        locs = concat(parts) if len(parts) > 1 else parts[0]
-        enough = "" if dim >= want else f" -- wanted {want:,}, the movie ran out"
-        ctx.report(f"registering {len(locs):,} localizations from {used:,} frames "
-                   f"({dim:,} in the dimmer channel{enough})")
-        # in chip pixels, which the table records the size of
-        from ..locs import in_pixels
-        x, y = in_pixels(locs, "x_pix", "y_pix")
-        result = register_channels(
-            x, y, np.asarray(locs["frame"]), source.shape[-2:],
-            camera.roi, settings=settings.transform.registration,
-            progress=ctx.report,
-            precision=(in_pixels(locs, "xy_err_pix")
-                       if "xy_err_nm" in locs else None))
-
-        if settings.transform.save_calibration:
-            out = settings.output.resolve(src.path)
-            if out is None:
-                # saving the localizations is off, but the transformation was
-                # still asked for: it belongs beside the movie it describes,
-                # not in whatever directory the process happens to be in
-                out = default_output_path(src.path)
-            path = out.with_name(out.name.rsplit(".", 1)[0] + "_2ct.h5")
-            result.save(path, overwrite=True)
-            ctx.report(f"transformation saved to {path}")
-        p = result.transform.parameters
-        ctx.report(f"registered on {p['n_inliers']:,} pairs, residual "
-                   f"dx {p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
-        return result.transform

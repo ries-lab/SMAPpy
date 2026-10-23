@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration]
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration]
 ---
 
 ## What it does
@@ -41,7 +41,9 @@ What it needs:
   carried over; the spline is, turned round if it was mirrored).  Take
   the beads with the same objective, lens, filters, camera and camera
   settings as the data; a calibration from another day is fine as long as
-  none of these changed.
+  none of these changed.  Left empty, *calibration* is *auto*: the
+  calibration made for this microscope in the state the data were taken in
+  is found and used (*Parameters*).
 * **The camera**, exactly as for the Gaussian fitter: the conversion to
   photons must be right, or every photon count and every precision is off.
 * **Sparse enough data**: an emitter with a neighbour inside its
@@ -299,6 +301,22 @@ calibration brings its own coefficients):
 ### model.calibration
 Made once per microscope configuration, with the objective, filters and
 camera settings of the data.
+
+Empty, it is *auto*, and the field says in grey which calibration that is.
+Every calibration *PSF calibration* saves is kept in a list, as a link to
+its file, with the microscope its beads were taken on: the entry and its
+setup version, the state of each device the PSF depends on (the 3D lens,
+the filters), the camera and EM gain on or off.  *auto* takes one that
+matches the data on all of these -- the one taken nearest in time to the
+data -- and calibrations saved in the data's folder or the folder above it
+are found too, without being listed.  A calibration that matches none of
+this is never taken on *auto*: one of another lens state fits, badly, without
+an error.  ▾ beside the field, or a right click in it, lists every
+calibration found, those that do not match marked, and *auto*.
+
+A fitted `.h5` works here too: the fit uses the calibration that file was
+fitted with, as its file recorded it.  A calibration moved or deleted since
+is refused, naming it.
 
 ### fit.roisize
 At least 2 pixels smaller than the calibration laterally (the Bead

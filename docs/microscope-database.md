@@ -454,6 +454,23 @@ and pixel, as before; the NA, the emission and the immersion are read by *PSF ca
 and in situ learning alone, which refuse without them.  A microscope nobody recognises, or a
 device in no state, blocks nothing: the pixel falls back to the camera's or the file's.
 
+## Remembering calibrations (2026-10-23)
+
+Decided with Jonas:
+
+* **A list of calibrations, as links** (`smappy/calibration_list.py`, `calibrations.json` in the
+  configuration folder): every calibration *PSF calibration* saves, with the beads' microscope summary
+  (entry, setup version, device states, camera), EM gain and the beads' day.  The window describes it,
+  since a bead average records no microscope in its file.
+* **The spline fitters' *calibration* empty is *auto***: the listed calibration -- or one beside the data,
+  its folder and the parent -- that matches the data's microscope, version, followed device states,
+  camera, EM gain and channel count, nearest in time to the data; shown in grey in the field, all found in
+  a menu (▾, right click).  Never one that does not match.  A fitted `.h5` stands for the calibration its
+  provenance records.  No age warning.
+* **Spline 3D 2C, *measure from this movie***: the calibration's PSFs with a registration measured as Gaussian
+  2D 2C measures it, with the calibration's layout and main channel; another main channel is refused
+  (`dual.with_registration`), so each PSF stays on its half.
+
 ## Next
 
 * Manual elements, when needed (above).

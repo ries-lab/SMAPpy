@@ -529,7 +529,10 @@ wavelength.
 
 ### Use in the Spline 3D fitter
 Puts the saved calibration into the fitter again (it is put there when it is
-saved).  For dual colour, the Spline 3D 2C fitter.
+saved).  For dual colour, the Spline 3D 2C fitter.  Every saved calibration is
+also listed, with the microscope and the device states of its beads, so that
+a fitter left on *auto* finds it for data taken the same way, without this
+button ([Spline 3D](plugin:Localize/Spline 3D)).
 
 ### Exclude / include
 Marks the selected beads for the next *Calibrate*: a bead to be left out,

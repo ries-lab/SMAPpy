@@ -1,6 +1,6 @@
 ---
 version: "8"
-covers: [smappy.dualfit.region_counterparts, smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
+covers: [smappy.dualfit.region_counterparts, smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations]
 ---
 
 ## What it does
@@ -48,7 +48,10 @@ What it needs:
   holds everything the fit needs about the two halves -- which half is which,
   the transformation between them (the [registration](plugin:Panels/Glossary),
   also called channel alignment), and a PSF model for each.  A
-  single-channel calibration or a SMAP `_3dcal.mat` will not do.
+  single-channel calibration or a SMAP `_3dcal.mat` will not do.  Left
+  empty, *calibration* is *auto*, as in [Spline 3D](plugin:Localize/Spline 3D).
+  When the splitter has moved since the beads, the PSFs still hold: *measure
+  from this movie* keeps them and measures the registration again.
 * **The camera**, as for any fit.
 * **Sparse data**, as for [Spline 3D](plugin:Localize/Spline 3D): a
   neighbour inside the [fit box](plugin:Panels/Glossary) (also called ROI
@@ -389,12 +392,32 @@ departs from the publication:
 
 ### model.calibration
 Made once per microscope configuration: the same objective, dichroic,
-filters, camera settings and split as the data.  It records whether the beads
+filters, camera settings and split as the data.  Empty, it is *auto*, the
+dual-colour calibration listed for this microscope and state, as in
+[Spline 3D](plugin:Localize/Spline 3D); ▾ or a right click lists all found,
+and a fitted `.h5` stands for the calibration it was fitted with.  It records whether the beads
 were taken with EM gain, and data taken the other way is warned about (an EM
 register mirrors the image, and the PSF with it).  The first frames are
 checked against its geometry: a calibration made on another camera ROI is
 refused, and a movie with no camera ROI in its metadata is taken to start at
 the chip's corner, with a warning.
+
+### transform.path
+A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
+registration, used in place of the calibration's own; the PSFs are still the
+calibration's.  It must put the main channel on the same half as the
+calibration does, or the fit refuses: each PSF was made from its own half.
+Ignored when *measure from this movie* is ticked.
+
+### transform.calibrate
+For a splitter that moved since the beads -- the residuals of *link xy*
+off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
+plain Gaussian over both halves and registered, with the calibration's
+layout and main channel, so that each PSF stays on its half; then the real
+fit runs with the calibration's PSFs and this registration.
+
+### transform.calibrate_skip
+Set it to 0 for a movie that does not start with everything on.
 
 ### model.link_xy
 Unlinked, each half fits its own position.  The table's position is the

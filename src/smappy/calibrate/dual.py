@@ -596,6 +596,24 @@ class DualColorCalibration(_Mapping):
         check_geometry(self.geometry, shape, roi)
 
 
+def with_registration(calibration: DualColorCalibration, transform) -> DualColorCalibration:
+    """``calibration``'s two PSFs with ``transform``'s registration (a `ChannelTransform`): a splitter
+    that moved since the beads, the PSFs not.  The main channel and the layout must be the
+    calibration's -- the main PSF was made from the main half, and fitted on the other it describes
+    the wrong light -- so another is refused, not swapped."""
+    for key in ("layout", "main_channel"):
+        mine, theirs = calibration.geometry.get(key), transform.geometry.get(key)
+        if mine is not None and theirs is not None and mine != theirs:
+            raise ValueError(f"the registration's {key.replace('_', ' ')} is {theirs}, the calibration's "
+                             f"{mine}: its PSFs would be fitted on the wrong halves")
+    combined = DualColorCalibration(calibration.main, calibration.secondary,
+                                    np.asarray(transform.transformation, float), dict(transform.geometry),
+                                    dict(calibration.parameters,
+                                         registration=dict(getattr(transform, "parameters", {}) or {})))
+    combined.polynomial = getattr(transform, "polynomial", None)
+    return combined
+
+
 @dataclass
 class DualBeads:
     channels: list

@@ -715,7 +715,29 @@ class PSFCalibrationWindow(QMainWindow):
         self.marks = self.method.initial_marks(value)
         self._show_result()
         if value.saved is not None:
+            self._list_calibration(value.saved, value.dual)
             self.calibrated.emit(str(value.saved), value.dual)
+
+    def _list_calibration(self, path, dual: bool) -> None:
+        """Add a saved calibration to the list the fitters' *auto* chooses from (`calibration_list`),
+        described by the beads' microscope as this window resolved it -- a bead average does not
+        record it in its file -- and the day they were taken."""
+        from .. import calibration_list
+        from ..io.tiff import camera_tags, open_stack
+        from ..microscope_db import acquisition_date
+        camera = getattr(self, "optics_camera", None)
+        made = None
+        try:
+            day = acquisition_date(camera_tags(open_stack(self.paths[0]))) if self.paths else None
+            made = day.isoformat() if day else None
+        except Exception:
+            pass
+        try:
+            calibration_list.add(path, microscope=getattr(camera, "microscope", None) or None,
+                                 em_on=getattr(camera, "em_on", None), dual=dual, made=made,
+                                 method=self.method.label)
+        except Exception as error:                 # the list is a convenience: never the save's failure
+            print(f"PSF calibration: could not list {path}: {error}")
 
     def _inputs(self) -> dict:
         run = self.run_form.value()
@@ -1147,6 +1169,7 @@ class PSFCalibrationWindow(QMainWindow):
             return
         self._update_buttons()
         self.status_bar.showMessage(f"saved {saved}")
+        self._list_calibration(saved, self.run_result.dual)
         self.calibrated.emit(str(saved), self.run_result.dual)
 
     def _use_in_fitter(self) -> None:

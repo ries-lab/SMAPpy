@@ -44,7 +44,7 @@ def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place()
     shared = ["source", "camera", "detection", "region", "model", "fit", "output"]
     assert list(GaussianFit.specs()) == shared
     assert list(SplineFit.specs()) == shared
-    assert list(DualSplineFit.specs()) == shared + ["finish"]
+    assert list(DualSplineFit.specs()) == shared[:5] + ["transform"] + shared[5:] + ["finish"]
     assert list(DualGaussianFit.specs()) == (shared[:5] + ["transform"]
                                              + shared[5:] + ["finish"])
     # the model is each fitter's own, and the two-channel ones share links

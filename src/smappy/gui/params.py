@@ -159,7 +159,11 @@ class _Field(QWidget):
         self._refill(self._supplied if self._supplied is not None else choices())
 
     def set_choices(self, choices) -> None:
-        """The list the plugin works out from the session; see `Plugin.describe`."""
+        """The list the plugin works out from the session; see `Plugin.describe`.  For a path, what
+        was found for it (a fitter's calibrations): offered in a menu, ▾ and a right click."""
+        if self.spec.info.kind in ("open_file", "dir"):
+            self._offer_paths(list(choices))
+            return
         if not isinstance(self.widget, QComboBox):
             return
         self._supplied = list(choices)
@@ -210,6 +214,37 @@ class _Field(QWidget):
             self.reset_button.setVisible(not on)
             self.reset_button.setEnabled(not self.locked)
 
+    def _offer_paths(self, choices: list) -> None:
+        self._found_paths = choices
+        if getattr(self, "found_button", None) is None:
+            self.found_button = QToolButton(text="\u25be", autoRaise=True)
+            self.found_button.setToolTip("the files found for this: choose one, or auto")
+            self.found_button.clicked.connect(lambda: self._path_menu().exec(
+                self.found_button.mapToGlobal(self.found_button.rect().bottomLeft())))
+            self.layout().insertWidget(self.layout().indexOf(self.widget) + 1, self.found_button)
+            self.widget.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.widget.customContextMenuRequested.connect(
+                lambda at: self._path_menu().exec(self.widget.mapToGlobal(at)))
+        self.found_button.setVisible(bool(choices))
+
+    def _path_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        auto = menu.addAction("auto" + (f" -- {self.widget.placeholderText()[6:]}"
+                                         if self.widget.placeholderText().startswith("auto: ") else ""))
+        auto.triggered.connect(lambda: self._take_path(""))
+        menu.addSeparator()
+        for value, label in getattr(self, "_found_paths", []):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value == self.widget.text())
+            action.triggered.connect(lambda _=False, v=value: self._take_path(v))
+        return menu
+
+    def _take_path(self, value: str) -> None:
+        self.widget.setText(value)
+        self.changed.emit()
+
     def _on_auto(self, on: bool) -> None:
         self._enable()
         if on and (self._hint or self._typed_over) and isinstance(self.widget, QLineEdit):
@@ -240,6 +275,10 @@ class _Field(QWidget):
                                              for i in range(self.widget.count()))))
             shown = labels.get(value, None if value is None else str(value))
             self.widget.setItemText(0, f"auto ({shown})" if shown else "auto")
+            return
+        if self.spec.info.kind in ("open_file", "dir") and isinstance(self.widget, QLineEdit):
+            # an empty path that something stands in for: said in grey, inside the field
+            self.widget.setPlaceholderText("" if value is None else str(value))
             return
         if self.auto is None or not isinstance(self.widget, QLineEdit):
             return
