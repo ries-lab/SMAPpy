@@ -240,7 +240,7 @@ def read_date(text: Any) -> Optional[_dt.date]:
 
 
 #: the parts of an entry a version can hold: tables by name, and the camera
-SECTIONS = ("devices", "parameters", "channels")
+SECTIONS = ("devices", "parameters", "channels", "pupils")
 SCALARS = ("camera",)
 
 
@@ -276,6 +276,9 @@ class Microscope:
     channels: List[Channel] = field(default_factory=list)
     camera: str = ""
     versions: List[Dict[str, Any]] = field(default_factory=list)
+    #: the objective's pupil, learnt from beads, by the state of the 3D lens (`pupil_key`): the
+    #: Zernikes of phase (nm) and magnitude, what in situ learning starts from (`pupil_of`)
+    pupils: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # ------------------------------------------------------------ identifying
     def identifies(self, metadata: Dict[str, Any]) -> bool:
@@ -425,6 +428,7 @@ class Microscope:
             channels=[Channel.from_dict(str(k), v) for k, v in channels.items()],
             camera=str(raw.get("camera", "")),
             versions=[dict(v) for v in (raw.get("versions") or [])],
+            pupils={str(k): dict(v) for k, v in (raw.get("pupils") or {}).items()},
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -438,9 +442,31 @@ class Microscope:
             out["channels"] = {c.name: c.to_dict() for c in self.channels}
         if self.camera:
             out["camera"] = self.camera
+        if self.pupils:
+            out["pupils"] = copy.deepcopy(self.pupils)
         if self.versions:
             out["versions"] = copy.deepcopy(self.versions)
         return out
+
+    # ------------------------------------------------------------- the objective
+    def lens_device(self) -> Optional[str]:
+        """The device the PSF's shape follows -- the 3D lens: what ``modality`` or ``astigmatism_nm``
+        follows -- or None for a microscope without one."""
+        for name in ("modality", "astigmatism_nm"):
+            raw = self.parameters.get(name)
+            if isinstance(raw, dict) and "device" in raw:
+                return str(raw["device"])
+        return None
+
+    def pupil_key(self, states: Dict[str, Any]) -> str:
+        """Where a pupil learnt in ``states`` ({device: state}) is kept: ``3DA: on``, or ``all``."""
+        device = self.lens_device()
+        if device is None or states.get(device) is None:
+            return "all"
+        return f"{device}: {states[device]}"
+
+    def pupil_for(self, states: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return self.pupils.get(self.pupil_key(states)) or self.pupils.get("all")
 
 
 @dataclass
@@ -641,6 +667,38 @@ def database(reload: bool = False) -> MicroscopeDatabase:
             warnings.warn(f"{path} could not be read: {error}", stacklevel=2)
     _cache = found
     return _cache
+
+
+def pupil_of(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The objective's pupil for a file's microscope (a `MicroscopeResolution.summary`): the entry as
+    it stood in the file's setup version, for the state its 3D lens was in; None when not kept."""
+    if not summary or not summary.get("name"):
+        return None
+    entry = database().get(str(summary["name"]))
+    if entry is None:
+        return None
+    until = read_date(summary.get("version")) if summary.get("version") else None
+    if until is not None:
+        entry = entry.as_of(until - _dt.timedelta(days=1))
+    return entry.pupil_for(summary.get("states") or {})
+
+
+def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tuple:
+    """Keep ``pupil`` with the microscope ``summary`` names, for the state of its 3D lens, in the
+    user's file (`save_microscope`: the entry before kept as a dated version).  Returns (the key, the
+    file).  Only for the current setup: a pupil of an older one would describe another camera."""
+    if not summary or not summary.get("name"):
+        raise ValueError("no microscope recognised for these beads: choose one first")
+    if summary.get("version"):
+        raise ValueError(f"these beads were taken with {summary['name']}'s setup until "
+                         f"{summary['version']}, not its current one")
+    entry = database().get(str(summary["name"]))
+    if entry is None:
+        raise ValueError(f"{summary['name']} is not in the microscope database")
+    entry = copy.deepcopy(entry)
+    key = entry.pupil_key(summary.get("states") or {})
+    entry.pupils[key] = dict(pupil)
+    return key, save_microscope(entry, path)
 
 
 def revision() -> int:

@@ -184,3 +184,24 @@ def test_the_window_offers_in_situ_with_its_own_section_and_finds_molecules_in_a
     assert states[0] == "used" and any(s.startswith("rejected") for s in states)
     assert window.stack_browser.movie and window.stack_browser.positions
     window.close()
+
+
+def test_a_pupil_kept_from_a_model_starts_in_situ_where_that_model_ended():
+    # every Zernike, phase in nm so that it holds at another wavelength; the astigmatism typed wins
+    import math
+    from types import SimpleNamespace
+
+    from smappy.calibrate.insitu_run import start_shared
+    from smappy.calibrate.pupil import objective_pupil
+    model, shared = model_and_shared()
+    kept = objective_pupil(SimpleNamespace(model=model, shared=lambda: shared), source="beads_3dcal.h5")
+    modes = model.psf.pupil.phase_modes
+    assert kept["phase_nm"]["6"] == pytest.approx(0.7 * 680 / (2 * math.pi), abs=1e-3)
+    assert set(kept["phase_nm"]) == {str(j) for j in modes} and kept["source"] == "beads_3dcal.h5"
+    start, previous = start_shared(model, "", 0.0, 680.0, kept)
+    assert previous is None and torch.allclose(start["pupil.phase"], shared["pupil.phase"], atol=1e-4)
+    # at another emission the same wavefront is other radians
+    longer, _ = start_shared(model, "", 0.0, 2 * 680.0, kept)
+    assert torch.allclose(longer["pupil.phase"], shared["pupil.phase"] / 2, atol=1e-4)
+    typed, _ = start_shared(model, "", 40.0, 680.0, kept)
+    assert float(typed["pupil.phase"][modes.index(6)]) == pytest.approx(2 * math.pi * 40 / 680)

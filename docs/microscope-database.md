@@ -454,7 +454,7 @@ and pixel, as before; the NA, the emission and the immersion are read by *PSF ca
 and in situ learning alone, which refuse without them.  A microscope nobody recognises, or a
 device in no state, blocks nothing: the pixel falls back to the camera's or the file's.
 
-## Remembering calibrations (2026-10-23)
+## Remembering calibrations and the objective (2026-10-23)
 
 Decided with Jonas:
 
@@ -470,6 +470,10 @@ Decided with Jonas:
 * **Spline 3D 2C, *measure from this movie***: the calibration's PSFs with a registration measured as Gaussian
   2D 2C measures it, with the calibration's layout and main channel; another main channel is refused
   (`dual.with_registration`), so each PSF stays on its half.
+* **The objective's pupil in the entry** (`pupils`, by the 3D lens's state, a section a version holds):
+  every Zernike of phase (nm) and magnitude and the blur, from *Add to microscope...* after a pupil model
+  or in situ run; in situ starts from it without *start from*, its Noll 6 over `astigmatism_nm`.  We do
+  not swap objectives, so one per entry.
 
 ## Next
 

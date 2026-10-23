@@ -288,6 +288,11 @@ class PSFCalibrationWindow(QMainWindow):
         self.use_button = QPushButton("Use in the Spline 3D fitter")
         self.use_button.setToolTip("put the saved calibration into the fitter's calibration field")
         self.use_button.clicked.connect(self._use_in_fitter)
+        self.keep_button = QPushButton("Add to microscope...")
+        self.keep_button.setToolTip("keep this model's pupil -- every Zernike of phase and magnitude -- with "
+                                    "the microscope, for the state of its 3D lens: in situ learning starts "
+                                    "from it")
+        self.keep_button.clicked.connect(self._keep_pupil)
         steps = QHBoxLayout()
         steps.addWidget(self.detect_button)
         steps.addWidget(self.run_button)
@@ -295,7 +300,7 @@ class PSFCalibrationWindow(QMainWindow):
         layout.addLayout(steps)
         layout.addWidget(self.found_label)
         layout.addWidget(self.progress_bar)
-        for button in (self.save_as_button, self.use_button):
+        for button in (self.save_as_button, self.use_button, self.keep_button):
             layout.addWidget(button)
         layout.addStretch(1)
         return panel
@@ -519,6 +524,50 @@ class PSFCalibrationWindow(QMainWindow):
         self.halves_button.setEnabled(done and not self.busy and why is None)
         self.halves_button.setToolTip(why or self._halves_tip)
         self.use_button.setEnabled(done and not self.busy and self.run_result.saved is not None)
+        learnt = done and self._learnt() is not None
+        self.keep_button.setVisible(learnt)
+        self.keep_button.setEnabled(learnt and not self.busy)
+
+    def _learnt(self):
+        """The uipsf model of the last run -- a pupil model's or in situ's -- or None (a bead average)."""
+        result = getattr(self.run_result, "result", None)
+        try:
+            cal = getattr(result, "cal", None)
+        except Exception:
+            return None
+        return cal if cal is not None and hasattr(cal, "shared") else None
+
+    def _keep_pupil(self) -> None:
+        """*Add to microscope...*: the run's pupil kept with the microscope the beads were taken on, for
+        the state of its 3D lens (`microscope_db.keep_pupil`), after saying what and where."""
+        from .. import microscope_db
+        from .pupil import objective_pupil
+        cal = self._learnt()
+        scope = getattr(getattr(self, "optics_camera", None), "microscope", None) or {}
+        if cal is None:
+            return
+        source = str(self.run_result.saved or (self.paths[0] if self.paths else ""))
+        pupil = objective_pupil(cal, source=Path(source).name)
+        entry = microscope_db.database().get(str(scope.get("name") or ""))
+        key = entry.pupil_key(scope.get("states") or {}) if entry is not None else "?"
+        before = entry.pupils.get(key) if entry is not None else None
+        text = (f"Keep this pupil with {scope.get('name') or 'no microscope'}, for {key}: "
+                f"{len(pupil['phase_nm'])} phase and {len(pupil['magnitude'])} magnitude Zernikes, "
+                f"learnt at {pupil['wavelength_nm']:g} nm.  In situ learning starts from it."
+                + (f"\n\nIt replaces the one from {before.get('source') or '?'} ({before.get('date')}), "
+                   f"which is kept in a dated version of the entry." if before else ""))
+        if self._confirm(text) != QMessageBox.Ok:
+            return
+        try:
+            key, path = microscope_db.keep_pupil(scope, pupil)
+        except Exception as error:
+            self.error(error)
+            return
+        self.status_bar.showMessage(f"{scope.get('name')}: pupil for {key} kept in {path}")
+
+    def _confirm(self, text: str):
+        """Ask before a change to the user's microscope file (a test answers it)."""
+        return QMessageBox.question(self, "Add to microscope", text, QMessageBox.Ok | QMessageBox.Cancel)
 
     # --------------------------------------------------------------- files
     def _refresh_files(self) -> None:

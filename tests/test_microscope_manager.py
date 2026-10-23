@@ -312,3 +312,43 @@ def test_the_astigmatism_field_shows_only_when_neither_the_entry_nor_a_start_mod
     assert form.labels["astigmatism_nm"].styleSheet() == "color: #c07000"
     assert form.more_section.button.isChecked() and form.row_layouts["astigmatism_nm"].isRowVisible(field)
     window.close()
+
+
+# ------------------------------------------- the objective's pupil, kept with the microscope
+
+PUPIL = {"phase_nm": {"5": -2.0, "6": 58.0, "11": 21.0}, "magnitude": {"1": 0.0, "11": 0.12},
+         "wavelength_nm": 676.0, "source": "beads_3dcal.h5", "date": "2026-10-23"}
+
+
+def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_survives_the_manager(
+        app, tmp_path, config):
+    from smappy.calibrate.insitu_run import InSituModelSettings, start_astigmatism
+    from smappy.gui.microscope_editor import MicroscopeManager
+    from smappy.io.tiff import open_stack
+    from smappy.plugins.fit import CameraSettings
+
+    def scope(tags, name):
+        source = open_stack(a_tiff(tmp_path / f"{name}_MMStack.ome.tif", tags))
+        return CameraSettings().resolve(source, require=False)
+    beads = scope(M2_BEADS, "beads")
+    key, path = microscope_db.keep_pupil(beads.microscope, PUPIL)
+    assert key == "3DA: on" and path == microscope_db.user_file()
+    assert microscope_db.pupil_of(beads.microscope)["phase_nm"]["11"] == 21.0
+    assert microscope_db.pupil_of(scope(M2_MOVIE, "movie").microscope) is None      # the lens out
+    # in situ's start astigmatism: the pupil's, over the entry's +62
+    assert start_astigmatism(InSituModelSettings(), beads)[0] == 58.0
+    # the entry before is kept, dated; an edit in the manager carries the pupil through
+    entry = microscope_db.database().get("M2")
+    assert entry.versions[-1]["pupils"] == {"3DA: on": None}
+    manager = MicroscopeManager()
+    manager.show_entry(entry)
+    assert "3DA: on" in manager.pupils_label.text()
+    assert manager.entry().pupils == entry.pupils
+    manager.close()
+
+
+def test_a_pupil_is_kept_only_for_a_recognised_microscope_in_its_current_setup(config):
+    with pytest.raises(ValueError, match="no microscope recognised"):
+        microscope_db.keep_pupil({}, PUPIL)
+    with pytest.raises(ValueError, match="setup until 2026-07-15"):
+        microscope_db.keep_pupil({"name": "M2", "version": "2026-07-15", "states": {}}, PUPIL)

@@ -159,6 +159,10 @@ def start_astigmatism(insitu: InSituModelSettings, camera=None) -> tuple[Optiona
     if insitu.astigmatism_nm is not None:
         return float(insitu.astigmatism_nm), "typed"
     scope = getattr(camera, "microscope", None) or {}
+    from ..microscope_db import pupil_of
+    kept = (pupil_of(scope) or {}).get("phase_nm") or {}
+    if "6" in kept:
+        return float(kept["6"]), f"{scope.get('name')}'s objective pupil, for its 3D lens"
     value = (scope.get("values") or {}).get("astigmatism_nm")
     if value is not None:
         return float(value), f"{scope.get('name')}'s, for its 3D lens"
@@ -166,9 +170,11 @@ def start_astigmatism(insitu: InSituModelSettings, camera=None) -> tuple[Optiona
                   else "no microscope recognised")
 
 
-def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_nm: float):
-    """(shared start values, the start model or None): a previous model's (*start from*), else the vertical
-    astigmatism typed in, in radians of the emission wavelength."""
+def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_nm: float, pupil=None):
+    """(shared start values, the start model or None): a previous model's (*start from*), else the
+    objective's pupil kept with the microscope (``pupil``, `microscope_db.pupil_of`: every Zernike of
+    phase and magnitude the model has) with the vertical astigmatism over it, in radians of the emission
+    wavelength."""
     import torch
     if run_start_from:
         from uipsf.workflows import start_values
@@ -176,11 +182,24 @@ def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_n
         from .pupil import load_start
         previous = load_start(run_start_from)
         return start_values(model, previous), previous
-    pupil = model.psf.pupil
-    phase = torch.zeros(len(pupil.phase_modes), dtype=model.psf.grid.rho.dtype)
-    if astigmatism_nm and 6 in pupil.phase_modes:
-        phase[pupil.phase_modes.index(6)] = 2 * math.pi * float(astigmatism_nm) / float(wavelength_nm)
-    return {"pupil.phase": phase}, None
+    zernikes = model.psf.pupil
+    dtype = model.psf.grid.rho.dtype
+    phase = torch.zeros(len(zernikes.phase_modes), dtype=dtype)
+    out = {}
+    if pupil:
+        for i, j in enumerate(zernikes.phase_modes):
+            nm = (pupil.get("phase_nm") or {}).get(str(j))
+            if nm is not None:
+                phase[i] = 2 * math.pi * float(nm) / float(wavelength_nm)
+        if len(zernikes.magnitude_modes) and pupil.get("magnitude"):
+            magnitude = torch.zeros(len(zernikes.magnitude_modes), dtype=dtype)
+            for i, j in enumerate(zernikes.magnitude_modes):
+                magnitude[i] = float(pupil["magnitude"].get(str(j), 0.0))
+            out["pupil.magnitude"] = magnitude
+    if astigmatism_nm and 6 in zernikes.phase_modes:
+        phase[zernikes.phase_modes.index(6)] = 2 * math.pi * float(astigmatism_nm) / float(wavelength_nm)
+    out["pupil.phase"] = phase
+    return out, None
 
 
 # ------------------------------------------------------------------ the spline
@@ -285,7 +304,9 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     astigmatism, why = start_astigmatism(insitu, rois.camera)
     if astigmatism is None and not run.start_from:
         raise ValueError(f"give the start's astigmatism (in situ, more) or a model to start from: {why}")
-    start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm)
+    from ..microscope_db import pupil_of
+    start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm,
+                                   pupil_of(getattr(rois.camera, "microscope", None)))
     result_focus = None
     if insitu.focus_nm is None:
         tell({"message": "estimating the focus from the molecules on the coverslip"})

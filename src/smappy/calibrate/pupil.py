@@ -442,6 +442,37 @@ def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 2
     return DualColorCalibration(main, secondary, _transform(learned), dict(learned.geometry), dict(record))
 
 
+def objective_pupil(cal, source: str = "") -> dict:
+    """What a learnt model says about the objective, to keep with the microscope (`microscope_db.
+    keep_pupil`): every Zernike of the main channel's pupil -- phase in nm of wavefront, so that it
+    holds at another emission wavelength, and magnitude as learnt -- with the blur, the optics it was
+    learnt with and where it came from.  All of them, though a consumer may use only some: they are a
+    few dozen numbers, and which are worth taking is the consumer's question (in situ takes them as its
+    start, `insitu_run.start_shared`)."""
+    import datetime as _dt
+    import math
+
+    import numpy as np
+    model = cal.model
+    psf = model.channels[0].psf if hasattr(model, "channels") else model.psf
+    shared = cal.shared()
+    optics = psf.grid.optics
+    wavelength = float(optics.wavelength_nm)
+    phase = np.asarray(shared["pupil.phase"].detach().cpu(), float)
+    out = {"phase_nm": {str(j): round(float(v) * wavelength / (2 * math.pi), 3)
+                        for j, v in zip(psf.pupil.phase_modes, phase, strict=True)},
+           "magnitude": {}, "wavelength_nm": wavelength, "NA": float(optics.NA),
+           "n_immersion": float(optics.n_imm), "source": str(source),
+           "date": _dt.date.today().isoformat()}
+    if "pupil.magnitude" in shared:
+        magnitude = np.asarray(shared["pupil.magnitude"].detach().cpu(), float)
+        out["magnitude"] = {str(j): round(float(v), 5)
+                            for j, v in zip(psf.pupil.magnitude_modes, magnitude, strict=True)}
+    if "psf.sigma" in shared:
+        out["sigma_nm"] = [round(float(v), 2) for v in np.asarray(shared["psf.sigma"].detach().cpu()).ravel()]
+    return out
+
+
 def model_path(path) -> Path:
     """Where the model file goes beside a calibration: ``x_3dcal.h5`` -> ``x_3dcal.uipsf.h5``."""
     path = Path(path)

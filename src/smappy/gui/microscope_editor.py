@@ -236,6 +236,13 @@ class MicroscopeManager(QWidget):
         self.save_button.clicked.connect(self.save)
         save_row.addWidget(self.save_button)
         right.addLayout(save_row)
+        # the objective's pupils (`Microscope.pupils`): kept by PSF calibration's *Add to
+        # microscope...*, not typed; said here, and carried through an edit of the rest
+        self.pupils_label = QLabel("")
+        self.pupils_label.setStyleSheet("color: gray")
+        self.pupils_label.setWordWrap(True)
+        right.addWidget(self.pupils_label)
+        self._pupils = {}
         self.message = QLabel("")
         self.message.setWordWrap(True)
         right.addWidget(self.message)
@@ -320,6 +327,11 @@ class MicroscopeManager(QWidget):
         for table in self.tables.values():
             table.blockSignals(False)
         self._versions = list(entry.versions)
+        self._pupils = dict(entry.pupils)
+        self.pupils_label.setText(
+            "objective pupil: " + "; ".join(f"{key} (from {p.get('source') or '?'}, {p.get('date') or '?'})"
+                                            for key, p in self._pupils.items())
+            if self._pupils else "no objective pupil kept: PSF calibration's Add to microscope... keeps one")
         self.versions_label.setText(
             "versions until " + ", ".join(str(v.get("until")) for v in self._versions)
             if self._versions else "no older versions")
@@ -352,6 +364,7 @@ class MicroscopeManager(QWidget):
                                        else side.strip()}
                          for arm, filter_, side in rows("channels") if arm.strip()},
             "camera": self.camera.currentData() or "", "versions": self._versions,
+            "pupils": self._pupils,
         }
         return Microscope.from_dict(raw)
 

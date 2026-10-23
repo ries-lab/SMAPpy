@@ -108,6 +108,12 @@ is what decides which way is up, so a camera mounted turned by 90 degrees has
 the other.  *follows* a
 device: `state: value; ...`, or `from the name` for a filter.
 
+
+Under the tables, in grey, the objective's pupils kept with the entry, one
+per state of the 3D lens, each with the calibration it came from and its
+date.  They are not typed: *PSF calibration*'s *Add to microscope...* keeps
+one from a pupil model, and an edit of the rest of the entry carries them
+through.  In situ learning starts from the one for its movie's lens state.
 ### channels
 The arms of a split, the transmitted one first -- it is the one used alone,
 when the splitting dichroic is out.  Each names the device that holds its
