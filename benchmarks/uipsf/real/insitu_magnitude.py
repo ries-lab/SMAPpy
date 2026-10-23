@@ -38,6 +38,8 @@ import numpy as np
 import torch
 
 NA, N_IMM, N_MED, WAVELENGTH_NM, PIXEL = 1.43, 1.516, 1.33, 676.0, (127.0, 116.0)
+#: the background per molecule: "constant", or "planar" (a level and a slope, `uipsf.model.background.Planar`)
+BACKGROUND = "constant"
 ORDER, BEAD_NM = 8, 100.0
 
 
@@ -117,7 +119,7 @@ def patch_insitu_model(kind: str, coefficients: dict, phase_above: int | None = 
     """`uipsf.workflows.insitu_model` replaced for this process by one whose pupil holds the beads'
     magnitude (``kind`` bead, bead-symmetric, bead-nonsymmetric; ``free`` holds none) and, with
     ``phase_above``, the beads' phase modes of radial order above it (``phase``, {Noll: rad})."""
-    if kind == "free" and phase_above is None:
+    if kind == "free" and phase_above is None and BACKGROUND == "constant":
         return
     import uipsf.workflows as wf
     from uipsf.optics.zernike import noll_to_nm, zernike_basis
@@ -144,6 +146,9 @@ def patch_insitu_model(kind: str, coefficients: dict, phase_above: int | None = 
                 pupil.phase_basis = pupil.phase_basis[keep]
                 phase_base = fixed_map(grid, fixed)
             based_pupil(pupil, fixed_map(grid, held), phase_base)
+        if BACKGROUND == "planar":
+            from uipsf.model.background import Planar
+            m.background = Planar(o.pixel_size_nm)
         return m
 
     wf.insitu_model = model
@@ -252,7 +257,8 @@ def learn(args):
     torch.save({"shared": {k: torch.as_tensor(v).detach().cpu() for k, v in cal.shared().items()},
                 "used": np.asarray(result.run.rounds[-1].used), "magnitude_kind": args.magnitude, "start": args.start,
                 "model": args.model, "order": ORDER, "hold_phase_above": args.hold_phase_above,
-                "subset": [args.subset, args.subsets], "max_haze": args.max_haze, "shape_k": args.shape_k},
+                "subset": [args.subset, args.subsets], "max_haze": args.max_haze, "shape_k": args.shape_k,
+                "background": BACKGROUND},
                run_path(args.rois, args.magnitude, args.start, args.model, run_tag(args)))
 
 
@@ -261,6 +267,7 @@ def run_tag(args) -> str:
     tag = "" if ORDER == 8 else f"_o{ORDER}"
     tag += "" if args.max_haze is None else f"_haze{args.max_haze:g}"
     tag += "" if args.shape_k is None else f"_shape{args.shape_k:g}"
+    tag += "" if BACKGROUND == "constant" else f"_{BACKGROUND}"
     tag += "" if args.hold_phase_above is None else f"_h{args.hold_phase_above}"
     return tag + ("" if args.subsets <= 1 else f"_s{args.subset}of{args.subsets}")
 
@@ -351,6 +358,7 @@ def score(args):
                   model=os.path.basename(r.get("model", args.model)), order=ORDER,
                   hold_phase_above=r.get("hold_phase_above"), subset=r.get("subset"),
                   learnt_max_haze=r.get("max_haze"), learnt_shape_k=r.get("shape_k"), scored_max_haze=args.max_haze,
+                  learnt_background=r.get("background", "constant"), scored_background=BACKGROUND,
                   focus_nm=round(focus, 1), sigma_nm=_np(r["shared"]["psf.sigma"]).round(2), **summary(loc, d, pixels)),
              args.out)
 
@@ -406,7 +414,7 @@ def beadfit(args):
                   sigma_nm=_np(shared["psf.sigma"]).round(2), **summary(loc, d, pixels)), args.out)
 
 def main():
-    global WAVELENGTH_NM, PIXEL, ORDER
+    global WAVELENGTH_NM, PIXEL, ORDER, BACKGROUND
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="step", required=True)
     b = sub.add_parser("beads")
@@ -460,12 +468,14 @@ def main():
     for p in (b, d, le, sc, bf):
         p.add_argument("--wavelength", type=float, default=WAVELENGTH_NM, help="emission, nm")
         p.add_argument("--order", type=int, default=ORDER, help="the Zernike order of the model learnt")
+        p.add_argument("--background", choices=("constant", "planar"), default=BACKGROUND,
+                       help="each molecule's background: a level, or a level and a slope (learning and scoring)")
         p.add_argument("--pixel", type=float, nargs=2, default=PIXEL, metavar=("X", "Y"),
                        help="nm on the sample: 127 116 for M2's iXon, 116 127 for its Evolve")
         p.add_argument("--out", default=None)
         p.add_argument("--memory", type=float, default=0.3, help="MPS memory fraction (the Mac is shared)")
     args = ap.parse_args()
-    WAVELENGTH_NM, PIXEL, ORDER = args.wavelength, tuple(args.pixel), args.order
+    WAVELENGTH_NM, PIXEL, ORDER, BACKGROUND = args.wavelength, tuple(args.pixel), args.order, args.background
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     {"beads": beads, "detect": detect, "learn": learn, "score": score, "beadfit": beadfit}[args.step](args)
