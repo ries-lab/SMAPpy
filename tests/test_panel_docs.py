@@ -7,6 +7,7 @@ label on the page must be a label the panel really shows, so a control that is
 renamed or removed fails this test rather than leaving the page describing a
 button nobody can find.
 """
+import importlib.util
 import inspect
 import re
 
@@ -70,8 +71,12 @@ def test_every_panel_has_a_page():
 
 @pytest.mark.parametrize("path", sorted(PANELS))
 def test_what_a_panel_page_says_it_covers_exists(path):
+    # uipsf's workflows import torch, an extra: without it they are not
+    # importable, as uipsf's own tests are not collected (`conftest.py`)
+    torch = importlib.util.find_spec("torch") is not None
     for dotted in docs.page_for(docs.panels()[path]).covers:
-        docs.resolve(dotted)
+        if torch or not dotted.startswith("uipsf."):
+            docs.resolve(dotted)
 
 
 @pytest.mark.parametrize("path", sorted(PANELS))

@@ -30,6 +30,22 @@ has already changed -- `NOTES.md` most often.  If you have already started,
 `git stash push -u` first so new untracked files come along, and rebuild
 afterwards if `csrc/` moved.
 
+## Remind the user to release
+
+Users get SMAPpy from PyPI, and the GUI's update check (`smappy/updates.py`)
+offers only a release there -- a change on `main` reaches nobody who
+installed with pip until it is released.  So, **at the end of a session
+that finished major work, an important fix, or the last of many small
+fixes since the last release, remind the user to make a release** --
+in one line of the summary, saying what has gathered since the last tag
+(`git log --oneline $(git describe --tags --abbrev=0)..origin/main`).
+Do not release yourself: a tag publishes to PyPI, which cannot be taken back.
+
+A release is: `version` in `pyproject.toml` raised (and pushed to `main`),
+then an annotated tag of that commit, `git tag -a vX.Y.Z -m "smappy-smlm
+X.Y.Z"` and `git push origin vX.Y.Z`; `.github/workflows/wheels.yml` builds
+the wheels on every platform, tests them and publishes them to PyPI.
+
 ## Getting the checkout to run
 
 A fresh container has **no numpy**.  Before anything else:
