@@ -1677,3 +1677,127 @@ molecule localised on it from the same heights (Δnats = Δdeviance / 2 against 
   in the cell; the coverslip is not where most of them are.
 
 One set of molecules only; the spread between subsets is not measured.
+
+## In situ on matched M2 pairs: magnitude, orders and what breaks it (October 2026)
+
+`benchmarks/uipsf/real/insitu_magnitude.py` (learning, scoring) and `bead_slices.py` (beads slice by slice);
+results in `benchmarks/uipsf/results/`: `insitu_magnitude.jsonl`, `insitu_orders.jsonl`,
+`insitu_paint_filters.jsonl`, `bead_slices.jsonl`.  Three bead / movie pairs of M2, each with the camera's
+clocks matched (EM gain 25 for beads, 100 for movies), NA 1.43, oil 1.516, sample 1.33, order 8 unless said:
+
+| pair | movie | camera, pixel (nm) | emission | molecules learnt / held out | photons, background (ph/px) |
+|---|---|---|---|---|---|
+| January | `260105_AA_CLTA-B-SNAP_AF647_C8_638i75_UVi20_25ms_3D_1`, dSTORM, 25 ms | Evolve, 116 × 127 | 680 | 1884 / 216 | ~3100, 55 |
+| dual-channel | `260821_AASJ_sun1_mRuby_pS8_CF_him8_A647_3D_2`, the right (brighter) half | iXon, 127 × 116 | 680 | 1806 / 218 | ~3800, 426 |
+| DNA-PAINT | `260917_AA_CLC-SNAP-BG-5xR2_Cy3B_561i20_PCAD_3D_200ms_1`, HiLo, 200 ms | iXon, 127 × 116 | 580 | 1718 / 200 | ~3700, 23 |
+
+**First, check that the movie is astigmatic like its beads.**  log₂(σx/σy) of the brightest half of a
+movie's detections, 25–75 %: −0.85 to +0.88 (January), −0.93 to +0.61 (dual), −0.24 to +0.79 (DNA-PAINT),
+against −0.6 … −1.2 to +0.7 … +0.9 for bead slices; the mismatched pair above, −0.08 to +0.13.  Cheap, and
+it caught the one thing that made every result of that pair meaningless.  A split chip is cut to one channel
+by `CalibrationSettings.region` / `InSituSettings.region` (hidden settings, scripts only so far).
+
+**The beads, slice by slice** (`bead_slices.py`, the user's idea).  A bead does not move while the stage
+steps through it, so each slice localised alone on the learnt model (`scoring.slice_fits`) should give the
+same x, y and a z on the stage's line; what a model gets wrong shows as x, y wandering and z bending through
+focus.  Systematic error (median over beads per slice, rms within ±600 nm), x / y / z in nm, with the
+nats lost against the best model:
+
+| magnitude, blur | January | dual-channel | DNA-PAINT beads (561) | Δnats |
+|---|---|---|---|---|
+| free, free | 2.1 / 1.0 / **2.7** | 2.9 / 1.3 / **2.6** | 1.2 / 1.0 / **2.9** | 0 |
+| symmetric, free | 7.3 / 6.2 / **2.1** | 3.0 / 3.7 / **3.7** | 5.9 / 2.0 / **2.9** | 24 k–109 k |
+| uniform, free | 7.7 / 6.5 / 26.5 | 5.9 / 2.3 / 28.6 | 7.8 / 2.1 / 38.4 | 404 k–607 k |
+| free, σ = 0 | 3.0 / 1.8 / 11.5 | 3.2 / 5.4 / 16.4 | 1.7 / 3.0 / 13.5 | 239 k–459 k |
+
+The symmetric magnitude and σ keep z straight; the non-symmetric magnitude only x and y, by 3–7 nm.  The
+symmetric magnitude barely changes across days, cameras and colours: over these three bead sets and the five
+earlier iXon days (`lab_beads.jsonl`), Noll 11 / 22 / 37 lie in −0.06 … −0.10 / −0.05 … −0.07 / −0.03 …
+−0.04, and Noll 4 in −0.04 … −0.14, moving with σ: the objective's transmission, as the user reads it.  A bead set learnt with only the symmetric modes gives the same m = 0 values within ~0.01.  The
+beads' spread over halves (`half_split_uncertainty`) is small: phase ≤ 0.006 rad, σ 2–4 nm.  A free blur
+must start above 0 (30 nm): at 0 its transform cannot move it.
+
+**In situ on the clean pairs: robust, and better than the bead model.**  Eleven models per pair -- the
+magnitude free, its m ≠ 0 or m = 0 part held, all held, each from the beads' pupil and from a cold start,
+and the bead model learnt with only symmetric modes, held whole or its m = 0 part with m ≠ 0 learnt -- scored
+on the held-out molecules, Δnats per molecule against the best (1 nat per molecule ≈ moving each by 1.4
+CRLB):
+
+| in situ model | dual-channel, bead / cold start | January, bead / cold start |
+|---|---|---|
+| magnitude free | 1.03 / 1.24 | 0.09 / 0.05 |
+| beads' m ≠ 0 held | **0** / 0.54 | 0.52 / 0.56 |
+| beads' m = 0 held | 0.96 / 0.81 | 0.05 / **0** |
+| beads' whole magnitude held | 0.54 / 0.91 | 0.65 / 0.65 |
+| symmetric bead model, held whole | 0.66 / 0.91 | 0.70 / 0.74 |
+| symmetric bead model, m = 0 held, m ≠ 0 learnt | 0.94 / – | 0.19 / – |
+| the bead model as it is, the focus scanned | 2.21 | 6.58 |
+
+- *Robust*: starts end within ~0.5 nats per molecule, the focus settles in 2–4 rounds with the coverslip
+  edge at 0 ± 30 nm, the twin test agrees with the beads' sign, and on January a free magnitude learns the
+  beads' phase astigmatism (−0.695 against −0.683) and symmetric magnitude (Noll 11 −0.074 against −0.072)
+  from the molecules alone.  Deviance per pixel 1.04 (dual) and 1.10 (January).
+- *In situ beats the bead model* by 2.2 and 6.6 nats per molecule, mostly through σ and the focus.  σ comes
+  out *below* the beads' (dual σy 41 against 63 nm; January σx 54–63 against 75): part of the beads' blur may
+  be the beads, not the microscope.
+- *A free symmetric magnitude trades with the focus*, through the supercritical light only molecules near the
+  coverslip send: with m ≠ 0 held, Noll 4 / 11 came out +0.02 / −0.08 from the beads' start and −0.21 / −0.32
+  from cold, the focus 140 nm apart.  The beads' symmetric magnitude held whole removes it (the two starts'
+  focus within 6 nm) at 0.7–0.9 nats per molecule; holding its m = 0 part and learning m ≠ 0 is within
+  0.05–0.94 of the best and lets the data add a small astigmatic magnitude (January: Noll 5 / 6 ≈ −0.05,
+  beads ≈ 0).  All magnitude choices lie within ~1 nat per molecule of each other.
+- *The high-order phase is loose on every pair*: over the eleven runs the phase differs by 0.3–0.45 rad rms
+  (41 modes) against per-mode CRLBs of 0.004–0.007, and the runs still score within ~1 nat per molecule.
+  In situ Zernikes are not comparable with the beads' mode by mode; the held-out score is the measure.
+
+**Which orders in situ: cross-validated.**  Each pair's molecules split by molecule into three disjoint sets
+(`--subset`), each learnt at phase order 4, 6 and 8 and with the beads' modes above 4 or 6 held
+(`--hold-phase-above`), the symmetric bead model's magnitude held in all; scored on the common held-out
+molecules, Δ per molecule against the best single run (mean of the three sets, range):
+
+| phase in situ | January | dual-channel |
+|---|---|---|
+| order 4 | 4.02 (3.95–4.05) | 1.55 (1.51–1.58) |
+| order 6 | 1.09 (1.08–1.12) | 0.79 (0.63–0.98) |
+| order 8 | **0.11** (0–0.27) | **0.49** (0–1.00) |
+| order 4, beads above | 3.72 | 1.21 |
+| order 6, beads above | 1.08 | 0.53 (0.44–0.59) |
+
+The sets' agreement, sd between sets against the coefficients' rms: order 6, 0.004–0.006 against 0.09–0.76
+(January) and 0.013–0.016 against 0.04–0.06 (dual): signal on both.  Order 8, 0.014–0.039 against
+0.08–0.74 (January): still signal; 0.05–0.16 against 0.01–0.18 (dual): largely noise, the astigmatism
+scattering by 0.14 rad and the held-out score by set from 0 to 1.0.  The likely difference is the
+background, 426 against 55 photons per pixel at similar photons per molecule.  The beads' high orders gain
+little over dropping them (0.3 above order 4, 0–0.26 above 6): the molecules' fine structure is not the
+beads'.  At orders 6 and 8 the in situ astigmatism moves 0.26–0.29 rad from the beads' while staying
+reproducible between sets -- a difference of the sample or a direction the molecules fix the same way every
+time; agreement between sets cannot tell.  So: order 6 by default, the beads' modes above held (no cost,
+steadier); order 8 only where disjoint sets agree.
+
+**DNA-PAINT: the background, not the PSF.**  Every model fits it at 2.34–2.54 deviance per pixel and the
+results swing with the start (up to 22 nats per molecule, focus 506–2027 nm), σ widening to 82–107 nm against
+the beads' 71 × 58.  The free imagers' haze: the edge pixels of each molecule's region scatter 1.87 times
+what the noise allows (median per molecule 1.36, 90 % 4.76), against 1.05 (dual) and 1.18 (January) --
+close to the deviance per pixel of each (2.34, 1.04, 1.10).  The model's flat background per molecule cannot follow it.
+Filters (`--max-haze`, `--shape-k`), the beads' symmetric magnitude held, Δ per molecule on all 200 held-out
+and on the 54 clean ones (edge ratio ≤ 1.2):
+
+| filter when learning | all held-out, bead / cold | clean held-out, bead / cold | focus (nm) | Noll 6 |
+|---|---|---|---|---|
+| none | 0.51 / 0 | 0.91 / 0 | 623 / 717 | 0.74 / 0.77 |
+| background ≤ 1.2 | 2.16 / 0.26 | 0.97 / 1.77 | 1203 / 931 | 1.08 / 0.07 |
+| shape 1.5 sd after round 1 | 1.04 / 0.99 | 0.48 / 0.56 | 583 / 588 | 0.75 / 0.76 |
+| both | 77 / 121 | 40 / 61 | 3720 / 4756 | runaway |
+
+The stricter shape test makes the starts agree; the background filter alone does not, and both together
+leave a biased set that runs away.  The clean molecules fit at 1.32 per pixel against 2.38 for all: the haze
+is most of it, but not all, and σ stays ~87 × 70 nm in every variant.  Untested: a sloped background per
+molecule, motion within a 200 ms frame (a linker), Cy3B's emission against the 561 beads'.
+
+**Known flaws of the scripts' variants**: the twin test mirrors the learnt modes but not a held map, so its
+verdict is not fair with a held magnitude or phase (a −200 nats "prefer twin" there is that); the z bins below
+the coverslip fill with poorly localised molecules (heights are not bounded at 0).
+
+**Open**: which focus is right (held and free magnitude differ by ~100 nm on January; needs a sample of
+known height); why σ in situ is below the beads' (bead size?); the residual 1.3 per pixel of clean DNA-PAINT
+molecules; holding the symmetric magnitude in the PSF calibration window (now script-only).

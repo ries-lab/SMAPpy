@@ -98,7 +98,13 @@ when a milestone lands or an item moves.
    cylindrical lens (its metadata: 3DA out, the beads' in), its bright spots round (log₂(σx/σy) −0.08 to +0.13,
    beads −0.57 to +0.70); to be repeated on 260821's 3D movie and beads, both with the lens in.  As measured: the beads' whole magnitude held costs 1–2 nats per
    molecule, its symmetric part nothing, neither brings σ to the beads'; a free magnitude trades its
-   astigmatism with the phase's; the focus is barely determined.  Next: hold the m ≠ 0 magnitude modes.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   astigmatism with the phase's; the focus is barely determined.  **Matched M2 pairs** (architecture.md, "In situ on matched M2
+   pairs"): on clean astigmatic data in situ is robust (starts within ~0.5 nats per molecule, the focus
+   settles) and beats the bead model by 2–7 nats per molecule; the beads' symmetric magnitude (stable across
+   days and colours, what keeps z straight on beads) held in situ is the steadiest choice; phase order 6 by
+   default, order 8 only where disjoint molecule sets agree (cross-validated); DNA-PAINT's free-imager haze
+   breaks the flat background, a stricter shape test after round 1 steadies it.  Next: a sloped background,
+   the symmetric bead magnitude and the order choice in the PSF calibration window.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
    aberration.
