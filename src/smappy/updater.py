@@ -142,13 +142,21 @@ def wait_for_exit(pid: int, timeout_s: float = WAIT_S) -> bool:
 
 
 def _zombie(pid: int) -> bool:
-    """Linux only (``/proc``): a process that has exited still answers
-    ``kill(pid, 0)`` until its parent waits for it."""
+    """A process that has exited still answers ``kill(pid, 0)`` until its
+    parent waits for it.  Linux says so in ``/proc``; macOS, which has no
+    ``/proc``, in ``ps``'s state column (``Z``)."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
+        stat = None
+    if stat is not None:
+        return stat.rsplit(")", 1)[-1].split()[:1] == ["Z"]
+    try:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                               text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
         return False
-    return stat.rsplit(")", 1)[-1].split()[:1] == ["Z"]
+    return state.startswith("Z")
 
 
 def _run(command: List[str], log) -> int:
