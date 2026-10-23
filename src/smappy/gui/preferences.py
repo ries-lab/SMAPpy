@@ -1,5 +1,5 @@
-"""Preferences: the folders scanned for plugins, the tabs, and whether
-quitting asks about unsaved changes.
+"""Preferences: the folders scanned for plugins, the tabs, whether
+quitting asks about unsaved changes and whether startup looks for updates.
 
 Both are things the user names on purpose.  One plugin folder is scanned
 without being named, the user's own (`config.user_plugin_dir`), and no tab
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogBut
                                QListWidget, QListWidgetItem, QMessageBox,
                                QPushButton, QTabWidget, QVBoxLayout, QWidget)
 
-from .. import config, plugins
+from .. import config, plugins, updates
 from ..workspace import Tab, Workspace
 
 BESPOKE = {"render": "the render view"}
@@ -93,7 +93,8 @@ class RootsPage(QWidget):
 
 
 class GeneralPage(QWidget):
-    """What the program does on its own: so far, whether quitting asks."""
+    """What the program does on its own: whether quitting asks, and whether
+    it looks for a newer version."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,6 +106,13 @@ class GeneralPage(QWidget):
         self.ask_quit.setChecked(config.ask_before_quit())
         self.ask_quit.toggled.connect(config.set_ask_before_quit)
         layout.addWidget(self.ask_quit)
+        self.check_updates = QCheckBox("check for a newer SMAPpy once a day")
+        self.check_updates.setToolTip("at startup, ask PyPI for the newest version and "
+                                      "say so if it is newer; nothing is installed, "
+                                      "and Help > Check for updates asks at any time")
+        self.check_updates.setChecked(updates.automatic())
+        self.check_updates.toggled.connect(updates.set_automatic)
+        layout.addWidget(self.check_updates)
         layout.addStretch(1)
 
 

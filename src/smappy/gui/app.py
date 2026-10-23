@@ -390,6 +390,10 @@ class ControlWindow(QMainWindow):
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
         self._action(help_, "Show the log folder", None, self.show_log_folder)
+        help_.addSeparator()
+        from .updates import Updates
+        self.updates = Updates(self)     # started by `main`, so no test asks PyPI
+        self._action(help_, "Check for updates...", None, self.updates.check_now)
         # Reset view is the render window's button, Ctrl+0 its key from either
         # window (`RenderToolBar`); a menu item as well said it twice
         self._action(view, "Show render window", None, render.show)
@@ -1795,6 +1799,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         del args[at:at + 2]
     if args:                     # after the windows: a big file takes minutes,
         control.load_paths(args, reset_view=True)   # and says so as it goes
+    control.updates.start()      # once a day at most, and a few seconds in
     return app.exec()
 
 
