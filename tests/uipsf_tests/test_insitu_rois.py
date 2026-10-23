@@ -253,7 +253,6 @@ def test_movies_are_read_until_enough_pass_but_always_spread_over_the_whole_movi
     # blocks spread over the movie gives twice that, so reading stops there -- not after the first block,
     # though it alone nearly has enough, nor after all 50
     import tifffile
-
     from smappy.calibrate import insitu_run
     from smappy.camera import CameraMetadata
     path = tmp_path / "movie.tif"
