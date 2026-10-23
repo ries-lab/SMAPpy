@@ -253,6 +253,8 @@ def _metadata(truth: GroundTruth, what: str) -> dict:
             "structure": s.structure.source(), "structure_name": truth.name,
             "n_labels": truth.n_labels, "n_emitters": len(truth.fluorophores),
             "n_blinks": len(truth.blinks), "n_frames": s.n_frames,
+            # where every reader of seconds looks (`metadata.file_frame_time`)
+            "camera": {"frame_time_ms": s.frame_time_ms},
             "off_time_frames": round(truth.blinks.off_time, 3),
             "simulation_settings": asdict(s),
             # a copy's position and turn, by its `copy` number: what a model

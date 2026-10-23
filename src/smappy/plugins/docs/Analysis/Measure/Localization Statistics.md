@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
+covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay, smappy.plugins.statistics.frame_decay, smappy.plugins.statistics.frame_counts]
 ---
 
 ## What it does
@@ -13,6 +13,9 @@ how good it is:
   CRLB or localization uncertainty) -- how well each position is known,
   laterally and, for 3D data, in z;
 * **on-time** -- for how many consecutive frames a fluorophore stays on.
+
+A second tab, **per frame**, shows how many localizations each frame holds
+over the acquisition, which shows how bleaching thins the data out.
 
 Each has the law it is expected to follow fitted over it, so a glance says
 whether the data look normal, and the fitted numbers are what to compare
@@ -168,6 +171,37 @@ event into one -- and the plugin reads the result.  It does not merge by
 itself, because merging can take minutes on a large dataset; it says so
 instead.
 
+### Per frame
+
+The localizations are counted in each frame, in about 200 windows of whole
+frames over the acquisition, and drawn as a rate: localizations per frame.
+Each visible layer is a line of its own, as the layer shows it (a layer
+that merges blinks counts blinks).
+
+If the dye bleaches at a constant rate, the count falls as
+$e^{-t/T}$, with $t$ the frame and $T$ the **decay time**, dashed over each
+line.  The plugin reports $T$ in frames, and in seconds with the frame
+time.  A count that does not fall (constant activation, or an activation
+laser turned up) has no decay time, and the plugin says so.  Two numbers
+need no model and are reported either way: the frame by which half of the
+localizations are in, and the mean count per frame in the first and in the
+last tenth of the acquisition.
+
+```figure The per frame tab for a simulated acquisition whose dye bleaches: the count per frame (solid) and the fitted decay (dashed).
+from smappy.simulate import SimulationSettings
+from smappy.plugins.statistics import frame_counts, draw_per_frame
+# a fixed activation rate, so the blinks come early and the dye bleaches
+fading = SimulationSettings(n_frames=10000, seed=2)
+fading.blinking.activation, fading.blinking.blinks, fading.blinking.bleaching = "decay", 3, 0.3
+fading = simulate(fading)
+fading = fading[np.asarray(fading["photons"]) > 200]
+fig.set_size_inches(5.5, 2.6)
+draw_per_frame(fig.subplots(), [frame_counts(fading["frame"], frame_time_ms=10.0)])
+```
+
+*Time Course* draws the same count against seconds, per file, beside other
+quantities.
+
 ## In detail
 
 **Which table.**  The one the layer shows.  A layer that merges blinks is
@@ -197,6 +231,19 @@ before the peak, interpolated between bins.
 
 **Too few.**  Below 20 values a distribution is shown without a fit.
 
+**The decay time** is the maximum likelihood estimate on the localizations'
+frames, not a fit to the drawn windows: if the count falls as $e^{-t/T}$, the
+frames are a sample of an exponential cut to the acquisition $[f_0, f_1]$, and
+$T$ solves
+
+$$\overline{f} = f_0 + T + \frac{(f_0 - f_1)\, e^{-(f_1 - f_0)/T}}{1 - e^{-(f_1 - f_0)/T}} ,$$
+
+the mean of that cut exponential, as for the photons.  A count that falls
+by less than about 10 % over the acquisition ($T$ more than ten times
+its length) is reported as no decay.  Files opened together share frame
+numbers, so their counts are added up frame by frame.  ROIs get no per
+frame tab and no number from it.
+
 ## Parameters
 
 ### bins
@@ -219,11 +266,14 @@ meaningful fit anyway.
 
 ## Output
 
-* **The figures**: one panel per distribution, as in the figure above.
+* **The figures**: one panel per distribution, as in the figure above, and
+  the *per frame* tab.
 * **Text**: the numbers, one line per distribution: $N_0$ and the mean and
   median photons; the maximum and rising edge of the precision, from the
   histogram and from the model, its median and $\sigma_c$; $\tau$ and the mean
-  on-time.  If the on-time could not be shown, the reason.
+  on-time; per layer, the decay time, the frame by which half the
+  localizations are in, and the count per frame at the start and the end.
+  If the on-time could not be shown, the reason.
 * **Per ROI**, the row each ROI gets: `n_localizations`; `mean_photons`,
   `median_photons` and `photons_n0`; `mean_precision_nm`,
   `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was

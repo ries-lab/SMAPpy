@@ -378,6 +378,9 @@ class Session:
         self._refreshing = False
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
+        # the slab's z range dragged in the 3D window while it follows the ROI,
+        # which the next ROI edit keeps; None: from the z filter
+        self.slab_z: Optional[Tuple[float, float]] = None
         self.select_in_slab = False               # plugins see only the slab
         # ... and only while the 3D window shows it: a restriction nobody can
         # see is one nobody remembers, and a plugin run an hour after the
@@ -417,6 +420,10 @@ class Session:
         # "3D"), as a `picture.ViewFrame` -- where it looks, how fine, its
         # panels -- for *Export Image* to frame its picture on
         self.view_frames: Dict[str, Callable[[], Any]] = {}
+        # what the Render tab's player shows now (`scan.Scan`), narrowing the
+        # windows' pictures and nothing else; None: everything
+        self.scan = None
+        self._scan_values = None
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True
@@ -465,7 +472,9 @@ class Session:
         "results" (a tool kept something worth drawing again), "rois" (the
         ROI manager's project), "roi-preview" (a segmenter's proposals,
         `Session.show_preview`), "name" (`rename`, or a file opened with
-        a name of its own) and "unsaved" (`set_unsaved`)."""
+        a name of its own), "unsaved" (`set_unsaved`), "files" (a file's
+        frame time, `set_frame_time`) and "scan" (the player's window,
+        `set_scan`)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -731,6 +740,32 @@ class Session:
         if colour is not None:
             self.colour = colour
         self.changed("name")
+
+    def set_frame_time(self, number: int, frame_time_ms: Optional[float]) -> None:
+        """Say what one frame of file ``number`` is in ms; None: not known.
+
+        Where everything that turns frames into seconds reads it
+        (`metadata.file_frame_time`): the file's entry, kept in the table's
+        ``metadata["files"]``.  A simulation or a bare table records none, and
+        typing it into every plugin that wants seconds was the only way.  Not
+        an undo step: the undo keeps tables, and this is one number of the
+        file, set again the same way.
+        """
+        if not 0 <= number < len(self.files):
+            raise IndexError(f"no file {number}: {len(self.files)} open")
+        value = None if not frame_time_ms or frame_time_ms <= 0 else float(frame_time_ms)
+        self.files[number].frame_time_ms = value
+        # in place: the grouped table and the layers' are shallow copies of
+        # this metadata, sharing the list, and should not wait for a relink
+        entries = self.locs.metadata.get("files")
+        if isinstance(entries, list):
+            entries[:] = [f.to_dict() for f in self.files]
+        else:
+            self.locs.metadata["files"] = [f.to_dict() for f in self.files]
+        self.log("frame time", f"{self.files[number].name}: "
+                 + (f"{value:g} ms" if value else "not known"), changed=False)
+        self.set_unsaved(True)
+        self.changed("files")
 
     def remove_file(self, number: int) -> None:
         """Drop one file's localizations; the others are renumbered densely."""
@@ -1215,7 +1250,7 @@ class Session:
         copy.files = list(self.files)
         copy.images = list(self.images)
         copy.history = list(self.history)
-        copy.roi, copy.slab = self.roi, self.slab
+        copy.roi, copy.slab, copy.slab_z = self.roi, self.slab, self.slab_z
         copy.select_in_slab = self.select_in_slab
         copy.slab_shown = self.slab_shown
         copy.projection = self.projection
@@ -1641,9 +1676,13 @@ class Session:
         return (dlo if lo is None else lo / axes.z_scale,
                 dhi if hi is None else hi / axes.z_scale)
 
-    def slab_from_roi(self, use_roi: bool = True) -> Slab:
-        """The slab from the ROI (or the whole field), z from the filter."""
-        z0, z1 = self.z_range()
+    def slab_from_roi(self, use_roi: bool = True, keep_z: bool = True) -> Slab:
+        """The slab from the ROI (or the whole field), z from the filter --
+        or, with ``keep_z``, the range dragged in the 3D window (`slab_z`).
+        Without, that range is forgotten: *from ROI* starts again."""
+        if not keep_z:
+            self.slab_z = None
+        z0, z1 = self.slab_z if keep_z and self.slab_z is not None else self.z_range()
         if use_roi and self.roi is not None:
             self.slab = Slab.from_region(self.roi, (z0, z1))
         else:
@@ -1664,6 +1703,40 @@ class Session:
         if self.slab_follows_roi:
             self.slab_from_roi()
         self.changed("roi-edited")
+
+    def slab_resized(self, slab: Slab) -> None:
+        """The slab's box dragged in the 3D window.
+
+        While it follows a line or a rectangle ROI the box is that ROI, and a
+        drag of its sides is an edit of it: the ROI is redrawn as the box's
+        footprint -- a line's ends and width -- and the z range is kept for
+        the next edit (`slab_z`).  An ROI the box cannot be (a polygon), or no
+        following, and the slab goes its own way as before.
+        """
+        roi = self.roi
+        region = (slab.footprint(roi.kind)
+                  if self.slab_follows_roi and roi is not None else None)
+        if region is None:
+            self.set_slab(slab, follow_roi=False)
+            return
+        self.slab_z = slab.axis_range(2)
+        self.set_roi(region)
+
+    def set_scan(self, scan) -> None:
+        """Show only what ``scan`` lets through in the picture windows
+        (`scan.scanned`); None shows everything again.  No filter changes
+        and no plugin sees it: it is how the data are looked at."""
+        self.scan = scan
+        self.changed("scan")
+
+    def scanned(self, snapshots):
+        """The windows' layer snapshots narrowed by the player's scan."""
+        if self.scan is None:
+            return snapshots
+        from .scan import ValueCache, scanned
+        if self._scan_values is None:
+            self._scan_values = ValueCache()
+        return scanned(snapshots, self.scan, self._scan_values)
 
     def set_slab(self, slab: Slab, follow_roi: bool = False) -> None:
         self.slab = slab
@@ -1702,7 +1775,7 @@ class Session:
             # not from the ROI: that was drawn on the old picture and is in its
             # coordinates too, so the whole field on the new axes is the only
             # box that means anything until the user draws another one
-            self.slab_from_roi(use_roi=False)
+            self.slab_from_roi(use_roi=False, keep_z=False)
         self.changed("layer")
 
     @property

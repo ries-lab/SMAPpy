@@ -39,8 +39,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from . import (Context, FormState, Plot, Plugin, Result, param, register,
-               settings_values)
+from . import (NO_FRAME_TIME, Context, FormState, Plot, Plugin, Result, frame_time_notice,
+               param, register, settings_values)
 
 # traces drawn over each other in a figure; more is a tangle
 MAX_DRAWN = 8
@@ -159,6 +159,8 @@ class Stability(Plugin):
                 ft = table_frame_time(locs)
                 if ft:
                     state.hints["frame_time_ms"] = f"{ft:g}"
+                elif not settings.frame_time_ms:
+                    state.notice = frame_time_notice()
         return state
 
     def run(self, ctx: Context, settings: StabilitySettings) -> Result:
@@ -191,8 +193,7 @@ class Stability(Plugin):
         else:
             ft = settings.frame_time_ms or table_frame_time(locs)
             if not ft:
-                raise ValueError("no frame time: the file records neither a frame "
-                                 "time nor an exposure, so set the frame time")
+                raise ValueError(NO_FRAME_TIME)
             dt_s = ft / 1000.0
             t_s = np.asarray(locs["frame"], float) * dt_s
         ctx.report("stability: traces")

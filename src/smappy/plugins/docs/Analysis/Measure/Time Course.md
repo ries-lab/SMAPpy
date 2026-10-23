@@ -82,7 +82,8 @@ from one frame to the next where the file records it (Micro-Manager's
 `ActualInterval-ms`, a time-lapse interval, SMAP's `timediff`, or the
 fitter's *frame time*), else the exposure -- the same on a camera that
 streams as fast as it can, and short by the camera's dead time on one that
-does not.  With several files open, the first file's.  The windows are still whole frames; only the
+does not; a file that records neither is given one in *File > File
+properties*.  With several files open, the first file's.  The windows are still whole frames; only the
 axis is relabelled.  A table with a clock of its own (MINFLUX's `time_s`)
 is cut into equal windows of that clock instead, and its rate is per
 second.

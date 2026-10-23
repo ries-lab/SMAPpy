@@ -106,7 +106,7 @@ def open_simulation(path) -> SimulatedSource:
               "pixelsize_um": settings.optics.pixelsize_nm / 1000.0,
               "em_on": settings.camera.em_gain > 0,
               "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
-              "camera_name": "simulation"}
+              "frame_time_ms": settings.frame_time_ms, "camera_name": "simulation"}
     return SimulatedSource(
         files=[Path(path)], shape=(size, size), dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,

@@ -435,11 +435,21 @@ it again restores it.
 Folded.  The slab's own settings, below.
 
 ### follow 2D ROI
-The slab takes its footprint from the 2D ROI every time the ROI changes.
-Editing the ranges or dragging a face unticks it.
+The slab takes its footprint from the 2D ROI every time the ROI changes, and
+the view follows the slab: centred on it, and turned with it when a line ROI
+is turned, so what one looks at stays in the middle, seen from the same side.
+In the 2D view, `[` and `]` (or `,` and `.`) turn a line ROI about its
+middle by 5 degrees, with Shift by 1.
+
+It works the other way too.  Dragging a side of the box edits the ROI: the
+line's width (the box's second axis) or its ends (the first), or the
+rectangle's sides; dragging the top or the bottom sets the depth, which is
+kept as the ROI moves until *from ROI* is pressed.  Over a polygon ROI, which
+no box is, a drag unticks it, as editing the ranges always does.
 
 ### from ROI
-Takes the footprint from the ROI once, and the depth from the z filter, now.
+Takes the footprint from the ROI once, and the depth from the z filter, now
+-- also forgetting a depth dragged in the box.
 
 ### x
 The slab's extent along its own first axis, in nm; for a slab turned by

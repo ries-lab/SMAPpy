@@ -31,8 +31,8 @@ Both take the [localization precision](plugin:Panels/Glossary) into
 account: a molecule that does not move still seems to, by its localization
 error, and an analysis that ignores it finds every molecule mobile.
 
-Time comes from the file's frame time (set in the camera's metadata, or
-here under *frame time*); a table with its own clock (`time_s`, MINFLUX)
+Time comes from the file's frame time (recorded by the camera, set in
+*File > File properties*, or here under *frame time*); a table with its own clock (`time_s`, MINFLUX)
 uses that.  It analyses the localizations the layer's filter and the ROI
 keep.  Per region it runs too: in each ROI of the ROI manager, or in a
 block over `track_id`, once per track.  With *write per track*, each

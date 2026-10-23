@@ -48,7 +48,7 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from . import Context, Plot, Plugin, Result, param, register
+from . import NO_FRAME_TIME, Context, Plot, Plugin, Result, param, register
 
 #: the most bins a time histogram is drawn with; more frames than this and a
 #: bin is several frames wide
@@ -359,9 +359,7 @@ class Blinking(Plugin):
             here = files == number
             ft = settings.frame_time_ms or file_frame_time(locs.metadata, int(number))
             if settings.time_axis == "seconds" and not ft:
-                raise ValueError("no frame time for the time in seconds: the "
-                                 "file records neither a frame time nor an "
-                                 "exposure, so set the frame time")
+                raise ValueError(NO_FRAME_TIME)
             channel = (np.asarray(locs["channel"])[here] if "channel" in locs
                        else None)
             name = (names[int(number)] if 0 <= int(number) < len(names)

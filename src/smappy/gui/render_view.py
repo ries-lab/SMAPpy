@@ -68,6 +68,18 @@ ROI_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
 DRAW_PEN = pg.mkPen((255, 255, 0), width=2, style=Qt.DashLine)
 DRAW_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
 
+# The keys that turn a line ROI about its middle, anticlockwise (+1) or
+# clockwise (-1) as seen; Shift for the fine step.  [ and ] as in a drawing
+# program, and , and . because on a German keyboard the brackets are behind
+# Option.  Shifted, a key reports another key -- < > on a US keyboard, ; :
+# on a German one, { } -- so those are listed too.
+LINE_TURN_KEYS = {**dict.fromkeys((Qt.Key_BracketLeft, Qt.Key_BraceLeft, Qt.Key_Comma,
+                                   Qt.Key_Less, Qt.Key_Semicolon), 1),
+                  **dict.fromkeys((Qt.Key_BracketRight, Qt.Key_BraceRight, Qt.Key_Period,
+                                   Qt.Key_Greater, Qt.Key_Colon), -1)}
+LINE_TURN = 5.0              # degrees per key press
+LINE_TURN_FINE = 1.0         # with Shift
+
 
 class RenderWorker(QObject):
     """Renders on its own thread; the view keeps answering to the mouse.
@@ -317,6 +329,9 @@ class RenderView(QWidget):
             self.tile_valid = False      # the picture changed, not just the view
             self._arrange()
             self.schedule()
+        elif what == "scan":
+            self.tile_valid = False      # the player moved: what is drawn changed
+            self.schedule()
         elif what == "roi":
             self._show_roi(self.session.roi)
 
@@ -419,7 +434,7 @@ class RenderView(QWidget):
 
     def snapshot(self) -> Tuple[LayerSnapshot, ...]:
         """The layers as a render needs them, frozen (`LayerSnapshot`)."""
-        return snapshot_layers(self.session.layers)
+        return self.session.scanned(snapshot_layers(self.session.layers))
 
     def panel_images(self, fov: FieldOfView, panels=None) -> List[np.ndarray]:
         """An RGB image per panel on ``fov`` -- the view's own panels unless
@@ -675,8 +690,23 @@ class RenderView(QWidget):
     def _on_key(self, event) -> None:
         if event.key() == Qt.Key_Escape and self.drawing:
             self._stop_drawing()
+        elif not self.drawing and self.turn_line(LINE_TURN_KEYS.get(event.key(), 0)
+                                                 * (LINE_TURN_FINE if event.modifiers()
+                                                    & Qt.ShiftModifier else LINE_TURN)):
+            event.accept()
         else:
             pg.GraphicsLayoutWidget.keyPressEvent(self.graphics, event)
+
+    def turn_line(self, degrees: float) -> bool:
+        """Turn the line ROI about its middle by ``degrees``, anticlockwise
+        as it is seen; False when there is no line to turn."""
+        roi = self.session.roi
+        if not degrees or roi is None or roi.kind != "line":
+            return False
+        # data coordinates are y up; the picture is usually y down, where a
+        # turn the data call anticlockwise is seen clockwise
+        self.session.set_roi(roi.turned(-degrees if self.view.yInverted() else degrees))
+        return True
 
     def _draw_event(self, event) -> bool:
         """Rectangle and line: press, drag, release.  Polygon: a press per
@@ -936,7 +966,8 @@ class RenderToolBar(QToolBar):
 
         self.roi_button = QToolButton(text="ROI: line")
         self.roi_button.setToolTip("left: draw a new ROI (press, drag, release; polygon: "
-                                   "click per vertex, double-click closes); right: the kind")
+                                   "click per vertex, double-click closes); right: the kind; "
+                                   "[ ] or , . turn a line ROI by 5 degrees, with Shift by 1")
         self.roi_menu = QMenu(self.roi_button)
         kinds = QActionGroup(self.roi_menu)
         self.kind = "line"

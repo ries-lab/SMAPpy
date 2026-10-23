@@ -271,7 +271,11 @@ record of that file (`metadata["files"]`), else the camera's
 `metadata.table_frame_time(locs)` for the files a table's rows come from
 (None when they differ).  A plugin that speaks of seconds reads it there and
 offers a *frame time* setting on *auto* to override it (Time Course,
-Blinking); MINFLUX's `time_s` is a clock of its own.
+Blinking); MINFLUX's `time_s` is a clock of its own.  When neither says,
+its `describe` puts `frame_time_notice()` under the form -- a button to
+*File > File properties*, where a file's frame time is set
+(`Session.set_frame_time`) -- and its run raises `NO_FRAME_TIME`.  Every
+simulator records one.
 
 **The microscope.**  A fitted file's `metadata["camera"]["microscope"]` is
 the microscope the database recognised (`microscope_db`), or None: its

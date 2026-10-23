@@ -50,6 +50,23 @@ class Region:
         n = np.array([-d[1], d[0]]) / (np.hypot(*d) or 1.0) * (width / 2)
         return cls("line", [p0 + n, p1 + n, p1 - n, p0 - n], width=float(width))
 
+    def ends(self) -> Tuple[np.ndarray, np.ndarray]:
+        """A line's two ends, the middles of its short sides."""
+        p = self.points
+        return (p[0] + p[3]) / 2, (p[1] + p[2]) / 2
+
+    def turned(self, degrees: float) -> "Region":
+        """A line turned about its middle, anticlockwise in data coordinates
+        (y up); its length and width kept."""
+        if self.kind != "line":
+            raise ValueError(f"only a line is turned, not a {self.kind}")
+        p0, p1 = self.ends()
+        mid, half = (p0 + p1) / 2, (p1 - p0) / 2
+        a = np.radians(degrees)
+        turn = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+        half = turn @ half
+        return Region.line(mid - half, mid + half, self.width)
+
     @classmethod
     def polygon(cls, vertices) -> "Region":
         return cls("polygon", vertices)

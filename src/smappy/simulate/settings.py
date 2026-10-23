@@ -184,6 +184,10 @@ class SimulationSettings:
                              "for a fitter to fit")
     n_frames: int = param(20000, label="frames", min=1,
                           help="the length of the measurement")
+    frame_time_ms: float = param(10.0, label="frame time", unit="ms", min=0.001,
+                                 advanced=True,
+                                 help="what one frame is in seconds: recorded with "
+                                      "the file, for what reads time")
     background: float = param(20.0, label="background", unit="photons/px", min=0,
                               help="per pixel and frame: in the precision, or "
                                    "drawn into the frames")

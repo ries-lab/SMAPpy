@@ -161,7 +161,7 @@ region is taken to be one structure.
 **Seconds.**  A time in frames times the frame time.  The frame time is the
 file's (`metadata["camera"]["frame_time_ms"]`, or the session's record of
 each file): the cycle time the file recorded where it recorded one, else the
-exposure.  With files of different frame times in one region, there is no
+exposure, or what *File > File properties* set.  With files of different frame times in one region, there is no
 one frame time and the seconds are NaN; set *frame time* to give one.
 
 ## Parameters

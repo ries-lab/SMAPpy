@@ -936,7 +936,8 @@ class SimulateBlinks(Plugin):
             return self._camera(ctx, settings, truth, camera_truth)
         locs = localizations(truth)
         name = "simulation (drift)" if settings.drift else "simulation"
-        info = FileInfo(name=name, path=name, format="simulated", n=len(locs))
+        info = FileInfo(name=name, path=name, format="simulated", n=len(locs),
+                        frame_time_ms=settings.frame_time_ms)
         md = locs.metadata
         close = ("removed" if settings.localizations.close == "remove" else "averaged")
         text = (f"{len(locs)} localizations of {md['n_emitters']} emitters "
@@ -972,7 +973,8 @@ class SimulateBlinks(Plugin):
             locs = camera_truth(truth)
             name = f"{path.name} (truth)"
             files = [(locs, FileInfo(name=name, path=str(path), format="simulated",
-                                     n=len(locs)), None)]
+                                     n=len(locs), frame_time_ms=settings.frame_time_ms),
+                      None)]
         return Result(files=files, text=text, data=data, written=str(path),
                       settings=settings, append=getattr(settings, "append", False))
 

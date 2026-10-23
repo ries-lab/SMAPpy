@@ -658,6 +658,19 @@ class Notice:
     kind: str = "warning"            # or "info"
 
 
+#: what a plugin that turns frames into seconds says when nothing tells it
+#: how long a frame is: where it is set for the file, as well as here
+NO_FRAME_TIME = ("no frame time: the file records neither a frame time nor an "
+                 "exposure -- set it in File > File properties, or set the "
+                 "frame time here")
+
+
+def frame_time_notice() -> Notice:
+    """The line under a form whose run needs seconds the file cannot give,
+    with a button to the dialog that sets the file's frame time."""
+    return Notice(NO_FRAME_TIME, action="Set frame time...", window="file properties")
+
+
 @dataclass
 class FormState:
     """What the form shows about the settings as they stand, beyond their

@@ -1252,6 +1252,11 @@ class RenderTab(QWidget):
         self._more_form = more_form
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True, **HELP))
+        # a window of frames, z, a column or the line's coordinates moved
+        # through the data in every picture window (`gui.scan_player`)
+        from .scan_player import ScanPlayer
+        self.player = ScanPlayer(session)
+        layout.addWidget(CollapsibleSection("player", self.player, expanded=False, **HELP))
         # last and closed: the ordinary picture is x against y, and this is
         # what turns the renderer into SMAP's versatile one
         self.axes = AxesSection(session, view)

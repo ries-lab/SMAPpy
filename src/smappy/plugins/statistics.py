@@ -44,6 +44,18 @@ down by an order of magnitude.  Binned they are a few counts in bins the model
 puts near zero and they move nothing.  ``precision fit`` puts the likelihood
 back for anyone who wants it.
 
+**Per frame.**  How many localizations each frame holds, over the
+acquisition: the dye bleaches and the density thins out, or the activation
+laser is turned up and it climbs.  A constant bleaching rate makes the count
+decay as ``exp(-t/T)``, so the frames of the localizations are a sample of
+an exponential cut to the acquisition, and ``T`` is `exponential_mean` of
+them over ``[first, last]`` -- the same truncated estimator as the photons,
+needing no bins.  A count that does not fall has no ``T`` (it is reported as
+none); the median frame, by which half the localizations are in, is
+reported either way.  One line per visible layer, as each shows it, in a tab
+of its own: *Time Course* is the place for the rate against seconds, per
+file and beside other quantities.
+
 **Which table.**  The one the layer shows: a grouped layer is described blink
 by blink (the photons added, the precision of the combined position), an
 ungrouped one frame by frame -- the same table the count beside the picture
@@ -580,6 +592,133 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
             for k, v in out.items()}
 
 
+# ---------------------------------------------------------------- per frame
+
+#: localizations per frame are counted in about this many windows, whatever
+#: the length of the acquisition: 20000 single frames drawn as bars are a
+#: grey smear, and the trend is what the panel is for
+PER_FRAME_BINS = 200
+#: a decay time longer than this many acquisitions is no decay: over the
+#: acquisition the count falls by less than 1 - exp(-1/10), 10 %
+NO_DECAY_SPANS = 10.0
+
+
+@dataclass
+class FrameCounts:
+    """The localizations per frame of one layer, and their decay."""
+    label: str
+    colour: str
+    counts: np.ndarray            # per window
+    edges: np.ndarray             # frames, the windows' bounds
+    stats: Dict[str, float] = field(default_factory=dict)
+    merged: bool = False          # blinks, not localizations
+
+    @property
+    def rate(self) -> np.ndarray:
+        """Per frame: the counts over each window's width."""
+        return self.counts / np.maximum(np.diff(self.edges), 1e-12)
+
+    def curve(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """The fitted decay in localizations per frame, or None without one."""
+        t, first, last, n = (self.stats.get(k, np.nan)
+                             for k in ("decay_frames", "first", "last", "n"))
+        if not (np.isfinite(t) and t > 0 and last > first):
+            return None
+        x = np.linspace(first, last, 300)
+        norm = t * (1.0 - np.exp(-(last - first) / t))
+        return x, n * np.exp(-(x - first) / t) / norm
+
+
+def frame_decay(frames, first: Optional[float] = None,
+                last: Optional[float] = None) -> Dict[str, float]:
+    """How the count per frame falls over ``[first, last]``.
+
+    ``decay_frames`` is ``T`` of a rate ``exp(-t/T)``, the maximum
+    likelihood estimate (`exponential_mean` on the frames, cut to the
+    acquisition), NaN with too few localizations and inf when the count does
+    not fall; ``median_frame`` is where half of them are in, which needs no
+    model; ``first_rate`` and ``last_rate`` are the mean per frame in the
+    first and the last tenth, which say how much it fell when it is not
+    exponential.
+    """
+    f = np.asarray(frames, dtype=float)
+    f = f[np.isfinite(f)]
+    out: Dict[str, float] = {"n": len(f)}
+    if not len(f):
+        out.update(first=np.nan, last=np.nan, decay_frames=np.nan,
+                   median_frame=np.nan, first_rate=np.nan, last_rate=np.nan)
+        return out
+    first = float(f.min()) if first is None else float(first)
+    last = float(f.max()) if last is None else float(last)
+    span = max(last - first, 1.0)
+    tenth = span / 10.0
+    out.update(first=first, last=last, median_frame=float(np.median(f)),
+               first_rate=float(np.sum(f < first + tenth) / tenth),
+               last_rate=float(np.sum(f > last - tenth) / tenth))
+    t = exponential_mean(f, first, last) if len(f) >= MIN_FOR_FIT else float("nan")
+    # a decay many times the acquisition is a flat count with noise on it:
+    # the 1 % it falls over the acquisition is not something to report a
+    # time for
+    out["decay_frames"] = float("inf") if t > NO_DECAY_SPANS * span else t
+    return out
+
+
+def frame_counts(frames, label: str = "", colour: str = "0.3",
+                 bins: int = PER_FRAME_BINS, frame_time_ms: Optional[float] = None,
+                 merged: bool = False) -> FrameCounts:
+    """Localizations per frame in windows of whole frames, with the decay;
+    ``decay_s`` too with a frame time."""
+    f = np.asarray(frames, dtype=float)
+    f = f[np.isfinite(f)]
+    lo, hi = (float(f.min()), float(f.max())) if len(f) else (0.0, 1.0)
+    width = max(1, int(np.ceil((hi - lo + 1) / bins)))
+    edges = np.arange(lo, hi + width + 1, width, dtype=float)
+    counts, edges = np.histogram(f, bins=edges)
+    stats = frame_decay(f, lo, hi)
+    known = bool(frame_time_ms) and frame_time_ms > 0
+    stats["decay_s"] = (stats["decay_frames"] * frame_time_ms / 1000.0 if known
+                        else float("nan"))
+    return FrameCounts(label=label, colour=colour, counts=counts, edges=edges,
+                       stats=stats, merged=merged)
+
+
+def frame_summary(c: FrameCounts) -> str:
+    """One line: the decay time, or that there is none, and the median."""
+    s = c.stats
+    what = "blinks" if c.merged else "localizations"
+    t = s.get("decay_frames", np.nan)
+    if np.isinf(t):
+        decay = "no decay"
+    elif np.isfinite(t):
+        seconds = s.get("decay_s", np.nan)
+        decay = f"decay time {t:.0f} frames" + (f" ({seconds:.1f} s)"
+                                                 if np.isfinite(seconds) else "")
+    else:
+        decay = "too few to fit"
+    return (f"{decay}; half of the {what} by frame {s['median_frame']:.0f}; "
+            f"{s['first_rate']:.2f} per frame at the start, "
+            f"{s['last_rate']:.2f} at the end")
+
+
+def draw_per_frame(ax, found: Sequence[FrameCounts]) -> None:
+    """The count per frame of every layer, its decay dashed over it."""
+    for c in found:
+        centres = 0.5 * (c.edges[:-1] + c.edges[1:])
+        ax.plot(centres, c.rate, color=c.colour, linewidth=1.0,
+                label=c.label or None, drawstyle="steps-mid")
+        curve = c.curve()
+        if curve is not None:
+            ax.plot(*curve, color=c.colour, linestyle="--", linewidth=1.2)
+    merged = all(c.merged for c in found)
+    ax.set_xlabel("frame")
+    ax.set_ylabel(("blinks" if merged else "localizations") + " per frame")
+    ax.set_ylim(bottom=0)
+    if any(c.label for c in found) and len(found) > 1:
+        ax.legend(fontsize=7, frameon=False)
+    if len(found) == 1:
+        ax.set_title(frame_summary(found[0]), fontsize=7.5, color="0.25")
+
+
 # --------------------------------------------------------------------- drawing
 
 def draw(ax, dist: Distribution) -> None:
@@ -770,10 +909,18 @@ class LocalizationStatistics(Plugin):
             ctx.report(why)
         lines = [f"{len(locs)} localizations, {where}"]
         lines += [f"{d.label}: {d.summary}" for d in found]
+        # per frame is over the acquisition, which a region is not a part of
+        # in any useful way: the view only
+        per_frame = ([] if ctx.per_region or "frame" not in locs
+                     else self._per_frame(ctx, settings, locs, grouped))
+        for c in per_frame:
+            lines.append(f"per frame{', ' + c.label if c.label else ''}: "
+                         f"{frame_summary(c)}")
         if why:
             lines.append(why)
         data = {"distributions": {d.key: d for d in found},
                 "stats": {d.key: d.stats for d in found},
+                "per_frame": per_frame,
                 "n": len(locs), "note": why}
 
         def plot(figure) -> None:
@@ -789,7 +936,26 @@ class LocalizationStatistics(Plugin):
         return Result(text="\n".join(lines), data=data, settings=settings,
                       values=statistics_values(locs, found),
                       plot=Plot(draw=plot, panels=len(found),
-                                size=(5.5, max(2.1 * len(found), 2.1))))
+                                size=(5.5, max(2.1 * len(found), 2.1))),
+                      plots=({"per frame": Plot(lambda ax: draw_per_frame(ax, per_frame),
+                                                size=(5.5, 3.0))}
+                             if per_frame else {}))
+
+    @staticmethod
+    def _per_frame(ctx: Context, settings: StatisticsSettings, locs: Localizations,
+                   grouped: bool) -> List[FrameCounts]:
+        """Every visible layer's count per frame, as it shows it: the
+        comparison is usually between them.  Without a session, or with
+        *all, unfiltered*, the table described."""
+        from .time_course import _layers
+        ft = settings.frame_time_ms or table_frame_time(locs)
+        found = []
+        if ctx.session is not None and settings.source != "all":
+            found = [frame_counts(table["frame"], name, colour, frame_time_ms=ft,
+                                  merged=merged)
+                     for name, colour, table, merged in _layers(ctx)
+                     if "frame" in table and len(table)]
+        return found or [frame_counts(locs["frame"], frame_time_ms=ft, merged=grouped)]
 
     def keep(self, result: Result):
         """The histograms and their fits, binned: what the figure is drawn

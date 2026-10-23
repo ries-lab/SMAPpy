@@ -118,6 +118,9 @@ class View3D(QWidget):
         self.show_guides = True
         self._fov: Optional[FieldOfView] = None
         self._face: Optional[tuple] = None       # (axis, sign) while a face drags
+        # the slab's angle when the view last followed it: a line ROI turned
+        # since turns the view by the difference
+        self._slab_angle: Optional[float] = None if session.slab is None else session.slab.angle
         # what the render grid's axes were last time: a change of quantity is
         # a change of units, and the zoom and the pivot mean nothing across it
         self._render_axes = session.axes()
@@ -151,7 +154,8 @@ class View3D(QWidget):
 
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
-        if what in ("locs", "layer", "layers", "append", "slab", "roi"):
+        if what in ("locs", "layer", "layers", "append", "slab", "roi", "roi-edited",
+                    "scan"):
             axes = self.session.axes()
             if axes != self._render_axes:
                 # a picture of another quantity: the session has already built
@@ -159,11 +163,26 @@ class View3D(QWidget):
                 self._render_axes = axes
                 self.fit()
                 return
+            session, slab = self.session, self.session.slab
+            following = session.slab_follows_roi and session.roi is not None
             if what == "locs":
                 self.fit()
-            elif what == "slab" and self.session.slab is not None:
+            elif what == "slab" and slab is not None:
                 # the slab's centre is the centre of rotation; follow it in place
-                self.projection.move_pivot(self.session.slab.center)
+                self.projection.move_pivot(slab.center)
+                if not following:
+                    self._slab_angle = slab.angle
+                self._draw_box()
+                self.changed.emit()
+            elif what in ("roi", "roi-edited") and following and slab is not None:
+                # the box follows the 2D ROI, and the view follows the box:
+                # centred on it and turned with it, so a line moved or turned
+                # is looked at as it was rather than sliding off the screen.
+                # On the ROI's edit, not the slab's: a slab moved in depth
+                # here (Ctrl+wheel) keeps the view where it was panned to
+                turned = 0.0 if self._slab_angle is None else slab.angle - self._slab_angle
+                self.projection.follow(slab, (turned + 180.0) % 360.0 - 180.0)
+                self._slab_angle = slab.angle
                 self._draw_box()
                 self.changed.emit()
             self.schedule()
@@ -205,7 +224,8 @@ class View3D(QWidget):
         self._generation += 1
         self._busy = True
         # frozen here, on the GUI thread: the worker sees nothing else
-        job = Job3D(snapshot_3d(self.session.layers), copy.deepcopy(self.projection),
+        job = Job3D(self.session.scanned(snapshot_3d(self.session.layers)),
+                    copy.deepcopy(self.projection),
                     copy.deepcopy(self.session.slab),
                     max(size.width(), 16), max(size.height(), 16), preview)
         self.render_requested.emit(job, self._generation)
@@ -407,7 +427,9 @@ class View3D(QWidget):
     def _release(self, event) -> None:
         self._dragging = False
         if self._mode == "face" and self.session.slab is not None:
-            self.session.set_slab(self.session.slab, follow_roi=False)
+            # while it follows a line or rectangle ROI the box is that ROI,
+            # and the drag edits it (`Session.slab_resized`)
+            self.session.slab_resized(self.session.slab)
         self._face = None
         self.schedule(preview=False)
 
@@ -691,7 +713,8 @@ class OptionsPanel(QWidget):
         self.follow.toggled.connect(self._on_follow)
         from_roi = QPushButton("from ROI")
         from_roi.setToolTip("take the footprint from the ROI once, now")
-        from_roi.clicked.connect(lambda: self.session.slab_from_roi())
+        # from the ROI afresh: a z range dragged since goes back to the filter's
+        from_roi.clicked.connect(lambda: self.session.slab_from_roi(keep_z=False))
         grid.addWidget(self.follow, 0, 0, 1, 3)
         grid.addWidget(from_roi, 0, 3)
         self.ranges: List[tuple] = []

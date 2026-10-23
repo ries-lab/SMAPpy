@@ -75,7 +75,9 @@ papers and in other software.
   chip the camera read out.
 * **frame time** (also called the cycle time or frame interval): the time
   from one frame to the next -- the exposure plus the camera's dead time;
-  where the file does not record it, the exposure stands in for it.
+  where the file does not record it, the exposure stands in for it.  A file
+  that records neither (a simulation of an older version, a bare csv) is
+  given one in *File > File properties*.
 
 ## The picture
 

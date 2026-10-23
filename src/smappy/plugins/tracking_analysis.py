@@ -35,8 +35,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from . import (Context, FormState, Plot, Plugin, Result, Stopped, param, register,
-               settings_values)
+from . import (NO_FRAME_TIME, Context, FormState, Plot, Plugin, Result, Stopped,
+               frame_time_notice, param, register, settings_values)
 from ..locs import Localizations
 
 
@@ -119,6 +119,8 @@ class TrackingAnalysis(Plugin):
                 ft = table_frame_time(locs)
                 if ft:
                     state.hints["frame_time_ms"] = f"{ft:g}"
+                elif not settings.frame_time_ms:
+                    state.notice = frame_time_notice()
         return state
 
     def run(self, ctx: Context, settings: TrackingAnalysisSettings) -> Result:
@@ -137,8 +139,7 @@ class TrackingAnalysis(Plugin):
         clock = "time_s" in locs
         ft = None if clock else (settings.frame_time_ms or table_frame_time(locs))
         if not clock and not ft:
-            raise ValueError("no frame time: the file records neither a frame time "
-                             "nor an exposure, so set the frame time")
+            raise ValueError(NO_FRAME_TIME)
         ids = np.where(use, np.asarray(locs[column], np.int64), 0)
         in_3d = settings.use_z and "z_nm" in locs
         t = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"],

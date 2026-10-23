@@ -76,7 +76,8 @@ one = st.analyse(beads[:1], ("x", "y"), highpass_hz=1.0)[0]
 ```
 
 **1. A regular trace.**  Each bead's localizations are put in time order,
-one point per frame; time is the frame times the file's frame time.  A
+one point per frame; time is the frame times the file's frame time (set
+in *File > File properties* for a file that records none).  A
 bead missed in a frame leaves a hole, which is filled by a straight line
 between its neighbours, because the spectrum needs a point at every time
 step.  How many points were filled is reported.  A table with its own

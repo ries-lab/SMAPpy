@@ -296,6 +296,17 @@ versatile(right, RenderAxes(x="frame", y="photons", x_scale=5.0, y_scale=20.0), 
 state.settings = kept
 ```
 
+**7. Moving through the data.**  The *player* shows only a window of one
+coordinate at a time and moves it: the frames (how a structure builds up,
+or bleaches), the time, z (slices through a cell), any column, or the
+position along or across a line ROI.  It narrows what the 2D and the 3D
+windows draw, nothing else: the filters stay as they are, and a plugin run
+meanwhile sees the whole table.  A window wider than the step makes the
+windows overlap, so the picture changes smoothly.  With the 3D window
+following a line ROI, *across the line* moves a thin slice through the
+structure as it is seen from the side.  *Record...* writes every step, as
+the 2D or the 3D window shows it, to a movie.
+
 ## In detail
 
 **The rendering kernel.**  Each localization contributes the integral of its
@@ -823,6 +834,53 @@ In *tracks* only, off by default.  Ticked, overlapping lines add as
 localizations do, so where tracks cross or a slow particle turns back on
 itself the picture is brighter -- a density of tracks.  Off, each line is
 drawn at its own brightness wherever it passes.
+
+### player
+Closed by default.  The window moved through the data, its transport and
+its recording (*How it works*, 7).
+
+### scan
+What the window moves through: *frame*, *time_s* and *z_nm* first, where
+the table has them; *along the line* and *across the line*, in nm from the
+middle of the line ROI, which must be drawn; then every other numeric
+column.  Along or across the line, it runs over the line's length or width.
+
+### window
+How much of the coordinate is shown at once, in its unit (frames, nm, ...).
+On *auto*, a twentieth of the range of what the layers show.  Too narrow
+shows too few localizations to see a structure; too wide changes little
+from step to step.
+
+### step
+How far the window moves each step.  On *auto*, a quarter of the window:
+each localization is shown in four steps running, which makes the
+transitions smooth.  Equal to the window, the steps are side by side, as in
+a movie of separate frames.
+
+### ▶
+Plays; pressed again, pauses, and the window stays where it is.
+
+### ■
+Stops and shows everything again.
+
+### speed
+Steps per second while playing, and the frame rate of a recorded movie.  A
+large table may draw more slowly than this; the picture then shows the
+latest step when it is ready.
+
+### at the end
+What playing does at the last step: start again from the first, turn back,
+or stop.
+
+### record
+Which window a recording is of: the 2D picture (as its view, its panels
+and its pixel) or the 3D view (its projection and its slab), which must be
+open.
+
+### Record...
+Asks for a file and writes every step to it -- an MP4, a TIFF stack or a
+GIF, by the extension -- drawn by the same renderer as *Save image*, with
+the step written in a corner.  It can be cancelled.
 
 ### axes
 Which column each axis of the picture is.  Set on all layers at once; closed,

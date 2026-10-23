@@ -88,6 +88,20 @@ class Slab:
         x0, y0, x1, y1 = region.bounds
         return cls.from_bounds(x0, x1, y0, y1, z0, z1)
 
+    def footprint(self, kind: str) -> Optional[Region]:
+        """The 2D ROI of ``kind`` this slab is the box over: a line along its
+        first axis as wide as its second, or the rectangle of an unturned
+        one; None for a footprint no ROI of that kind can be (a polygon, a
+        turned rectangle).  The inverse of `from_region`."""
+        if kind == "line":
+            half = self.axis_unit(0)[:2] * self.size[0] / 2
+            mid = self.center[:2]
+            return Region.line(mid - half, mid + half, float(self.size[1]))
+        if kind == "rect" and abs(self.angle) % 360 < 1e-9:
+            (x0, x1), (y0, y1) = self.axis_range(0), self.axis_range(1)
+            return Region.rect(x0, y0, x1, y1)
+        return None
+
     def to_local(self, x, y, z=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Data -> slab frame: centred, in-plane rotation undone.
 
@@ -285,6 +299,15 @@ class Projection:
         shift = self.matrix @ (self.pivot - pivot)
         self.offset = self.offset + shift[:2]
         self.pivot = pivot
+
+    def follow(self, slab: "Slab", turned_by: float = 0.0) -> None:
+        """Centre the view on ``slab`` and turn it with the slab by
+        ``turned_by`` degrees: a slab following a line ROI that was moved or
+        turned stays where it was on screen, seen from the same side.  The
+        zoom and the tilt are left as they were."""
+        self.azimuth = (self.azimuth - turned_by) % 360   # as `preset` counts the angle
+        self.pivot = slab.center.copy()
+        self.offset[:] = 0
 
     def screen_centre(self) -> np.ndarray:
         """The data point in the middle of the screen, at the pivot's depth.

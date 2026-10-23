@@ -255,3 +255,62 @@ def test_the_on_time_counts_each_blink_once_whichever_table_is_shown():
         on_time = result.data["distributions"]["on_time"]
         assert on_time.stats["n"] == 300
         assert on_time.stats["mean"] == pytest.approx(3.0)
+
+
+def _bleaching(n=200_000, decay=3000.0, n_frames=10_000, seed=2):
+    """Localizations whose frames fall off as exp(-t / decay), cut to the
+    acquisition: a dye bleaching at a constant rate."""
+    rng = np.random.default_rng(seed)
+    frame = np.floor(rng.exponential(decay, n))
+    frame = frame[frame < n_frames].astype(np.int64)
+    k = len(frame)
+    photons = rng.exponential(N0, k) + 200
+    return Localizations({"x_nm": rng.uniform(0, 5000, k), "y_nm": rng.uniform(0, 5000, k),
+                          "frame": frame, "photons": photons,
+                          "xy_err_nm": PSF_SCALE / np.sqrt(photons)}, {"units": "nm"})
+
+
+def test_the_count_per_frame_finds_the_bleaching_time():
+    from smappy.plugins.statistics import frame_counts
+    c = frame_counts(_bleaching()["frame"], frame_time_ms=20.0)
+    # integer frames floor each time by half a frame on average
+    assert c.stats["decay_frames"] == pytest.approx(3000.0, rel=0.03)
+    assert c.stats["decay_s"] == pytest.approx(60.0, rel=0.03)
+    assert c.stats["median_frame"] == pytest.approx(3000 * np.log(2 / (1 + np.exp(-10 / 3))),
+                                                    rel=0.03)
+    assert len(c.counts) <= 200 and c.counts.sum() == c.stats["n"]
+    # the drawn curve is at the height of the counts
+    x, y = c.curve()
+    assert y[0] == pytest.approx(c.rate[0], rel=0.05)
+
+
+def test_a_count_that_does_not_fall_has_no_decay_time():
+    from smappy.plugins.statistics import frame_counts, frame_summary
+    rng = np.random.default_rng(3)
+    c = frame_counts(rng.integers(0, 10_000, 50_000))
+    assert np.isinf(c.stats["decay_frames"]) and c.curve() is None
+    assert c.stats["first_rate"] == pytest.approx(5.0, rel=0.1)
+    assert frame_summary(c).startswith("no decay")
+
+
+def test_the_per_frame_tab_has_a_line_per_visible_layer():
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.session import Session
+    session = Session(_bleaching(n=50_000))
+    session.add_layer()
+    result = session.run(LocalizationStatistics(), StatisticsSettings())
+    found = result.data["per_frame"]
+    assert len(found) == 2
+    assert "per frame" in result.plots
+    figure = Figure()
+    result.figures()[1].draw_into(figure)
+    assert len(figure.axes[0].lines) == 4           # each layer's counts and decay
+    assert "per frame" in result.text
+
+
+def test_a_region_has_no_per_frame_tab():
+    ctx = plugins.Context(locs=_bleaching(n=20_000), region_id=7)
+    result = LocalizationStatistics().run(ctx, StatisticsSettings())
+    assert not result.plots and result.data["per_frame"] == []

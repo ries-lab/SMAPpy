@@ -1,9 +1,11 @@
-"""Small dialogs: mapping csv columns, asking for a pixel size."""
+"""Small dialogs: mapping csv columns, asking for a pixel size, a file's
+frame time."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFormLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QVBoxLayout)
@@ -351,3 +353,54 @@ class CopyLayerDialog(QDialog):
             self.session.copy_layer(source, self.target,
                                     **{n: b.isChecked() for n, b in self.parts.items()})
         self.accept()
+
+
+class FilePropertiesDialog(QDialog):
+    """The open files and what one frame of each is in time.
+
+    The frame time is the one property a file may lack that something reads
+    later -- seconds in Stability, Blinking, Time Course -- and nothing else
+    let one set it: a simulation or a bare csv records none.  The pixel size
+    is shown, not edited: the nm columns were made with it.
+    """
+
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("File properties")
+        self.session = session
+        layout = QVBoxLayout(self)
+        files = session.files
+        self.table = QTableWidget(len(files), 4, self)
+        self.table.setHorizontalHeaderLabels(
+            ["file", "localizations", "pixel size (nm)", "frame time (ms)"])
+        self.times = []
+        for row, info in enumerate(files):
+            for col, text in enumerate((info.name, f"{info.n:,}",
+                                        f"{info.pixelsize_nm:g}" if info.pixelsize_nm
+                                        else "-")):
+                item = QTableWidgetItem(text)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setToolTip(str(info.path))
+                self.table.setItem(row, col, item)
+            spin = QDoubleSpinBox(minimum=0.0, maximum=1e7, decimals=3)
+            spin.setSpecialValueText("not known")
+            spin.setValue(info.frame_time_ms or 0.0)
+            spin.setToolTip("the time from one frame to the next; 0: not known")
+            self.table.setCellWidget(row, 3, spin)
+            self.times.append(spin)
+        self.table.resizeColumnsToContents()
+        layout.addWidget(QLabel("the frame time turns frames into seconds wherever "
+                                "a plugin reports time"))
+        layout.addWidget(self.table)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.resize(560, 140 + 30 * min(len(files), 10))
+
+    def apply(self) -> None:
+        """Set the frame times that changed."""
+        for number, (info, spin) in enumerate(zip(self.session.files, self.times)):
+            value = spin.value() or None
+            if value != info.frame_time_ms:
+                self.session.set_frame_time(number, value)

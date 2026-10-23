@@ -236,6 +236,8 @@ class ControlWindow(QMainWindow):
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         self._action(menu, "Session name...", None, self.rename_session)
+        self._action(menu, "File properties...", None, self.edit_file_properties).setToolTip(
+            "the open files' frame times: what turns frames into seconds")
         # a lambda: `triggered` hands on `checked` (False), which would land
         # in `start` and make the offer without starting anything to take it
         self.new_window_action = self._action(menu, "Open in a new window",
@@ -376,6 +378,9 @@ class ControlWindow(QMainWindow):
         # Transform with given settings: Register layers' *apply*, with the
         # named transformation it measured (`transform.settings_for`)
         session.window_openers["transform"] = self.open_transform
+        # a plugin that needs seconds the files cannot give (`frame_time_notice`)
+        session.window_openers["file properties"] = \
+            lambda settings=None: self.edit_file_properties()
         # the picture windows' *Save image...*: Export Image, set to the
         # window it was asked from (`plugins.file.image_settings_for`)
         session.window_openers["export image"] = self.open_export_image
@@ -815,6 +820,16 @@ class ControlWindow(QMainWindow):
             window.panel.start_run()
         except Exception:                    # a singleShot callable must not raise
             traceback.print_exc()
+
+    def edit_file_properties(self) -> None:
+        """The open files' frame times (`dialogs.FilePropertiesDialog`)."""
+        from .dialogs import FilePropertiesDialog
+        if not self.session.files:
+            QMessageBox.information(self, "File properties", "no file is open")
+            return
+        dialog = FilePropertiesDialog(self.session, self)
+        if dialog.exec():
+            dialog.apply()
 
     def rename_session(self) -> None:
         """Ask for the session's name and colour (`identity.NameDialog`)."""

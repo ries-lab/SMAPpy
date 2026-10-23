@@ -198,7 +198,9 @@ def make(d) -> None:
     assert [r["status"] for r in rows] == ["done"] * 4, rows
     for i in range(4):
         figures = list((output / f"cell_{i + 1}" / "figures").glob("*.png"))
-        assert len(figures) == len(STEPS), figures
+        # each step its figures: one, or one per tab (statistics_per_frame)
+        assert all(any(f.stem == label or f.stem.startswith(label + "_")
+                       for f in figures) for _, label in STEPS), figures
     d.shot("Each file is loaded, run and saved in turn. The status says which "
            "are done; the log below says what each step did.",
            spot=[window.table, window.log], zoom=None)

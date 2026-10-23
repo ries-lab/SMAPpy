@@ -44,7 +44,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import Context, FormState, Plot, Plugin, Result, param, register
+from . import (NO_FRAME_TIME, Context, FormState, Plot, Plugin, Result,
+               frame_time_notice, param, register)
 
 #: the series that is not a column: localizations (or blinks) per frame
 COUNT = "localizations per frame"
@@ -280,6 +281,9 @@ class TimeCourse(Plugin):
                        and np.asarray(locs[n]).dtype.kind in "iuf"]
             tags = [TAG + n for n in _tags(locs) if n != "frame"]
             state.choices["series"] = [COUNT, *columns, *tags]
+            if settings.x == "seconds" and "time_s" not in locs \
+                    and not _frame_time(locs, settings):
+                state.notice = frame_time_notice()
         return state
 
     def run(self, ctx: Context, settings: TimeCourseSettings) -> Result:
@@ -306,9 +310,7 @@ class TimeCourse(Plugin):
         elif settings.x == "seconds":
             ms = _frame_time(reference, settings)
             if not ms:
-                raise ValueError("no frame time: the file records neither a "
-                                 "frame time nor an exposure, so set the "
-                                 "frame time")
+                raise ValueError(NO_FRAME_TIME)
             clock, xlabel, scale = "frame", "time (s)", ms / 1000.0
         else:
             clock, xlabel = "frame", "frame"
