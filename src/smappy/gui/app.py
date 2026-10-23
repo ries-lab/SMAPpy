@@ -1664,6 +1664,8 @@ class ControlWindow(QMainWindow):
         saved or opened and the preference asks (`config.ask_before_quit`);
         then Save (and go only if it was saved), Discard, or Cancel."""
         from .. import config
+        if getattr(self, "leaving", False):       # *Update and restart* asked already
+            return True
         if not self.session.unsaved or not config.ask_before_quit():
             return True
         answer = self._ask_unsaved()
