@@ -207,7 +207,10 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   table does not have is missing, with a source that says which state, as a readout mode
   the camera database does not know is.  `"from the name"` reads a wavelength out of a
   filter's name (`676/37` → 676, `665LP` → nothing, to be typed): the names are already
-  the data.
+  the data.  The objective's coverslip is two of them, `n_coverslip` (the glass it
+  expects; absent, the immersion's, an oil objective's) and `coverslip_design_um` (the
+  thickness it is corrected for, 170 without one): *PSF calibration* builds uipsf's layered
+  model from them (`docs/uipsf/microscopes.md`, "The coverslip").
 * **`channels`**, for a microscope with a split: each channel names the filter device it
   follows and the half of the chip it lands on (`left`, `right`, `upper`, `lower`, the dual
   calibration's words), so a

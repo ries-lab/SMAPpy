@@ -49,6 +49,32 @@ def zernikes(source, which: str = "phase", channel: int = 0) -> tuple[list[int],
     return modes, values, crlb
 
 
+def coverslip_tilt(source) -> tuple[np.ndarray, np.ndarray] | None:
+    """(tilt, CRLB) of the coverslip, (t_x, t_y) in degrees, of ``source`` (a `Calibration` or a
+    `LearnedPSF`); None for a model without one (`model.geometry`).  NaN CRLBs for a tilt held, not learnt.
+    Degrees, not the radians the model fits: a coverslip's tilt is read and set in degrees."""
+    shared = _shared(source)
+    if "geometry.tilt" not in shared:
+        return None
+    values = torch.as_tensor(shared["geometry.tilt"]).detach().cpu().double().numpy()
+    std = source.result.std if hasattr(source, "result") else source.crlb
+    crlb = (torch.as_tensor(std["geometry.tilt"]).detach().cpu().double().numpy() if "geometry.tilt" in std
+            else np.full(2, np.nan))
+    return np.degrees(values), np.degrees(crlb)
+
+
+def tilt_text(source) -> str:
+    """The coverslip's tilt in a line, *coverslip tilt x 0.52° ± 0.03°, y −0.10° ± 0.03°*; empty without one."""
+    found = coverslip_tilt(source)
+    if found is None:
+        return ""
+    (tx, ty), (ex, ey) = found
+
+    def one(v, e):
+        return f"{v:.2f}°" + ("" if not np.isfinite(e) else f" ± {e:.2f}°")
+    return f"coverslip tilt x {one(tx, ex)}, y {one(ty, ey)}"
+
+
 def phase_scale(source, channel: int = 0, units: str = "rad") -> tuple[float, str]:
     """(factor, label) that turn a phase in radians into ``units`` (`PHASE_UNITS`), λ the channel's own."""
     if units == "rad":
@@ -185,6 +211,9 @@ def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, refer
     left, right = fig.subfigures(1, 2, width_ratios=[1, 2.4])
     draw_pupil(left, source, channel, vertical=True, units=units)
     draw_zernikes(right, source, channel, reference, reference_label, units=units, halves=halves)
+    tilt = tilt_text(source)                 # the coverslip's, learnt beside the Zernikes: its coma is not theirs
+    if tilt:
+        fig.suptitle(tilt, fontsize="small")
 
 
 def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[tuple], list]:

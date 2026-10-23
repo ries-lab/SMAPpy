@@ -398,6 +398,8 @@ class PSFCalibrationWindow(QMainWindow):
         if name in ("microscope", "camera", "conversion", "offset", "emgain", "pixel_x_nm", "pixel_y_nm"):
             self._undetect("the microscope changed")
             self._show_optics()
+        elif name in ("n_immersion", "n_coverslip"):     # the coverslip's thickness and tilt shown or not
+            self._show_optics()
 
     def _main_half(self):
         """The dual calibration's main half as set, or None on *auto*."""
@@ -454,16 +456,32 @@ class PSFCalibrationWindow(QMainWindow):
                 details = {"line": f"the stacks cannot be read: {error}", "status": "missing"}
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
+                                     "n_coverslip", "coverslip_um",
                                      "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain",
                                      "camera")})
         self.optics_form.set_details(details)
         self._show_astigmatism()
         optics = self.method.sections.get("microscope", False)      # a model: the optics too
+        layered = optics and self._coverslip_matters()
         self.optics_form.set_shown({"NA": optics, "n_immersion": optics, "wavelength_nm": optics,
                                     "wavelength2_nm": optics and self.is_dual, "n_medium": optics,
-                                    "n_coverslip": optics,
+                                    "n_coverslip": optics, "coverslip_um": layered,
                                     "emgain": bool(self.optics_camera is not None
                                                    and self.optics_camera.is_em)})
+        # the tilt: always in situ, where molecules above the glass see it; for beads only through a coverslip
+        # of another index (a water or silicone objective) -- with oil, beads on the coverslip see none
+        self.model_form.set_shown({"fit_tilt": self.method.sections.get("in situ", False) or layered})
+
+    def _coverslip_matters(self) -> bool:
+        """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""
+        try:
+            optics = self.optics_form.value()
+        except ValueError:
+            return False
+        try:
+            return optics.coverslip_matters(self.optics_camera)
+        except Exception:                            # no stacks, or a camera that cannot be read
+            return optics.n_coverslip is not None and optics.n_coverslip != (optics.n_immersion or 1.518)
 
     def _show_astigmatism(self) -> None:
         """In situ's start astigmatism: the microscope entry's for its 3D lens, as the field's *auto*, under

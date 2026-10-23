@@ -55,6 +55,9 @@ from .input import BeadStack, discover_acquisitions, read_bead_stacks
 
 KEEP = slice(1, None)            # every slice but the first (module docstring)
 
+#: the coverslip an objective is corrected for unless its microscope says otherwise (`coverslip_design_um`), µm
+DESIGN_COVERSLIP_UM = 170.0
+
 #: the order a calibration learns up to unless told: n_max 6, with 8 the held-out check (plan §10)
 AUTO_ORDER = 6
 
@@ -84,6 +87,10 @@ class BeadSettings:
     heldout: float = param(0.0, label="held out", min=0.0, max=0.5, advanced=True,
                            help="the fraction of beads kept out of learning and localised for the "
                                 "held-out report")
+    # offered for beads only through a coverslip of another index (`learns_tilt`), always in situ
+    fit_tilt: bool = param(False, label="learn coverslip tilt",
+                           help="learn the coverslip's tilt against the optical axis, mostly a coma: in situ, "
+                                "or beads seen through a coverslip of another index than the immersion's")
 
     def __post_init__(self):
         if self.magnitude not in dict(MAGNITUDES):
@@ -382,7 +389,10 @@ def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
     if options is not None and not isinstance(options, dict):
         from dataclasses import asdict
         options = asdict(options)
-    return {"method": "uipsf2_pupil", "zernikes": _zernikes(learned), "options": options or {},
+    from uipsf.diagnostics import coverslip_tilt
+    tilt = coverslip_tilt(learned)
+    extra = {} if tilt is None else {"coverslip_tilt_deg": [[float(v), float(e)] for v, e in zip(*tilt, strict=True)]}
+    return {"method": "uipsf2_pupil", "zernikes": _zernikes(learned), "options": options or {}, **extra,
             "sampling": {"dz_nm": float(dz_nm), "z_range_nm": float(z_range_nm), "roi_size": int(roi_size),
                          "upsample": _upsample(learned, upsample)},
             "z_convention": "emitter_nm = -(index-z0)*dz", "lateral_unit": "pixel",
@@ -534,7 +544,13 @@ class OpticsSettings:
                             help="the beads' medium: water 1.33, air 1.0, a mounting medium up to "
                                  "the immersion's (index matched)")
     n_coverslip: Optional[float] = param(None, label="coverslip index", min=1.0, max=2.0, advanced=True,
-                                         help="auto: the immersion's")
+                                         help="auto: the microscope's for its objective, else the immersion's")
+    # the thickness is the sample's, not the objective's: the design thickness is the microscope's
+    # (`coverslip_design_um`, 170 µm without one); either matters only with a coverslip of another index
+    coverslip_um: Optional[float] = param(None, label="coverslip thickness", unit="µm", min=0.0, max=1000.0,
+                                          advanced=True,
+                                          help="the coverslip's thickness; auto: the objective's design "
+                                               "thickness.  Only with a coverslip of another index")
     pixel_x_nm: Optional[float] = param(None, label="pixel x", unit="nm", min=1.0,
                                         help="on the sample; auto: the microscope's for its 3D lens, or "
                                              "the camera's")
@@ -582,8 +598,12 @@ class OpticsSettings:
             pixel = None
         if self.pixel_x_nm is not None:
             pixel = (self.pixel_x_nm, self.pixel_y_nm or self.pixel_x_nm)
-        return dict(NA=self.NA or values.get("NA"),
-                    n_immersion=self.n_immersion or values.get("n_immersion") or 1.518,
+        n_immersion = self.n_immersion or values.get("n_immersion") or 1.518
+        design = float(values.get("coverslip_design_um") or DESIGN_COVERSLIP_UM)
+        return dict(NA=self.NA or values.get("NA"), n_immersion=n_immersion,
+                    n_coverslip=self.n_coverslip or values.get("n_coverslip") or n_immersion,
+                    coverslip_um=self.coverslip_um if self.coverslip_um is not None else design,
+                    coverslip_design_um=design,
                     wavelengths=waves, pixel=pixel, microscope=scope.get("name"))
 
     def missing(self, camera, channels: int = 1, main: Optional[str] = None) -> list:
@@ -606,12 +626,22 @@ class OpticsSettings:
         if found["pixel"] is None:
             pixel_size_nm(camera)                    # its error names what is missing
         return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"], n_med=self.n_medium,
-                       pixel_size_nm=found["pixel"], n_cov=self.n_coverslip) for w in found["wavelengths"]]
+                       pixel_size_nm=found["pixel"], n_cov=found["n_coverslip"],
+                       d_cov_nm=found["coverslip_um"] * 1000, d_cov_design_nm=found["coverslip_design_um"] * 1000)
+                for w in found["wavelengths"]]
+
+    def coverslip_matters(self, camera) -> bool:
+        """Whether the coverslip is a layer of its own here, an index other than the immersion's (a water or
+        silicone objective): only then do its thickness and its tilt change what beads on it look like
+        (`uipsf.Optics.coverslip_matters`)."""
+        found = self.resolved(camera)
+        return found["n_coverslip"] != found["n_immersion"]
 
     def hints(self, camera, channels: int = 1, main: Optional[str] = None) -> dict:
         """What the form shows greyed in its *auto* fields for this camera: `SettingsForm.set_hints`."""
         found = self.resolved(camera, channels, main)
-        out = {"NA": found["NA"], "n_immersion": found["n_immersion"], "wavelength_nm": found["wavelengths"][0]}
+        out = {"NA": found["NA"], "n_immersion": found["n_immersion"], "wavelength_nm": found["wavelengths"][0],
+               "n_coverslip": found["n_coverslip"], "coverslip_um": found["coverslip_um"]}
         if channels > 1:
             out["wavelength2_nm"] = found["wavelengths"][1]
         if found["pixel"] is not None:
@@ -683,6 +713,16 @@ PASSES_PER_PARAMETER = 2.0
 TIMED_PASSES = 3
 
 
+def learns_tilt(model: BeadSettings, optics) -> BeadSettings:
+    """``model`` as a bead run learns it with ``optics`` (`uipsf.Optics`, one per channel): *learn coverslip
+    tilt* dropped where the coverslip is the immersion (oil): beads on it see no tilt at all, and the window
+    hides the choice there (`psf_window`), so one left ticked from another microscope must not cost a fit."""
+    from dataclasses import replace
+    if model.fit_tilt and not any(o.coverslip_matters for o in optics):
+        return replace(model, fit_tilt=False)
+    return model
+
+
 def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings) -> float:
     """About how long learning ``rois`` will take, seconds, in well under a second: the model's forward pass
     on one bead, timed (`TIMED_PASSES`), times the beads, the parameters and `PASSES_PER_PARAMETER`.  A
@@ -698,7 +738,8 @@ def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings
     from uipsf.workflows.calibrate import bead_model
     batch = rois.batch
     channels = batch.data.shape[1]
-    learnt = bead_model(optics.optics(rois.camera, channels, main_half(rois)), model, tuple(batch.data.shape[-2:]),
+    found = optics.optics(rois.camera, channels, main_half(rois))
+    learnt = bead_model(found, learns_tilt(model, found), tuple(batch.data.shape[-2:]),
                         [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()))
     one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
     start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
@@ -739,7 +780,8 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         start = load_start(run.start_from) if run.start_from else None
         warm = None
     channels = 2 if dual else 1
-    cal = calibrate_beads(rois.batch, optics.optics(rois.camera, channels, main_half(rois)), model,
+    found = optics.optics(rois.camera, channels, main_half(rois))
+    cal = calibrate_beads(rois.batch, found, learns_tilt(model, found),
                           transforms=[None, rois.transform] if dual else None, geometry=rois.geometry,
                           start=start, noise=rois.noise, decisions=decisions, warm_start=warm,
                           progress=progress, cancel=cancel)

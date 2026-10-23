@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
@@ -163,6 +163,47 @@ given under *microscope*, and the image is taken at each camera pixel's
 centre: the pixel's width ends up in the learnt blur, which is therefore a
 little wider than the optics' own (about 30 nm added in quadrature for 110 nm
 pixels).
+**The coverslip.**  Between the sample and the immersion lies the coverslip,
+with its own refractive index (*coverslip index*) and thickness (*coverslip
+thickness*).  The objective is corrected for one thickness, its design
+thickness: 170 µm, or what the microscope's entry gives for its objective
+(`coverslip_design_um`).  With an oil objective the coverslip is the immersion
+-- glass and oil have the same index -- and neither thickness changes
+anything.  With a water or silicone objective the coverslip is a layer of its
+own: a thickness other than the design's leaves a spherical aberration (what
+a correction collar takes out), and a coverslip tilted against the optical
+axis leaves mostly coma.  The thickness is held at its value, never learnt:
+the few micrometres a coverslip varies give a spherical aberration that is the
+same at every depth, which the pupil's Zernikes take up anyway.
+
+**The coverslip's tilt** -- t_x and t_y, the angles about the two axes -- is
+learnt with *learn coverslip tilt*, beside the pupil.  Its prior is a normal
+distribution about 0 with a standard deviation of 0.05 rad (about 3°): it
+only keeps the tilt at 0 where the data say nothing.  The tilt also moves the
+image sideways; that shift is taken out of the model, so the positions stay
+where the images are and the PSF stays centred for the spline.  Who sees the
+tilt:
+
+- *Beads with an oil objective* see none: nothing but immersion lies between
+  them and the objective.  The choice is not offered then.
+- *Beads with a water or silicone objective* see it through the tilted glass
+  plate: about 1.1 rad of coma (Noll 8) and 0.3 rad of secondary coma (Noll
+  16) per degree through 170 µm, the same at every height.  The same coma
+  could be the objective's own, so the two are told apart only by the
+  parts of the tilt's phase that the pupil's Zernikes up to *Zernike order*
+  cannot hold: read the tilt with its uncertainty.
+- *Molecules in situ* see it through the glass-to-sample interface, more the
+  deeper they lie (with oil, 1° gives about 0.18 rad of coma at 1 µm deep and
+  none on the coverslip).  Because it grows with depth, in situ learning
+  tells it apart from the pupil's own coma; on simulated molecules from 0 to
+  1.5 µm deep, a tilt of 2° was found to ±0.15-0.2°.
+
+A tilt makes coma, linear in the angle; astigmatism only at second order
+(0.02 rad at 2°, 1 µm deep, oil), so a tilt cannot explain a large
+astigmatism.  A model with a tilt, or with a coverslip off its design
+thickness, is saved as a version-3 model file, which older SMAPpy refuses
+rather than reading without the tilt.
+
 The likelihood is Poisson with the camera's read noise added as a shifted
 Poisson, SMAPpy's own fitters' likelihood; with EM gain, the excess noise
 factor 2.  Slices closer than 50 nm are thinned for learning.  The first
@@ -393,6 +434,17 @@ with no second arm takes the same as *emission*.
 The immersion oil's refractive index; auto: the microscope's, else 1.518 (the
 standard oils of Olympus, Leica and Zeiss).
 
+### coverslip index
+The coverslip's refractive index.  Leave it on *auto* with an oil objective;
+with a water or silicone objective it is the glass's, about 1.52 for #1.5
+coverslips.
+
+### coverslip thickness
+Shown only when the coverslip's index differs from the immersion's.  The
+coverslip actually used, if it is known to be off the objective's design
+thickness; #1.5 coverslips are 170 ± 5 µm.  A collar set to it does the same
+in the microscope.
+
 ### model
 The choices of the model, explained under *In detail*.
 
@@ -413,6 +465,13 @@ The blur's start, or its value when held.
 ### bead diameter
 The beads' size, so that it is taken out of the model: a 100 nm bead is not a
 point.  0 for beads much smaller than the resolution.
+
+### learn coverslip tilt
+Learns the coverslip's tilt beside the pupil (*In detail*): always offered in
+situ, and for beads only when the coverslip's index differs from the
+immersion's.  Tick it when the coma of the result differs between samples
+mounted on different days, or in situ when molecules lie well above the
+coverslip.  Off, the tilt is 0.
 
 ### beads
 How beads are found, and for the bead average how they are aligned and
@@ -636,7 +695,11 @@ diagnostics*), explained on its page.  The pupil model's:
   term (±45°), a leading *2* or *3* for the second or third order of the
   family (*2Sp* the secondary spherical); the line under the figure lists
   them, and the legend under the bars names the colours.  A
-  difference far beyond the error bars is a change in the microscope.
+  difference far beyond the error bars is a change in the microscope.  With
+  *learn coverslip tilt*, the tilt is written over the figure in degrees with
+  its CRLB, *coverslip tilt x 0.52° ± 0.03°, y −0.10° ± 0.03°*, and in the
+  line under the buttons; the calibration file keeps it too.  A tilt within
+  about two of its CRLBs of 0 is no tilt.
 - **Zernike table**: the same numbers, every channel's phase -- in radians,
   waves and nm -- and magnitude with their uncertainties (and the *start from* model's); after
   *Uncertainty from halves...* also the halves' uncertainty (*± halves*, in

@@ -38,7 +38,7 @@ SELECTION = InSituSettings(block_frames=150, molecules=63)          # 3 a bin
 
 
 def small_model(optics, settings, roi_shape, focus_nm, z_max_nm=2000.0, device=None, dtype=torch.float32,
-                held_phase=None, held_magnitude=None, fit_focus=True):
+                held_phase=None, held_magnitude=None, fit_focus=True, fit_tilt=False):
     """`insitu_model` with a pupil of 16 samples on the CPU instead of 64, for seconds rather than a minute."""
     import uipsf
     from uipsf.workflows.calibrate import magnitude_modes
@@ -47,7 +47,8 @@ def small_model(optics, settings, roi_shape, focus_nm, z_max_nm=2000.0, device=N
                                                                                         settings.magnitude),
                                held_phase=held_phase, held_magnitude=held_magnitude)
     psf = uipsf.VectorPSF(grid, pupil, tuple(roi_shape), sigma_nm=(settings.blur_nm,) * 2)
-    return uipsf.ForwardModel(psf, geometry=uipsf.model.InSituGeometry(focus_nm, fit_focus=fit_focus),
+    geometry = uipsf.model.InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt)
+    return uipsf.ForwardModel(psf, geometry=geometry,
                               intensity=uipsf.model.Bleaching(order=0))
 
 
@@ -141,6 +142,32 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
     learned = uipsf.load_model(model_path(result.saved), device="cpu")
     assert learned.model.geometry.focus_nm == pytest.approx(result.model.geometry.focus_nm)
     assert float(learned.shared["geometry.focus"]) == pytest.approx(float(result.cal.shared()["geometry.focus"]))
+
+
+def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_file, tmp_path, monkeypatch):
+    # *learn coverslip tilt* through to the model, its result and both files.  The movie has no tilt, but its
+    # pupil a coma (Noll 7, -0.2 rad) that order 2 cannot hold, so the tilt along y takes it: no value is
+    # asserted.  Whether a tilt is found is test_tilt's (the model) and test_coverslip_calibration's (the
+    # window, beads).
+    from smappy.calibrate.insitu_run import run_insitu
+    from smappy.calibrate.pupil import model_path
+
+    import uipsf
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    from uipsf.diagnostics import coverslip_tilt
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    path, _ = movie_file
+    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0, fit_tilt=True),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, save_to=tmp_path / "tilt_3dcal.h5")
+    assert result.model.geometry.fit_tilt
+    degrees, crlb = coverslip_tilt(result.cal)
+    assert np.all(np.isfinite(crlb)) and np.all(crlb > 0), (degrees, crlb)
+    assert np.allclose([v for v, _ in result.calibration.parameters["coverslip_tilt_deg"]], degrees)
+    learned = uipsf.load_model(model_path(result.saved), device="cpu")
+    assert np.allclose(np.degrees(learned.shared["geometry.tilt"].numpy()), degrees, atol=1e-6)
 
 
 def test_the_focus_from_the_data_moves_a_guess_toward_the_truth_before_any_learning(movie_file, monkeypatch):

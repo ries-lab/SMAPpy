@@ -99,8 +99,16 @@ number is no state at all; the states as `name: reading; ...`; the EMU button
 it came from.  When two states share one reading, the first listed wins.
 
 ### parameters
-One row per value: `NA`, `n_immersion`, `wavelength_nm`, `pixel_nm`
-(`127 116`: x and y), `modality`, `astigmatism_nm`.  *follows* empty: the value.
+One row per value: `NA`, `n_immersion`, `n_coverslip`, `coverslip_design_um`,
+`wavelength_nm`, `pixel_nm` (`127 116`: x and y), `modality`,
+`astigmatism_nm`.  *follows* empty: the value.
+`n_coverslip` and `coverslip_design_um` are the objective's: the coverslip's
+refractive index it expects and the thickness it is corrected for.  Without
+them the coverslip is taken to be the immersion (an oil objective, where
+neither matters) and 170 µm thick; a water or silicone objective needs
+`n_coverslip` (about 1.52 for glass) for *PSF calibration* to model the glass
+plate and to offer learning its tilt.  A microscope with several objectives
+lets them follow the device that holds the objective, as the NA does.
 `astigmatism_nm` is where *PSF calibration*'s in situ learning starts without a
 model: the vertical astigmatism (Noll 6) in nm of wavefront, read from a bead
 model of the microscope, per state of the 3D lens (`on: 62; off: 0`).  Its sign

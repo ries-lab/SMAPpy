@@ -198,9 +198,11 @@ and excitation (the donuts of MINFLUX and STED, above).
 - Full Gibson–Lanni with a coverslip offset.  **Done in part (October 2026):** the layered model with a
   tilted coverslip (`optics/layers.py`, architecture.md, "The layered model"): immersion, coverslip of its own
   index and thickness, sample, the interfaces tilted by a learnt `geometry.tilt`.  A tilt is coma, not
-  astigmatism: it does not explain M2's in situ astigmatism.  Next: the coverslip and immersion per objective
-  in SMAPpy's microscope database and *learn the tilt* in the in situ settings; the coverslip over the field
-  (`FocalSurface`).
+  astigmatism: it does not explain M2's in situ astigmatism.  In SMAPpy too (October 2026,
+  `docs/uipsf/microscopes.md`, "The coverslip"): `n_coverslip` and `coverslip_design_um` per objective in the
+  microscope database, the thickness a setting of the calibration, *learn coverslip tilt* a model choice of
+  the PSF calibration window, in situ and (through another glass) for beads.  Next: the coverslip over the
+  field (`FocalSurface`).
 - Polychromatic emission (5–11 nm of σ measured).
 - The aperture edge done properly: anti-aliased, or a fitted soft cut-off.
 - Saturation I/(1 + I/I_sat); a per-slice background; exact EMCCD noise.

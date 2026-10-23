@@ -124,7 +124,8 @@ TABS = (
      "each device: the Micro-Manager tags it is read from (an older name after a ' | '), how "
      "(exact, nearest, value), and its states as 'name: reading; ...'"),
     ("parameters", ["parameter", "follows", "value"],
-     "NA, n_immersion, wavelength_nm, pixel_nm, modality ...: a value, or a device it follows "
+     "NA, n_immersion, n_coverslip, coverslip_design_um, wavelength_nm, pixel_nm, modality ...: a "
+     "value, or a device it follows "
      "and 'state: value; ...' ('from the name' reads a filter's band)"),
     ("channels", ["arm", "filter", "side"],
      "the split: its arms, transmitted first, the filter device each follows and the half of "

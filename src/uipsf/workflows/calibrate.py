@@ -44,7 +44,7 @@ import torch
 # The choices live in smappy, torch-free, so its window builds the form without torch installed.
 from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings  # noqa: F401
 
-from ..model import Channel, ForwardModel, VectorPSF, ZernikePupil
+from ..model import BeadStackGeometry, Channel, ForwardModel, VectorPSF, ZernikePupil
 from ..model.channels import prefix
 from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
@@ -94,7 +94,9 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     main channel first), each with its own pupil, started at ``transforms`` (secondary → main chip
     pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to ``z_max_nm`` from
     aliasing (`choose_pupil_size`, never below 64).  ``held_phase`` / ``held_magnitude``: modes held at
-    given values (`ZernikePupil`)."""
+    given values (`ZernikePupil`).  ``settings.fit_tilt`` learns the coverslip's tilt (`BeadStackGeometry`):
+    seen by beads only through a coverslip of another index than the immersion's, a water or silicone
+    objective's (`Optics.coverslip_matters`)."""
     optics = [optics] if not isinstance(optics, (list, tuple)) else list(optics)
     transforms = list(transforms) if transforms is not None else [None] * len(optics)
     if len(transforms) != len(optics):
@@ -108,7 +110,8 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
         psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
                         sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur == "free")
         channels.append(Channel(psf, transform=H))
-    return ForwardModel(channels)
+    # getattr: settings of a model saved before the tilt was a choice
+    return ForwardModel(channels, geometry=BeadStackGeometry(fit_tilt=getattr(settings, "fit_tilt", False)))
 
 
 def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,

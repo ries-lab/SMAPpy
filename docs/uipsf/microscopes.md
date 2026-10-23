@@ -60,3 +60,30 @@ median).
   Micro-Manager.  EMU's configurations name them (`docs/microscope-database.md`, which decodes these files with them).
 - **The values used** (from the user, 2026-10-20): M2 NA 1.43, oil 1.516; M5 Olympus NA 1.50 TIRF (nominal),
   oil 1.518; TetraSpeck beads of 100 nm in water (1.33), the 676/37 channel, taken as 676 nm.
+
+## The coverslip (October 2026)
+
+uipsf's layered model (`docs/uipsf/architecture.md`, "The layered model and a tilted coverslip") puts the
+coverslip between the sample and the immersion, with its own index and thickness, and can learn its tilt.
+SMAPpy gives it per objective, from the microscope database, and per calibration:
+
+| `Optics` | from | default |
+|---|---|---|
+| `n_cov` | the entry's `n_coverslip`, or *coverslip index* typed | the immersion's |
+| `d_cov_design_nm` | the entry's `coverslip_design_um` × 1000 | 170 µm |
+| `d_cov_nm` | *coverslip thickness* (µm), a setting of the calibration: the sample's, not the objective's | the design thickness |
+
+`OpticsSettings.resolved` returns them beside the NA and the immersion; `OpticsSettings.optics` builds each
+channel's `Optics` with them.  The lab's microscopes (M2, M5) have oil objectives and no `n_coverslip`: the
+coverslip is the immersion there and their models are as before.  A water or silicone objective needs
+`n_coverslip` in its entry (about 1.52), a microscope with several objectives making it follow the device
+that holds them.
+
+*learn coverslip tilt* is a model choice (`BeadSettings.fit_tilt`), one field for both methods since the
+window's *model* section is theirs: `bead_model` gives `BeadStackGeometry(fit_tilt=…)`, and in situ passes
+it to `insitu_model(…, fit_tilt=…)`.  The window offers it always in situ and for beads only when
+`n_cov ≠ n_imm`; a bead run drops it otherwise (`pupil.learns_tilt`), since beads on the coverslip of an
+oil objective see no tilt.  The learnt `geometry.tilt` is shown in degrees with its CRLB over *Pupil and
+Zernikes* and in the run's summary line (`uipsf.diagnostics.coverslip_tilt`), and kept in the calibration's
+record as `coverslip_tilt_deg` ([[t_x, CRLB], [t_y, CRLB]]).
+

@@ -432,6 +432,34 @@ def test_psf_calibration_takes_the_optics_from_the_microscope_on_auto():
     assert (typed["NA"], typed["wavelengths"], typed["n_immersion"]) == (1.4, [650.0], 1.515)
 
 
+def test_an_objectives_coverslip_is_saved_with_the_microscope_and_reaches_the_calibration(config):
+    from smappy.calibrate.pupil import OpticsSettings
+    # a water objective, its turret a device: each objective with its own coverslip glass and design
+    turret = Device(name="objective", tags=["Turret-Label"], states={"60x W": "Position-1", "100x oil": "Position-2"})
+    water = a_microscope(
+        name="water scope", identify={"Laser-Serial": "W-1"}, devices={"objective": turret},
+        parameters={"NA": {"device": "objective", "values": {"60x W": 1.2, "100x oil": 1.45}},
+                    "n_immersion": {"device": "objective", "values": {"60x W": 1.333, "100x oil": 1.518}},
+                    "n_coverslip": {"device": "objective", "values": {"60x W": 1.52}},
+                    "coverslip_design_um": {"device": "objective", "values": {"60x W": 150}},
+                    "wavelength_nm": 670})
+    save_microscope(water)
+    stored = microscope_db.database(reload=True).get("water scope")
+    assert stored.parameters["n_coverslip"] == {"device": "objective", "values": {"60x W": 1.52}}
+    assert stored.parameters["coverslip_design_um"]["values"] == {"60x W": 150}
+    tags = {"Laser-Serial": "W-1", "Turret-Label": "Position-1", "PixelSizeUm": "0.11"}
+    found = OpticsSettings().resolved(camera_of(tags))
+    assert (found["n_immersion"], found["n_coverslip"]) == (1.333, 1.52)
+    assert found["coverslip_design_um"] == found["coverslip_um"] == 150.0      # the thickness: the design's
+    assert OpticsSettings().coverslip_matters(camera_of(tags))
+    typed = OpticsSettings(coverslip_um=172.0).resolved(camera_of(tags))
+    assert (typed["coverslip_um"], typed["coverslip_design_um"]) == (172.0, 150.0)
+    # the oil objective of the same microscope says nothing: the coverslip is the immersion, 170 µm
+    oil = OpticsSettings().resolved(camera_of(dict(tags, **{"Turret-Label": "Position-2"})))
+    assert (oil["n_coverslip"], oil["coverslip_design_um"]) == (1.518, 170.0)
+    assert not OpticsSettings().coverslip_matters(camera_of(dict(tags, **{"Turret-Label": "Position-2"})))
+
+
 def test_dual_colour_puts_the_arm_on_the_main_half_first():
     from smappy.calibrate.pupil import OpticsSettings
     tags = dict(M2_BEADS, **{"Servos-Position0": "20000", "Thorlabs ELL9-Label": "Position 3"})

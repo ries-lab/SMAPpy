@@ -375,7 +375,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
 
     def make(focus):
         return insitu_model(o, model, (roi, roi), focus, device=device, held_phase=held_phase,
-                            held_magnitude=held_magnitude, fit_focus=focus_fit == "learnt")
+                            held_magnitude=held_magnitude, fit_focus=focus_fit == "learnt", fit_tilt=model.fit_tilt)
     learnt = make(guess)
     start, previous = start_shared(learnt, run.start_from, astigmatism or 0.0, o.wavelength_nm, kept)
     result_focus = None
@@ -423,6 +423,11 @@ def calibration_of(result: InSituRunResult, spline=None, insitu: InSituModelSett
         result.calibration = insitu_spline(model, cal.shared(), (low, high), dz,
                                            int(result.rois.units.regions.shape[-1]), insitu.spline_z,
                                            camera=result.rois.camera)
+        from uipsf.diagnostics import coverslip_tilt
+        tilt = coverslip_tilt(cal)                        # with its CRLB, as a bead model's record keeps it
+        if tilt is not None:
+            result.calibration.parameters["coverslip_tilt_deg"] = [[float(v), float(e)]
+                                                                   for v, e in zip(*tilt, strict=True)]
     return result.calibration
 
 

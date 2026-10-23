@@ -524,7 +524,9 @@ class PupilModel:
         cal = run.result.cal
         if cal.result.stop_reason == "cancelled":
             return "stopped, nothing saved"
-        return f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used"
+        from uipsf.diagnostics.figures import tilt_text
+        tilt = tilt_text(cal)
+        return f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f", {tilt}" if tilt else "")
 
 
 class InSitu:
@@ -633,8 +635,10 @@ class InSitu:
             return "stopped, nothing saved"
         focus = float(result.cal.shared()["geometry.focus"])
         twin = result.run.final.twin
+        from uipsf.diagnostics.figures import tilt_text
+        tilt = tilt_text(result.cal)
         text = (f"{len(result.cal.beads.used)} frames used, {len(result.run.rounds)} rounds, focus {focus:.0f} nm"
-                + ("" if twin is None else f", twin test: {twin.verdict}"))
+                + (f", {tilt}" if tilt else "") + ("" if twin is None else f", twin test: {twin.verdict}"))
         return text + "".join(f"; {w}" for w in result.messages)
 
     def states(self, run: Run) -> dict:
