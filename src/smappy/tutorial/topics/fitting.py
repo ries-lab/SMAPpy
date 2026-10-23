@@ -106,15 +106,9 @@ def make(d) -> None:
     camera.set_expanded(True)
     d.settle()
     control = panel.form.fields["camera"]
-    d.shot("Open, it lists the numbers the fit uses. For a known microscope "
-           "they come from the file and from SMAPpy's database.",
-           spot=[control.line, control.values_line], zoom=d.around(camera, 760))
-    d.shot("Microscope shows each number and where it came from.",
-           spot=[control.button], point=control.button, click=True,
-           zoom=d.around(control.button, 760))
-    control.open_window()
-    d.settle()
-    place_beside(d, control.window, 0.8)
+    d.shot("Open, it lists the microscope, the camera and the numbers the fit "
+           "uses. A tooltip says where each number comes from.",
+           spot=[control.inner], zoom=d.around(camera, 760))
     d.shot("The numbers are locked: the lock opens them for typing, so that "
            "overriding the file is a decision.",
            spot=[control.lock], point=control.lock, click=True,
@@ -128,8 +122,8 @@ def make(d) -> None:
                            for n in ("conversion", "offset", "pixelsize_um")])])
     d.shot("A wrong conversion still fits well but gives wrong photon counts, so "
            "check it once per camera.",
-           spot=[d.window_rect(control.window)])
-    control.window.hide()
+           spot=[field(panel, "camera.conversion")])
+    camera.set_expanded(False)
 
     d.chapter("Finding the spots")
     detection = section_of(panel, "detection")

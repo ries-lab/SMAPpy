@@ -1,43 +1,48 @@
-"""The microscope control: one line where a file is opened, its values a button away.
+"""The microscope control: a folded section where a file is opened, its values in it.
 
 Every place a stack is opened -- the fitters, *PSF calibration* -- has the same control
-(`docs/microscope-database.md`, "Second round").  In the panel it is a line, the
-microscope and its state as found from the file (`microscope_db.one_line`), the values the
-function uses below it in grey, and *Microscope...*.  The button opens one window: the
-microscope and the camera, recognised or chosen, and the values with where each comes
-from.  The values are locked: a lock opens them for editing, so that overriding what the
-file and the database say is a decision, and an edited value's label is coloured.
+(`docs/microscope-database.md`, "Second round").  Folded, as it starts, the section's title is
+one line: the microscope and its state as found from the file (`microscope_db.one_line`),
+orange when something the function needs is missing or nothing was recognised.  Open, it lists
+the microscope, the camera and only the values the function uses, each showing the value found
+-- grey -- with where it comes from in its tooltip.  The values are locked: the lock opens them,
+typing over one makes it the user's (its label coloured, ↺ beside it to give it back), so that
+overriding what the file and the database say is a decision.  The microscope stays choosable.
 
-It is a `SettingsForm` -- a settings part of kind ``"microscope"`` -- whose rows live in
-the window instead of the panel: the dotted names, the hints, the choices, what is shown,
-saving and restoring are a form's, unchanged, so a chain or a GUI file that set
-``camera.conversion`` still does.  The function says what it found through one hint on
-the part itself, a dict (`set_details`): the line, a status, the values in a sentence,
-and each value's source.
+It replaced a window behind a *Microscope...* button (2026-10): the window put the values a
+click and a window away from where they are used, and its grey list of sources under the values
+was read by nobody.  No *auto* boxes either: every value here has been found somewhere, and the
+field shows it (`_Field.type_over`).
+
+It is a `SettingsForm` -- a settings part of kind ``"microscope"`` -- whose rows are an inner
+form's: the dotted names, the hints, the choices, what is shown, saving and restoring are a
+form's, unchanged, so a chain or a GUI file that set ``camera.conversion`` still does.  The
+function says what it found through one hint on the part itself, a dict (`set_details`): the
+line, a status, and each value's source.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton
 
 from .params import SettingsForm
 
 #: an edited value's label: the user's word over the file's
 EDITED = "color: #1d5fb4; font-weight: 600"
 #: the line, by status: all known, something the function uses missing, nothing recognised
-STATUS = {"ok": "color: gray", "missing": "color: #c07000", "unrecognised": "color: #c07000",
+STATUS = {"ok": "", "missing": "color: #c07000", "unrecognised": "color: #c07000",
           "fallback": "color: #c07000"}
-#: the fields that choose rather than state a value, never locked
-CHOOSERS = ("microscope", "camera")
+#: the field that chooses where the values come from: never locked
+CHOOSER = "microscope"
 
 
 class MicroscopeForm(SettingsForm):
-    """A settings part shown as one line and a window (module docstring)."""
+    """A settings part shown folded as one line, its values inside (module docstring)."""
 
     def __init__(self, settings_cls: type, specs=None, parent=None):
-        super().__init__(settings_cls, {}, parent)       # an empty form: this widget is the line
+        super().__init__(settings_cls, {}, parent)       # an empty form: the inner one holds the rows
+        self._sources: Dict[str, str] = {}
         self.inner = SettingsForm(settings_cls, specs)
         # the inner form's tables are this form's: every SettingsForm method works on them
         self.fields, self.labels = self.inner.fields, self.inner.labels
@@ -46,41 +51,22 @@ class MicroscopeForm(SettingsForm):
         self.inner.changed.connect(self.changed)
         self.inner.field_changed.connect(self.field_changed)
         self.inner.changed.connect(self._paint)
+        for name, field in self._value_fields().items():
+            if hasattr(field, "type_over"):
+                field.type_over()
 
-        line = self.layout()
+        box = self.layout()
+        # said inside only when something is wrong: the title says the rest
         self.line = QLabel("no file")
         self.line.setWordWrap(True)
-        line.addWidget(self.line)
-        self.values_line = QLabel("")
-        self.values_line.setWordWrap(True)
-        self.values_line.setStyleSheet("color: gray")
-        line.addWidget(self.values_line)
-        row = QHBoxLayout()
-        self.button = QPushButton("Microscope...")
-        self.button.setToolTip("the microscope and the camera found for this file, the values "
-                               "used and where each comes from; choose them, or unlock to edit")
-        self.button.clicked.connect(self.open_window)
-        row.addWidget(self.button)
-        row.addStretch(1)
-        line.addLayout(row)
-
-        self.window = QWidget(self, Qt.Window)
-        self.window.setWindowTitle("Microscope")
-        box = QVBoxLayout(self.window)
-        self.window_line = QLabel("")
-        self.window_line.setWordWrap(True)
-        box.addWidget(self.window_line)
+        self.line.setVisible(False)
+        box.addWidget(self.line)
         box.addWidget(self.inner)
-        self.sources = QLabel("")
-        self.sources.setWordWrap(True)
-        self.sources.setStyleSheet("color: gray")
-        box.addWidget(self.sources)
         buttons = QHBoxLayout()
         self.lock = QToolButton()
         self.lock.setCheckable(True)
         self.lock.setToolTip("locked: the values are the file's and the database's.  Unlock to "
-                             "type one: it wins over them, for this run, and is kept with its "
-                             "settings")
+                             "type over one: it wins over them, and is kept with the settings")
         self.lock.toggled.connect(self._locked)
         buttons.addWidget(self.lock)
         buttons.addStretch(1)
@@ -92,67 +78,91 @@ class MicroscopeForm(SettingsForm):
         #: what *Microscope manager...* calls: the main window's, else a manager of its own
         self.open_manager = None
         self._manager_window = None
-        self._sources: Dict[str, str] = {}
+        self.status = "ok"
+        #: the line: the section's title
+        self.title = "no file"
         self.lock.setChecked(True)
         self._locked(True)
 
     # ------------------------------------------------------------------ the lock
     def _value_fields(self):
-        return {n: f for n, f in self.fields.items() if n not in CHOOSERS}
+        return {n: f for n, f in self.fields.items() if n != CHOOSER}
 
     def _locked(self, locked: bool) -> None:
         self.lock.setText("\U0001F512 locked" if locked else "\U0001F513 editing")
         for field in self._value_fields().values():
-            field.setEnabled(not locked)
+            if hasattr(field, "set_locked"):
+                field.set_locked(locked)
+            else:
+                field.setEnabled(not locked)
 
     def _paint(self) -> None:
-        """Colour the label of each value typed over the file's: it is the user's word."""
-        for name, field in self._value_fields().items():
+        """Colour the label of each value typed over the file's: it is the user's word; and say in
+        each label's tooltip where its value comes from."""
+        for name, field in self.fields.items():
             label = self.labels.get(name)
             if label is None:
                 continue
             try:
-                edited = field.value() is not None
+                edited = name != CHOOSER and field.value() not in (None, "")
             except ValueError:
                 edited = True
             label.setStyleSheet(EDITED if edited else "")
-            label.setToolTip(("edited: wins over the file and the database.  " if edited else "")
-                             + self._sources.get(name, ""))
+            source = self._sources.get(name, "")
+            label.setToolTip(("edited: wins over the file and the database" if edited
+                              else f"found: {source}" if source else ""))
 
     def set(self, settings) -> None:
         super().set(settings)
         self._paint()
         # a settings file with values typed opens unlocked, so they are seen as the user's
-        if any(f.value() is not None for f in self._value_fields().values()):
+        if any(f.value() not in (None, "") for f in self._value_fields().values()):
             self.lock.setChecked(False)
 
     # ---------------------------------------------------------------- what was found
     def set_details(self, details: Optional[Dict[str, Any]]) -> None:
         """The function's account of the file: ``line``, ``status`` (`STATUS`), ``values`` (the
-        values used, in a sentence) and ``sources`` ({field: where its value comes from})."""
+        values used, in a sentence: said inside when something is wrong) and ``sources`` ({field:
+        where its value comes from}, in each label's tooltip).  The line is the section's title."""
         details = details or {}
-        status = details.get("status", "ok")
-        text = details.get("line", "no file")
-        self.line.setText(text)
-        self.line.setStyleSheet(STATUS.get(status, ""))
-        self.window_line.setText(text)
-        self.window_line.setStyleSheet(STATUS.get(status, ""))
-        self.values_line.setText(details.get("values", ""))
+        self.status = details.get("status", "ok")
+        text = self.title = details.get("line", "no file")
+        section = self._section()
+        if section is not None:
+            from .widgets import CONTROL_WIDTH
+            from PySide6.QtCore import Qt
+            shown = section.button.fontMetrics().elidedText(text, Qt.ElideRight, CONTROL_WIDTH - 90)
+            section.set_title(shown)
+            section.button.setToolTip(text if shown != text else "")
+            style = "border: none; font-weight: bold;" + (" " + STATUS[self.status] + ";"
+                                                         if STATUS.get(self.status) else "")
+            section.button.setStyleSheet(f"QToolButton {{ {style} }}")
+        wrong = STATUS.get(self.status, "")
+        self.line.setVisible(bool(wrong))
+        self.line.setStyleSheet(wrong)
+        self.line.setText({"missing": "missing: " + details.get("values", "").split("missing: ")[-1],
+                           "fallback": "nothing in the file recognises a microscope: the last one "
+                                       "used stands in",
+                           "unrecognised": "no microscope recognised: choose one, or unlock and type "
+                                           "the values"}.get(self.status, ""))
         self._sources = dict(details.get("sources") or {})
-        self.sources.setText("\n".join(f"{name}: {source}" for name, source in self._sources.items()
-                                       if name in self.fields and self._shown(name)))
         self._paint()
 
     def _shown(self, name: str) -> bool:
         layout = self.row_layouts.get(name)
         return layout is None or layout.isRowVisible(self.fields[name])
 
-    # ------------------------------------------------------------------ windows
-    def open_window(self) -> None:
-        self.window.show()
-        self.window.raise_()
-        self.window.activateWindow()
+    def _section(self):
+        """The collapsible section this form is the content of, if any."""
+        from .widgets import CollapsibleSection
+        parent = self.parent()
+        while parent is not None:
+            if isinstance(parent, CollapsibleSection) and parent.content is self:
+                return parent
+            parent = parent.parent()
+        return None
 
+    # ------------------------------------------------------------------ the manager
     def _manager(self) -> None:
         opener = self.open_manager
         if opener is None:

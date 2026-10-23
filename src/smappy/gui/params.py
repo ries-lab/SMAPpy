@@ -46,6 +46,11 @@ class _Field(QWidget):
         # clips it at zero margin; a little slack on every row fixes that
         row.setContentsMargins(2, 0, 6, 0)
         self.auto: Optional[QCheckBox] = None
+        # the microscope control's way (`type_over`): no *auto* box, the found value typed over
+        self._typed_over = False
+        self._checking = False
+        self.locked = False
+        self.reset_button: Optional[QToolButton] = None
         choices = info.choices() if callable(info.choices) else info.choices
         if choices is None and spec.type is bool and spec.optional:
             # three states as words: a tri-state tick box's third state is a
@@ -85,6 +90,7 @@ class _Field(QWidget):
             # the compact thing.  Validation happens in `value`.
             self.widget = QLineEdit()
             self.widget.setMaximumWidth(80)
+            self.widget.editingFinished.connect(self._check)
             self.widget.editingFinished.connect(self.changed)
         if isinstance(self.widget, QComboBox):
             # first call on the room, up to its cap: see _fit_combo
@@ -117,6 +123,8 @@ class _Field(QWidget):
             value, label = choice if isinstance(choice, tuple) else (choice, str(choice))
             self.widget.addItem(label, value)
             self._values.append(value)
+        if getattr(self, "_choice_hint", None) is not None:
+            self.set_hint(self._choice_hint)
         self._fit_combo()
 
     def _fit_combo(self) -> None:
@@ -166,9 +174,45 @@ class _Field(QWidget):
         finally:
             self.widget.blockSignals(blocked)
 
+    def type_over(self) -> None:
+        """No *auto* box: the field shows the value found (the hint, in grey) and typing over it makes
+        the value the user's; ↺ or clearing the field gives it back to the file.  The microscope control
+        (`gui.microscope_form`): there every value has been found somewhere, and a box beside each that
+        said so was one more thing to read.  `value()` is unchanged -- None while it is the found one."""
+        if self.auto is None or not isinstance(self.widget, QLineEdit) or self._typed_over:
+            return
+        self._typed_over = True
+        self.auto.setVisible(False)
+        self.reset_button = QToolButton(text="\u21ba", autoRaise=True)
+        self.reset_button.setToolTip("back to the value found: the file's, the database's")
+        self.reset_button.clicked.connect(lambda: self.auto.setChecked(True))
+        self.layout().insertWidget(self.layout().indexOf(self.auto), self.reset_button)
+        self.widget.textEdited.connect(self._typed)
+        self._on_auto(self.auto.isChecked())
+
+    def _typed(self, text: str) -> None:
+        if self.auto.isChecked():
+            blocked = self.auto.blockSignals(True)       # the text typed stays: it is the value
+            self.auto.setChecked(False)
+            self.auto.blockSignals(blocked)
+            self._enable()
+            self._paint()
+
+    def set_locked(self, locked: bool) -> None:
+        """Locked: the value can be read, not typed (the microscope control's lock)."""
+        self.locked = locked
+        self._enable()
+
+    def _enable(self) -> None:
+        on = self.auto is not None and self.auto.isChecked()
+        self.widget.setEnabled(not self.locked and (self._typed_over or not on))
+        if self.reset_button is not None:
+            self.reset_button.setVisible(not on)
+            self.reset_button.setEnabled(not self.locked)
+
     def _on_auto(self, on: bool) -> None:
-        self.widget.setEnabled(not on)
-        if on and self._hint and isinstance(self.widget, QLineEdit):
+        self._enable()
+        if on and (self._hint or self._typed_over) and isinstance(self.widget, QLineEdit):
             self.widget.setText(self._hint)      # leaving it blank says less
         self._paint()
         self.changed.emit()
@@ -187,9 +231,11 @@ class _Field(QWidget):
         on, so nothing here can turn a read-from-the-file number into one the
         user is taken to have set.
         """
-        if isinstance(self.widget, QComboBox) and self.spec.optional \
-                and self._values and self._values[0] is None:
+        if isinstance(self.widget, QComboBox) and self._values and (
+                self._values[0] is None and self.spec.optional
+                or self._values[0] == "" and self.widget.itemText(0).startswith("auto")):
             # a choice on auto says what auto is: "auto (on)"
+            self._choice_hint = value          # kept: a refill of the list (`_fill`) says it again
             labels = dict(zip(self._values, (self.widget.itemText(i)
                                              for i in range(self.widget.count()))))
             shown = labels.get(value, None if value is None else str(value))
@@ -245,6 +291,9 @@ class _Field(QWidget):
         else:
             w.setText("" if value is None else f"{value:g}" if isinstance(value, float)
                       else str(value))
+            self._set_text = w.text()
+            if self.spec.type in (int, float):
+                self._check()
 
     def value(self) -> Any:
         if self.auto is not None and self.auto.isChecked():
@@ -257,11 +306,67 @@ class _Field(QWidget):
         if isinstance(w, QSpinBox):
             return w.value()
         text = w.text().strip()
-        if self.spec.type is int:
-            return int(float(text))
-        if self.spec.type is float:
-            return float(text)
+        if self.spec.type in (int, float):
+            return self._number(text)
         return text
+
+    @property
+    def label(self) -> str:
+        return self.spec.info.label or self.spec.name.replace("_", " ")
+
+    def _number(self, text: str):
+        """``text`` as the field's number, or a ValueError that names the field and says what it takes.
+
+        Checked here, not left to the plugin: a word in a number field said only Python's "could not
+        convert string to float", without the field, a decimal in a whole-number field was cut to its
+        integer part, and a value beyond the field's bounds reached the run.  Refused, never clamped: a
+        clamped value is one the user did not type.  The bounds are the GUI's, for what is typed: a value
+        set from a chain, a script or a controlling program (`set`) beyond them is shown red but passed on,
+        as it would be without a form (MicroClaw's live fits stop after half a second idle)."""
+        info, whole = self.spec.info, self.spec.type is int
+        try:
+            number = float(text)
+        except ValueError:
+            raise ValueError(f"{self.label}: '{text}' is not a number" if text
+                             else f"{self.label}: empty, a number is needed") from None
+        if number != number:
+            raise ValueError(f"{self.label}: '{text}' is not a number")
+        if whole and number != int(number):
+            raise ValueError(f"{self.label}: '{text}' is not a whole number")
+        unit = f" {info.unit}" if info.unit else ""
+        if text == getattr(self, "_set_text", None) and not self._checking:
+            return int(number) if whole else number
+        if info.min is not None and number < info.min:
+            raise ValueError(f"{self.label}: {text} is below its least, {info.min:g}{unit}")
+        if info.max is not None and number > info.max:
+            raise ValueError(f"{self.label}: {text} is above its most, {info.max:g}{unit}")
+        return int(number) if whole else number
+
+    def problem(self) -> str:
+        """What is wrong with the value as shown, or "" -- `_number`'s message, bounds included."""
+        self._checking = True
+        try:
+            self.value()
+        except (ValueError, TypeError) as error:
+            return str(error)
+        finally:
+            self._checking = False
+        return ""
+
+    def _check(self) -> None:
+        """When a number is typed: red and the reason in the tooltip if it will not do.  The run refuses
+        it too, with the same words (`_number`)."""
+        if self._typed_over and not self.widget.text().strip() and not self.auto.isChecked():
+            self.auto.setChecked(True)               # emptied: the found value again
+            return
+        problem = self.problem()
+        self.widget.setProperty("invalid", bool(problem))
+        if problem:
+            self.widget.setStyleSheet("border: 1.5px solid #d62728; border-radius: 3px")
+            self.widget.setToolTip(problem)
+        else:
+            self.widget.setToolTip("")
+            self._paint()
 
 
 class LayersField(QWidget):

@@ -76,7 +76,7 @@ tags read in this file.
 
 **3. Checking.**  Below, the window shows what the entry, as it stands, makes
 of this file: every parameter, its value, and where it came from.  It is the
-table of values a fitter's *Microscope...* window draws on, so the entry can be checked
+table of values a fitter's *microscope* section draws on, so the entry can be checked
 against the file before it is saved.  Under the table, in orange, is
 whatever is still wrong: a parameter the fit needs that is still unknown, a
 recognising tag this file does not match, a file another camera already
@@ -86,7 +86,7 @@ claims.
 of the same name there.  The database is then read again, and every open fitter
 re-reads its file: its line disappears, its *auto* fields show the new
 numbers, and the camera is offered under *camera* in each fitter's
-*Microscope...* window.
+*microscope* section.
 
 ## In detail
 
@@ -115,8 +115,8 @@ mode, or a wrong number is corrected.  When the editor is opened for a file
 whose camera was recognised, that camera is chosen already.
 
 ### name
-What the camera is called under *camera* in the fitters' *Microscope...*
-window and in the microscope manager.  An entry is saved
+What the camera is called under *camera* in the fitters' *microscope*
+section and in the microscope manager.  An entry is saved
 under its name, so saving under a new name makes a second camera.
 
 ### device

@@ -328,22 +328,20 @@ the stacks, named as the bead calibration names it and never over another
 file, and handed to the fitter.  Off: the figures only; *Save as...* still
 saves.
 
-### Microscope...
-Under the line that names the microscope found for the first stack (*M2 · 3DA
-on · iXon 1 · 127 × 116 nm*) and the numbers used: the window with the
-microscope and the camera, recognised or chosen by hand for stacks no entry
-recognises (for this window's runs, not the entry), and only the values the
-method uses -- the camera and the pixel for the bead average, the optics too
-for a model -- each with where it comes from.  They are locked; the lock opens
-them, and a typed value is marked.  Also the
-[Microscope manager](plugin:Panels/Microscope manager).
-
 ### microscope
-The microscope control.  On *auto* each value comes from the microscope
-database for the microscope that took the first stack (recognised from its
-metadata, else the last one used) and the state its devices were in, and from
-the camera database for its camera: shown greyed once stacks are added.  A
-value typed wins.  There is no default for the NA and the wavelength: a
+The microscope control, folded, titled with the microscope found for the
+first stack (*M2 · 3DA on · iXon 1 · 127 × 116 nm*), orange when something
+the method needs is missing.  Open: the microscope, recognised or chosen by
+hand for stacks no entry recognises (for this window's runs, not the entry),
+the camera, and only the values the method uses -- the camera and the pixel
+for the bead average, the optics too for a model.  Each value comes from the
+microscope database for the microscope that took the first stack (recognised
+from its metadata, else the last one used) and the state its devices were
+in, and from the camera database for its camera; the field shows it in grey,
+with where it comes from in its label's tooltip.  The values are locked: the
+lock opens them, a value typed over the found one wins and is marked, and ↺
+gives it back.  Also the
+[Microscope manager](plugin:Panels/Microscope manager).  There is no default for the NA and the wavelength: a
 microscope the database does not know needs them typed, because a wrong value
 cannot be noticed in the result, only in a model that does not fit.  The
 calibration keeps the microscope's state -- which filter, the 3D lens in or

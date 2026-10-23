@@ -138,12 +138,10 @@ def make(d) -> None:
            zoom=d.around(field(fit, "source.path"), 760))
     section_of(fit, "camera").set_expanded(True)
     microscope = fit.form.fields["camera"]
-    microscope.open_window()
     d.settle()
-    place_beside(d, microscope.window, 0.8)
     d.shot("The camera comes from the simulation: nothing to type in.",
-           spot=[d.window_rect(microscope.window)])
-    microscope.window.hide()
+           spot=[microscope.inner])
+    section_of(fit, "camera").set_expanded(False)
     d.shot("Run.", spot=[fit.run_button], point=fit.run_button, click=True,
            zoom=d.around(fit.run_button, 760))
     _run(d, fit)

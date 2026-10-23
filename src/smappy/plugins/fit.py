@@ -806,6 +806,8 @@ class _FitPlugin(Plugin):
             return None
         hints = {f"camera.{name}": getattr(camera, name)
                  for name in self.CAMERA_FIELDS}
+        # the camera row on *auto* says which camera it found, as the values do
+        hints["camera.camera"] = camera.camera_name or None
         sizes = camera.pixelsize_um_xy
         if sizes is not None:
             hints["camera.pixelsize_um"] = sizes[0]

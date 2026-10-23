@@ -90,7 +90,7 @@ def test_the_camera_hints_say_what_auto_resolves_to(stack):
     settings.source.path = str(stack)
     hints = plugin.describe(None, settings).hints
     # each field's, and the microscope control's own account under the part's name
-    assert set(hints) - {"camera"} == {f"camera.{n}" for n in plugin.CAMERA_FIELDS}
+    assert set(hints) - {"camera", "camera.camera"} == {f"camera.{n}" for n in plugin.CAMERA_FIELDS}
     # a value the user did set comes back as theirs, not as the file's
     settings.camera.offset = 42.0
     assert plugin.describe(None, settings).hints["camera.offset"] == 42.0

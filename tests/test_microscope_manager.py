@@ -164,10 +164,11 @@ def test_psf_calibration_names_the_stacks_microscope_and_takes_one_chosen(app, t
     tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
     window.add_paths([a_tiff(tmp_path / "beads_MMStack.ome.tif", tags)])
     form = window.optics_form
-    assert form.line.text() == "no microscope recognised"
+    assert form.title == "no microscope recognised" and form.status == "unrecognised"
+    assert form.line.isVisibleTo(form)                        # said inside, in orange
     form.fields["microscope"].set("M2")                       # by hand, in the control
     form.fields["microscope"].changed.emit()
-    assert form.line.text().startswith("M2 \u00b7")
+    assert form.title.startswith("M2 \u00b7") and window.sections["microscope"].title == form.title
     assert window.optics_camera.pixelsize_um_xy == (0.127, 0.116)
     assert form.fields["NA"]._hint == "1.43"
     window.close()
@@ -202,17 +203,45 @@ def test_the_microscope_control_locks_its_values_and_colours_an_edit(app, tmp_pa
     panel.form.set_values({"source.path": a_tiff(tmp_path / "beads_MMStack.ome.tif", M2_BEADS)})
     panel._describe()
     control = panel.form.fields["camera"]
-    assert control.line.text().startswith("M2 \u00b7 3DA on")
-    assert "15.8 e-/ADU" in control.values_line.text()
-    assert not control.fields["conversion"].isEnabled() and control.fields["microscope"].isEnabled()
+    section = panel.form.sections["camera"]
+    # folded, its title is the line; open, the rows are there, no window
+    assert not section.button.isChecked() and section.title.startswith("M2 \u00b7 3DA on")
+    conversion = control.fields["conversion"]
+    assert conversion.widget.text() == "15.8" and not conversion.auto.isVisibleTo(conversion)
+    assert control.fields["camera"].widget.itemText(0) == "auto (iXon 1)"
+    assert "found:" in control.labels["conversion"].toolTip()            # where it comes from
+    assert not conversion.widget.isEnabled() and control.fields["microscope"].isEnabled()
+    assert not control.fields["camera"].widget.isEnabled()               # the camera is a value too
+    # unlocked, typing over the found value makes it the user's
     control.lock.setChecked(False)
-    control.fields["conversion"].set(12.0)
-    control.fields["conversion"].changed.emit()
+    conversion.widget.setText("12")
+    conversion.widget.textEdited.emit("12")
+    conversion.widget.editingFinished.emit()
     assert control.labels["conversion"].styleSheet().startswith("color: #1d5fb4")
-    assert panel.form.values()["camera.conversion"] == 12.0      # stored as before
-    control.open_window()
-    assert control.window.isVisible()
-    control.window.close()
+    assert panel.form.values()["camera.conversion"] == 12.0              # stored as before
+    assert conversion.reset_button.isVisibleTo(conversion)
+    # and ↺ gives it back to the file
+    conversion.reset_button.click()
+    assert panel.form.values()["camera.conversion"] is None and conversion.widget.text() == "15.8"
+    assert control.labels["conversion"].styleSheet() == ""
+    # emptied, the same
+    conversion.widget.setText("9")
+    conversion.widget.textEdited.emit("9")
+    conversion.widget.setText("")
+    conversion.widget.editingFinished.emit()
+    assert panel.form.values()["camera.conversion"] is None
+
+
+def test_a_camera_chosen_in_the_control_is_the_one_the_fit_uses(app, tmp_path, config):
+    from smappy.camera_db import database
+    from smappy.plugins.fit import GaussianFit
+    other = next(n for n in database().names() if n != "iXon 1")
+    plugin = GaussianFit()
+    settings = plugin.Settings()
+    settings.source.path = a_tiff(tmp_path / "beads_MMStack.ome.tif", M2_BEADS)
+    assert plugin.describe(None, settings).hints["camera.camera"] == "iXon 1"     # found from the file
+    settings.camera.camera = other
+    assert plugin.resolution(settings).camera_metadata().camera_name == other
 
 
 def test_the_menu_opens_the_manager(app, config):
@@ -242,3 +271,4 @@ def test_a_gaussian_fit_runs_without_the_optics_a_psf_model_needs(app, tmp_path)
     assert camera.pixelsize_um == 0.127               # the file's, the lens unknown
     from smappy.calibrate.pupil import OpticsSettings
     assert OpticsSettings().missing(camera) == []      # NA and emission from M2 anyway
+

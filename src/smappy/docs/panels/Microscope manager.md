@@ -22,14 +22,15 @@ with their states named, and the values that follow from them.  A file is
 then read with its microscope's optics wherever it is opened:
 
 - Wherever a stack is opened -- every fitter, *PSF calibration* -- the same
-  control shows it: one line, *M2 · 3DA on · iXon 1 · 127 × 116 nm*, grey
-  when everything the function uses is known and orange when not, the
-  numbers used below it, and *Microscope...*.  That window shows the
-  microscope and the camera, recognised or chosen by hand, and only the
-  values the function uses, each with where it comes from.  The values are
-  locked; the lock opens them, and a value typed over the file's is marked
-  and kept with the run's settings.  When nothing recognises a file, the
-  last microscope used stands in, and the line says so.
+  control shows it: a section, folded, whose title is one line, *M2 · 3DA on
+  · iXon 1 · 127 × 116 nm*, orange when something the function uses is
+  missing or no microscope was recognised.  Open, it shows the microscope
+  and the camera, recognised or chosen by hand, and only the values the
+  function uses, each as it was found, with where it comes from in its
+  tooltip.  The values are locked; the lock opens them, a value typed over
+  the file's is marked and kept with the run's settings, and ↺ gives it
+  back.  When nothing recognises a file, the last microscope used stands
+  in, and the section says so.
 - A microscope brings its camera: a file whose camera says nothing that
   identifies it is read with the camera the microscope is set up with.  The
   fitters use the microscope's pixel for the state of its 3D lens, over the
@@ -39,7 +40,7 @@ then read with its microscope's optics wherever it is opened:
   another filter, another microscope.
 
 This window is where the entries are made.  Opened from *File > Microscope
-manager...*, or from *Microscope manager...* in any *Microscope...* window.  A value typed where a file is opened (an NA in *PSF
+manager...*, or from *Microscope manager...* in any *microscope* section.  A value typed where a file is opened (an NA in *PSF
 calibration*, a pixel size in the fitter) still wins over the entry, for that
 run.
 

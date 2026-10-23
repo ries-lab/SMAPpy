@@ -93,8 +93,10 @@ camera field, the Localize tab without its camera buttons:
 * **One control everywhere** -- *PSF calibration*, every fitter, in situ -- replacing the
   fitters' camera part: a line, *M2 · iXon 1 · 3DA on · 127 × 116 nm*, grey when all
   that the function uses is known, orange when something is missing, marked when no
-  microscope was recognised and **the last one used** stands in.  *Microscope...* opens
-  one window, the same everywhere: the microscope (recognised, chosen, or the last
+  microscope was recognised and **the last one used** stands in.  *(Step 3, 2026-10-23:
+  the window became the folded section itself, its title the line; no *auto* boxes, each
+  field shows the value found and is typed over, ↺ back; the sources in the tooltips.)*
+  *Microscope...* opened one window, the same everywhere: the microscope (recognised, chosen, or the last
   used), the camera (the microscope's, or chosen when the file's is not known), and
   **only the values the function uses**, each with its value and its source.  They are
   locked; **a lock opens the editing** -- one small lock, not a tick per value -- and an
