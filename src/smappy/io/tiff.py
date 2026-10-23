@@ -41,6 +41,9 @@ class ImageSource:
     #: a `smappy.frametags.FrameTags` that `frames` hands each frame's
     #: metadata to, when set -- read with the pixels, so it costs no pass
     tags: Optional[object] = field(default=None, repr=False)
+    #: per file, its frames' page offsets from Micro-Manager's index map (`_frame_offsets`), or None
+    #: where it has none: a frame is then read where it is instead of after walking every page before it
+    offsets: Optional[List[Optional[np.ndarray]]] = field(default=None, repr=False)
 
     def __len__(self) -> int:
         return self.n_frames
@@ -53,32 +56,47 @@ class ImageSource:
         Frame indices are zero-based and continuous across the files of the
         acquisition.
         """
-        index = 0
         buffer: List[np.ndarray] = []
         buffer_start = start
 
         stop = self.n_frames if stop is None else min(stop, self.n_frames)
-        for path in self.files:
-            with tifffile.TiffFile(path) as tf:
-                for page in tf.pages:
-                    if index >= stop:
-                        break
-                    if index < start:
-                        index += 1
-                        continue
-                    buffer.append(page.asarray())
-                    if self.tags is not None:
-                        self.tags.add(index, tags_of_page(page))
-                    if len(buffer) == chunk:
-                        yield buffer_start, np.stack(buffer)
-                        buffer_start += len(buffer)
-                        buffer = []
-                    index += 1
-            if index >= stop:
-                break
+        for page, index in self._pages(start, stop):
+            buffer.append(page.asarray())
+            if self.tags is not None:
+                self.tags.add(index, tags_of_page(page))
+            if len(buffer) == chunk:
+                yield buffer_start, np.stack(buffer)
+                buffer_start += len(buffer)
+                buffer = []
 
         if buffer:
             yield buffer_start, np.stack(buffer)
+
+    def _pages(self, start: int, stop: int):
+        """``(page, frame index)`` of frames ``start`` to ``stop``: by the index map's offsets where
+        `open_stack` found one -- a file before ``start`` not even opened, a page read where it is --
+        else by walking each file's pages from its first."""
+        index = 0
+        for f, path in enumerate(self.files):
+            if index >= stop:
+                return
+            offsets = self.offsets[f] if self.offsets is not None else None
+            if offsets is not None and index + len(offsets) <= start:
+                index += len(offsets)
+                continue
+            with tifffile.TiffFile(path) as tf:
+                if offsets is not None:
+                    first = max(0, start - index)
+                    for k in range(first, min(len(offsets), stop - index)):
+                        yield _page_at(tf, offsets[k], k), index + k
+                    index += len(offsets)
+                    continue
+                for page in tf.pages:
+                    if index >= stop:
+                        break
+                    if index >= start:
+                        yield page, index
+                    index += 1
 
     def watch(self, chunk: int = 100, **kwargs) -> Iterator[Tuple[int, np.ndarray]]:
         """Like `frames`, but for a file the microscope is still writing.
@@ -141,14 +159,20 @@ def open_stack(path) -> ImageSource:
         if tag is not None and isinstance(tag.value, dict):
             plane = tag.value
 
-    n_frames = 0
+    # Counted from Micro-Manager's index map where there is one: walking the pages to count them read
+    # every page's header, 28 s for a 34 GB acquisition of 314 000 frames on iCloud Drive (M2, 2026-09-17),
+    # against 0.02 s for the eight maps
+    n_frames, offsets = 0, []
     for k, f in enumerate(files):
         with tifffile.TiffFile(f) as tf:
-            n = len(tf.pages)
+            found = _frame_offsets(tf)
+            n = len(found) if found is not None else len(tf.pages)
             # An acquisition stopped while writing leaves a last page that is not a frame (a DNA-PAINT
             # movie of M2's, 2026-09-17: shape ()); counted, it broke every block that reached it
-            while k == len(files) - 1 and n and tuple(tf.pages[n - 1].shape) != shape:
+            while k == len(files) - 1 and n and tuple(
+                    (_page_at(tf, found[n - 1], n - 1) if found is not None else tf.pages[n - 1]).shape) != shape:
                 n -= 1
+            offsets.append(found[:n] if found is not None else None)
             n_frames += n
 
     declared = summary.get("Frames")
@@ -156,7 +180,34 @@ def open_stack(path) -> ImageSource:
         files=files, shape=shape, dtype=dtype, n_frames=n_frames,
         n_frames_declared=int(declared) if declared else None,
         mm_metadata=plane, summary=summary,
+        offsets=offsets if any(o is not None for o in offsets) else None,
     )
+
+
+def _frame_offsets(tf) -> Optional[np.ndarray]:
+    """The page offsets of a Micro-Manager file's frames, in the order written, from the index map in its
+    header; None when it has none or the map does not start at the first page.  Micro-Manager allocates
+    the map for more frames than a file gets: the entries never written are 0."""
+    if not getattr(tf, "is_micromanager", False):
+        return None
+    try:
+        index = (tf.micromanager_metadata or {}).get("IndexMap")
+    except Exception:
+        return None
+    if index is None or np.ndim(index) != 2 or not len(index):
+        return None
+    offsets = np.sort(np.asarray(index)[:, -1].astype(np.int64))
+    offsets = offsets[offsets > 0]
+    if not len(offsets) or int(offsets[0]) != int(tf.pages.first.offset):
+        return None
+    return offsets
+
+
+def _page_at(tf, offset, index: int):
+    """The page whose header is at ``offset`` -- what ``tf.pages[index]`` is, without reaching it through
+    every page before it."""
+    tf.filehandle.seek(int(offset))
+    return tifffile.TiffPage(tf, index=int(index))
 
 
 STACK_SUFFIXES = (".tif", ".tiff")      # ".ome.tif" ends in one of them
