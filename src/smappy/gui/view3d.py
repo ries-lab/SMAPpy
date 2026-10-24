@@ -160,6 +160,20 @@ class View3D(QWidget):
             self._timer.stop()
             self.render()
             return
+        if what == "projection":
+            # the player's view path (`view_path`): its view, the rest of the
+            # projection -- the engine, the opacity -- left as it is here
+            new = self.session.projection
+            proj = self.projection
+            proj.azimuth, proj.elevation, proj.roll = new.azimuth, new.elevation, new.roll
+            proj.pivot, proj.offset = new.pivot.copy(), new.offset.copy()
+            proj.zoom, proj.focal = new.zoom, new.focal
+            self._draw_box()
+            self.changed.emit()
+            self.frame_source.drawing = self.isVisible()
+            self._timer.stop()
+            self.render()
+            return
         if what in ("locs", "layer", "layers", "append", "slab", "roi", "roi-edited"):
             axes = self.session.axes()
             if axes != self._render_axes:

@@ -305,10 +305,48 @@ windows draw, nothing else: the filters stay as they are, and a plugin run
 meanwhile sees the whole table.  A window wider than the step makes the
 windows overlap, so the picture changes smoothly.  With the 3D window
 following a line ROI, *across the line* moves a thin slice through the
-structure as it is seen from the side.  *Record...* writes every step, as
-the 2D or the 3D window shows it, to a movie.
+structure as it is seen from the side.  Under *more*, the window can
+narrow some layers and leave the others whole: tracks drawn as they grow,
+over all the localizations they came from.  *Record...* writes every step, as the 2D or
+the 3D window shows it, to a movie.
+
+**8. Moving the view.**  The player's *view path*, under *more*, moves the
+3D view along a path through key views: the views one adds as they are,
+and turns and zooms made for one.  Between the keys the view moves
+smoothly, without stopping or jerking at a key, about the point in the
+middle of the screen, so what one looks at stays there.  A key also keeps
+the 3D view's box with its size, so the box can move too: a key with the
+whole depth, then one with the front face pushed back, moves that face
+through the sample and shows the structure layer by layer.  The path runs
+on the player's time line: over the scan, so a structure turns
+while it builds up, or by itself with *scan* on *none*, at the keys' own
+times.  *Record...* of the 3D view writes the path as a movie.
 
 ## In detail
+
+**How the view path is interpolated.**  A key is the view about the point in
+the middle of the screen -- a turn, that point and a zoom -- and the 3D
+view's box; anything else the 3D window draws with (its engine, opacity,
+depth cue) stays as the window has it.  The turn is interpolated on unit
+quaternions, which have none of the jumps of interpolating the azimuth and
+elevation angles where they wrap around.  Each key gets an angular
+velocity $\omega_i$, the mean of the turns to the keys on either side
+weighted by their times, as Catmull-Rom takes its tangents; between keys
+$i$ and $i+1$, $h$ seconds apart, the turn is a cubic Bezier curve on the
+sphere of rotations (Shoemake 1985, by repeated slerp) through
+$q_i$, $q_i \exp(\omega_i h/3)$, $q_{i+1} \exp(-\omega_{i+1} h/3)$ and $q_{i+1}$.
+So the turn neither stops nor changes direction suddenly at a key, and
+keys evenly spaced about one axis turn at a constant rate.  Between two
+keys the turn takes the shorter way round, less than half a turn, so a
+turn made with *add turn* gets a key every 90 degrees.  The point looked
+at, the zoom and the box's centre, size and angle follow a cubic through
+the keys (Catmull-Rom, with the keys' own times), the zoom on a log scale
+so that zooming in looks equally fast throughout; with two keys that is a
+straight line, so a box whose back face is the same in both keys keeps it
+there all the way.
+*ease in and out* slows the start and the end of the whole path, not each
+key.  A path that ends where it began, a whole turn, leaves out its last
+view when it plays in a loop, so the loop does not stall on it.
 
 **The rendering kernel.**  Each localization contributes the integral of its
 Gaussian over each pixel, not the Gaussian's value at the pixel centre:
@@ -883,7 +921,83 @@ open.
 ### Record...
 Asks for a file and writes every step to it -- an MP4, a TIFF stack or a
 GIF, by the extension -- drawn by the same renderer as *Save image*, with
-the step written in a corner.  It can be cancelled.
+the step written in a corner.  With the view path playing, a recording of the
+3D view follows its path; its pixel size is written for the first step,
+since a zoom changes it.  It can be cancelled.
+
+### more
+Closed by default, so the player is first of all a window moved through
+the data.  Opened: which layers it narrows, and the 3D view's path.
+
+### layers
+Which layers the window narrows; the others are shown whole, with their
+own filters.  Untick the layer of all the localizations and leave the
+tracks' layer ticked, drawn as *tracks*, to watch tracks grow over the
+structure.  The range scanned is that of the ticked layers.  Back to all
+when a layer is added or removed.
+
+### view path
+The path the 3D view is moved along (*How it works*, 8).  *scan*'s first
+choice, *none*, plays the view path alone: as many steps as its seconds
+times *speed*, with nothing narrowed.  The list shows each key's time and
+its box's size in nm.
+
+### move the box
+Moves the 3D view's box between the keys' boxes, where they differ.  The
+box then no longer follows the 2D ROI (the 3D window's *follow* is
+switched off), since the path sets it.  Off, the box stays as it is and
+only the view moves.
+
+### move the 3D view
+Off leaves the 3D view as it is while the player plays, without losing
+the path.
+
+### +
+Adds the 3D view as it is now, with its box, as a key after the selected
+one, or at the end.  Turn, pan, zoom and resize the box in the 3D view for
+the next key, then press it again.
+
+### set
+Replaces the selected key with the 3D view as it is now.
+
+### −
+Removes the selected key.
+
+### save...
+Writes the path, with its keys and their times, to a `.view.yaml` file.
+
+### load...
+Reads a path written by *save...*; the keys replace those in the list.
+
+### seconds
+The time from the key before to the selected one; the first key has none.
+At 0 the key is a cut rather than a move.  While a coordinate is scanned,
+the path is stretched over the scan and only the ratios of the times
+count.
+
+### turn
+What *add turn* turns about -- *z*, *x* or *y* of the data through the
+middle of the screen, or the screen's vertical or horizontal -- and how
+far.  *z* is a turntable: the structure spins while the tilt stays.  A
+whole turn is 360°; negative turns the other way.
+
+### zoom
+How much larger the picture is at the end of *add turn*, and over how
+many seconds.  With the turn at 0° it is a zoom alone; with both, the
+structure turns while one zooms in on it.
+
+### over
+The time the turn and the zoom take.
+
+### ease in and out
+Starts and ends the whole path slowly, which looks calmer in a movie.  Off
+for a whole turn played in a loop, which should not slow down where it
+joins.
+
+### add turn
+Adds the turn and the zoom to the path, from its last key -- or from the
+3D view as it is now, which becomes the first key.  Several can follow one
+another: a turn about z, then a zoom in.
 
 ### axes
 Which column each axis of the picture is.  Set on all layers at once; closed,
@@ -971,3 +1085,7 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).
   [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
+* Shoemake K. Animating rotation with quaternion curves. *Computer
+  Graphics (SIGGRAPH '85)* 19, 245-254 (1985).
+  [doi:10.1145/325165.325242](https://doi.org/10.1145/325165.325242)
+  -- the view path's turn: slerp and Bezier curves of rotations.

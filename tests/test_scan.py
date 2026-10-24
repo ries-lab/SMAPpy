@@ -58,6 +58,20 @@ def test_a_scan_narrows_each_layer_on_top_of_its_filter():
     assert sc.scanned(layers, None) == tuple(layers)
 
 
+def test_a_scan_of_some_layers_leaves_the_others_whole():
+    session = Session(table())
+    session.add_layer(like=0)
+    session.layers[1].set_bound("frame", None, 500)
+    layers = snapshot_layers(session.layers)
+    shown = sc.scanned(layers, sc.Scan("frame", 100, 200, layers=(1,)))
+    assert shown[0] is layers[0]
+    frames = np.asarray(layers[1].locs["frame"])[np.asarray(shown[1].mask, bool)]
+    assert len(frames) and frames.min() >= 100 and frames.max() < 200
+    # the range runs over the scanned layers only
+    assert sc.shown_range(layers, "frame", which=(1,))[1] <= 500
+    assert sc.shown_range(layers, "frame")[1] >= 900
+
+
 def test_the_session_narrows_the_pictures_and_nothing_a_plugin_reads():
     session = Session(table())
     seen = []
@@ -151,3 +165,125 @@ def test_the_player_records_what_the_2d_window_shows(app, tmp_path, monkeypatch)
         stack = tif.asarray()
     assert stack.shape[0] == len(player.steps) == 3       # 0-499, 250-749, 500-999
     assert stack.dtype == np.uint8
+
+
+def test_the_player_scans_only_the_layers_ticked(app):
+    from smappy.gui.scan_player import ScanPlayer
+    session = Session(table())
+    session.add_layer(like=0)
+    player = ScanPlayer(session)
+    player.coordinate.setCurrentText("frame")
+    player.show_step(0)
+    assert session.scan.layers is None and player.layer_choice.text() == "all"
+    player.set_scanned(0, False)
+    assert session.scan.layers == (1,)
+    player._fill_layers()
+    assert [a.isChecked() for a in player.layer_choice.menu().actions()] == [False, True]
+    session.add_layer(like=0)             # positions mean others now: all again
+    assert player.scanned_layers() is None
+
+
+def test_the_view_path_alone_plays_its_keys_in_the_3d_view(app):
+    from smappy.gui.scan_player import NONE, ScanPlayer
+    from smappy.gui.view3d import View3DWindow
+    session = Session(table())
+    window = View3DWindow(session)
+    window.show()
+    app.processEvents()
+    player = ScanPlayer(session)
+    assert player.coordinate.currentText() == "frame"      # not the view path alone
+    window.view.projection.opacity = 0.4                     # the look, not the viewpoint
+    window.view.refresh_frame()                              # as a render does
+    player.add_view()
+    window.view.projection.rotate_view(80.0, 0.0)
+    window.view.projection.zoom *= 0.25
+    window.view.refresh_frame()
+    end = window.view.projection.matrix.copy()
+    player.add_view()                                        # 2 s after the first
+    player.ease.setChecked(False)
+    player.coordinate.setCurrentText(NONE)
+    player.speed.setValue(5)
+    steps = player.prepare()
+    assert len(steps) == 11 and not player.window_.isEnabled()
+    player.show_step(5)
+    assert session.scan is None
+    proj = window.view.projection
+    np.testing.assert_allclose(proj.matrix, player.path.at(0.5).rotation, atol=1e-9)
+    assert proj.opacity == 0.4
+    player.show_step(10)
+    np.testing.assert_allclose(proj.matrix, end, atol=1e-9)
+    # a turn adds a key every 90 degrees from the last key
+    player.turn_degrees.setValue(180.0)
+    player.add_turn_keys()
+    assert len(player.path.keys) == 4
+    window.close()
+
+
+def test_the_view_path_follows_the_scan_and_is_recorded_from_the_3d_view(app, tmp_path,
+                                                                      monkeypatch):
+    tifffile = pytest.importorskip("tifffile")
+    from smappy.gui import scan_player
+    from smappy.gui.view3d import View3DWindow
+    session = Session(table())
+    window = View3DWindow(session)
+    window.resize(160, 160)
+    window.show()
+    app.processEvents()
+    window.view.refresh_frame()
+    player = scan_player.ScanPlayer(session)
+    player.turn_degrees.setValue(90.0)
+    player.add_turn_keys()                                   # the view now, then 90 degrees
+    player.coordinate.setCurrentText("frame")
+    player.window_.setValue(500)
+    player.step.setValue(250)
+    player.show_step(len(player.prepare()) - 1)              # the scan's end: the path's
+    np.testing.assert_allclose(window.view.projection.matrix,
+                               player.path.keys[-1].view.rotation, atol=1e-9)
+    player.record_from.setCurrentIndex(player.record_from.findData("3D"))
+    path = tmp_path / "turn.tif"
+    monkeypatch.setattr(scan_player.QFileDialog, "getSaveFileName",
+                        lambda *a, **k: (str(path), ""))
+    player._record()
+    with tifffile.TiffFile(path) as tif:
+        stack = tif.asarray()
+    assert stack.shape[0] == 3
+    assert not np.array_equal(stack[0], stack[-1])
+    window.close()
+
+
+def test_the_simple_player_folds_the_layers_and_the_view_path_away(app):
+    from smappy.gui.scan_player import ScanPlayer
+    from smappy.gui.widgets import CollapsibleSection
+    player = ScanPlayer(Session(table()))
+    more, = [c for c in player.findChildren(CollapsibleSection) if c.title == "more"]
+    assert more.frame.isHidden()
+    assert player.layer_choice.parent() is not player and more.isAncestorOf(player.keys)
+
+
+def test_the_view_path_moves_the_box_its_keys_keep(app):
+    from smappy.gui.scan_player import NONE, ScanPlayer
+    from smappy.gui.view3d import View3DWindow
+    from smappy.view3d import Slab
+    session = Session(table())
+    window = View3DWindow(session)
+    window.show()
+    app.processEvents()
+    window.view.refresh_frame()
+    player = ScanPlayer(session)
+    session.set_slab(Slab([2000, 2000, 0], [4000, 4000, 800]))
+    player.add_view()
+    # the front face moved back by 600 nm, the back face kept
+    session.set_slab(Slab([2000, 2000, -300], [4000, 4000, 200]))
+    player.add_view()
+    assert player.keys.item(1).text().endswith("box 4000 x 4000 x 200")
+    player.ease.setChecked(False)
+    player.coordinate.setCurrentText(NONE)
+    steps = player.prepare()
+    player.show_step(len(steps) // 2)
+    assert session.slab.size[2] == pytest.approx(500.0)
+    assert session.slab.center[2] - session.slab.size[2] / 2 == pytest.approx(-400.0)
+    assert not session.slab_follows_roi
+    player.move_box.setChecked(False)                  # the box stays where it is
+    player.show_step(0)
+    assert session.slab.size[2] == pytest.approx(500.0)
+    window.close()

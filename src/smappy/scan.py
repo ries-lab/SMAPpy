@@ -48,11 +48,14 @@ AUTO_OVERLAP = 4
 @dataclass(frozen=True)
 class Scan:
     """What is shown now: ``lo <= coordinate < hi``.  ``line`` is the line
-    ROI the line's coordinates are measured on."""
+    ROI the line's coordinates are measured on.  ``layers`` are the
+    positions of the layers scanned, None all of them: the others are shown
+    whole, so tracks can be played over the localizations they came from."""
     coordinate: str
     lo: float
     hi: float
     line: Optional[object] = None        # a `regions.Region` of kind "line"
+    layers: Optional[Tuple[int, ...]] = None
 
     def __str__(self) -> str:
         return f"{self.coordinate} {self.lo:g} to {self.hi:g}"
@@ -155,13 +158,15 @@ class ValueCache:
 def scanned(layers: Sequence[LayerSnapshot], scan: Optional[Scan],
             cache: Optional[ValueCache] = None) -> Tuple[LayerSnapshot, ...]:
     """The layers showing only what ``scan`` lets through, on top of their
-    own filters; image layers and a layer without the column as they are
-    -- a second file without z is not emptied by a scan of z."""
+    own filters; image layers, a layer without the column and one not in
+    ``scan.layers`` as they are -- a second file without z is not emptied by
+    a scan of z."""
     if scan is None:
         return tuple(layers)
     out = []
-    for layer in layers:
-        if not layer.visible or layer.is_image or layer.locs is None:
+    for i, layer in enumerate(layers):
+        if not layer.visible or layer.is_image or layer.locs is None or \
+                (scan.layers is not None and i not in scan.layers):
             out.append(layer)
             continue
         try:
@@ -185,13 +190,16 @@ def scanned(layers: Sequence[LayerSnapshot], scan: Optional[Scan],
 
 
 def shown_range(layers: Sequence[LayerSnapshot], coordinate: str, line=None,
-                cache: Optional[ValueCache] = None) -> Tuple[float, float]:
+                cache: Optional[ValueCache] = None,
+                which: Optional[Sequence[int]] = None) -> Tuple[float, float]:
     """The lowest and highest value of the coordinate among what the visible
-    layers show (their filters), over which a scan runs."""
+    layers show (their filters), over which a scan runs; of the layers at
+    the positions ``which`` only, when given (`Scan.layers`)."""
     get = cache or values
     lo, hi = np.inf, -np.inf
-    for layer in layers:
-        if not layer.visible or layer.is_image or layer.locs is None:
+    for i, layer in enumerate(layers):
+        if not layer.visible or layer.is_image or layer.locs is None or \
+                (which is not None and i not in which):
             continue
         try:
             v = get(layer.locs, coordinate, line)
@@ -250,25 +258,44 @@ def step_text(coordinate: str, step: Step, frame_time_ms: Optional[float] = None
     return f"{name} {step.lo:.4g} to {step.hi:.4g}{unit}"
 
 
-def scan_pictures(layers: Sequence[LayerSnapshot], frame, coordinate: str,
-                  steps: Sequence[Step], line=None, text: Optional[Callable] = None,
-                  pixelsize: Optional[float] = None) -> Iterator[np.ndarray]:
+def scan_pictures(layers: Sequence[LayerSnapshot], frame, coordinate: Optional[str],
+                  steps: Sequence[Optional[Step]], line=None, text: Optional[Callable] = None,
+                  pixelsize: Optional[float] = None,
+                  which: Optional[Sequence[int]] = None,
+                  projections: Optional[Sequence] = None,
+                  slabs: Optional[Sequence] = None) -> Iterator[np.ndarray]:
     """Each step's picture, as the window ``frame`` (a `picture.ViewFrame`)
     shows it: the 2D window's view and panels, or the 3D window's
-    projection.  8-bit RGB, in order, for `movie.write_stack`."""
+    projection.  ``which`` are the layers scanned (`Scan.layers`).  A
+    coordinate of None narrows nothing (the view path alone moves);
+    ``projections``, one per step, are the 3D view's path
+    (`view_path.projections`) in place of the window's one projection, and
+    ``slabs`` its boxes in place of the window's one box.
+    8-bit RGB, in order, for `movie.write_stack`."""
     from .picture import frame_fov, render_picture, stamp
+    from .render import FieldOfView
     fov = frame_fov(frame, "view", pixelsize)
     cache = ValueCache()
     white = any(l.display.white_background for l in layers if l.visible)
-    for step in steps:
-        shown = scanned(layers, Scan(coordinate, step.lo, step.hi, line), cache)
+    for k, step in enumerate(steps):
+        shown = layers if coordinate is None else scanned(
+            layers, Scan(coordinate, step.lo, step.hi, line,
+                         None if which is None else tuple(which)), cache)
         if frame.projection is not None:
-            picture, = render_picture(shown, fov, what="composite", projection=frame.projection,
-                                      slab=frame.slab)
+            projection, grid = frame.projection, fov
+            if projections is not None:
+                # the same canvas, on this step's pan and zoom
+                projection = projections[k]
+                px = fov.pixelsize * projection.zoom / frame.projection.zoom
+                grid = FieldOfView(projection.offset[0] - fov.nx * px / 2,
+                                   projection.offset[1] - fov.ny * px / 2, px, fov.nx, fov.ny)
+            slab = frame.slab if slabs is None else slabs[k]
+            picture, = render_picture(shown, grid, what="composite", projection=projection,
+                                      slab=slab)
         else:
             picture, = render_picture(shown, fov, what="view", panels=frame.panels,
                                       stacked=frame.stacked)
         image = picture.image
-        if text is not None:
+        if text is not None and step is not None:
             image = stamp(image, text(step), white)
         yield image
