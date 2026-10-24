@@ -1911,3 +1911,219 @@ changing the PSF.  A silicone objective (n_imm 1.40) into water has both.
 Not modelled: where the tilted coverslip lies over the field (each molecule's h and the shared focus absorb
 a coverslip ±100 nm higher at ±20 µm and 0.005 rad), the Fresnel coefficients' and apodisation's change with
 the tilt (first order only at the aperture's edge), and a wedge (the two faces not parallel).
+
+## A wrong sample index in situ: z distortion and the likelihood (October 2026, `synthetic/insitu_nmed.py`)
+
+*Why:* the user's question for thick samples -- does an n_med typed as water when the sample is
+cytoplasm-like bend z over the ~2 µm depth of field, and could n_med be learnt in situ?  A simulated M2 movie
+(`insitu_region.py`'s optics, pupil and symmetric magnitude, held), true n_med 1.37, molecules 0–2000 nm with
+the focus imaging the middle sharply, 25 px regions; molecules found once, learnt in rounds at each n_med, then
+the 1700 matched molecules (learnt and held out) localised against their true heights, the likelihood on the
+364 held out only.  One seed (`results/insitu_nmed.jsonl`).  Distortion: the median residual per 200 nm bin
+after a line, peak to peak.
+
+| n_med fitted | Δnats, held out | slope | distortion p-p (nm) | learnt focus (nm, true 1107) | σ (nm) | Noll 11 / 22 error (rad) |
+|---|---|---|---|---|---|---|
+| truth model | 0 | 0.996 | 12 | – | 55 | – |
+| 1.31 | 24.7 | 0.980 | 37 | 1137 | 46/43 | +0.05 / – |
+| 1.33 | 13.8 | 0.986 | 30 | 1118 | 49/46 | +0.03 / – |
+| 1.35 | 7.7 | 0.988 | 23 | 1127 | 52/50 | – |
+| 1.36 | 16.3 | 0.971 | 26 | 913 | 54/52 | – |
+| 1.37 (true) | 7.5 | 0.986 | 31 | 856 | 55/53 | −0.06 / – |
+| 1.38 | 11.6 | 0.994 | 34 | 813 | 56/55 | −0.08 / −0.04 |
+| 1.39 | 18.9 | 0.997 | 23 | 735 | 58/56 | −0.10 / −0.05 |
+| 1.41 | 17.5 | 1.016 | 19 | 540 | 60/58 | −0.16 / −0.09 |
+
+- *No distortion from the index.*  Over 1.31–1.41 the slope stays within 3 % and the residual within 19–37 nm
+  peak to peak, the same as with the true index (31 nm).  The learnt run absorbs the index: Noll 11 and 22
+  move monotonically with it (+0.05 … −0.16 rad), σ by ±7 nm, and the focus (and every height) shifts.
+- *What in situ leaves at any index*: about +20 nm in the lowest bin (0–200 nm), which the truth model does
+  not have (4 nm): near the coverslip, not from n_med.
+- *The likelihood cannot find the index*: 7.5–25 nats over 364 molecules, ≤ 0.07 per molecule, not monotonic
+  about the truth (1.36 worse than 1.35 and 1.37), the same size as the runs' own scatter (the focus ending
+  856 or 1127 nm at neighbouring indices).
+- *Thin control* (0–300 nm, focus 166 nm): fitted at 1.33 the slope is 0.94 (18 nm over the layer), at 1.37
+  0.99, and the held-out likelihood prefers 1.33 by 42 nats -- the wrong way.
+
+So for |Δn| ≤ 0.06 over 2 µm, n_med is neither a source of distortion in situ nor learnable from it: the
+static spherical modes, σ and the focus take it.  Untested: larger mismatches (mounting media, 1.45), other
+seeds, a deeper focus without the coverslip's molecules.
+
+## A radial magnitude: a low-order centre and an edge (October 2026, `synthetic/radial_magnitude.py`)
+
+*Why:* the symmetric magnitude is what in situ holds from beads, and what it describes sits mostly at the
+edge, which radial Zernikes reach only with terms that also move the centre, where a bump trades with σ.
+`magnitude.py`'s scenario (12 beads, ±750 nm, NA 1.43, truth σ 35 nm), three seeds at order 6 and one at 8
+(`results/radial_magnitude.jsonl`).  The fits keep the m ≠ 0 Zernikes and replace the radial ones (Noll 4,
+11, 22, 37) by Noll 4 alone (or 4 and 11, *c11*) and an edge: *spline*, added hats at ρ = 0.80 … 1.00, or
+*logistic*, a multiplied 1 / (1 + exp((ρ − ρ_c)/w)), its two parameters bounded.  The pupils are the
+benchmark's (`EdgePupil`, a `ZernikePupil` subclass); uipsf is unchanged.  Δnats against free Zernikes
+(negative: better), the worst phase bias in CRLBs, and each slice localised alone (`slice_fits`): the z
+slope and the bend about it within ±600 nm, peak to peak over the median of the beads per slice.
+
+| truth, order 6 | Zernike: bias, σx | logistic: Δnats, bias, σx, ρ_c / w | spline: Δnats | flat: Δnats, z slope |
+|---|---|---|---|---|
+| matched | 1.9–3.2, 34–36 | 0 … +3, 2.0–3.1, 34–36, inert (ρ_c ≥ 1.06) | −1 … 0 | +9 … +17, 1.00 |
+| bead-like (M2's Noll 4/11/22/37) | 2.3–3.0, 34–37 | −37 … −27, 1.8–2.3, 34–37, 0.99 / 0.03 | −37 … −29 | +1700, 0.94 |
+| NA 1.40 | 13.6–14.7, 36.5–37.4 | −130 … −114, 10.7–11.4, 34.8–35.7, 0.980 / 0.007 | −135 … −118 | +1190, 0.95 |
+| soft edge, outer 10 % | 2.4–3.8, 35–36.5 | −89 … −73, 1.8–2.5, 34–36, 0.971 / 0.021 | −91 … −76 | +3560, 0.92 |
+| apodisation × √cos θ | 1.6–1.9, 34–36 | −0 … +3, 1.6–1.9, 34–36, inert (Noll 4 takes it) | −1 … 0 | +3280, 0.93 |
+
+At order 8 (Zernikes then hold Noll 37 too) the edge models gain less: −37 / −31 nats (NA 1.40, spline /
+logistic), −6 / −3 (soft edge), 0 / +2 (bead-like, which Zernikes describe exactly), 0 / +1 (matched).
+
+- *The logistic edge with Noll 4 matches or beats free radial Zernikes everywhere*, with three symmetric
+  parameters instead of three or four: up to 135 nats better at order 6, at most 3 worse.  It reads
+  physically: ρ_c·NA is the effective NA (NA 1.40 → ρ_c 0.980 = 1.40/1.43), w the edge's softness; where the
+  truth has no edge it goes inert and Noll 4 takes a smooth fall (the apodisation).  M2's measured symmetric
+  magnitude is itself an edge: ρ_c 0.99, w 0.03.
+- *σ is less biased*: NA 1.40 moves σx to 36.5–37.4 nm with Zernikes, 34.8–35.7 with the edge.  The phase
+  bias of NA 1.40 drops from 14 to 11 CRLBs but stays: the NA's k_z, which no magnitude repairs.
+- *z is the same for every magnitude that has a radial part*: slopes 0.998–1.006 and bends 11–30 nm with
+  Zernikes and both edges alike.  Only a flat magnitude bends the z scale (slope 0.92–0.95, 0.96 at order 8).
+- *The spline is not determined*: its hats swing ±0.1–0.4 between neighbouring knots even on the matched
+  truth; only the last knot is fixed by the data.  It would need a smoothness penalty and gains nothing over
+  the logistic.
+- *A second centre mode is degenerate with the edge*: with Noll 11, Noll 4 and 11 combine to a near-constant
+  over the centre (which the energy normalisation removes) at no cost (spline c11 on matched: −0.11 / −0.05),
+  and logistic c11 stuck at its bounds on one matched seed (+21 nats).  Noll 4 alone, as the user proposed.
+
+Untested: real beads (held-out nats, `bead_slices.py`'s z and x, y bend, ρ_c and w across the M2 days), and
+holding the logistic edge in situ.
+
+### On real beads, and the supercritical ring as its own term (October 2026, `real/edge_magnitude.py`)
+
+Five M2 bead days (260622 Evolve; 260829, 260904, 260915, 261012 iXon), order 8, blur free, 100 nm beads, every
+bead included; each variant through `run_calibration` with `bead_model`'s pupil replaced
+(`results/edge_magnitude.jsonl`).  Δnats against free Zernikes (44 magnitude parameters); bends are
+`bead_slices.measure`'s systematic x / y / z rms within ±600 nm.
+
+- *The asymmetric magnitude is needed on beads*: every rotationally symmetric fit is 16 000–121 000 nats behind,
+  and x or y bend by up to 11 nm (260915: y 3.4 → 10.9 nm; 260829: x 2.6 → 7.4); z barely moves (2–3.7 nm).
+- *A logistic edge replaces the radial Zernikes*: symmetric, Noll 4 × logistic (3 parameters) beats Noll 4, 11,
+  22, 37 on 4 of 5 days (by 760–2 860; 260904 −880); with the m ≠ 0 modes it beats free Zernikes on 4 of 5
+  (by 345–1 350; 260829 −294).  ρ_c 0.973–0.995, w 0.021–0.027, about one pupil sample (2/P).
+- *Monotone costs nothing where the data agree*: exp(−aρ²) equals Noll 4 within 20 nats on the four days where
+  Noll 4 comes out negative; on 261012 (σx 91 nm) the data want the centre rising, and monotone loses 10 000.
+  The rise follows σ over the days (the free Zernikes' profile at ρ 0.8: 1.10 at σx 91, 0.93 at σx 64), so it is
+  read as the blur model, not the objective.  A ρ⁴ term stays at 0.  A Richards edge runs to its bound (ν ≈ 10)
+  with a shoulder at ρ 0.93–0.95: the critical angle, n_med/NA = 0.93.
+- *The bead's supercritical light* (the bead model has no depth: dye at the glass), as one factor exp(−2πκh) on
+  the ring, κ = √((ρNA)² − n_med²)/λ.  One effective height reproduces a bead's height-averaged ring: the second
+  cumulant of a 100 nm bead's heights (sd 22 nm) changes it by ≤ 1.2 % in amplitude, and a simulated bead
+  (`synthetic/radial_magnitude.py`, *bead*) gives h 45–48 nm against its mean 50.
+- *Simulated, the user's model works with the right bend*: subcritical magnitude cos θ_imm^γ (an apodisation's
+  shape, γ ≥ 0) × the ring's exp(−2πκh), two parameters, recovers a bead with an extra √cos θ apodisation
+  (γ 0.49–0.50, h 48–50 nm) with the subcritical profile within 0.002 and the likelihood of the logistic edge or
+  better; exp(−aρ²) instead leaves the steepening to the ring (h → 0, a step s → 0.7) and is 7–30 nats worse.
+  A step on the ring, a spread of heights and a hard NA cutoff add nothing.
+- *Real, cos θ^γ × ring (2 symmetric parameters) with the m ≠ 0 modes*: against free Zernikes −2 372, −930, −718,
+  +79, +4 786 nats (260915, 260904, 260622, 260829, 261012); against the logistic edge with them, better by
+  1 022, 497, 215 on three days, equal on 260622, worse on 261012, the rising day.  The fall is all on the ring:
+  the subcritical profile at ρ 0.93 is 0.88–0.98.  h 150–185 nm on four days (76 on 261012), three times a
+  100 nm bead's mean height: the effective ring loses more than the bead's height explains, so it carries the
+  objective's losses there too.  γ 0.025–0.21 falls with σ (0 at σx 91), the blur trade again.  A hard NA cutoff
+  goes inert (ρ_c ≥ 1.04) or finds a worse optimum.  σ and the x / y / z bends do not change with the form.
+
+So the symmetric magnitude of a bead model can be cos θ^γ below the critical angle and one effective
+height on the ring, at no cost against Zernikes where the centre is monotone.  Emitters deeper than the ring's
+decay length see only the cos θ^γ part.  Open: whether holding it (the ring term dropped, the in situ model's
+own depth taking its place) beats the bead model's Zernike or logistic magnitude in situ on the matched M2
+pairs; and the blur model, which the centre's rise and γ follow.
+
+*The ring pinned to the bead's physics, and a layer of heights* (same five days, with the m ≠ 0 modes).  The
+ring fixed to a 100 nm sphere on the glass (√(6(u − 2 + (u + 2)e^(−u))/u³), u = 4πκd; no parameter) is 12 500–
+30 200 nats behind free Zernikes and 13 000–32 500 behind one free height, and z bends more (3.3–6.6 against
+1.9–3.5 nm rms): γ rises to 0.24–0.41, the subcritical bend taking the ring's missing loss -- what the separation
+was to avoid.  A uniform layer h₀ … h₀ + L (exact, √(e^(−4πκh₀)(1 − e^(−x))/x), x = 4πκL) collapses to one
+height (L ≈ 1 nm) on three days and gains 300 nats on 260904 (h₀ 0, L 448: mean 224 nm), within 22 of one
+height on 261012; on 260829 it stopped 2 100 worse.  Simulated, h₀ and L trade at equal likelihood and only
+their mean is fixed (46.5 and 50.1 nm, true 50).  So the real beads send far less light into the ring than a
+100 nm bead in water at NA 1.43 should, as one effective height of 150–185 nm, and a spread of heights does
+not describe the difference.  Candidates: an effective NA below 1.43 (the ring's place n_med/NA and the edge
+both move; NA and n_med are held at 1.43 and 1.33 here, PBS is ~1.334), the objective's coatings at its highest
+angles, the polystyrene bead.  A Bertrand image of the beads separates them: the model puts the critical-angle
+peak at 8.4× the centre for dye on the glass, 7.7× for a 100 nm bead; the fits imply 4.8–6.3×.
+
+*The bead's physics with an effective NA* (`results/edge_magnitude_na.jsonl`; nominal NA 1.46 so the grid can
+hold any cutoff, n_med 1.334 for PBS, with the m ≠ 0 modes).  The user's model: the exact 100 nm sphere ring,
+cos θ_imm^γ and a cutoff at ρ_c (width half a pupil sample, 1/P), which is an effective NA exactly -- k_z, the
+Fresnel terms and the critical angle depend on n sin θ, not on the nominal NA -- so two symmetric parameters.
+Δnats against free Zernikes at the same optics, order 8:
+
+| day | σx (nm) | NA_eff | γ | bead ring + NA | logistic edge | free height + NA | bead ring, no NA |
+|---|---|---|---|---|---|---|---|
+| 260904 | 64 | 1.406 | 0.22 | −1 347 | −2 961 | −3 290 | +46 813 |
+| 260829 | 67 | 1.407 | 0.15 | −735 | −1 169 | −980 | +68 562 |
+| 260622 | 77 | 1.399 | 0.16 | −410 | −761 | −505 | +86 713 |
+| 260915 | 88 | 1.406 | 0.06 | +2 149 | −6 107 | −6 397 | +159 503 |
+| 261012 | 92 | 1.427 | 0 (bound) | +4 314 | −8 228 | −325 | +157 946 |
+
+- *The effective NA is the objective's*: 1.399–1.407 on four days, against the nominal 1.43; with it the bead's
+  own supercritical light needs no free height, which with the NA free scatters from 7 to 211 nm.
+- *The bead's physics with it beats free Zernikes on the three days of moderate σ*; it loses on the two of
+  σx 88–92 nm, where γ is at its bound: the centre wants to rise there, the blur trade (above), not the edge.
+- *σ does not move* (within 1.5 nm of the Zernike fit's on every day), nor does NA_eff follow σ.
+
+*The asymmetric magnitude: its order, and the phase's* (same optics).  Against order 8 with the m ≠ 0 magnitude
+to 8: that magnitude only to order 4 (12 coefficients, not 40) costs 3 400–20 000 nats at phase order 8 and
+3 400–15 900 at order 10, while x and y bend within ±0.7 nm of the full one (better on two days, worse on two).
+Phase to order 10 gains 6 300–24 700 nats for free Zernikes and 4 800–15 000 for the bead physics, and the
+asymmetric magnitude does not shrink -- its rms grows from 0.05 to 0.06–0.11, much of it at orders 3 and 5 -- so it
+is not phase the order lacked.  NA_eff (1.399–1.409; 1.427–1.429 on 261012), γ and σ (within 1 nm) do not change
+with either.  So the symmetric part is two well-determined numbers; the asymmetric part is real structure up
+to order 8 that matters for the likelihood far more than for a localisation, cause open (field dependence,
+vignetting off axis).  Not yet compared: the bead physics with the m ≠ 0 magnitude to order 10 against free
+Zernikes at order 10 (65 parameters against 42 here).
+
+*Symmetric only* (no m ≠ 0 magnitude; same optics; Δnats against the symmetric Zernikes of that order, Noll
+4, 11, 22, 37 at order 8 and 56 too at 10):
+
+| day | physics (2), order 8 | logistic (3), order 8 | physics, order 10 | logistic, order 10 | asymmetric modes added, order 8 / 10 |
+|---|---|---|---|---|---|
+| 260904 | +1 164 | −656 | +3 065 | +748 | −97 000 / −84 000 |
+| 260829 | −1 496 | −1 790 | +188 | +327 | −88 000 / −74 000 |
+| 260622 | −2 133 | −2 407 | +1 373 | +942 | −19 000 / −16 000 |
+| 260915 | −5 006 | −5 018 | +1 601 | +1 116 | −118 000 / −106 000 |
+| 261012 | +2 322 | −11 372 | +12 383 | −731 | −53 000 / −34 000 |
+
+σx / σy (nm) of the same fits, with free Zernikes (m ≠ 0 included, order 8) for reference:
+
+| day | symmetric Zernikes, 8 / 10 | physics, 8 / 10 | logistic, 8 / 10 | free Zernikes, 8 |
+|---|---|---|---|---|
+| 260904 | 66.9/51.6, 66.6/52.8 | 66.2/51.5, 66.1/52.6 | 66.3/51.5, 66.1/52.5 | 64.8/52.7 |
+| 260829 | 69.9/52.6, 68.9/53.7 | 69.5/52.5, 68.8/53.6 | 69.5/52.5, 68.9/53.6 | 67.7/54.3 |
+| 260622 | 77.0/74.9, 76.6/75.1 | 76.6/74.6, 76.6/74.6 | 76.6/74.7, 76.6/74.6 | 77.2/74.3 |
+| 260915 | 89.2/61.5, 88.5/62.1 | 88.8/61.1, 88.1/61.9 | 88.9/61.1, 88.3/61.9 | 87.8/62.1 |
+| 261012 | 93.1/65.1, 92.2/65.4 | 94.5/66.5, 94.4/67.1 | 92.7/64.8, 92.2/65.2 | 91.8/66.4 |
+
+σ is the same within 0.7 nm whichever symmetric form, except the physics on 261012 (+1.4–2.2 nm), where it cannot
+rise towards the edge; dropping the m ≠ 0 modes widens σx by up to 2.2 nm and narrows σy by up to 1.7.  The
+bead ring is the layered model's: dye in water at the heights of a sphere's slices.  A polystyrene bead (n ≈ 1.59)
+is no such thing -- the dye sits inside a high-index sphere touching the glass at a point -- so the effective NA
+may carry the bead's own optics too; index-matched beads, 20 nm beads or a Bertrand image would tell.
+
+At order 8 the bead physics with γ and an effective NA does as well as the four radial Zernikes on three days
+with two parameters, and within 300 nats of the logistic edge except on 261012 (the σx 92 nm day).  At order 10
+the five radial Zernikes pull ahead by 190–3 100 nats (12 400 on 261012).  NA_eff (1.400–1.409, 1.427 on 261012)
+and γ are those of the asymmetric fits, and the symmetric Zernikes come out the same with or without the
+m ≠ 0 modes (Noll 4 within 0.004): the symmetric part does not depend on the asymmetric one.  The higher phase
+order does not lessen what dropping the asymmetric magnitude costs (16 000–106 000 nats at order 10), nor the
+bends it leaves: x 6–7 nm on 260829, y 9–11 nm on 260915, y 4–6 nm on 260904.
+
+*One round blur σ instead of σx, σy* (same optics, order 8; `blur="round"`).  What the round σ costs against the
+elliptical one, with the same magnitude, in nats, and z's bend (rms nm, elliptical → round):
+
+| day (camera) | σx/σy → σ (nm) | symmetric magnitudes | with the m ≠ 0 modes | z bend |
+|---|---|---|---|---|
+| 260622 (Evolve) | 77/75 → 76 | 200–220 | 450–530 | 1.4–1.8 → 1.5–1.9 |
+| 260829 (iXon) | 70/53 → 61 | 10 000 | 5 600–5 800 | 2.0–3.8 → 2.9–3.4 |
+| 260904 (iXon) | 67/52 → 59 | 5 600–6 200 | 3 200–3 500 | 3.7–4.0 → 5.5–6.0 |
+| 260915 (iXon) | 89/61 → 75 | 69 600–70 100 | 44 200–54 300 | 2.0–3.1 → 6.4–6.7 |
+| 261012 (iXon) | 93/65 → 79 | 78 500–80 500 | 57 600–59 000 | 1.6–2.3 → 8.1–9.0 |
+
+The anisotropy belongs to the iXon: on the Evolve day a round σ costs nothing, on the iXon days up to 80 000
+nats and a z bent by up to 9 nm.  The m ≠ 0 magnitude takes part of it (the cost drops by a quarter to a half
+with it, its rms grows to 0.06–0.11), not all.  NA_eff, γ and the order of the magnitude models do not change.
+So the elliptical σ stays, as the camera's term rather than the optics' (an EMCCD's transfer along one axis, the
+open question of roadmap item 6), and the magnitude findings above do not depend on it.
