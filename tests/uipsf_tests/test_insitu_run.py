@@ -178,7 +178,8 @@ def test_the_focus_from_the_data_moves_a_guess_toward_the_truth_before_any_learn
     path, _ = movie_file
     rois = movie_rois([path], SELECTION, CAMERA)
     o = OPTICS_SETTINGS.optics(CAMERA, 1)[0]
-    model = small_model(o, BeadSettings(zernike_order=3, blur_nm=30.0), (15, 15), 1000.0)
+    roi = rois.units.regions.shape[-1]
+    model = small_model(o, BeadSettings(zernike_order=3, blur_nm=30.0), (roi, roi), 1000.0)
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[model.psf.pupil.phase_modes.index(6)] = 0.4
     focus, edge = focus_from_data(model, rois, {"pupil.phase": phase}, ShiftedPoisson(), 1000.0, molecules=30)

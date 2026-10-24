@@ -108,7 +108,8 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
         pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude),
                              held_phase=held_phase, held_magnitude=held_magnitude)
         psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
-                        sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur == "free")
+                        sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur != "fixed",
+                        round_sigma=settings.blur == "round")
         channels.append(Channel(psf, transform=H))
     # getattr: settings of a model saved before the tilt was a choice
     return ForwardModel(channels, geometry=BeadStackGeometry(fit_tilt=getattr(settings, "fit_tilt", False)))
@@ -161,7 +162,9 @@ def start_values(model: ForwardModel, previous) -> dict:
                     value[i] = coeff[old_modes.index(j)]
             out[name] = value
         if new.psf.fit_sigma and pre + "psf.sigma" in shared:
-            out[pre + "psf.sigma"] = shared[pre + "psf.sigma"]
+            # a round blur from a free one takes their mean, a free one from a round one its value twice
+            s = torch.as_tensor(shared[pre + "psf.sigma"]).detach().cpu().double()
+            out[pre + "psf.sigma"] = s.mean().reshape(1) if new.psf.round_sigma else VectorPSF.blur({"psf.sigma": s})
         if c > 0:
             for n in ("share", "dz") + (("transform",) if new.fit_transform else ()):
                 if pre + n in shared:

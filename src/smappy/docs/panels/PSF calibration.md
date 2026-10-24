@@ -457,7 +457,13 @@ aberrations and cost more time and more beads.
 situ*, which decides it by its *hold*.
 
 ### blur
-Whether the extra blur is learnt or held at *blur σ*.
+Whether the extra blur is learnt or held at *blur σ*.  *free* learns it
+along x and y apart, *round* one value for both.  In situ, keep it free:
+on dSTORM data of clathrin the molecules wanted a blur 10 nm stronger
+along one axis than the other, which their beads did not show, and a
+round blur made up for it with an astigmatism 0.2 rad too strong.  Nor
+take the beads' blur over: there the molecules wanted 60 nm, the beads
+76 nm.
 
 ### blur σ
 The blur's start, or its value when held.
@@ -539,9 +545,19 @@ proportion.  Reading and finding them took about ten seconds per thousand
 frames of 128 × 128 pixels on a laptop.
 
 ### region
-The square each molecule is fitted in.  Spots 600 nm or more from focus
-outgrow 15 pixels; a larger region keeps them whole, at the cost of more
-neighbours inside it.
+The square each molecule is fitted in.  On *auto* it spans 3 µm of the
+sample: 25 pixels on 116–127 nm pixels, 29 on 110 nm.  Smaller regions
+can bias the pupil: on dSTORM data of clathrin, 15 and 21 px regions
+learnt an astigmatism a third stronger than the same day's beads, and
+25 px the beads' own.  A small region does not cut the spot wrongly (the
+model is cut alike); it hides the faint outer light that tells apart two
+nearly equal answers -- the right astigmatism with a blur stronger along
+one axis, or more astigmatism with a round blur.  A larger region costs
+little: on that dense movie it masked 1.4 % of the pixels instead of
+0.3 %, and rejected no more molecules as overlapping.  On a high, uneven
+background (several hundred photons per pixel) a large region sees more of
+the unevenness; such data need care.  Set it by hand only with a reason:
+very small pixels (65 nm makes 47 px, which costs memory and time).
 
 ### significance
 How far above the background's noise a spot must be.  Lower finds dimmer

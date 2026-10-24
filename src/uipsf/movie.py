@@ -122,7 +122,7 @@ def render(model, shared: dict, truth: MovieTruth, image: np.ndarray, spot_px: i
     ``spot_px`` pixels about the spot's pixel, times its photons."""
     base = model.psf
     psf = VectorPSF(base.grid, base.pupil, (spot_px, spot_px), upsample=base.upsample, kind=base.kind,
-                    analyser=base.analyser)
+                    analyser=base.analyser, round_sigma=base.round_sigma)
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     p = view({k: torch.as_tensor(v, device=dev) for k, v in shared.items()}, 0)
     px, py = model.pixel_size_nm

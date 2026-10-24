@@ -103,7 +103,11 @@ when a milestone lands or an item moves.
    settles) and beats the bead model by 2–7 nats per molecule; the beads' symmetric magnitude (stable across
    days and colours, what keeps z straight on beads) held in situ is the steadiest choice; phase order 6 by
    default, order 8 only where disjoint molecule sets agree (cross-validated); DNA-PAINT's free-imager haze
-   breaks the flat background, a stricter shape test after round 1 steadies it.  Next: a sloped background,
+   breaks the flat background, a stricter shape test after round 1 steadies it.  **The region size**
+   (architecture.md, "The region size, the blur and the background"): 15 px put January on a second, nearly
+   equal solution with 0.3 rad more astigmatism and a round blur; 25 px (3 µm, now *auto*) with σ free finds the
+   beads' astigmatism and an anisotropic blur from both starts; a large region needs care on high, uneven
+   backgrounds (haze rejection or a planar background).  Next: a sloped background,
    the symmetric bead magnitude and the order choice in the PSF calibration window.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical

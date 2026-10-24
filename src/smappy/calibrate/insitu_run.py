@@ -128,6 +128,7 @@ def movie_rois(paths, settings: InSituSettings | None = None, camera=None, progr
     if not paths:
         raise ValueError("no movies")
     camera = camera if camera is not None else camera_for(paths[0])
+    s = s.resolved(pixel_size_nm(camera))
     read_noise = float(camera.readout_variance)
     plan = [(m, path, open_stack(path)) for m, path in enumerate(paths)]
     orders = [block_order(src.n_frames, s.block_frames) for _, _, src in plan]
@@ -346,6 +347,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
         rois = movie_rois(paths, detection, camera, progress)
     if not len(rois.ids("used")):
         raise ValueError("no molecules chosen: review the detection's settings")
+    detection = detection.resolved(rois.pixel_size_nm)
     o = optics.optics(rois.camera, 1)[0]
     roi = int(rois.units.regions.shape[-1])
     guess = 1000.0 if insitu.focus_nm is None else float(insitu.focus_nm)

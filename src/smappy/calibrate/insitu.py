@@ -13,7 +13,8 @@ what would mislead the fit -- overlapping molecules first.  The steps, each a fu
    candidate is kept on its **absolute significance**: the photons above the background in a disc of
    radius 2σ against the background's Poisson noise there, never relative to the frame.  Of candidates
    of several widths at one place the most significant stays.
-3. **A first fit** (`measure`): SMAPpy's elliptical Gaussian (C++, axis-aligned) in a ``roi_px`` region:
+3. **A first fit** (`measure`): SMAPpy's elliptical Gaussian (C++, axis-aligned) in a ``roi_px`` region
+   (on auto 2.5 µm of the sample, `region_px`):
    photons, widths, position.  Model-free, so nothing favours the start's PSF.  Detections whose fits
    meet (within ``merge_px``) are one molecule: a defocused spot has several local maxima.  A Gaussian
    wider than a third of the region spread over the background and is no detection.
@@ -57,6 +58,12 @@ from ..plugins import param
 
 
 UNITS = (("frame", "frame"), ("blink", "blink, frames summed"))
+#: *region* on auto: this much of the sample, nm.  At 15 and 21 px (1.8, 2.5 µm on M2) January's molecules learnt
+#: a primary astigmatism 0.3 rad stronger than the beads'; at 25 px (3 µm) the beads' (docs/uipsf/architecture.md,
+#: "The region size")
+REGION_NM = 3000.0
+#: and never fewer pixels than this
+MIN_REGION_PX = 15
 PROXIES = (("astigmatism", "astigmatism: σx² − σy²"), ("size", "size: σx² + σy²"))
 
 
@@ -70,8 +77,9 @@ class InSituSettings:
     significance: float = param(6.0, label="significance", min=1.0, advanced=True,
                                 help="photons above the background in a disc, in standard deviations of its "
                                      "noise, for a detection")
-    roi_px: int = param(15, label="region", unit="px", min=7, advanced=True,
-                        help="the square region each molecule is fitted in (odd)")
+    roi_px: Optional[int] = param(None, label="region", unit="px", min=7, advanced=True,
+                                  help=f"the square region each molecule is fitted in (odd); auto: "
+                                       f"{REGION_NM / 1000:g} µm on the sample")
     proxy: str = param("astigmatism", label="z proxy", choices=PROXIES, advanced=True,
                        help="how the first round sorts by height: an astigmatic PSF's elongation, or a 2D "
                             "PSF's size")
@@ -115,10 +123,29 @@ class InSituSettings:
                                     help="(x, y, width, height) in the movie's pixels: only molecules inside "
                                          "are used")
 
+    def resolved(self, pixel_size_nm) -> "InSituSettings":
+        """These settings with *region* on auto made a size in pixels (`region_px`); what the steps read."""
+        from dataclasses import replace
+        return self if self.roi_px is not None else replace(self, roi_px=region_px(pixel_size_nm))
+
     @property
     def per_bin(self) -> int:
         """A z bin's share of *molecules*; a bin with fewer passes its shortfall on (`quotas`)."""
         return max(1, math.ceil(self.molecules / max(1, self.bins)))
+
+
+def region_px(pixel_size_nm) -> int:
+    """*region* on auto: the smallest odd number of pixels that spans `REGION_NM` on the sample (the mean of
+    the pixel's sides), at least `MIN_REGION_PX` -- 25 on M2's 116 x 127 nm pixels, 29 on 110 nm.
+
+    A size on the sample, not in pixels or from the PSF's extent.  What a small region does is not to cut the
+    spot -- the model is cut alike, and on simulated movies 15 px learns the truth -- but to hide the faint
+    outer light that tells two nearly equal solutions apart: on January's molecules the beads' astigmatism
+    with an anisotropic blur, or 0.3 rad more astigmatism with a round one.  A spot's light keeps no fixed
+    fraction short of 30 px either (the bead model's in focus: 87 % in 15 px, 95 % in 31)."""
+    side = float(np.mean(np.asarray(pixel_size_nm, float)))
+    n = math.ceil(REGION_NM / side)
+    return max(MIN_REGION_PX, n + 1 - n % 2)
 
 
 # ------------------------------------------------------------------ 1, 2: background and detection
@@ -594,7 +621,7 @@ def concatenate(parts) -> Units:
 def insitu_rois(frames: np.ndarray, pixel_size_nm, settings: InSituSettings | None = None,
                 read_noise_var: float = 0.0, excess_noise: float = 1.0, background=None) -> InSituROIs:
     """A movie in photons [T, Y, X] to chosen units (module docstring): one block, one movie."""
-    s = settings or InSituSettings()
+    s = (settings or InSituSettings()).resolved(pixel_size_nm)
     u, n = insitu_units(frames, s, read_noise_var, background)
     return choose(concatenate([(u, 0, 0)]), n, pixel_size_nm, s, read_noise_var, excess_noise)
 

@@ -63,6 +63,7 @@ def _np(t):
 
 def sigma_optics(sigma):
     """σ with the pixel's own width taken out (`lab_beads.py`)."""
+    sigma = list(np.ravel(sigma)) * (2 if np.size(sigma) == 1 else 1)        # a round σ is one value
     return [round(math.sqrt(max(s * s - q * q / 12, 0.0)), 2) for s, q in zip(sigma, PIXEL, strict=True)]
 
 
@@ -171,7 +172,7 @@ def beads(args):
     from smappy.calibrate.pupil import BeadSettings, RunSettings, run_calibration
     files = sorted(glob.glob(os.path.join(args.acquisition, "*", "*.ome.tif")))
     t0 = time.perf_counter()
-    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur="free",
+    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur=args.blur,
                          bead_diameter_nm=args.bead_diameter)
     from smappy.calibrate.core import CalibrationSettings
     detection = CalibrationSettings(region=tuple(args.region)) if args.region else None
@@ -229,6 +230,8 @@ def learn(args):
         rois = pickle.load(f)
     if args.subsets > 1:
         keep_subset(rois, args.subset, args.subsets)
+    if args.crop:
+        crop(rois, args.crop)
     if args.poisson:
         # plain Poisson, as v1 treats the data: no EM excess noise (`InSituROIs.batch` reads it)
         rois.excess_noise = 1.0
@@ -236,7 +239,7 @@ def learn(args):
         drop_hazy(rois, args.max_haze)
     astig_nm = bead_phase[6] * WAVELENGTH_NM / (2 * math.pi)
     # a blur held round at a value (--blur-fixed): does in situ's extra astigmatism trade with σx != σy?
-    model = (BeadSettings(zernike_order=ORDER, magnitude="free", blur="free") if args.blur_fixed is None else
+    model = (BeadSettings(zernike_order=ORDER, magnitude="free", blur=args.blur) if args.blur_fixed is None else
              BeadSettings(zernike_order=ORDER, magnitude="free", blur="fixed", blur_nm=args.blur_fixed))
     from dataclasses import replace as replaced
     model = replaced(model, fit_tilt=args.fit_tilt)          # the coverslip's tilt learnt (uipsf 774472e)
@@ -254,6 +257,18 @@ def learn(args):
         import uipsf.workflows.insitu_rounds as rounds
         base = rounds.RoundSettings
         rounds.RoundSettings = lambda **k: base(**{"height_range_nm": tuple(args.height_range), **k})
+    if args.z_range is not None:
+        # v1's window: only molecules within this of the height in focus are chosen, from round 2
+        import uipsf.workflows.insitu_rounds as rounds
+        base_rounds = rounds.RoundSettings
+        rounds.RoundSettings = lambda **k: base_rounds(**{"z_range_nm": args.z_range, **k})
+    if args.reject_k is not None:
+        # a stronger outlier rejection at learning (v1 drops the worst 10 % by likelihood, more by MSE)
+        import uipsf.workflows.insitu_rounds as rounds
+        from uipsf.workflows.rejection import RejectionSettings
+        base_learn = rounds.learn_insitu
+        rounds.learn_insitu = lambda *a, **k: base_learn(
+            *a, **{"rejection": RejectionSettings(k=args.reject_k, max_masked=1.0), **k})
     # the rounds choose by the detection's settings: a stricter shape test after the first round
     selection = InSituSettings() if args.shape_k is None else InSituSettings(shape_k=args.shape_k)
     result = run_insitu(None, optics(), model, insitu, detection=selection, run=run, rois=rois)
@@ -288,7 +303,8 @@ def learn(args):
                 "used": np.asarray(result.run.rounds[-1].used), "magnitude_kind": args.magnitude, "start": args.start,
                 "model": args.model, "order": ORDER, "hold_phase_above": args.hold_phase_above,
                 "subset": [args.subset, args.subsets], "max_haze": args.max_haze, "shape_k": args.shape_k,
-                "background": BACKGROUND, "n_medium": N_MED},
+                "background": BACKGROUND, "n_medium": N_MED, "crop": args.crop,
+                "blur": args.blur if args.blur_fixed is None else "fixed", "blur_nm": args.blur_fixed},
                run_path(args.rois, args.magnitude, args.start, args.model, run_tag(args)))
 
 
@@ -310,6 +326,10 @@ def run_tag(args) -> str:
     tag += "" if args.blur_fixed is None else f"_sigma{args.blur_fixed:g}"
     tag += "_tilt" if args.fit_tilt else ""
     tag += "_poisson" if args.poisson else ""
+    tag += "_round" if args.blur == "round" else ""
+    tag += f"_crop{args.crop}" if args.crop else ""
+    tag += "" if args.z_range is None else f"_zr{args.z_range:g}"
+    tag += "" if args.reject_k is None else f"_rk{args.reject_k:g}"
     tag += "" if args.hold_phase_above is None else f"_h{args.hold_phase_above}"
     return tag + ("" if args.subsets <= 1 else f"_s{args.subset}of{args.subsets}")
 
@@ -318,6 +338,16 @@ def bead_phases(previous) -> dict:
     """{Noll mode: rad} of the bead model's phase."""
     modes = previous.model.channels[0].psf.pupil.phase_modes
     return dict(zip(modes, _np(previous.shared["pupil.phase"]).tolist(), strict=True))
+
+
+def crop(rois, n: int):
+    """Each region cut to its central ``n`` px: the same molecules, chosen at the detection's region size,
+    fitted in a smaller one -- whether a region size acts through the pixels or through the selection."""
+    u = rois.units
+    k = (u.regions.shape[-1] - n) // 2
+    if k < 0 or n % 2 == 0:
+        raise ValueError(f"cannot crop {u.regions.shape[-1]} px regions to {n}")
+    u.regions, u.masks = u.regions[:, k:k + n, k:k + n], u.masks[:, k:k + n, k:k + n]
 
 
 def keep_subset(rois, k: int, n: int):
@@ -379,6 +409,8 @@ def score(args):
             ids = np.intersect1d(ids, r["used"])
     else:
         ids = score_ids(rois, args.set)
+    if args.crop:
+        crop(rois, args.crop)
     if args.max_haze is not None:
         ids = ids[haze(rois)[ids] <= args.max_haze]
     ids = ids[:args.limit] if args.limit else ids
@@ -393,7 +425,9 @@ def score(args):
         # each run with the sample index it learnt with (the score's own for runs from before it was kept)
         N_MED = r.get("n_medium", scored_n)
         o = optics().optics(rois.camera)[0]
-        settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
+        # each run with its own blur: a round one is one value (`VectorPSF.round_sigma`)
+        settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur=r.get("blur", "free"),
+                                blur_nm=r.get("blur_nm") or 30.0)
         # a run held its own bead model's magnitude, and its high phase orders
         own = load_start(r["model"]) if "model" in r else previous
         patch_insitu_model(r["magnitude_kind"], bead_magnitude(own), r.get("hold_phase_above"), bead_phases(own))
@@ -470,6 +504,7 @@ def main():
     b.add_argument("--model", required=True, help="the model file saved (.uipsf.h5)")
     b.add_argument("--halves", type=int, default=0, help="this many half-split pairs: the beads' own spread")
     b.add_argument("--bead-diameter", type=float, default=BEAD_NM, help="nm, taken out of the model")
+    b.add_argument("--blur", choices=("free", "round"), default="free", help="σ free in x and y, or one value")
     b.add_argument("--magnitude", choices=("free", "symmetric", "fixed"), default="free",
                    help="the beads' magnitude: symmetric learns only its m = 0 modes")
     d = sub.add_parser("detect")
@@ -492,6 +527,12 @@ def main():
     le.add_argument("--subsets", type=int, default=1)
     le.add_argument("--fit-tilt", action="store_true", help="learn the coverslip's tilt")
     le.add_argument("--poisson", action="store_true", help="plain Poisson noise (no EM excess), as v1")
+    le.add_argument("--z-range", type=float, default=None,
+                    help="from round 2 learn only from molecules within this of the height in focus, nm (v1: ~1000)")
+    le.add_argument("--reject-k", type=float, default=None,
+                    help="the learning's outlier rejection, robust sd above the median (default 3)")
+    le.add_argument("--crop", type=int, default=None, help="learn on each region's central this many px")
+    le.add_argument("--blur", choices=("free", "round"), default="free", help="σ free in x and y, or one value")
     le.add_argument("--blur-fixed", type=float, default=None, help="the blur held round at this σ, nm")
     le.add_argument("--height-range", type=float, nargs=2, default=None, metavar=("LOW", "HIGH"),
                     help="from round 2 learn only from molecules this high above the coverslip, nm")
@@ -507,6 +548,7 @@ def main():
     sc.add_argument("--set", choices=("common", "heldout", "detected"), default="common",
                     help="common: those every run used; heldout: held out at detection; detected: round 1's")
     sc.add_argument("--max-haze", type=float, default=None, help="score only molecules this clean (`haze`)")
+    sc.add_argument("--crop", type=int, default=None, help="score on each region's central this many px")
     sc.add_argument("--limit", type=int, default=None, help="only the first this many molecules: a quick check")
     sc.add_argument("--device", default=None)
     bf = sub.add_parser("beadfit")

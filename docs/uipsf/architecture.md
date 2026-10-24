@@ -1802,18 +1802,76 @@ the coverslip fill with poorly localised molecules (heights are not bounded at 0
 known height); why σ in situ is below the beads' (bead size?); the residual 1.3 per pixel of clean DNA-PAINT
 molecules.
 
-**The region size biases the astigmatism (found October 2026, to be redone properly).**  On January the in situ
-primary astigmatism came out 0.3–0.4 rad stronger than the beads' (Noll 6 −1.01 … −1.15 against −0.68, with
-secondary Noll 12 ≈ −0.2) in every variant at the default 15 px region: not the depth (0–300 and 700–1500 nm
-alike), the sample index (1.36), a coverslip tilt (learnt 0.3°/0.6°, no gain), σ (held round at 63 or 76 nm), the
-magnitude or the noise model (plain Poisson).  uiPSF v1 on the same pair agrees with its beads (in situ Noll 6
-−0.70, beads −0.67; v1's M2 file uses 25 px), and v2 at 25 px does too (−0.66, Noll 12 −0.05; also with 6000
-molecules).  A spot 0.5–1 µm from focus is about as long as a 15 px region (1.7 × 1.9 µm): its ends fall on the
-edge pixels that fix each molecule's flat background, and the fit trades elongation against background.  On
-Zenodo's thin Nup96 layer (focus 266 nm) 15 px does no harm.  So results above at 15 px on January and the
-dual-channel pair (the order cross-validation, the magnitude scores, the bead model's cost) are to be redone at
-a region sized to the spot at the heights learnt.  v1 against v2's other settings (`benchmarks/uipsf/real/
-v1_pair.py`): v1 also keeps molecules within ±1 µm of focus and rejects 10–20 % more outliers -- the next to test.
+### The region size, the blur and the background (October 2026)
+
+At the 15 px region every v2 run on January learnt a primary astigmatism 0.3–0.4 rad stronger than the beads'
+(Noll 6 −1.01 … −1.15 against −0.68, Noll 12 ≈ −0.2), whatever the depth, index, tilt, magnitude or noise
+model; uiPSF v1 at its 25 px agreed with the beads (−0.70).  Scripts: `synthetic/insitu_region.py` (simulated),
+`real/insitu_magnitude.py` (new: `--crop`, `--blur round`, `--z-range`, `--reject-k`); results
+`insitu_region.jsonl`, `insitu_region_real.jsonl`, `insitu_round_sigma.jsonl`, `insitu_defaults.jsonl`
+(`insitu_shape_r21.jsonl`, `insitu_v1settings_r21.jsonl`: the 21 px runs below).
+
+**Not the truncation.**  A simulated M2 movie (NA 1.43, 116 × 127 nm, the January beads' pupil and symmetric
+magnitude, 0–1300 nm, focus 430 nm, ~3000 photons on 55 per pixel, rendered in 41 px) learnt from the truth at
+15, 21 and 25 px: Noll 6 within 0.008 rad of the truth at every size (CRLB 0.005), also with 15 % of each spot's
+light added as a 600 nm halo.  The model is cut as the data are; an exact model at any region gives the truth.
+That is why the simulated tests and benchmarks, all at 15 px, never showed it
+(`test_insitu_region.py` pins it).  The bead model's own spot keeps 87 % of its light in 15 px, 95 % in 31: no
+size keeps "the whole spot".
+
+**The pixels, not the selection.**  January's molecules chosen at 25 px, fitted on their central part
+(`--crop`; uniform magnitude, plain Poisson, order 6): Noll 6 −0.66 at 25 px, −0.68 at 21, −0.98 at 15 (Noll 12
+−0.05 / −0.07 / −0.20).  On the held-out molecules the 15 px solution fits the inner 15 px better (2.9 Poisson
+nats per molecule) and the outer rings worse by as much; over 25 px the two tie.
+
+**Two nearly equal solutions, and the blur decides.**  January's molecules fit about as well with (A) the beads'
+astigmatism and an anisotropic blur, or (B) 0.3 rad more, a secondary astigmatism and coma, and a round blur:
+
+| solution | Noll 6 | Noll 12 | Noll 8 | σ (nm) | found with |
+|---|---|---|---|---|---|
+| A | −0.73 … −0.76 | −0.07 … −0.12 | ~0.26 | ~58 × 67 | σ free and 25 px, bead and cold start (−0.732 / −0.733); 29 px −0.72 |
+| B | −0.96 … −1.05 | −0.20 | ~0.40 | ~63 round | 15 or 21 px with σ free (21 px: fresh detection −1.01, cut from 25 px −1.00, also with haze ≤ 1.5); σ round from a cold start at 25 px (−0.96 / −0.97); σ held at the beads' 75.8 (−0.92) |
+| beads | −0.68 | 0.01 | 0.11 | 75 × 76 | – |
+
+A needs both an anisotropic σ and a region large enough for the faint outer light to show it; with σ round the
+start decides even at 25 px (bead start −0.76).  The held-out scores barely choose (up to 0.4 nats per molecule
+either way, as much as similar runs scatter); the beads' astigmatism and v1 favour A.  With the default model
+(the beads' symmetric magnitude held, order 8 above 6 held) 21 px is not enough; with uniform magnitude and order
+6 it was.  The beads are round (75 × 76, round σ 75.8, the same pupil), so A says the movie has a blur ~10 nm
+stronger along y that the beads do not: untested candidates, the EMCCD's charge smear along the readout (EM gain
+100 in the movie, 25 for the beads), or motion within the 25 ms frame.  Holding the beads' σ in situ is wrong on
+January (−0.92, 0.43 nats per molecule worse): its molecules want ~60 nm, its beads 76.
+
+**The other pairs.**  The dual-channel half's astigmatism does not depend on σ or the region: +0.75 at 15 px,
++0.76 at 21, and at 25 px +0.61 (planar background, free σ), +0.62 (round), +0.61 (the beads' σ held), +0.69 /
++0.70 (round σ, haze ≤ 1.5, bead / cold start); beads +0.65 (learnt on the same right half, `--region`).
+Zenodo FD (central 500 × 500 px, cold start): −0.709 at 25 px, −0.714 at 15, beads −0.691; heights (5 / 50 / 95 %)
+−8 / 225 / 736 nm.
+
+**A large region sees an uneven background.**  The dual channel (~430 photons per pixel) at 25 px with the flat
+background per molecule ran away (focus 3.5 µm, from both starts): its edge pixels scatter more than the noise
+allows the more of them there are (median 1.07 / 1.18 / 1.26 at 15 / 21 / 25 px; the share above 1.5: 16 / 29 /
+36 %; January 14 / 7 / 6 %).  A planar background (`Planar`) or leaving out molecules whose edges scatter more
+than 1.5 times the noise (`--max-haze`) each kept it at the beads' astigmatism; on January either costs nothing
+(−0.76 / −0.74).  The stricter shape test (1.5 sd) did not (focus 1.95 µm).  The dual channel's focus does not
+settle at 21 or 25 px in any variant (round 1's free focus falls to 0–130 nm, the coverslip correction swings,
+the last edge 50–600 nm off); at 15 px it did.  Open.
+
+**Cost of a large region** (January, dense dSTORM, 15 / 21 / 25 px): overlap rejections 21–22 % of detections at
+every size, too much masked 0.3 / 0.6 / 0.8 %, masked pixels of used molecules 0.26 / 0.87 / 1.39 %; detection
+~1.1 min; learning time unchanged (7–13 min).
+
+**v1's other settings** -- heights within ±1 µm of focus (`RoundSettings.z_range_nm`), a stronger outlier
+rejection (k = 2) -- changed nothing at 21 px (−0.99 … −1.00) and did not decide A against B at 25 px.
+
+**Decided so far**: *region* on auto spans 3 µm of the sample (`insitu.region_px`, 25 px on M2, 29 on 110 nm;
+it was 15 px); `VectorPSF(round_sigma=True)` and *blur* › *round* exist, but in situ σ stays free.  Proposed
+with the user, not yet the code's defaults: haze rejection ≤ 1.5 rather than a planar background, heights
+within ±1 µm of focus, no tilt, n_med 1.33.  The earlier tables of this section (orders, magnitude choices,
+the bead model's cost) were measured at 15 px, where January sat on solution B: their January rows are to be
+read with that in mind; the dual channel's are not affected.  Next: why January's molecules are blurred along
+one axis (the beads' and the movie's camera settings, the in-focus spots' profile along x and y); a free-σ
+confirmation at 25 px with the proposed defaults; perhaps the beads' astigmatism as a loose prior in situ.
 
 **Implemented (decided with the user, October 2026).**  `ZernikePupil` holds modes (`held_phase`,
 `held_magnitude`): fixed maps, no parameters, written to the model file and mirrored by the twin test

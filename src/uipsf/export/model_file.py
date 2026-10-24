@@ -104,7 +104,8 @@ def _describe_channel(ch: Channel) -> dict:
     return dict(name=ch.name, optics=optics, pupil_size=psf.grid.size, pupil=pup,
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
-                         sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma),
+                         sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma,
+                         round_sigma=psf.round_sigma),
                 transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform)
 
 
@@ -146,7 +147,7 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     s = config["psf"]
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
-                    fit_sigma=s.get("fit_sigma", True))
+                    fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False))
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
                    name=config.get("name"), fit_transform=config.get("fit_transform", True))
 

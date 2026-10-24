@@ -62,7 +62,7 @@ DESIGN_COVERSLIP_UM = 170.0
 AUTO_ORDER = 6
 
 MAGNITUDES = (("free", "free"), ("symmetric", "symmetric"), ("fixed", "fixed (apodisation)"))
-BLURS = (("free", "free"), ("fixed", "fixed"))
+BLURS = (("free", "free"), ("round", "round"), ("fixed", "fixed"))
 
 
 @dataclass

@@ -28,6 +28,12 @@ def model_and_shared(P=32, roi=(15, 15)):
     return model, shared
 
 
+def steps(**kw):
+    """Settings for calling the steps directly, in the 15 px regions these tests were drawn for: a *region* on
+    auto becomes pixels only where a movie and its pixel size come in (`InSituSettings.resolved`)."""
+    return I.InSituSettings(**{"roi_px": 15, **kw})
+
+
 def frames_with(spots, size=(48, 48), n_frames=1, background=10.0, seed=0, noise=True):
     """Frames with molecules (frame, x_px, y_px, h_nm, photons) rendered by the model."""
     model, shared = model_and_shared()
@@ -52,7 +58,7 @@ def test_a_defocused_molecule_is_found_on_its_significance_where_a_relative_thre
     # fraction of the other's, below v1's 0.2-0.3 of the frame's maximum, but its photons are as many.
     frames = frames_with([(0, 14, 24, IN_FOCUS, 3000.0), (0, 34, 24, IN_FOCUS + 700.0, 3000.0)])
     bg = np.full_like(frames, 10.0)
-    s = I.InSituSettings()
+    s = steps()
     c = I.detect(frames, bg, s)
     kept, g = I.measure(frames, c, s)
     assert len(kept) == 2 and sorted(np.rint(g["x_px"] / 10).astype(int).tolist()) == [1, 3]
@@ -63,14 +69,14 @@ def test_a_defocused_molecule_is_found_on_its_significance_where_a_relative_thre
 
 def test_a_defocused_spots_several_maxima_are_one_molecule():
     frames = frames_with([(0, 24, 24, IN_FOCUS - 600.0, 6000.0)], noise=False)
-    s = I.InSituSettings()
+    s = steps()
     c = I.detect(frames, np.full_like(frames, 10.0), s)
     kept, g = I.measure(frames, c, s)
     assert len(c) > 1 and len(kept) == 1
 
 
 def test_a_neighbour_within_both_spots_sizes_rejects_and_a_farther_one_is_masked():
-    s = I.InSituSettings()
+    s = steps()
     near = dict(det_frame=np.array([0]), det_xy=np.array([[27.0, 20.0]]), det_sigma=np.array([1.5]),
                 det_blink=np.array([1]), blink_id=0, settings=s)
     assert I.overlaps((20, 20), np.array([0]), 1.5, **near)                  # 7 px < 3·1.5 + 3·1.5
@@ -83,7 +89,7 @@ def test_a_neighbour_within_both_spots_sizes_rejects_and_a_farther_one_is_masked
 
 
 def _units(frames, **kw):
-    s = I.InSituSettings(**kw)
+    s = steps(**kw)
     kept, g = I.measure(frames, I.detect(frames, np.full_like(frames, 10.0), s), s)
     return I.units(frames, kept, g, s)
 
@@ -125,7 +131,7 @@ def test_a_blink_whose_photons_step_between_inner_frames_is_rejected():
 def test_a_unit_whose_own_fit_runs_wider_than_a_third_of_its_region_is_rejected(monkeypatch):
     # On Windows one unit's masked fit ran to σx 16 px (5 on macOS) and set the z proxy's range on its own.
     frames = frames_with(BLINK, n_frames=10)
-    s = I.InSituSettings()
+    s = steps()
     kept, g = I.measure(frames, I.detect(frames, np.full_like(frames, 10.0), s), s)
     fit = I.gaussian
 
@@ -196,7 +202,7 @@ def test_the_molecules_chosen_in_a_small_movie_are_molecules_at_every_height():
                       on_coverslip=0.2, illumination_fwhm_px=100.0, seed=1,
                       blinking=BlinkingSettings(photons=6000.0, photons_std=3000.0, on_time=1.5, blinks=3.0))
     movie = simulate_movie(model, shared, s)
-    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, I.InSituSettings(molecules=63))
+    rois = I.insitu_rois(movie.frames, OPTICS.pixel_size_nm, steps(molecules=63))
     used = rois.ids("used")
     assert len(used) > 25
     # each used unit is a molecule (a Gaussian truncated by the region misplaces the farthest by 2–4 px), and
@@ -224,7 +230,7 @@ def test_a_molecules_frames_are_held_out_together():
 
 
 def test_a_neighbour_much_dimmer_than_the_molecule_neither_rejects_nor_masks_it():
-    s = I.InSituSettings()
+    s = steps()
     near = dict(det_frame=np.array([0]), det_xy=np.array([[27.0, 20.0]]), det_sigma=np.array([1.5]),
                 det_blink=np.array([1]), blink_id=0, settings=s)
     assert not I.overlaps((20, 20), np.array([0]), 1.5, **near, det_photons=np.array([100.0]), photons=1000.0)
@@ -240,8 +246,8 @@ def test_a_region_keeps_only_the_molecules_inside_it_and_judges_them_against_the
     frames = frames_with([(0, 10, 24, IN_FOCUS, 3000.0), (0, 14, 12, IN_FOCUS, 3000.0),
                           (0, 36, 24, IN_FOCUS, 3000.0)])
     bg = np.full_like(frames, 10.0)
-    whole, _ = I.insitu_units(frames, I.InSituSettings(), background=bg)
-    half, _ = I.insitu_units(frames, I.InSituSettings(region=(24, 0, 24, 48)), background=bg)
+    whole, _ = I.insitu_units(frames, steps(), background=bg)
+    half, _ = I.insitu_units(frames, steps(region=(24, 0, 24, 48)), background=bg)
     right = half.x_px >= 24
     assert right.sum() == 1 and len(half.reason) == len(whole.reason) == 3
     assert all(r == "outside the region" for r in np.array(half.reason, object)[~right])
