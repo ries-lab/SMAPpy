@@ -187,7 +187,7 @@ class PluginTab(QWidget):
             section.toggled.connect(lambda on, s=section, i=instance:
                                     self._toggled(s, i, on))
             section.detach_requested.connect(
-                lambda s=section: detach_to_window(s, self.window()))
+                lambda s=section, i=instance: self._detach(s, i))
             section.button.setContextMenuPolicy(Qt.CustomContextMenu)
             section.button.customContextMenuRequested.connect(
                 lambda point, i=instance, s=section: self._menu(i, s, point))
@@ -211,6 +211,12 @@ class PluginTab(QWidget):
         for other in self.sections:               # one open at a time
             if other is not section and other.button.isChecked():
                 other.set_expanded(False)
+
+    def _detach(self, section: CollapsibleSection, instance: Instance) -> None:
+        """Into a window of its own -- the panel made first: one that was
+        never opened is an empty slot, and its window came up blank."""
+        self.slots[instance.id].ensure()
+        detach_to_window(section, self.window())
 
     def open_section(self, instance_id: str) -> None:
         for section, instance in zip(self.sections, self.tab.instances):
@@ -300,7 +306,7 @@ class PluginTab(QWidget):
             self.tab.instances.insert(index + 1, copy)
             self.rebuild()
         elif chosen is detach:
-            detach_to_window(section, self.window())
+            self._detach(section, instance)
             return
         elif chosen is remove:
             self.tab.instances.pop(index)

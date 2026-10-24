@@ -201,32 +201,72 @@ class Popup(QFrame):
 
 
 def detach_to_window(section: CollapsibleSection, parent=None) -> "FloatingWindow":
-    """Move a section's content to its own window; closing it puts it back."""
+    """Move a section's content to its own window; closing it puts it back.
+
+    Sized to what it holds, no larger than the screen, and put beside the
+    window it came from (`place_beside`).
+    """
     window = FloatingWindow(section.title, section.detach(), parent=parent)
     window.closed.connect(section.reattach)
-    window.resize(max(section.content.sizeHint().width() + 20, 320), 400)
+    window.fit_content()
+    if parent is not None:
+        place_beside(window, parent)
     window.show()
     section._window = window            # keep it alive
     return window
 
 
 class FloatingWindow(QWidget):
-    """A section's content in its own window; closing puts it back."""
+    """A section's content in its own window; closing puts it back.
+
+    A standard window, not a `Qt.Tool` one: on macOS a tool window is a
+    utility panel with a small title bar that floats over everything, and
+    the panels in it looked like a part of something else.  The content is
+    in a scroll area, so a panel longer than the screen -- a fitter's, say --
+    scrolls rather than pushing the window's bottom edge off the screen.
+    """
 
     closed = Signal()
+    MARGIN = 6                          # px around the content
 
     def __init__(self, title: str, content: QWidget, parent=None):
-        super().__init__(parent, Qt.Tool)
+        super().__init__(parent, Qt.Window)
         self.setWindowTitle(title)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.addWidget(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        holder = QWidget()
+        inner = QVBoxLayout(holder)
+        inner.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        inner.addWidget(content)
+        inner.addStretch(1)
+        self.scroll.setWidget(holder)
+        layout.addWidget(self.scroll)
         self.content = content
+        self._inner = inner
+        content.show()
         from .app import window_shortcuts
         window_shortcuts(self)
 
+    def fit_content(self) -> None:
+        """As large as the content wants, within the screen's free area."""
+        from PySide6.QtWidgets import QApplication
+        hint = self.content.sizeHint()
+        bar = self.scroll.verticalScrollBar().sizeHint().width()
+        width = max(hint.width() + 2 * self.MARGIN + bar, 320)
+        height = max(hint.height() + 2 * self.MARGIN, 200)
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            room = screen.availableGeometry()
+            width = min(width, room.width() - 40)
+            height = min(height, room.height() - 60)       # the title bar
+        self.resize(width, height)
+
     def closeEvent(self, event) -> None:
-        self.layout().removeWidget(self.content)
+        self._inner.removeWidget(self.content)
         self.content.setParent(None)
         self.closed.emit()
         super().closeEvent(event)
