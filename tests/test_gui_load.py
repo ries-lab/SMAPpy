@@ -80,12 +80,18 @@ def test_open_returns_at_once_and_reports_its_stages(app, tmp_path):
     stages = []                                 # every stage, not a sampled few
     control._task.progress.connect(stages.append)
 
-    QTimer.singleShot(20_000, app.quit)         # a floor under a stuck test
+    # a floor under a stuck test -- an object, stopped after: a singleShot
+    # left pending quit the next test's event loop in the same worker
+    floor = QTimer(singleShot=True, interval=20_000)
+    floor.timeout.connect(app.quit)
+    floor.start()
     done = QTimer(control)
     done.timeout.connect(lambda: app.quit() if control._task is None
                          and not control._queue else None)
     done.start(10)
     app.exec()
+    floor.stop()
+    done.stop()
 
     assert len(session.locs) == 20_000
     # everything is usable again except the undo and redo entries: a file just

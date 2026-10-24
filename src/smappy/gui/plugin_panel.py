@@ -24,7 +24,7 @@ from ..plugins import reads_locs, Plugin, Result, Stopped
 from ..session import LiveTableError, Session
 from .errors import ERROR_STYLE, details_window, message_of
 from .params import SettingsForm
-from .widgets import ColumnScroll
+from .widgets import ColumnScroll, note_style
 
 # questions of *which* asked in a row before a run: one per step of a chain
 # that has to choose, and a bound so a preflight that never settles cannot
@@ -35,8 +35,6 @@ MAX_CHOICES = 8
 WARNING_STYLE = "color: #c06000; font-weight: bold;"
 RESULT_TIP = ("show what the run made: its figures (the drift curves, say), "
               "or, when it drew none, its text in a window of its own")
-# a notice that is only worth knowing (`Notice.kind` "info")
-INFO_STYLE = "color: gray;"
 
 
 
@@ -111,7 +109,7 @@ class PluginPanel(QWidget):
         if self.plugin.description:
             about = self.about = QLabel(self.plugin.description)
             about.setWordWrap(True)
-            about.setStyleSheet("color: gray")
+            about.setStyleSheet(note_style())
             layout.addWidget(about)
         self.form = SettingsForm(plugin_cls.Settings, plugin_cls.specs())
         layout.addWidget(self.form)
@@ -390,7 +388,7 @@ class PluginPanel(QWidget):
             self.notice_button.hide()
             return
         self.notice.setText(notice.text)
-        self.notice.setStyleSheet(INFO_STYLE if notice.kind == "info"
+        self.notice.setStyleSheet(note_style() if notice.kind == "info"
                                   else WARNING_STYLE)
         self._notice_window = notice.window
         self._notice_settings = notice.settings

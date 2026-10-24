@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, Q
 
 from ..plugins import ParamSpec, param_specs
 from . import folders
-from .widgets import CollapsibleSection
+from .widgets import CollapsibleSection, note_style
 
 
 class _Field(QWidget):
@@ -256,7 +256,7 @@ class _Field(QWidget):
         """Grey while the value on show is a hint rather than a setting."""
         if isinstance(self.widget, QLineEdit):
             hinting = self.auto is not None and self.auto.isChecked()
-            self.widget.setStyleSheet("color: gray; font-style: italic"
+            self.widget.setStyleSheet(note_style("font-style: italic")
                                       if hinting else "")
 
     def set_hint(self, value: Any) -> None:

@@ -121,6 +121,10 @@ class View3D(QWidget):
         # the slab's angle when the view last followed it: a line ROI turned
         # since turns the view by the difference
         self._slab_angle: Optional[float] = None if session.slab is None else session.slab.angle
+        # off: the box follows the ROI and the view stays where it is -- a
+        # movie made by moving a line along a structure wants the camera
+        # still and the box travelling, not the picture recentred every frame
+        self.centre_on_roi = True
         # what the render grid's axes were last time: a change of quantity is
         # a change of units, and the zoom and the pivot mean nothing across it
         self._render_axes = session.axes()
@@ -200,7 +204,8 @@ class View3D(QWidget):
                 # On the ROI's edit, not the slab's: a slab moved in depth
                 # here (Ctrl+wheel) keeps the view where it was panned to
                 turned = 0.0 if self._slab_angle is None else slab.angle - self._slab_angle
-                self.projection.follow(slab, (turned + 180.0) % 360.0 - 180.0)
+                if self.centre_on_roi:
+                    self.projection.follow(slab, (turned + 180.0) % 360.0 - 180.0)
                 self._slab_angle = slab.angle
                 self._draw_box()
                 self.changed.emit()
@@ -753,9 +758,20 @@ class OptionsPanel(QWidget):
                                   "off: about the slab's centre")
         self.at_centre.setChecked(proj.rotate_at_centre)
         self.at_centre.toggled.connect(self._on_at_centre)
+        self.centre_roi = QCheckBox("centre on the ROI")
+        self.centre_roi.setToolTip("while the slab follows the 2D ROI, a moved or "
+                                   "turned ROI is centred and turned with it.  off: "
+                                   "the view stays put and the box moves in it, "
+                                   "as a movie along a line wants")
+        self.centre_roi.setChecked(self.view3d.centre_on_roi)
+        self.centre_roi.toggled.connect(self._on_centre_roi)
         box.addWidget(self.fix_roll)
         box.addWidget(self.at_centre)
+        box.addWidget(self.centre_roi)
         return part
+
+    def _on_centre_roi(self, on: bool) -> None:
+        self.view3d.centre_on_roi = on
 
     def _fit_popup(self) -> None:
         try:

@@ -126,11 +126,6 @@ def bar_label(value: float, unit: str) -> str:
     return f"{value:g} {unit}"
 
 
-def bar_number(value: float) -> str:
-    """Four digits, but a frame number of 20000 as itself, not 2e+04."""
-    return f"{value:.0f}" if 1e4 <= abs(value) < 1e9 else f"{value:.4g}"
-
-
 def auto_bar(width: float) -> float:
     """The scale bar the window draws on a view ``width`` wide."""
     return nice_step(BAR_FRACTION * width) if width > 0 else 0.0
@@ -170,13 +165,22 @@ def colour_scales(layers: Sequence[LayerSnapshot]) -> List[tuple]:
 
 def colour_bar_labels(names: Sequence[str], field: str, range_: Tuple[float, float]
                       ) -> Tuple[str, str, str]:
-    """The title, the top and the bottom label: "layer 1: z_nm", "300 nm",
-    "-300 nm"."""
-    unit = axis_unit(field)
-    unit = "" if unit == field else f" {unit}"
+    """The title, the top and the bottom label: "layer 1\\nz_nm", "300",
+    "-300".
+
+    The title is two lines, the layers and the column under them: one line
+    of both made the box as wide as the two together.  No unit at the ends:
+    the column's name in the title carries it, and the bar is small.  Rounded to whole numbers from 100 up and to three digits
+    below: a range set by a percentile is -312.7 to 287.41, and the bar is
+    read, not computed with.
+    """
     lo, hi = range_
-    return (f"{', '.join(names)}: {field}", f"{bar_number(hi)}{unit}",
-            f"{bar_number(lo)}{unit}")
+    return f"{', '.join(names)}\n{field}", bar_end(hi), bar_end(lo)
+
+
+def bar_end(value: float) -> str:
+    """"300", "-313", "0.25", "20000": an end of a colour bar."""
+    return f"{value:.0f}" if 100 <= abs(value) < 1e9 else f"{value:.3g}"
 
 
 # ------------------------------------------------------------- where, how fine
@@ -423,38 +427,47 @@ def stamp(pixels: np.ndarray, text: str, white: bool = False) -> np.ndarray:
 
 def _colour_bars(image, scales, size: int, font, white: bool):
     """The window's colour bars, stacked in the top right corner: on a
-    darkened (or, on white paper, lightened) box, the LUT upwards, the
-    column's range at its ends, whose it is above it."""
+    darkened (or, on white paper, lightened) box as narrow as its words, the
+    layers and the column above the LUT, the LUT upwards, the range at its
+    ends (`gui.render_view.ColourBar`, scaled)."""
     from PIL import Image, ImageDraw
     w = image.width
-    box_w, box_h, gap = 9 * size, 9 * size, size // 3
-    bar_w = max(4, size)
+    gap, pad, edge = size // 3, max(1, size // 4), max(1, size // 6)
+    bar_w, bar_h, line = max(4, size), 5 * size, int(size * 1.25)
+    measure = ImageDraw.Draw(image)
+    boxes, y0 = [], edge
+    for names, field, range_, table in scales:
+        title, top, bottom = colour_bar_labels(names, field, range_)
+        lines = title.split("\n")
+        text = max([measure.textlength(t, font=font) for t in lines]
+                   + [bar_w + size // 3 + measure.textlength(t, font=font)
+                      for t in (top, bottom)])
+        box_w = int(min(text + 2 * pad + 2, 14 * size))
+        box_h = len(lines) * line + bar_h + 2 * pad
+        x0 = w - box_w - edge
+        if y0 + box_h > image.height or x0 < 0:
+            break
+        boxes.append((x0, y0, box_w, box_h, lines, top, bottom, table))
+        y0 += box_h + gap
     base = np.asarray(image).astype(np.float32)
     ground = 255.0 if white else 0.0
     ink = (0, 0, 0) if white else (230, 230, 230)
-    boxes = []
-    for n in range(len(scales)):
-        x0, y0 = w - box_w - size // 2, size // 2 + n * (box_h + gap)
-        boxes.append((x0, y0))
-        if y0 + box_h > base.shape[0] or x0 < 0:
-            boxes.pop()
-            break
+    for x0, y0, box_w, box_h, *_ in boxes:
         # 140 of 255, as the window's box
         sub = base[y0:y0 + box_h, x0:x0 + box_w]
         sub[:] = sub * (1 - 0.55) + ground * 0.55
     image = Image.fromarray(np.round(base).astype(np.uint8), "RGB")
     draw = ImageDraw.Draw(image)
-    for (x0, y0), (names, field, range_, table) in zip(boxes, scales):
-        title, top, bottom = colour_bar_labels(names, field, range_)
-        line = int(size * 1.25)
-        bx, by0, by1 = x0 + size // 2, y0 + line + size // 3, y0 + box_h - size // 3
+    for x0, y0, box_w, box_h, lines, top, bottom, table in boxes:
+        bx, by0, by1 = x0 + pad, y0 + pad + len(lines) * line, y0 + box_h - pad
         n = max(by1 - by0, 1)
         index = np.linspace(len(table) - 1, 0, n).round().astype(int)   # the top at the top
         column = np.round(np.clip(table[index], 0, 1) * 255).astype(np.uint8)
         strip = np.repeat(column[:, None, :], bar_w, axis=1)
         image.paste(Image.fromarray(np.ascontiguousarray(strip), "RGB"), (bx, by0))
-        draw.text((x0 + size // 3, y0 + size // 6), _fit(draw, title, font, box_w - size),
-                  fill=ink, font=font)
+        for i, text in enumerate(lines):
+            draw.text((x0 + pad, y0 + pad + i * line), _fit(draw, text, font, box_w - 2 * pad),
+                      fill=ink, font=font)
         tx = bx + bar_w + size // 3
         draw.text((tx, by0), _fit(draw, top, font, x0 + box_w - tx), fill=ink, font=font)
         draw.text((tx, by1), _fit(draw, bottom, font, x0 + box_w - tx), fill=ink,

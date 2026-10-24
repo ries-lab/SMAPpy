@@ -86,7 +86,10 @@ the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 and lays out its own panels (`statistics.py`, `Analysis/Regions/Summarize/Histograms`
 and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
-neither, and `size` is the hint the window reads instead.  Return the settings
+neither, and `size` is the hint the window reads instead.  The *All* page is
+made when two or more figures are on it; `Plot(..., summary=False)` keeps a
+figure off it, for one that is already a page of everything
+(`statistics.py`).  Return the settings
 that were actually used -- that is what the history records.
 
 `text` goes into the plugin panel's output box, however long it is; *Show result*

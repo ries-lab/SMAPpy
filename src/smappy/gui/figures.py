@@ -193,8 +193,9 @@ class FigureTabs(QWidget):
         that has gone takes its pane with it.
         """
         plots = list(plots)
-        if len(plots) > 1:            # a page of all of them, drawn on demand
-            plots.append(summary_plot(plots))
+        paged = [plot for plot in plots if plot.summary]
+        if len(paged) > 1:            # a page of all of them, drawn on demand
+            plots.append(summary_plot(paged))
         self._subtitle = subtitle
         names = [plot.name for plot in plots]
         if names != self._names:

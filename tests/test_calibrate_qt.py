@@ -157,6 +157,7 @@ def test_the_dual_fit_quality_page_refits_with_the_two_channel_fitter(app):
 
 def test_an_auto_setting_shows_what_the_run_resolved_it_to(app):
     """"auto" says a decision will be made; afterwards it says which one."""
+    from smappy.gui.widgets import note_colour
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
     from test_bead_calibration import synthetic_collection
@@ -171,7 +172,7 @@ def test_an_auto_setting_shows_what_the_run_resolved_it_to(app):
     assert step.auto.isChecked()                  # still auto ...
     assert step.value() is None                   # ... and still not a setting
     assert float(step.widget.text()) == pytest.approx(result.beads.dz_nm)
-    assert "gray" in step.widget.styleSheet()
+    assert note_colour() in step.widget.styleSheet()
 
 
 @pytest.fixture

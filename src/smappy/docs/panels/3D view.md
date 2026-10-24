@@ -473,6 +473,13 @@ trackball.
 Off, the slab's centre is always the centre of rotation, which is right as
 long as the slab is in view.
 
+### centre on the ROI
+While *follow 2D ROI* is on, a line or rectangle moved or turned in the 2D
+window is centred in the 3D view and turned with it, so it never slides off
+the screen.  Untick it to keep the camera still and let the box travel
+through the picture -- what a movie along a line, made with the player,
+wants.
+
 ## Differences from SMAP
 
 Based on SMAP's `sr3D/Viewer3DV01`

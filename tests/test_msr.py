@@ -525,12 +525,19 @@ def test_the_open_dialog_queues_what_is_ticked_and_opens_its_images(two, monkeyp
     session = Session()
     control = ControlWindow(session, RenderWindow(session))
     control.load_paths([str(two)])
-    QTimer.singleShot(20_000, app.quit)
+    # The floor is an object, stopped after: a pending `QTimer.singleShot(
+    # 20_000, app.quit)` -- this test's or `test_gui_load`'s, in the same
+    # worker -- quit a later event loop after its first file.
+    floor = QTimer(singleShot=True, interval=20_000)
+    floor.timeout.connect(app.quit)
+    floor.start()
     done = QTimer(control)
     done.timeout.connect(lambda: app.quit() if control._task is None
                          and not control._queue else None)
     done.start(10)
     app.exec()
+    floor.stop()
+    done.stop()
     assert [f.name for f in session.files] == ["cell: first", "cell: second"]
     assert not any(l.is_image for l in session.layers)
     assert [im.name for im in session.images] == ["cell: Ch1 {0}"]

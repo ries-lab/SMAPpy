@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay, smappy.plugins.statistics.frame_decay, smappy.plugins.statistics.frame_counts]
+version: "6"
+covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay, smappy.plugins.statistics.frame_decay, smappy.plugins.statistics.frame_counts, smappy.plugins.statistics.shared_highs, smappy.plugins.statistics.draw_layers]
 ---
 
 ## What it does
@@ -27,6 +27,13 @@ they are shown -- after its [filter](plugin:Panels/Glossary) (also called
 bounds: the lowest and highest values of columns a localization must lie
 between) and inside the drawn [ROI](plugin:Panels/Glossary) (region of
 interest) -- unless *localizations* is set to *all*.
+
+With more than one visible layer -- a layer per channel, say -- each is
+described as it shows it, and they are drawn together: a step line per
+layer in the layer's colour, its fitted law over it as a heavier line in the same colour and
+its fitted number ($N_0$, $\sigma_c$, $\tau$) in the legend.  The text
+reports every layer's numbers, layer by layer.  With *all* the whole table
+is described once.
 
 The same plugin measures every ROI of the
 [ROI manager](plugin:Panels/ROI manager), once per ROI: as one of its
@@ -212,6 +219,15 @@ whichever table is shown.  (Counting it per frame would count a three-frame
 blink three times and a one-frame blink once, and weigh the histogram towards
 long blinks.)
 
+**Several layers** share their bins: each histogram is drawn up to the
+largest of the layers' own ends (below), so that one layer's longer tail
+does not give it wider bins and higher counts per bin.  The fits do not see
+this -- each layer's numbers are those it would have alone -- and the
+precision's model is drawn only as far as its fit went.  The maximum and
+rising-edge lines are left out of a figure of several layers, four lines
+each being more than one panel can carry; they are in the text.  An ROI is
+always one table, its own rows.
+
 **The photon histogram** is drawn up to the 99.9th percentile; the fit uses
 every localization above the start.
 
@@ -266,14 +282,15 @@ meaningful fit anyway.
 
 ## Output
 
-* **The figures**: one panel per distribution, as in the figure above, and
-  the *per frame* tab.
+* **The figures**: one panel per distribution, as in the figure above
+  (several layers: a step line each), and the *per frame* tab.
 * **Text**: the numbers, one line per distribution: $N_0$ and the mean and
   median photons; the maximum and rising edge of the precision, from the
   histogram and from the model, its median and $\sigma_c$; $\tau$ and the mean
   on-time; per layer, the decay time, the frame by which half the
   localizations are in, and the count per frame at the start and the end.
-  If the on-time could not be shown, the reason.
+  If the on-time could not be shown, the reason.  With several layers, a
+  block of these lines per layer.
 * **Per ROI**, the row each ROI gets: `n_localizations`; `mean_photons`,
   `median_photons` and `photons_n0`; `mean_precision_nm`,
   `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was

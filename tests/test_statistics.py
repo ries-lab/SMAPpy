@@ -314,3 +314,32 @@ def test_a_region_has_no_per_frame_tab():
     ctx = plugins.Context(locs=_bleaching(n=20_000), region_id=7)
     result = LocalizationStatistics().run(ctx, StatisticsSettings())
     assert not result.plots and result.data["per_frame"] == []
+
+
+def test_each_visible_layer_gets_its_own_fits_drawn_as_steps_on_shared_bins():
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.session import Session
+    a, b = simulate(n=100_000, seed=1), simulate(n=100_000, seed=2)
+    columns = {k: np.concatenate([a[k], b[k]]) for k in a.keys()}
+    columns["photons"][len(a):] *= 2.5          # the second dye: N0 = 3000
+    columns["channel"] = np.repeat([1, 2], [len(a), len(b)]).astype(np.int32)
+    session = Session(Localizations(columns, {"units": "nm"}))
+    session.add_layer()
+    for i, channel in enumerate((1, 2)):
+        session.layers[i].set_bound("channel", channel, channel)
+    result = session.run(LocalizationStatistics(), StatisticsSettings())
+    layers = result.data["layers"]
+    assert len(layers) == 2
+    first, second = (found["photons"] for found in layers.values())
+    assert first.stats["n0"] == pytest.approx(N0, rel=0.03)
+    assert second.stats["n0"] == pytest.approx(2.5 * N0, rel=0.03)
+    np.testing.assert_array_equal(first.edges, second.edges)
+    assert all(name in result.text for name in layers)
+    figure = Figure()
+    result.plot.draw_into(figure)
+    steps = [a for a in figure.axes[0].patches]      # ax.stairs: a patch each
+    assert len(figure.axes) == 4 and len(steps) == 2
+    # no *All* page: the main figure is every distribution already
+    assert not any(plot.summary for plot in result.figures())

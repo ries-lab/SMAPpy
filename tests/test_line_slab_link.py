@@ -149,3 +149,28 @@ def test_the_3d_view_stays_on_a_line_moved_and_turned_in_2d(app):
     np.testing.assert_allclose(window.view.projection.screen_centre()[:2], shown[:2],
                                atol=1e-6)
     window.close()
+
+
+def test_with_centring_off_the_3d_view_stays_put_while_the_box_follows_the_line(app):
+    from smappy.gui.view3d import View3DWindow
+    session = Session(table())
+    session.set_roi(Region.line((1000, 1000), (3000, 1000), 250.0))
+    window = View3DWindow(session)
+    window.show()
+    app.processEvents()
+    window.view.preset("front")
+    window.panel.centre_roi.setChecked(False)
+    proj = window.view.projection
+    azimuth = proj.azimuth
+    point = np.array([500.0, 700.0, 0.0])            # where a data point is drawn
+
+    def on_screen():
+        return (proj.matrix @ (point - proj.pivot))[:2] - proj.offset
+
+    shown = on_screen()
+    session.roi_edited(Region.line((2000, 3000), (4000, 3000), 250.0))     # dragged
+    session.set_roi(session.roi.turned(20.0))
+    np.testing.assert_allclose(session.slab.center[:2], (3000, 3000), atol=1e-6)
+    np.testing.assert_allclose(on_screen(), shown, atol=1e-6)
+    assert proj.azimuth == pytest.approx(azimuth)
+    window.close()

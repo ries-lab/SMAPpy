@@ -91,6 +91,7 @@ PRECISION_Z_FIELDS = ("z_err_nm",)
 TRIM_PERCENT = 0.5
 MIN_FOR_FIT = 20                    # below this a fit says nothing
 SMOOTH_BINS = 1.0                   # for the maximum and the rising edge
+TITLE_SIZE = 9                      # points: a panel's fit, above it
 
 
 def _half_max_u() -> float:
@@ -406,6 +407,7 @@ class Distribution:
     log_y: bool = False
     summary: str = ""
     note: str = ""
+    short: str = ""         # the fit alone, for a legend beside other layers'
 
 
 def _binned(values, bins: int, low=None, high=None) -> Tuple[np.ndarray, np.ndarray]:
@@ -420,12 +422,15 @@ def _binned(values, bins: int, low=None, high=None) -> Tuple[np.ndarray, np.ndar
     return np.histogram(values, bins=bins, range=(float(low), float(high)))
 
 
-def photon_distribution(photons, bins: int = 100, start: float = 0.0
-                        ) -> Distribution:
-    """The photon histogram with its exponential tail fitted."""
+def photon_distribution(photons, bins: int = 100, start: float = 0.0,
+                        high: Optional[float] = None) -> Distribution:
+    """The photon histogram with its exponential tail fitted.  ``high`` is
+    where the histogram stops, its own 99.9th percentile by default: layers
+    drawn on one axis share one (`shared_highs`), and the fit ignores it."""
     values = np.asarray(photons, dtype=float)
     values = values[np.isfinite(values)]
-    high = np.percentile(values, 99.9) if len(values) else 1.0
+    if high is None:
+        high = own_high("photons", values)
     counts, edges = _binned(values, bins, 0.0, high)
     landmarks = histogram_landmarks(counts, edges)
     if start <= 0:                       # start where the threshold stops biting
@@ -436,6 +441,7 @@ def photon_distribution(photons, bins: int = 100, start: float = 0.0
     return Distribution(
         key="photons", label="photons", counts=counts, edges=edges, stats=stats,
         curve=model_curve("photons", stats, edges),
+        short=f"N0 = {n0:.0f}",
         summary=(f"N0 = {n0:.0f} photons above {start:.0f} "
                  f"(mean {stats['mean']:.0f}, median {stats['median']:.0f}, "
                  f"{stats['n']} localizations)"))
@@ -443,18 +449,25 @@ def photon_distribution(photons, bins: int = 100, start: float = 0.0
 
 def precision_distribution(precision, bins: int = 100, key: str = "precision",
                            label: str = "localization precision",
-                           unit: str = "nm", method: str = "histogram") -> Distribution:
-    """The precision histogram with the model the exponential photons imply."""
+                           unit: str = "nm", method: str = "histogram",
+                           high: Optional[float] = None) -> Distribution:
+    """The precision histogram with the model the exponential photons imply.
+    ``high``: where the histogram is drawn to (`photon_distribution`); the
+    fit keeps its own range."""
     values = np.asarray(precision, dtype=float)
     values = values[np.isfinite(values) & (values > 0)]
     stats = precision_model(values, bins=bins, method=method)
-    counts, edges = _binned(values, bins, 0.0, precision_range(values))
+    if high is None:
+        high = precision_range(values)
+    counts, edges = _binned(values, bins, 0.0, high)
     landmarks = histogram_landmarks(counts, edges)
     stats["histogram_max"] = landmarks["max"]
     stats["histogram_rising"] = landmarks["rising"]
     return Distribution(
         key=key, label=label, unit=unit, counts=counts, edges=edges, stats=stats,
         curve=model_curve(key, stats, edges),
+        short=(f"sigma_c = {stats['sigma_c']:.1f} {unit}" if np.isfinite(stats["sigma_c"])
+               else f"median {stats['median']:.1f} {unit}"),
         summary=(f"max at {stats['histogram_max']:.1f} {unit} "
                  f"(model {stats['max']:.1f}), rising edge "
                  f"{stats['histogram_rising']:.1f} {unit} "
@@ -462,14 +475,15 @@ def precision_distribution(precision, bins: int = 100, key: str = "precision",
                  f"sigma_c = {stats['sigma_c']:.1f}"))
 
 
-def ontime_distribution(frames, frame_time_ms: Optional[float] = None
-                        ) -> Distribution:
+def ontime_distribution(frames, frame_time_ms: Optional[float] = None,
+                        high: Optional[float] = None) -> Distribution:
     """The on-time histogram, one bin per frame, with its geometric fit, and
-    ``tau`` in ms too (``stats["tau_ms"]``) with a frame time."""
+    ``tau`` in ms too (``stats["tau_ms"]``) with a frame time.  ``high``:
+    the longest on-time drawn (`photon_distribution`)."""
     t = np.asarray(frames, dtype=float)
     t = t[np.isfinite(t) & (t >= 1)]
     stats = ontime_decay(t)
-    high = max(int(np.percentile(t, 99.9)) if len(t) else 1, 2)
+    high = int(own_high("on_time", t) if high is None else high)
     edges = np.arange(0.5, high + 1.5)
     counts, edges = np.histogram(t, bins=edges)
     tau = stats["tau"]
@@ -480,6 +494,7 @@ def ontime_distribution(frames, frame_time_ms: Optional[float] = None
     return Distribution(
         key="on_time", label="on-time", unit="frames", counts=counts, edges=edges,
         stats=stats, curve=curve, log_y=True,
+        short=f"tau = {tau:.2f} frames{time}",
         summary=(f"tau = {tau:.2f} frames{time} "
                  f"(mean {stats['mean']:.2f}, {stats['n']} blinks)"))
 
@@ -504,7 +519,9 @@ def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
         a = stats.get("a", float("nan"))
         if not (np.isfinite(a) and a > 0):
             return None
-        x = np.linspace(edges[0] + 1e-6, edges[-1], 400)
+        top = stats.get("high", np.nan)
+        top = edges[-1] if not np.isfinite(top) else min(top, edges[-1])
+        x = np.linspace(edges[0] + 1e-6, top, 400)
         # the binned fit carries its own amplitude: the counts it describes are
         # the ones in the picture, which is fewer than n when a tail was cut
         scale = stats.get("amplitude", stats["n"])
@@ -523,35 +540,76 @@ def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
                frame_time_ms: Optional[float] = None,
-               precision_fit: str = "histogram") -> List[Distribution]:
+               precision_fit: str = "histogram",
+               highs: Optional[Dict[str, float]] = None) -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
     ``on_time`` is given separately because it lives in the *grouped* table:
     one row per blink, not one per frame.  A table that carries ``n_in_group``
     already -- a grouped file, or a grouped layer -- supplies it itself.
     ``precision_fit`` is `precision_model`'s method; "none" fits no model,
-    and the median and the histogram's landmarks are still there.
+    and the median and the histogram's landmarks are still there.  ``highs``
+    are where each histogram stops, by key (`shared_highs`): for layers
+    drawn on one axis; they change the picture, not the fits.
     """
+    highs = highs or {}
     found: List[Distribution] = []
     if "photons" in locs:
-        found.append(photon_distribution(locs["photons"], bins, photon_start))
+        found.append(photon_distribution(locs["photons"], bins, photon_start,
+                                         high=highs.get("photons")))
     lateral = next((n for n in PRECISION_FIELDS if n in locs), None)
     if lateral:
         found.append(precision_distribution(
             locs[lateral], bins, key="precision",
             label="localization precision",
             unit="nm" if lateral.endswith("_nm") else "pixel",
-            method=precision_fit))
+            method=precision_fit, high=highs.get("precision")))
     axial = next((n for n in PRECISION_Z_FIELDS if n in locs), None)
     if axial:
         found.append(precision_distribution(
             locs[axial], bins, key="precision_z", label="z precision", unit="nm",
-            method=precision_fit))
+            method=precision_fit, high=highs.get("precision_z")))
     if on_time is None and "n_in_group" in locs:
         on_time = locs["n_in_group"]
     if on_time is not None and len(on_time):
-        found.append(ontime_distribution(on_time, frame_time_ms))
+        found.append(ontime_distribution(on_time, frame_time_ms,
+                                         high=highs.get("on_time")))
     return found
+
+
+def own_high(key: str, values) -> float:
+    """Where one table's histogram of ``key`` stops: the 99.9th percentile of
+    the photons and the on-time, the precision's `precision_range`."""
+    values = np.asarray(values, dtype=float)
+    if key.startswith("precision"):
+        return precision_range(values)
+    values = values[np.isfinite(values)]
+    if key == "on_time":
+        values = values[values >= 1]
+        return max(int(np.percentile(values, 99.9)) if len(values) else 1, 2)
+    return float(np.percentile(values, 99.9)) if len(values) else 1.0
+
+
+def shared_highs(tables: Sequence[Tuple[Localizations, Optional[Sequence[float]]]]
+                 ) -> Dict[str, float]:
+    """One upper end per histogram for several layers, ``(locs, on_time)``
+    each: the largest of their own.  Layers drawn as steps on one axis need
+    the same bins, or a layer with a longer tail has wider bins and, per bin,
+    more counts than it has per photon."""
+    columns = {"photons": ("photons",), "precision": PRECISION_FIELDS,
+               "precision_z": PRECISION_Z_FIELDS}
+    out: Dict[str, float] = {}
+    for locs, on_time in tables:
+        found = {key: locs[next(n for n in names if n in locs)]
+                 for key, names in columns.items() if any(n in locs for n in names)}
+        if on_time is None and "n_in_group" in locs:
+            on_time = locs["n_in_group"]
+        if on_time is not None and len(on_time):
+            found["on_time"] = on_time
+        for key, values in found.items():
+            if len(values):
+                out[key] = max(out.get(key, -np.inf), own_high(key, values))
+    return out
 
 
 def statistics_values(locs: Localizations, found: Sequence[Distribution]
@@ -705,7 +763,7 @@ def draw_per_frame(ax, found: Sequence[FrameCounts]) -> None:
     for c in found:
         centres = 0.5 * (c.edges[:-1] + c.edges[1:])
         ax.plot(centres, c.rate, color=c.colour, linewidth=1.0,
-                label=c.label or None, drawstyle="steps-mid")
+                label=c.label or None)
         curve = c.curve()
         if curve is not None:
             ax.plot(*curve, color=c.colour, linestyle="--", linewidth=1.2)
@@ -716,7 +774,7 @@ def draw_per_frame(ax, found: Sequence[FrameCounts]) -> None:
     if any(c.label for c in found) and len(found) > 1:
         ax.legend(fontsize=7, frameon=False)
     if len(found) == 1:
-        ax.set_title(frame_summary(found[0]), fontsize=7.5, color="0.25")
+        ax.set_title(frame_summary(found[0]), fontsize=TITLE_SIZE, color="0.25")
 
 
 # --------------------------------------------------------------------- drawing
@@ -746,10 +804,46 @@ def draw(ax, dist: Distribution) -> None:
         ax.set_ylim(bottom=0.5)
     ax.set_xlabel(f"{dist.label} ({dist.unit})" if dist.unit else dist.label)
     ax.set_ylabel("localizations" if dist.key != "on_time" else "blinks")
-    ax.set_title(dist.summary, fontsize=7.5, color="0.25")
+    ax.set_title(dist.summary, fontsize=TITLE_SIZE, color="0.25")
     if dist.note:
         ax.text(0.98, 0.9, dist.note, transform=ax.transAxes, ha="right",
                 fontsize=7, color="0.45")
+
+
+def draw_layers(ax, entries: Sequence[Tuple[str, str, Distribution]]) -> None:
+    """One quantity of several layers, ``(name, colour, distribution)`` each:
+    a step line per layer, faint, and its fit over it in the same colour,
+    solid and heavier -- dashed, it vanished into its own steps -- with the
+    fit's number in the legend.  Bars would hide each other; the landmarks,
+    four lines a layer, are in the text."""
+    first = entries[0][2]
+    for name, colour, dist in entries:
+        ax.stairs(dist.counts, dist.edges, color=colour, linewidth=0.8, alpha=0.55,
+                  label=f"{name}: {dist.short}" if dist.short else name)
+        if dist.curve is not None:
+            ax.plot(*dist.curve, color=colour, linewidth=1.8)
+    if any(d.log_y for _, _, d in entries):
+        ax.set_yscale("log")
+        ax.set_ylim(bottom=0.5)
+    else:
+        ax.set_ylim(bottom=0)
+    ax.set_xlabel(f"{first.label} ({first.unit})" if first.unit else first.label)
+    ax.set_ylabel("localizations" if first.key != "on_time" else "blinks")
+    ax.set_title(first.label, fontsize=TITLE_SIZE, color="0.25")
+    ax.legend(fontsize=7, frameon=False, loc="upper right")
+
+
+def draw_all_layers(figure, layers: Sequence[Tuple[str, str, Sequence[Distribution]]]
+                    ) -> None:
+    """Every quantity any layer has, a panel each, ``(name, colour,
+    distributions)`` per layer (`draw_all`'s rules on the figure)."""
+    keys: List[str] = []
+    for _, _, found in layers:
+        keys += [d.key for d in found if d.key not in keys]
+    axes = figure.subplots(len(keys), 1, squeeze=False).ravel()
+    for axis, key in zip(axes, keys):
+        draw_layers(axis, [(name, colour, d) for name, colour, found in layers
+                           for d in found if d.key == key])
 
 
 def draw_all(figure, found: Sequence[Distribution]) -> None:
@@ -858,6 +952,20 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     return np.asarray(locs["n_in_group"])[mask], ""
 
 
+@dataclass
+class _Group:
+    """One table the plugin describes: a layer's, or the only one."""
+    locs: Localizations
+    where: str
+    grouped: bool
+    on_time: Optional[np.ndarray] = None
+    why: str = ""                       # why there is no on-time
+    current: bool = False               # the layer the run was started on
+    name: str = ""
+    colour: str = "0.3"
+    found: List[Distribution] = field(default_factory=list)
+
+
 @register("Analysis/Measure/Localization Statistics")
 class LocalizationStatistics(Plugin):
     """Photons, localization precision and on-time, each with its law fitted."""
@@ -872,10 +980,103 @@ class LocalizationStatistics(Plugin):
     # model as the view does, where it used to start without it
     # 5: the on-time in seconds with the file's frame time, unasked, where it
     # took an exposure typed in; and on_time_s in a region's row
-    version = "5"
+    # 6: every visible layer described, as steps on shared bins with their
+    # own fits, where it was the current layer's alone
+    version = "6"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
-        table, selection = ctx.table()
+        groups = self._groups(ctx, settings)
+        frame_time = settings.frame_time_ms or table_frame_time(groups[0].locs)
+        # layers on one axis share their bins; one layer keeps its own
+        highs = (shared_highs([(g.locs, g.on_time) for g in groups])
+                 if len(groups) > 1 else None)
+        for g in groups:
+            g.found = statistics(g.locs, bins=settings.bins,
+                                 photon_start=settings.photon_start, on_time=g.on_time,
+                                 frame_time_ms=frame_time,
+                                 precision_fit=settings.precision_fit, highs=highs)
+        main = next((g for g in groups if g.current), groups[0])
+        found = main.found
+        if not any(g.found for g in groups):
+            raise ValueError("the table has no photons, precision or on-time: "
+                             f"it has {', '.join(sorted(main.locs.keys()))}")
+        lines = []
+        for g in groups:
+            # the selection names its layer: "(layer 2, blinks merged)"
+            lines.append(f"{len(g.locs)} localizations, {g.where}")
+            lines += [f"{'  ' if len(groups) > 1 else ''}{d.label}: {d.summary}"
+                      for d in g.found]
+        notes = list(dict.fromkeys(g.why for g in groups if g.why))
+        for why in notes:
+            ctx.report(why)
+        # per frame is over the acquisition, which a region is not a part of
+        # in any useful way: the view only
+        per_frame = ([] if ctx.per_region or "frame" not in main.locs
+                     else self._per_frame(ctx, settings, main.locs, main.grouped))
+        for c in per_frame:
+            lines.append(f"per frame{', ' + c.label if c.label else ''}: "
+                         f"{frame_summary(c)}")
+        lines += notes
+        data = {"distributions": {d.key: d for d in found},
+                "stats": {d.key: d.stats for d in found},
+                "layers": {g.name: {d.key: d for d in g.found} for g in groups},
+                "per_frame": per_frame,
+                "n": len(main.locs), "note": "; ".join(notes)}
+        keys = {d.key for g in groups for d in g.found}
+
+        def plot(figure) -> None:
+            """One panel per distribution, in whatever it is given to draw in.
+
+            A single axis is right for a plugin with one thing to draw and
+            there are up to four here, so this declares its panels and is
+            handed the figure -- which on the window's *All* page is one
+            subfigure of it, and works the same.
+            """
+            if len(groups) > 1:
+                draw_all_layers(figure, [(g.name, g.colour, g.found) for g in groups])
+            else:
+                draw_all(figure, found)
+
+        # no *All* page: the main figure is already every distribution, one
+        # under the other, and the per-frame panel squeezed beside it read
+        # worse than either tab on its own
+        return Result(text="\n".join(lines), data=data, settings=settings,
+                      values=statistics_values(main.locs, found),
+                      plot=Plot(draw=plot, panels=len(keys), summary=False,
+                                size=(5.5, max(2.1 * len(keys), 2.1))),
+                      plots=({"per frame": Plot(lambda ax: draw_per_frame(ax, per_frame),
+                                                size=(5.5, 3.0), summary=False)}
+                             if per_frame else {}))
+
+    @staticmethod
+    def _groups(ctx: Context, settings: StatisticsSettings) -> List["_Group"]:
+        """What is described: every visible layer as it shows it, when the
+        localizations are *as plotted* and there is more than one -- the
+        comparison is usually between them -- else the current layer's table.
+        A region describes its own rows, and *all, unfiltered* the whole
+        table, once."""
+        from .line_profile import layer_colour
+        layers = getattr(ctx.session, "layers", None) or []
+        visible = [i for i, layer in enumerate(layers)
+                   if not layer.is_image and layer.visible]
+        if (ctx.per_region or settings.source == "all" or len(visible) < 2):
+            return [LocalizationStatistics._group(ctx, settings, None)]
+        groups: List[_Group] = []
+        for i in visible:
+            taken = [g.colour for g in groups]
+            g = LocalizationStatistics._group(ctx, settings, i)
+            g.name = layers[i].name
+            g.colour = layer_colour(layers[i].get_display(), len(groups), taken)
+            g.current = i == ctx.layer
+            groups.append(g)
+        return groups
+
+    @staticmethod
+    def _group(ctx: Context, settings: StatisticsSettings,
+               layer: Optional[int]) -> "_Group":
+        """One table to describe: layer ``layer``'s, or with None the one
+        the context is about, with its on-time."""
+        table, selection = ctx.table() if layer is None else ctx.table(layer)
         grouped = table is not ctx.ungrouped()[0]
         if settings.source == "all":
             locs = table
@@ -893,53 +1094,13 @@ class LocalizationStatistics(Plugin):
         if "n_in_group" in locs:
             on_time = blink_on_times(locs)
         elif not ctx.per_region:
-            on_time, why = grouped_on_time(ctx.session, ctx.layer,
+            on_time, why = grouped_on_time(ctx.session,
+                                           ctx.layer if layer is None else layer,
                                            settings.source != "all")
         # in a region the session's grouped table is the whole field's, not
         # the region's: no on-time unless the region's own table has it
-        found = statistics(locs, bins=settings.bins,
-                           photon_start=settings.photon_start, on_time=on_time,
-                           frame_time_ms=(settings.frame_time_ms
-                                          or table_frame_time(locs)),
-                           precision_fit=settings.precision_fit)
-        if not found:
-            raise ValueError("the table has no photons, precision or on-time: "
-                             f"it has {', '.join(sorted(locs.keys()))}")
-        if why:
-            ctx.report(why)
-        lines = [f"{len(locs)} localizations, {where}"]
-        lines += [f"{d.label}: {d.summary}" for d in found]
-        # per frame is over the acquisition, which a region is not a part of
-        # in any useful way: the view only
-        per_frame = ([] if ctx.per_region or "frame" not in locs
-                     else self._per_frame(ctx, settings, locs, grouped))
-        for c in per_frame:
-            lines.append(f"per frame{', ' + c.label if c.label else ''}: "
-                         f"{frame_summary(c)}")
-        if why:
-            lines.append(why)
-        data = {"distributions": {d.key: d for d in found},
-                "stats": {d.key: d.stats for d in found},
-                "per_frame": per_frame,
-                "n": len(locs), "note": why}
-
-        def plot(figure) -> None:
-            """One panel per distribution, in whatever it is given to draw in.
-
-            A single axis is right for a plugin with one thing to draw and
-            there are up to four here, so this declares its panels and is
-            handed the figure -- which on the window's *All* page is one
-            subfigure of it, and works the same.
-            """
-            draw_all(figure, found)
-
-        return Result(text="\n".join(lines), data=data, settings=settings,
-                      values=statistics_values(locs, found),
-                      plot=Plot(draw=plot, panels=len(found),
-                                size=(5.5, max(2.1 * len(found), 2.1))),
-                      plots=({"per frame": Plot(lambda ax: draw_per_frame(ax, per_frame),
-                                                size=(5.5, 3.0))}
-                             if per_frame else {}))
+        return _Group(locs=locs, where=where, grouped=grouped, on_time=on_time,
+                      why=why, current=True)
 
     @staticmethod
     def _per_frame(ctx: Context, settings: StatisticsSettings, locs: Localizations,
@@ -992,7 +1153,8 @@ def distribution_data(d: Distribution) -> Dict:
                else {"edges": edges.tolist()}),
             "stats": {k: (v.item() if isinstance(v, np.generic) else v)
                       for k, v in d.stats.items()},
-            "log_y": d.log_y, "summary": d.summary, "note": d.note}
+            "log_y": d.log_y, "summary": d.summary, "note": d.note,
+            "short": d.short}
 
 
 def distribution_from(doc: Dict) -> Distribution:
@@ -1008,4 +1170,4 @@ def distribution_from(doc: Dict) -> Distribution:
                         counts=np.asarray(doc["counts"]), edges=edges, stats=stats,
                         curve=model_curve(doc["key"], stats, edges),
                         log_y=bool(doc.get("log_y")), summary=doc.get("summary", ""),
-                        note=doc.get("note", ""))
+                        note=doc.get("note", ""), short=doc.get("short", ""))

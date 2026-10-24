@@ -27,7 +27,7 @@ from .chain_panel import ChainPanel, is_chain, spec_of
 from .chooser import choose_plugin
 from .plugin_panel import PluginPanel
 from .help_window import show_help
-from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
+from .widgets import CollapsibleSection, ColumnScroll, detach_to_window, note_style
 
 
 class _Slot(QWidget):
@@ -131,7 +131,7 @@ class PluginTab(QWidget):
             top.removeWidget(add)
             row.addWidget(add)
             label = QLabel("plugins")
-            label.setStyleSheet("color: gray")
+            label.setStyleSheet(note_style())
             row.addWidget(label)
             row.addStretch(1)
             column.addLayout(row)
@@ -197,7 +197,7 @@ class PluginTab(QWidget):
             self.slots.pop(stale).deleteLater()
         if not self.tab.instances:
             hint = QLabel("nothing pinned here yet — use + to add a plugin")
-            hint.setStyleSheet("color: gray")
+            hint.setStyleSheet(note_style())
             hint.setWordWrap(True)
             self.stack.addWidget(hint)
         self.stack.addStretch(1)

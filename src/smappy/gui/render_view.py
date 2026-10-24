@@ -17,7 +17,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QPainter
-from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
+from PySide6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
                                QLabel, QMenu, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -30,6 +30,8 @@ from ..session import Session
 from . import folders
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
+FIELD_WIDTH = 64    # px: the toolbar's line width and pixel size
+EDGE = 2            # px between the colour bars and the picture's corner
 DEFAULT_PIXEL = 10.0  # nm per screen pixel that a click on *pixel* zooms to
 
 # How the layers are laid out: added up into one picture, as SMAP does by
@@ -224,6 +226,7 @@ class RenderView(QWidget):
         self._merger.status.connect(self._show_merge_hint)
         # what the colours mean, when layers are coloured by a column
         self.colour_bars = ColourBars(self)
+        self.colour_bar_shown = True          # the toolbar's *options*
         # what *Export Image* frames its picture on, kept as plain data for
         # a plugin's worker to read (`picture.FrameSource`)
         self.frame_source = FrameSource()
@@ -340,7 +343,7 @@ class RenderView(QWidget):
         self._show_hint()
         self._show_merge_hint()
         if what in ("locs", "layer", "layers", "regrouped"):
-            self.colour_bars.show_for(self.session.layers)
+            self._show_colour_bars()
         if what == "locs":
             self.tile_valid = False
             self._arrange()
@@ -875,12 +878,22 @@ class RenderView(QWidget):
         except Exception:                 # half built, or being torn down
             pass
 
+    def show_colour_bars(self, on: bool) -> None:
+        """The toolbar's *options > colour bar*: on screen, and in what Save
+        and Copy take."""
+        self.colour_bar_shown = bool(on)
+        self._show_colour_bars()
+
+    def _show_colour_bars(self) -> None:
+        self.colour_bars.show_for(self.session.layers if self.colour_bar_shown else [])
+
     def quick_settings(self, path: str = ""):
         """*Export Image* as the quick PNG uses it: the view, as displayed,
         with what the window draws over it."""
         self.refresh_frame()
         from ..plugins.file import image_settings_for
-        return image_settings_for(self.session, "2D", str(path))
+        return image_settings_for(self.session, "2D", str(path),
+                                  colour_bars=self.colour_bar_shown)
 
     def save_png(self, path) -> None:
         """The view as displayed: the panels side by side, if they are, with
@@ -1022,19 +1035,16 @@ class RenderToolBar(QToolBar):
         # The width of a line ROI is the one number a line is drawn *for* --
         # a profile is taken across it -- and it lived behind a right-click on
         # the button and a modal dialog, which is where nobody found it.  On
-        # the toolbar, and it resizes the line that is already drawn.
-        self.width_label = QLabel(" width ")
-        self.addWidget(self.width_label)
+        # the toolbar, beside the ROI button, and it resizes the line that is
+        # already drawn.  Its name and unit are in the tooltip: a label and a
+        # suffix took a third of the toolbar's width.
         # whole nanometres, 10 a wheel step: a tenth of a nanometre was a
         # precision nobody draws a line to, and a wheel step of 1 took
         # thirty turns to go from a thin line to a wide one
         self.line_width = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, singleStep=10)
         self.line_width.setKeyboardTracking(False)
         self.line_width.setValue(view.line_width)
-        self.line_width.setMaximumWidth(95)
-        self.line_width.setToolTip("how wide a line ROI is: the band a profile "
-                                   "is taken over, and the slab's second axis "
-                                   "in the 3D window")
+        self.line_width.setMaximumWidth(FIELD_WIDTH)
         self.line_width.valueChanged.connect(self._on_width)
         self.addWidget(self.line_width)
 
@@ -1082,9 +1092,7 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.pixel_button)
         self.pixel = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
         self.pixel.setKeyboardTracking(False)
-        self.pixel.setMaximumWidth(95)
-        self.pixel.setToolTip("what one screen pixel is: type a size to zoom to "
-                              "it, scroll to zoom as usual")
+        self.pixel.setMaximumWidth(FIELD_WIDTH)
         self.pixel.valueChanged.connect(view.set_pixel_size)
         self.addWidget(self.pixel)
         view.view.sigRangeChanged.connect(self._show_pixel)
@@ -1099,6 +1107,23 @@ class RenderToolBar(QToolBar):
         self.keys = Popup(keys, self)
         self.keys_button.clicked.connect(lambda: self.keys.show_below(self.keys_button))
         self.addWidget(self.keys_button)
+
+        # How the picture is dressed, as opposed to what it shows: the colour
+        # bar to begin with.  What is hidden here is hidden in what Save and
+        # Copy take too (`RenderView.quick_settings`): they are the window's
+        # picture.
+        self.options_button = QToolButton(text="options",
+                                          popupMode=QToolButton.InstantPopup)
+        self.options_button.setToolTip("what the window draws over the picture")
+        options = QMenu(self.options_button)
+        self.colour_bar_action = options.addAction("colour bar")
+        self.colour_bar_action.setCheckable(True)
+        self.colour_bar_action.setChecked(view.colour_bar_shown)
+        self.colour_bar_action.setToolTip("the colour scale of a layer coloured "
+                                          "by a column, top right")
+        self.colour_bar_action.toggled.connect(view.show_colour_bars)
+        self.options_button.setMenu(options)
+        self.addWidget(self.options_button)
 
         # what each layer draws in the view: counted again once a zoom or a
         # pan settles, since a count of the whole table beside a zoomed
@@ -1129,7 +1154,7 @@ class RenderToolBar(QToolBar):
         the colour used to be set as the whole sheet, which silently undid
         the buttons the first time the title was written.
         """
-        sheet, small = toolbar_sheet(self.width_label.font(), self.border)
+        sheet, small = toolbar_sheet(QApplication.font("QLabel"), self.border)
         self.setStyleSheet(sheet)
         self.counts.setStyleSheet(f"font-size: {small}; color: gray;"
                                   " padding-left: 8px")
@@ -1204,9 +1229,12 @@ class RenderToolBar(QToolBar):
         except KeyError:
             name = "x_nm"
         unit = axis_unit(name)
-        suffix = f" {unit}" if unit in ("nm", "pixels") else ""
-        self.line_width.setSuffix(suffix)
-        self.pixel.setSuffix(suffix)
+        unit = f" ({unit})" if unit in ("nm", "pixels") else ""
+        self.line_width.setToolTip(f"line width{unit}: how wide a line ROI is, the "
+                                   "band a profile is taken over, and the slab's "
+                                   "second axis in the 3D window")
+        self.pixel.setToolTip(f"pixel size{unit}: what one screen pixel is; type "
+                              "a size to zoom to it, scroll to zoom as usual")
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path
@@ -1229,38 +1257,53 @@ class RenderToolBar(QToolBar):
 
 class ColourBar(QWidget):
     """One colour scale: a LUT from the bottom of a colour range to the top,
-    the two ends in the column's unit, and whose it is above it."""
+    its two ends, and whose it is above it -- the layers on one line, the
+    column under them, so the box is as narrow as its words and sits in the
+    corner covering as little of the picture as it can."""
 
-    WIDTH, HEIGHT, BAR = 120, 120, 12         # px: the widget, and the bar in it
+    BAR, BAR_HEIGHT, MAX_WIDTH = 10, 56, 160   # px: the bar, and the widest box
+    PAD = 3                                     # px inside the box
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.resize(self.WIDTH, self.HEIGHT)
         self.layers: List[str] = []
         self.field = ""
         self.range: Tuple[float, float] = (0.0, 1.0)
         self.table = np.zeros((2, 3), np.float32)
+        self._fit_size()
 
     def set(self, layers: List[str], field: str, range_: Tuple[float, float],
             table: np.ndarray) -> None:
         self.layers, self.field, self.range, self.table = list(layers), field, range_, table
         lo, hi = range_
         self.setToolTip(f"{', '.join(layers)}: {field} from {lo:g} to {hi:g}")
+        self._fit_size()
         self.update()
 
     def labels(self) -> Tuple[str, str, str]:
-        """The title, the top and the bottom label: "layer 1: z_nm", "300 nm",
-        "-300 nm"."""
+        """The title, the top and the bottom label: "layer 1\\nz_nm", "300",
+        "-300"."""
         return colour_bar_labels(self.layers, self.field, self.range)
+
+    def _fit_size(self) -> None:
+        title, top, bottom = self.labels()
+        metrics = self.fontMetrics()
+        lines = title.split("\n")
+        text = max([metrics.horizontalAdvance(t) for t in lines]
+                   + [self.BAR + 4 + metrics.horizontalAdvance(t) for t in (top, bottom)])
+        self.resize(min(text + 2 * self.PAD + 2, self.MAX_WIDTH),
+                    len(lines) * metrics.height() + self.BAR_HEIGHT + 2 * self.PAD)
 
     def paintEvent(self, event) -> None:          # noqa: N802 (Qt's name)
         title, top, bottom = self.labels()
+        lines = title.split("\n")
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 140))
         metrics = painter.fontMetrics()
         line = metrics.height()
-        x, y0, y1 = 6, 6 + line, self.height() - 6
+        pad = self.PAD
+        x, y0, y1 = pad, pad + len(lines) * line + 2, self.height() - pad
         # the LUT upwards: the top of the range at the top
         rgb = (np.clip(self.table[::-1], 0, 1) * 255).astype(np.uint8)
         rgb = np.ascontiguousarray(np.repeat(rgb[:, None, :], 2, axis=1))
@@ -1268,12 +1311,13 @@ class ColourBar(QWidget):
         painter.drawImage(QRectF(x, y0, self.BAR, y1 - y0), image)
         painter.setPen(QColor(230, 230, 230))
         text_x = x + self.BAR + 4
-        for text, rect, align in (
-                (title, QRectF(4, 2, self.width() - 8, line), Qt.AlignLeft),
-                (top, QRectF(text_x, y0, self.width() - text_x, line),
-                 Qt.AlignLeft | Qt.AlignTop),
-                (bottom, QRectF(text_x, y1 - line, self.width() - text_x, line),
-                 Qt.AlignLeft | Qt.AlignBottom)):
+        rows = [(text, QRectF(pad, pad + i * line, self.width() - 2 * pad, line),
+                 Qt.AlignLeft) for i, text in enumerate(lines)]
+        rows += [(top, QRectF(text_x, y0, self.width() - text_x, line),
+                  Qt.AlignLeft | Qt.AlignTop),
+                 (bottom, QRectF(text_x, y1 - line, self.width() - text_x, line),
+                  Qt.AlignLeft | Qt.AlignBottom)]
+        for text, rect, align in rows:
             text = metrics.elidedText(text, Qt.ElideRight, int(rect.width()))
             painter.drawText(rect, align, text)
         painter.end()
@@ -1318,12 +1362,16 @@ class ColourBars(QWidget):
         if not scales:
             self.hide()
             return
-        step = ColourBar.HEIGHT + self.GAP
-        for i, (bar, scale) in enumerate(zip(self.bars, scales)):
+        for bar, scale in zip(self.bars, scales):
             bar.set(*scale)
-            bar.move(0, i * step)
+        # each as wide as its words, right-aligned against the picture's edge
+        width = max(bar.width() for bar in self.bars)
+        y = 0
+        for bar in self.bars:
+            bar.move(width - bar.width(), y)
             bar.show()
-        self.resize(ColourBar.WIDTH, len(scales) * step - self.GAP)
+            y += bar.height() + self.GAP
+        self.resize(width, y - self.GAP)
         self.place()
         self.show()
         self.raise_()
@@ -1331,7 +1379,7 @@ class ColourBars(QWidget):
     def place(self) -> None:
         parent = self.parentWidget()
         if parent is not None:
-            self.move(parent.width() - self.width() - 8, 8)
+            self.move(parent.width() - self.width() - EDGE, EDGE)
 
 
 class AxisBars:

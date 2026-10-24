@@ -22,7 +22,9 @@ or *split + overlay* with the added-up picture after them (SMAP's *split* and
 The panels go across or one above another, whichever shows the data larger in
 the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
 (region of interest: a rectangle, line or polygon drawn on the picture) is
-drawn and edited on the first and its outline is on all of them.  Beside it, *pixel* says what one
+drawn and edited on the first and its outline is on all of them; the field
+beside the *ROI* button is a line ROI's width.  Further on, the field beside
+*pixel* says what one
 screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
 *pixel* to go to 10 nm.  Right-click the picture to move that place to the
 middle; double-click it to show everything, as *Reset view* (Ctrl+0) does.  *keys* on the toolbar lists what the mouse and the keys do in the
@@ -784,11 +786,13 @@ to make sparse tracks visible zoomed out.
 *intensity* colours by brightness through the LUT; *field* colours by the
 column chosen beside it.  A visible layer coloured by a column puts a
 colour bar in the render window's top right corner: the LUT over the
-*colour range*, its ends in the column's unit, and above it the layer and
-the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
-under the other; layers with the same column, LUT, inversion and range
-share one, labelled with all of them.  A picture saved or copied from the
-render window draws the same bars into it (*Save image*).
+*colour range*, its ends rounded, and above it the layer and, on the line
+under it, the column, whose name carries the unit (*z_nm*).  Each scale has its own bar,
+stacked one under the other; layers with the same column, LUT, inversion
+and range share one, labelled with all of them.  A picture saved or copied
+from the render window draws the same bars into it (*Save image*).  The
+toolbar's *options* menu hides the bar, on screen and in what is saved or
+copied.
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the

@@ -34,6 +34,24 @@ from . import identity
 from .identity import install_identity
 
 
+# The main window's tabs where the menu bar is in the window (not a Mac's):
+# framed, a gap under the menu bar, and the current one marked by a bar in the
+# highlight colour, which keeps its width where bold text would not.
+TAB_STYLE = """
+QTabBar::tab {
+    margin-top: 4px; padding: 3px 10px;
+    border: 1px solid palette(mid); border-bottom: none;
+    border-top-left-radius: 4px; border-top-right-radius: 4px;
+    background: palette(button);
+}
+QTabBar::tab:selected {
+    background: palette(base);
+    border-top: 2px solid palette(highlight);
+}
+QTabBar::tab:!selected:hover { background: palette(light); }
+"""
+
+
 class HandoffTask(QThread):
     """Take a session another instance handed over (`smappy.handoff`) off the
     GUI thread, and merge its blinks there if a layer shows them -- `LoadTask`
@@ -171,6 +189,15 @@ class ControlWindow(QMainWindow):
         # all, and the control column is meant to stay narrow
         self.tabs.setUsesScrollButtons(True)
         self.tabs.setElideMode(Qt.ElideNone)
+        if sys.platform != "darwin":
+            # Elsewhere the menu bar is in the window, straight above the
+            # tabs, and Windows draws both as flat words in a row: File, Edit,
+            # View over Render, Analysis, Regions read as one menu of two
+            # lines.  So the menu bar gets a rule and the tabs look like tabs.
+            # A Mac's menu is at the top of the screen and needs neither.
+            self.menuBar().setStyleSheet(
+                "QMenuBar { border-bottom: 1px solid palette(mid); }")
+            self.tabs.setStyleSheet(TAB_STYLE)
         self.plugin_tabs: List[PluginTab] = []
         self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()

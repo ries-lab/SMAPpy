@@ -632,7 +632,8 @@ def test_an_info_notice_is_drawn_quietly_and_a_warning_loudly():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
-    from smappy.gui.plugin_panel import INFO_STYLE, WARNING_STYLE, PluginPanel
+    from smappy.gui.plugin_panel import WARNING_STYLE, PluginPanel
+    from smappy.gui.widgets import note_style
     from smappy.plugins import Notice
 
     QApplication.instance() or QApplication([])
@@ -647,7 +648,7 @@ def test_an_info_notice_is_drawn_quietly_and_a_warning_loudly():
 
     panel = PluginPanel(Quiet, Session(table()))
     panel._show_notice(Notice("worth knowing", kind="info"))
-    assert panel.notice.styleSheet() == INFO_STYLE
+    assert panel.notice.styleSheet() == note_style()
     panel._show_notice(Notice("this camera is a guess"))
     assert panel.notice.styleSheet() == WARNING_STYLE
 

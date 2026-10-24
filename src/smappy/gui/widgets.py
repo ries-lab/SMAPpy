@@ -291,6 +291,37 @@ QTextEdit[readOnly="true"] {
 """
 
 
+# The grey of the explanations under a plugin's title, its hints and notes.
+# Qt's "gray" is #808080 whatever the theme: on a light window that is a
+# contrast of about 3 to 1, hard to read in the size these lines are set in,
+# and on a dark one it is darker still.  So it is the window's own text colour
+# brought 35 % of the way towards the background -- clearly secondary, about
+# 6 to 1 on a light window, and right on a dark one too.
+NOTE_FRACTION = 0.35
+
+
+def note_colour() -> str:
+    """The secondary text colour, from the application's palette."""
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        return "#555555"
+    palette = app.palette()
+    text = palette.color(QPalette.WindowText)
+    back = palette.color(QPalette.Window)
+    mix = [round(t + NOTE_FRACTION * (b - t)) for t, b in
+           ((text.red(), back.red()), (text.green(), back.green()),
+            (text.blue(), back.blue()))]
+    return "#{:02x}{:02x}{:02x}".format(*mix)
+
+
+def note_style(extra: str = "") -> str:
+    """A style sheet for a secondary line of text: ``note_style("font-style:
+    italic")``."""
+    return f"color: {note_colour()};" + (f" {extra}" if extra else "")
+
+
 def apply_style(app) -> None:
     """Mark the editable fields, keeping whatever style is already set."""
     existing = app.styleSheet() or ""

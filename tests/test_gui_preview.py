@@ -70,6 +70,7 @@ def test_a_preview_that_is_not_of_a_frame_gets_no_frame_number(app):
 
 def test_an_auto_field_shows_what_auto_resolves_to_in_grey(app):
     from dataclasses import dataclass
+    from smappy.gui.widgets import note_colour
     from typing import Optional
 
     @dataclass
@@ -83,7 +84,7 @@ def test_an_auto_field_shows_what_auto_resolves_to_in_grey(app):
     form.set_hints({"offset": 500.0})
     assert field.widget.text() == "500"          # the number is on show...
     assert field.value() is None                 # ...but it is still auto
-    assert "gray" in field.widget.styleSheet()
+    assert note_colour() in field.widget.styleSheet()
     assert "auto: 500" in field.toolTip()
 
     # taking it off auto keeps the number, now as the user's own

@@ -524,6 +524,9 @@ class Plot:
     panels: int = 1                    # how many axes `draw` makes
     size: Optional[Tuple[float, float]] = None   # width, height in inches
     edit: Optional["ShapeEdit"] = None           # a panel that takes drawn shapes
+    # on the window's *All* page, which is made when two or more are; off
+    # for a figure that is already a page of everything
+    summary: bool = True
 
     def draw_into(self, figure) -> None:
         """Draw into a cleared figure, or into a subfigure of a page."""

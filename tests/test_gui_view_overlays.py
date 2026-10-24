@@ -62,16 +62,24 @@ def test_colouring_by_a_column_shows_its_scale_and_intensity_shows_none(app):
     bar = bars.bars[0]
     title, top, bottom = bar.labels()
     lo, hi = session.layers[0].state.settings.color_range
-    assert title == "layer 1: z_nm"
-    assert top == f"{hi:.4g} nm" and bottom == f"{lo:.4g} nm"
-    # a large count is written out, not as 2e+04
-    from smappy.picture import bar_number
-    assert bar_number(20000.0) == "20000" and bar_number(-299.3456) == "-299.3"
+    assert title == "layer 1\nz_nm"           # the layers, the column under them
+    # no unit at the ends: the title's column name says it
+    from smappy.picture import bar_end
+    assert top == bar_end(hi) and bottom == bar_end(lo) and "nm" not in top
+    # whole numbers from 100 up, a large count written out, not as 2e+04
+    assert bar_end(20000.0) == "20000" and bar_end(-299.3456) == "-299"
+    assert bar_end(0.25678) == "0.257"
     # the range typed in the tab is the range on the bar
     tab.color_lo.setText("-100")
     tab.color_hi.setText("250")
     tab.color_lo.editingFinished.emit()
-    assert bars.bars[0].labels()[1:] == ("250 nm", "-100 nm")
+    assert bars.bars[0].labels()[1:] == ("250", "-100")
+    # options > colour bar hides it, and the saved picture with it
+    window.toolbar.colour_bar_action.setChecked(False)
+    assert not bars.isVisible()
+    assert window.view.quick_settings().colour_bars is False
+    window.toolbar.colour_bar_action.setChecked(True)
+    assert bars.isVisible()
     # a column that is not a length is counted in itself: no unit
     tab.color_field.setCurrentText("frame")
     bar = bars.bars[0]
@@ -102,7 +110,7 @@ def test_each_scale_has_its_bar_and_layers_on_one_scale_share_it(app):
     colour(second, "frame", color_range=(0.0, 1000.0))
     session.changed("layer")
     titles = [bar.labels()[0] for bar in bars.bars]
-    assert titles == [f"{first.name}: z_nm", f"{second.name}: frame"]
+    assert titles == [f"{first.name}\nz_nm", f"{second.name}\nframe"]
     assert bars.isVisible() and all(bar.isVisible() for bar in bars.bars)
     # stacked, not on top of each other
     assert bars.bars[1].y() >= bars.bars[0].y() + bars.bars[0].height()
@@ -110,7 +118,7 @@ def test_each_scale_has_its_bar_and_layers_on_one_scale_share_it(app):
     colour(second, "z_nm", color_range=(-300.0, 300.0))
     session.changed("layer")
     assert [bar.labels()[0] for bar in bars.bars] == \
-        [f"{first.name}, {second.name}: z_nm"]
+        [f"{first.name}, {second.name}\nz_nm"]
 
     # the same column through another LUT is another scale
     colour(second, "z_nm", lut="jet", color_range=(-300.0, 300.0))

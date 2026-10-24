@@ -96,7 +96,7 @@ def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
 
     bar.pixel_button.click()
     assert view.pixel_size() == pytest.approx(DEFAULT_PIXEL, rel=0.01)
-    assert bar.pixel.suffix() == " nm"
+    assert "(nm)" in bar.pixel.toolTip()                # the unit, without a suffix's width
 
 
 def blinks(n_emitters=300, on=3):

@@ -53,6 +53,7 @@ def _step_at(spec, path):
 from ..session import Session
 from ..workspace import Instance
 from .plugin_panel import PluginPanel
+from .widgets import note_style
 
 
 def spec_of(instance: Instance) -> Optional[ChainSpec]:
@@ -96,7 +97,7 @@ class ChainPanel(QWidget):
         self.save_as = QToolButton(text="save as...")
         self.save_as.clicked.connect(lambda: self.save_chain(ask=True))
         self.where = QLabel("")
-        self.where.setStyleSheet("color: gray")
+        self.where.setStyleSheet(note_style())
         for w in (self.edit, self.save, self.save_as):
             bar.addWidget(w)
         bar.addWidget(self.where, 1)
@@ -137,7 +138,7 @@ class ChainPanel(QWidget):
         self.check_button.setEnabled(bool(self.root))
         self.checked = QLabel("")
         self.checked.setWordWrap(True)
-        self.checked.setStyleSheet("color: gray")
+        self.checked.setStyleSheet(note_style())
         checking.addWidget(self.check_button)
         checking.addWidget(self.checked, 1)
         column.addLayout(checking)
