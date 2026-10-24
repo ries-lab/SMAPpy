@@ -78,6 +78,8 @@ class RoundSettings:
     # only units whose height above the coverslip lies in (low, high) nm are chosen from round 2 (None: all): to
     # learn from molecules near the coverslip or deep in the sample apart (M2, October 2026)
     height_range_nm: tuple | None = None
+    # off when nothing of the pupil is learnt (every aberration held from beads): the sign is the beads'
+    twin_test: bool = True
 
 
 @dataclass
@@ -88,7 +90,7 @@ class Edge:
     n: int                             # heights in the window
 
 
-def coverslip_edge(h, sd, window: float = 0.3) -> Edge | None:
+def coverslip_edge(h, sd, window: float = 0.3, max_blur: float | None = None) -> Edge | None:
     """The lower edge of heights ``h`` with CRLBs ``sd`` (module docstring): None with too few heights.
 
     The heights in the lowest ``window`` are modelled as a flat density above the edge s, optionally a
@@ -97,7 +99,12 @@ def coverslip_edge(h, sd, window: float = 0.3) -> Edge | None:
     against 17 on simulated movies), and the outliers because a few molecules land hundreds of nanometres
     below the coverslip; without either, the fit explained that tail by moving the edge down 75 nm.  The
     spike is kept only if it gains more than `SPIKE_NATS`: without molecules on the coverslip its weight
-    sits at its bound, 0, where the fit with it put the edge 10–28 nm too high on simulated heights."""
+    sits at its bound, 0, where the fit with it put the edge 10–28 nm too high on simulated heights.
+
+    ``max_blur`` bounds κ: without molecules on the coverslip but with a density that rises slowly above
+    the edge (defocused molecules fitted worse, fewer passing), an unbounded κ made the spike a broad hump
+    in the middle of the window, its edge 150 nm above the lowest heights (Spline 3D's auto depth,
+    `smappy.calibrate.depth`, which bounds it at 3)."""
     from scipy.optimize import minimize
     from scipy.special import expit
     from scipy.stats import norm
@@ -111,7 +118,10 @@ def coverslip_edge(h, sd, window: float = 0.3) -> Edge | None:
     L = U - x.min()
 
     def unpack(p, spike):
-        s, kappa, eps = p[0], 1 + np.exp(np.clip(p[1], -30, 5)), MAX_OUTLIERS * expit(p[2])
+        # bounded smoothly, a logistic, so that the Hessian `_sd_of_first` takes stays regular
+        kappa = (1 + np.exp(np.clip(p[1], -30, 5)) if max_blur is None
+                 else 1 + (float(max_blur) - 1) * expit(p[1]))
+        s, eps = p[0], MAX_OUTLIERS * expit(p[2])
         return s, kappa, eps, (expit(p[3]) if spike else 0.0)
 
     def nll(p, spike=True):
@@ -345,6 +355,9 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         if moved < s.stop_sd and (edge is None or abs(edge.shift_nm) <= max(edge.sd_nm, s.focus_floor_nm)):
             break
     last = run.rounds[-1]
+    run.model = current
+    if not s.twin_test:
+        return run
     tell({"message": "the twin test: the mirrored pupil fitted to the same molecules"})
     batch, _ = rois.batch(ids=last.used)
     located = replace(batch.to(dtype=dtype), start=None)

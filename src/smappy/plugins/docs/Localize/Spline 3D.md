@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration]
+version: "6"
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil]
 ---
 
 ## What it does
@@ -180,6 +180,40 @@ right.legend(frameon=False, fontsize=8)
 size* (which the file records, so a position in camera pixels is `x_nm`
 divided by it; no pixel columns are kept), fits that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
 
+**6. The focus in the sample.**  A bead calibration is the PSF of a bead
+*on the coverslip*.  A molecule some way into a watery sample looks
+different.  The [index mismatch](plugin:Panels/Glossary) (also called
+refractive-index mismatch: oil and water bend light differently) adds a
+spherical aberration that grows with the depth.  And only molecules within
+about a wavelength of the coverslip send the extra light beyond the critical
+angle ([SAF](plugin:Panels/Glossary), supercritical-angle fluorescence) into
+the objective.  A calibration made with the pupil (Zernike) method keeps its
+model beside the spline.  From it, the fit draws a new spline for the sample:
+the beads' aberrations, with molecules at every height above the coverslip
+and the objective's focus moved *position* into the sample.  z is then the
+**height above the coverslip**, not the objective's movement.
+
+*focus* says how the position is known:
+
+* *auto* (the default) finds it before the fit from the lowest
+  localizations.  In most samples some molecules are on the coverslip, so the
+  heights have a lower edge, and the focus is moved until that edge is at 0.
+  It takes a second or two.
+* *in situ* learns it from the molecules, as the
+  [PSF calibration](plugin:Panels/PSF calibration)'s in situ method does,
+  but with every aberration held from the beads.  Only the focus and the blur
+  are learnt, the coverslip's edge guiding the focus.  It takes minutes, and
+  is for when the depth has to be right.
+* *typed* takes it as given.
+* *as calibrated* fits with the beads' spline as it is.
+
+*auto* and *in situ* are found once for a file and its settings: *Preview*
+finds them and draws the heights they came from, with the coverslip at 0 and
+the plane in focus marked, and the Run after it uses what Preview found.  An
+*in situ* result is also kept on disk, so it is not learnt again in the next
+session.  A bead-average calibration has no model: there the setting is not
+shown, and *auto* fits as calibrated.
+
 ## In detail
 
 **The spline.**  The calibration is a grid of $n_z \times n_y \times n_x$
@@ -278,7 +312,49 @@ noise*), which also keeps a pixel whose spline model nears zero from
 dominating a fit at low background (see
 [Gaussian 2D](plugin:Localize/Gaussian 2D)).
 
-**Compared with the paper.**  The method is that of
+**The focus in the sample.**  The pupil model is drawn
+(`smappy.calibrate.depth`) for an emitter at height $h$ with the objective
+moved $f$ (*position*) from the coverslip: the stage defocus $-f$, and the
+emitter's depth $h$ in the sample.  The sample's index is the beads' medium
+unless *sample index* says otherwise.  The bead's size is left out and the
+learnt blur kept.  The planes are the calibration's $dz$ apart, as many about
+the plane in focus as the bead spline has about its own.  They reach at most
+300 nm below the coverslip, into the glass, where an emitter is drawn as one
+on the coverslip with the focus that much farther away.  Nothing is there, but
+with a focus slightly wrong the lowest molecules are fitted there instead of
+being parked on the spline's edge.  Fits below 0 are filtered afterwards, like
+any other.
+
+*auto* reads 10 blocks of 50 frames spread over the fitted range and cuts the
+fit boxes as the fit does.  It keeps the 4000 with the most photons above the
+fit box's edge (not the brightest peak, which would favour molecules in
+focus), and fits them with 30 iterations.  It takes the lower edge of their
+heights by maximum likelihood, as in situ learning does: on the lowest 30 % of
+the heights, a flat density above the edge, optionally a pile-up on it, each
+height blurred by at most 3 times its CRLB.  The first fit is on the bead
+spline, whose z is the objective's movement, and its edge gives the first
+focus.  Then come at most 4 passes on drawn splines, each moving the focus by
+the edge's offset times the focus per height ($n_{imm}/n_{med}$ to begin
+with, then measured between passes).  They stop once the edge is within
+15 nm of 0, and the pass with the edge nearest 0 is kept.  The position found
+is written into the settings as *typed*, so the history and the file name it.
+Without molecules on the coverslip the edge belongs to the lowest molecules,
+above it, and the position comes out short by their distance: on simulated
+heights starting 250 nm above the coverslip, by about 200 nm.  The run says so
+in its log.  So little depends on the depth there that it rarely matters.
+
+*in situ* runs the in situ calibration (`insitu_run.run_insitu`) with *hold*
+set to every aberration.  The bead model's whole pupil, phase and magnitude,
+is held, and a mode up to its order that it lacks is held at 0.  Learnt are
+the focus, the blur and each molecule; with nothing of the pupil to learn
+there is no twin test.  It starts at the position *auto* finds, from 1000
+molecules, in at most 2 rounds.  The spline is the learnt model drawn as
+above, at the learnt focus.  It is kept in the configuration directory's
+`sample_depth` folder (not beside the data, where *calibration* on *auto*
+would take it for a bead calibration), and the run fits with it as
+*as calibrated*, so the history names the file.
+
+**Compared with the paper.****Compared with the paper.**  The method is that of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661); what the code does
 differently (the first two concern the Bead calibration tool; a SMAP
 calibration brings its own coefficients):
@@ -325,9 +401,31 @@ beyond the grid the model would only repeat its edge.  Large enough for the wide
 most defocused spot; the default 13 holds the spots of the figures above, over
 $\pm$600 nm.
 
+### model.focus
+*auto* is right for most data, and costs a second or two before the fit.
+*in situ* for a measurement where the depth matters more than a few minutes:
+deep in the sample, or TIRF and other work on the coverslip where the SAF
+counts.  *as calibrated* for molecules near the coverslip with the focus
+there too, or to compare with an older fit.  Drawing needs torch (`pip install
+smappy-smlm[uipsf]`): without it, *auto* fits as calibrated and warns, and the
+others stop and say so.  A live fit
+cannot use *auto* or *in situ*: the frames they need are not there yet.
+
+### model.focus_nm
+How far the objective was moved up from the coverslip, as its focus drive
+reads, not the true distance in the sample.  An error of a few hundred
+nanometres changes little.  On *auto* and *in situ* it shows what was found
+for this file, once a Preview or a Run has found it.
+
+### model.sample_index
+1.33 for water and most buffers, around 1.45 for glycerol-based mounting
+media, 1.52 for a medium matched to the oil (the depth then hardly matters).
+
 ### model.z_start_nm
 Worth moving only when most of the data is far from focus on one side, where
-a start at the focal plane has the farthest to go.
+a start at the focal plane has the farthest to go.  With a focus in the
+sample it is relative to the plane in focus, wherever that lies above the
+coverslip.
 
 ### fit.iterations
 Defocused spots can take more steps than in 2D; 50 is usually plenty, and
@@ -367,7 +465,7 @@ z instead of the PSF width:
 | column | meaning |
 | --- | --- |
 | `x_nm`, `y_nm` | the position |
-| `z_nm` | height relative to the calibration's focal plane, in objective nanometres |
+| `z_nm` | height relative to the calibration's focal plane, in objective nanometres; drawn for a focus in the sample (*focus* not *as calibrated*), the height above the coverslip |
 | `z_err_nm` | its precision (CRLB) |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | the lateral precision (CRLB) |
 | `photons`, `background`, `photons_err`, `background_err` | $N$, $b$ and their CRLB |

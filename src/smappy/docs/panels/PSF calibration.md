@@ -493,7 +493,11 @@ from the coverslip's focus.  A rough value is enough: the rounds learn it.
 ### hold
 *the start's*: the symmetric magnitude and the phase above the *Zernike
 order* held from *start from*, or else from the microscope's kept pupil (the
-default; see *What is held*).  *nothing*: the symmetric magnitude learnt from
+default; see *What is held*).  *every aberration*: the whole pupil of
+*start from* (or the kept one) held, every mode of phase and magnitude, and
+only the focus and the blur learnt, with no twin test -- the beads' pupil
+taken as the objective's, for a sample whose depth is the question (Spline
+3D's *focus* *in situ* runs this).  *nothing*: the symmetric magnitude learnt from
 the molecules, for a microscope with no pupil kept and no model to start
 from; the focus is then pinned to the coverslip unless *focus fit* says
 *typed*.

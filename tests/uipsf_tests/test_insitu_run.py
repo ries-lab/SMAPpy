@@ -292,3 +292,91 @@ def test_in_situ_holds_the_start_or_learns_the_symmetric_magnitude_with_the_focu
     else:
         assert not pupil.held_magnitude and not result.model.geometry.fit_focus
         assert any("pinned to the coverslip" in m for m in result.messages)
+
+
+def test_in_situ_holding_every_aberration_learns_only_the_focus_and_finds_it(movie_file, monkeypatch):
+    # the movie's own pupil kept with the microscope, every mode of it held: nothing of the pupil is learnt, no
+    # twin test, and the focus comes from the molecules
+    import math
+
+    import smappy.microscope_db as db
+    from smappy.calibrate.insitu_run import run_insitu
+    from smappy.calibrate.pupil import RunSettings
+
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    from test_insitu_rois import FOCUS
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    model, shared = model_and_shared()
+    wavelength = OPTICS_SETTINGS.optics(CAMERA, 1)[0].wavelength_nm
+    kept = {"phase_nm": {str(j): float(v) * wavelength / (2 * math.pi)
+                         for j, v in zip(model.psf.pupil.phase_modes, shared["pupil.phase"], strict=True)}}
+    monkeypatch.setattr(db, "pupil_of", lambda scope: kept)
+    path, _ = movie_file
+    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0),
+                        InSituModelSettings(focus_nm=450.0, max_rounds=3, hold="all"), SELECTION, camera=CAMERA,
+                        run=RunSettings(save_model=False))
+    pupil = result.model.psf.pupil
+    assert pupil.phase_modes == [] and pupil.magnitude_modes == []
+    assert pupil.held_phase[6] == pytest.approx(0.7, rel=1e-6)
+    assert result.run.final.twin is None and "every aberration" in result.messages[0]
+    # within the small movie's reach: its edge is 27 heights, and a pupil of 16 samples images a movie drawn
+    # with 32 (738 nm in 3 rounds alone, up to 820 between threads)
+    assert float(result.cal.shared()["geometry.focus"]) == pytest.approx(FOCUS, abs=150)
+
+
+@pytest.mark.slow
+def test_spline_3d_in_situ_learns_the_focus_with_the_beads_aberrations_and_keeps_it(movie_file, tmp_path,
+                                                                                      monkeypatch):
+    # Spline 3D's *focus* in situ: the movie's own pupil as the bead model, in situ holding all of it,
+    # the spline it learnt kept in the configuration directory and fitted with; a second Preview finds it kept
+    from dataclasses import replace
+
+    import smappy.calibrate.pupil as pupil_module
+    from smappy.calibrate import depth
+    from smappy.calibrate.pupil import spline_calibration
+    from smappy.io.calibration import save_spline_calibration
+    from smappy.plugins import Context
+    from smappy.plugins.fit import (
+        CameraSettings,
+        OutputSettings,
+        SourceSettings,
+        SplineFit,
+        SplineFitSettings,
+        SplineModelSettings,
+    )
+
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    from test_insitu_rois import FOCUS
+    from uipsf.export import LearnedPSF, describe
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    model, shared = model_and_shared()
+    learned = LearnedPSF(model, shared, {}, describe(model), options={"zernike_order": 4, "blur_nm": 30.0})
+    monkeypatch.setattr(depth, "load", lambda path: learned)
+    monkeypatch.setattr(pupil_module, "load_start", lambda path: learned)
+    beads = spline_calibration(learned, 20.0, 700.0, 17)
+    calibration = tmp_path / "beads_3dcal.h5"
+    save_spline_calibration(calibration, replace(beads, parameters=dict(beads.parameters,
+                                                                         model_file="beads_3dcal.uipsf.h5")))
+    (tmp_path / "beads_3dcal.uipsf.h5").write_bytes(b"")
+    path, _ = movie_file
+    settings = SplineFitSettings(source=SourceSettings(path=str(path)),
+                                 camera=CameraSettings(conversion=2.0, offset=100.0, pixelsize_um=0.127,
+                                                       pixelsize_y_um=0.116),
+                                 model=SplineModelSettings(calibration=str(calibration), focus="insitu"),
+                                 output=OutputSettings(save=False))
+    plugin = SplineFit()
+    preview = plugin.preview(Context(), settings)
+    assert "focus" in preview.plots and not preview.data["error"], preview.data["error"]
+    found = depth.found(plugin._focus_key(settings))
+    assert found.method == "in situ" and found.focus_nm == pytest.approx(FOCUS, abs=100)
+    depth._FOUND.clear()                                               # a new session: the kept file
+    result = plugin.run(Context(), settings)
+    used = result.settings.model
+    assert used.focus == "calibrated" and "sample_depth" in used.calibration
+    assert used.focus_nm == pytest.approx(found.focus_nm, abs=0.1)
+    assert np.quantile(np.asarray(result.locs["z_nm"]), 0.05) > -150    # heights above the coverslip

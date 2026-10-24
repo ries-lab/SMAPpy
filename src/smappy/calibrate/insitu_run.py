@@ -35,7 +35,7 @@ from ..plugins import param
 from .insitu import InSituROIs, InSituSettings, choose, concatenate, insitu_units, select
 
 SPLINE_Z = (("focus", "above the plane in focus"), ("height", "above the coverslip"))
-HOLDS = (("start", "the start's"), ("nothing", "nothing"))
+HOLDS = (("start", "the start's"), ("all", "every aberration"), ("nothing", "nothing"))
 FOCUS_FITS = (("learnt", "learnt"), ("coverslip", "from the coverslip"), ("typed", "typed"))
 #: the spline's z step on auto, nm: a molecule's PSF changes over ~100 nm
 SPLINE_DZ_NM = 20.0
@@ -57,8 +57,9 @@ class InSituModelSettings:
                                                  "not used with start from")
     hold: str = param("start", label="hold", choices=HOLDS,
                       help="the start's: the symmetric magnitude and the phase above the order held from start "
-                           "from or the microscope's pupil; nothing: the symmetric magnitude learnt, the focus "
-                           "then pinned")
+                           "from or the microscope's pupil; every aberration: the start model's whole pupil, "
+                           "only the focus and the blur learnt; nothing: the symmetric magnitude learnt, the "
+                           "focus then pinned")
     focus_fit: str = param("learnt", label="focus fit", choices=FOCUS_FITS,
                            help="learnt with the pupil; from the coverslip: set by the lowest molecules' edge "
                                 "each round, not fitted; typed: held at focus")
@@ -211,7 +212,7 @@ def start_shared(model, run_start_from: str, astigmatism_nm: float, wavelength_n
     return out, None
 
 
-def held_pupil(previous, kept, order: int, wavelength_nm: float) -> tuple[dict, dict, str]:
+def held_pupil(previous, kept, order: int, wavelength_nm: float, every: bool = False) -> tuple[dict, dict, str]:
     """(phase held {Noll: rad}, magnitude held {Noll: value}, where from) for in situ's *hold* the start's:
     the start model's (``previous``, a `LearnedPSF`) or else the microscope's kept pupil (``kept``,
     `microscope_db.pupil_of`) symmetric magnitude and its phase above ``order``; empty with neither.
@@ -219,7 +220,12 @@ def held_pupil(previous, kept, order: int, wavelength_nm: float) -> tuple[dict, 
     Why these (`docs/uipsf/architecture.md`, "In situ on matched M2 pairs"): the symmetric magnitude is the
     objective's transmission, the same over days and colours, and learnt from molecules it trades with the
     focus; the phase above order 6 gains little over the beads' and scatters between molecule sets.  The
-    phase goes through nm of wavefront, so that a pupil learnt at another emission holds at this one."""
+    phase goes through nm of wavefront, so that a pupil learnt at another emission holds at this one.
+
+    ``every``: the whole pupil, every mode of phase and magnitude whatever its order -- *hold* every aberration,
+    where the beads' pupil is taken as the objective's and only what belongs to the sample is learnt (the focus,
+    the blur, the coverslip's tilt): the beads' aberrations are known far better than a movie can tell them,
+    and with nothing of the pupil to learn the sign of z needs no twin test."""
     import math
 
     from uipsf.optics.zernike import noll_to_nm
@@ -239,8 +245,9 @@ def held_pupil(previous, kept, order: int, wavelength_nm: float) -> tuple[dict, 
         source = "the microscope's pupil"
     else:
         return {}, {}, ""
-    phase = {j: 2 * math.pi * nm / float(wavelength_nm) for j, nm in phase_nm.items() if noll_to_nm(j)[0] > order}
-    symmetric = {j: v for j, v in magnitude.items() if noll_to_nm(j)[1] == 0 and j > 1}
+    phase = {j: 2 * math.pi * nm / float(wavelength_nm) for j, nm in phase_nm.items()
+             if every or noll_to_nm(j)[0] > order}
+    symmetric = {j: v for j, v in magnitude.items() if (every or noll_to_nm(j)[1] == 0) and j > 1}
     return phase, symmetric, source
 
 
@@ -342,22 +349,33 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     o = optics.optics(rois.camera, 1)[0]
     roi = int(rois.units.regions.shape[-1])
     guess = 1000.0 if insitu.focus_nm is None else float(insitu.focus_nm)
-    astigmatism, why = start_astigmatism(insitu, rois.camera)
-    if astigmatism is None and not run.start_from:
-        raise ValueError(f"give the start's astigmatism (in situ, more) or a model to start from: {why}")
     from dataclasses import replace
 
     from ..microscope_db import pupil_of
     from .pupil import AUTO_ORDER, load_start
     kept = pupil_of(getattr(rois.camera, "microscope", None))
+    every = insitu.hold == "all"
+    astigmatism, why = start_astigmatism(insitu, rois.camera)
+    if every and not (run.start_from or kept):
+        raise ValueError("holding every aberration needs a pupil to hold: a bead model to start from, or one "
+                         "kept with the microscope")
+    if astigmatism is None and not run.start_from and not every:
+        raise ValueError(f"give the start's astigmatism (in situ, more) or a model to start from: {why}")
     messages = []
     # what is held: the start's symmetric magnitude and high orders, or nothing; the m != 0 magnitude is
     # never learnt in situ, where it took the astigmatism over from the phase
     held_phase, held_magnitude, source = {}, {}, ""
-    if insitu.hold == "start":
+    if insitu.hold in ("start", "all"):
         order = model.zernike_order or AUTO_ORDER
         held_phase, held_magnitude, source = held_pupil(load_start(run.start_from) if run.start_from else None,
-                                                        kept, order, o.wavelength_nm)
+                                                        kept, order, o.wavelength_nm, every=every)
+        if every:
+            from uipsf.optics.zernike import noll_to_nm, zernike_modes
+            # no phase mode left to learn: the order is the held pupil's own, and a mode up to it that the
+            # pupil does not have is held at 0
+            top = max([noll_to_nm(j)[0] for j in held_phase] + [2])
+            held_phase = {j: held_phase.get(j, 0.0) for j in sorted(set(zernike_modes(top)) | set(held_phase))}
+            model = replace(model, zernike_order=top)
         if not source:
             messages.append("nothing to hold: no start model and no pupil kept with the microscope; the "
                             "symmetric magnitude is learnt and the focus pinned")
@@ -385,10 +403,12 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
         learnt = make(result_focus)
     start = dict(start, **{"geometry.focus": torch.tensor(learnt.geometry.focus_nm)})
     learned = calibrate_insitu(learnt, rois, start, rois.batch()[1],
-                               RoundSettings(max_rounds=insitu.max_rounds, coverslip=edge),
+                               RoundSettings(max_rounds=insitu.max_rounds, coverslip=edge, twin_test=not every),
                                selection=detection, progress=progress, cancel=cancel)
     result = InSituRunResult(rois, learned, learned.model or learnt, previous, result_focus)
-    if source:
+    if source and every:
+        messages.insert(0, f"held from {source}: every aberration; learnt: the focus and the blur")
+    elif source:
         messages.insert(0, f"held from {source}: the symmetric magnitude and the phase above order "
                            f"{model.zernike_order or AUTO_ORDER}")
     if edge and not any(r.focus_prior is not None for r in learned.rounds[1:]) and len(learned.rounds) > 1:

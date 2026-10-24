@@ -56,6 +56,13 @@ papers and in other software.
   wider in x on one side of the focus and in y on the other, so its shape
   tells its z.
 * **z**: the position along the optical axis, of a 3D localization.
+* **index mismatch** (also called refractive-index mismatch or depth-induced
+  aberration): immersion oil and a watery sample bend light differently, so
+  the PSF of a molecule deep in the sample gains a spherical aberration, and
+  its focus moves less than the objective does.
+* **SAF** (supercritical-angle fluorescence): light that only a molecule
+  within about a wavelength of the coverslip sends into the objective, at
+  angles beyond the critical one; it makes those molecules brighter.
 
 ## Camera
 
