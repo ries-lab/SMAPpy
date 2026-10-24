@@ -309,3 +309,20 @@ def test_switching_to_the_absolute_scale_starts_where_the_quantile_was():
     assert absolute.absolute and absolute.contrast == 2.5
     assert absolute.pixel_max(rendered) == pytest.approx(
         normalize(rendered.weight, None, 2.5)[1])
+
+
+@pytest.mark.parametrize("mode", ["gauss", "hist", "tracks", "voronoi"])
+def test_a_field_coloured_picture_with_nothing_in_view_is_black_not_the_luts_lowest_colour(mode):
+    from smappy.locs import Localizations
+    from smappy.render import DisplaySettings, RenderSettings, render_locs
+    n = 50
+    locs = Localizations({"x_nm": np.linspace(0, 500, n, dtype=np.float32),
+                          "y_nm": np.linspace(0, 500, n, dtype=np.float32),
+                          "z_nm": np.linspace(-300, 300, n, dtype=np.float32),
+                          "frame": np.arange(n), "track_id": np.arange(n) // 10})
+    fov = FieldOfView(0, 0, 10, 50, 50)
+    display = DisplaySettings(lut="jet")
+    nothing = render_locs(locs, fov, RenderSettings(mode=mode, color_field="z_nm"), display,
+                          select=np.zeros(0, np.int64))
+    assert nothing.color is not None
+    assert display.apply(nothing).max() == 0.0

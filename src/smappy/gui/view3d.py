@@ -34,7 +34,7 @@ from ..session import Session
 from . import folders
 from .render_view import (RenderWorker, bar_label, frame_canvas, nice_step,
                           toolbar_border, toolbar_sheet)
-from .widgets import CollapsibleSection
+from .widgets import CollapsibleSection, Popup
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, engine_for,
                       render_3d, snapshot_3d, upscale)
 
@@ -154,8 +154,13 @@ class View3D(QWidget):
 
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
-        if what in ("locs", "layer", "layers", "append", "slab", "roi", "roi-edited",
-                    "scan"):
+        if what == "scan":
+            # at once and flagged, as the 2D view does (`RenderView._on_session`)
+            self.frame_source.drawing = self.isVisible()
+            self._timer.stop()
+            self.render()
+            return
+        if what in ("locs", "layer", "layers", "append", "slab", "roi", "roi-edited"):
             axes = self.session.axes()
             if axes != self._render_axes:
                 # a picture of another quantity: the session has already built
@@ -216,6 +221,7 @@ class View3D(QWidget):
         self.refresh_frame()
         if not len(self.session.locs):
             self.image.clear()
+            self.frame_source.drawing = False
             return
         if self._busy:
             self._pending = preview if self._pending is None else (self._pending and preview)
@@ -237,6 +243,8 @@ class View3D(QWidget):
         if self._pending is not None:
             preview, self._pending = self._pending, None
             self.render(preview)
+        else:
+            self.frame_source.drawing = False
 
     def _on_rendered(self, result, generation: int) -> None:
         rgb, fov = result
@@ -251,6 +259,8 @@ class View3D(QWidget):
         if self._pending is not None:
             preview, self._pending = self._pending, None
             self.render(preview)
+        else:
+            self.frame_source.drawing = False
 
     def _face_centers(self, slab: Slab) -> np.ndarray:
         """(6, 3) data points at the face centres, ordered (axis, sign)."""
@@ -541,31 +551,6 @@ KEYS = """<table cellspacing="0" cellpadding="3">
 # the looks, and the `Projection.engine` each one is: the plain sum is "auto",
 # drawn on the GPU or the CPU by the slab's size (`view3d.engine_for`)
 LOOKS = (("sum", "auto"), ("points", "points"), ("spheres", "spheres"))
-
-
-class _Popup(QFrame):
-    """A panel that drops from a title-bar button and closes on a click
-    elsewhere, as a menu does, but holding fields."""
-
-    def __init__(self, content: QWidget, parent=None):
-        super().__init__(parent, Qt.Popup)
-        self.setFrameShape(QFrame.StyledPanel)
-        # the click that closes it must not land on the image, or on the
-        # button that opened it, which would open it again at once
-        self.setAttribute(Qt.WA_NoMouseReplay)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(content)
-        self.content = content
-
-    def show_below(self, button: QWidget) -> None:
-        self.adjustSize()
-        at = button.mapToGlobal(QPoint(0, button.height()))
-        screen = button.screen().availableGeometry()
-        x = max(screen.left(), min(at.x(), screen.right() - self.width()))
-        y = max(screen.top(), min(at.y(), screen.bottom() - self.height()))
-        self.move(x, y)
-        self.show()
 
 
 class OptionsPanel(QWidget):
@@ -913,8 +898,10 @@ class View3DToolBar(QToolBar):
 
     def set_border(self, colour: str) -> None:
         """The session's colour along the bottom, as on the 2D title bar."""
-        self.border = toolbar_border(colour)
-        self._style()
+        border = toolbar_border(colour)
+        if border != self.border:       # a style sheet set again restyles everything
+            self.border = border
+            self._style()
 
 
 class View3DWindow(QMainWindow):
@@ -929,10 +916,10 @@ class View3DWindow(QMainWindow):
         self.view = View3D(session)
         self.setCentralWidget(self.view)
         self.panel = OptionsPanel(session, self.view)
-        self.options = _Popup(self.panel, self)
+        self.options = Popup(self.panel, self)
         keys = QLabel(KEYS)
         keys.setTextFormat(Qt.RichText)
-        self.keys = _Popup(keys, self)
+        self.keys = Popup(keys, self)
         self.toolbar = View3DToolBar(self)
         self.addToolBar(self.toolbar)
         self.resize(900, 760)
@@ -979,7 +966,16 @@ class View3DWindow(QMainWindow):
         super().showEvent(event)
         self._slab_shown(True)
         self.shown.emit(True)
-        if not self._fitted:
+        roi = self.view.session.roi
+        if roi is not None and roi.kind == "line":
+            # a line is drawn to be looked at from the side: along it, z up
+            # ("front", the slab's long axis across the screen), framed --
+            # also when the window comes back, which otherwise keeps its view
+            self._fitted = True
+            self.view.fit()
+            self.view.preset("front")
+            self.view.fit()
+        elif not self._fitted:
             self._fitted = True
             self.view.fit()
         else:

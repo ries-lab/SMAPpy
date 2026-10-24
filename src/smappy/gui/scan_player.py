@@ -46,6 +46,7 @@ class ScanPlayer(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)            # the rows belong together; the default parted them
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         self.coordinate = QComboBox()
@@ -83,13 +84,15 @@ class ScanPlayer(QWidget):
         layout.addLayout(transport)
         self.where = QLabel("")
         self.where.setStyleSheet("color: grey")
+        self.where.hide()               # a blank line under the slider while stopped
         layout.addWidget(self.where)
 
         row = QHBoxLayout()
         self.speed = QSpinBox(minimum=1, maximum=60, value=5)
         self.speed.setSuffix(" /s")
-        self.speed.setToolTip("steps per second while playing, and the frame rate "
-                              "of a recorded movie")
+        self.speed.setToolTip("steps per second while playing -- at most what the "
+                              "windows can draw -- and the frame rate of a "
+                              "recorded movie")
         self.ends = QComboBox()
         for value, text in ENDS:
             self.ends.addItem(text, value)
@@ -125,6 +128,11 @@ class ScanPlayer(QWidget):
         self.record_button.clicked.connect(self.record)
         session.on_change(self._on_session)
         self._fill_coordinates()
+
+    def _say(self, text: str) -> None:
+        """The line under the slider, shown only when it says something."""
+        self.where.setText(text)
+        self.where.setVisible(bool(text))
 
     @staticmethod
     def _spin(tip: str) -> QDoubleSpinBox:
@@ -220,7 +228,7 @@ class ScanPlayer(QWidget):
         try:
             steps = self.prepare()
         except (ValueError, KeyError) as error:
-            self.where.setText(str(error).strip("'\""))
+            self._say(str(error).strip("'\""))
             self.pause()
             return
         index = int(np.clip(index, 0, len(steps) - 1))
@@ -231,7 +239,7 @@ class ScanPlayer(QWidget):
         blocked = self.slider.blockSignals(True)
         self.slider.setValue(index)
         self.slider.blockSignals(blocked)
-        self.where.setText(f"{sc.step_text(coordinate, step, self._frame_time())}"
+        self._say(f"{sc.step_text(coordinate, step, self._frame_time())}"
                            f"   ({index + 1} of {len(steps)})")
 
     def _frame_time(self) -> Optional[float]:
@@ -264,7 +272,7 @@ class ScanPlayer(QWidget):
         self.slider.setValue(0)
         self.slider.blockSignals(blocked)
         self._direction = 1
-        self.where.setText("")
+        self._say("")
 
     def _set_speed(self, *_) -> None:
         self.timer.setInterval(int(round(1000.0 / self.speed.value())))
@@ -272,8 +280,20 @@ class ScanPlayer(QWidget):
     def _on_slider(self, index: int) -> None:
         self.show_step(index)
 
+    def drawing(self) -> bool:
+        """A picture window has not drawn the last step yet
+        (`picture.FrameSource.drawing`)."""
+        return any(getattr(source, "drawing", False)
+                   for source in self.session.view_frames.values())
+
     def _tick(self) -> None:
         try:
+            if self.drawing():
+                # faster than the windows draw: wait for them, so the speed
+                # is capped at what can be shown.  Stepping on regardless
+                # superseded every picture before it was drawn, and above
+                # a few steps a second nothing was shown at all
+                return
             steps = self.prepare()
             index = self.slider.value() + self._direction
             if not 0 <= index < len(steps):
@@ -290,7 +310,7 @@ class ScanPlayer(QWidget):
         except Exception as error:        # never into Qt: stop and say why
             traceback.print_exc()
             self.pause()
-            self.where.setText(f"stopped: {error}")
+            self._say(f"stopped: {error}")
 
     # --------------------------------------------------------------- record
     def record(self) -> None:
@@ -342,9 +362,9 @@ class ScanPlayer(QWidget):
                                                                              or coordinate))
         except InterruptedError:
             Path(path).unlink(missing_ok=True)
-            self.where.setText("recording cancelled")
+            self._say("recording cancelled")
             return
         finally:
             progress.close()
-        self.where.setText(f"recorded {len(steps)} steps to {Path(written).name}")
+        self._say(f"recorded {len(steps)} steps to {Path(written).name}")
         self.session.log("record scan", f"{coordinate}, {len(steps)} steps to {written}")

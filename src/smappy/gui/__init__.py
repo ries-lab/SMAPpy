@@ -7,7 +7,8 @@ def make_app(argv=None):
 
     One place for what each entry point used to repeat: the style of the
     editable fields, garbage collection on the GUI thread (`collector`: off
-    everywhere else, or a widget can be destroyed on a worker), and the icon.
+    everywhere else, or a widget can be destroyed on a worker), the icon, and
+    every window kept to its screen (`screen`).
     The session's identity is not here, because it needs the session:
     an entry point that makes one calls `identity.install_identity` too.
     """
@@ -15,6 +16,7 @@ def make_app(argv=None):
 
     from .collector import collect_on_gui_thread
     from .icon import install_icon
+    from .screen import install_screen_fit
     from .widgets import apply_style
     if QApplication.instance() is None:
         name_the_mac_app()
@@ -24,6 +26,7 @@ def make_app(argv=None):
     apply_style(app)
     collect_on_gui_thread(app)
     install_icon(app)
+    install_screen_fit(app)
     return app
 
 

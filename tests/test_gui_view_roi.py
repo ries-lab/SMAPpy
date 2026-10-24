@@ -84,7 +84,7 @@ def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
     view.resize(400, 300)
     bar = RenderToolBar(view)
     view.reset()
-    assert bar.pixel.value() == pytest.approx(view.pixel_size(), abs=0.01)
+    assert bar.pixel.value() == pytest.approx(view.pixel_size(), abs=0.05)  # shown to 0.1 nm
 
     centre = view.view.viewRect().center()
     bar.pixel.setValue(4.0)

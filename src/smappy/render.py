@@ -279,7 +279,9 @@ def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma
             norm = norm ** gamma
         table = luts.get(lut, invert)
         index = np.clip((norm * len(table)).astype(np.int32), 0, len(table) - 1)
-        return table[index]
+        # take, not table[index]: half the time on a view-sized image, which
+        # is most of a player step's render on a small view
+        return np.take(table, index, axis=0)
 
     brightness, _ = normalize(rendered.weight, imax, contrast)
     if gamma != 1.0:
@@ -758,6 +760,19 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     needs are indexed, so filtering never copies the table.
     """
     settings = settings or RenderSettings()
+    rendered = _render_locs(locs, fov, settings, display, select, n_threads, use_extension)
+    if settings.color_field is not None and rendered.color is None:
+        # Nothing in view: the kernels make no colour planes from no colours,
+        # and `to_rgb` then took the picture for an intensity image and
+        # filled it with the LUT's lowest colour -- jet's dark blue.  Empty
+        # is black whatever the LUT.
+        rendered.color = np.zeros((*rendered.weight.shape, 3), np.float32)
+    return rendered
+
+
+def _render_locs(locs: Localizations, fov: FieldOfView, settings: RenderSettings,
+                 display: Optional[DisplaySettings], select, n_threads: int,
+                 use_extension: bool) -> RenderedImage:
     display = display or DisplaySettings()
     select = getattr(select, "indices", select)  # a LocFilter, or a mask/indices
 

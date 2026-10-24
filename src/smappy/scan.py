@@ -87,21 +87,69 @@ class ValueCache:
     """Each layer table's scanned values, worked out once per table, scan
     coordinate and line: a scan steps through the same values hundreds of
     times, and a line's coordinates are two multiplications of the whole
-    table each."""
+    table each.
+
+    Keyed by the column arrays the values come from, not by the table: every
+    step's snapshot is a new table over the same columns, and a key of the
+    table itself missed on every step.  The entry holds the arrays, so a key
+    is never matched by a new array that happens to reuse a freed one's id.
+    """
 
     def __init__(self, size: int = 8):
-        self._found: Dict[tuple, np.ndarray] = {}
+        self._found: Dict[tuple, tuple] = {}
+        self._sorted: Dict[tuple, tuple] = {}
         self._size = size
 
+    @staticmethod
+    def _sources(locs, coordinate: str) -> tuple:
+        if coordinate in LINE_COORDINATES:
+            names = ("x_nm", "y_nm")
+        elif coordinate in locs:
+            names = (coordinate,)
+        else:
+            names = ()                  # `values` says what is missing
+        return tuple(locs[name] for name in names)
+
+    def _key(self, locs, coordinate: str, line) -> Tuple[tuple, tuple]:
+        sources = self._sources(locs, coordinate)
+        return ((tuple(id(a) for a in sources), len(locs), coordinate,
+                 None if line is None else tuple(np.round(line.points, 6).ravel())),
+                sources)
+
     def __call__(self, locs, coordinate: str, line=None) -> np.ndarray:
-        key = (id(locs), len(locs), coordinate,
-               None if line is None else tuple(np.round(line.points, 6).ravel()))
+        key, sources = self._key(locs, coordinate, line)
         found = self._found.get(key)
-        if found is None:
+        if found is None or any(a is not b for a, b in zip(found[0], sources)):
             if len(self._found) >= self._size:
                 self._found.clear()
-            found = self._found[key] = values(locs, coordinate, line)
-        return found
+                self._sorted.clear()
+            found = self._found[key] = (sources, values(locs, coordinate, line))
+            self._sorted.pop(key, None)
+        return found[1]
+
+    def rows(self, locs, coordinate: str, line, lo: float, hi: float) -> np.ndarray:
+        """The rows with ``lo <= value < hi``, ascending, found by bisection.
+
+        A step's comparison over the whole table was most of what a step
+        cost on a small view of a large table; the order is worked out once
+        per coordinate (none for frames, which are sorted already), after
+        which a step costs what its window holds.
+        """
+        v = self(locs, coordinate, line)
+        key, _ = self._key(locs, coordinate, line)
+        found = self._sorted.get(key)
+        if found is None:
+            if len(v) < 2 or bool(np.all(v[1:] >= v[:-1])):
+                found = (None, v)                # NaN would have failed this
+            else:
+                order = np.argsort(v, kind="stable")
+                found = (order, v[order])        # NaN last, never inside a window
+            self._sorted[key] = found
+        order, ordered = found
+        i0, i1 = np.searchsorted(ordered, [lo, hi], side="left")
+        if order is None:
+            return np.arange(i0, i1)
+        return np.sort(order[i0:i1])
 
 
 def scanned(layers: Sequence[LayerSnapshot], scan: Optional[Scan],
@@ -111,21 +159,28 @@ def scanned(layers: Sequence[LayerSnapshot], scan: Optional[Scan],
     -- a second file without z is not emptied by a scan of z."""
     if scan is None:
         return tuple(layers)
-    get = cache or values
     out = []
     for layer in layers:
         if not layer.visible or layer.is_image or layer.locs is None:
             out.append(layer)
             continue
         try:
-            v = get(layer.locs, scan.coordinate, scan.line)
+            if cache is None:
+                v = values(layer.locs, scan.coordinate, scan.line)
+                rows = np.flatnonzero((v >= scan.lo) & (v < scan.hi))
+            else:
+                rows = cache.rows(layer.locs, scan.coordinate, scan.line, scan.lo, scan.hi)
         except KeyError:
             out.append(layer)
             continue
-        keep = (v >= scan.lo) & (v < scan.hi)
         mask = layer.mask
-        mask = keep if mask is None else np.asarray(mask, bool) & keep[:len(mask)]
-        out.append(replace(layer, mask=mask, known_indices=None, memo={}))
+        n = len(layer.locs) if mask is None else len(mask)
+        if mask is not None:
+            rows = rows[rows < n]
+            rows = rows[np.asarray(mask, bool)[rows]]
+        narrowed = np.zeros(n, bool)
+        narrowed[rows] = True
+        out.append(replace(layer, mask=narrowed, known_indices=rows, memo={}))
     return tuple(out)
 
 

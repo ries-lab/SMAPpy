@@ -76,6 +76,9 @@ class FrameSource:
 
     def __init__(self, frame: Optional[ViewFrame] = None):
         self.frame = frame
+        # the window has not drawn the last change yet: the player waits for
+        # it rather than stepping past pictures nobody saw (`gui.scan_player`)
+        self.drawing = False
 
     def __call__(self) -> Optional[ViewFrame]:
         return self.frame

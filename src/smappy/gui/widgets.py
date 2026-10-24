@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLayout, QScrollArea,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -109,7 +109,36 @@ class CollapsibleSection(QWidget):
         layout.addLayout(header)
         layout.addWidget(self.frame)
         self.button.toggled.connect(self.set_expanded)
+        self.button.clicked.connect(self._opened_by_hand)
         self.set_expanded(expanded)
+
+    def _opened_by_hand(self, on: bool) -> None:
+        # Opened near the bottom of a tab, a section unfolded out of sight and
+        # looked as if the click had done nothing.  Only a click scrolls: a
+        # section opened by the program (a restored layout) must not move the
+        # tab.  Once the layout has taken the new height, hence the timer.
+        if on:
+            QTimer.singleShot(0, self._scroll_into_view)
+
+    def _scroll_into_view(self) -> None:
+        """Scroll the nearest scroll area so all of the section shows, its
+        title bar first when it is taller than the view."""
+        try:                    # a singleShot callable must never raise
+            area = self.parentWidget()
+            while area is not None and not isinstance(area, QScrollArea):
+                area = area.parentWidget()
+            if area is None or area.widget() is None:
+                return
+            top = self.mapTo(area.widget(), QPoint(0, 0)).y()
+            bottom = top + self.height()
+            bar = area.verticalScrollBar()
+            seen = area.viewport().height()
+            if bottom > bar.value() + seen:
+                bar.setValue(min(bottom - seen, top))
+            elif top < bar.value():
+                bar.setValue(top)
+        except Exception as error:          # noqa: BLE001
+            print(f"scrolling a section into view: {error}")
 
     @property
     def title(self) -> str:
@@ -144,6 +173,31 @@ class CollapsibleSection(QWidget):
         if self.detach_button:
             self.detach_button.show()
         self.set_expanded(self.button.isChecked())
+
+
+class Popup(QFrame):
+    """A panel that drops from a title-bar button and closes on a click
+    elsewhere, as a menu does, but holding fields."""
+
+    def __init__(self, content: QWidget, parent=None):
+        super().__init__(parent, Qt.Popup)
+        self.setFrameShape(QFrame.StyledPanel)
+        # the click that closes it must not land on the image, or on the
+        # button that opened it, which would open it again at once
+        self.setAttribute(Qt.WA_NoMouseReplay)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(content)
+        self.content = content
+
+    def show_below(self, button: QWidget) -> None:
+        self.adjustSize()
+        at = button.mapToGlobal(QPoint(0, button.height()))
+        screen = button.screen().availableGeometry()
+        x = max(screen.left(), min(at.x(), screen.right() - self.width()))
+        y = max(screen.top(), min(at.y(), screen.bottom() - self.height()))
+        self.move(x, y)
+        self.show()
 
 
 def detach_to_window(section: CollapsibleSection, parent=None) -> "FloatingWindow":

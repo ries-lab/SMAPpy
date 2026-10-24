@@ -1248,6 +1248,10 @@ class ControlWindow(QMainWindow):
 
 
     def _on_session(self, what: str) -> None:
+        if what == "scan":
+            # the player's step: nothing here changes, and the counts and
+            # the restyled toolbars cost the player a few ms a step
+            return
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
             self.render_window.show()      # closed by accident: a change wants it back
         self._refresh_undo()

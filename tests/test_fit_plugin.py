@@ -300,7 +300,11 @@ def test_the_camera_part_is_folded_and_titled_by_what_it_resolves_to(stack):
     from smappy.locs import Localizations
     from smappy.session import Session
 
+    from smappy import config
     QApplication.instance() or QApplication([])
+    # a microscope chosen by an earlier test on this worker would stand in
+    # (`test_microscope_manager` leaves M2 there)
+    config.set("last_microscope", "")
     panel = PluginPanel(GaussianFit, Session(Localizations()))
     section = panel.form.sections["camera"]
     assert not section.button.isChecked()

@@ -101,7 +101,9 @@ ax.text(cx - w + 350, cy - w + 160, "500 nm", ha="center", va="bottom", fontsize
 localizations is turned by a rotation $R$ into view coordinates: two across
 the screen, and a third, the *depth*, pointing at the viewer.  Dragging with
 the mouse changes $R$.  The buttons *top*, *front* and *side* look at the
-slab from above, along its width and along its length.  The box's edges are
+slab from above, along its width and along its length.  Opened while a line
+ROI is drawn, the window looks at the line from the front -- along it, z
+up -- and fits it to the window.  The box's edges are
 drawn over the image, and a small tripod in the corner shows where the slab's
 own x (red), y (green) and z (blue) point.
 

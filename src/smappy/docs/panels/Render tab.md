@@ -25,7 +25,8 @@ the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
 drawn and edited on the first and its outline is on all of them.  Beside it, *pixel* says what one
 screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
 *pixel* to go to 10 nm.  Right-click the picture to move that place to the
-middle; double-click it to show everything, as *Reset view* (Ctrl+0) does.  At the end of the toolbar is how many localizations each layer draws
+middle; double-click it to show everything, as *Reset view* (Ctrl+0) does.  *keys* on the toolbar lists what the mouse and the keys do in the
+picture, the keys that turn a line ROI among them.  At the end of the toolbar is how many localizations each layer draws
 in the view -- counted again after every zoom -- or in the ROI when one is
 drawn; *3D* opens the [3D view](plugin:Panels/3D view).  Every control below the layer strip edits one layer,
 the one selected in the strip.
@@ -864,9 +865,11 @@ Plays; pressed again, pauses, and the window stays where it is.
 Stops and shows everything again.
 
 ### speed
-Steps per second while playing, and the frame rate of a recorded movie.  A
-large table may draw more slowly than this; the picture then shows the
-latest step when it is ready.
+Steps per second while playing, and the frame rate of a recorded movie.  It
+is at most what the windows can draw: the player waits for the 2D picture,
+and the 3D view when it is open, to show a step before it takes the next,
+so no step is skipped.  A large table or a large window can therefore play
+more slowly than this; a recorded movie keeps the frame rate set here.
 
 ### at the end
 What playing does at the last step: start again from the first, turn back,

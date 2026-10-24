@@ -80,6 +80,19 @@ LINE_TURN_KEYS = {**dict.fromkeys((Qt.Key_BracketLeft, Qt.Key_BraceLeft, Qt.Key_
 LINE_TURN = 5.0              # degrees per key press
 LINE_TURN_FINE = 1.0         # with Shift
 
+# what the picture does with the mouse and the keys, behind *keys*, as in the
+# 3D window (`view3d.KEYS`): the turning keys were in a tooltip nobody hovered
+KEYS = """<table cellspacing="0" cellpadding="3">
+<tr><td><b>drag</b></td><td>pan</td></tr>
+<tr><td><b>wheel</b>, pinch, right-drag</td><td>zoom</td></tr>
+<tr><td><b>right-click</b></td><td>put that place in the middle</td></tr>
+<tr><td><b>double-click</b>, Ctrl+0</td><td>show everything</td></tr>
+<tr><td><b>[ ]</b> or <b>, .</b></td><td>turn a line ROI by 5°, with Shift by 1°</td></tr>
+<tr><td><b>Esc</b></td><td>stop drawing an ROI</td></tr>
+<tr><td><b>polygon ROI</b></td><td>a click per corner, double-click closes</td></tr>
+<tr><td><b>Ctrl+3</b></td><td>show or hide the 3D view</td></tr>
+</table>"""
+
 
 class RenderWorker(QObject):
     """Renders on its own thread; the view keeps answering to the mouse.
@@ -149,9 +162,16 @@ class PanelJob:
     layers: Tuple[LayerSnapshot, ...]
     fov: FieldOfView
     panels: Tuple = ("overlay",)
+    # 8-bit, for the screen: done here on the render thread, since pyqtgraph
+    # otherwise scales a float image on the GUI thread on every paint -- a
+    # few ms a picture, which is what held back the player on a small view
+    to_screen: bool = False
 
     def run(self, worker=None) -> List[np.ndarray]:
-        return render_panels(self.layers, self.fov, self.panels)[0]
+        images = render_panels(self.layers, self.fov, self.panels)[0]
+        if self.to_screen:
+            images = [(np.clip(image, 0, 1) * 255 + 0.5).astype(np.uint8) for image in images]
+        return images
 
 
 class RenderView(QWidget):
@@ -330,8 +350,13 @@ class RenderView(QWidget):
             self._arrange()
             self.schedule()
         elif what == "scan":
-            self.tile_valid = False      # the player moved: what is drawn changed
-            self.schedule()
+            # the player moved: drawn now rather than after the debounce,
+            # which a player faster than it restarted for ever, so nothing
+            # was drawn at all; and flagged, so the player waits for it
+            self.tile_valid = False
+            self.frame_source.drawing = self.isVisible()
+            self._timer.stop()
+            self.render()
         elif what == "roi":
             self._show_roi(self.session.roi)
 
@@ -540,22 +565,27 @@ class RenderView(QWidget):
         if not self._has_content():
             self.image.clear()
             self.fov = None
+            self.frame_source.drawing = False
             return
         view = self.current_fov()
         self._update_guides(view)
         if self._covered(view):
+            self.frame_source.drawing = False
             return
         if self._busy:                   # one at a time; the newest view wins
             self._pending = True
             return
+        # while the player runs every step is a new picture, and the margin
+        # a pan would use is more than twice the pixels drawn for nothing
+        scale = 1.0 if self.session.scan is not None else TILE
         w, h = view.x1 - view.x0, view.y1 - view.y0
-        tile = FieldOfView.fit((view.x0 - (TILE - 1) / 2 * w, view.x1 + (TILE - 1) / 2 * w),
-                               (view.y0 - (TILE - 1) / 2 * h, view.y1 + (TILE - 1) / 2 * h),
-                               int(view.nx * TILE), int(view.ny * TILE))
+        tile = FieldOfView.fit((view.x0 - (scale - 1) / 2 * w, view.x1 + (scale - 1) / 2 * w),
+                               (view.y0 - (scale - 1) / 2 * h, view.y1 + (scale - 1) / 2 * h),
+                               int(view.nx * scale), int(view.ny * scale))
         self._generation += 1
         self._busy = True
         # frozen here, on the GUI thread: the worker sees nothing else
-        self._job = PanelJob(self.snapshot(), tile, tuple(self.panels))
+        self._job = PanelJob(self.snapshot(), tile, tuple(self.panels), to_screen=True)
         self.render_requested.emit(self._job, self._generation)
 
     def _place_error_hint(self) -> None:
@@ -602,6 +632,8 @@ class RenderView(QWidget):
         if self._pending:
             self._pending = False
             self.render()
+        else:
+            self.frame_source.drawing = False
 
     def _keep_indices(self, job: Optional[PanelJob]) -> None:
         """Hand the filters what the render thread compacted from their masks,
@@ -629,6 +661,8 @@ class RenderView(QWidget):
         if self._pending:
             self._pending = False
             self.render()
+        else:
+            self.frame_source.drawing = False
 
     def render_now(self) -> np.ndarray:
         """Synchronous: the exact current view, for saving and tests."""
@@ -991,7 +1025,10 @@ class RenderToolBar(QToolBar):
         # the toolbar, and it resizes the line that is already drawn.
         self.width_label = QLabel(" width ")
         self.addWidget(self.width_label)
-        self.line_width = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
+        # whole nanometres, 10 a wheel step: a tenth of a nanometre was a
+        # precision nobody draws a line to, and a wheel step of 1 took
+        # thirty turns to go from a thin line to a wide one
+        self.line_width = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, singleStep=10)
         self.line_width.setKeyboardTracking(False)
         self.line_width.setValue(view.line_width)
         self.line_width.setMaximumWidth(95)
@@ -1043,7 +1080,7 @@ class RenderToolBar(QToolBar):
         self.pixel_button.setToolTip(f"zoom to {DEFAULT_PIXEL:g} nm per screen pixel")
         self.pixel_button.clicked.connect(lambda: self.pixel.setValue(DEFAULT_PIXEL))
         self.addWidget(self.pixel_button)
-        self.pixel = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
+        self.pixel = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
         self.pixel.setKeyboardTracking(False)
         self.pixel.setMaximumWidth(95)
         self.pixel.setToolTip("what one screen pixel is: type a size to zoom to "
@@ -1053,6 +1090,15 @@ class RenderToolBar(QToolBar):
         view.view.sigRangeChanged.connect(self._show_pixel)
         self._show_pixel()
         self._width_unit()
+
+        from .widgets import Popup
+        self.keys_button = QToolButton(text="keys")
+        self.keys_button.setToolTip("what the mouse and the keys do in the picture")
+        keys = QLabel(KEYS)
+        keys.setTextFormat(Qt.RichText)
+        self.keys = Popup(keys, self)
+        self.keys_button.clicked.connect(lambda: self.keys.show_below(self.keys_button))
+        self.addWidget(self.keys_button)
 
         # what each layer draws in the view: counted again once a zoom or a
         # pan settles, since a count of the whole table beside a zoomed
@@ -1090,8 +1136,10 @@ class RenderToolBar(QToolBar):
 
     def set_border(self, colour: str) -> None:
         """The session's colour along the bottom (`gui.identity`), or none."""
-        self.border = toolbar_border(colour)
-        self._style_buttons()
+        border = toolbar_border(colour)
+        if border != self.border:       # a style sheet set again restyles everything
+            self.border = border
+            self._style_buttons()
 
     def _update_counts(self, what: str) -> None:
         """Localizations per layer in the view, or in the ROI when there is one."""
