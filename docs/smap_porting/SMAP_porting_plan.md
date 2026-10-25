@@ -269,6 +269,20 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **6c** ✅ | **Voronoi render mode** (SharpViSu) | S | - |
 | **6d** ✅ | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
 
+### Wave 6 -- the design is in `wave6_design.md` (decided 2026-10-25)
+
+*Segment regions* simplified and given more structures (#109, #111, #135,
+SMAP's NPC cleanup): a circle template (ring or disc, over a range of
+radii) replaces the ring template and density peaks; beads; positions from
+a file; one *keep* condition on the values measured on each candidate;
+presets NPC, CME and Circles; the helpers in `smappy/segmentation.py`.
+
+| step | what | size | needs |
+|---|---|---|---|
+| **6.1** | `smappy/segmentation.py`, the circle template with its values and *keep*, density peaks removed, the presets | M-L | - |
+| **6.2** | beads, on `fiducials.find_beads` | S | 6.1 |
+| **6.3** | positions from a file | S | 6.1 |
+
 ### Done
 
 * **Step 1** (2026-10-14): `FormState.shown`.
