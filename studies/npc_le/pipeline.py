@@ -14,7 +14,7 @@ from scipy.optimize import minimize_scalar
 
 import bench
 import spill
-from smappy.plugins.npc import NPCSegmentSettings, corner_model
+from smappy.plugins.npc import corner_model
 
 HERE = Path(__file__).resolve().parent
 POOL, REPLICATES = 7, 5
@@ -38,7 +38,7 @@ def one_condition(condition):
         pores, sigma_all, found, junk, copies = [], [], 0, 0, 0
         for seed in range(1 + replicate * POOL, 1 + (replicate + 1) * POOL):
             st = bench.settings_for(efficiency, photons, blinks, seed)
-            pores += bench.pores_of(st, NPCSegmentSettings(), truth_only=False)
+            pores += bench.pores_of(st, bench.NPC_KEEP, truth_only=False)
             sigma_all.append(bench.pores_of.sigma_all)
             found += bench.pores_of.found
             junk += bench.pores_of.junk

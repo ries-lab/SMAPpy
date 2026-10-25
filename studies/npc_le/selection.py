@@ -5,9 +5,8 @@ conditioned on at least 4 corners (`joint.fit`), against the efficiency the
 simulation was run with.  The simulation has junk that is not a ring
 (`npc_junk.yaml`).  The segmentations:
 
-* ``default``: the NPC segmenter with its defaults;
-* ``lenient``: *min localizations* 4, its checks as they are;
-* ``adaptive``: the segmenter's candidates with its checks off, judged again
+* ``default``: *Segment regions*' NPC preset (its *keep*);
+* ``adaptive``: the segmenter's candidates with only ``n_ring >= 4``, judged again
   on the localizations better than the corner cutoff (so that imprecise ones
   do not count as outside), each fraction by a binomial test of its count
   (so that a pore with five localizations is not rejected for two outside),
@@ -28,24 +27,29 @@ from scipy.stats import binom
 import bench
 import joint
 from pipeline import counting
-from smappy.plugins.npc import NPCSegmentSettings, fit_circle, segment_npcs
+from smappy.plugins.npc import fit_circle
+from smappy.segmentation import VALUES, find_circles, judge
 
 HERE = Path(__file__).resolve().parent
 POOL, REPLICATES = 7, 5
 ALPHA = 0.05                     # a fraction fails when its count is this unlikely
-# on the precise localizations a pore has a few percent inside and outside, so
-# the limits can be tighter than the segmenter's, which count every one
-CHECKS = NPCSegmentSettings(max_inside=0.1, max_outside=0.2)
+# the ring the NPC preset looks for, and the radii a pore may fit
+R, DR, WINDOW_NM, RADII = 55.0, 15.0, 100.0, (40.0, 70.0)
 RADIAL_EXTRA_NM = 5.0            # tilt and the label, beyond the precision
 FAR_FRACTION = 0.01              # of |z| > 3 a pore may have
 # 4 localizations, the fewest a pore showing 4 corners can have: no more, or
 # the sparse pores that still show 4 corners are lost
 MIN_LOCS = 4
-OPEN = NPCSegmentSettings(min_locs=MIN_LOCS, min_radius_nm=0.0, max_radius_nm=1e9,
-                          max_inside=1.0, max_outside=1.0, min_spread_nm=0.0)
+OPEN = f"n_ring >= {MIN_LOCS}"
 
 
-def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
+def candidates(grouped, keep):
+    sites = find_circles(grouped, "ring", R, R, DR)
+    judge(sites, keep, VALUES["ring"])
+    return [site for site in sites if site["use"]]
+
+
+def adaptive(grouped, cutoff=joint.CUTOFF):
     """The segmenter's candidates, judged on their precise localizations."""
     x = np.asarray(grouped["x_nm"], float)
     y = np.asarray(grouped["y_nm"], float)
@@ -54,10 +58,10 @@ def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
     from scipy.spatial import cKDTree
     tree = cKDTree(np.column_stack((x[precise], y[precise])))
     xp, yp, sp = x[precise], y[precise], s[precise]
-    R, dR = settings.radius_nm, settings.ring_width_nm
+    dR = DR
     out = []
-    for site in segment_npcs(grouped, OPEN):
-        near = np.asarray(tree.query_ball_point(site["center"], settings.window_nm), int)
+    for site in candidates(grouped, OPEN):
+        near = np.asarray(tree.query_ball_point(site["center"], WINDOW_NM), int)
         n = len(near)
         if n < 3:
             continue
@@ -66,7 +70,7 @@ def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
         c = np.asarray(fit_circle(xp[near], yp[near], c, radius=R, scale=dR)[:2])
         r = np.hypot(xp[near] - c[0], yp[near] - c[1])
         radius = fit_circle(xp[near], yp[near], c, scale=dR)[2]
-        if not settings.min_radius_nm <= radius <= settings.max_radius_nm:
+        if not RADII[0] <= radius <= RADII[1]:
             continue
         # Far from the ring for its own precision?  On a pore |z| > 3 happens
         # 0.3 % of the time; a filled structure, centred or seen from beside
@@ -82,12 +86,9 @@ def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
 
 
 SEGMENTATIONS = {
-    "default": lambda g: [q["center"] for q in segment_npcs(g, NPCSegmentSettings())
-                          if q["use"]],
-    "lenient": lambda g: [q["center"] for q in
-                          segment_npcs(g, NPCSegmentSettings(min_locs=MIN_LOCS)) if q["use"]],
+    "default": bench.segment,
     "adaptive": adaptive,
-    "none": lambda g: [q["center"] for q in segment_npcs(g, OPEN)],
+    "none": lambda g: [q["center"] for q in candidates(g, OPEN)],
 }
 
 

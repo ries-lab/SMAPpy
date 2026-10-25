@@ -15,7 +15,7 @@ window.
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow) -- the plugins it runs, one after the other, each with its own
 settings in a section of this panel -- rather than a plugin of its own:
-[Segment regions](plugin:Analysis/Regions/Segment regions) (its ring template, preset *NPC*),
+[Segment regions](plugin:Analysis/Regions/Segment regions) (its circle template, with the *NPC* preset's ring and *keep*),
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
 [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency).
 Their pages explain the methods; this one only what running them together

@@ -2,7 +2,7 @@
 from a corner is least biased by imprecise and repeated localizations?
 
 Simulates Nup96 pores (tilted up to 10 degrees), links them (always grouped,
-as on real data), segments them with `ROIManager/Segment/NPC`, and scores
+as on real data), segments them with *Segment regions*' NPC preset, and scores
 several corner counters against the truth of the same pores:
 
 * ``labelled``: the corners with at least one labelled copy (the recipe);
@@ -27,9 +27,9 @@ from typing import Callable, Dict, List
 import numpy as np
 
 from smappy.group import group
-from smappy.plugins.npc import (LabelingEfficiencySettings, NPCSegmentSettings,
-                                PRECISION_OF_ARC, fit_circle, labeling_efficiency,
-                                segment_npcs)
+from smappy.plugins.npc import (LabelingEfficiencySettings, PRECISION_OF_ARC,
+                                fit_circle, labeling_efficiency)
+from smappy.segmentation import VALUES, find_circles, judge
 from smappy.simulate import ground_truth, simulate
 from smappy.simulate.settings import (BlinkingSettings, LabellingSettings,
                                       SimulationSettings, StructureSettings)
@@ -245,22 +245,32 @@ def pores_from_sites(ctx: dict, centres_found, truth_only: bool = True) -> List[
     return out
 
 
-def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
+#: the NPC preset's keep (`smappy/data/segment_presets/NPC.yaml`)
+NPC_KEEP = "n_ring >= 4 and 40 <= radius_nm <= 70 and far_p >= 0.05"
+
+
+def segment(grouped, keep: str = NPC_KEEP) -> list:
+    """The centres the NPC preset's ring keeps with this *keep*."""
+    sites = find_circles(grouped, "ring", 55.0, 55.0)
+    judge(sites, keep, VALUES["ring"])
+    return [site["center"] for site in sites if site["use"]]
+
+
+def pores_of(settings: SimulationSettings, keep: str = None,
              truth_only: bool = True) -> List[Pore]:
-    """The pores the segmenter finds.  By default with *min localizations* 3
-    and only the sites on a true pore (the counting under study, not the
-    segmentation); ``segment=NPCSegmentSettings(), truth_only=False`` is the
-    pipeline as a user runs it, junk sites included (their truth fields are
-    those of the nearest pore and mean nothing).  At 500 photons the
-    segmenter at 3 proposes as many sites again on scattered imprecise
-    localizations, which `pores_of.junk` counts."""
+    """The pores the segmenter finds.  By default with ``n_ring >= 3`` and
+    only the sites on a true pore (the counting under study, not the
+    segmentation); ``keep=NPC_KEEP, truth_only=False`` is the pipeline as a
+    user runs it, junk sites included (their truth fields are those of the
+    nearest pore and mean nothing).  At 500 photons the segmenter at 3
+    proposes as many sites again on scattered imprecise localizations,
+    which `pores_of.junk` counts."""
     ctx = prepare(settings)
     # the precision of every localization in the field, which is what a
     # cutoff's pass fraction q is measured on
     pores_of.sigma_all = ctx["sigma"]
-    sites = [site["center"] for site in
-             segment_npcs(ctx["grouped"], segment or NPCSegmentSettings(min_locs=3))
-             if site["use"]]
+    sites = segment(ctx["grouped"],
+                    keep or NPC_KEEP.replace("n_ring >= 4", "n_ring >= 3"))
     out = pores_from_sites(ctx, sites, truth_only)
     pores_of.junk, pores_of.found = pores_from_sites.junk, pores_from_sites.found
     return out

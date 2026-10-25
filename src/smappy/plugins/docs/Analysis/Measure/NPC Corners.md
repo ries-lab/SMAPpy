@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.npc.count_corners, smappy.plugins.npc.segments, smappy.plugins.npc.fit_circle]
+covers: [smappy.plugins.npc.count_corners, smappy.plugins.npc.segments, smappy.segmentation.fit_circle]
 ---
 
 ## What it does
@@ -29,7 +29,7 @@ detected label).  Its page explains why the counts are taken this way.
 
 It is not in a new list of per-region steps by itself: add it to the
 *per-region steps* in the Regions tab when the ROIs are pores.  It needs ROIs centred
-roughly on the pores, such as those of [Segment regions](plugin:Analysis/Regions/Segment regions)'s ring template,
+roughly on the pores, such as those of [Segment regions](plugin:Analysis/Regions/Segment regions) with its *NPC* preset,
 pores seen face on, blinks merged -- [merge blinks](plugin:Panels/Glossary),
 also called grouping or linking, combines the localizations in consecutive
 frames that come from one blinking event into one -- and the

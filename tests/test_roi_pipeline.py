@@ -5,14 +5,16 @@ import pytest
 from smappy import plugins
 from smappy.locs import Localizations
 from smappy.plugins import Context, settings_from, settings_values
-from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histograms,
-                                density_peaks, histograms)
-from smappy.plugins.segment import SegmentRegions, SegmentSettings
+from smappy.plugins.roi import HistogramSettings, Histograms, histograms
+from smappy.plugins.segment import CircleSettings, SegmentRegions, SegmentSettings
+from smappy.segmentation import find_circles
 
 
-def peaks(**values):
-    """Segment regions' settings for density peaks with these values."""
-    return SegmentSettings(method="peaks", peaks=DensityPeakSettings(**values))
+def discs(keep="n_locs >= 20", **values):
+    """Segment regions' settings for the circle template's disc, 20 to 80 nm,
+    with these values."""
+    circle = {"shape": "disc", "min_radius_nm": 20.0, "max_radius_nm": 80.0, **values}
+    return SegmentSettings(method="circle", circle=CircleSettings(**circle), keep=keep)
 from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
 from smappy.roi_manager import pipeline as pipeline_module
 from smappy.chain import Block, Step as ChainStep
@@ -57,12 +59,14 @@ def test_the_region_plugins_are_registered_under_regions():
 
 def test_the_defaults_dict_became_a_typed_settings_class():
     specs = plugins.get("Analysis/Regions/Segment regions").specs()
-    assert set(specs) == {"preset", "method", "ring", "peaks", "ids", "replace"}
-    peak = specs["peaks"].children
-    assert set(peak) == {"bin_nm", "sigma_nm", "separation_nm",
-                         "count_radius_nm", "min_count"}
-    assert peak["bin_nm"].type is float and peak["bin_nm"].info.unit == "nm"
-    assert peak["min_count"].type is int and peak["min_count"].info.min == 1
+    assert set(specs) == {"preset", "method", "circle", "beads", "ids", "file", "keep",
+                          "keep_rejected", "replace"}
+    circle = specs["circle"].children
+    assert set(circle) == {"shape", "min_radius_nm", "max_radius_nm", "ring_width_nm",
+                           "precision_nm", "bin_nm"}
+    assert circle["bin_nm"].type is float and circle["bin_nm"].info.unit == "nm"
+    assert specs["beads"].children["memory"].type is int
+    assert specs["beads"].children["memory"].info.min == 0
 
 
 def test_statistics_measures_one_site_through_the_context():
@@ -77,7 +81,7 @@ def test_statistics_measures_one_site_through_the_context():
 
 def test_a_bad_setting_is_refused_rather_than_silently_odd():
     with pytest.raises(ValueError, match="must be positive"):
-        density_peaks(table([(0, 0)]), DensityPeakSettings(bin_nm=0.0))
+        find_circles(table([(0, 0)]), "disc", 20.0, 80.0, bin_nm=0.0)
 
 
 def test_histograms_needs_a_site_table():
@@ -181,28 +185,28 @@ def test_a_file_from_before_the_block_reads_its_steps_and_options():
 # ------------------------------------------------------------- the settings
 
 def test_settings_round_trip_through_a_flat_map():
-    settings = DensityPeakSettings(bin_nm=5.0, min_count=3)
+    settings = CircleSettings(bin_nm=5.0, shape="disc")
     values = settings_values(settings)
-    assert values["bin_nm"] == 5.0 and values["min_count"] == 3
-    assert settings_from(DensityPeakSettings, values) == settings
+    assert values["bin_nm"] == 5.0 and values["shape"] == "disc"
+    assert settings_from(CircleSettings, values) == settings
 
 
 def test_a_renamed_field_costs_that_field_and_not_the_pipeline():
-    rebuilt = settings_from(DensityPeakSettings, {"bin_nm": 9.0, "went_away": 1})
+    rebuilt = settings_from(CircleSettings, {"bin_nm": 9.0, "went_away": 1})
     assert rebuilt.bin_nm == 9.0
-    assert rebuilt.min_count == DensityPeakSettings().min_count
+    assert rebuilt.min_radius_nm == CircleSettings().min_radius_nm
 
 
 def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
     from smappy.session import Session
     session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
     session.show_grouped(0, False)
-    settings = peaks(separation_nm=1000.0, min_count=20)
+    settings = discs()
     finder = SegmentRegions()
     preview = finder.preview(session.context(), settings)
     assert session.rois.rois == {}
     sites = preview.roi_preview["sites"]
-    assert len(sites) == 3 and preview.text == "3 candidates previewed"
+    assert len(sites) == 3 and preview.text.startswith("preview: 3 structures of")
 
     # the session puts it where the manager draws it; a run adds the same
     # ROIs and takes the preview away
@@ -218,11 +222,11 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
 def test_propose_is_find_without_the_adding():
     project, source = rois_of(table([(0, 0), (3000, 0)], per=40))
     project.set_geometry(300)
-    settings = peaks(separation_nm=1000.0, min_count=20)
+    settings = discs()
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
     assert origin["method"] == "Analysis/Regions/Segment regions"
-    assert all(p["origin"]["segment"] == "peaks" for p in proposals)
+    assert all(p["origin"]["segment"] == "circle" for p in proposals)
     found = project.find(source.id, settings=settings)
     assert [r.center for r in found] == [p["center"] for p in proposals]
     # the found ROIs are what a second proposal keeps its distance from,
@@ -269,7 +273,7 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (1500.0, 1500.0))
     finder = SegmentRegions()
-    settings = peaks(separation_nm=1000.0, min_count=20)
+    settings = discs()
     first = finder.run(session.context(), settings).rois
     assert len(first) == 3
     project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
@@ -369,8 +373,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     file_id = next(iter(project.sources))
 
     found = project.find(file_id, plugin=SegmentRegions(),
-                         settings=peaks(sigma_nm=60.0, separation_nm=1000.0,
-                                        min_count=20))
+                         settings=discs())
     assert len(found) == 4
 
     window = RegionSteps(session)
@@ -402,8 +405,9 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     session.show_grouped(0, False)
     header = ROIHeader(session)
     panel = PluginPanel(plugins.get("Analysis/Regions/Segment regions"), session)
-    panel.form.restore({"method": "peaks", "peaks.separation_nm": 1000.0,
-                        "peaks.min_count": 20})
+    panel.form.restore({"method": "circle", "circle.shape": "disc",
+                        "circle.min_radius_nm": 20.0, "circle.max_radius_nm": 80.0,
+                        "keep": "n_locs >= 20"})
 
     def wait(start):
         loop = QEventLoop()
@@ -422,11 +426,11 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     assert window.clear_preview_button.isVisibleTo(window)
     assert "previewing 4" in window.status.currentMessage()
 
-    panel.form.restore({"peaks.min_count": 1000})
+    panel.form.restore({"keep": "n_locs >= 1000"})
     wait(panel.preview)
     assert session.rois.segment_preview["sites"] == []
 
-    panel.form.restore({"peaks.min_count": 20})
+    panel.form.restore({"keep": "n_locs >= 20"})
     wait(panel.run)
     assert len(session.rois.rois) == 4 and window.table.model().rowCount() == 4
     assert session.rois.segment_preview is None

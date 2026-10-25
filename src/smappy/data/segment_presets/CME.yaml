@@ -1,0 +1,12 @@
+# Clathrin-coated pits: filled discs of 30 to 150 nm radius.  keep asks only
+# for enough localizations; centre_ratio (low for pits that look like rings,
+# late in their growth) and roundness are there to sort or filter on.  A
+# first set of values, to be refined on real data.
+method: circle
+circle:
+  shape: disc
+  min_radius_nm: 30.0
+  max_radius_nm: 150.0
+  precision_nm: 20.0
+  bin_nm: 10.0
+keep: n_locs >= 20
