@@ -47,6 +47,7 @@ class MicroscopeForm(SettingsForm):
         # the inner form's tables are this form's: every SettingsForm method works on them
         self.fields, self.labels = self.inner.fields, self.inner.labels
         self.sections, self.row_layouts = self.inner.sections, self.inner.row_layouts
+        self.row_widgets, self.beside = self.inner.row_widgets, self.inner.beside
         self.more_section = self.inner.more_section
         self.inner.changed.connect(self.changed)
         self.inner.field_changed.connect(self.field_changed)

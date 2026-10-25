@@ -1,0 +1,7 @@
+# Fiducial beads: on in every frame, bright, never bleached.
+name: beads
+structure.kind: beads
+structure.density_um2: 0.05
+blinking.activation: always
+blinking.photons: 20000
+blinking.photons_std: 0

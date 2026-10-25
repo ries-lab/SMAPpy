@@ -298,6 +298,11 @@ def leaves(specs, prefix: str = ""):
         dotted = prefix + name
         if spec.children is not None:
             yield from leaves(spec.children, dotted + ".")
+        elif spec.items is not None:
+            # a list of parts: the list, then an item's fields, named without
+            # an index -- each is explained once, for every item
+            yield dotted, spec
+            yield from leaves(spec.items, dotted + ".")
         else:
             yield dotted, spec
 
@@ -342,6 +347,17 @@ def parameter_table(specs, notes: Dict[str, str], converter: Converter) -> str:
                             f'{html.escape(info.label or name)}</b>'
                             f'{" &ndash; " + text if text else ""}</td></tr>')
                 emit(spec.children, dotted + ".", depth + 1)
+                continue
+            if spec.items is not None:
+                note = notes.get(dotted, "")
+                text = converter.inline(_sentence(info.help)) if info.help else ""
+                if note:
+                    text += "".join(converter._blocks(note.splitlines()))
+                rows.append(f'<tr class="part"><td colspan="3"><b>'
+                            f'{html.escape(info.label or name)}</b> (a list; each '
+                            f'item has the settings below)'
+                            f'{" &ndash; " + text if text else ""}</td></tr>')
+                emit(spec.items, dotted + ".", depth + 1)
                 continue
             label = html.escape(info.label or name)
             more = ' <span class="more">(more)</span>' if info.advanced else ""

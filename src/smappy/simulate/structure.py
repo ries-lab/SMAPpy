@@ -9,7 +9,7 @@ geometry, and optionally *copies* of the whole:
 
     elements:
       - points: [[0, 0, 0], [12, 5, 0]]     # label positions, nm
-      - file: labels.csv                    # x, y[, z][, dye] per row, nm
+      - file: labels.csv                    # x, y[, z] per row, nm
       - line: [[0, 0, 0], [1000, 0, 0]]     # a polyline, `density` per nm
         density: 0.05
         width: 15                           # labels scatter by this about it
@@ -30,7 +30,7 @@ geometry, and optionally *copies* of the whole:
       jitter: 20                            # each copy moved by up to +-this, nm
       min_distance: 300                     # between copies, random placement
 
-Every element takes ``dye`` (default 1) and ``width``.  Explicit positions
+Every element takes ``width``.  Explicit positions
 (``points``, ``file``) are the same in every copy; the geometric elements are
 sampled afresh for each, Poisson in number, so no two copies of a filament
 network are alike.  A structure made of different things -- pores and some
@@ -40,6 +40,9 @@ own copies.  Paths are relative to the YAML.
 This is the geometry only: which labels carry a fluorophore, and how many, is
 the labelling (`smappy.simulate.kinetics.label`), set with the simulation and
 not with the structure, because the same structure is labelled well or badly.
+Nor is the colour: a structure in two colours is two components of a scene
+(`smappy.simulate.scene`), each its own geometry, labelling and dye, the
+second put where the first's copies are when they belong together.
 
 The built-in structures are YAML files like any other, in
 ``smappy/data/structures``, so each is also an example of the syntax.
@@ -60,13 +63,15 @@ KINDS = ("points", "file", "line", "circle", "polygon", "image")
 class Labels:
     """Label positions and what each belongs to."""
     xyz: np.ndarray          # (n, 3) nm
-    dye: np.ndarray          # (n,) int, 1-based
     copy: np.ndarray         # (n,) int, which copy of the structure, 0-based
     # per copy, by its number: where it was put (x_nm, y_nm, z_nm, the
     # jitter included) and how it was turned, R = Rz(alpha) Ry(beta) Rz(gamma)
     # in degrees -- gamma the turn in the plane, beta the tilt, alpha its
     # direction
     poses: Optional[Dict[str, list]] = None
+    # the copies as `_placements` gives them, (position, rotation, angles):
+    # what a component placed "same as" this one is put at
+    placements: Optional[list] = None
 
     def __len__(self) -> int:
         return len(self.xyz)
@@ -132,29 +137,37 @@ class Structure:
             self.parts.append(([_Element(e, self.base) for e in elements],
                                part.get("copies")))
 
-    def sample(self, rng) -> Labels:
-        xyz, dye, copy = [], [], []
+    def sample(self, rng, copies: Optional[Dict[str, Any]] = None,
+               placements: Optional[list] = None) -> Labels:
+        """The labels of every copy.  ``copies`` -- a ``copies:`` block --
+        places the whole structure, every part together, instead of the
+        file's own blocks; ``placements`` puts it exactly where another
+        structure's copies were (`Labels.placements`)."""
+        parts = self.parts
+        if copies is not None or placements is not None:
+            parts = [([e for elements, _ in self.parts for e in elements], copies)]
+        xyz, copy, used = [], [], []
         poses = {k: [] for k in ("x_nm", "y_nm", "z_nm", "alpha_deg", "beta_deg",
                                  "gamma_deg")}
+        poses["part"] = []                # which of the file's `parts:` it is a copy of
         n_copies = 0
-        for elements, copies in self.parts:
-            placements = _placements(copies, rng)
-            for position, rotation, angles in placements:
+        for number, (elements, block) in enumerate(parts):
+            where = placements if placements is not None else _placements(block, rng)
+            for position, rotation, angles in where:
+                used.append((position, rotation, angles))
                 for key, value in zip(poses, (*position, *angles)):
                     poses[key].append(round(float(value), 3))
+                poses["part"].append(number)
                 one = [e.sample(rng) for e in elements]
-                pts = np.vstack([p for p, _ in one]) if one else np.zeros((0, 3))
+                pts = np.vstack(one) if one else np.zeros((0, 3))
                 if rotation is not None:
                     pts = pts @ rotation.T
                 xyz.append(pts + position)
-                dye.append(np.concatenate([d for _, d in one]))
                 copy.append(np.full(len(pts), n_copies))
                 n_copies += 1
         if not xyz:
-            return Labels(np.zeros((0, 3)), np.zeros(0, np.int32), np.zeros(0, np.int32),
-                          poses)
-        return Labels(np.vstack(xyz), np.concatenate(dye).astype(np.int32),
-                      np.concatenate(copy).astype(np.int32), poses)
+            return Labels(np.zeros((0, 3)), np.zeros(0, np.int32), poses, used)
+        return Labels(np.vstack(xyz), np.concatenate(copy).astype(np.int32), poses, used)
 
 
 class _Element:
@@ -167,7 +180,6 @@ class _Element:
                              f"this one has {kinds or sorted(spec)}")
         self.kind = kinds[0]
         self.spec = spec
-        self.dye = int(spec.get("dye", 1))
         self.width = float(spec.get("width", 0.0))
         self.density = float(spec.get("density", 0.0))
         value = spec[self.kind]
@@ -176,8 +188,7 @@ class _Element:
         if self.kind == "points":
             self.points = _xyz(value, "points")
         elif self.kind == "file":
-            self.points, dyes = read_labels(base / str(value))
-            self.dyes = dyes if dyes is not None else np.full(len(self.points), self.dye)
+            self.points = read_labels(base / str(value))
         elif self.kind == "line":
             self.vertices = _xyz(value, "line")
             if len(self.vertices) < 2:
@@ -200,11 +211,9 @@ class _Element:
             self.origin = np.asarray(spec.get("origin", [0, 0]), float)
             self.z = _z_range(spec.get("z", 0.0))
 
-    def sample(self, rng):
-        if self.kind == "points":
-            pts, dye = self.points, np.full(len(self.points), self.dye)
-        elif self.kind == "file":
-            pts, dye = self.points, self.dyes
+    def sample(self, rng) -> np.ndarray:
+        if self.kind in ("points", "file"):
+            pts = self.points
         elif self.kind == "line":
             pts = _sample_polyline(self.vertices, self.density, rng)
         elif self.kind == "circle":
@@ -214,11 +223,9 @@ class _Element:
         else:
             pts = _sample_image(self.image, self.pixelsize, self.origin, self.density,
                                 self.z, rng)
-        if self.kind not in ("points", "file"):
-            dye = np.full(len(pts), self.dye)
         if self.width > 0 and len(pts):
             pts = pts + rng.normal(0, self.width, pts.shape)
-        return np.asarray(pts, float).reshape(-1, 3), np.asarray(dye, int)
+        return np.asarray(pts, float).reshape(-1, 3)
 
 
 # ------------------------------------------------------------------ sampling
@@ -382,8 +389,8 @@ def _z_range(value) -> Sequence[float]:
 
 
 def read_labels(path: Path):
-    """``(xyz, dye or None)`` from a text file: ``x, y[, z][, dye]`` per row,
-    commas or white space, header lines and ``#`` comments skipped."""
+    """``xyz`` from a text file: ``x, y[, z]`` per row (more columns are
+    ignored), commas or white space, header lines and ``#`` comments skipped."""
     rows = []
     with open(path, encoding="utf-8") as fh:
         for line in fh:
@@ -400,9 +407,7 @@ def read_labels(path: Path):
     if width < 2:
         raise ValueError(f"{path}: each row needs at least x and y")
     a = np.array([r[:width] for r in rows])
-    xyz = _xyz(a[:, :min(width, 3)], str(path))
-    dye = a[:, 3].astype(int) if width >= 4 else None
-    return xyz, dye
+    return _xyz(a[:, :min(width, 3)], str(path))
 
 
 def _read_image(path: Path) -> np.ndarray:

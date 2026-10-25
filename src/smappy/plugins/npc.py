@@ -371,13 +371,14 @@ def true_corners(locs, corners: int = 8) -> Dict[int, int]:
     ``{copy: corners labelled}``.
     """
     from ..simulate import ground_truth
-    from ..simulate import SimulationSettings
-    from . import settings_from
+    from ..simulate.scene import settings_of
     recipe = locs.metadata.get("simulation_settings")
     copies = locs.metadata.get("copies")
     if not recipe or not copies:
         raise ValueError("this table is not a simulation")
-    truth = ground_truth(settings_from(SimulationSettings, recipe))
+    if "components" in recipe and "x_nm" not in copies:
+        raise ValueError("a scene of several components: label corners need one")
+    truth = ground_truth(settings_of(recipe))
     f = truth.fluorophores
     cx = np.asarray(copies["x_nm"], dtype=float)
     cy = np.asarray(copies["y_nm"], dtype=float)
@@ -429,6 +430,8 @@ def simulated_efficiency(project, rows) -> Optional[float]:
     if roi is None:
         return None
     recipe = project.state(roi.file_id).locs.metadata.get("simulation_settings") or {}
+    if recipe.get("components"):            # a scene: its first component's
+        recipe = recipe["components"][0]
     value = (recipe.get("labelling") or {}).get("efficiency")
     return None if value is None else float(value)
 

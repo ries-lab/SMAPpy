@@ -176,8 +176,10 @@ def prepare(settings: SimulationSettings) -> dict:
         mine = f.copy == c
         th = np.arctan2(f.xyz[mine, 1] - centres[c, 1], f.xyz[mine, 0] - centres[c, 0])
         f_corner[mine] = corner_of(th, turn[c])
-    # pores are the copies labelled with dye 1; dye 2 is junk (npc_junk.yaml)
-    pores = np.unique(f.copy[f.dye == 1])
+    # pores are the copies of the first part; the other parts are junk
+    # (npc_junk.yaml)
+    part = np.asarray(poses.get("part", [0] * len(centres)))
+    pores = np.unique(f.copy[part[f.copy] == 0])
     from scipy.spatial import cKDTree
     x = np.asarray(grouped["x_nm"], float)
     y = np.asarray(grouped["y_nm"], float)

@@ -319,10 +319,11 @@ way and what was left out of SMAP's `VersatileRenderer`.
 
 ## Simulated data
 
-`smappy.simulate` is one model with two outputs, and the `File/Simulate/
-Blinking Structure` plugin (shown as *Simulate structure*) is its form:
-structure -> labelling -> blinking -> localizations or camera frames.  NOTES.md, "The simulation model", has the
-assumptions.  What a session needs:
+`smappy.simulate` is one model with three outputs, and the `File/Simulate/
+Simulate` plugin is its form: a scene of components (`simulate.scene`), each
+structure -> labelling -> blinking (-> diffusion), then localizations, camera
+frames or a split camera.  NOTES.md, "The simulation model", has the
+assumptions; docs/simulation-redesign.md the scene's design.  What a session needs:
 
 * Structures are YAML (the syntax is in `simulate/structure.py`); the
   built-ins are the files in `src/smappy/data/structures` -- `demo` (the ring
@@ -334,9 +335,16 @@ assumptions.  What a session needs:
 * A camera simulation saved as `*.sim.yaml` (`simulate.source.write_recipe`)
   is an acquisition: a fitter's `source.path` may name it, `open_stack` opens
   it, the frames are drawn as they are read, and the camera comes from it.
-* The truth columns: `emitter` (which fluorophore), `dye`, `copy` (which
-  copy of the structure); camera truth adds `neighbour_nm`, the nearest other
-  spot in the same frame.  `metadata["copies"]` has each copy's position and
+* A scene (`SceneSettings`) is a list of `ComponentSettings` -- a structure,
+  `homogeneous` labels or `beads` -- each with its own labelling,
+  photophysics, diffusion, colour (`channel`) and split ratio; one can be
+  placed where another's copies are, or blink as another does.  A
+  single-structure `SimulationSettings` is a scene of one (`as_scene`), with
+  the same numbers.  Presets are YAML in `data/simulation_presets`.
+* The columns: `channel` (the component's colour); the truth `emitter`
+  (which fluorophore), `component`, `copy` (which copy of the structure),
+  and with diffusion `track_id_true` and `state_true`; camera truth adds
+  `neighbour_nm`, the nearest other spot in the same frame.  `metadata["copies"]` has each copy's position and
   turn by its `copy` number (`x_nm`, ..., `alpha_deg`, `beta_deg`,
   `gamma_deg`: R = Rz(alpha) Ry(beta) Rz(gamma)).
 * Simulated localizations go down to 10 photons, as SMAP's do, and Ground

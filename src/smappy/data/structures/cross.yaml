@@ -1,0 +1,13 @@
+# The demo's lines and scattered points (`demo`) without the ring: the
+# second colour of the two-colour scene.
+name: cross, with scattered points
+elements:
+  - line: [[1000, 1500, -200], [9000, 7500, 200]]
+    density: 0.08
+    width: 15
+  - line: [[1500, 8500, 150], [8500, 1500, 150]]
+    density: 0.08
+    width: 15
+  - polygon: [[500, 500], [9500, 500], [9500, 9500], [500, 9500]]
+    density: 1.85e-6                 # ~150 labels
+    z: [-300, 300]

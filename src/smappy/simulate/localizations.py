@@ -28,8 +28,8 @@ from typing import Optional
 import numpy as np
 
 from ..locs import Localizations
-from .kinetics import Blinks, Emission, Fluorophores, blink, blink_offsets, emission, label
-from .settings import SimulationSettings
+from .kinetics import Blinks, Emission, Fluorophores
+from .settings import SceneSettings, SimulationSettings
 from .structure import load_structure
 
 
@@ -43,32 +43,46 @@ class GroundTruth:
     emission: Emission
     drift_nm: Optional[np.ndarray]   # (n_frames, 3), or None
     poses: Optional[dict] = None     # where each copy was put and how it was turned
+    # each emission row's displacement by diffusion (`scene.motion`), or None,
+    # and its diffusive state (-1 for a component that does not move)
+    motion_nm: Optional[np.ndarray] = None
+    state: Optional[np.ndarray] = None
 
     def positions(self) -> np.ndarray:
-        """Where each emitting row was, drift included: (len(emission), 3)."""
+        """Where each emitting row was, motion and drift included:
+        (len(emission), 3)."""
         xyz = self.fluorophores.xyz[self.emission.owner]
         if self.blinks.offset is not None and self.emission.blink is not None:
             xyz = xyz + self.blinks.offset[self.emission.blink]
+        if self.motion_nm is not None:
+            xyz = xyz + self.motion_nm
         if self.drift_nm is not None:
             xyz = xyz + self.drift_nm[self.emission.frame]
         return xyz
+
+    def components(self) -> list:
+        """The components' names, by the `component` number a row carries."""
+        from .settings import SceneSettings
+        s = self.settings
+        return ([c.name for c in s.components] if isinstance(s, SceneSettings)
+                else ["structure"])
 
 
 def settings_with(settings: Optional[SimulationSettings] = None, **values) -> SimulationSettings:
     return replace(settings or SimulationSettings(), **values)
 
 
-def ground_truth(settings: SimulationSettings) -> GroundTruth:
-    rng = np.random.default_rng(settings.seed)
-    structure = load_structure(settings.structure.source())
-    labels = structure.sample(rng)
-    fluorophores = label(labels, settings.labelling, rng)
-    blinks = blink(len(fluorophores), settings.n_frames, settings.blinking, rng)
-    blinks.offset = blink_offsets(len(blinks), settings.labelling.linkage_free_nm, rng)
-    emitted = emission(blinks, settings.n_frames)
-    drift = drift_trace(settings.n_frames, rng) if settings.drift else None
-    return GroundTruth(settings, structure.name, len(labels), fluorophores, blinks,
-                       emitted, drift, labels.poses)
+def ground_truth(settings) -> GroundTruth:
+    """The truth of a scene (`SceneSettings`), or of one structure
+    (`SimulationSettings`, a scene of one component: the same numbers as
+    before scenes were)."""
+    from .scene import as_scene, scene_truth
+    if isinstance(settings, SceneSettings):
+        return scene_truth(settings)
+    truth = scene_truth(as_scene(settings))
+    truth.settings = settings
+    truth.name = load_structure(settings.structure.source()).name
+    return truth
 
 
 def drift_trace(n_frames: int, rng) -> np.ndarray:
@@ -175,7 +189,10 @@ def localizations(truth: GroundTruth) -> Localizations:
     em = truth.emission
     photons = rng.poisson(em.photons).astype(np.float64)
     found = photons >= max(out.min_photons, 1.0)
-    frame, owner, photons = em.frame[found], em.owner[found], photons[found]
+    # each localization's emission row, through the removal or the averaging:
+    # what it was (the owner), and its diffusive state
+    rows = np.flatnonzero(found)
+    frame, photons = em.frame[found], photons[found]
     xyz = truth.positions()[found]
     background = np.round(draw_background(settings, len(frame), rng), 3)
 
@@ -185,13 +202,14 @@ def localizations(truth: GroundTruth) -> Localizations:
     n_merged = None
     if out.close == "remove":
         keep = size == 1
-        frame, owner, photons, xyz, background = (
-            frame[keep], owner[keep], photons[keep], xyz[keep], background[keep])
+        frame, rows, photons, xyz, background = (
+            frame[keep], rows[keep], photons[keep], xyz[keep], background[keep])
     elif out.close == "average":
-        frame, owner, photons, xyz, background, n_merged = _average(
-            group, frame, owner, photons, xyz, background)
+        frame, rows, photons, xyz, background, n_merged = _average(
+            group, frame, rows, photons, xyz, background)
     else:
         raise ValueError(f"close emitters {out.close!r}: remove or average")
+    owner = em.owner[rows]
 
     n = len(frame)
     sigma = spot_sigma(xyz[:, 2], optics)
@@ -208,12 +226,19 @@ def localizations(truth: GroundTruth) -> Localizations:
         "xy_err_nm": prec.astype(np.float32), "z_err_nm": prec_z.astype(np.float32),
         # a fitted width scatters about the true one by about the precision
         "sigma_nm": (sigma + rng.normal(0, prec)).astype(np.float32),
-        # the ground truth: which fluorophore, of which dye, in which copy
-        "emitter": owner.astype(np.int32), "dye": fl.dye[owner].astype(np.int32),
+        # the colour, as a fit and an assignment would give it
+        "channel": fl.channel[owner].astype(np.int32),
+        # the ground truth: which fluorophore, of which component, in which copy
+        "emitter": owner.astype(np.int32), "component": fl.component[owner].astype(np.int32),
         "copy": fl.copy[owner].astype(np.int32),
     }
     if n_merged is not None:
         columns["n_merged"] = n_merged.astype(np.int32)
+    if truth.state is not None:
+        # the tracks' truth, as the tracking tools read it (`tracking.columns`)
+        state = truth.state[rows]
+        columns["track_id_true"] = np.where(state >= 0, owner + 1, 0).astype(np.int64)
+        columns["state_true"] = state.astype(np.int32)
     metadata = _metadata(truth, "smappy blinking structure")
     metadata.update({"n_localizations": n, "close_emitters": out.close,
                      "min_separation_nm": out.min_separation_nm,
@@ -230,7 +255,7 @@ def draw_background(settings: SimulationSettings, n: int, rng) -> np.ndarray:
 
 def _average(group, frame, owner, photons, xyz, background):
     """One row per group: positions weighted by photons, photons added, the
-    brightest member's identity."""
+    brightest member's identity (``owner``: whatever names a row)."""
     unique, inverse = np.unique(group, return_inverse=True)
     m = len(unique)
     total = np.bincount(inverse, weights=photons, minlength=m)
@@ -249,8 +274,15 @@ def _average(group, frame, owner, photons, xyz, background):
 
 def _metadata(truth: GroundTruth, what: str) -> dict:
     s = truth.settings
+    scene = isinstance(s, SceneSettings)
     return {"units": "nm", "simulation": what, "seed": s.seed,
-            "structure": s.structure.source(), "structure_name": truth.name,
+            "structure": ([c.structure.source() if c.structure.kind == "structure"
+                           else c.structure.kind for c in s.components if c.enabled]
+                          if scene else s.structure.source()),
+            "structure_name": truth.name,
+            # what `component` numbers: the scene's components by position
+            "components": truth.components(),
+            "simulation_kind": "scene" if scene else "structure",
             "n_labels": truth.n_labels, "n_emitters": len(truth.fluorophores),
             "n_blinks": len(truth.blinks), "n_frames": s.n_frames,
             # where every reader of seconds looks (`metadata.file_frame_time`)

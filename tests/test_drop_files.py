@@ -232,7 +232,7 @@ def test_a_written_simulation_offers_fit_this_which_fills_the_fitters_file(
     tab = next(control.tabs.widget(i) for i in range(control.tabs.count())
                if control.tabs.tabText(i) == "File")
     simulate = next(i for i in tab.tab.instances
-                    if i.plugin == "File/Simulate/Blinking Structure")
+                    if i.plugin == "File/Simulate/Simulate")
     tab.open_section(simulate.id)
     panel = tab.slots[simulate.id].panel
     path = tmp_path / "run.sim.yaml"

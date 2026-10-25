@@ -147,9 +147,11 @@ where = ["src"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise, and the window icon,
-# and what the user's plugin folder is given (`smappy.user_plugins`)
+# its scene presets and saved components (`plugins.simulate`), and what
+# the user's plugin folder is given (`smappy.user_plugins`)
 "smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml",
             "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
+            "data/simulation_presets/*.yaml", "data/simulation_components/*.yaml",
             "data/icons/*.svg", "data/icons/*.png", "data/user_plugins/*.in"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree

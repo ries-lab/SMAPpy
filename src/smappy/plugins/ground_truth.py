@@ -65,9 +65,8 @@ def truth_for(locs: Localizations, path: str = "") -> Localizations:
             raise FileNotFoundError(f"the simulation {source} is not there any more")
         settings = read_recipe(source)
     elif locs.metadata.get("simulation_settings"):
-        from ..simulate import SimulationSettings
-        from . import settings_from
-        settings = settings_from(SimulationSettings, locs.metadata["simulation_settings"])
+        from ..simulate.scene import settings_of
+        settings = settings_of(locs.metadata["simulation_settings"])
     else:
         raise ValueError("this table says nothing of a simulation: fit a *.sim.yaml, "
                          "simulate one, or name the simulation file")

@@ -71,9 +71,16 @@ def open_section(d, plugin_tab, title: str):
 
 
 def field(panel, path: str):
-    """A plugin form's field by dotted name: ``field(panel, "camera.offset")``."""
+    """A plugin form's field by dotted name: ``field(panel, "camera.offset")``.
+    Through a list of parts by index -- ``components.0.labelling`` selects the
+    first item and reaches into its form, as a person clicks it first."""
+    from ...gui.params import ListField
     target = panel.form
     for part in path.split("."):
+        if isinstance(target, ListField):
+            target.list.setCurrentRow(int(part))
+            target = target.editor
+            continue
         target = target.fields[part]
     return target
 

@@ -30,7 +30,7 @@ Frames are drawn a block at a time and their noise is seeded per frame, so
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -48,9 +48,9 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
            dual: Optional[dict] = None, chunk: int = 200) -> np.ndarray:
     """Frames ``start`` .. ``stop`` of ``truth`` as uint16 ADU, (n, y, x).
 
-    ``dual`` -- ``{"ratios": per dye, "sigma_nm": per half}`` -- draws a split
-    camera instead: each molecule in both halves, the fraction ``ratio`` of
-    its light in the lower one, placed there by `dual_transformation`.
+    ``dual`` -- ``{"sigma_nm": per half}`` -- draws a split camera instead:
+    each molecule in both halves, the fraction of its light its component's
+    `split_ratio` says in the lower one, placed there by `dual_transformation`.
     """
     s = truth.settings
     stop = s.n_frames if stop is None else min(stop, s.n_frames)
@@ -75,7 +75,7 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
             elif dual is None:
                 _draw(image, frame, px, em.photons[rows], *_widths(xyz[rows, 2], s.optics))
             else:
-                ratio = _ratios(truth, dual["ratios"])[em.owner[rows]]
+                ratio = truth.fluorophores.ratio[em.owner[rows]]
                 forward = np.linalg.inv(dual_transformation(size))
                 secondary = (np.c_[px, np.ones(len(px))] @ forward.T)[:, :2]
                 for half, (at, share) in enumerate(((px, 1 - ratio), (secondary, ratio))):
@@ -108,15 +108,6 @@ def _widths(z_nm, optics: OpticsSettings):
     return sx * k, sy * k
 
 
-def _ratios(truth, ratios: Sequence[float]) -> np.ndarray:
-    dye = truth.fluorophores.dye
-    ratios = np.asarray(ratios, float)
-    if len(dye) and dye.max() > len(ratios):
-        raise ValueError(f"the structure has dye {dye.max()} and only "
-                         f"{len(ratios)} ratios were given")
-    return ratios[np.clip(dye - 1, 0, None)] if len(dye) else np.zeros(0)
-
-
 def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
     """Every spot drawn, at its true position (drift included), with the
     photons it emitted in that frame and its nearest neighbour's distance."""
@@ -132,7 +123,9 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
         "photons": em.photons.astype(np.float32),
         "background": frame_backgrounds(s)[em.frame].astype(np.float32),
         "neighbour_nm": neighbour_distance(xyz[:, 0], xyz[:, 1], em.frame).astype(np.float32),
-        "emitter": em.owner.astype(np.int32), "dye": fl.dye[em.owner].astype(np.int32),
+        "channel": fl.channel[em.owner].astype(np.int32),
+        "emitter": em.owner.astype(np.int32),
+        "component": fl.component[em.owner].astype(np.int32),
         "copy": fl.copy[em.owner].astype(np.int32),
     }
     metadata = _metadata(truth, "smappy camera frames")
@@ -144,10 +137,10 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
                      "astigmatism": ([s.optics.focal_offset_nm, s.optics.depth_nm]
                                      if s.optics.astigmatism else None)})
     if dual:
-        columns["ratio"] = _ratios(truth, dual["ratios"])[em.owner].astype(np.float32)
+        columns["ratio"] = fl.ratio[em.owner].astype(np.float32)
         size = s.camera.size_px
         metadata.update({"sigma_nm": list(dual["sigma_nm"]),
-                         "ratios": list(dual["ratios"]),
+                         "ratios": sorted({float(r) for r in fl.ratio}),
                          "transformation": dual_transformation(size).tolist(),
                          "layout": "up-down", "main_channel": "upper",
                          "split_position": size})
@@ -318,30 +311,37 @@ def dual_camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float 
                        ratios=(0.25, 0.75), conversion: float = 0.5,
                        offset: float = 100.0, read_noise: float = 1.5,
                        astigmatism: Optional[Tuple[float, float]] = None,
-                       structure: str = "demo",
+                       structure="demo",
                        labelling: Optional[LabellingSettings] = None,
                        blinking: Optional[BlinkingSettings] = None):
     """Frames of a split camera imaging two dyes: ``(frames, truth)``.
 
-    The two-colour counterpart of `camera_frames`: which dye a molecule is
-    comes from its structure (the demo's ring is dye 1, the lines and the
-    scattered points dye 2).  A dichroic sends each molecule's light to both
-    halves of the chip -- the upper half the main channel, the lower the
-    secondary, placed by `dual_transformation` -- in a proportion that is
-    the dye's: ``ratios`` is the fraction in the secondary half, one per dye.
-    So every molecule is a pair of spots, and which dye it is shows only in
-    how its photons split, which is what the two-colour fit and the colour
-    assignment measure.  The halves see different wavelengths, so
-    ``sigma_nm`` is a width per half.  ``frames`` is uint16 ADU,
-    (n, 2 * size_px, size_px); ``truth`` has the main-half positions,
-    ``dye`` and ``ratio``, and its metadata the transformation.
+    The two-colour counterpart of `camera_frames`: two components, the
+    demo's ring and its lines with the scattered points (`ring`, `cross`;
+    `scene.two_colour_scene`), each its own dye.  A dichroic sends each
+    molecule's light to both halves of the chip -- the upper half the main
+    channel, the lower the secondary, placed by `dual_transformation` -- in a
+    proportion that is the dye's: ``ratios`` is the fraction in the secondary
+    half, one per component.  So every molecule is a pair of spots, and which
+    dye it is shows only in how its photons split, which is what the
+    two-colour fit and the colour assignment measure.  The halves see
+    different wavelengths, so ``sigma_nm`` is a width per half.  ``frames``
+    is uint16 ADU, (n, 2 * size_px, size_px); ``truth`` has the main-half
+    positions, ``channel`` and ``ratio``, and its metadata the
+    transformation.  ``structure`` names the two components' structures.
     """
     from .localizations import ground_truth
-    settings = _settings(n_frames, seed, pixelsize_nm, size_px, photons, background,
-                         sigma_nm[0], conversion, offset, read_noise, astigmatism,
-                         structure, labelling, blinking)
-    truth = ground_truth(settings)
-    dual = {"ratios": tuple(ratios), "sigma_nm": tuple(sigma_nm)}
+    from .scene import two_colour_scene, with_components
+    single = _settings(n_frames, seed, pixelsize_nm, size_px, photons, background,
+                       sigma_nm[0], conversion, offset, read_noise, astigmatism,
+                       "demo", labelling, blinking)
+    structures = ("ring", "cross") if structure == "demo" else tuple(structure)
+    scene = two_colour_scene(
+        n_frames, seed, ratios, structures, output="camera",
+        background=single.background, optics=single.optics, camera=single.camera)
+    scene = with_components(scene, labelling=single.labelling, blinking=single.blinking)
+    truth = ground_truth(scene)
+    dual = {"sigma_nm": tuple(sigma_nm)}
     return render(truth, dual=dual), camera_truth(truth, dual=dual)
 
 

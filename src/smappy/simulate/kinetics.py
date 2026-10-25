@@ -52,6 +52,9 @@ flexible linker.
 **Photons.**  Each blink draws a total from a gamma distribution with the
 given mean and standard deviation (a standard deviation of 0 is exactly the
 mean), which it emits at the constant rate ``total / on_time`` while it is on.
+
+**Always on** is a bead: one emission from the first frame to the last,
+never bleached, ``photons`` per frame.
 """
 from __future__ import annotations
 
@@ -66,9 +69,23 @@ from .structure import Labels
 @dataclass
 class Fluorophores:
     xyz: np.ndarray          # (n, 3) nm
-    dye: np.ndarray
     copy: np.ndarray
     label: np.ndarray        # index into the structure's labels
+    # which component of the scene, its colour and its split-camera ratio
+    # (`smappy.simulate.scene`): one per fluorophore, so what is drawn from
+    # the emission needs nothing else
+    component: np.ndarray = None
+    channel: np.ndarray = None
+    ratio: np.ndarray = None
+
+    def __post_init__(self) -> None:
+        n = len(self.xyz)
+        if self.component is None:
+            self.component = np.zeros(n, np.int32)
+        if self.channel is None:
+            self.channel = np.ones(n, np.int32)
+        if self.ratio is None:
+            self.ratio = np.full(n, 0.5)
 
     def __len__(self) -> int:
         return len(self.xyz)
@@ -123,7 +140,7 @@ def label(labels: Labels, settings: LabellingSettings, rng) -> Fluorophores:
     xyz = labels.xyz[index]
     if settings.linkage_nm > 0:
         xyz = xyz + rng.normal(0, settings.linkage_nm, xyz.shape)
-    return Fluorophores(xyz, labels.dye[index], labels.copy[index], index)
+    return Fluorophores(xyz, labels.copy[index], index)
 
 
 # ------------------------------------------------------------------ blinking
@@ -166,6 +183,11 @@ def blink(n: int, n_frames: int, settings: BlinkingSettings, rng) -> Blinks:
     """Every blink of ``n`` fluorophores within ``n_frames``."""
     if settings.activation == "all":
         return _every_blink(n, n_frames, settings, rng)
+    if settings.activation == "always":
+        # a bead: on from the first frame to the last, its photons per frame
+        rate = draw(settings.photons, settings.photons_std, n, rng)
+        return Blinks(np.arange(n), np.zeros(n), np.full(n, float(n_frames)), rate,
+                      float("nan"))
     on, p = settings.on_time, settings.bleaching
     off = settings.off_time or off_time_for(settings.blinks, on, p, n_frames)
     # blinks before bleaching, capped at more than the measurement could hold
@@ -191,7 +213,8 @@ def blink(n: int, n_frames: int, settings: BlinkingSettings, rng) -> Blinks:
         keep = start < n_frames
         owner, start, on_for = owner[keep], start[keep], on_for[keep]
     elif settings.activation not in ("constant", "decay"):
-        raise ValueError(f"activation {settings.activation!r}: constant, decay or all")
+        raise ValueError(f"activation {settings.activation!r}: constant, decay, all "
+                         f"or always")
     end = np.minimum(start + on_for, n_frames)
     rate = draw(settings.photons, settings.photons_std, len(owner), rng) / on
     return Blinks(owner, start, end, rate, off)

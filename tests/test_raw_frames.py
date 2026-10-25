@@ -24,7 +24,7 @@ def simulated(tmp_path_factory):
         output="camera", n_frames=N_FRAMES, seed=3,
         labelling=LabellingSettings(efficiency=0.1),
         camera=CameraOutputSettings(path=str(folder / "run.sim.yaml")))
-    made = get("File/Simulate/Blinking Structure")().run(Context(), settings)
+    made = get("File/Simulate/Simulate")().run(Context(), settings)
     out = folder / "out.hdf5"
     result = GaussianFit().run(Context(), GaussianFitSettings(
         source=SourceSettings(path=made.written, chunk=25),

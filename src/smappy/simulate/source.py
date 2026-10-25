@@ -44,11 +44,13 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     import yaml
     path = recipe_path(path)
     values = asdict(settings)
-    if values["structure"]["file"]:
-        values["structure"]["file"] = str(Path(values["structure"]["file"]).resolve())
+    for part in values.get("components") or [values]:
+        if part["structure"]["file"]:
+            part["structure"]["file"] = str(Path(part["structure"]["file"]).resolve())
     if values["optics"]["calibration"]:
         values["optics"]["calibration"] = str(Path(values["optics"]["calibration"]).resolve())
-    values["output"] = "camera"
+    if values["output"] == "localizations":
+        values["output"] = "camera"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# a smappy simulation: open it in a fitter as its file\n")
@@ -57,14 +59,24 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     return path
 
 
+def dual_of(settings) -> Optional[dict]:
+    """How `camera.render` draws a split camera's two halves, or None for
+    one camera: the second half's PSF width, the first's on *auto*."""
+    if getattr(settings, "output", "") != "split":
+        return None
+    first = settings.optics.sigma_nm
+    second = settings.camera.split_sigma_nm or first
+    return {"sigma_nm": (first, second)}
+
+
 def read_recipe(path) -> SimulationSettings:
     import yaml
-    from ..plugins import settings_from
     with open(path, encoding="utf-8") as fh:
         spec = yaml.safe_load(fh) or {}
     if spec.get("smappy") != "simulation":
         raise ValueError(f"{path} is not a smappy simulation (no `smappy: simulation`)")
-    return settings_from(SimulationSettings, spec.get("settings") or {})
+    from .scene import settings_of
+    return settings_of(spec.get("settings") or {})
 
 
 @dataclass
@@ -81,7 +93,7 @@ class SimulatedSource(ImageSource):
     def truth(self):
         """Every spot drawn, as a localization table (`camera.camera_truth`)."""
         from .camera import camera_truth
-        return camera_truth(self._truth)
+        return camera_truth(self._truth, dual=dual_of(self.settings))
 
     def frames(self, chunk: int = 100, start: int = 0,
                stop: Optional[int] = None) -> Iterator[Tuple[int, np.ndarray]]:
@@ -89,7 +101,7 @@ class SimulatedSource(ImageSource):
         stop = self.n_frames if stop is None else min(stop, self.n_frames)
         for a in range(start, stop, chunk):
             b = min(a + chunk, stop)
-            yield a, render(self._truth, a, b)
+            yield a, render(self._truth, a, b, dual=dual_of(self.settings))
 
     def watch(self, chunk: int = 100, **kwargs):
         # nothing is being written: the whole stack is already "there"
@@ -107,7 +119,8 @@ def open_simulation(path) -> SimulatedSource:
               "em_on": settings.camera.em_gain > 0,
               "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
               "frame_time_ms": settings.frame_time_ms, "camera_name": "simulation"}
+    height = 2 * size if dual_of(settings) else size      # a split camera's two halves
     return SimulatedSource(
-        files=[Path(path)], shape=(size, size), dtype=np.dtype(np.uint16),
+        files=[Path(path)], shape=(height, size), dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,
         mm_metadata={}, summary={}, settings=settings, camera=camera, _truth=truth)

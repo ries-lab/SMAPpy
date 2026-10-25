@@ -396,7 +396,7 @@ class ControlWindow(QMainWindow):
         # what a file opener's found microscope offers (`gui.microscope_view`)
         session.window_openers["microscope manager"] = \
             lambda settings=None: self.open_microscope_manager()
-        # a written simulation offers this (`SimulateBlinks.describe`), with the
+        # a written simulation offers this (`Simulate.describe`), with the
         # file's path: into a fitter as a dropped stack goes
         session.window_openers["fit file"] = self.fit_file
         # Line Profile with no line ROI offers this (`LineProfile.describe`):

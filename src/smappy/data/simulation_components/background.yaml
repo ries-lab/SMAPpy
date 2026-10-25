@@ -1,0 +1,5 @@
+# Labels at random over the field, in 3D: unspecific binding.
+name: background
+structure.kind: homogeneous
+structure.density_um2: 2.0
+structure.z_range_nm: 600

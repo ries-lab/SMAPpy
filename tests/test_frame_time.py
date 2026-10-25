@@ -32,11 +32,11 @@ def test_the_structure_simulation_records_its_frame_time():
 
 
 def test_the_simulation_plugin_hands_its_frame_time_to_the_session():
-    from smappy.plugins.file import SimulateBlinks
-    settings = SimulateBlinks.Settings(n_frames=200)
+    from smappy.plugins.simulate import Simulate
+    settings = Simulate.Settings(n_frames=200)
     settings.frame_time_ms = 30.0
     session = Session()
-    session.run(SimulateBlinks(), settings)
+    session.run(Simulate(), settings)
     assert session.files[0].frame_time_ms == 30.0
     assert table_frame_time(session.locs) == 30.0
 

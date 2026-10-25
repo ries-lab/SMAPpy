@@ -80,7 +80,7 @@ dye = np.zeros(len(locs), int)
 for f in np.unique(locs["frame"]):
     m, t = locs["frame"] == f, truth["frame"] == f
     d, i = cKDTree(np.c_[truth["x_nm"][t], truth["y_nm"][t]]).query(np.c_[locs["x_nm"][m], locs["y_nm"][m]])
-    dye[np.flatnonzero(m)] = np.where(d < 50, truth["dye"][t][i], 0)
+    dye[np.flatnonzero(m)] = np.where(d < 50, truth["channel"][t][i], 0)
 ```
 
 **1. The two halves, and the map between them.**  Which half is which, and

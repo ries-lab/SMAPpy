@@ -137,7 +137,7 @@ def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
                                     OutputSettings, SourceSettings)
     from smappy.simulate import (CameraOutputSettings, LabellingSettings,
                                  SimulationSettings)
-    made = get("File/Simulate/Blinking Structure")().run(Context(), SimulationSettings(
+    made = get("File/Simulate/Simulate")().run(Context(), SimulationSettings(
         output="camera", n_frames=N_FRAMES, seed=3,
         labelling=LabellingSettings(efficiency=0.1),
         camera=CameraOutputSettings(path=str(tmp_path / "run.sim.yaml"))))

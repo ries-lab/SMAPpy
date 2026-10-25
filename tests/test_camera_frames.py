@@ -245,9 +245,9 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
             np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
         near = (d < 60) & (locs["channel"][m] > 0)
         got += list(locs["channel"][m][near])
-        want += list(truth["dye"][t][i[near]])
+        want += list(truth["channel"][t][i[near]])
     # colour 1 is the lower (ch0 - ch1) / (ch0 + ch1): the dye with more in
-    # the secondary half, which is the lines (dye 2)
+    # the secondary half, which is the lines (component 2, `cross`)
     assert np.mean(np.asarray(got) == 3 - np.asarray(want)) > 0.95
 
 

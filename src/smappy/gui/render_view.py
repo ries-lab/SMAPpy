@@ -44,7 +44,7 @@ PANEL_LABEL = (255, 255, 255)
 PANEL_BORDER = pg.mkPen((128, 128, 128), width=1)
 # what the view says while it has nothing to show
 EMPTY_HINT = ("Open or drop a file (File > Open...)\n"
-              "or simulate one: File tab > Simulate structure")
+              "or simulate one: File tab > Simulate")
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
 
 

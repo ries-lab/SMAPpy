@@ -1,0 +1,11 @@
+# Particles that diffuse at 0.5 um^2/s, one long blink each.
+name: particles
+structure.kind: homogeneous
+structure.density_um2: 0.5
+blinking.activation: all
+blinking.blinks: 1
+blinking.on_time: 20
+blinking.photons: 20000
+blinking.photons_std: 5000
+motion.diffusion: true
+motion.d_um2_s: 0.5

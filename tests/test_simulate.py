@@ -14,21 +14,20 @@ from smappy.simulate.structure import Labels
 
 def _labels(n, rng=None):
     rng = rng or np.random.default_rng(0)
-    return Labels(rng.uniform(0, 1e4, (n, 3)), np.ones(n, np.int32), np.zeros(n, np.int32))
+    return Labels(rng.uniform(0, 1e4, (n, 3)), np.zeros(n, np.int32))
 
 
 # ----------------------------------------------------------------- structure
 def test_a_line_and_a_circle_are_labelled_at_their_density_along_them():
-    s = load_structure({"elements": [
-        {"line": [[0, 0, 0], [3000, 4000, 0]], "density": 0.1},    # 5 um
-        {"circle": 1000, "density": 0.2, "centre": [0, 0, 500], "dye": 2}]})
-    counts = [np.bincount(s.sample(np.random.default_rng(k)).dye, minlength=3)[1:]
-              for k in range(40)]
-    mean = np.mean(counts, axis=0)
-    assert mean[0] == pytest.approx(500, rel=0.03)
-    assert mean[1] == pytest.approx(0.2 * 2 * np.pi * 1000, rel=0.03)
-    ring = s.sample(np.random.default_rng(1))
-    ring = ring.xyz[ring.dye == 2]
+    line = load_structure({"elements": [
+        {"line": [[0, 0, 0], [3000, 4000, 0]], "density": 0.1}]})          # 5 um
+    circle = load_structure({"elements": [
+        {"circle": 1000, "density": 0.2, "centre": [0, 0, 500]}]})
+    assert np.mean([len(line.sample(np.random.default_rng(k))) for k in range(40)]) \
+        == pytest.approx(500, rel=0.03)
+    assert np.mean([len(circle.sample(np.random.default_rng(k))) for k in range(40)]) \
+        == pytest.approx(0.2 * 2 * np.pi * 1000, rel=0.03)
+    ring = circle.sample(np.random.default_rng(1)).xyz
     np.testing.assert_allclose(np.hypot(ring[:, 0], ring[:, 1]), 1000, atol=1e-6)
     assert np.all(ring[:, 2] == 500)
 
@@ -43,7 +42,7 @@ def test_a_polygon_is_filled_evenly_at_its_density_per_area():
 
 
 def test_label_positions_come_from_a_list_or_a_file_and_are_the_same_in_every_copy(tmp_path):
-    (tmp_path / "pts.csv").write_text("x,y,z,dye\n0,0,0,1\n10,0,5,2\n")
+    (tmp_path / "pts.csv").write_text("x,y,z\n0,0,0\n10,0,5\n")
     (tmp_path / "s.yaml").write_text(
         "elements:\n  - file: pts.csv\n  - points: [[0, 20]]\n"
         "copies:\n  n: 4\n  placement: grid\n  field: [0, 0, 2000, 2000]\n")
@@ -53,7 +52,6 @@ def test_label_positions_come_from_a_list_or_a_file_and_are_the_same_in_every_co
     for c in range(1, 4):
         offset = labels.xyz[labels.copy == c] - first
         np.testing.assert_allclose(offset, offset[:1].repeat(3, 0))   # a pure shift
-    assert list(labels.dye[labels.copy == 0]) == [1, 2, 1]
     np.testing.assert_allclose(first[1] - first[0], [10, 0, 5])
     centres = np.array([labels.xyz[labels.copy == c][0] for c in range(4)])
     np.testing.assert_allclose(sorted(set(centres[:, 0])), [500, 1500])   # a 2 x 2 grid
@@ -310,7 +308,7 @@ def test_a_simulation_file_opens_as_an_acquisition_with_its_camera(tmp_path):
 def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):
     from smappy import plugins
     from smappy.plugins import Context
-    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    plugin = plugins.get("File/Simulate/Simulate")()
     settings = plugin.Settings(output="camera", n_frames=20)
     with pytest.raises(ValueError, match="where to write"):
         plugin.run(Context(), settings)

@@ -1,0 +1,17 @@
+# Nuclear pores with fiducial beads, and drift: what the drift corrections
+# from beads are tried on.  The beads are on in every frame, bright and
+# never bleached.
+n_frames: 20000
+drift: true
+key:
+  components.0.labelling.efficiency: labelling efficiency
+  components.1.structure.density_um2: density
+  components.1.blinking.photons: photons per frame
+components:
+  - name: NPC
+    structure: {kind: structure, preset: npc}
+    labelling: {efficiency: 0.6}
+    blinking: {photons: 4000, photons_std: 2000, blinks: 3}
+  - name: beads
+    structure: {kind: beads, density_um2: 0.05}
+    blinking: {activation: always, photons: 20000, photons_std: 0}

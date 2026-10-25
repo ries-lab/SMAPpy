@@ -71,16 +71,17 @@ method assumes.
 ```figure-setup
 from smappy.locs import Localizations
 from smappy.simulate import simulate
+from smappy.simulate.scene import two_colour_scene, with_components
 from smappy.simulate.settings import BlinkingSettings
 from smappy.plugins.assign_colors import (
     AssignColorSettings, _intensity_plotter, _plotter, assign_by_minima,
     assign_by_probability, find_modes, ratios)
 
-# the demo structure: its ring is dye 1, its lines and scattered points dye 2
-locs = simulate(n_frames=3000, seed=1,
-                blinking=BlinkingSettings(photons=1200, photons_std=600))
+# the demo in two colours: its ring is dye 1, its lines and scattered points dye 2
+locs = simulate(with_components(two_colour_scene(3000, 1),
+                                blinking=BlinkingSettings(photons=1200, photons_std=600)))
 rng = np.random.default_rng(0)
-dye = np.asarray(locs["dye"])
+dye = np.asarray(locs["channel"])
 # dye 1 splits as r = -0.35, dye 2 as r = +0.25, and each molecule's own
 # split wanders around its dye's by 0.04; the photons are then split
 # between the halves binomially

@@ -78,7 +78,7 @@ def _agreement(locs, truth) -> float:
             np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
         near = (dist < 60) & (locs["channel"][m] > 0)
         got += list(locs["channel"][m][near])
-        want += list(truth["dye"][t][i[near]])
+        want += list(truth["channel"][t][i[near]])
     got, want = np.asarray(got), np.asarray(want)
     same = float(np.mean(got == want))
     return max(same, 1 - same)

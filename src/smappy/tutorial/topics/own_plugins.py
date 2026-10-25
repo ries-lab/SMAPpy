@@ -158,7 +158,7 @@ def make(d) -> None:
 
     # the tour's simulated table, made the way it shows (File -> Simulate)
     file_tab = show_tab(d, "File")
-    _, simulate = open_section(d, file_tab, "Simulate structure")
+    _, simulate = open_section(d, file_tab, "Simulate")
     simulate.run_button.click()
     d.settle()
 

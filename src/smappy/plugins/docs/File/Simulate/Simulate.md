@@ -1,21 +1,29 @@
 ---
-version: "4"
-covers: [smappy.plugins.file.SimulateBlinks.run, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.ground_truth, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe]
+version: "1"
+covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of]
 ---
 
 ## What it does
 
 To test an analysis you need data where the answer is known.  This plugin
-makes such data.  It takes a structure -- a ring, filaments, nuclear pores --
-puts fluorophores on it, lets them blink the way a dye does, and gives either
-the **localizations** a fit would have produced or the raw **camera frames**
-for a fitter to fit.
+makes such data: a **scene** of one or more **components** -- a structure
+such as nuclear pores or filaments, labels spread evenly as a background or
+as particles that diffuse, fiducial beads -- each labelled, blinking the way
+a dye does, in a colour of its own.  It gives the **localizations** a fit
+would have produced, the raw **camera frames** for a fitter to fit, or a
+**split camera** -- each molecule in two halves of the chip -- for the
+two-colour fit.
 
-Both outputs come from the same molecules.  With the same settings and
+Start from a **preset**: a whole scene (nuclear pores, two-colour pores,
+diffusing particles, ...) that fills every setting and puts the few that
+matter most at the top, under *key parameters*.  Change those, run, and
+look.  Everything else is folded below and can be changed too; the preset
+then says *modified*, and *save...* keeps the scene as a preset of your own.
+
+All outputs come from the same molecules.  With the same settings and
 *seed*, the localizations and the frames describe the same fluorophores
-blinking in the same frames.  So you can look at a simulation as
-localizations first, and then fit it from its frames by changing only
-*simulate*.
+blinking in the same frames, so a simulation looked at as localizations can
+be fitted from its frames by changing only *simulate*.
 
 Use it to:
 
@@ -24,23 +32,29 @@ Use it to:
   degree of labelling: the fraction of target proteins that carry a detected
   label), a linkage error or a dye's blinking does to a picture or a
   measurement;
-* test a fitter, a filter or a drift correction against the
-  [ground truth](plugin:Panels/Glossary) -- where the molecules really were --
-  with [Ground Truth](plugin:Analysis/Measure/Ground Truth).
+* test a fitter, a filter, a drift correction, a colour assignment or a
+  tracking analysis against the [ground truth](plugin:Panels/Glossary) --
+  where the molecules really were -- with
+  [Ground Truth](plugin:Analysis/Measure/Ground Truth).
 
 It is a model, not a microscope.  The background is flat, the spot is a
 Gaussian (or a measured [PSF](plugin:Panels/Glossary), point spread function:
-the image one molecule makes on the camera), and the dye has one on-state and
-one off-state.  What it tests is whether an analysis gets back what was put in.
+the image one molecule makes on the camera), the dye has one on-state and
+one off-state, and a moving molecule is drawn where it is at its frame,
+without motion blur.  What it tests is whether an analysis gets back what
+was put in.
 
 ## How it works
 
 ```figure-setup
 from smappy.simulate import (SimulationSettings, BlinkingSettings, LabellingSettings,
                              ground_truth, localizations, load_structure, render,
-                             mortensen)
+                             mortensen, jump_nm)
 from smappy.simulate.kinetics import blink
 from smappy.simulate.localizations import drift_trace
+from smappy.simulate.scene import scene_truth
+from smappy.simulate.settings import (ComponentSettings, MotionSettings,
+                                      PlacementSettings, SceneSettings, StructureSettings)
 settings = SimulationSettings(n_frames=5000, seed=2,
                               labelling=LabellingSettings(efficiency=0.5, linkage_nm=10))
 truth = ground_truth(settings)
@@ -50,22 +64,48 @@ labels = load_structure("demo").sample(np.random.default_rng(settings.seed))
 x, y = np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"])
 ```
 
-**1. The structure.**  A structure is a file that says where the labels
+**1. A preset, and its key parameters.**  A preset is a YAML file of all
+the settings, shipped in `smappy/data/simulation_presets` or saved as your
+own in the configuration folder (a file of yours with a shipped name wins).
+Choosing one sets every setting, the ones it does not name to their
+defaults, and shows the key parameters it lists -- for the pores the
+labelling efficiency, the photons and the blinks; for diffusion the
+diffusion coefficient, the density and the track length.  A key parameter is
+the setting itself, shown a second time: editing it there edits the
+component below.
+
+**2. Components.**  The scene's components are listed under *components*;
+select one to see its settings.  *+* adds a new one or one saved before
+(*save...* keeps the selected one: a background, beads, a pore of your
+own); untick one to leave it out.  Each component has
+
+* **labels** of one of three kinds: *a structure* (step 3), *homogeneous* --
+  labels at random over the scene's *field* at a *density*, spread over a
+  *z range* -- or *beads*, at random in the field at their density;
+* its own **labelling**, **photophysics** and **diffusion**;
+* a **colour**, written into the localizations as `channel`, and, for a
+  split camera, the **split ratio** of its photons that go to the second
+  half.
+
+**3. The structure.**  A structure is a file that says where the labels
 are, in nanometres.  It is written in YAML, a plain-text format, as a list of
 *elements*: single points (or a table of them), lines, circles, filled
 polygons, or a grey-scale image whose brightness sets the density.  Points
 are placed exactly where the file says.  The other elements are filled at a
 *density* (labels per nm of line, or per nm² of area), with the number of
 labels drawn at random around that density, so no two simulations are
-alike.  A structure can be repeated as *copies* over the field of view,
-placed at random or on a grid, turned, tilted and jittered.
+alike.  The file can repeat the structure as *copies* over the field of
+view, placed at random or on a grid, turned, tilted and jittered.  A
+structure has no colour of its own: a structure in two colours is two
+components.
 
 The built-in structures are the files in `smappy/data/structures`, and each
 one is also an example of the syntax:
 
 * **demo** -- a slightly tilted ring 5 µm across, two crossing lines and a
-  few scattered labels over 10 × 10 µm, in 3D.  The ring is dye 1, the rest
-  dye 2.  The tutorials measure it.
+  few scattered labels over 10 × 10 µm, in 3D.  The tutorials measure it.
+  **ring** and **cross** are its two halves, the ring and the rest: the
+  two colours of the preset *Ring and cross*.
 * **npc** -- nuclear pore complexes labelled at Nup96: 32 labels per pore in
   two rings 50 nm apart in z, radius 53.7 nm
   ([Thevathasan et al. 2019](https://doi.org/10.1038/s41592-019-0574-9)),
@@ -80,8 +120,8 @@ one is also an example of the syntax:
   labelled wedges rise in density by √2 each, from 25 to 4525 labels per
   µm², so the same picture shows where localizations start to overlap.
 
-A new structure is a YAML file chosen as the *structure file*, or dropped
-into that folder to become a built-in.
+A new structure is a YAML file chosen with *from file*, or dropped into that
+folder to become a built-in.
 
 ```figure The four built-in structures, as label positions.  The pores and filaments are copies of one element, each placed and turned anew; the pie's spokes rise in density going anticlockwise from the right.
 fig.set_size_inches(7.5, 2.3)
@@ -92,7 +132,7 @@ for ax, name in zip(axes, ("demo", "filaments", "npc", "pie")):
     if name == "npc":                     # a few pores, close up
         cx, cy = lab.poses["x_nm"][0], lab.poses["y_nm"][0]
         xy = xy[(abs(xy[:, 0] - cx) < 600) & (abs(xy[:, 1] - cy) < 600)]
-    colour = {"c": lab.dye, "cmap": "coolwarm"} if name == "demo" else {"color": "k"}
+    colour = {"color": "k"}
     ax.scatter(xy[:, 0] / 1000, xy[:, 1] / 1000, s=0.3 if name != "npc" else 2,
                linewidths=0, rasterized=True, **colour)
     if name == "npc":
@@ -103,7 +143,45 @@ for ax, name in zip(axes, ("demo", "filaments", "npc", "pie")):
 axes[0].set_xlabel("x (µm)", fontsize=8)
 ```
 
-**2. Labelling.**  Not every label carries a fluorophore.  Each one does
+**4. Where the copies go.**  A component's *placement* says where its
+structure's copies are: *as the structure file says*; *set here* -- a
+*number* (or a *density*) of copies over the scene's field, turned, tilted
+and jittered as asked; or *where another component's are*.  The last is
+what a structure labelled in two colours needs: each copy of the second
+component is put exactly where a copy of the first is, turned as it is, but
+with the second component's own geometry and labelling.  Two colours of one
+pore, each pore at its own random place and turn, stay together.  In the
+same way *photophysics as* lets a component blink as another does, so two
+components of one dye cannot drift apart.
+
+```figure Two components placed together: the pores of colour 1 set over the field, those of colour 2 placed where they are.  Close up on one pore, colour 1 drawn as rings and colour 2 as dots: the same pore in both colours, each labelled on its own (efficiency 0.6 and 0.5), so some labels carry both, some one, some neither.
+fig.set_size_inches(6.5, 2.6)
+first = ComponentSettings(name="NPC", channel=1, structure=StructureSettings(preset="npc"),
+                          placement=PlacementSettings(mode="copies", n=40))
+first.labelling.efficiency = 0.6
+second = ComponentSettings(name="second", channel=2, structure=StructureSettings(preset="npc"),
+                           placement=PlacementSettings(mode="same", same_as="NPC"))
+second.labelling.efficiency = 0.5
+two = scene_truth(SceneSettings(n_frames=200, seed=3, components=[first, second]))
+fl = two.fluorophores
+whole, near = fig.subplots(1, 2)
+for k, colour in ((1, "#d62728"), (2, "#1f77b4")):
+    pick = fl.channel == k
+    whole.scatter(fl.xyz[pick, 0] / 1000, fl.xyz[pick, 1] / 1000, s=1, color=colour,
+                  linewidths=0)
+cx, cy = two.poses["NPC"]["x_nm"][0], two.poses["NPC"]["y_nm"][0]
+for k, style in ((1, dict(s=70, facecolors="none", edgecolors="#d62728", linewidths=1.2)),
+                 (2, dict(s=14, color="#1f77b4", linewidths=0))):
+    pick = (fl.channel == k) & (abs(fl.xyz[:, 0] - cx) < 150) & (abs(fl.xyz[:, 1] - cy) < 150)
+    near.scatter(fl.xyz[pick, 0] - cx, fl.xyz[pick, 1] - cy, label=f"colour {k}", **style)
+whole.set_aspect("equal"); near.set_aspect("equal")
+whole.set_xlabel("x (µm)", fontsize=8); near.set_xlabel("x - pore centre (nm)", fontsize=8)
+near.legend(fontsize=7, frameon=False)
+for ax in (whole, near):
+    ax.tick_params(labelsize=7)
+```
+
+**5. Labelling.**  Not every label carries a fluorophore.  Each one does
 with the *labelling efficiency*, and then carries one fluorophore -- or
 another fixed number, or a random (Poisson) number around it.  A fluorophore
 does not sit exactly on its label: an antibody or a linker holds it a few
@@ -112,13 +190,15 @@ moves the fluorophore once, and all its blinks share the offset.  A *free*
 one is drawn anew for every blink, as for a dye that turns on a flexible
 linker.
 
-**3. Blinking.**  Each fluorophore switches between a dark state and a
+**6. Photophysics.**  Each fluorophore switches between a dark state and a
 bright state.  It stays dark for a random time (on average the *off time*)
 and bright for a random time (on average the *on time*), and after each blink
 it bleaches for good with the *bleaching probability*.  The same model serves
 STORM, PALM and PAINT; PAINT is a long off time.  Switching happens at any
 moment, not only at frame boundaries, so the first and last frames of a blink
-are dimmer than the ones in between.
+are dimmer than the ones in between.  A bead is *always on*: one emission
+from the first frame to the last, never bleached, its *photons per blink*
+then per frame.
 
 Nobody knows the off time of a dye, but one knows roughly how often a
 molecule comes back in an experiment.  So the plugin asks for *blinks*, the
@@ -133,7 +213,9 @@ to keep the number of molecules per frame steady.  The default *activation*,
 measurement.  *Decaying* keeps the rate fixed, so the blinks thin out as the fluorophores
 bleach -- the more so, the higher the bleaching probability.
 *Every blink until bleached* is SMAP's "Dye" model: every fluorophore shows
-all its blinks, however long the measurement, spread evenly.
+all its blinks, however long the measurement, spread evenly.  With one
+blink each and a long on time it is a tracking experiment's fluorophore: on
+once, for a track, then bleached.
 
 ```figure Left: the blinks of 30 fluorophores over the measurement (default settings, 5000 frames): each row one fluorophore, each tick a blink.  Right: how many of 5000 fluorophores are on per frame, for the three choices of *activation*, with a bleaching probability of 0.3 and 2.5 blinks: *decaying* thins out as the fluorophores bleach, the other two stay flat.
 rng = np.random.default_rng(4)
@@ -155,16 +237,62 @@ for ax in (left, right):
     ax.tick_params(labelsize=7)
 ```
 
-**4. Photons.**  Each blink gets a total number of photons, drawn at random
-around *photons per blink* with a spread of *photons std*.  The fluorophore
-emits them at a steady rate while it is on, so each frame gets the share of
-the time it was on in it.
+**7. Photons.**  Each blink gets a total number of photons, drawn at random
+around *photons per blink* with a spread of *std*.  The fluorophore emits
+them at a steady rate while it is on, so each frame gets the share of the
+time it was on in it.
 
-**5. Drift**, if *add drift* is ticked: the whole sample moves along a slow
+**8. Diffusion**, if a component's *diffusion* is ticked: each of its labels
+takes a random step every frame, larger the larger the diffusion
+coefficient *D*, in the plane unless *in z too* is ticked.  With a *second
+state*, a label spends that fraction of the time diffusing with the second
+state's coefficient instead; with *switching* above 0 it changes state as
+it goes.  The table then carries what the tracking tools read as the truth:
+`track_id_true`, which particle a localization belongs to, and `state_true`,
+the state it was in.  The form says how far a particle jumps in a frame and
+how far apart the particles on in a frame are, which is what
+[Link tracks](plugin:Analysis/Tracking/Link tracks) is set by.
+
+```figure Particles of the *Two-state diffusion* kind: 60 % of the time at D = 0.8 µm²/s and 40 % at 0.02 µm²/s, switching rarely.  Left, the tracks coloured by state: the slow parts stay put, the fast ones roam.  Right, the jumps between consecutive frames in each state, against what D and the precision give (lines): the simulation gives what was asked.
+fig.set_size_inches(8, 3.4)
+moving = ComponentSettings(
+    name="particles", structure=StructureSettings(kind="homogeneous", density_um2=3.0),
+    blinking=BlinkingSettings(activation="all", blinks=1, on_time=40, photons=60000,
+                              photons_std=0),
+    motion=MotionSettings(diffusion=True, d_um2_s=0.8, slow_fraction=0.4, d2_um2_s=0.02,
+                          switch_probability=0.02))
+tracks = localizations(scene_truth(SceneSettings(n_frames=400, seed=3, field_um=8.0,
+                                                 background=5.0, components=[moving])))
+tx, ty = np.asarray(tracks["x_nm"], float), np.asarray(tracks["y_nm"], float)
+tframe, tid = np.asarray(tracks["frame"]), np.asarray(tracks["track_id_true"])
+tstate = np.asarray(tracks["state_true"])
+order = np.lexsort((tframe, tid))
+step = (tid[order][1:] == tid[order][:-1]) & (np.diff(tframe[order]) == 1)
+jumps = np.hypot(np.diff(tx[order]), np.diff(ty[order]))[step]
+jump_state = tstate[order][:-1][step]
+precision = float(np.median(tracks["xy_err_nm"]))
+left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1, 1.2]})
+for k, colour in ((0, "C0"), (1, "C3")):
+    pick = tstate == k
+    left.scatter(tx[pick] / 1000, ty[pick] / 1000, s=1, c=colour, linewidths=0)
+left.set_aspect("equal"); left.set_xlabel("x (µm)", fontsize=8)
+r = np.linspace(0, 400, 200)
+for k, (d, colour) in enumerate(((0.8, "C0"), (0.02, "C3"))):
+    right.hist(jumps[jump_state == k], bins=np.linspace(0, 400, 41), density=True,
+               color=colour, alpha=0.4, label=f"D = {d} µm²/s")
+    s2 = jump_nm(d, 10.0) ** 2 / 2 + 2 * precision ** 2      # per axis
+    right.plot(r, r / s2 * np.exp(-r ** 2 / (2 * s2)), color=colour)
+right.set_xlabel("jump between consecutive frames (nm)", fontsize=8)
+right.set_yticks([]); right.legend(fontsize=7, frameon=False)
+for ax in (left, right):
+    ax.tick_params(labelsize=7)
+```
+
+**9. Drift**, if *add drift* is ticked: the whole sample moves along a slow
 random path over the measurement, so every localization and every spot is
 off by where the sample was in its frame.
 
-**6a. Localizations.**  For each frame a fluorophore was on in, the number
+**10a. Localizations.**  For each frame a fluorophore was on in, the number
 of photons detected is drawn around what it emitted (Poisson).  Below the
 *detection limit* there is no localization.  The rest are placed at the true
 position plus a random error whose size is the **localization precision** a
@@ -198,12 +326,18 @@ c.set_xlabel("error / xy_err_nm, x", fontsize=8); c.tick_params(labelsize=7)
 c.set_title(f"std {pull.std():.2f}", fontsize=9)
 ```
 
-**6b. Camera frames.**  Here every spot is drawn onto a camera: the
+**10b. Camera frames.**  Here every spot is drawn onto a camera: the
 fluorophore's photons spread over the pixels as a Gaussian of the *PSF
 sigma* (astigmatic, whose shape changes with z, if *astigmatic* is ticked,
 or a measured PSF from a *PSF calibration*), on the *background*, with the
 camera's shot noise, read noise and gain.  Nothing is removed, however dim
-or crowded: sorting that out is the fitter's job.
+or crowded: sorting that out is the fitter's job.  A **split camera** draws
+two halves, one above the other: each molecule in both, its component's
+*split ratio* of the photons in the lower half, which is placed by a known
+transformation (a slight turn, scale and shift) and sees a PSF of its own
+(*second half's PSF*).  Which colour a molecule is shows only in how its
+light splits -- what the two-colour fitters and
+[Assign colours](plugin:Analysis/Dual-colour/Assign colours) measure.
 
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
@@ -233,6 +367,17 @@ for ax, f in zip(axes, busy):
 
 ## In detail
 
+**A scene.**  The components switched on are simulated one after another
+from one random generator, each through the stages above -- labels,
+labelling, blinking, the free linkage error, the emission frame by frame,
+then its diffusion -- and their emissions are merged and sorted by frame.
+The drift is drawn last.  A scene of one component draws exactly the numbers
+a single structure always drew.  A component placed *where another's are*
+comes after it whatever the list's order.  A link to a component that is
+not in the scene or is switched off, two components of one name, or links
+that go round in a circle are refused, naming them.
+
+
 **Sampling a structure.**  A line of length $L$ gets a Poisson number of
 labels with mean $\rho L$, uniform along it; a circle of radius $r$ gets
 $2\pi r \rho$ on average; a polygon of area $A$ gets $\rho A$, uniform inside
@@ -247,6 +392,20 @@ and moved by up to `jitter` nm.  Each copy's position and turn are kept with
 the table, in `metadata["copies"]`, by its number in the `copy` column, as
 angles $\alpha, \beta, \gamma$ with the rotation
 $R = R_z(\alpha)\, R_y(\beta)\, R_z(\gamma)$.
+
+**Diffusion.**  Per axis a step is Gaussian with variance $2 D t$, $t$ the
+*frame time*, with the state the label had in the frame before: the state
+holds over the interval.  Only the frames a fluorophore emits in are needed.
+With one state each, the step between two of them $k$ frames apart is one
+Gaussian of variance $2 D t k$.  With two states and *switching*, the frames
+between are walked one by one: in each, with the probability *switching*,
+the state is drawn again from the two fractions -- possibly the same one --
+so the fractions are exactly the time spent in each state.  A label starts
+in a state drawn from the fractions.  The root-mean-square jump in one frame
+is $\sqrt{2 d D t}$ in $d$ dimensions; the form shows it with the mean
+distance between nearest neighbours, $1 / (2 \sqrt{\rho})$, $\rho$ the
+labels on per µm² in a frame (the density times the labelling efficiency
+times the fraction of frames a fluorophore is on).
 
 **The off time from the number of blinks.**  A fluorophore blinks $G$ times
 before it bleaches, geometric with $P(G \geq k) = (1-p)^{k-1}$.  Within a
@@ -349,40 +508,69 @@ ax.legend(fontsize=7, frameon=False); ax.tick_params(labelsize=7)
 
 ## Parameters
 
+### preset
+A preset of yours is saved in the configuration folder's
+`simulation_presets`, and only yours can be deleted.  A preset keeps every
+setting, so *modified* means a value differs from it.
+
 ### output
 *localizations* is quick and needs nothing else: the table appears at once,
-replacing what is open.  *camera frames* writes the *simulation file* and
-opens nothing unless *load the truth* is ticked; fit the file to get
-localizations.
+replacing what is open.  *camera frames* and *split camera* write the
+*simulation file* and open nothing unless *load the truth* is ticked; fit the
+file to get localizations.
 
 ### n_frames
 The number of blinks per fluorophore is set by *blinks* whatever the length,
-so a longer measurement is a sparser one: fewer molecules on per frame.  A short
-camera stack is dense -- lower the *labelling efficiency* to thin it.
+so a longer measurement is a sparser one: fewer molecules on per frame.  A
+short camera stack is dense -- lower the *labelling efficiency* to thin it.
 
-### labelling.efficiency
+### field_um
+Homogeneous labels and beads fill it; copies set in a component are placed
+in it.  A structure file's own copies keep the field the file gives.
+
+### components
+Each item is one kind of thing in the sample, its settings below.  Most
+scenes need one or two: the structure, and perhaps a background or beads.
+
+### components.channel
+The localizations' `channel`.  Two components of one dye share a colour.
+
+### components.placement.same_as
+Both components must make the same number of copies: the first one's set
+here or in its file, the second placed as it.
+
+### components.labelling.efficiency
 Real labelling reaches 0.5-0.7 for good antibodies or tags; 0.6 is a
 reasonable value for the nuclear pores.
 
-### labelling.linkage_nm
+### components.labelling.linkage_nm
 About 10 nm per axis for a primary and secondary antibody, a few nm for a
 nanobody or a tag.
 
-### blinking.blinks
+### components.blinking.blinks
 The mean over *all* fluorophores, including those that bleach after one
 blink.  It must stay below 1 / *bleaching probability*.
 
-### blinking.off_time
+### components.blinking.off_time
 Leave it on auto unless the dye's off time is known; set, it overrides
 *blinks*.
 
-### blinking.bleaching
+### components.blinking.bleaching
 With the geometric number of blinks this gives, many fluorophores blink once
 and a few many times, as real dyes do.
 
-### blinking.photons
+### components.blinking.photons
 A typical dSTORM dye (Alexa Fluor 647) gives a few thousand photons per blink;
-a fluorescent protein a few hundred.
+a fluorescent protein a few hundred.  For a bead, always on, it is per frame.
+
+### components.motion.d_um2_s
+Single molecules tracked from fits want them sparse: keep the jump the form
+shows below about a tenth of the distance between particles, where linking
+is nearly perfect.  Raise it to see linking fail.
+
+### components.motion.slow_fraction
+0 gives one state.  A bound and a free population (D around 0.01 and 1
+µm²/s) is the usual case to test a jump-distance or MSD analysis on.
 
 ### optics.calibration
 The width and astigmatism settings are then not used for the frames.  The
@@ -410,26 +598,33 @@ nothing to match by hand.
 
 ## Output
 
-**Localizations.**  A table in nanometres, replacing what is open:
+**Localizations.**  A table in nanometres, replacing what is open (or added
+as a new file with *add as a new file*):
 
 * `frame`, `x_nm`, `y_nm`, `z_nm`, `photons`, `background`, `xy_err_nm`,
   `z_err_nm` and `sigma_nm`, as a fitter writes them;
-* the **truth**: `emitter` (which fluorophore), `dye` (from the structure),
-  `copy` (which copy of the structure), and `n_merged` when close emitters
-  are averaged;
-* in the metadata: the settings (`simulation_settings`), the numbers of
-  labels, fluorophores and blinks, the off time that was used, each copy's
-  position and turn (`copies`) and, with drift, the drift path
+* `channel`, the component's colour;
+* the **truth**: `emitter` (which fluorophore), `component` (which
+  component, by its place in the list), `copy` (which copy of its
+  structure), `n_merged` when close emitters are averaged, and with
+  diffusion `track_id_true` and `state_true`;
+* in the metadata: the settings (`simulation_settings`, the preset's name
+  among them), the components' names (`components`), the numbers of labels,
+  fluorophores and blinks, each copy's position and turn (`copies`, per
+  component when there are several) and, with drift, the drift path
   (`drift_truth`).
 
 The text says how many localizations came from how many fluorophores and
-blinks, the off time, and how many were too close together.
+blinks, per component when there are several, and how many were too close
+together.
 
 **Camera frames.**  The *simulation file*; with *also write a TIFF*, the
 frames beside it; with *load the truth*, a table of every spot drawn: `frame`,
 the true `x_nm`, `y_nm`, `z_nm` (drift included), the `photons` it emitted in
-that frame, the `background`, `emitter`, `dye`, `copy`, and `neighbour_nm`, the
-distance to the nearest other spot on in the same frame.
+that frame, the `background`, `channel`, `emitter`, `component`, `copy`, and
+`neighbour_nm`, the distance to the nearest other spot on in the same frame;
+for a split camera also its `ratio`, and the transformation between the
+halves in the metadata.
 
 **Comparing with the truth.**
 [Ground Truth](plugin:Analysis/Measure/Ground Truth) scores a table against
@@ -470,6 +665,9 @@ an EMCCD and z three times the lateral precision.
 * **Structures** are YAML files of elements and copies, placed at random or
   on a grid, rather than one site per ROI on a grid.  An image is scaled by
   its brightest pixel, not by 255.
+* **Scenes.**  SMAP simulates one structure per run; here several
+  components, each with its own labelling and blinking, one placed with
+  another, and diffusing particles, are one simulation.
 * **Camera frames** are a recipe drawn as they are read.  SMAP Poisson-draws
   the photons for its localizations and then again for its frames, which
   doubles their variance; here they are drawn once.

@@ -1,0 +1,25 @@
+# The pores in two colours: Nup96 in colour 1 and a second label of the same
+# pores in colour 2, each pore at its random place and turn, the two colours
+# of a pore together (placed same as NPC), blinking alike.  The split camera
+# sends a quarter of colour 1's light and three quarters of colour 2's to the
+# second half.
+n_frames: 20000
+key:
+  components.0.labelling.efficiency: labelling efficiency
+  components.1.labelling.efficiency: labelling efficiency
+  components.0.blinking.photons: photons per blink
+components:
+  - name: NPC
+    channel: 1
+    split_ratio: 0.25
+    structure: {kind: structure, preset: npc}
+    placement: {mode: copies, density_um2: 1.0, rotation: random, min_distance_nm: 200}
+    labelling: {efficiency: 0.6}
+    blinking: {photons: 4000, photons_std: 2000, blinks: 3}
+  - name: second label
+    channel: 2
+    split_ratio: 0.75
+    structure: {kind: structure, preset: npc}
+    placement: {mode: same, same_as: NPC}
+    labelling: {efficiency: 0.5}
+    photophysics_from: NPC
