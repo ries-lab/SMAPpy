@@ -1705,9 +1705,12 @@ class ControlWindow(QMainWindow):
         if recipe_transform(path) is not None:
             # a simulated split camera: the two-colour fitter, wherever it is
             found = self._pinned(TWO_COLOUR_FITTER) or found
-        elif recipe_calibration(path) is not None:
-            # drawn with a bead calibration: the spline fitter, which takes it
-            found = self._pinned(SPLINE_FITTER) or found
+        drawn = recipe_calibration(path)
+        if drawn is not None:
+            # drawn with a PSF calibration: the spline fitter of its kind,
+            # which takes it -- for a split camera that replaces the above
+            found = self._pinned(DUAL_SPLINE_FITTER if drawn[0] == "dual"
+                                 else SPLINE_FITTER) or found
         panel = None
         if found is not None:
             index, tab, instance = found
@@ -1860,6 +1863,7 @@ class RenderWindow(QMainWindow):
 
 DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
 SPLINE_FITTER = "Localize/Spline 3D"            # a simulation drawn with a calibration
+DUAL_SPLINE_FITTER = "Localize/Spline 3D 2C"    # ... a split one, with a dual-colour one
 TWO_COLOUR_FITTER = "Localize/Gaussian 2D 2C"   # a simulated split camera's
 
 

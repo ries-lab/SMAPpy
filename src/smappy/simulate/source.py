@@ -49,7 +49,8 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
         fh.write("# a smappy simulation: open it in a fitter as its file\n")
         yaml.safe_dump({"smappy": "simulation", "version": 1, "settings": values},
                        fh, sort_keys=False)
-    if dual_of(settings):
+    if dual_of(settings) and not settings.optics.calibration:
+        # (a dual-colour calibration carries its own registration)
         write_transform(settings, transform_path(path))
     return path
 
@@ -97,28 +98,32 @@ def recipe_transform(path) -> Optional[Path]:
     """The transformation written beside a split camera's recipe, if ``path``
     is one and it is there: what a two-colour fitter takes for its file."""
     try:
-        if not is_simulation(path) or not dual_of(read_recipe(path)):
+        if not is_simulation(path):
             return None
+        settings = read_recipe(path)
+        if not dual_of(settings) or settings.optics.calibration:
+            return None          # one camera, or a calibration's own registration
     except (OSError, ValueError):
         return None
     found = transform_path(path)
     return found if found.is_file() else None
 
 
-def recipe_calibration(path) -> Optional[str]:
-    """The bead calibration a one-camera recipe draws its spots with, if
-    ``path`` is such a recipe: what a spline fitter takes for its own, so
-    the fit meets the PSF the frames were made with.  None for a Gaussian
-    PSF and for a split camera, whose halves are drawn as Gaussians."""
+def recipe_calibration(path) -> Optional[Tuple[str, str]]:
+    """The PSF calibration a recipe draws its spots with, if ``path`` is
+    such a recipe: ``("single", path)`` for one camera's bead calibration,
+    ``("dual", path)`` for a split camera's dual-colour one -- what a spline
+    fitter of that kind takes for its own, so the fit meets the PSF the
+    frames were made with.  None for Gaussian spots."""
     try:
         if not is_simulation(path):
             return None
         settings = read_recipe(path)
     except (OSError, ValueError):
         return None
-    if dual_of(settings) or not settings.optics.calibration:
+    if not settings.optics.calibration:
         return None
-    return settings.optics.calibration
+    return ("dual" if dual_of(settings) else "single"), settings.optics.calibration
 
 
 def dual_of(settings) -> Optional[dict]:
@@ -181,8 +186,13 @@ def open_simulation(path) -> SimulatedSource:
               "em_on": settings.camera.em_gain > 0,
               "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
               "frame_time_ms": settings.frame_time_ms, "camera_name": "simulation"}
-    height = 2 * size if dual_of(settings) else size      # a split camera's two halves
+    if dual_of(settings):
+        # a split camera's two halves, laid out as its calibration's, if any
+        from .camera import split_layout
+        shape = split_layout(settings)["shape"]
+    else:
+        shape = (size, size)
     return SimulatedSource(
-        files=[Path(path)], shape=(height, size), dtype=np.dtype(np.uint16),
+        files=[Path(path)], shape=shape, dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,
         mm_metadata={}, summary={}, settings=settings, camera=camera, _truth=truth)
