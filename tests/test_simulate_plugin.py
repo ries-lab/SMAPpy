@@ -220,3 +220,116 @@ def test_saved_components_can_be_added_to_a_scene(app):
     next(a for a in lst.add_menu.actions() if a.text() == "beads").trigger()
     beads = panel.form.value().components[-1]
     assert beads.structure.kind == "beads" and beads.blinking.activation == "always"
+
+
+# ------------------------------------------------- a split camera's own calibration
+
+def _dual_calibration(path, main_channel="upper", split=32, shape=(64, 64)):
+    """A dual-colour calibration file: astigmatic PSFs turned against each
+    other, the secondary half a little shifted from the main one."""
+    from smappy.calibrate.core import spline_coefficients
+    from smappy.calibrate.dual import DualColorCalibration, save_dual_color_calibration
+    from smappy.io.calibration import SplineCalibration
+
+    def spline(astigmatism):
+        z, y, x = np.mgrid[:41, :17, :17].astype(float)
+        t = (z - 20) / 12
+        sx, sy = 1.2 * np.sqrt(1 + (t - astigmatism) ** 2), 1.2 * np.sqrt(1 + (t + astigmatism) ** 2)
+        volume = np.exp(-.5 * (((x - 8) / sx) ** 2 + ((y - 8) / sy) ** 2)) / (2 * np.pi * sx * sy)
+        return SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
+                                 psf=volume, parameters={})
+
+    shift = split if main_channel == "upper" else -split
+    transformation = np.array([[1., 0., -0.37], [0., 1., -shift + 0.21], [0., 0., 1.]])
+    geometry = {"layout": "up-down", "main_channel": main_channel, "split_position": split,
+                "image_shape": list(shape), "coordinate_system": "camera-chip"}
+    save_dual_color_calibration(path, DualColorCalibration(
+        spline(0.6), spline(-0.6), transformation, geometry, {}))
+    return path
+
+
+def _split_pores(tmp_path, calibration):
+    settings = preset("Two-colour pores")
+    settings.output = "camera"
+    settings.camera.split = True
+    settings.camera.load_truth = True
+    settings.field_um = 3.0
+    settings.optics.calibration = str(calibration)
+    settings.camera.path = str(tmp_path / "pores.sim.yaml")
+    return settings
+
+
+def test_a_split_camera_with_a_dual_calibration_takes_its_halves_and_registration(tmp_path):
+    from smappy.io.tiff import open_stack
+    from smappy.simulate.camera import split_layout
+    from smappy.simulate.source import recipe_calibration, recipe_transform
+    calibration = _dual_calibration(tmp_path / "dual.h5", main_channel="lower")
+    settings = _split_pores(tmp_path, calibration)
+    settings.n_frames = 30
+    layout = split_layout(settings)
+    assert layout["shape"] == (64, 64) and list(layout["origin"]) == [0, 32]
+    # a position in the main (lower) half lands in the upper one, as registered
+    np.testing.assert_allclose(layout["to_secondary"](np.array([[10.0, 40.0]])),
+                               [[10.37, 40 - 32 - 0.21]])
+    made = Simulate().run(Context(), settings)
+    assert open_stack(made.written).shape == (64, 64)
+    truth = made.files[0][0]
+    assert truth["y_nm"].min() >= 3200            # the truth where the fit puts it
+    # the calibration carries the registration: none written, Spline 3D 2C takes it
+    assert recipe_transform(made.written) is None
+    assert recipe_calibration(made.written) == ("dual", str(calibration))
+    assert "Spline 3D 2C" in Simulate().describe(None, settings).notice.text
+
+
+def test_a_calibration_of_the_wrong_kind_for_the_camera_is_refused_with_why(tmp_path):
+    single = tmp_path / "single.h5"
+    from smappy.calibrate.core import spline_coefficients
+    from smappy.io.calibration import SplineCalibration, save_spline_calibration
+    volume = np.ones((5, 9, 9)) / 81
+    save_spline_calibration(single, SplineCalibration(spline_coefficients(volume), 10., 2.,
+                                                      psf=volume, parameters={}))
+    settings = _split_pores(tmp_path, single)
+    notice = Simulate().describe(None, settings).notice
+    assert "needs a dual-colour one" in notice.text and notice.window is None
+    with pytest.raises(ValueError, match="dual-colour"):
+        Simulate().run(Context(), settings)
+    settings = _split_pores(tmp_path, _dual_calibration(tmp_path / "dual.h5"))
+    settings.camera.split = False
+    with pytest.raises(ValueError, match="tick split camera"):
+        Simulate().run(Context(), settings)
+
+
+@pytest.mark.slow
+def test_pores_drawn_with_a_dual_calibration_are_fitted_with_it_by_spline_3d_2c(tmp_path):
+    """The frames are what the two-colour spline fit's model expects: given
+    the recipe, it takes the calibration, and the colours come back."""
+    from scipy.spatial import cKDTree
+    from smappy.plugins.fit import CameraSettings, DualSplineFit, OutputSettings
+    settings = _split_pores(tmp_path, _dual_calibration(tmp_path / "dual.h5"))
+    settings.n_frames = 300
+    for c in settings.components:
+        c.labelling.efficiency = 0.3
+    made = Simulate().run(Context(), settings)
+    truth = made.files[0][0]
+    fitter = DualSplineFit()
+    fit = fitter.Settings()
+    fit.source.path = made.written
+    fit.output = OutputSettings(path=str(tmp_path / "pores.hdf5"))
+    fit.camera = CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1)
+    updates = fitter.react("source.path", fit)
+    assert updates["model.calibration"] == str(tmp_path / "dual.h5")
+    fit.model.calibration = updates["model.calibration"]
+    locs = fitter.run(Context(), fit).locs
+    got, want = [], []
+    for f in np.unique(locs["frame"]):
+        m, t = locs["frame"] == f, (truth["frame"] == f) & (truth["photons"] > 1500)
+        if not t.any():
+            continue
+        d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(
+            np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
+        near = (d < 60) & (locs["channel"][m] > 0)
+        got += list(locs["channel"][m][near])
+        want += list(truth["channel"][t][i[near]])
+    assert len(got) > 50
+    agree = np.mean(np.asarray(got) == np.asarray(want))
+    assert max(agree, 1 - agree) > 0.9

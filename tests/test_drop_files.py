@@ -311,3 +311,22 @@ def test_fit_this_gives_astigmatic_frames_to_gaussian_2d_elliptical_and_names_as
     assert values["source.path"] == str(tmp_path / "astig.sim.yaml")
     assert values["model.elliptical"] is True
     assert "Astigmatic z" in control.statusBar().currentMessage()
+
+
+def test_fit_this_gives_a_split_camera_drawn_with_a_dual_calibration_to_spline_3d_2c(
+        app, windows, tmp_path):
+    from test_simulate_plugin import _dual_calibration
+    from smappy.plugins.simulate import Simulate
+    from smappy.simulate.source import write_recipe
+    session, control, _ = windows
+    calibration = _dual_calibration(tmp_path / "dual.h5")
+    settings = Simulate.Settings(output="camera", n_frames=20)
+    settings.camera.split = True
+    settings.optics.calibration = str(calibration)
+    path = write_recipe(settings, tmp_path / "split.sim.yaml")
+    assert control.fit_file(path)
+    localize = control.tabs.currentWidget()
+    opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
+    assert opened.plugin == "Localize/Spline 3D 2C"
+    values = localize.slots[opened.id].panel.form.values()
+    assert values["model.calibration"] == str(calibration)

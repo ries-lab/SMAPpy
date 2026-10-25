@@ -69,7 +69,9 @@ at the frame.  Moving whole copies is left for later.
   halves, each component's photons split by its ratio; the transformation
   between the halves (`camera.dual_transformation`) is written beside the
   recipe as `<name>_2ct.h5`, which a two-colour fitter given the recipe
-  takes for its *transformation* (`_FitPlugin.react`), and *Fit this* hands
+  takes for its *transformation* (`_FitPlugin.react`) -- unless a dual-colour
+  *PSF calibration* is set, whose halves, registration and two PSFs it draws
+  instead (`camera.split_layout`), for Spline 3D 2C -- and *Fit this* hands
   a split recipe to Gaussian 2D 2C.  So simulated two-colour pores go
   straight into the 2D two-colour workflow.
 

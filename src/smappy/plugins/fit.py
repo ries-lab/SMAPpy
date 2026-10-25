@@ -964,13 +964,15 @@ class _FitPlugin(Plugin):
             # a recipe drawn with a bead calibration: a spline fitter fits
             # with that calibration, unless one was chosen
             model = getattr(settings, "model", None)
-            if isinstance(model, SplineModelSettings):
+            kind = ("single" if isinstance(model, SplineModelSettings)
+                    else "dual" if isinstance(model, DualModelSettings) else None)
+            if kind is not None:
                 from ..simulate.source import recipe_calibration
                 drawn = recipe_calibration(settings.source.path)
-                if drawn is not None and model.calibration in (
+                if drawn is not None and drawn[0] == kind and model.calibration in (
                         "", getattr(self, "_default_calibration", None)):
-                    updates["model.calibration"] = drawn
-                    self._default_calibration = drawn
+                    updates["model.calibration"] = drawn[1]
+                    self._default_calibration = drawn[1]
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
             # the file it is given.  Copying turned the file's numbers into the

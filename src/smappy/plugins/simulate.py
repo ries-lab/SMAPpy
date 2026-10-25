@@ -236,7 +236,8 @@ class Simulate(Plugin):
     changes_locs = True
     # 2: diffusion in 3D by default; the split camera a camera option, with
     # its transformation written beside the recipe
-    version = "2"
+    # 3: a split camera with a dual-colour calibration drawn as calibrated
+    version = "3"
 
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields
@@ -244,8 +245,16 @@ class Simulate(Plugin):
         a camera, *Fit this*."""
         state = component_state(settings)
         camera = settings.output == "camera"
+        from ..simulate.camera import psf_problem
+        problem = psf_problem(settings)
+        drawn = camera and bool(settings.optics.calibration) and not problem
         state.shown.update({"camera": camera, "localizations": not camera,
-                            "camera.split_sigma_nm": camera and settings.camera.split})
+                            # a dual-colour calibration brings each half's PSF
+                            "camera.split_sigma_nm": camera and settings.camera.split
+                            and not drawn})
+        if drawn and settings.camera.split:
+            # ... and the frame: its halves as they were calibrated
+            state.active["camera.size_px"] = False
         keys = preset_keys(settings.preset)
         if camera:
             keys.update(CAMERA_KEYS)
@@ -270,17 +279,19 @@ class Simulate(Plugin):
             # Fit this writes the recipe from the settings as they are and
             # hands it to a fitter (the GUI's "fit simulation" window), as Run
             # writes it: a file left by an earlier run is never what is fitted
-            what = ("the two-colour fitter" if settings.camera.split
-                    else "the spline fitter, with its PSF calibration"
-                    if settings.optics.calibration
+            what = ("Spline 3D 2C, with its PSF calibration"
+                    if settings.camera.split and drawn
+                    else "the two-colour fitter" if settings.camera.split
+                    else "Spline 3D, with its PSF calibration" if drawn
                     else "Gaussian 2D, elliptical, for Astigmatic z" if astigmatic_note(settings)
                     else "a fitter")
             text = (f"Fit this writes {recipe_of(settings).name} with these settings "
                     f"and opens it in {what}")
             motion = state.notice.text + ".  " if state.notice is not None else ""
-            state.notice = Notice(unsplit or motion + text, action="Fit this",
-                                  window="fit simulation",
-                                  kind="warning" if unsplit else "info")
+            state.notice = Notice(problem or unsplit or motion + text,
+                                  action="" if problem else "Fit this",
+                                  window=None if problem else "fit simulation",
+                                  kind="warning" if problem or unsplit else "info")
         return state
 
     def react(self, changed: str, settings: SimulateSettings) -> Optional[Dict[str, Any]]:
@@ -309,6 +320,11 @@ class Simulate(Plugin):
             raise ValueError("no component is switched on: tick one in the list")
         ctx.report(f"simulating {settings.n_frames} frames of "
                    f"{', '.join(c.name for c in on)}...")
+        if settings.output == "camera":
+            from ..simulate.camera import psf_problem
+            problem = psf_problem(settings)
+            if problem:
+                raise ValueError(problem)
         truth = ground_truth(settings)
         if settings.output == "camera":
             return self._camera(ctx, settings, truth)

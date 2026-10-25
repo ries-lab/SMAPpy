@@ -143,9 +143,10 @@ class OpticsSettings:
                              file_filter="Calibrations (*_3dcal.mat *_3Dcal.mat *.h5);;"
                                          "All files (*)",
                              help="camera frames drawn with a measured spline PSF "
-                                  "(a bead calibration) instead of a Gaussian, and "
-                                  "fitted with it by Spline 3D; one camera only, a "
-                                  "split camera's halves stay Gaussian")
+                                  "instead of a Gaussian, and fitted with it: a bead "
+                                  "calibration by Spline 3D; for a split camera a "
+                                  "dual-colour one, its two PSFs, halves and "
+                                  "registration, by Spline 3D 2C")
 
 
 @dataclass
@@ -188,7 +189,8 @@ class CameraOutputSettings:
                             "software")
     size_px: int = param(100, label="size", unit="px", min=8,
                          help="the side of the square frame, which covers x and y "
-                              "from 0 to this times the pixel size")
+                              "from 0 to this times the pixel size; a split camera "
+                              "with a dual-colour calibration takes its frame")
     conversion: float = param(0.5, unit="e-/ADU", min=1e-6,
                               help="electrons per camera count")
     offset: float = param(100.0, unit="ADU",
