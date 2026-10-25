@@ -30,6 +30,7 @@ Frames are drawn a block at a time and their noise is seeded per frame, so
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
@@ -55,30 +56,37 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
     s = truth.settings
     stop = s.n_frames if stop is None else min(stop, s.n_frames)
     size = s.camera.size_px
-    height = 2 * size if dual else size
-    out = np.empty((max(stop - start, 0), height, size), np.uint16)
+    layout = split_layout(s) if dual else None
+    height, width = layout["shape"] if dual else (size, size)
+    out = np.empty((max(stop - start, 0), height, width), np.uint16)
     background = frame_backgrounds(s)
     em = truth.emission
     xyz = truth.positions()
     for a in range(start, stop, chunk):
         b = min(a + chunk, stop)
         lo, hi = np.searchsorted(em.frame, [a, b])
-        image = np.empty((b - a, height, size))
+        image = np.empty((b - a, height, width))
         image[:] = background[a:b, None, None]
         rows = slice(lo, hi)
         frame = em.frame[rows] - a
         if hi > lo:
             px = xyz[rows, :2] / s.optics.pixelsize_nm
             if dual is None and s.optics.calibration:
+                if is_dual_calibration(s.optics.calibration):
+                    raise ValueError(psf_problem(replace(s, output="camera")))
                 _draw_spline(image, frame, px, xyz[rows, 2], em.photons[rows],
                              spline_calibration(s.optics.calibration))
             elif dual is None:
                 _draw(image, frame, px, em.photons[rows], *_widths(xyz[rows, 2], s.optics))
             else:
                 ratio = truth.fluorophores.ratio[em.owner[rows]]
-                forward = np.linalg.inv(dual_transformation(size))
-                secondary = (np.c_[px, np.ones(len(px))] @ forward.T)[:, :2]
-                for half, (at, share) in enumerate(((px, 1 - ratio), (secondary, ratio))):
+                main = px + layout["origin"]
+                secondary = layout["to_secondary"](main)
+                for half, (at, share) in enumerate(((main, 1 - ratio), (secondary, ratio))):
+                    if layout["splines"] is not None:
+                        _draw_spline(image, frame, at, xyz[rows, 2],
+                                     em.photons[rows] * share, layout["splines"][half])
+                        continue
                     optics = replace(s.optics, sigma_nm=dual["sigma_nm"][half])
                     _draw(image, frame, at, em.photons[rows] * share,
                           *_widths(xyz[rows, 2], optics))
@@ -138,12 +146,18 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
                                      if s.optics.astigmatism else None)})
     if dual:
         columns["ratio"] = fl.ratio[em.owner].astype(np.float32)
-        size = s.camera.size_px
+        layout = split_layout(s)
+        # where the fit puts them: on the chip, in the main half
+        ox, oy = layout["origin"] * s.optics.pixelsize_nm
+        columns["x_nm"] = (columns["x_nm"] + ox).astype(np.float32)
+        columns["y_nm"] = (columns["y_nm"] + oy).astype(np.float32)
+        geometry = layout["geometry"]
         metadata.update({"sigma_nm": list(dual["sigma_nm"]),
                          "ratios": sorted({float(r) for r in fl.ratio}),
-                         "transformation": dual_transformation(size).tolist(),
-                         "layout": "up-down", "main_channel": "upper",
-                         "split_position": size})
+                         "transformation": layout["transformation"].tolist(),
+                         "layout": geometry["layout"],
+                         "main_channel": geometry["main_channel"],
+                         "split_position": geometry["split_position"]})
     return Localizations(columns, metadata)
 
 
@@ -290,6 +304,93 @@ def _camera(image, rng, conversion: float, offset: float, read_noise: float,
 # Small, but pixels off at the corners -- the reason a transformation is fitted
 # rather than a shift assumed.
 DUAL_SHIFT_PX, DUAL_ANGLE_DEG, DUAL_SCALE = (1.6, -0.9), 0.4, 1.004
+
+
+_DUALS: dict = {}
+
+
+def dual_calibration(path):
+    """A dual-colour calibration (`calibrate.dual`), loaded once per path."""
+    key = str(Path(path).resolve())
+    if key not in _DUALS:
+        from ..calibrate.dual import load_dual_color_calibration
+        _DUALS[key] = load_dual_color_calibration(path)
+    return _DUALS[key]
+
+
+def is_dual_calibration(path) -> bool:
+    """Whether ``path`` is a dual-colour calibration (two PSFs and the map
+    between the halves), not a one-camera bead calibration."""
+    try:
+        import h5py
+        if not h5py.is_hdf5(path):
+            return False
+        with h5py.File(path, "r") as f:
+            return f.attrs.get("format") == "smappy-dual-color-calibration"
+    except OSError:
+        return False
+
+
+def psf_problem(s: SimulationSettings) -> str:
+    """What is wrong with the PSF calibration for this camera, or "": a
+    split camera draws a dual-colour calibration's two PSFs, one camera a
+    bead calibration's one."""
+    path = s.optics.calibration
+    if not path or s.output != "camera":
+        return ""
+    if not Path(path).is_file():
+        return f"no PSF calibration at {path}"
+    dual = is_dual_calibration(path)
+    if s.camera.split and not dual:
+        return (f"{Path(path).name} is a one-camera calibration: a split camera needs a "
+                f"dual-colour one (PSF calibration in Dual colour mode), or none for "
+                f"Gaussian halves")
+    if dual and not s.camera.split:
+        return (f"{Path(path).name} is a dual-colour calibration: tick split camera, or "
+                f"choose a one-camera calibration")
+    return ""
+
+
+def split_layout(s: SimulationSettings) -> dict:
+    """How a split camera is laid out and drawn: the frame's ``shape``, the
+    main half's corner on it (``origin``, x and y in pixels), the map from a
+    main-half position to the secondary half (``to_secondary``, chip
+    pixels), its 3x3 the other way (``transformation``, secondary to main,
+    as `calibrate.dual` keeps it), the ``geometry`` -- and ``splines``, the
+    two PSFs, or None for Gaussians.
+
+    With a dual-colour calibration all of it is the calibration's: its
+    halves, its registration, mirror included, and its two splines, so the
+    frames are what Spline 3D 2C fitted with that calibration expects --
+    each half's spot where and as its model puts it (`dualfit.build_link`).
+    Without one, the built-in splitter (`dual_transformation`), upper half
+    main, Gaussians of each half's width.
+    """
+    path = s.optics.calibration
+    if path:
+        problem = psf_problem(replace(s, output="camera"))
+        if problem:
+            raise ValueError(problem)
+        from ..dualfit import reference_is_first, split_axis
+        cal = dual_calibration(path)
+        geometry = dict(cal.geometry)
+        origin = np.zeros(2)
+        if not reference_is_first(geometry):
+            origin[1 - split_axis(geometry)] = geometry["split_position"]
+        return {"shape": tuple(int(v) for v in geometry["image_shape"]),
+                "origin": origin, "to_secondary": cal.to_secondary,
+                "transformation": np.asarray(cal.transformation, float),
+                "geometry": geometry, "splines": (cal.main, cal.secondary)}
+    size = s.camera.size_px
+    h = dual_transformation(size)
+    forward = np.linalg.inv(h)
+    return {"shape": (2 * size, size), "origin": np.zeros(2),
+            "to_secondary": lambda xy: (np.c_[xy, np.ones(len(xy))] @ forward.T)[:, :2],
+            "transformation": h,
+            "geometry": {"layout": "up-down", "main_channel": "upper",
+                         "split_position": size, "image_shape": [2 * size, size],
+                         "coordinate_system": "camera-chip"},
+            "splines": None}
 
 
 def dual_transformation(size_px: int = 100) -> np.ndarray:

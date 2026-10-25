@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of]
+version: "3"
+covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem]
 ---
 
 ## What it does
@@ -339,6 +339,13 @@ is placed by a known transformation (a slight turn, scale and shift) and
 sees a PSF of its own (*second half's PSF*).  Which colour a molecule is
 shows only in how its light splits -- what the two-colour fitters and
 [Assign colours](plugin:Analysis/Dual-colour/Assign colours) measure.
+With a dual-colour *PSF calibration* (made by PSF calibration in Dual
+colour mode) the split camera is that calibration's instead: its frame and
+halves, side by side or one above the other, its two measured PSFs, and
+the second half placed by its registration, mirror included -- each spot
+where and as the two-colour spline fit's model puts it.  A one-camera
+calibration with a split camera, or a dual-colour one without, is refused
+with a line under the form.
 
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
@@ -349,7 +356,8 @@ Open it in a fitter as its file, as you would open a TIFF.  *Fit this*
 under the form does both at once, without Run: it writes the recipe from
 the settings as they are and opens it in the Localize tab's open fitter
 (or Gaussian 2D); drawn with a *PSF calibration*, in Spline 3D with that
-calibration filled in; and for a split camera in Gaussian 2D 2C.  Run and *Fit
+calibration filled in; for a split camera in Gaussian 2D 2C, or with a
+dual-colour calibration in Spline 3D 2C with that calibration.  Run and *Fit
 this* always write the current settings over whatever file is there, so
 what is fitted is never what an earlier run left.  The frames are drawn as the fitter reads them, identically
 every time, and the fitter takes the camera's pixel size, conversion and
@@ -360,6 +368,8 @@ the map between the split camera's halves exactly, so beside the recipe it
 writes it as a transformation file, `<name>_2ct.h5`, the kind a two-colour
 fitter reads.  A two-colour fitter given the recipe as its file takes that
 transformation without being asked, instead of measuring it from the movie.
+A dual-colour calibration carries its own registration, so then no such
+file is written and Spline 3D 2C takes the calibration.
 So two-colour pores as frames are: the preset *Two-colour pores*, *simulate*
 set to *camera frames*, *split camera* ticked, *Fit this*, Run -- and
 the fit assigns each localization its colour by how its light split, which
@@ -510,7 +520,13 @@ background is flat over a frame, and with its *std* it varies from frame to
 frame.  The split camera's lower half is the upper one mapped by
 `dual_transformation`: a turn of 0.4°, a scale of 1.004 and a shift of
 (1.6, −0.9) pixels about the half's centre, written beside the recipe as
-the `_2ct.h5` a two-colour fitter reads.  Each frame's noise has its own seed, so a frame is the same
+the `_2ct.h5` a two-colour fitter reads.  With a dual-colour calibration
+the frame is the calibration's `image_shape`, the main half where its
+geometry says (a molecule at x, y in the main half is at x, y plus that
+half's corner, which the truth table reports too), and the secondary spot
+at the calibration's `to_secondary` of the main one, each evaluated from
+its own spline, as `dualfit.build_link` makes the fit evaluate them.
+Each frame's noise has its own seed, so a frame is the same
 whichever block of the stack it is drawn in.
 
 **Drift.**  A random walk of 0.6 nm per frame and axis, plus a straight creep
