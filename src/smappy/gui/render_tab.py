@@ -1404,6 +1404,14 @@ class RenderTab(QWidget):
         return self.session.layers[self.strip.current]
 
     def _on_session(self, what: str) -> None:
+        if what in ("locs", "regrouped", "append") \
+                and len(self.strip.buttons) != len(self.session.layers):
+            # a new table can bring new layers and say only "locs": a live fit
+            # starts with one layer, and the strip, still on layer 2, raised in
+            # the middle of `begin_live` -- the fit's table was then refused
+            # as if the fit were still running.  `rebuild` selects a layer
+            # that exists, which binds it.
+            self.strip.rebuild()
         if what == "locs":
             self._bind_layer(self.strip.current)
             self.axes.bind()

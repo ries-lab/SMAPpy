@@ -440,8 +440,11 @@ class PluginPanel(QWidget):
                                 f"{'s' if self._warnings > 1 else ''})")
             self.status.setStyleSheet(WARNING_STYLE)
         elif event == "start":
-            self.session.begin_live(payload.get("extent"), payload.get("path"))
+            # owned first: a window listening to the session can raise inside
+            # `begin_live`, and a live table nobody owns refuses the fit's own
+            # result as if another fit were running
             self._owns_live = True
+            self.session.begin_live(payload.get("extent"), payload.get("path"))
         elif event == "block":
             self.session.append(payload)
 

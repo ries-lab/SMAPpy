@@ -179,6 +179,9 @@ def block(frame, n=300):
 def test_a_live_fit_appends_once_and_every_layer_follows():
     session = Session(simulate(n_frames=200, seed=1))
     before = session.locs
+    # the layer is kept through the fit, merging blinks as it was set to:
+    # this follows the localizations
+    session.layers[0].show_grouped(False)
     session.begin_live((0, 5000, 0, 5000))
     session.append(block(1))
     second = session.add_layer(like=0)
@@ -208,7 +211,7 @@ def test_a_live_fit_appends_once_and_every_layer_follows():
     assert not session.live
     session.undo()
     assert session.locs is before
-    assert session.layers[0].locs is session.tables.grouped().locs
+    assert session.layers[0].locs is session.tables.ungrouped.locs   # as it was set
 
 
 def test_undo_brings_back_the_table_the_bounds_and_the_link_settings_stay():

@@ -212,3 +212,32 @@ def test_colours_follow_the_live_table_and_are_found_again_when_it_is_finished()
     session.apply(Shift(), Result(locs=finished, text="fit"), finishes_live=True)
     assert not session.live and "channel" in session.locs
     assert session.history[-2]["what"] == "live recipes"
+
+
+def test_a_live_fit_keeps_the_layers_and_shows_in_layer_one_only():
+    """The layers are the user's, not the fit's: a live fit keeps them with
+    their settings, layer 1 shows the fit, and a layer set to a file that is
+    no longer there shows nothing -- through the run and once it is done."""
+    import dataclasses
+    from smappy.io.formats import FileInfo
+    session = Session()
+    session.add_file(block(1), FileInfo(name="a", path="a", format="test"))
+    session.add_file(block(2), FileInfo(name="b", path="b", format="test"), append=True)
+    session.add_layer()
+    one, two = session.layers
+    two.set_files([1])
+    two.set_bound("photons", 500.0, None)
+    two.set_display(dataclasses.replace(two.get_display(), lut="cyan"))
+    session.begin_live((0, 5000, 0, 5000), "/data/fit_locs.hdf5")
+    assert session.layers == [one, two] and [f.name for f in session.files] == ["fit_locs.hdf5"]
+    for frame in range(3, 6):
+        session.append(block(frame))
+    assert len(session.locs) == 150 and one.filter.mask.sum() > 0
+    assert two.filter.mask.sum() == 0                     # its file is gone
+    assert two.ranges["photons"] == (500.0, None) and two.get_display().lut == "cyan"
+    finished = session.locs.snapshot().compact()
+    session.apply(Shift(), Result(locs=finished, text="fit"), finishes_live=True)
+    assert session.layers == [one, two] and not session.live
+    assert one.filter.mask.sum() > 0 and two.filter.mask.sum() == 0
+    assert two.ranges["photons"] == (500.0, None)
+    assert session.files[0].n == 150
