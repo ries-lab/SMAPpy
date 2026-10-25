@@ -43,7 +43,7 @@ class BatchWindow(QMainWindow):
 
     def __init__(self, open_result: Optional[Callable[[str], None]] = None, parent=None):
         super().__init__(parent)
-        from .help_window import attach_help
+        from .help_window import attach_help, show_help
         attach_help(self, 'Panels/Batch window')
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("SMAPpy batch")
@@ -59,6 +59,17 @@ class BatchWindow(QMainWindow):
 
         central = QWidget()
         root = QVBoxLayout(central)
+        # the "?" every plugin's title bar has: F1 alone was never found
+        top = QHBoxLayout()
+        top.addWidget(QLabel("one chain over many files, each in a fresh session"))
+        top.addStretch(1)
+        self.help_button = QToolButton(text="?", autoRaise=True)
+        self.help_button.setToolTip("how to use the batch window: files, a chain, "
+                                    "the output, and what a run writes (F1)")
+        self.help_button.clicked.connect(
+            lambda: show_help("Panels/Batch window", self))
+        top.addWidget(self.help_button)
+        root.addLayout(top)
         split = QSplitter(Qt.Vertical)
         root.addWidget(split, 1)
 

@@ -28,7 +28,8 @@ input is one file.
 
 It opens from **Plugins > Batch...**, or on its own as `smappy-batch-gui`.  It
 is a front end to the job file and the command `smappy-batch`: everything it
-does can be repeated from a terminal with the file it writes.
+does can be repeated from a terminal with the file it writes.  The **?** at
+its top right (or F1) opens this page.
 
 ## How it works
 

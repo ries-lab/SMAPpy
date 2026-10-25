@@ -677,8 +677,8 @@ class LayerStrip(QWidget):
 
 
 class Overview(QWidget):
-    """The whole field, small, with a frame where the main view is: a map to
-    read, not a control -- it neither zooms nor moves the view."""
+    """The whole field, small, with a frame where the main view is; a click
+    centres the main view there, at its zoom.  It never zooms."""
 
     def __init__(self, session: Session, view, parent=None):
         super().__init__(parent)
@@ -705,6 +705,7 @@ class Overview(QWidget):
                                            enableMenu=False, enableMouse=False)
         self.image = pg.ImageItem(axisOrder="row-major")
         self.box.addItem(self.image)
+        self.image.mouseClickEvent = self._on_click
         self.frame = pg.QtWidgets.QGraphicsRectItem()
         self.frame.setPen(pg.mkPen((255, 255, 0), width=1))
         self.frame.setBrush(pg.mkBrush(None))
@@ -803,6 +804,14 @@ class Overview(QWidget):
         self.image.setRect(rect)
         self.box.setRange(rect, padding=0)
         self._track()
+
+    def _on_click(self, event) -> None:
+        if self.view is None:
+            return
+        pos = self.image.mapToView(event.pos())
+        self.view.window().show()          # closed by accident: bring it back
+        self.view.center_on(pos.x(), pos.y())
+        event.accept()
 
     def _track(self) -> None:
         if self.view is not None:

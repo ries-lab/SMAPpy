@@ -327,3 +327,27 @@ def test_a_chain_waits_for_the_merge_and_shares_it(app, monkeypatch, counted):
     _run_until(app, lambda: _panel_done(panel))
     assert panel.result.data["results"]["n"].data["n"] == _expected_blinks(session)
     assert links == []                                   # the session's merge, shared
+
+
+def test_the_control_window_has_room_for_a_process_tab_and_2d_view_shows_the_picture(app):
+    from PySide6.QtWidgets import QWidget
+    from smappy.gui.app import ControlWindow, RenderWindow
+
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    control.show()
+    control.tabs.addTab(QWidget(), "Process")        # off in the shipped GUI
+    app.processEvents()
+    bar = control.tabs.tabBar()
+    assert bar.count() == 6
+    assert sum(bar.tabSizeHint(i).width() for i in range(6)) <= control.tabs.width()
+
+    view_menu = next(a.menu() for a in control.menuBar().actions() if a.text() == "View")
+    two_d = next(a for a in view_menu.actions() if a.text() == "2D view")
+    assert two_d.shortcut().toString() == "Ctrl+2"
+    render.hide()
+    two_d.trigger()
+    assert render.isVisible()
+    render.close()
+    control.close()

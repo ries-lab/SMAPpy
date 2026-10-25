@@ -39,7 +39,7 @@ from .identity import install_identity
 # highlight colour, which keeps its width where bold text would not.
 TAB_STYLE = """
 QTabBar::tab {
-    margin-top: 4px; padding: 3px 10px;
+    margin-top: 4px; padding: 3px 8px;
     border: 1px solid palette(mid); border-bottom: none;
     border-top-left-radius: 4px; border-top-right-radius: 4px;
     background: palette(button);
@@ -239,7 +239,7 @@ class ControlWindow(QMainWindow):
         # what one notices.  Capped so it still fits a laptop screen.
         screen = QApplication.primaryScreen()
         height = screen.availableGeometry().height() - 60 if screen else 900
-        self.resize(CONTROL_WIDTH, max(640, min(1000, height)))
+        self.resize(self._tabs_width(), max(640, min(1000, height)))
 
         # Loading runs in a LoadTask; these hold its state.  `_load_locked` is
         # everything that would change the table under a running one.
@@ -350,6 +350,10 @@ class ControlWindow(QMainWindow):
         self.view3d_window = None
         self.calibration_window = None
         self.psf_calibration_window = None
+        # the render window, brought to the front; Ctrl+2 beside the 3D
+        # view's Ctrl+3.  Reset view is its button, Ctrl+0 its key from either
+        # window (`RenderToolBar`); a menu item as well said it twice
+        self._action(view, "2D view", "Ctrl+2", self.show_2d)
         self._action(view, "3D view", "Ctrl+3", self.toggle_3d)
         render.toolbar.view3d_button.clicked.connect(self.toggle_3d)
         self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
@@ -431,9 +435,6 @@ class ControlWindow(QMainWindow):
         # (*SMAPpy > About SMAPpy*), where a Mac user looks for it
         about = self._action(help_, "About SMAPpy", None, self.show_about)
         about.setMenuRole(QAction.AboutRole)
-        # Reset view is the render window's button, Ctrl+0 its key from either
-        # window (`RenderToolBar`); a menu item as well said it twice
-        self._action(view, "Show render window", None, render.show)
         if sys.platform == "darwin":
             # A Mac has one menu bar, the front window's: with the picture in
             # front -- most of the time -- it was empty, and the Plugins menu
@@ -448,6 +449,36 @@ class ControlWindow(QMainWindow):
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
         self._on_session("locs")
+
+    #: tabs the window keeps room for though the GUI may not have them yet
+    #: (off in the shipped one, for now), so turning one on does not bring
+    #: the scroll arrows back
+    ROOM_FOR_TABS = ("Process",)
+
+    def _tabs_width(self) -> int:
+        """The control column's width, or wider if its tabs and those of
+        `ROOM_FOR_TABS` it lacks would not fit side by side: six names at
+        CONTROL_WIDTH on Windows and Linux, wider on a Mac's own tabs."""
+        bar = self.tabs.tabBar()
+        names = [bar.tabText(i) for i in range(bar.count())]
+        width = sum(bar.tabSizeHint(i).width() for i in range(bar.count()))
+        metrics = bar.fontMetrics()
+        if names:
+            # a tab's padding and frame: what its width has beyond its name
+            frame = max(bar.tabSizeHint(i).width() - metrics.horizontalAdvance(n)
+                        for i, n in enumerate(names))
+            width += sum(metrics.horizontalAdvance(n) + frame
+                         for n in self.ROOM_FOR_TABS if n not in names)
+        return max(CONTROL_WIDTH, width + 8)
+
+    def show_2d(self) -> None:
+        """The render window shown and in front, wherever it was."""
+        window = self.render_window
+        if window.isMinimized():
+            window.showNormal()
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def show_about(self) -> None:
         from .about import show_about
