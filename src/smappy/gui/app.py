@@ -403,6 +403,7 @@ class ControlWindow(QMainWindow):
         # a written simulation offers this (`Simulate.describe`), with the
         # file's path: into a fitter as a dropped stack goes
         session.window_openers["fit file"] = self.fit_file
+        session.window_openers["fit simulation"] = self.fit_simulation
         # Line Profile with no line ROI offers this (`LineProfile.describe`):
         # the render window, drawing a line
         session.window_openers["draw line"] = lambda settings=None: self.draw_line()
@@ -1677,6 +1678,19 @@ class ControlWindow(QMainWindow):
                     if instance.plugin == plugin:
                         return index, tab, instance
         return None
+
+    def fit_simulation(self, settings) -> bool:
+        """*Simulate*'s *Fit this*: the recipe written from ``settings`` as
+        they are now -- never a file an earlier run left -- and handed to a
+        fitter (`fit_file`)."""
+        from ..plugins.simulate import recipe_of
+        from ..simulate.source import write_recipe
+        try:
+            path = write_recipe(settings, recipe_of(settings))
+        except (OSError, ValueError) as e:
+            self.statusBar().showMessage(f"the simulation could not be written: {e}", 12000)
+            return False
+        return self.fit_file(path)
 
     def fit_file(self, path) -> bool:
         """Set a fitter's *file* to ``path`` as if it had been picked with the

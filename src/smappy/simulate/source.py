@@ -43,14 +43,7 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     absolute so the recipe still finds it from wherever it is opened."""
     import yaml
     path = recipe_path(path)
-    values = asdict(settings)
-    for part in values.get("components") or [values]:
-        if part["structure"]["file"]:
-            part["structure"]["file"] = str(Path(part["structure"]["file"]).resolve())
-    if values["optics"]["calibration"]:
-        values["optics"]["calibration"] = str(Path(values["optics"]["calibration"]).resolve())
-    if values["output"] == "localizations":
-        values["output"] = "camera"
+    values = recipe_values(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# a smappy simulation: open it in a fitter as its file\n")
@@ -59,6 +52,19 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     if dual_of(settings):
         write_transform(settings, transform_path(path))
     return path
+
+
+def recipe_values(settings: SimulationSettings) -> dict:
+    """The settings as a simulation file holds them."""
+    values = asdict(settings)
+    for part in values.get("components") or [values]:
+        if part["structure"]["file"]:
+            part["structure"]["file"] = str(Path(part["structure"]["file"]).resolve())
+    if values["optics"]["calibration"]:
+        values["optics"]["calibration"] = str(Path(values["optics"]["calibration"]).resolve())
+    if values["output"] == "localizations":
+        values["output"] = "camera"
+    return values
 
 
 def transform_path(recipe) -> Path:

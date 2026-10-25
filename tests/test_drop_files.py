@@ -226,8 +226,11 @@ def test_only_local_files_are_taken_from_a_drag():
     assert not drops.accepts(text)
 
 
-def test_a_written_simulation_offers_fit_this_which_fills_the_fitters_file(
+def test_fit_this_writes_the_simulation_as_set_and_fills_the_fitters_file(
         app, windows, tmp_path):
+    """No Run first, and never a recipe an earlier run left: Fit this writes
+    the settings as they are and hands the file to the fitter."""
+    from smappy.simulate.source import read_recipe
     session, control, _ = windows
     tab = next(control.tabs.widget(i) for i in range(control.tabs.count())
                if control.tabs.tabText(i) == "File")
@@ -236,23 +239,15 @@ def test_a_written_simulation_offers_fit_this_which_fills_the_fitters_file(
     tab.open_section(simulate.id)
     panel = tab.slots[simulate.id].panel
     path = tmp_path / "run.sim.yaml"
+    path.write_text("# left by an earlier run\nsmappy: simulation\nsettings: {n_frames: 5}\n")
     panel.form.set_values({"output": "camera", "n_frames": 20,
                            "camera.path": str(path)})
     panel.refresh_derived()
-    assert not panel.notice_button.isVisibleTo(panel)     # nothing written yet
-
-    ended = []
-    panel.ended.connect(lambda *args: ended.append(args))
-    panel.run_button.click()
-    deadline = time.monotonic() + 60
-    while not ended and time.monotonic() < deadline:
-        app.processEvents()
-        time.sleep(0.01)
-    assert ended and ended[0][0] == "done" and path.is_file()
     assert panel.notice_button.isVisibleTo(panel)
     assert panel.notice_button.text() == "Fit this"
 
     panel.notice_button.click()                 # the fitter's file, as a drop sets it
+    assert read_recipe(path).n_frames == 20                 # these settings
     assert control.tabs.tabText(control.tabs.currentIndex()) == "Localize"
     localize = control.tabs.currentWidget()
     opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]

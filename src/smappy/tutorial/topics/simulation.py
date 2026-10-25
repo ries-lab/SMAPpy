@@ -141,7 +141,8 @@ def make(d) -> None:
     d.chapter("Fitting them")
     fit_this = sim.notice_button
     assert fit_this.isVisible() and fit_this.text() == "Fit this"
-    d.shot("Fit this gives the recipe to a fitter as its file.",
+    d.shot("Fit this writes the recipe from the settings as they are and gives "
+           "it to a fitter as its file.",
            spot=[fit_this], point=fit_this, click=True,
            zoom=d.around(fit_this, 760))
     fit_this.click()
