@@ -1,8 +1,8 @@
 ---
 title: PSF calibration
-summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- and shows what each found and how well it fits.
+summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
 ---
 
 ## What it does
@@ -20,7 +20,12 @@ three methods (*method*):
   molecules of a measurement itself, with no beads (*In situ*, below).
 
 All three write the same kind of file and hand it to the same fitter, so they
-can be compared.
+can be compared.  A fourth method makes no PSF at all:
+
+* **elliptical Gaussian**: how the two widths of an elliptical Gaussian fit
+  change with z, for [Astigmatic z](plugin:Analysis/After fit/Astigmatic z),
+  which turns the widths of Gaussian 2D's *elliptical* fit into z
+  (*Elliptical Gaussian*, below).
 
 The pupil model: the light from a point is collected by the objective, and
 everything the microscope does to it -- the astigmatism of a cylindrical lens,
@@ -270,6 +275,55 @@ secondary channel placed where the learnt transform puts it and the photons
 free in each channel, so a wrong transform or channels whose z disagree show
 as they would in the data; one z per pair, and the photon ratio beside it.
 
+## Elliptical Gaussian
+
+The simplest 3D for an astigmatic microscope needs no PSF model: fit every
+spot with an elliptical Gaussian, which measures its width in x and in y, and
+read z off how those widths change with z.  This method measures that change
+on the same bead z-stacks (Huang et al. 2008,
+[doi:10.1126/science.1153529](https://doi.org/10.1126/science.1153529)).
+
+**1. The beads** are found as the bead average finds them (*beads*), the
+too-dim ones left out as there.
+
+**2. Every plane of every bead** is fitted with the elliptical Gaussian of
+[Gaussian 2D](plugin:Localize/Gaussian 2D), in a box of *fit box* pixels
+around the bead.  The box should be the one the data are fitted in: a
+Gaussian fitted to a PSF that is not a Gaussian finds widths that depend on
+the box.  The camera's conversion turns the beads into photons, so the widths'
+errors are those a real fit reports, and its pixel size turns them into nm.
+
+**3. The beads are put onto each other.**  Beads on a coverslip are not all
+at one height -- a tilted coverslip moves them by tens of nanometres across
+the field -- so each bead's z is moved to put its own round spot, where its
+two widths are equal, at 0.  A bead whose widths never cross in the stack is
+not used.  z is the height in the sample: the objective raised by dz leaves
+the bead dz below focus.
+
+**4. One curve per axis** is fitted to all the beads' widths, weighted by
+their errors,
+
+$$s(z) = s_0 \sqrt{1 + u^2 + A u^3 + B u^4}, \quad u = \frac{z - c}{d}$$
+
+where $s_0$ is the narrowest width, $c$ the focus of that axis and $d$ how
+far from it the width has grown by $\sqrt{2}$.  $A$ and $B$ are the two
+terms Huang added for what a real objective does beyond a perfect beam; with
+*higher orders* off they are 0.  A bead that touched another, or a plane
+whose fit failed, is not allowed to pull the curve: the fit's loss grows only
+linearly beyond three errors.  z is then moved once more, so that 0 is where
+the curves cross, and the range of the beads is the range the curves are
+trusted over.
+
+It takes seconds and needs no PyTorch.  Its file, `<name>_astigz.h5` beside
+the stacks, is handed to Astigmatic z and never to a fitter: it is not listed
+for the fitters' *auto*.  Its pages are *Widths in z* -- every bead's widths
+over the curves, the selected beads ringed -- and *z from the widths*: each
+bead plane's widths turned back into z by Astigmatic z's own method, against
+the z it was taken at, and the error it reports there.  A good calibration
+scatters a few nanometres about zero near focus and more towards the ends,
+with no trend; a trend means the curves miss the beads, and the table's
+*residual (nm)* says which bead misses most.
+
 ## In situ
 
 A PSF measured with beads on the coverslip is not quite the PSF of molecules
@@ -376,7 +430,8 @@ Whether *Add folder...*, and a folder dropped on the window, looks inside the
 folder's subfolders.
 
 ### method
-*bead average*, *pupil model (uiPSF)* or *in situ (blinking molecules)*.  The
+*bead average*, *pupil model (uiPSF)*, *in situ (blinking molecules)* or
+*elliptical Gaussian*.  The
 window shows only what the method reads.  Switching keeps the files and
 settings and clears the result.
 
@@ -485,6 +540,24 @@ averaged: the bead calibration's settings, which its
 [page](plugin:Panels/Bead calibration) explains.  The pupil model reads only
 the finding; *bead box* is also the size of the boxes it learns from and of
 its spline.
+
+### elliptical Gaussian
+The elliptical Gaussian method's own settings (*Elliptical Gaussian*).
+
+### fit box
+The box each bead plane is fitted in, in pixels.  Use the *fit box* of the
+fit the data get (13 by default): a defocused spot is cut by the box, and a
+width measured in another box does not describe the data's.
+
+### higher orders
+Fits Huang's $A$ and $B$ as well.  Off, each axis is the plain defocus curve:
+better when the stacks are short or the beads few, since five numbers per
+axis then follow the noise.  On, the curves follow a real objective's widths
+far from focus.
+
+### start sigma
+The width every fit starts from; leave it unless fits fail on very wide or
+very narrow spots.
 
 ### in situ
 In situ learning's own settings, and how many molecules to learn from; the
@@ -642,7 +715,9 @@ wavelength.
 
 ### Use in the Spline 3D fitter
 Puts the saved calibration into the fitter again (it is put there when it is
-saved).  For dual colour, the Spline 3D 2C fitter.  Every saved calibration is
+saved).  For dual colour, the Spline 3D 2C fitter; for the elliptical
+Gaussian, *Use in Astigmatic z*: its file goes into Astigmatic z, with its
+*calibration* set to *from a file*.  Every saved calibration is
 also listed, with the microscope and the device states of its beads, so that
 a fitter left on *auto* finds it for data taken the same way, without this
 button ([Spline 3D](plugin:Localize/Spline 3D)).
@@ -772,3 +847,7 @@ Zernikes*, *Zernike table* and *Residual atlas* as above, and:
   spread functions for SMLM localization and microscope characterization.
   *Nat Methods* 21:1082–1093.
   [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x)
+- Huang B, Wang W, Bates M, Zhuang X (2008) Three-dimensional super-resolution
+  imaging by stochastic optical reconstruction microscopy. *Science*
+  319:810–813.  The defocus curves of the elliptical Gaussian method.
+  [doi:10.1126/science.1153529](https://doi.org/10.1126/science.1153529)

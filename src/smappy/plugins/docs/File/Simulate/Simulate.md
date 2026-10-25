@@ -338,7 +338,7 @@ both, its component's *split ratio* of the photons in the lower half, which
 is placed by a known transformation (a slight turn, scale and shift) and
 sees a PSF of its own (*second half's PSF*).  Which colour a molecule is
 shows only in how its light splits -- what the two-colour fitters and
-[Assign colours](plugin:Analysis/Dual-colour/Assign colours) measure.
+[Assign colours](plugin:Analysis/After fit/Assign colours) measure.
 
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
@@ -349,7 +349,11 @@ Open it in a fitter as its file, as you would open a TIFF.  *Fit this*
 under the form does both at once, without Run: it writes the recipe from
 the settings as they are and opens it in the Localize tab's open fitter
 (or Gaussian 2D); drawn with a *PSF calibration*, in Spline 3D with that
-calibration filled in; and for a split camera in Gaussian 2D 2C.  Run and *Fit
+calibration filled in; and for a split camera in Gaussian 2D 2C.  Astigmatic
+Gaussian frames on one camera go to Gaussian 2D with *elliptical* ticked, and
+the status line gives the curves to type into
+[Astigmatic z](plugin:Analysis/After fit/Astigmatic z), which turns the two
+widths into z.  Run and *Fit
 this* always write the current settings over whatever file is there, so
 what is fitted is never what an earlier run left.  The frames are drawn as the fitter reads them, identically
 every time, and the fitter takes the camera's pixel size, conversion and

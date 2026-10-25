@@ -318,7 +318,9 @@ a script, `smappy.fit(..., cutoff=..., cutoff_mode="absolute")` and
 `smappy-fit --cutoff-mode absolute` say the same.
 
 ### model.elliptical
-Seven parameters instead of five.  Useful for looking at astigmatism, not for
+Six parameters instead of five: a width in x and one in y.  For astigmatic
+data, whose two widths
+[Astigmatic z](plugin:Analysis/After fit/Astigmatic z) turns into z; not for
 2D data.
 
 ### fit.roisize
@@ -359,7 +361,7 @@ The table, with one row per fitted spot:
 | `photons`, `background` | $N$, and $b$ per pixel |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | the precision (CRLB) |
 | `photons_err`, `background_err` | their CRLB |
-| `sigma_nm` | the fitted PSF width (`sigma_x_nm`, `sigma_y_nm` if elliptical) |
+| `sigma_nm` | the fitted PSF width (`sigma_x_nm`, `sigma_y_nm` and their CRLB `sigma_x_err_nm`, `sigma_y_err_nm` if elliptical) |
 | `logl`, `logl_rel` | the log-likelihood, and per pixel |
 | `peak_x_pix`, `peak_y_pix` | the candidate the fit box was cut around |
 | `iterations` | how many steps the fit took |

@@ -14,6 +14,9 @@ as the window does.
 * **pupil model (uiPSF)**: `pupil.run_calibration` and uipsf's figures.
 * **in situ (blinking molecules)**: `insitu_run.run_insitu` on movies, uipsf's figures and the in situ
   pages (`insitu_views`); its table counts molecules by state, with no marks.
+* **elliptical Gaussian**: no PSF model at all, the curves of an elliptical Gaussian's widths in z
+  (`elliptical`), for Astigmatic z rather than a fitter; saved as ``<name>_astigz.h5`` and never listed
+  for the fitters' *auto*.
 
 Both save the same way: with *save model*, beside the stacks under the bead
 calibration's name, never over an existing file except the last run's own
@@ -669,4 +672,115 @@ def _state_rows(units, state) -> list:
             for s in order]
 
 
-METHODS = (BeadAverage(), PupilModel(), InSitu())
+class EllipticalGaussian:
+    """The widths of an elliptical Gaussian through focus (`elliptical`), for *Astigmatic z*: the beads
+    are found as the bead average finds them, each plane fitted with the elliptical Gaussian, the beads
+    put onto each other by their round spots and one defocus curve per axis fitted to them.  Seconds,
+    one channel, no torch; its own section *elliptical Gaussian*, and the camera for photons and nm."""
+    key, label = "elliptical", "elliptical Gaussian"
+    sections = {"start from": False, "microscope": False, "model": False, "spline": False, "averaging": False,
+                "elliptical": True}
+    columns = ("bead", "stack", "x, y (px)", "brightness", "z0 (nm)", "residual (nm)", "state")
+    marks_include = False
+    has_stack = False
+    listed = False                         # not a PSF: the fitters' *auto* must never pick it
+    use_label = "Use in Astigmatic z"
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .core import collect_beads
+        if dual:
+            raise ValueError("the elliptical Gaussian calibration is one channel only")
+        beads = collect_beads(paths, inputs["detection"], _counted(progress, 0.0, 1.0))
+        bright = sum(bool(r.get("brightness_accepted", True)) for r in beads.records)
+        return Detected(beads, f"{len(beads.records)} beads found, {bright} bright enough; calibrating takes "
+                               f"seconds", _positions(beads.records))
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _detected_rows(self.columns, detected.found.records, marks,
+                              lambda r: f"{r.get('brightness_adu', float('nan')):.4g}")
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .elliptical import bead_residuals, bead_widths, calibrate_widths, save_path
+        from .pupil import pixel_size_nm
+        if previous is not None:
+            beads = previous.result["beads"]
+        elif detected is not None:
+            beads = detected.found
+        else:
+            beads = self.detect(paths, dual, inputs, progress).found
+        camera = inputs.get("camera")
+        if camera is None:
+            raise ValueError("the elliptical Gaussian calibration needs the camera: its pixel size for nm and "
+                             "its conversion for photons -- give them under microscope")
+        settings = inputs["elliptical"]
+        tell = _counted(progress, 0.0, 1.0) or (lambda text: None)
+        widths = bead_widths(beads, camera, pixel_size_nm(camera), settings, tell)
+        # a bead too dim for the bead average is too dim here too
+        dim = [i for i, r in enumerate(beads.records) if not r.get("brightness_accepted", True)]
+        excluded = sorted({b for b, wish in (marks or {}).items() if wish == "exclude"} | set(dim))
+        names = ", ".join(sorted({Path(str(s.get("path", ""))).name for s in beads.sources}))
+        cal = calibrate_widths(widths, settings.higher_orders, excluded, source=names)
+        result = {"beads": beads, "widths": widths, "calibration": cal, "excluded": excluded,
+                  "manual": sorted(b for b, wish in (marks or {}).items() if wish == "exclude"),
+                  "residuals": bead_residuals(widths, cal)}
+        run = Run(result, False)
+        if inputs["run"].save_model:
+            path = previous.saved if previous is not None and previous.saved is not None else save_path(paths)
+            run.saved = cal.save(path)
+        return run
+
+    def finish(self, run: Run, progress=None) -> Run:
+        return run
+
+    def save_as(self, run: Run, path) -> Path:
+        run.saved = run.result["calibration"].save(path)
+        return run.saved
+
+    def pages(self, run: Run) -> list:
+        from .elliptical import draw_widths, draw_z_back
+        r = run.result
+        return [Page("Widths in z", lambda f, s, e: draw_widths(f, r["widths"], r["calibration"], s, r["excluded"])),
+                Page("z from the widths",
+                     lambda f, s, e: draw_z_back(f, r["widths"], r["calibration"], s, r["excluded"]),
+                     follows_selection=False)]
+
+    def rows(self, run: Run, marks: dict) -> list:
+        r = run.result
+        widths, out = r["widths"], []
+        for i, record in enumerate(r["beads"].records):
+            if not record.get("brightness_accepted", True):
+                state = str(record.get("brightness_reason", "too dim"))
+            elif not np.isfinite(widths.z0_nm[i]):
+                state = "widths never cross"
+            elif i in r["manual"]:
+                state = "manual exclusion"
+            else:
+                state = "used"
+            wish = marks.get(i)
+            if wish is not None and state != "manual exclusion":
+                state = f"{state} -> {wish} on Calibrate"
+            elif wish is None and state == "manual exclusion":
+                state = f"{state} -> include on Calibrate"
+            out.append(((i, record["stack"] + 1, f"{record['x_px']}, {record['y_px']}",
+                         f"{record['brightness_adu']:.4g}", f"{widths.z0_nm[i]:.0f}",
+                         f"{r['residuals'][i]:.2f}", state),
+                        state != "used"))
+        return out
+
+    def initial_marks(self, run: Run) -> dict:
+        return {i: "exclude" for i in run.result["manual"]}
+
+    def mark(self, run: Run, bead: int) -> str:
+        return "exclude"
+
+    def stacks(self, run: Run):
+        return None, None
+
+    def summary(self, run: Run) -> str:
+        cal = run.result["calibration"]
+        return (f"{cal.beads} of {len(run.result['beads'].records)} beads used; rms residual "
+                f"{cal.residual_nm[0]:.1f} / {cal.residual_nm[1]:.1f} nm in x / y")
+
+
+METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian())

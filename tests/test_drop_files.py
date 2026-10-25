@@ -292,3 +292,22 @@ def test_fit_this_gives_a_simulation_drawn_with_a_calibration_to_the_spline_fitt
     values = localize.slots[opened.id].panel.form.values()
     assert values["source.path"] == str(path)
     assert values["model.calibration"] == str(tmp_path / "beads_3dcal.mat")
+
+
+def test_fit_this_gives_astigmatic_frames_to_gaussian_2d_elliptical_and_names_astigmatic_z(
+        app, windows, tmp_path):
+    """Astigmatic frames on one camera: Gaussian 2D with *elliptical* ticked, whichever
+    fitter is open, and the status line says what to type into Astigmatic z."""
+    from smappy.plugins.simulate import Simulate
+    session, control, _ = windows
+    settings = Simulate.Settings(output="camera", n_frames=20)
+    settings.optics.astigmatism = True
+    settings.camera.path = str(tmp_path / "astig.sim.yaml")
+    assert control.fit_simulation(settings)
+    localize = control.tabs.currentWidget()
+    opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
+    assert opened.plugin == "Localize/Gaussian 2D"
+    values = localize.slots[opened.id].panel.form.values()
+    assert values["source.path"] == str(tmp_path / "astig.sim.yaml")
+    assert values["model.elliptical"] is True
+    assert "Astigmatic z" in control.statusBar().currentMessage()

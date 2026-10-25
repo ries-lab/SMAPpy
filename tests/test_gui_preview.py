@@ -42,7 +42,7 @@ def test_a_method_greys_out_the_other_methods_parameters(app):
     from smappy import plugins
     from smappy.gui.plugin_panel import PluginPanel
 
-    panel = PluginPanel(plugins.get("Analysis/Dual-colour/Assign colours"), Session())
+    panel = PluginPanel(plugins.get("Analysis/After fit/Assign colours"), Session())
     form = panel.form
     # the panel greys on the way up, before anything is edited
     assert form.fields["exclusion"].isEnabled()
@@ -64,7 +64,7 @@ def test_a_preview_that_is_not_of_a_frame_gets_no_frame_number(app):
     from smappy import plugins
     from smappy.gui.plugin_panel import PluginPanel
 
-    panel = PluginPanel(plugins.get("Analysis/Dual-colour/Assign colours"), Session())
+    panel = PluginPanel(plugins.get("Analysis/After fit/Assign colours"), Session())
     assert panel.preview_button is not None and panel.preview_frame is None
 
 

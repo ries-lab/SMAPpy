@@ -1278,12 +1278,21 @@ class ControlWindow(QMainWindow):
         """Put a fresh calibration into the fitter it belongs to.
 
         A dual-colour calibration is no use to the single-channel fitter, so
-        which one gets it follows from the mode it was built in.  The panel is
+        which one gets it follows from the mode it was built in; an
+        elliptical Gaussian's curves go to Astigmatic z.  The panel is
         built and its section opened on the way: a tab imports a plugin only
         when it is first looked at, and a calibration that lands in a plugin
         nobody has opened yet would land nowhere.
         """
-        wanted = "Localize/Spline 3D 2C" if dual else "Localize/Spline 3D"
+        from ..astigmatic_z import is_calibration
+        if is_calibration(path):
+            # the elliptical Gaussian's curves: for Astigmatic z, not a fitter
+            wanted, values, name = (ASTIGMATIC_Z, {"calibration": "file", "path": str(path)},
+                                    "Astigmatic z")
+        else:
+            wanted = "Localize/Spline 3D 2C" if dual else "Localize/Spline 3D"
+            values = {"model.calibration": str(path)}
+            name = f"{wanted.split('/')[-1]} fitter"
         for index in range(self.tabs.count()):
             tab = self.tabs.widget(index)
             slots = getattr(tab, "slots", None)
@@ -1297,15 +1306,13 @@ class ControlWindow(QMainWindow):
                     break
                 self.tabs.setCurrentIndex(index)
                 tab.open_section(instance.id)
-                panel.form.set_values({"model.calibration": str(path)})
+                panel.form.set_values(values)
                 self.statusBar().showMessage(
-                    f"the {wanted.split('/')[-1]} fitter now uses {Path(path).name}",
-                    8000)
+                    f"{'the ' * (name != 'Astigmatic z')}{name} now uses {Path(path).name}", 8000)
                 return
         self.statusBar().showMessage(
-            f"{Path(path).name} was saved, but no {wanted.split('/')[-1]} "
-            "fitter is pinned to a tab - add one with + and set its "
-            "calibration field", 12000)
+            f"{Path(path).name} was saved, but no {name} is pinned to a tab - "
+            "add one with + and set its calibration", 12000)
 
     def show_3d(self) -> None:
         if self.view3d_window is None:
@@ -1683,19 +1690,23 @@ class ControlWindow(QMainWindow):
         """*Simulate*'s *Fit this*: the recipe written from ``settings`` as
         they are now -- never a file an earlier run left -- and handed to a
         fitter (`fit_file`)."""
-        from ..plugins.simulate import recipe_of
+        from ..plugins.simulate import astigmatic_note, recipe_of
         from ..simulate.source import write_recipe
         try:
             path = write_recipe(settings, recipe_of(settings))
         except (OSError, ValueError) as e:
             self.statusBar().showMessage(f"the simulation could not be written: {e}", 12000)
             return False
-        return self.fit_file(path)
+        return self.fit_file(path, elliptical=astigmatic_note(settings))
 
-    def fit_file(self, path) -> bool:
+    def fit_file(self, path, elliptical: Optional[str] = None) -> bool:
         """Set a fitter's *file* to ``path`` as if it had been picked with the
         field's own button: the fitter hears of it (`react` fills the camera
         and the output, the hints follow), and nothing is fitted.
+
+        ``elliptical`` -- astigmatic frames, simulated: Gaussian 2D with
+        *elliptical* ticked, whose widths Astigmatic z turns into z, and this
+        line, saying so, in the status bar.
 
         Returns whether a fitter took it.
         """
@@ -1708,6 +1719,8 @@ class ControlWindow(QMainWindow):
         elif recipe_calibration(path) is not None:
             # drawn with a bead calibration: the spline fitter, which takes it
             found = self._pinned(SPLINE_FITTER) or found
+        elif elliptical:
+            found = self._pinned(DROP_FITTER) or found
         panel = None
         if found is not None:
             index, tab, instance = found
@@ -1726,6 +1739,13 @@ class ControlWindow(QMainWindow):
         edit = getattr(field, "widget", None)
         if hasattr(edit, "setCursorPosition"):
             edit.setCursorPosition(len(edit.text()))   # show the file's name
+        model = panel.form.fields.get("model")
+        if elliptical and "elliptical" in getattr(model, "fields", {}):
+            panel.form.set_values({"model.elliptical": True})
+            self.statusBar().showMessage(
+                f"{instance.title(panel.plugin.name)}: file set to {path.name}, elliptical; "
+                f"Run fits it -- {elliptical}", 15000)
+            return True
         self.statusBar().showMessage(
             f"{instance.title(panel.plugin.name)}: file set to {path.name}; "
             "Run fits it", 8000)
@@ -1861,6 +1881,7 @@ class RenderWindow(QMainWindow):
 DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
 SPLINE_FITTER = "Localize/Spline 3D"            # a simulation drawn with a calibration
 TWO_COLOUR_FITTER = "Localize/Gaussian 2D 2C"   # a simulated split camera's
+ASTIGMATIC_Z = "Analysis/After fit/Astigmatic z"   # where an elliptical Gaussian calibration goes
 
 
 def _takes_a_stack(panel) -> bool:

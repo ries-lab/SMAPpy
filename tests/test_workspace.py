@@ -45,7 +45,7 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert [i.plugin for i in analysis.instances] == [
         "Analysis/Measure/Line Profile", STATS, RCC, COMET,
-        "Analysis/Dual-colour/Assign colours"]
+        "Analysis/After fit/Assign colours", "Analysis/After fit/Astigmatic z"]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert regions.header == "roi"

@@ -296,7 +296,7 @@ over, far outside the pairs -- the step is dropped and the fitted seed stands.
 Candidates are found over the whole frame and combined, each gets a fit box
 (the square of pixels fitted; also called ROI size) in both halves, and the pair goes to `fit_gauss_global` with x and y shared through the
 registration -- so the two photon numbers that come back belong to one molecule
-and their ratio is its colour, ready for `Analysis/Dual-colour/Assign colours`.
+and their ratio is its colour, ready for `Analysis/After fit/Assign colours`.
 
 The width is fitted **free per channel** by default.  The two halves of a
 ratiometric splitter see different wavelengths and rarely share a focus, and

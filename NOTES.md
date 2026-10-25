@@ -1434,6 +1434,41 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   on Zenodo showed the dim channel wandering by 32 nm rms where the pair's
   fit is within 1 nm of the bright channel's.
 
+## Astigmatic z from elliptical widths
+
+3D without a spline: Gaussian 2D's *elliptical* fit measures a width per
+axis, and `Analysis/After fit/Astigmatic z` (`smappy/astigmatic_z.py`) reads
+z off them through one defocus curve per axis, Huang et al. 2008's with its
+A and B.  Not a port of SMAP's Gauss fitter or its `sx^2 - sy^2` lookup; the
+decisions:
+
+* **Least squares on both widths, weighted by their CRLB.**  The lookup of
+  `sx^2 - sy^2` uses only the difference, so it finds a z for a spot too wide
+  in both axes (an overlap) as readily as for a good one, and gives no error.
+  It survives as the start: one `np.interp` on the curve's one-to-one stretch,
+  then six Gauss-Newton steps.  0.6 s a million; a grid-search start for
+  everyone was 3.5 s.  The fitter now writes `sigma_x_err_pix` /
+  `sigma_y_err_pix` (the CRLB it already had) for the weights; merged blinks
+  combine them as precisions.
+* **No flag column: the error carries it.**  chi^2 at the minimum (one
+  degree of freedom) inflates `z_err_nm` by sqrt(chi^2) above 1, and a z on
+  an edge of the calibrated range gets the whole range.  A filter on
+  `z_err_nm` then does what a flag would; on fitted simulated frames the
+  error comes out about a fifth larger than the scatter.
+* **z = 0 is the round spot**, for a typed calibration and one from beads
+  alike, and each bead is moved to its own round spot before the curves are
+  fitted (a tilted coverslip puts beads tens of nm apart).  z is the sample's,
+  the objective's position turned round, as `simulate.bead_stacks` and the
+  spline calibration have it.
+* **The calibration is the PSF calibration window's fourth method**
+  (`psf_methods.EllipticalGaussian`, `calibrate/elliptical.py`), fitting the
+  beads with the same elliptical Gaussian in the data's fit box -- widths of
+  a Gaussian on a non-Gaussian PSF depend on both.  Its `_astigz.h5` is never
+  listed for the fitters' *auto*; `use_calibration` sends it to Astigmatic z.
+* **Not a finishing step of the fit, yet.**  `FinishSettings` (drift and
+  colours after a two-colour fit) is to be redesigned; Astigmatic z after an
+  elliptical Gaussian 2D fit is a candidate for it then.
+
 ## Tracking
 
 *Link tracks* (`smappy/tracking/link.py`, wave 4 step 19a) writes
@@ -1736,6 +1771,11 @@ measurements, four beads each) and checked by
   *probabilistic* method's posteriors mean what they say -- is to be checked
   on a two-colour `.msr` when one is available (none was, 2026-10).  Compare
   against minflux-viewer's per-trace EM on the same file.
+* **Astigmatic z, untried on real beads.**  The elliptical Gaussian
+  calibration and Astigmatic z were tested on simulated Gaussian spots, where
+  the model is exact.  On real beads the widths of a Gaussian on the real PSF
+  are what the curves describe; whether A and B are enough far from focus, and
+  how far z from widths falls behind Spline 3D, is to be checked.
 * **MBM registration, untried on real washes.**  `mbm_registration` matches
   beads by a vote on their shifts, not by name (slots are reused), and was
   tested on simulated beads; a real sequential measurement should be checked.

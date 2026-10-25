@@ -115,6 +115,9 @@ COMBINE_MODES: Dict[str, str] = {
     "sigma_nm": "mean", "sigma_pix": "mean",
     "sigma_x_nm": "mean", "sigma_y_nm": "mean",
     "sigma_x_pix": "mean", "sigma_y_pix": "mean",
+    # the error of the widths' mean, weighted as a precision is: what Astigmatic z weighs a blink by
+    "sigma_x_err_nm": "precision", "sigma_y_err_nm": "precision",
+    "sigma_x_err_pix": "precision", "sigma_y_err_pix": "precision",
     "photons": "sum", "background": "sum",
     "photons_err": "quad", "background_err": "quad",
     "xy_err_nm": "precision", "xy_err_pix": "precision",
