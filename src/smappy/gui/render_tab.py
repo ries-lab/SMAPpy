@@ -820,7 +820,9 @@ class Overview(QWidget):
 
 
 #: the overview docked: its height in px follows the data's shape within these
-OVERVIEW_HEIGHT, OVERVIEW_MIN, OVERVIEW_MAX = 150, 80, 300
+#: (at most 200: at 300 a square field pushed the tab's default rows past
+#: the window)
+OVERVIEW_HEIGHT, OVERVIEW_MIN, OVERVIEW_MAX = 150, 80, 200
 #: the overview's render, at most this many pixels a side: a detached window
 #: on a large screen need not cost a full-size render
 OVERVIEW_PIXELS = 1600
@@ -1273,6 +1275,10 @@ class RenderTab(QWidget):
         lut_row.addWidget(self.invert)
         self.contrast = CompactSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.contrast.setToolTip("saturate 10^-p of the pixels: 2 is bright, 4 dark")
+        # its size hint is the range's, "6": squeezed to it beside the scale's
+        # choice, a value such as 3.25 was cut off
+        self.contrast.setMinimumWidth(
+            self.contrast.fontMetrics().horizontalAdvance("0.00") + 36)
         # SMAP's toggle: the quantile, or a set maximum -- here a density, so
         # that the picture keeps its brightness as one zooms (`absolute_imax`)
         self.scale = QComboBox()

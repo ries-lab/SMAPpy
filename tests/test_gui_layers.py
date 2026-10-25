@@ -293,12 +293,13 @@ def test_the_contrast_switches_to_an_absolute_maximum_where_the_view_was(app):
     tab.scale.setCurrentIndex(tab.scale.findData(True))
     display = session.layers[0].get_display()
     assert display.absolute and tab.maximum.isVisibleTo(tab)
-    # full scale where the quantile had it: the picture does not jump
+    # full scale where the quantile had it, to the three figures it is
+    # rounded to (`round_significant`): the picture does not jump
     _, rendered = session.layers[0].render(
         FieldOfView.from_range((0.0, 10_000.0), (0.0, 10_000.0), 20.0))
     quantile = dataclasses.replace(display, absolute=False)
     assert display.pixel_max(rendered) == pytest.approx(
-        normalize(rendered.weight, None, quantile.contrast)[1], rel=1e-3)
+        normalize(rendered.weight, None, quantile.contrast)[1], rel=5e-3)
     tab.scale.setCurrentIndex(tab.scale.findData(False))
     assert not session.layers[0].get_display().absolute
     assert session.layers[0].get_display().maximum == pytest.approx(display.maximum)

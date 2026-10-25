@@ -360,7 +360,11 @@ transformation without being asked, instead of measuring it from the movie.
 So two-colour pores as frames are: the preset *Two-colour pores*, *simulate*
 set to *camera frames*, *split camera* ticked, Run, *Fit this*, Run -- and
 the fit assigns each localization its colour by how its light split, which
-the table's truth (`channel`) can check.
+the table's truth (`channel`) can check.  While a scene in two colours is
+simulated as camera frames, *split camera* is among the key parameters at
+the top, and until it is ticked a line under the form says that the colours
+are drawn on one camera as one: such frames go to a one-colour fitter,
+which cannot tell them apart.
 
 ```figure Three frames of the same simulation as camera frames (counts), with the true positions of the spots on in each marked.  Some are dim -- the start or end of a blink -- and some overlap; all are drawn.
 fig.set_size_inches(7.5, 2.6)

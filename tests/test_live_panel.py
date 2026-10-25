@@ -142,3 +142,41 @@ def test_an_expression_runs_during_a_live_fit_and_follows_it(app, tmp_path, monk
     run_and_wait(panel, app)
     session.append(block(9))
     assert session.live and "bright" in session.locs and len(session.locs) == 400
+
+
+class Streams(Plugin):
+    """A fit in miniature: starts a live table, streams blocks, hands back
+    the finished one."""
+    path = "Test/Streams"
+    name = "Streams"
+    changes_locs = True
+
+    def run(self, ctx, settings):
+        ctx.emit("start", {"extent": (0, 5000, 0, 5000)})
+        blocks = [block(frame) for frame in range(1, 4)]
+        for b in blocks:
+            ctx.emit("block", b)
+        from smappy.locs import concat
+        return Result(locs=concat(blocks), text="fitted")
+
+
+def test_a_fit_whose_table_cannot_be_put_in_place_fails_and_ends_the_live_table(
+        app, monkeypatch):
+    """Raised out of the panel's slot, the error left the status at
+    'running...' beside a Run button and the session live for good, so every
+    table change after it was offered a new window."""
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session()
+    panel = PluginPanel(Streams, session)
+    real = Session.apply
+
+    def broken(self, plugin, result, **kw):
+        if kw.get("finishes_live"):
+            raise RuntimeError("the table would not go in")
+        return real(self, plugin, result, **kw)
+
+    monkeypatch.setattr(Session, "apply", broken)
+    run_and_wait(panel, app)
+    assert panel.status.text() == "the table would not go in"
+    assert panel.run_button.text() == "Run"
+    assert not session.live and len(session.locs) == 300   # what came, kept
