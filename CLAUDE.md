@@ -56,12 +56,12 @@ A fresh container has **no numpy**.  Before anything else:
 Running the tests -- three tiers:
 
     python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
-    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: ~4 min on four cores
+    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: ~4.5 min on four cores
     python -m pytest tests -q -n auto --long    # by hand, when uipsf's learning changes: --slow and the studies
 
 * **Run the slow tier before you open a PR, and before you call major work
   done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
-  algorithm computes.  It is about 60 tests marked `@pytest.mark.slow` (the
+  algorithm computes.  It is about 130 tests marked `@pytest.mark.slow` (the
   tutorials, the pages' figures, the large numerical checks) that are two
   thirds of the suite's time, and they are where a GUI or docs change breaks.
   The summary's "skipped" count includes them, so a run without `--slow` has
