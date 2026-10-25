@@ -445,11 +445,9 @@ class ControlWindow(QMainWindow):
                     self._shared_menus.addMenu(action.menu())
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
         QApplication.instance().aboutToQuit.connect(self.release_offers)
-        QApplication.instance().aboutToQuit.connect(self.save_window_state)
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
         self._on_session("locs")
-        self.restore_layout()
 
     def show_about(self) -> None:
         from .about import show_about
@@ -670,8 +668,11 @@ class ControlWindow(QMainWindow):
     # ---------------------------------------------------------- workspace
     def plugin_state(self) -> dict:
         """What goes into a localization file's `gui` group: the GUI as a
-        file would have it, which already leaves out the window geometry."""
-        return self.collect_workspace().to_dict()
+        file would have it, without where the windows were -- that belongs
+        to this screen, not to the data."""
+        state = self.collect_workspace().to_dict()
+        state.pop("windows", None)
+        return state
 
     def restore_state_from_file(self) -> None:
         """Take the tabs and their parameters from a file that carries them.
@@ -874,8 +875,13 @@ class ControlWindow(QMainWindow):
             self.session.rename(*answer)
 
     def save_gui_to(self, path) -> Path:
-        """Write the GUI to ``path``, make it the loaded one and the next start."""
-        written = self.collect_workspace().save(path)
+        """Write the GUI to ``path``, make it the loaded one and the next start.
+
+        The windows' places go with it: the one time they are kept.
+        """
+        workspace = self.collect_workspace()
+        workspace.windows = self.window_geometries()
+        written = workspace.save(path)
         workspace_module.remember(written)
         self._update_title()
         return written
@@ -927,6 +933,7 @@ class ControlWindow(QMainWindow):
         self.session.apply_default_filters(self.workspace.filters)
         workspace_module.remember(self.workspace.path)
         self._update_title()
+        self.apply_windows()
         if path and self.workspace.path is None:
             QMessageBox.information(self, "Open workspace",
                                     f"{path} is not a workspace file; the default is loaded")
@@ -955,20 +962,29 @@ class ControlWindow(QMainWindow):
         """The shipped GUI, and the shipped GUI at the next start too."""
         self.load_gui_from(None)
 
-    def save_window_state(self) -> None:
-        """Where the window is: the one thing kept without being asked."""
-        try:
-            workspace_module.save_window_state(
-                {"geometry": bytes(self.saveGeometry().toBase64()).decode()})
-        except OSError as e:                 # a read-only config dir must not
-            print(f"could not save the window position: {e}")   # cost the quit
+    def _windows(self) -> Dict[str, QWidget]:
+        """The windows whose places a workspace keeps, by name."""
+        windows = {"control": self, "render": self.render_window}
+        if self.view3d_window is not None:
+            windows["3d"] = self.view3d_window
+        return windows
 
-    def restore_layout(self) -> None:
-        geometry = workspace_module.window_state().get("geometry")
-        if not isinstance(geometry, str) or not geometry:
-            return
-        from PySide6.QtCore import QByteArray
-        self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
+    def window_geometries(self) -> Dict[str, str]:
+        """Where the windows are now; the 3D view only once it was opened."""
+        return {name: bytes(window.saveGeometry().toBase64()).decode()
+                for name, window in self._windows().items()}
+
+    def apply_windows(self) -> None:
+        """Put the windows where the loaded workspace had them; a workspace
+        saved without them leaves them where they are."""
+        for name, window in self._windows().items():
+            self._place(name, window)
+
+    def _place(self, name: str, window: QWidget) -> None:
+        geometry = self.workspace.windows.get(name)
+        if geometry:
+            from PySide6.QtCore import QByteArray
+            window.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
 
     def _open_manager(self) -> None:
         if self.roi_tab is not None:
@@ -1271,6 +1287,7 @@ class ControlWindow(QMainWindow):
             self.view3d_window.toolbar.set_border(identity.colour_hex(self.session))
             # beside the 2D picture, not over it: the two are looked at together
             place_beside(self.view3d_window, self.render_window)
+            self._place("3d", self.view3d_window)   # where the workspace had it
         self.view3d_window.show()
         self.view3d_window.raise_()
 
@@ -1846,6 +1863,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     screen = app.primaryScreen().availableGeometry()
     control.move(screen.left(), screen.top())
     render.move(screen.left() + control.width() + 20, screen.top())
+    control.apply_windows()      # where the workspace keeps them, if it does
     render.show()
     control.show()
     args = list(argv[1:])

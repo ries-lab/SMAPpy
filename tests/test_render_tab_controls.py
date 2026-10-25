@@ -194,3 +194,22 @@ def test_the_help_window_writes_black_on_white_or_white_on_black(app):
     text = palette.color(QPalette.Text).name()
     base = palette.color(QPalette.Base).name()
     assert (text, base) in (("#000000", "#ffffff"), ("#ffffff", "#000000"))
+
+
+def test_auto_scales_the_colours_to_what_is_shown(app):
+    """A column first chosen takes its range from every localization; *auto*
+    from those the picture shows -- here, the half of the field in view."""
+    from PySide6.QtCore import QRectF
+    from smappy.gui.render_tab import RenderTab
+    locs = table()
+    locs.columns["photons"] = (locs["x_nm"] / 10).astype(np.float32)   # 0..1000
+    session = Session(locs)
+    tab = RenderTab(session)
+    tab.color.setCurrentIndex(1)
+    tab.color_field.setCurrentText("photons")
+    lo, hi = session.layers[0].state.settings.color_range
+    assert lo < 50 and hi > 950
+    tab.filter.view_rect = lambda: QRectF(0, 0, 5000, 10_000)        # the left half
+    tab.color_auto.click()
+    lo, hi = session.layers[0].state.settings.color_range
+    assert lo < 50 and 450 < hi < 510

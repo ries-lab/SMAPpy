@@ -834,7 +834,8 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
         color_range=color_range, n=sel[1], radius=radius_px,
         depth_range=(drange[0] - pad, drange[1] + pad),
         ssao_radius=ssao_nm / fov.pixelsize, ssao_strength=projection.ssao_strength)
-    return (key, sel, params, display.lut, display.invert), params
+    invert = luts.field_inversion(display.invert) if color_mode > 0 else bool(display.invert)
+    return (key, sel, params, display.lut, invert), params
 
 
 def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
@@ -876,7 +877,9 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                 # same on the coarser preview grid); 0 = the median precision
                 radius=point_radius_nm(locs, select, prec_name, projection) / fov.pixelsize,
                 alpha=projection.point_alpha)
-    lut, invert = display.lut, display.invert
+    # a coded column is turned round to invert it, an intensity ramp is not
+    lut = display.lut
+    invert = luts.field_inversion(display.invert) if color_mode > 0 else bool(display.invert)
     idx = thinned(selection_rows(locs, select, slab, index), budget)
     if projection.engine == "points":
         if not preview and idx.size <= PREVIEW_POINTS:

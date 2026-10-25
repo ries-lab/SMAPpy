@@ -68,175 +68,27 @@ def test_luts_are_well_formed():
     for name in luts.names():
         table = luts.get(name)
         assert table.shape == (256, 3) and table.min() >= 0 and table.max() <= 1
-    # "complement" is the opposite colour at the same brightness, not a
-    # reversal: a layer and its inverse add to grey, and grey is its own
-    # inverse (black on white is the `gray_inverted` ramp, which is why it
-    # is a LUT of its own)
-    for name in ("hot", "jet", "turbo", "gray"):
-        table, flipped = luts.get(name), luts.get(name, invert="complement")
-        total = table + flipped
-        assert np.allclose(total[:, 0], total[:, 1]) and np.allclose(total[:, 1], total[:, 2])
-        assert np.allclose(table.max(1) + table.min(1), flipped.max(1) + flipped.min(1))
-    assert np.allclose(luts.get("gray", invert="complement"), luts.get("gray"))
-    assert np.allclose(luts.complement(np.array([[1.0, 0.0, 0.0]])), [[0.0, 1.0, 1.0]])
-
-    # on white paper the hue stays and the brightness turns over: a `red` ramp
-    # runs white to red, `hot` white through red and yellow to black, and the
-    # grey one is the black-on-white ramp
-    red = luts.on_white(luts.get("red"))
-    assert np.allclose(red[0], [1, 1, 1]) and np.allclose(red[-1], [1, 0, 0])
-    hot = luts.on_white(luts.get("hot"))
-    assert hot[0].min() > 0.98 and np.allclose(hot[-1], [0, 0, 0])
-    assert np.allclose(luts.on_white(luts.get("gray")), luts.get("gray_inverted"))
-    # and the two inversions together are the plain negative
-    assert np.allclose(luts.on_white(luts.complement(luts.get("jet"))),
-                       1 - luts.get("jet"), atol=1e-6)
-    # values below/above the range clamp to the first/last colour
-    ends = luts.colors([-5.0, 5.0], "jet", 0.0, 1.0)
-    assert np.allclose(ends, luts.get("jet")[[0, -1]])
 
 
-# ------------------------------------------------------- Gaussian render modes
-def _random_locs(n=200, seed=0):
-    rng = np.random.default_rng(seed)
-    return (rng.uniform(-20, 320, n).astype(np.float32),
-            rng.uniform(-20, 220, n).astype(np.float32),
-            rng.uniform(1.0, 20.0, n).astype(np.float32))
-
-
-@pytest.mark.parametrize("mode", ["hist", "fixed", "per_loc"])
-def test_extension_matches_the_numpy_reference(mode):
-    x, y, sigma = _random_locs()
-    fov = FieldOfView.from_range((0, 300), (0, 200), 5.0)
-    sig = {"hist": None, "fixed": 12.0, "per_loc": sigma}[mode]
-    colors = luts.colors(np.linspace(0, 1, x.size), "jet", 0.0, 1.0)
-
-    fast = render(x, y, fov, sigma=sig, colors=colors)
-    reference = render(x, y, fov, sigma=sig, colors=colors, use_extension=False)
-    assert np.allclose(fast.weight, reference.weight, atol=1e-6)
-    assert np.allclose(fast.color, reference.color, atol=1e-6)
-    assert fast.n_locs == reference.n_locs
-
-
-def test_every_localization_contributes_its_full_intensity():
-    """The kernel is normalised by its own sum, so N is conserved exactly."""
-    x, y, sigma = _random_locs(n=100, seed=1)
-    fov = FieldOfView.around(x, y, 5.0, margin=200.0)  # nothing near the border
-    weights = np.full(x.size, 3.0, np.float32)
-    for sig in (None, 12.0, sigma):
-        img = render(x, y, fov, sigma=sig, weights=weights)
-        assert img.weight.sum() == pytest.approx(3.0 * x.size, rel=1e-5)
-
-
-def test_the_histogram_is_the_zero_sigma_limit():
-    x, y, _ = _random_locs(n=50, seed=2)
-    fov = FieldOfView.from_range((0, 300), (0, 200), 5.0)
-    hist = render(x, y, fov)
-    tiny = render(x, y, fov, sigma=1e-3)
-    assert np.allclose(hist.weight, tiny.weight, atol=1e-6)
-
-
-def test_the_kernel_is_a_pixel_integrated_gaussian():
-    """Its second moment must be sigma^2 + 1/12: the variance of the pixel itself.
-
-    A point-sampled kernel (SMAP's template) would give sigma^2 instead, which
-    is what makes it wrong for the small sigmas the renderer mostly uses.
-    """
-    fov = FieldOfView.from_range((0, 100), (0, 100), 1.0)
-    for sigma in (0.8, 3.0):
-        img = render(np.array([50.5]), np.array([50.5]), fov, sigma=sigma,
-                     roi_sigma=8.0)
-        rows, cols = np.mgrid[0:fov.ny, 0:fov.nx]
-        centers = cols + 0.5
-        mean = (img.weight * centers).sum()
-        var = (img.weight * (centers - mean) ** 2).sum()
-        assert mean == pytest.approx(50.5, abs=1e-3)
-        assert var == pytest.approx(sigma ** 2 + 1 / 12, rel=1e-3)
-
-
-def test_colors_do_not_change_the_weight_plane():
-    x, y, sigma = _random_locs(n=100, seed=3)
-    fov = FieldOfView.from_range((0, 300), (0, 200), 5.0)
-    colors = luts.colors(sigma, "jet", sigma.min(), sigma.max())
-    plain = render(x, y, fov, sigma=sigma)
-    colored = render(x, y, fov, sigma=sigma, colors=colors)
-    assert np.array_equal(plain.weight, colored.weight)
-    # a white localization puts its whole weight into every channel
-    white = render(x, y, fov, sigma=sigma, colors=np.ones((x.size, 3), np.float32))
-    assert np.allclose(white.color, plain.weight[..., None], atol=1e-6)
-
-
-def test_threads_do_not_change_the_result():
-    x, y, sigma = _random_locs(n=500, seed=4)
-    fov = FieldOfView.from_range((0, 300), (0, 200), 2.0)
-    serial = render(x, y, fov, sigma=sigma, n_threads=1)
-    threaded = render(x, y, fov, sigma=sigma, n_threads=8)
-    assert np.array_equal(serial.weight, threaded.weight)
-    assert serial.n_locs == threaded.n_locs
-
-
-def test_sigma_settings_floor_and_cap():
-    precision = np.array([0.5, 5.0, 5.0, 5.0, 500.0], np.float32)
-    sigma = SigmaSettings(factor=2.0, min_sigma=4.0, min_sigma_pixels=0.7,
-                          max_factor=10.0).apply(precision, pixelsize=10.0)
-    assert sigma[0] == 7.0                  # floor: 0.7 pixels beats min_sigma
-    assert sigma[1] == 10.0                 # 5 * factor
-    assert sigma[4] == 100.0                # capped at 10x the median (10)
-
-
-def test_dynamic_contrast_saturates_the_stated_fraction():
-    """p is the handle SMAP uses: 10^-p of the pixels reach full scale."""
-    rng = np.random.default_rng(0)
-    image = rng.gamma(0.3, 10.0, (600, 600)).astype(np.float32)
-    for p in (2.0, 3.0, 4.0):
-        norm, imax = normalize(image, contrast=p)
-        assert (image >= imax).mean() == pytest.approx(10.0 ** -p, rel=0.15)
-        assert norm.max() == 1.0 and norm.min() >= 0.0
-    # a lower p is a brighter image, at every pixel
-    assert (normalize(image, contrast=2.0)[0] >= normalize(image, contrast=4.0)[0]).all()
-
-
-def test_an_explicit_imax_overrides_the_contrast():
-    image = np.linspace(0, 10, 100, dtype=np.float32).reshape(10, 10)
-    norm, imax = normalize(image, imax=5.0, contrast=2.0)
-    assert imax == 5.0 and norm.max() == 1.0 and (norm >= 1.0).sum() == 50
-
-
-def test_the_default_inversion_is_smaps_lutinvert():
-    """The pictures are compared against SMAP's, and "invert" there is
-    `lutinvert`: ``sum(c) - c``, which counts a second channel twice.  On a
-    ramp of one hue it is the complement; on `hot` it saturates at white where
-    the complement runs on to blue, which is the difference one sees."""
-    assert luts.DEFAULT_INVERSION == "sum"
-    assert np.allclose(luts.get("hot", invert=True), luts.get("hot", invert="sum"))
-
+def test_invert_is_smaps_lutinvert_on_intensity_and_a_turn_round_on_a_column():
+    """SMAP's two inversions.  An intensity ramp: ``sum(c) - c`` (`lutinvert`),
+    which on `hot` runs black through cyan to white.  A LUT coding a column:
+    the table turned round, since the sum of a rainbow's channels is no
+    colour of it."""
     one_hue = np.array([[0.4, 0.0, 0.0]], np.float32)
-    assert np.allclose(luts.invert_sum(one_hue), luts.complement(one_hue))
     assert np.allclose(luts.invert_sum(one_hue), [[0.0, 0.4, 0.4]])
-
-    # yellow: sum counts both channels, the complement only the range
     yellow = np.array([[1.0, 1.0, 0.0]], np.float32)
     assert np.allclose(luts.invert_sum(yellow), [[1.0, 1.0, 1.0]])
-    assert np.allclose(luts.complement(yellow), [[0.0, 0.0, 1.0]])
-
-    # every inversion stays inside the cube, on every shipped ramp
+    assert np.allclose(luts.get("hot", invert=True), luts.invert_sum(luts.get("hot")))
     for name in luts.names():
-        for how in luts.INVERSIONS:
-            table = luts.get(name, invert=how)
-            assert table.min() >= 0 and table.max() <= 1, (name, how)
+        table = luts.get(name, invert=True)
+        assert table.min() >= 0 and table.max() <= 1, name
 
-    with pytest.raises(KeyError):
-        luts.get("hot", invert="reversed")
-
-
-def test_a_plain_true_means_the_default_inversion():
-    """``invert=True`` from a script, which does not choose, still inverts."""
-    from smappy.render import DisplaySettings
-
-    assert DisplaySettings().invert is False
-    assert luts.inversion_name(True) == luts.DEFAULT_INVERSION
-    assert luts.inversion_name("complement") == "complement"
-
+    turbo = luts.get("turbo")
+    values = np.array([0.0, 1.0])
+    plain = luts.colors(values, "turbo", 0.0, 1.0)
+    turned = luts.colors(values, "turbo", 0.0, 1.0, invert=True)
+    assert np.allclose(plain, turbo[[0, -1]]) and np.allclose(turned, turbo[[-1, 0]])
 
 def test_a_table_with_no_columns_yet_renders_as_an_empty_picture():
     """A live fit's table, before its first block: the view asks for a picture

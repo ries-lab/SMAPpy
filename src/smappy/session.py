@@ -1837,6 +1837,18 @@ class Session:
         return int(np.count_nonzero(mask & (x >= x0) & (x < x1)
                                     & (y >= y0) & (y < y1)))
 
+    def shown_in_view(self, layer: int, x0: float, x1: float, y0: float,
+                      y1: float) -> np.ndarray:
+        """What the layer draws (`shown_selection`) inside the box, as a mask
+        over its table: the colour range's *auto* scales to what is on screen."""
+        lay = self.layers[layer]
+        mask = self.shown_selection(layer).mask.copy()
+        if not len(lay.locs):
+            return mask
+        x, y = self.axes(layer).coordinates(lay.locs)
+        mask &= (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
+        return mask
+
     def _clip(self, sel: Selection, locs: Localizations, layer: int) -> Selection:
         """Narrow a layer's selection to the ROI and, if asked, the slab."""
         axes = self.axes(layer)

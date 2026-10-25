@@ -677,7 +677,8 @@ class LayerStrip(QWidget):
 
 
 class Overview(QWidget):
-    """The whole field of view, small; click to centre the main image there."""
+    """The whole field, small, with a frame where the main view is: a map to
+    read, not a control -- it neither zooms nor moves the view."""
 
     def __init__(self, session: Session, view, parent=None):
         super().__init__(parent)
@@ -716,7 +717,6 @@ class Overview(QWidget):
         row.addStretch(1)
         layout.addLayout(row)
         self.update_button.clicked.connect(self.update_image)
-        self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
         # A new table draws itself: this is 300 x 200 pixels, which is 0.4 s
@@ -807,14 +807,6 @@ class Overview(QWidget):
     def _track(self) -> None:
         if self.view is not None:
             self.frame.setRect(self.view.view.viewRect())
-
-    def _on_click(self, event) -> None:
-        if self.view is None:
-            return
-        pos = self.image.mapToView(event.pos())
-        self.view.window().show()          # closed by accident: bring it back
-        self.view.center_on(pos.x(), pos.y())
-        event.accept()
 
 
 #: the overview docked: its height in px follows the data's shape within these
@@ -1246,7 +1238,8 @@ class RenderTab(QWidget):
         color_row.addWidget(self.color_field, 1)
         self.color_lo, self.color_hi = _Bound(), _Bound()
         self.color_auto = QPushButton("auto")
-        self.color_auto.setToolTip("the field's 0.5-99.5% range")
+        self.color_auto.setToolTip("the field's 0.5-99.5% range over what the "
+                                   "picture shows: filtered, in the ROI, in view")
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto):
@@ -1260,28 +1253,14 @@ class RenderTab(QWidget):
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.invert = QCheckBox("invert")
-        self.invert.setToolTip("the opposite colour at the same brightness: red "
-                               "becomes cyan.  For black on white pick the "
-                               "gray_inverted LUT -- inverting is about hue, not "
-                               "about which end is bright.")
-        # The two inversions are not the same picture past a ramp of one hue,
-        # and which one is wanted depends on what the picture is for, so it is
-        # a choice rather than a decision made here.
-        self.invert_mode = QComboBox()
-        self.invert_mode.addItem("SMAP", "sum")
-        self.invert_mode.addItem("grey", "complement")
-        self.invert_mode.setToolTip(
-            "SMAP: sum(c) - c, as SMAP's lutinvert -- inverted hot runs black "
-            "through cyan to white.\n"
-            "grey: the hue exactly half a turn away at the same lightness, so "
-            "a layer over its inverse goes grey where the two coincide; "
-            "inverted hot runs on to blue instead of saturating at white.")
-        self.invert_mode.setMaximumWidth(90)
+        self.invert.setToolTip("as SMAP: colouring by intensity, the opposite colour "
+                               "at the same brightness (red becomes cyan); "
+                               "colouring by a column, the LUT turned round.  For "
+                               "black on white use white background")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)
         lut_row.addWidget(self.invert)
-        lut_row.addWidget(self.invert_mode)
         self.contrast = CompactSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.contrast.setToolTip("saturate 10^-p of the pixels: 2 is bright, 4 dark")
         # SMAP's toggle: the quantile, or a set maximum -- here a density, so
@@ -1393,7 +1372,6 @@ class RenderTab(QWidget):
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.invert.toggled.connect(self._on_display)
-        self.invert_mode.currentIndexChanged.connect(self._on_display)
         self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
         self.maximum.valueChanged.connect(self._on_display)
@@ -1458,7 +1436,7 @@ class RenderTab(QWidget):
         self.filter.layer_index = index
         widgets = (self.mode, self.track_column, self.line_width, self.lines_add,
                    self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
-                   self.lut, self.invert, self.invert_mode, self.white,
+                   self.lut, self.invert, self.white,
                    self.contrast, self.scale, self.maximum, self.gamma,
                    self.grouped,
                    self.image_source, self.image_pixelsize, self.image_x0,
@@ -1674,11 +1652,19 @@ class RenderTab(QWidget):
             self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
         self.session.changed("layer")
 
-    def _field_range(self, field: str):
+    def _field_range(self, field: str, shown: bool = False):
+        """The column's 0.5-99.5 %: over all the layer's localizations when a
+        field is first chosen, so the first colours are the whole table's;
+        with ``shown``, over what the picture shows -- filtered, in the ROI
+        and in view -- for *auto*, which rescales to what one is looking at."""
         locs = self.layer.locs
         if field not in locs:
             return None
         values = np.asarray(locs[field], np.float64)
+        if shown and self.session is not None:
+            mask = self._shown_mask()
+            if mask is not None and mask.any():
+                values = values[mask]
         finite = values[np.isfinite(values)]
         if not finite.size:
             return None
@@ -1696,9 +1682,17 @@ class RenderTab(QWidget):
         state.settings = dataclasses.replace(state.settings, color_range=(lo, hi))
         self.session.changed("layer")
 
+    def _shown_mask(self) -> Optional[np.ndarray]:
+        index = self.strip.current
+        rect = self.filter.view_rect() if self.filter.view_rect is not None else None
+        if rect is None:
+            return self.session.shown_selection(index).mask
+        return self.session.shown_in_view(index, rect.left(), rect.right(),
+                                          rect.top(), rect.bottom())
+
     def _auto_color_range(self) -> None:
         field = self.layer.state.settings.color_field
-        rng = self._field_range(field) if field else None
+        rng = self._field_range(field, shown=True) if field else None
         if rng is None:
             return
         self.color_lo.set(rng[0])
@@ -1714,20 +1708,12 @@ class RenderTab(QWidget):
         self.session.changed("layer")
 
     def _show_invert(self, invert) -> None:
-        """The tick and which inversion, from the one field that carries both."""
-        from .. import lut as luts_module
         self.invert.setChecked(bool(invert))
-        self.invert_mode.setCurrentIndex(
-            max(0, self.invert_mode.findData(luts_module.inversion_name(invert))))
-        self.invert_mode.setEnabled(bool(invert))
 
     def _on_display(self) -> None:
         layer = self.layer
-        on = self.invert.isChecked()
-        self.invert_mode.setEnabled(on)
         layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
-                                              invert=self.invert_mode.currentData() if on
-                                              else False,
+                                              invert=self.invert.isChecked(),
                                               contrast=self.contrast.value(),
                                               absolute=bool(self.scale.currentData()),
                                               maximum=self.maximum.value(),

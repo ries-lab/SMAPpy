@@ -283,9 +283,6 @@ def test_the_view_path_moves_the_box_its_keys_keep(app):
     assert session.slab.size[2] == pytest.approx(500.0)
     assert session.slab.center[2] - session.slab.size[2] / 2 == pytest.approx(-400.0)
     assert not session.slab_follows_roi
-    player.move_box.setChecked(False)                  # the box stays where it is
-    player.show_step(0)
-    assert session.slab.size[2] == pytest.approx(500.0)
     window.close()
 
 

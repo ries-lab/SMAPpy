@@ -184,10 +184,6 @@ class ScanPlayer(QWidget):
         grid = QGridLayout(box)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setVerticalSpacing(2)
-        self.path_on = QCheckBox("move the 3D view")
-        self.path_on.setChecked(True)
-        self.path_on.setToolTip("play the view path in the 3D view, over the "
-                                  "scan's steps; off: the view stays as it is")
         self.keys = QListWidget()
         self.keys.setMaximumHeight(90)
         self.keys.setToolTip("the key views; a click shows one in the 3D view")
@@ -233,15 +229,9 @@ class ScanPlayer(QWidget):
         self.ease.setChecked(True)
         self.ease.setToolTip("start and end the path slowly; off for a turn played in "
                              "a loop")
-        self.move_box = QCheckBox("move the box")
-        self.move_box.setChecked(True)
-        self.move_box.setToolTip("where the keys' boxes differ, move the 3D view's box "
-                                 "between them -- a face through the sample; the box "
-                                 "stops following the 2D ROI")
-        ticks = QHBoxLayout()
-        ticks.addWidget(self.path_on)
-        ticks.addWidget(self.move_box, 1)
-        grid.addLayout(ticks, 0, 0, 1, 2)
+        # what moves is what the keys differ in: the view, the box, or both.
+        # No ticks to switch either off -- a path that should leave the view
+        # or the box alone is made of keys that do not change it
         grid.addWidget(self.keys, 1, 0, 1, 2)
         grid.addLayout(buttons, 2, 0, 1, 2)
         grid.addWidget(QLabel("seconds"), 3, 0)
@@ -263,8 +253,6 @@ class ScanPlayer(QWidget):
         grid.addLayout(last, 6, 0, 1, 2)
         grid.setColumnStretch(1, 1)
 
-        self.path_on.toggled.connect(self._path_changed)
-        self.move_box.toggled.connect(self._path_changed)
         self.ease.toggled.connect(self._set_ease)
         self.keys.currentRowChanged.connect(self._key_selected)
         self.key_seconds.valueChanged.connect(self._set_seconds)
@@ -289,7 +277,7 @@ class ScanPlayer(QWidget):
             self._say(str(error))
 
     def path_moves(self) -> bool:
-        return self.path_on.isChecked() and self.path.moves
+        return self.path.moves
 
     def view_now(self):
         """The 3D window's projection as it is, or an error if it is closed."""
@@ -300,7 +288,7 @@ class ScanPlayer(QWidget):
         return frame.projection
 
     def box_moves(self) -> bool:
-        return self.path_moves() and self.move_box.isChecked() and self.path.moves_box
+        return self.path_moves() and self.path.moves_box
 
     def show_view(self, view) -> None:
         """``view`` in the 3D window: its box first, when the box moves, then

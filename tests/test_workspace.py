@@ -442,11 +442,21 @@ def test_a_remembered_gui_that_has_gone_gives_the_default(window, tmp_path):
     assert make_window().workspace.path is None
 
 
-def test_the_window_position_is_kept_apart_from_the_gui(window, tmp_path):
-    from smappy import workspace
-    window.save_window_state()
-    assert workspace.window_state()["geometry"]
-    make_window()                              # reads it back without error
+def test_the_windows_places_are_kept_only_by_saving_the_workspace(window, tmp_path):
+    from smappy import config
+    window.move(37, 41)
+    path = window.save_gui_to(tmp_path / "placed.gui.yaml")
+    import yaml
+    saved = yaml.safe_load(path.read_text())
+    assert set(saved["windows"]) >= {"control", "render"}
+    assert "windows" not in window.plugin_state()      # not into data files
+    other = make_window()                      # the next start opens it
+    assert other.workspace.windows == saved["windows"]
+    other.move(300, 300)
+    other.apply_windows()
+    assert (other.pos().x(), other.pos().y()) == (window.pos().x(), window.pos().y())
+    # nothing is written at quit: the config folder holds no window file
+    assert not list(config.config_dir().glob("window*"))
 
 
 def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):
