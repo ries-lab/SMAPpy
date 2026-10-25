@@ -958,6 +958,16 @@ class _FitPlugin(Plugin):
                     updates["transform.path"] = str(written)
                     updates["transform.calibrate"] = False
                     self._default_transform = str(written)
+            # a recipe drawn with a bead calibration: a spline fitter fits
+            # with that calibration, unless one was chosen
+            model = getattr(settings, "model", None)
+            if isinstance(model, SplineModelSettings):
+                from ..simulate.source import recipe_calibration
+                drawn = recipe_calibration(settings.source.path)
+                if drawn is not None and model.calibration in (
+                        "", getattr(self, "_default_calibration", None)):
+                    updates["model.calibration"] = drawn
+                    self._default_calibration = drawn
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
             # the file it is given.  Copying turned the file's numbers into the

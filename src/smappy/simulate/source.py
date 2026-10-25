@@ -105,6 +105,22 @@ def recipe_transform(path) -> Optional[Path]:
     return found if found.is_file() else None
 
 
+def recipe_calibration(path) -> Optional[str]:
+    """The bead calibration a one-camera recipe draws its spots with, if
+    ``path`` is such a recipe: what a spline fitter takes for its own, so
+    the fit meets the PSF the frames were made with.  None for a Gaussian
+    PSF and for a split camera, whose halves are drawn as Gaussians."""
+    try:
+        if not is_simulation(path):
+            return None
+        settings = read_recipe(path)
+    except (OSError, ValueError):
+        return None
+    if dual_of(settings) or not settings.optics.calibration:
+        return None
+    return settings.optics.calibration
+
+
 def dual_of(settings) -> Optional[dict]:
     """How `camera.render` draws a split camera's two halves, or None for
     one camera: the second half's PSF width, the first's on *auto*."""

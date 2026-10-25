@@ -273,3 +273,22 @@ def test_fit_this_gives_a_split_camera_to_the_two_colour_fitter_with_its_map(
     values = localize.slots[opened.id].panel.form.values()
     assert values["source.path"] == made.written
     assert values["transform.path"] == str(tmp_path / "two_2ct.h5")
+
+
+def test_fit_this_gives_a_simulation_drawn_with_a_calibration_to_the_spline_fitter(
+        app, windows, tmp_path):
+    """Frames drawn with a bead calibration are fitted with it: Spline 3D,
+    the calibration filled in, whichever fitter is open."""
+    from smappy.plugins.simulate import Simulate
+    from smappy.simulate.source import write_recipe
+    session, control, _ = windows
+    settings = Simulate.Settings(output="camera", n_frames=20)
+    settings.optics.calibration = str(tmp_path / "beads_3dcal.mat")
+    path = write_recipe(settings, tmp_path / "spline.sim.yaml")
+    assert control.fit_file(path)
+    localize = control.tabs.currentWidget()
+    opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
+    assert opened.plugin == "Localize/Spline 3D"
+    values = localize.slots[opened.id].panel.form.values()
+    assert values["source.path"] == str(path)
+    assert values["model.calibration"] == str(tmp_path / "beads_3dcal.mat")
