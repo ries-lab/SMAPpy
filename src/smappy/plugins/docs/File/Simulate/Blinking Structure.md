@@ -64,8 +64,9 @@ The built-in structures are the files in `smappy/data/structures`, and each
 one is also an example of the syntax:
 
 * **demo** -- a slightly tilted ring 5 µm across, two crossing lines and a
-  few scattered labels over 10 × 10 µm, in 3D.  The ring is dye 1, the rest
-  dye 2.  The tutorials measure it.
+  few scattered labels over 10 × 10 µm, in 3D.  The tutorials measure it.
+  **ring** and **cross** are its two halves, the ring and the rest, which
+  the two-colour simulations make two colours of.
 * **npc** -- nuclear pore complexes labelled at Nup96: 32 labels per pore in
   two rings 50 nm apart in z, radius 53.7 nm
   ([Thevathasan et al. 2019](https://doi.org/10.1038/s41592-019-0574-9)),
@@ -92,7 +93,7 @@ for ax, name in zip(axes, ("demo", "filaments", "npc", "pie")):
     if name == "npc":                     # a few pores, close up
         cx, cy = lab.poses["x_nm"][0], lab.poses["y_nm"][0]
         xy = xy[(abs(xy[:, 0] - cx) < 600) & (abs(xy[:, 1] - cy) < 600)]
-    colour = {"c": lab.dye, "cmap": "coolwarm"} if name == "demo" else {"color": "k"}
+    colour = {"color": "k"}
     ax.scatter(xy[:, 0] / 1000, xy[:, 1] / 1000, s=0.3 if name != "npc" else 2,
                linewidths=0, rasterized=True, **colour)
     if name == "npc":
@@ -414,7 +415,8 @@ nothing to match by hand.
 
 * `frame`, `x_nm`, `y_nm`, `z_nm`, `photons`, `background`, `xy_err_nm`,
   `z_err_nm` and `sigma_nm`, as a fitter writes them;
-* the **truth**: `emitter` (which fluorophore), `dye` (from the structure),
+* `channel`, the colour (1 here);
+* the **truth**: `emitter` (which fluorophore), `component` (0 here),
   `copy` (which copy of the structure), and `n_merged` when close emitters
   are averaged;
 * in the metadata: the settings (`simulation_settings`), the numbers of
@@ -428,7 +430,7 @@ blinks, the off time, and how many were too close together.
 **Camera frames.**  The *simulation file*; with *also write a TIFF*, the
 frames beside it; with *load the truth*, a table of every spot drawn: `frame`,
 the true `x_nm`, `y_nm`, `z_nm` (drift included), the `photons` it emitted in
-that frame, the `background`, `emitter`, `dye`, `copy`, and `neighbour_nm`, the
+that frame, the `background`, `channel`, `emitter`, `component`, `copy`, and `neighbour_nm`, the
 distance to the nearest other spot on in the same frame.
 
 **Comparing with the truth.**

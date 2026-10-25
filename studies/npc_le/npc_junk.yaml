@@ -1,5 +1,5 @@
-# The tilted Nup96 pores of npc_tilt.yaml (dye 1) and junk that is not a
-# ring (dye 2): blobs 40 nm across, filled squares the size of a pore,
+# The tilted Nup96 pores of npc_tilt.yaml (the first part) and junk that is
+# not a ring (the other parts): blobs 40 nm across, filled squares the size of a pore,
 # 300 nm pieces of filament, and single molecules over the whole field.
 name: nuclear pores (Nup96), tilted, with junk
 parts:
@@ -51,7 +51,6 @@ parts:
     - [20, 20]
     - [-20, 20]
     density: 0.008
-    dye: 2
   copies:
     density: 0.5
     field: *id001
@@ -64,7 +63,6 @@ parts:
     - [55, 55]
     - [-55, 55]
     density: 0.0025
-    dye: 2
   copies:
     density: 0.3
     field: *id001
@@ -76,7 +74,6 @@ parts:
     - [150, 0, 0]
     density: 0.06
     width: 10
-    dye: 2
   copies:
     density: 0.3
     field: *id001
@@ -89,4 +86,3 @@ parts:
     - [9500, 9500]
     - [500, 9500]
     density: 3.0e-06
-    dye: 2

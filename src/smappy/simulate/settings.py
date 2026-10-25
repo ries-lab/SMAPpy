@@ -9,7 +9,7 @@ from these fields.  A camera-frame simulation is also saved as exactly this
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 from ..plugins import param
 from .structure import preset_choices
@@ -18,19 +18,43 @@ STRUCTURE_FILTER = "Structures (*.yaml *.yml);;All files (*)"
 SIMULATION_FILTER = "Simulations (*.sim.yaml);;All files (*)"
 
 
+#: the structure *preset* that means "the file below"
+FROM_FILE = "file"
+#: what a component's labels are (`StructureSettings.kind`)
+STRUCTURE_KINDS = (("structure", "a structure"), ("homogeneous", "homogeneous"),
+                   ("beads", "beads"))
+
+
 @dataclass
 class StructureSettings:
-    """What is labelled (`smappy.simulate.structure`)."""
-    preset: str = param("demo", label="structure", choices=lambda: preset_choices(),
+    """What is labelled (`smappy.simulate.structure`): a structure from a
+    YAML, labels spread evenly (*homogeneous*: a background, or particles
+    to diffuse), or fiducial beads."""
+    kind: str = param("structure", label="labels", choices=STRUCTURE_KINDS,
+                      help="a structure from a YAML; homogeneous: labels at "
+                           "random over the field; beads: bright fiducials")
+    preset: str = param("demo", label="structure",
+                        choices=lambda: preset_choices() + [(FROM_FILE, "from file")],
                         help="a built-in structure; its YAML in smappy/data/structures "
                              "is an example of the syntax")
     file: str = param("", label="structure file", kind="open_file",
                       file_filter=STRUCTURE_FILTER,
                       help="a structure YAML: label positions, or lines, circles, "
-                           "polygons and images at a density, and copies of them; "
-                           "wins over the built-in when set")
+                           "polygons and images at a density, and copies of them")
+    density_um2: float = param(1.0, label="density", unit="/µm²", min=0,
+                               help="homogeneous labels, or beads, per µm² of the "
+                                    "scene's field")
+    z_range_nm: float = param(0.0, label="z range", unit="nm", min=0,
+                              help="homogeneous labels spread evenly over this "
+                                   "range of z about 0")
 
     def source(self) -> str:
+        """The YAML read: the file when *from file* is chosen (or a file is
+        given, as a script says it), else the built-in."""
+        if self.preset == FROM_FILE:
+            if not self.file:
+                raise ValueError("structure from file: choose the structure file")
+            return self.file
         return self.file or self.preset
 
 
@@ -77,7 +101,8 @@ class BlinkingSettings:
     activation: str = param("constant", label="activation",
                             choices=(("constant", "constant: ramped against bleaching"),
                                      ("decay", "decaying: all dark at the start"),
-                                     ("all", "every blink until bleached, spread evenly")),
+                                     ("all", "every blink until bleached, spread evenly"),
+                                     ("always", "always on: a bead")),
                             advanced=True,
                             help="constant: the blinks are spread evenly over the "
                                  "measurement, as an activation raised while the "
@@ -85,11 +110,13 @@ class BlinkingSettings:
                                  "rate, so most blinks come early; every blink: each "
                                  "fluorophore shows all its blinks before it bleaches "
                                  "(1 / blinks per blink), whatever the number of "
-                                 "frames, spread evenly -- SMAP's 'Dye' model")
+                                 "frames, spread evenly -- SMAP's 'Dye' model; "
+                                 "always on: on from the first frame to the last, "
+                                 "never bleached, photons per frame")
     photons: float = param(5000.0, label="photons per blink", min=0,
                            help="mean over a whole blink; a frame gets its share "
                                 "by the time the fluorophore was on in it")
-    photons_std: float = param(2500.0, label="photons std", min=0,
+    photons_std: float = param(2500.0, label="std", min=0, beside=True,
                                help="spread between blinks (a gamma distribution); "
                                     "0: every blink the same")
 
@@ -191,7 +218,7 @@ class SimulationSettings:
     background: float = param(20.0, label="background", unit="photons/px", min=0,
                               help="per pixel and frame: in the precision, or "
                                    "drawn into the frames")
-    background_std: float = param(0.0, label="background std", min=0,
+    background_std: float = param(0.0, label="std", min=0, beside=True,
                                   help="spread between localizations, or between "
                                        "frames for the camera; 0: always the same")
     drift: bool = param(False, label="add drift",
@@ -213,3 +240,143 @@ class SimulationSettings:
         collapsed=True)
     camera: CameraOutputSettings = param(default_factory=CameraOutputSettings,
                                          label="camera frames", collapsed=True)
+
+
+# ------------------------------------------------------------------ a scene
+
+@dataclass
+class PlacementSettings:
+    """Where a structure's copies go (`smappy.simulate.structure`)."""
+    mode: str = param("file", label="copies",
+                      choices=(("file", "as the structure file says"),
+                               ("copies", "set here"),
+                               ("same", "where another component's are")),
+                      help="the structure file's own copies; copies set here over "
+                           "the scene's field; or the poses of another "
+                           "component's copies, this one's geometry put there")
+    n: int = param(0, label="number", min=0,
+                   help="how many copies; 0: by the density")
+    density_um2: float = param(0.5, label="density", unit="/µm²", min=0,
+                               help="copies per µm² of the field, when the number is 0")
+    rotation: str = param("random", label="rotation",
+                          choices=(("none", "none"), ("random", "in the plane"),
+                                   ("random_3d", "in 3D")),
+                          help="how each copy is turned")
+    tilt_deg: float = param(0.0, label="tilt", unit="°", min=0, max=90,
+                            help="each copy tilted by up to this, in a random direction")
+    jitter_nm: float = param(0.0, label="jitter", unit="nm", min=0,
+                             help="each copy moved by up to this per axis")
+    min_distance_nm: float = param(0.0, label="minimum distance", unit="nm", min=0,
+                                   help="between the copies' centres")
+    same_as: str = param("", label="component",
+                         help="the component whose copies' places and turns "
+                              "this one takes; it must have as many copies")
+
+    def copies(self, field_nm: float) -> dict:
+        """As a structure file's ``copies:`` block, over the scene's field."""
+        out = {"field": [0.0, 0.0, field_nm, field_nm], "rotation": self.rotation,
+               "tilt": self.tilt_deg, "jitter": self.jitter_nm,
+               "min_distance": self.min_distance_nm}
+        if self.n > 0:
+            out["n"] = self.n
+        else:
+            out["density"] = self.density_um2
+        return out
+
+
+@dataclass
+class MotionSettings:
+    """Brownian motion of each label, frame to frame (no motion blur)."""
+    on: bool = param(False, label="diffusion", help="the labels diffuse")
+    d_um2_s: float = param(0.5, label="D", unit="µm²/s", min=0,
+                           help="the diffusion coefficient of the first state")
+    slow_fraction: float = param(0.0, label="second state", min=0, max=1,
+                                 help="the fraction of the time in a second state; "
+                                      "0: one state")
+    d2_um2_s: float = param(0.02, label="D of the second", unit="µm²/s", min=0,
+                            help="the diffusion coefficient of the second state")
+    switch_probability: float = param(0.0, label="switching", min=0, max=1,
+                                      help="per frame: the state is drawn again")
+
+
+@dataclass
+class ComponentSettings:
+    """One kind of thing in the sample, with its own labelling, photophysics
+    and motion: a structure, a homogeneous background, beads."""
+    name: str = param("structure", label="name",
+                      help="what the list calls it, and what another "
+                           "component's 'same as' names")
+    on: bool = param(True, label="on", help="untick to leave it out")
+    channel: int = param(1, label="colour", min=1,
+                         help="the localizations' channel; a split camera sends "
+                              "the ratio below of its light to the second half")
+    split_ratio: float = param(0.5, label="split ratio", min=0, max=1,
+                               help="split camera: the fraction of this "
+                                    "component's photons in the second half")
+    structure: StructureSettings = param(default_factory=StructureSettings,
+                                         label="structure")
+    placement: PlacementSettings = param(default_factory=PlacementSettings,
+                                         label="placement", collapsed=True)
+    labelling: LabellingSettings = param(default_factory=LabellingSettings,
+                                         label="labelling", collapsed=True)
+    photophysics_from: str = param("", label="photophysics as",
+                                   help="another component whose photophysics "
+                                        "this one takes; empty: its own, below")
+    blinking: BlinkingSettings = param(default_factory=BlinkingSettings,
+                                       label="photophysics")
+    motion: MotionSettings = param(default_factory=MotionSettings, label="motion",
+                                   collapsed=True)
+
+
+def default_components() -> list:
+    return [ComponentSettings()]
+
+
+@dataclass
+class SceneSettings:
+    """A scene: components, each with its own labelling, photophysics and
+    motion, and what they share -- frames, background, optics, output."""
+    output: str = param("localizations", label="simulate",
+                        choices=(("localizations", "localizations"),
+                                 ("camera", "camera frames"),
+                                 ("split", "split camera")),
+                        help="a localization table directly; camera frames for a "
+                             "fitter; or a split camera, two halves, for the "
+                             "two-colour fit")
+    n_frames: int = param(20000, label="frames", min=1,
+                          help="the length of the measurement")
+    field_um: float = param(10.0, label="field", unit="µm", min=0.1,
+                            help="the side of the square field copies set in a "
+                                 "component, homogeneous labels and beads are in")
+    frame_time_ms: float = param(10.0, label="frame time", unit="ms", min=0.001,
+                                 advanced=True,
+                                 help="what one frame is in seconds: recorded with "
+                                      "the file, and the time diffusion has per frame")
+    background: float = param(20.0, label="background", unit="photons/px", min=0,
+                              help="per pixel and frame: in the precision, or "
+                                   "drawn into the frames")
+    background_std: float = param(0.0, label="std", min=0, beside=True,
+                                  help="spread between localizations, or between "
+                                       "frames for the camera; 0: always the same")
+    drift: bool = param(False, label="add drift",
+                        help="a random walk plus a slow creep of ~100 nm; the "
+                             "truth is kept in the metadata as drift_truth")
+    seed: int = param(0, label="seed", min=0, advanced=True,
+                      help="the same seed and settings give the same simulation")
+    components: List[ComponentSettings] = param(
+        default_factory=default_components, label="components",
+        help="the things in the sample; select one to set it")
+    optics: OpticsSettings = param(default_factory=OpticsSettings, label="optics",
+                                   collapsed=True)
+    localizations: LocalizationOutputSettings = param(
+        default_factory=LocalizationOutputSettings, label="localizations",
+        collapsed=True)
+    camera: CameraOutputSettings = param(default_factory=CameraOutputSettings,
+                                         label="camera frames", collapsed=True)
+
+    def component(self, name: str) -> "ComponentSettings":
+        for c in self.components:
+            if c.name == name:
+                return c
+        raise ValueError(f"no component {name!r}: the scene has "
+                         + (", ".join(repr(c.name) for c in self.components) or "none"))

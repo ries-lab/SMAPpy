@@ -44,11 +44,13 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     import yaml
     path = recipe_path(path)
     values = asdict(settings)
-    if values["structure"]["file"]:
-        values["structure"]["file"] = str(Path(values["structure"]["file"]).resolve())
+    for part in values.get("components") or [values]:
+        if part["structure"]["file"]:
+            part["structure"]["file"] = str(Path(part["structure"]["file"]).resolve())
     if values["optics"]["calibration"]:
         values["optics"]["calibration"] = str(Path(values["optics"]["calibration"]).resolve())
-    values["output"] = "camera"
+    if values["output"] == "localizations":
+        values["output"] = "camera"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# a smappy simulation: open it in a fitter as its file\n")
@@ -59,12 +61,12 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
 
 def read_recipe(path) -> SimulationSettings:
     import yaml
-    from ..plugins import settings_from
     with open(path, encoding="utf-8") as fh:
         spec = yaml.safe_load(fh) or {}
     if spec.get("smappy") != "simulation":
         raise ValueError(f"{path} is not a smappy simulation (no `smappy: simulation`)")
-    return settings_from(SimulationSettings, spec.get("settings") or {})
+    from .scene import settings_of
+    return settings_of(spec.get("settings") or {})
 
 
 @dataclass

@@ -73,14 +73,14 @@ cell is outside the data.
 
 ```figure-setup
 from smappy.simulate import simulate
-from smappy.simulate.settings import SimulationSettings, StructureSettings
+from smappy.simulate.scene import two_colour_scene
 from smappy.plugins.neighbourhood import (count_neighbours, neighbour_statistic,
                                           voronoi_density)
-locs = simulate(SimulationSettings(n_frames=3000, seed=5,
-                                   structure=StructureSettings(preset="demo")))
+# the demo in two colours: the ring dye 1, the lines and scattered points dye 2
+locs = simulate(two_colour_scene(3000, 5))
 keep = np.asarray(locs["photons"]) > 200
 xy = np.column_stack((locs["x_nm"], locs["y_nm"]))[keep]
-dye = np.asarray(locs["dye"])[keep]
+dye = np.asarray(locs["channel"])[keep]
 n = len(xy)
 density = count_neighbours(xy, xy, 50.0, same=np.arange(n))
 voronoi = voronoi_density(xy)
