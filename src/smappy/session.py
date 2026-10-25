@@ -1383,7 +1383,12 @@ class Session:
         left refusing every table change for a fit that will never finish.
         """
         if self._live:
-            self.set_locs(self.locs.snapshot(), undoable=False)
+            try:
+                self.set_locs(self.locs.snapshot(), undoable=False)
+            finally:
+                # whatever went wrong with the table, the fit is over: a
+                # session left live refuses every table change after it
+                self._live = False
 
     def append(self, block: Localizations) -> int:
         """Add a block to the live table; every layer takes it in -- with the

@@ -205,7 +205,7 @@ def render_histogram(x, y, fov: FieldOfView, weights=None, colors=None
 # three orders of magnitude -- so a fixed maximum is useless and a quantile is
 # the only scale that transfers between datasets.  p is the natural handle
 # because the useful range spans decades: 2 is bright, 4 is dark.
-DEFAULT_CONTRAST = 3.0
+DEFAULT_CONTRAST = 3.5
 
 
 #: squared data units in a um^2 (nm axes): the area an absolute maximum is per

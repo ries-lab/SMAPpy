@@ -109,6 +109,20 @@ def test_a_camera_recipe_without_a_file_is_named_after_its_preset(tmp_path, monk
     assert Simulate().describe(None, settings).notice.window == "fit file"
 
 
+def test_two_colours_as_camera_frames_put_the_split_camera_at_the_top_and_say_why():
+    settings = preset("Two-colour pores")
+    settings.output = "camera"
+    state = Simulate().describe(None, settings)
+    assert state.keys["camera.split"] == "split camera (two colours)"
+    assert "split camera" in state.notice.text
+    settings.camera.split = True
+    state = Simulate().describe(None, settings)
+    assert "camera.split" in state.keys and state.notice is None
+    one = preset("Nuclear pores (Nup96)")
+    one.output = "camera"
+    assert "camera.split" not in Simulate().describe(None, one).keys
+
+
 @pytest.mark.slow
 def test_two_colour_pores_as_a_split_camera_are_fitted_by_the_two_colour_fitter(tmp_path):
     """The two-colour workflow on simulated pores: the recipe is the fitter's
@@ -185,6 +199,14 @@ def test_the_panel_shows_the_presets_key_parameters_which_edit_the_scene(app):
     lst = form.fields["components"]
     lst.list.setCurrentRow(1)
     assert lst.editor.fields["labelling"].fields["efficiency"].value() == 0.3
+    # as camera frames, the split camera is ticked from the top
+    out = form.fields["output"]
+    out.widget.setCurrentIndex(out.widget.findData("camera"))
+    panel._describe()
+    split = form.key_fields["camera.split"]
+    split.set(True)
+    split.changed.emit()
+    assert form.value().camera.split is True
 
 
 def test_saved_components_can_be_added_to_a_scene(app):

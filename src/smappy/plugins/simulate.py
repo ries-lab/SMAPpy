@@ -34,6 +34,9 @@ DEFAULT_KEYS = {"components.0.structure.preset": "structure",
 #: added to any preset's keys while the output is a camera: where the recipe
 #: goes is what a test of a fitting workflow sets first
 CAMERA_KEYS = {"camera.path": "simulation file"}
+#: added too while the scene has two colours: the split camera is how they
+#: reach the two-colour fit, and folded under *camera frames* it was missed
+SPLIT_KEYS = {"camera.split": "split camera (two colours)"}
 
 
 @dataclass
@@ -186,6 +189,11 @@ def present_density(scene: SceneSettings, c) -> float:
     return c.structure.density_um2 * c.labelling.efficiency * on
 
 
+def colours(scene: SceneSettings) -> int:
+    """How many colours (`channel`) the switched-on components are in."""
+    return len({c.channel for c in scene.components if c.enabled})
+
+
 def motion_notice(scene: SceneSettings) -> Optional[Notice]:
     """For diffusing components, the jump in a frame against the distance
     between particles: what *Link tracks* is set by."""
@@ -230,6 +238,8 @@ class Simulate(Plugin):
             keys.update(CAMERA_KEYS)
             state.hints["camera.path"] = str(recipe_of(settings))
             state.hints["camera.split_sigma_nm"] = settings.optics.sigma_nm
+            if colours(settings) > 1:
+                keys.update(SPLIT_KEYS)
         # a key whose field the form hides (a split ratio without a split
         # camera, photophysics taken from another) is not shown at the top
         hidden = [path for path, on in state.shown.items() if not on]
@@ -238,12 +248,21 @@ class Simulate(Plugin):
         state.keys = key_labels(settings, keys)
         state.hints["preset"] = "modified" if modified(settings) else ""
         state.notice = motion_notice(settings)
+        # two colours on one unsplit camera are one colour to any fitter: said
+        # before the run, and beside *Fit this* after it
+        unsplit = (f"{colours(settings)} colours drawn on one camera, as one: tick "
+                   f"split camera for frames the two-colour fitter can tell apart"
+                   if camera and colours(settings) > 1 and not settings.camera.split
+                   else "")
+        if unsplit:
+            state.notice = Notice(unsplit)
         path = recipe_of(settings) if camera else None
         if path is not None and path.is_file():
             what = "the two-colour fitter" if settings.camera.split else "a fitter"
-            state.notice = Notice(
-                f"{path.name} is written: fit it with {what} in the Localize tab",
-                action="Fit this", window="fit file", settings=str(path), kind="info")
+            text = f"{path.name} is written: fit it with {what} in the Localize tab"
+            state.notice = Notice(text + (f".  {unsplit}" if unsplit else ""),
+                                  action="Fit this", window="fit file", settings=str(path),
+                                  kind="warning" if unsplit else "info")
         return state
 
     def react(self, changed: str, settings: SimulateSettings) -> Optional[Dict[str, Any]]:

@@ -860,6 +860,16 @@ class PluginPanel(QWidget):
                 # while this ran: what was declared is asked about before the
                 # run (`_start`), so this is only said, not offered again
                 refused = str(e)
+            except Exception as e:
+                # Putting the result in place failed.  Raised out of this slot,
+                # it left the status at "running..." beside a Run button and,
+                # for a fit, the session live for good: every table change
+                # after it was refused as if the fit were still adding.
+                import traceback
+                if owns:
+                    self._owns_live = True          # `_on_failed` ends it
+                self._on_failed(str(e) or type(e).__name__, traceback.format_exc())
+                return
         else:
             self.session.show_preview(self.plugin, result)
             # a figure whose panel takes shapes writes them into this form

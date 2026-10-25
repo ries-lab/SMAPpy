@@ -250,9 +250,9 @@ still showing density.
 fig.set_size_inches(7.5, 5.2)
 axes = fig.subplots(2, 2).ravel()
 draw(axes[0], "contrast 2", contrast=2.0)
-draw(axes[1], "contrast 3 (default)")
+draw(axes[1], "contrast 3", contrast=3.0)
 draw(axes[2], "contrast 4", contrast=4.0)
-draw(axes[3], "contrast 3, gamma 0.5", gamma=0.5)
+draw(axes[3], "contrast 3, gamma 0.5", contrast=3.0, gamma=0.5)
 ```
 
 ```figure The whole field coloured by z: the ring is tilted, so its top and bottom lie at different depths, and the two lines are at slightly different heights.  The same on a white background, and the plain picture with the LUT inverted.
@@ -605,7 +605,8 @@ zero (plain binning), and put back on the way back to x and y.
 The whole field, with a yellow frame where the main view is; click in it
 to move the main view there, at the same zoom.  It shows the extent of
 the visible layers' localizations, or of an image layer, and 1 % around it,
-as large as the panel allows -- docked, its height follows the data's shape;
+as large as the panel allows -- docked, its height follows the data's shape,
+up to 200 pixels so that the tab's rows below it fit the window;
 taken out into a window of its own, it fills the window.  It draws itself
 when a table is opened.
 
@@ -820,7 +821,7 @@ By a column, the LUT turned round: on z, near and far swap colours.  For black
 on white, pick the gray_inverted LUT or *white background* instead.
 
 ### contrast
-*quantile*: 3 is a good start.  Too low, and the structure saturates into
+*quantile*: the default, 3.5, is a good start.  Too low, and the structure saturates into
 white bands; too high, and all but the brightest spots disappear.  The same
 number transfers between datasets, because it is a fraction of pixels, not
 a brightness.  *absolute*: for comparing the brightness of several datasets
