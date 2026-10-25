@@ -208,7 +208,11 @@ class Thing(Plugin):
   unit, bounds, `choices`, `advanced=True` to hide it under "more".  The GUI
   builds its widgets from these; nothing in a plugin imports Qt.  A field
   that is itself a dataclass is a part, a section of its own
-  (`collapsed=True` starts it folded); rows and parts are laid out in the
+  (`collapsed=True` starts it folded); a `List[X]` of one is a list of parts
+  the user adds to, one value of flat maps in a saved file, an item's field
+  named `field.<i>.<name>` in `react` and `FormState` (`gui/params.ListField`);
+  `beside=True` puts a field on the row before; `kind="preset"` is a name
+  from saved settings (`smappy.presets`).  Rows and parts are laid out in the
   order they are declared.
 * `version` -- bump it when a change moves the numbers: a chain records it,
   a batch re-runs files whose steps' versions changed, and the plugin's page

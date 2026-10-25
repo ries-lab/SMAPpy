@@ -6,6 +6,7 @@ declarations to build its widgets.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import inspect
 import types
@@ -50,6 +51,20 @@ class ParamSpec:
     info: ParamInfo
     # for a field that is itself a settings dataclass (a *part*): its specs
     children: Optional[Dict[str, "ParamSpec"]] = None
+    # for a list of settings dataclasses (`List[ComponentSettings]`): the
+    # class of an item and its specs -- a list of parts, as many as the user
+    # makes (a simulated scene's components)
+    item_type: Optional[type] = None
+    items: Optional[Dict[str, "ParamSpec"]] = None
+
+
+def list_item_type(tp) -> Optional[type]:
+    """The dataclass a ``List[X]`` annotation holds, or None for any other."""
+    if typing.get_origin(tp) in (list, List):
+        args = typing.get_args(tp)
+        if len(args) == 1 and dataclasses.is_dataclass(args[0]) and isinstance(args[0], type):
+            return args[0]
+    return None
 
 
 def param_specs(settings_cls: type) -> Dict[str, ParamSpec]:
@@ -82,6 +97,9 @@ def param_specs(settings_cls: type) -> Dict[str, ParamSpec]:
             if default is not None:        # the parent's default instance wins
                 for child in spec.children.values():
                     child.default = getattr(default, child.name)
+        elif list_item_type(tp) is not None:
+            spec.item_type = list_item_type(tp)
+            spec.items = param_specs(spec.item_type)
         specs[f.name] = spec
     return specs
 
@@ -101,6 +119,10 @@ def settings_values(settings) -> Dict[str, Any]:
         value = getattr(settings, f.name)
         if dataclasses.is_dataclass(value):
             out.update({f"{f.name}.{k}": v for k, v in settings_values(value).items()})
+        elif isinstance(value, list) and value and all(
+                dataclasses.is_dataclass(v) for v in value):
+            # a list of parts is one value: a list of their flat maps
+            out[f.name] = [settings_values(v) for v in value]
         else:
             out[f.name] = value
     return out
@@ -149,6 +171,16 @@ def _from_specs(settings_cls: type, specs: Dict[str, "ParamSpec"],
             child = _from_specs(spec.type, spec.children, nested.get(name))
             if child is not None:
                 kwargs[name] = child
+        elif spec.items is not None:
+            raw = flat.get(name)
+            if isinstance(raw, (list, tuple)):
+                # each item a flat or nested map, or already the dataclass
+                kwargs[name] = [item if isinstance(item, spec.item_type)
+                                else _from_specs(spec.item_type, spec.items,
+                                                 item if isinstance(item, dict) else {})
+                                for item in raw]
+            elif spec.default is not None:
+                kwargs[name] = copy.deepcopy(spec.default)
         elif name in flat:
             kwargs[name] = flat[name]
         elif spec.default is not None:

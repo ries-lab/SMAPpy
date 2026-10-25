@@ -1,0 +1,125 @@
+# The simulator, redesigned: a scene of components
+
+Status: agreed design, not yet built (2026-10).  It replaces *Simulate
+structure* and *Simulate tracks* with one plugin, *Simulate*
+(`File/Simulate/Simulate`).  Backwards compatibility is not kept: old
+`.sim.yaml` recipes, saved settings and the structure YAML's `dye` go.
+
+## The model
+
+A **scene** is a list of **components** plus what they share.
+
+**Shared (the scene's):** frames, frame time, drift, camera background,
+optics (pixel size, PSF, astigmatism), detection (limit, close emitters),
+output, seed.
+
+**A component** is one kind of thing in the sample, with its own:
+
+| part | settings |
+| --- | --- |
+| name, on | the name the list shows; a tick to leave it out |
+| structure | a built-in, a file, *homogeneous* (random positions at a density over the field and a z range) or *beads* |
+| placement | copies: number or density, field, rotation, tilt, jitter, minimum distance; or **same as** another component |
+| labelling | efficiency, fluorophores per label (Poisson), linkage error fixed and free |
+| photophysics | photons ± std, on time, blinks or bleaching, activation; or *always on* (beads); or **same as** another component |
+| motion | off, or diffusion: D per state, fractions, switching; moves single labels |
+| colour | the output `channel`; the split camera's ratio |
+
+The structure YAML is geometry only: points, lines, circles, polygons,
+images, copies.  Its `dye` is removed; a colour is a component's.  A
+structure file with several `parts:` stays one component.
+
+**Same as.**  Two links, each a choice of another component:
+
+* *placement same as X*: this component's copies are put where X's are and
+  turned as X's are -- the same poses (`Labels.poses`) -- with this
+  component's own geometry.  A two-colour pore: Nup96 in colour 1, a second
+  Nup in colour 2, each pore at a random place and orientation, the two
+  colours of a pore together.  The two must have the same number of copies;
+  the linked one's copy settings are not shown.
+* *photophysics same as X*: X's photons, blinking and activation.  Two
+  components in one dye stay in step.
+
+A link to a component that is itself linked follows the chain; a cycle or a
+link to a missing or switched-off component is refused with its name.
+
+**Tracks** are a homogeneous component with motion and long-lived
+photophysics (long on time, short off times).  Precision comes from the
+photons, as for everything else.  `simulate_tracks()` stays, as a wrapper
+that builds such a scene, for scripts and the tracking tests.
+
+**Beads** are a component of structure *beads* (copies at a density or a
+number) with photophysics *always on*, bright, no bleaching.
+
+**Motion** moves single labels by Brownian steps, frame to frame, the state
+held over the interval.  No motion blur: a camera frame draws the position
+at the frame.  Moving whole copies is left for later.
+
+## Outputs
+
+* **localizations**: one table, `channel` = the component's colour; truth
+  columns `component`, `emitter` (also the track id), `copy`, and `state`
+  with motion.
+* **camera frames**: one camera, all components drawn.
+* **split camera**: two halves, each component's photons split by its ratio,
+  the transformation between the halves written beside the frames -- a
+  direct feeder for the dual-colour fit, with bead stacks for calibrating it
+  if asked.
+
+Each output can load the truth as a file.
+
+## Presets and components
+
+* A **scene preset** is a YAML file of the whole settings, shipped in
+  `smappy/data/simulation_presets`, the user's in
+  `<config dir>/simulation_presets`.  Choosing one fills every setting;
+  any can then be changed, and the list says *(modified)*.  *Save...* writes
+  the current scene as a preset of the user's; *delete* removes one.
+* A preset names its **key parameters** -- the few fields shown at the top,
+  across components (`NPC: labelling efficiency`, `background: density`).
+  Everything else is folded below.
+* A **component** can be saved on its own (*save component...*) and added
+  to any scene (*add > from saved*): "NPC", "beads", "background".
+* Shipped scene presets: Nuclear pores (Nup96), Two-colour pores, Ring and
+  cross (two colours), Filaments, Diffusion, Two-state diffusion, Pores with
+  beads.
+
+## The interface
+
+```
+preset   [Nuclear pores (Nup96)   v]  [save...] [delete]
+- key parameters --------------------------------------
+NPC: structure      [npc v]
+frames              [20000]
+NPC: photons        [5000] +- [2500]
+NPC: labelling      [0.6]
+output              [localizations v]   [ ] add as new file
+- components ------------------------------- (folded)
+  [x] NPC          colour 1
+  [x] background   colour 1    [+ v] [duplicate] [-] [save...]
+  > the selected component's form: structure, placement,
+    labelling, photophysics, motion, colour
+> optics   > detection   > camera   > more (seed, frame time, drift)
+```
+
+## What the settings framework gains
+
+1. **List-valued settings**: a field `List[ComponentSettings]` is a list of
+   parts.  `settings_values` writes it as one key holding a list of flat
+   maps; `settings_from` reads it back; forms show a list with a form for
+   the selected item; chains, batches and workspaces store it as it is.
+   `FormState` addresses an item as `components.<i>.<field>`.
+2. **`beside=True`** on a `param`: the field on the row of the one before,
+   for "photons +- std".
+3. **A preset list** with save and delete, generalising *Segment regions*'
+   presets, for scene presets and saved components alike.
+
+## The work, in order
+
+1. The framework: list-valued settings, `beside`, presets -- with tests.
+2. The model: components, homogeneous and beads, per-component labelling,
+   photophysics and motion, the two *same as* links, `channel`, the tracks
+   wrapper.
+3. The outputs: localizations, camera, split camera, the truth.
+4. The plugin: *Simulate* replacing both, the presets, its page, the
+   tutorials that use the simulator (seven), the tests.

@@ -36,6 +36,17 @@ class ParamInfo:
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False
+    # on the row of the field before it, with its label as a small word in
+    # between: "photons [5000] +- [2500]" rather than a second row
+    beside: bool = False
+    # kind="preset": a name chosen from saved settings, with *save...* and
+    # *delete* beside it; and for a list of parts, where saved items are.
+    # A callable giving the folders, the user's first (`smappy.presets`)
+    store: Optional[Any] = None
+    # for a list of parts: the item's field a row of the list is named by,
+    # and the item's bool field its tick sets ("" for none)
+    item_name: str = "name"
+    item_on: str = "on"
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):

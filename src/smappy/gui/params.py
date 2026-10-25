@@ -787,6 +787,394 @@ class ShapesField(QWidget):
         pass
 
 
+class PresetField(QWidget):
+    """A name from saved settings (`smappy.presets`), with *save...* and
+    *delete* beside it: ``kind="preset"``.
+
+    Choosing a name is an edit like any other -- the plugin's `react` fills
+    the settings from it -- and saving asks the form for its values, since a
+    preset is the whole form, not this field.
+    """
+
+    changed = Signal()
+    save_requested = Signal(str)
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QPushButton
+        self.spec = spec
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 0, 6, 0)
+        self.widget = QComboBox()
+        self.save_button = QPushButton("save...")
+        self.save_button.setToolTip("keep these settings under a name of yours")
+        self.delete_button = QPushButton("delete")
+        self.delete_button.setToolTip("remove the chosen preset of yours")
+        row.addWidget(self.widget, 1)
+        row.addWidget(self.save_button)
+        row.addWidget(self.delete_button)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self.widget.currentIndexChanged.connect(self._chosen)
+        self.save_button.clicked.connect(self._save)
+        self.delete_button.clicked.connect(self._delete)
+        self._fill(spec.default or "")
+
+    def folders(self) -> list:
+        store = self.spec.info.store
+        return list(store()) if callable(store) else []
+
+    def _fill(self, current: str) -> None:
+        from .. import presets
+        self.widget.blockSignals(True)
+        self.widget.clear()
+        self.widget.addItem("-", "")
+        for name in presets.names(self.folders()):
+            self.widget.addItem(name, name)
+        index = self.widget.findData(current)
+        if index < 0 and current:
+            self.widget.addItem(f"{current} (missing)", current)
+            index = self.widget.count() - 1
+        self.widget.setCurrentIndex(max(index, 0))
+        self.widget.blockSignals(False)
+        self._enable()
+
+    def _enable(self) -> None:
+        from .. import presets
+        name = self.value()
+        folders = self.folders()
+        self.delete_button.setEnabled(bool(name and folders
+                                           and presets.is_users(folders, name)))
+        self.save_button.setEnabled(bool(folders))
+
+    def _chosen(self) -> None:
+        self._enable()
+        self.changed.emit()
+
+    def _save(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Save preset", "name:", text=self.value())
+        if ok and name.strip():
+            self.save_requested.emit(name.strip())
+
+    def _delete(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from .. import presets
+        name = self.value()
+        try:
+            presets.delete(self.folders(), name)
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Delete preset", str(error))
+            return
+        self._fill("")
+        self.changed.emit()
+
+    def saved(self, name: str) -> None:
+        """A preset was written: list it, and show it chosen."""
+        self._fill(name)
+
+    def set(self, value) -> None:
+        self._fill(value or "")
+
+    def value(self) -> str:
+        return self.widget.currentData() or ""
+
+    def refresh(self) -> None:
+        self._fill(self.value())
+
+    def set_hint(self, value) -> None:
+        pass
+
+
+class ListField(QWidget):
+    """A list of parts -- a simulated scene's components -- as a list with a
+    form below it for the item selected.
+
+    The items are kept here as settings objects; the form edits the one
+    selected, and an edit writes it back.  Each row is named by the item's
+    `ParamInfo.item_name` field and ticked by its `item_on` one.  The plugin
+    addresses an item as ``<field>.<i>.<name>`` in its `FormState` and its
+    `react` (`route`); what it says about an item not on show is kept and
+    shown when it is selected.  ``set_choices`` on the field itself gives the
+    *add* menu its entries, ``(label, values)``; saved items come from the
+    folders `ParamInfo.store` names.
+    """
+
+    changed = Signal()
+    item_changed = Signal(str)        # "<i>.<dotted name>", or "" for the list
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QListWidget, QMenu
+        self.spec = spec
+        self.item_type = spec.item_type
+        self.items: List[Any] = []
+        self._states: Dict[int, Dict[str, Dict[str, Any]]] = {}
+        self._offers: List[tuple] = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self.list = QListWidget()
+        self.list.setMaximumHeight(110)
+        if spec.info.help:
+            self.list.setToolTip(spec.info.help)
+        layout.addWidget(self.list)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        self.add_button = QToolButton(text="+")
+        self.add_button.setToolTip("add an item: a new one, or one saved before")
+        self.add_button.setPopupMode(QToolButton.InstantPopup)
+        self.add_menu = QMenu(self.add_button)
+        self.add_menu.aboutToShow.connect(self._fill_add_menu)
+        self.add_button.setMenu(self.add_menu)
+        self.copy_button = QToolButton(text="duplicate")
+        self.copy_button.setToolTip("a copy of the selected item, after it")
+        self.remove_button = QToolButton(text="\u2212")
+        self.remove_button.setToolTip("remove the selected item")
+        self.up_button = QToolButton(text="\u2191")
+        self.down_button = QToolButton(text="\u2193")
+        self.save_button = QToolButton(text="save...")
+        self.save_button.setToolTip("keep the selected item under a name, to add "
+                                    "to another list")
+        self.save_button.setVisible(callable(spec.info.store))
+        for b in (self.add_button, self.copy_button, self.remove_button,
+                  self.up_button, self.down_button):
+            buttons.addWidget(b)
+        buttons.addStretch(1)
+        buttons.addWidget(self.save_button)
+        layout.addLayout(buttons)
+        self.editor = SettingsForm(self.item_type, spec.items)
+        if spec.info.item_on in spec.items:          # the list's tick is it
+            self.editor.set_shown({spec.info.item_on: False})
+        layout.addWidget(self.editor)
+        self.copy_button.clicked.connect(self._duplicate)
+        self.remove_button.clicked.connect(self._remove)
+        self.up_button.clicked.connect(lambda: self._move(-1))
+        self.down_button.clicked.connect(lambda: self._move(1))
+        self.save_button.clicked.connect(self._save)
+        self.list.currentRowChanged.connect(self._select)
+        self.list.itemChanged.connect(self._ticked)
+        self.editor.field_changed.connect(self._edited)
+        self.set(spec.default or [])
+
+    # ------------------------------------------------------------ the list
+    def current(self) -> int:
+        return self.list.currentRow()
+
+    def _name(self, item, i: int) -> str:
+        name = getattr(item, self.spec.info.item_name, "") if self.spec.info.item_name else ""
+        return str(name) or f"{i + 1}"
+
+    def _rebuild(self, select: int) -> None:
+        on = self.spec.info.item_on
+        self.list.blockSignals(True)
+        self.list.clear()
+        from PySide6.QtWidgets import QListWidgetItem
+        for i, item in enumerate(self.items):
+            row = QListWidgetItem(self._name(item, i))
+            if on and hasattr(item, on):
+                row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
+                row.setCheckState(Qt.Checked if getattr(item, on) else Qt.Unchecked)
+            self.list.addItem(row)
+        self.list.blockSignals(False)
+        has = bool(self.items)
+        for b in (self.copy_button, self.remove_button, self.up_button,
+                  self.down_button, self.save_button):
+            b.setEnabled(has)
+        self.editor.setVisible(has)
+        if has:
+            self.list.setCurrentRow(min(max(select, 0), len(self.items) - 1))
+            self._select(self.current())
+
+    def _select(self, i: int) -> None:
+        if not 0 <= i < len(self.items):
+            return
+        self.editor.blockSignals(True)
+        self.editor.set(self.items[i])
+        self.editor.blockSignals(False)
+        # one form for every item: what was hidden or greyed for another
+        # item comes back before this one's state is shown
+        own = self._states.get(i, {})
+        for method in ("set_shown", "set_active"):
+            reset = {sub: True for state in self._states.values()
+                     for sub in state.get(method, {}) if sub not in own.get(method, {})}
+            if reset:
+                getattr(self.editor, method)(reset)
+        for method, values in own.items():
+            getattr(self.editor, method)(values)
+
+    def _edited(self, sub: str) -> None:
+        i = self.current()
+        if not 0 <= i < len(self.items):
+            return
+        try:
+            self.items[i] = self.editor.value()
+        except (ValueError, TypeError):
+            return                         # a number half typed: the old stands
+        row = self.list.item(i)
+        if row is not None:
+            self.list.blockSignals(True)
+            row.setText(self._name(self.items[i], i))
+            on = self.spec.info.item_on
+            if on and hasattr(self.items[i], on):
+                row.setCheckState(Qt.Checked if getattr(self.items[i], on) else Qt.Unchecked)
+            self.list.blockSignals(False)
+        self.item_changed.emit(f"{i}.{sub}")
+        self.changed.emit()
+
+    def _ticked(self, row) -> None:
+        i = self.list.row(row)
+        on = self.spec.info.item_on
+        if not (0 <= i < len(self.items) and on and hasattr(self.items[i], on)):
+            return
+        self.items[i] = dataclasses.replace(self.items[i],
+                                            **{on: row.checkState() == Qt.Checked})
+        if i == self.current():
+            self._select(i)
+        self.item_changed.emit(f"{i}.{on}")
+        self.changed.emit()
+
+    def _structural(self, select: int) -> None:
+        self._states.clear()
+        self._rebuild(select)
+        self.item_changed.emit("")
+        self.changed.emit()
+
+    def add(self, item=None) -> None:
+        """Append ``item`` -- a settings object or a map of its values -- or a
+        new one, and select it."""
+        self.items.append(self._item(item))
+        self._structural(len(self.items) - 1)
+
+    def _duplicate(self) -> None:
+        i = self.current()
+        if 0 <= i < len(self.items):
+            import copy
+            twin = copy.deepcopy(self.items[i])
+            name = self.spec.info.item_name
+            if name and hasattr(twin, name):
+                twin = dataclasses.replace(twin, **{name: f"{getattr(twin, name)} copy"})
+            self.items.insert(i + 1, twin)
+            self._structural(i + 1)
+
+    def _remove(self) -> None:
+        i = self.current()
+        if 0 <= i < len(self.items):
+            del self.items[i]
+            self._structural(i)
+
+    def _move(self, by: int) -> None:
+        i = self.current()
+        j = i + by
+        if 0 <= i < len(self.items) and 0 <= j < len(self.items):
+            self.items[i], self.items[j] = self.items[j], self.items[i]
+            self._structural(j)
+
+    def _fill_add_menu(self) -> None:
+        from .. import presets
+        menu = self.add_menu
+        menu.clear()
+        menu.addAction("new", lambda: self.add())
+        for label, values in self._offers:
+            menu.addAction(label, lambda v=values: self.add(v))
+        store = self.spec.info.store
+        folders = list(store()) if callable(store) else []
+        saved = presets.names(folders)
+        if saved:
+            menu.addSeparator()
+            for name in saved:
+                menu.addAction(name, lambda n=name: self._add_saved(folders, n))
+
+    def _add_saved(self, folders, name: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from .. import presets
+        try:
+            values = presets.read(folders, name)
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Add", str(error))
+            return
+        self.add(values)
+
+    def _save(self) -> None:
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from .. import presets
+        from ..plugins import settings_values
+        i = self.current()
+        store = self.spec.info.store
+        if not (0 <= i < len(self.items)) or not callable(store):
+            return
+        name, ok = QInputDialog.getText(self, "Save", "name:",
+                                        text=self._name(self.items[i], i))
+        if not (ok and name.strip()):
+            return
+        try:
+            presets.write(list(store()), name.strip(), settings_values(self.items[i]))
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Save", str(error))
+
+    def _item(self, value):
+        from ..plugins import _from_specs
+        if isinstance(value, self.item_type):
+            return value
+        if value is None:
+            return self.item_type()
+        return _from_specs(self.item_type, self.spec.items,
+                           value if isinstance(value, dict) else {})
+
+    # ------------------------------------------------------- as a field
+    def set(self, value) -> None:
+        import copy
+        self.items = [self._item(copy.deepcopy(v)) for v in (value or [])]
+        self._states.clear()
+        self._rebuild(0)
+
+    def value(self) -> list:
+        import copy
+        return copy.deepcopy(self.items)
+
+    def values(self) -> list:
+        """The items as flat maps, for a file (`SettingsForm.values`)."""
+        from ..plugins import settings_values
+        return [settings_values(item) for item in self.items]
+
+    def refresh(self) -> None:
+        self.editor.refresh()
+
+    def set_hint(self, value) -> None:
+        pass
+
+    def set_choices(self, choices) -> None:
+        """What *add* offers beside a new item: ``(label, values)`` pairs."""
+        self._offers = [tuple(c) for c in (choices or [])]
+
+    def route(self, method: str, path: str, value) -> None:
+        """``<i>.<name>`` of a `SettingsForm` method (``set_hints``, ...):
+        to the form if item ``i`` is on show, kept for when it is."""
+        index, _, sub = path.partition(".")
+        try:
+            i = int(index)
+        except ValueError:
+            return
+        if not (0 <= i < len(self.items)) or not sub:
+            return
+        if method == "set_values":
+            from ..plugins import _from_specs, settings_values
+            flat = settings_values(self.items[i])
+            flat[sub] = value
+            self.items[i] = _from_specs(self.item_type, self.spec.items, flat)
+            if i == self.current():
+                self._select(i)
+                row = self.list.item(i)
+                if row is not None:
+                    self.list.blockSignals(True)
+                    row.setText(self._name(self.items[i], i))
+                    self.list.blockSignals(False)
+            return
+        self._states.setdefault(i, {}).setdefault(method, {})[sub] = value
+        if i == self.current():
+            getattr(self.editor, method)({sub: value})
+
+
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
@@ -825,12 +1213,31 @@ class SettingsForm(QWidget):
             return form
         more = form_layout()
         main = None                          # the rows since the last part
+        # the widget each row is in the form layout by: the field, or the
+        # holder of a field and those `beside` it
+        self.row_widgets: Dict[str, QWidget] = {}
+        self.beside: Dict[str, tuple] = {}   # a field beside another: (label, widget)
+        last_row: Optional[QHBoxLayout] = None
         # `specs if None`, not `specs or`: {} is a plugin that declares no
         # settings at all -- a loader with sensible defaults, say -- and it
         # must give an empty form rather than fall back to introspection
-        for name, spec in (param_specs(settings_cls) if specs is None
-                           else specs).items():
-            if spec.info.hidden:
+        specs = param_specs(settings_cls) if specs is None else specs
+        shown_specs = [(n, sp) for n, sp in specs.items() if not sp.info.hidden]
+        followed = {shown_specs[k][0] for k in range(len(shown_specs) - 1)
+                    if shown_specs[k + 1][1].info.beside}
+        for name, spec in shown_specs:
+            if spec.items is not None:
+                lst = ListField(spec)
+                lst.item_changed.connect(
+                    lambda sub, n=name: self.field_changed.emit(f"{n}.{sub}" if sub else n))
+                lst.changed.connect(self.changed)
+                self.fields[name] = lst
+                main = last_row = None
+                section = CollapsibleSection(spec.info.label or name, lst,
+                                             expanded=not (spec.info.advanced
+                                                           or spec.info.collapsed))
+                self.sections[name] = section
+                layout.addWidget(section)
                 continue
             if spec.children is not None:
                 if spec.info.kind == "microscope":
@@ -842,7 +1249,7 @@ class SettingsForm(QWidget):
                 part.field_changed.connect(lambda sub, n=name: self.field_changed.emit(f"{n}.{sub}"))
                 part.changed.connect(self.changed)
                 self.fields[name] = part
-                main = None
+                main = last_row = None
                 section = CollapsibleSection(spec.info.label or name, part,
                                              expanded=not (spec.info.advanced
                                                            or spec.info.collapsed))
@@ -851,23 +1258,44 @@ class SettingsForm(QWidget):
                 continue
             w = (LayersField(spec) if spec.info.kind == "layers"
                  else ColumnsField(spec) if spec.info.kind == "columns"
-                 else ShapesField(spec) if spec.info.kind == "shapes" else _Field(spec))
+                 else ShapesField(spec) if spec.info.kind == "shapes"
+                 else PresetField(spec) if spec.info.kind == "preset" else _Field(spec))
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
+            if isinstance(w, PresetField):
+                w.save_requested.connect(lambda preset, f=w: self._save_preset(preset, f))
             self.fields[name] = w
             label = QLabel(spec.info.label or name)
             if spec.info.help:
                 label.setToolTip(spec.info.help)
             self.labels[name] = label
-            if spec.info.advanced:
-                more.addRow(label, w)
-                self.row_layouts[name] = more
+            if spec.info.beside and last_row is not None:
+                # on the row before: its label a small word between the two
+                last_row.insertWidget(last_row.count() - 1, label)
+                last_row.insertWidget(last_row.count() - 1, w)
+                self.beside[name] = (label, w)
+                self.row_layouts[name] = self.row_layouts[self._last_name]
+                self.row_widgets[name] = self.row_widgets[self._last_name]
                 continue
-            if main is None:
-                main = form_layout()
-                layout.addLayout(main)
-            main.addRow(label, w)
-            self.row_layouts[name] = main
+            row_widget = w
+            last_row = None
+            if name in followed:
+                row_widget = QWidget()
+                last_row = QHBoxLayout(row_widget)
+                last_row.setContentsMargins(0, 0, 0, 0)
+                last_row.setSpacing(4)
+                last_row.addWidget(w)
+                last_row.addStretch(1)
+            self._last_name = name
+            self.row_widgets[name] = row_widget
+            target = more if spec.info.advanced else None
+            if target is None:
+                if main is None:
+                    main = form_layout()
+                    layout.addLayout(main)
+                target = main
+            target.addRow(label, row_widget)
+            self.row_layouts[name] = target
         if more.rowCount():
             box = QWidget()
             box.setLayout(more)
@@ -908,6 +1336,9 @@ class SettingsForm(QWidget):
             if isinstance(f, SettingsForm):
                 out.update({f"{name}.{k}": v for k, v in f.values().items()})
                 continue
+            if isinstance(f, ListField):
+                out[name] = f.values()
+                continue
             try:
                 out[name] = f.value()
             except (ValueError, TypeError):
@@ -928,6 +1359,35 @@ class SettingsForm(QWidget):
                 dropped.append(path)
         return dropped
 
+    def _routed(self, method: str, path: str, value) -> bool:
+        """Hand ``path`` to a list of parts on the way, if there is one:
+        ``components.2.photons`` is item 2's ``photons`` (`ListField.route`)."""
+        parts = path.split(".")
+        target = self
+        for k, part in enumerate(parts[:-1]):
+            field = target.fields.get(part) if isinstance(target, SettingsForm) else None
+            if isinstance(field, ListField):
+                field.route(method, ".".join(parts[k + 1:]), value)
+                return True
+            if field is None:
+                return False
+            target = field
+        return False
+
+    def _save_preset(self, name: str, field: "PresetField") -> None:
+        """*save...* of a preset field: the whole form, but the preset's own
+        name, under ``name`` in the user's folder."""
+        from PySide6.QtWidgets import QMessageBox
+        from .. import presets
+        own = next((n for n, f in self.fields.items() if f is field), None)
+        values = {k: v for k, v in self.values().items() if k != own}
+        try:
+            presets.write(field.folders(), name, values)
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "Save preset", str(error))
+            return
+        field.saved(name)
+
     def set_hints(self, values: Dict[str, Any]) -> None:
         """Show, by dotted name, what each field's *auto* resolves to.
 
@@ -936,6 +1396,8 @@ class SettingsForm(QWidget):
         the form the way a stale saved value must not.
         """
         for path, value in values.items():
+            if self._routed("set_hints", path, value):
+                continue
             target = self
             parts = path.split(".")
             try:
@@ -955,6 +1417,8 @@ class SettingsForm(QWidget):
         session decides (`Plugin.describe`).  Unknown names are ignored, as
         for hints."""
         for path, choices in lists.items():
+            if self._routed("set_choices", path, choices):
+                continue
             target = self
             parts = path.split(".")
             try:
@@ -972,6 +1436,8 @@ class SettingsForm(QWidget):
         line and must not widen the form.  Unknown names are ignored."""
         from .widgets import CONTROL_WIDTH
         for path, title in titles.items():
+            if self._routed("set_titles", path, title):
+                continue
             target = self
             parts = path.split(".")
             try:
@@ -993,6 +1459,8 @@ class SettingsForm(QWidget):
         Unknown names are ignored, as in `set_hints`.
         """
         for path, on in flags.items():
+            if self._routed("set_active", path, on):
+                continue
             target = self
             parts = path.split(".")
             try:
@@ -1015,6 +1483,8 @@ class SettingsForm(QWidget):
         """
         touched = set()
         for path, on in flags.items():
+            if self._routed("set_shown", path, on):
+                continue
             target = self
             parts = path.split(".")
             try:
@@ -1024,7 +1494,11 @@ class SettingsForm(QWidget):
                 if name in target.sections:
                     target.sections[name].setVisible(bool(on))
                     continue
-                target.row_layouts[name].setRowVisible(target.fields[name], bool(on))
+                if name in target.beside:
+                    for widget in target.beside[name]:
+                        widget.setVisible(bool(on))
+                    continue
+                target.row_layouts[name].setRowVisible(target.row_widgets[name], bool(on))
             except (KeyError, AttributeError):
                 continue
             touched.add(target)
@@ -1037,11 +1511,13 @@ class SettingsForm(QWidget):
         more = self.more_section.content
         rows = [n for n, lay in self.row_layouts.items() if lay is more.layout()]
         self.more_section.setVisible(any(
-            self.row_layouts[n].isRowVisible(self.fields[n]) for n in rows))
+            self.row_layouts[n].isRowVisible(self.row_widgets[n]) for n in rows))
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""
         for path, value in values.items():
+            if self._routed("set_values", path, value):
+                continue
             target = self
             parts = path.split(".")
             for part in parts[:-1]:

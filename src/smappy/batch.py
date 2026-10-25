@@ -350,6 +350,18 @@ def _check_values(values: Dict[str, Any], fields: Dict[str, ParamSpec], where: s
                     f"; it has {', '.join(sorted(fields))}")
             problems.append(Problem("error", where, f"no field {key!r}{hint}"))
             continue
+        if spec.items is not None:
+            # a list of parts: each item checked against the item's fields
+            if not isinstance(value, (list, tuple)):
+                problems.append(Problem("error", where, f"{key}: {value!r} is not a list"))
+                continue
+            for i, item in enumerate(value):
+                if not isinstance(item, dict):
+                    problems.append(Problem("error", where, f"{key}.{i}: not a mapping"))
+                    continue
+                _check_values(item, _flat_specs(spec.items), f"{where}: {key}.{i}",
+                              problems)
+            continue
         why = _check_value(spec, value)
         if why:
             problems.append(Problem("error", where, f"{key}: {why}"))

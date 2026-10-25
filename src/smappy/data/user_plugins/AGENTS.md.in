@@ -88,9 +88,13 @@ line of text, `Optional[float] = param(None, ...)` a box that may be empty.
 | `help` | the tooltip, a short phrase |
 | `choices` | `("a", "b")` or `(("value", "label"), ...)` |
 | `advanced=True` | hidden under *more* |
-| `kind` | `"open_file"`, `"save_file"`, `"dir"` (a path with a browse button), `"text"` (a wide line) |
+| `kind` | `"open_file"`, `"save_file"`, `"dir"` (a path with a browse button), `"text"` (a wide line), `"preset"` (a name from saved settings, with *save...* and *delete*; `store=` gives the folders) |
+| `beside=True` | on the row of the field before it: `photons [5000] ± [2500]` |
 
 A field whose type is another settings dataclass is a section of its own.
+A field `List[X]` of a settings dataclass `X` is a list the user adds to,
+with a form for the item selected; `react` and `describe` name an item's
+field `field.<i>.<name>`.
 
 ## What `run` gets: the context
 
