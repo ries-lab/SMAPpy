@@ -1615,6 +1615,39 @@ class ROIProject:
             found.append(roi)
         return found
 
+    def add_preview(self) -> List[ROI]:
+        """Add a segmenter's preview (`segment_preview`) as it stands: the
+        ROIs it would remove go, its proposals become ROIs with the origin
+        and *use* a run would give them, as one step of the ROI undo.
+
+        The same as running the segmenter again with the same settings --
+        which a minute's search on a large file makes worth avoiding, and
+        which on a file whose filter has changed since would not give what
+        was looked at.  Each site may carry the ROI's ``polygon``, ``ids``
+        and ``spatial`` (*from an id column*)."""
+        preview = self.segment_preview
+        if preview is None:
+            raise ValueError("there is no preview to add: run a segmenter's Preview")
+        file_id = preview["file_id"]
+        if file_id not in self.sources:
+            raise ValueError("the file the preview was made on is gone")
+        name = str(preview.get("method") or "preview").rsplit("/", 1)[-1]
+        made = []
+        with self.edit(name) as step:
+            replaced = [i for i in preview.get("replaces") or () if i in self.rois]
+            for roi_id in replaced:
+                self.rois.pop(roi_id, None)
+            for site in preview["sites"]:
+                roi = self.add_roi(file_id, site["center"], polygon=site.get("polygon"),
+                                   origin=site.get("origin"), ids=site.get("ids"),
+                                   spatial=site.get("spatial", True))
+                roi.use = bool(site.get("use", True))
+                made.append(roi)
+            step.label = f"{name}: {len(made)} ROIs" + (
+                f" for {len(replaced)}" if replaced else "")
+        self.segment_preview = None
+        return made
+
     def propose(self, file_id, plugin=None, settings=None, parameters=None,
                 exclude=()):
         """``(origin, proposals)``: what `find` would add, adding nothing.

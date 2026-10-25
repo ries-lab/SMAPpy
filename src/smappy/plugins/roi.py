@@ -54,7 +54,9 @@ class SegmenterPlugin(Plugin):
 
     Its Preview runs the same finder and adds nothing: the proposals go to
     the manager as `ROIProject.segment_preview`, drawn in grey, each preview
-    replacing the last, and only Run adds them.  The undo stack cannot do
+    replacing the last, and Run -- or the manager's *Add previewed ROIs*,
+    which adds them as they were proposed without finding them again
+    (`ROIProject.add_preview`) -- adds them.  The undo stack cannot do
     this job -- it holds tables, and ROIs are not one -- and removing the
     last try's ROIs by hand after every change of a setting is how a finder
     stops being tuned.
@@ -112,8 +114,11 @@ class SegmenterPlugin(Plugin):
                 step.label = f"{self.name}: {len(rois)} ROIs" + (
                     f" for {len(replaced)}" if replaced else "")
             return [{"center": r.center, "use": r.use} for r in rois], {"rois": rois}
-        _, proposals = project.propose(file_id, self, settings, exclude=replaced)
-        sites = [{"center": p["center"], "use": p["use"]} for p in proposals]
+        origin, proposals = project.propose(file_id, self, settings, exclude=replaced)
+        # each with the origin a run would give it, so that the manager can
+        # add the preview as it stands (`ROIProject.add_preview`)
+        sites = [{"center": p["center"], "use": p["use"],
+                  "origin": {**origin, **p["origin"]}} for p in proposals]
         return sites, {"roi_preview": {"file_id": file_id, "method": self.path,
                                        "sites": sites, "replaces": list(replaced)}}
 

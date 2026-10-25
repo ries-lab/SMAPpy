@@ -28,7 +28,7 @@ from ..session import Layer, Session
 from ..lut import FIELD_LUT, INTENSITY_LUT
 from . import folders
 from .merging import merger_for
-from .render_view import nice_below
+from .render_view import fill_canvas, nice_below
 from .widgets import (CollapsibleSection, ColumnScroll, CompactSpinBox, FlowLayout,
                       detach_to_window,
                       round_in_span, round_significant)
@@ -703,6 +703,7 @@ class Overview(QWidget):
         self._resize_timer.timeout.connect(self._update_deferred)
         self.box = self.graphics.addViewBox(lockAspect=True, invertY=True,
                                            enableMenu=False, enableMouse=False)
+        fill_canvas(self.graphics)
         self.image = pg.ImageItem(axisOrder="row-major")
         self.box.addItem(self.image)
         self.frame = pg.QtWidgets.QGraphicsRectItem()

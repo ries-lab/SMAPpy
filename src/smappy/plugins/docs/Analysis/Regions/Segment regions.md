@@ -59,7 +59,9 @@ in the list (one of the same name replaces the shipped one).  The settings,
 not the preset, are what a run uses; change any after choosing one.
 
 *Preview* draws the ROIs it would make, grey, in the ROI manager without
-adding them; *Run* adds them, as one step of the ROI manager's *Undo*.
+adding them; *Run* adds them, as one step of the ROI manager's *Undo* --
+or the ROI manager's *Add previewed ROIs* adds those shown, without
+searching again.
 
 ### Circle template
 
@@ -694,7 +696,7 @@ A table written by *Export table* (with *ROI position*), or any csv with
   same text and figures, and adds nothing: they are drawn grey and dashed in
   the ROI manager (with *keep rejected*, the rejected ones dotted), and with
   *replace* the earlier ROIs it would remove are hidden.  The next preview
-  replaces it; *Run* adds it.
+  replaces it; *Run*, or *Add previewed ROIs* in the ROI manager, adds it.
 
 A good result has one ROI on each structure and none on the background.
 ROIs on the background: tighten *keep* (more localizations, a narrower

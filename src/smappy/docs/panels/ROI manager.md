@@ -116,7 +116,8 @@ the file moves the zoom there.  Moving around never moves an ROI.
 **2. Finding ROIs.**  A segmentation plugin run from the Regions tab adds its
 candidates to the file shown here.  Its *Preview* button proposes them
 without adding them: they are drawn grey and dashed (the ones the finder
-rejected dotted), each preview replaces the last, and *Run* adds them.  That
+rejected dotted), each preview replaces the last, and *Run* adds them -- or
+*Add previewed ROIs* adds those shown, without searching again.  That
 is how a finder's settings are tuned without removing the last try's ROIs by
 hand; and a run that was not wanted is taken back with *Undo*.  A click on empty space in the zoom drafts
 an ROI by hand (blue, dashed); *Add* stores it.  A click on an ROI's
@@ -407,9 +408,19 @@ afresh.
 Puts back what *Undo* took back, and names it as *Undo* does (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
 after an undo makes the undone step unrecoverable.
 
+### Add previewed ROIs
+Shown while a segmenter's preview is drawn.  Adds the grey proposals as they
+were proposed -- with what was measured on each, and the ROIs a replacing
+run would remove removed -- as one step of *Undo*, without running the
+segmenter again: on a large file a search can take a minute, and the ROIs
+added are the ones looked at even if the filter has changed since.  For *from
+an id column*, the preview and so what is added are the file shown; *Run*
+makes the ROIs of every file.
+
 ### Discard preview
 Shown while a segmenter's preview is drawn.  Takes the grey proposals away
-without adding any; *Run* in the segmenter adds them instead.
+without adding any; *Run* in the segmenter, or *Add previewed ROIs*, adds
+them instead.
 
 ### Polygon
 Click once per vertex in the ROI image; clicking near the first vertex

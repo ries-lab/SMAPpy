@@ -296,6 +296,14 @@ def test_rois_of_an_id_column_have_a_preview_and_then_are_made():
     assert len(run.rois) == 3 and all(made_by(r, "ids") for r in run.rois)
     assert sorted(map(tuple, (s["center"] for s in preview.roi_preview["sites"]))) == \
         sorted(tuple(r.center) for r in run.rois)
+    # added as previewed: ROIs of their id alone, as the run made them
+    tracks = SegmentSettings(method="ids", ids=ColumnROIsSettings(
+        min_size=10, membership="id"))
+    session.show_preview(SegmentRegions(), SegmentRegions().preview(session.context(),
+                                                                    tracks))
+    added = session.add_preview()
+    assert len(added) == 3 and all(not r.spatial and r.ids for r in added)
+    assert len(session.rois.rois) == 3                    # the earlier ones replaced
 
 
 def test_an_unknown_method_is_refused_with_the_ones_there_are():

@@ -219,6 +219,30 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
         sorted(s["center"] for s in sites)
 
 
+def test_a_preview_is_added_as_it_was_proposed_without_running_again():
+    """What a run would add -- the same places, origins, values and use --
+    the ROIs a replacing run removes removed, one undo step for it all."""
+    from smappy.session import Session
+    session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
+    session.show_grouped(0, False)
+    project = session.rois
+    finder = SegmentRegions()
+    settings = discs()
+    old = finder.run(session.context(), settings).rois
+    session.show_preview(finder, finder.preview(session.context(), settings))
+    added = session.add_preview()
+    assert project.segment_preview is None
+    assert not {r.id for r in old} & set(project.rois)        # replaced
+    assert sorted(r.center for r in added) == sorted(r.center for r in old)
+    assert [r.origin["values"] for r in added] == [r.origin["values"] for r in old]
+    assert all(r.origin["method"] == finder.path and r.origin["parameters"]
+               for r in added)
+    project.undo()
+    assert sorted(project.rois) == sorted(r.id for r in old)  # one step back
+    with pytest.raises(ValueError, match="no preview"):
+        session.add_preview()
+
+
 def test_propose_is_find_without_the_adding():
     project, source = rois_of(table([(0, 0), (3000, 0)], per=40))
     project.set_geometry(300)
@@ -441,6 +465,45 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     wait(panel.preview)
     window.clear_preview_button.click()
     assert session.rois.segment_preview is None and len(session.rois.rois) == 4
+
+    # the preview added as it stands: the same four, replacing the run's
+    wait(panel.preview)
+    assert window.add_preview_button.isVisibleTo(window)
+    before = sorted(r.center for r in session.rois.rois.values())
+    window.add_preview_button.click()
+    app.processEvents()
+    assert session.rois.segment_preview is None
+    assert sorted(r.center for r in session.rois.rois.values()) == before
+    assert window.table.model().rowCount() == 4
+    assert not window.add_preview_button.isVisibleTo(window)
+    assert "added 4 previewed ROIs" in window.status.currentMessage()
+
+
+def test_the_managers_pictures_reach_the_edges_of_their_panes(app):
+    """The picture is rendered at the size the view box shows, not the
+    widget's: pyqtgraph's margin left a black rim beyond the picture, where
+    the structures at the edge looked cut off."""
+    from smappy.gui.roi_window import ROIManagerWindow
+    from smappy.session import Session
+    session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 1000)], per=40))
+    session.show_grouped(0, False)
+    project = session.rois
+    roi = project.add_roi(next(iter(project.sources)), (0.0, 0.0))
+    window = ROIManagerWindow(session)
+    window.resize(1300, 850)
+    window.show()
+    app.processEvents()
+    window.select(roi.id)
+    window.redraw()
+    app.processEvents()
+    for pane in (window.file_pane, window.zoom_pane):
+        shown = pane.view.viewRect()
+        image = pane.image.mapRectToParent(pane.image.boundingRect())
+        pixel = pane.fov.pixelsize
+        for a, b in ((shown.left(), image.left()), (shown.right(), image.right()),
+                     (shown.top(), image.top()), (shown.bottom(), image.bottom())):
+            assert abs(a - b) < pixel, pane.title
+    window.close()
 
 
 def test_the_manager_undoes_a_removal_with_its_own_undo(app):
