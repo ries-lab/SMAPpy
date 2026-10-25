@@ -8,8 +8,8 @@ calibration, is `fitting_3d`: the same fitter form, with a measured PSF.
 """
 from __future__ import annotations
 
-from .common import (expand, field, open_section, place_beside, section,
-                     section_of, show_tab, type_into)
+from .common import (expand, field, open_section, place_beside, section_of,
+                     show_tab, type_into)
 
 TITLE = "Fitting in 2D"
 DESCRIPTION = ("The camera, finding the spots, the PSF model, and checking the "
@@ -182,11 +182,14 @@ def make(d) -> None:
                zoom=d.around(filt, 700))
 
     d.chapter("After fitting")
-    analysis = show_tab(d, "Analysis")
-    drift = [section(analysis, name).button for name in ("COMET", "RCC")]
-    d.shot("Before measuring, correct the drift, with RCC or COMET in the "
-           "Analysis tab. Filtering and merging blinks are in the rendering tutorial.",
-           spot=drift, point=drift[0], zoom=d.around(drift[0], 760))
+    show_tab(d, "Localize")
+    drift = field(panel, "finish.drift")
+    expand(drift)
+    d.settle()
+    d.shot("Before measuring, correct the drift: after the fit, at the foot of "
+           "the fitter, runs RCC or COMET when the fit ends. Run these now does it "
+           "later. Filtering and merging blinks are in the rendering tutorial.",
+           spot=[section_of(panel, "finish")], point=drift, zoom=d.around(drift, 760))
 
     d.chapter("Next")
     d.card("What to remember",

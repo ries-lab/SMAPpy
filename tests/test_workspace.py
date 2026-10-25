@@ -7,6 +7,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 STATS = "Analysis/Measure/Localization Statistics"
+PROFILE = "Analysis/Measure/Line Profile"
 SEGMENT = "Analysis/Regions/Segment regions"
 
 
@@ -43,9 +44,9 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     ws = Workspace.default()
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "Regions"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
+    # drift, colours and z are each fitter's *after the fit*, not pins here
     assert [i.plugin for i in analysis.instances] == [
-        "Analysis/Measure/Line Profile", STATS, RCC, COMET,
-        "Analysis/After fit/Assign colours", "Analysis/After fit/Astigmatic z"]
+        "Analysis/Measure/Line Profile", STATS]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert regions.header == "roi"
@@ -71,11 +72,11 @@ def test_every_plugin_the_shipped_gui_names_is_shipped():
 
 def test_a_plugin_that_is_not_installed_is_left_out_of_the_default():
     refs = dict(plugins.refs())
-    del refs[COMET]
+    del refs[PROFILE]
     ws = Workspace.default(refs)
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
-    assert COMET not in {i.plugin for i in analysis.instances}
-    assert RCC in {i.plugin for i in analysis.instances}
+    assert PROFILE not in {i.plugin for i in analysis.instances}
+    assert STATS in {i.plugin for i in analysis.instances}
 
 
 def test_a_tab_is_not_a_branch_of_the_tree():
@@ -92,7 +93,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     ws = Workspace.default()
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     analysis.instances[0].label = "COMET (coarse)"
-    analysis.instances[0].values = {"segmentation_var": 12}
+    analysis.instances[0].values = {"bootstrap": 12}
     analysis.instances.append(analysis.instances[0].copy())
     titles = [i.title() for i in analysis.instances]
     assert titles[0] == titles[-1] == "COMET (coarse)"
@@ -102,7 +103,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     back = load(path)
     tab = next(t for t in back.tabs if t.name == "Analysis")
     assert [i.title() for i in tab.instances] == titles
-    assert tab.instances[0].values == {"segmentation_var": 12}
+    assert tab.instances[0].values == {"bootstrap": 12}
     assert back.layout["active_tab"] == "Analysis"
 
 
@@ -233,11 +234,11 @@ def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
 def test_opening_a_section_is_what_imports_the_plugin(window):
     import sys
     tab = tab_named(window, "Analysis")
-    instance = next(i for i in tab.tab.instances if i.plugin == COMET)
+    instance = next(i for i in tab.tab.instances if i.plugin == PROFILE)
     assert tab.slots[instance.id].panel is None       # nothing built yet
     tab.open_section(instance.id)
     assert tab.slots[instance.id].panel is not None
-    assert "smappy.plugins.drift_comet" in sys.modules
+    assert "smappy.plugins.line_profile" in sys.modules
 
 
 def test_only_one_section_is_open_at_a_time(window):
@@ -262,10 +263,10 @@ def test_a_pin_that_is_not_installed_says_so_instead_of_crashing(window):
 
 def test_values_survive_being_saved_and_reopened(window, tmp_path):
     tab = tab_named(window, "Analysis")
-    at = next(k for k, i in enumerate(tab.tab.instances) if i.plugin == COMET)
+    at = next(k for k, i in enumerate(tab.tab.instances) if i.plugin == PROFILE)
     instance = tab.tab.instances[at]
     tab.open_section(instance.id)
-    tab.slots[instance.id].panel.form.restore({"segmentation_var": 11})
+    tab.slots[instance.id].panel.form.restore({"bootstrap": 11})
     instance.label = "COMET (coarse)"
     path = tmp_path / "saved.yaml"
     window.save_gui_to(path)
@@ -273,7 +274,7 @@ def test_values_survive_being_saved_and_reopened(window, tmp_path):
     reopened = load(path)
     back = next(t for t in reopened.tabs if t.name == "Analysis")
     assert back.instances[at].label == "COMET (coarse)"
-    assert back.instances[at].values["segmentation_var"] == 11
+    assert back.instances[at].values["bootstrap"] == 11
     assert reopened.layout["open"]["Analysis"] == instance.id
     # the screen's business, not the GUI's; and a GUI starts on File
     assert "geometry" not in reopened.layout
@@ -327,54 +328,54 @@ def make_window():
     return ControlWindow(session, RenderWindow(session))
 
 
-def comet_value(window):
+def profile_value(window):
     tab = tab_named(window, "Analysis")
-    return next(i for i in tab.tab.instances if i.plugin == COMET).values.get(
-        "segmentation_var")
+    return next(i for i in tab.tab.instances if i.plugin == PROFILE).values.get(
+        "bootstrap")
 
 
-def set_comet_value(window, value):
+def set_profile_value(window, value):
     tab = tab_named(window, "Analysis")
-    instance = next(i for i in tab.tab.instances if i.plugin == COMET)
+    instance = next(i for i in tab.tab.instances if i.plugin == PROFILE)
     tab.open_section(instance.id)
-    tab.slots[instance.id].panel.form.restore({"segmentation_var": value})
+    tab.slots[instance.id].panel.form.restore({"bootstrap": value})
 
 
 def test_nothing_typed_survives_a_restart_unless_it_was_saved(window, tmp_path):
     """One installation, many users: a value one person typed must not become
     the next person's default by the program remembering it."""
     from PySide6.QtWidgets import QApplication
-    set_comet_value(window, 17)
+    set_profile_value(window, 17)
     window.tabs.setCurrentIndex(3)
     QApplication.instance().aboutToQuit.emit()
     written = {p.name for p in (tmp_path / "config").rglob("*") if p.is_file()}
     assert written <= {"window.yaml"}         # where the window was, nothing else
 
     again = make_window()
-    assert comet_value(again) is None
+    assert profile_value(again) is None
     assert again.tabs.tabText(again.tabs.currentIndex()) == "File"
     assert again.workspace.path is None
     assert "default workspace" in again.windowTitle()
 
 
 def test_a_saved_gui_is_what_the_next_start_opens(window, tmp_path):
-    set_comet_value(window, 17)
+    set_profile_value(window, 17)
     path = window.save_gui_to(tmp_path / "jonas.gui.yaml")
     assert window.windowTitle().endswith("jonas")
 
     again = make_window()
     assert again.workspace.path == path.resolve()
-    assert comet_value(again) == 17
+    assert profile_value(again) == 17
     assert again.windowTitle().endswith("jonas")
     assert again.tabs.tabText(again.tabs.currentIndex()) == "File"
 
 
 def test_save_gui_overwrites_the_loaded_file_and_nothing_else(window, tmp_path):
     path = window.save_gui_to(tmp_path / "lab.gui.yaml")
-    set_comet_value(window, 23)
+    set_profile_value(window, 23)
     window.save_gui()
     assert next(i for t in load(path).tabs for i in t.instances
-                if i.plugin == COMET).values["segmentation_var"] == 23
+                if i.plugin == PROFILE).values["bootstrap"] == 23
 
 
 def test_save_gui_on_the_shipped_default_asks_where(window, tmp_path, monkeypatch):
@@ -393,14 +394,14 @@ def test_save_gui_on_the_shipped_default_asks_where(window, tmp_path, monkeypatc
 
 
 def test_loading_a_gui_replaces_the_values_and_is_remembered(window, tmp_path):
-    set_comet_value(window, 31)
+    set_profile_value(window, 31)
     path = window.save_gui_to(tmp_path / "other.gui.yaml")
     window.load_default_gui()
-    assert comet_value(window) is None
+    assert profile_value(window) is None
     assert make_window().workspace.path is None      # the default, next time too
 
     window.load_gui_from(path)
-    assert comet_value(window) == 31
+    assert profile_value(window) == 31
     assert window.tabs.tabText(window.tabs.currentIndex()) == "File"
     assert make_window().workspace.path == path.resolve()
 
@@ -412,16 +413,16 @@ def test_the_workspace_is_a_submenu_of_file_and_reset_gives_the_default(window, 
     actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}
     assert list(actions) == ["Save", "Save as...", "Open...", "Recent", "Reset",
                              "From data file..."]
-    set_comet_value(window, 31)
+    set_profile_value(window, 31)
     window.save_gui_to(tmp_path / "mine.gui.yaml")
     actions["Reset"].trigger()
-    assert window.workspace.path is None and comet_value(window) is None
+    assert window.workspace.path is None and profile_value(window) is None
 
 
 def test_recent_lists_the_workspaces_saved_or_loaded_and_opens_one_in_a_click(
         window, tmp_path):
     first = window.save_gui_to(tmp_path / "first.gui.yaml")
-    set_comet_value(window, 41)
+    set_profile_value(window, 41)
     second = window.save_gui_to(tmp_path / "second.gui.yaml")
     window.load_gui_from(first)                  # loading puts it back on top
     gone = window.save_gui_to(tmp_path / "gone.gui.yaml")
@@ -431,7 +432,7 @@ def test_recent_lists_the_workspaces_saved_or_loaded_and_opens_one_in_a_click(
     entries = {a.text(): a for a in window.recent_gui_menu.actions()}
     assert list(entries) == ["first", "second"]  # newest first, the gone one left out
     entries["second"].trigger()
-    assert window.workspace.path == second and comet_value(window) == 41
+    assert window.workspace.path == second and profile_value(window) == 41
     # and it is what the next start opens; nothing was saved to get there
     assert make_window().workspace.path == second.resolve()
 

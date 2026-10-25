@@ -65,15 +65,29 @@ def recipe_of(settings: SceneSettings):
 
 def astigmatic_note(settings: SceneSettings) -> Optional[str]:
     """For astigmatic Gaussian frames on one camera, what *Fit this* says after opening them in
-    Gaussian 2D with *elliptical* ticked: Astigmatic z, and the curves to type there.  None for any
-    other -- frames drawn with a PSF calibration go to Spline 3D."""
+    Gaussian 2D with *elliptical* ticked: its *after the fit* runs Astigmatic z on the curves
+    `astigmatic_values` types in.  None for any other -- frames drawn with a PSF calibration go
+    to Spline 3D."""
     optics = settings.optics
     if (settings.output != "camera" or settings.camera.split or not optics.astigmatism
             or optics.calibration):
         return None
-    return (f"then Analysis > After fit > Astigmatic z with typed curves: widths {optics.sigma_nm:g} nm, "
+    return (f"after the fit, Astigmatic z on the simulator's curves: widths {optics.sigma_nm:g} nm, "
             f"focus x {optics.focal_offset_nm:g} and y {-optics.focal_offset_nm:g} nm, "
             f"depths {optics.depth_nm:g} nm")
+
+
+def astigmatic_values(settings: SceneSettings) -> Optional[dict]:
+    """The fitter's *after the fit* for `astigmatic_note`'s frames, by dotted name: astigmatic
+    z on, with the simulator's curves typed."""
+    if astigmatic_note(settings) is None:
+        return None
+    optics = settings.optics
+    curves = {"sigma_x_nm": optics.sigma_nm, "focus_x_nm": optics.focal_offset_nm,
+              "depth_x_nm": optics.depth_nm, "sigma_y_nm": optics.sigma_nm,
+              "focus_y_nm": -optics.focal_offset_nm, "depth_y_nm": optics.depth_nm}
+    return {"finish.astigmatic_z": True, "finish.astigmatic.calibration": "typed",
+            **{f"finish.astigmatic.typed.{k}": float(v) for k, v in curves.items()}}
 
 
 # ------------------------------------------------------------------ presets

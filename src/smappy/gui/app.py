@@ -1279,16 +1279,20 @@ class ControlWindow(QMainWindow):
 
         A dual-colour calibration is no use to the single-channel fitter, so
         which one gets it follows from the mode it was built in; an
-        elliptical Gaussian's curves go to Astigmatic z.  The panel is
+        elliptical Gaussian's curves go to Gaussian 2D, *elliptical* ticked
+        and its *after the fit* turning the widths into z.  The panel is
         built and its section opened on the way: a tab imports a plugin only
         when it is first looked at, and a calibration that lands in a plugin
         nobody has opened yet would land nowhere.
         """
         from ..astigmatic_z import is_calibration
         if is_calibration(path):
-            # the elliptical Gaussian's curves: for Astigmatic z, not a fitter
-            wanted, values, name = (ASTIGMATIC_Z, {"calibration": "file", "path": str(path)},
-                                    "Astigmatic z")
+            # the elliptical Gaussian's curves: for the fit that measures the
+            # widths, which turns them into z once it is done
+            wanted, values, name = (ASTIGMATIC_FITTER, {
+                "model.elliptical": True, "finish.astigmatic_z": True,
+                "finish.astigmatic.calibration": "file",
+                "finish.astigmatic.path": str(path)}, "Gaussian 2D fitter")
         else:
             wanted = "Localize/Spline 3D 2C" if dual else "Localize/Spline 3D"
             values = {"model.calibration": str(path)}
@@ -1307,8 +1311,7 @@ class ControlWindow(QMainWindow):
                 self.tabs.setCurrentIndex(index)
                 tab.open_section(instance.id)
                 panel.form.set_values(values)
-                self.statusBar().showMessage(
-                    f"{'the ' * (name != 'Astigmatic z')}{name} now uses {Path(path).name}", 8000)
+                self.statusBar().showMessage(f"the {name} now uses {Path(path).name}", 8000)
                 return
         self.statusBar().showMessage(
             f"{Path(path).name} was saved, but no {name} is pinned to a tab - "
@@ -1690,23 +1693,26 @@ class ControlWindow(QMainWindow):
         """*Simulate*'s *Fit this*: the recipe written from ``settings`` as
         they are now -- never a file an earlier run left -- and handed to a
         fitter (`fit_file`)."""
-        from ..plugins.simulate import astigmatic_note, recipe_of
+        from ..plugins.simulate import astigmatic_note, astigmatic_values, recipe_of
         from ..simulate.source import write_recipe
         try:
             path = write_recipe(settings, recipe_of(settings))
         except (OSError, ValueError) as e:
             self.statusBar().showMessage(f"the simulation could not be written: {e}", 12000)
             return False
-        return self.fit_file(path, elliptical=astigmatic_note(settings))
+        return self.fit_file(path, elliptical=astigmatic_note(settings),
+                             after=astigmatic_values(settings))
 
-    def fit_file(self, path, elliptical: Optional[str] = None) -> bool:
+    def fit_file(self, path, elliptical: Optional[str] = None,
+                 after: Optional[dict] = None) -> bool:
         """Set a fitter's *file* to ``path`` as if it had been picked with the
         field's own button: the fitter hears of it (`react` fills the camera
         and the output, the hints follow), and nothing is fitted.
 
         ``elliptical`` -- astigmatic frames, simulated: Gaussian 2D with
         *elliptical* ticked, whose widths Astigmatic z turns into z, and this
-        line, saying so, in the status bar.
+        line, saying so, in the status bar; ``after``, the values of its
+        *after the fit* that do it (`simulate.astigmatic_values`).
 
         Returns whether a fitter took it.
         """
@@ -1744,7 +1750,8 @@ class ControlWindow(QMainWindow):
             edit.setCursorPosition(len(edit.text()))   # show the file's name
         model = panel.form.fields.get("model")
         if elliptical and "elliptical" in getattr(model, "fields", {}):
-            panel.form.set_values({"model.elliptical": True})
+            panel.form.set_values({"model.elliptical": True, **(after or {})})
+            panel.refresh_derived()               # the after-the-fit steps it now shows
             self.statusBar().showMessage(
                 f"{instance.title(panel.plugin.name)}: file set to {path.name}, elliptical; "
                 f"Run fits it -- {elliptical}", 15000)
@@ -1885,7 +1892,7 @@ DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
 SPLINE_FITTER = "Localize/Spline 3D"            # a simulation drawn with a calibration
 DUAL_SPLINE_FITTER = "Localize/Spline 3D 2C"    # ... a split one, with a dual-colour one
 TWO_COLOUR_FITTER = "Localize/Gaussian 2D 2C"   # a simulated split camera's
-ASTIGMATIC_Z = "Analysis/After fit/Astigmatic z"   # where an elliptical Gaussian calibration goes
+ASTIGMATIC_FITTER = "Localize/Gaussian 2D"     # where an elliptical Gaussian calibration goes
 
 
 def _takes_a_stack(panel) -> bool:

@@ -88,7 +88,7 @@ def test_the_camera_hints_say_what_auto_resolves_to(stack):
     plugin = GaussianFit()
     settings = plugin.Settings()
     settings.source.path = str(stack)
-    hints = plugin.describe(None, settings).hints
+    hints = camera_hints(plugin, settings)
     # each field's, and the microscope control's own account under the part's name
     assert set(hints) - {"camera", "camera.camera"} == {f"camera.{n}" for n in plugin.CAMERA_FIELDS}
     # a value the user did set comes back as theirs, not as the file's
@@ -96,12 +96,19 @@ def test_the_camera_hints_say_what_auto_resolves_to(stack):
     assert plugin.describe(None, settings).hints["camera.offset"] == 42.0
 
 
+def camera_hints(plugin, settings):
+    """The hints of the camera part: *after the fit*'s drift steps say what
+    their merge on auto is whatever the file (`after_fit.AfterFit.describe`)."""
+    return {k: v for k, v in plugin.describe(None, settings).hints.items()
+            if not k.startswith("finish.")}
+
+
 def test_hints_are_silent_when_there_is_nothing_to_resolve():
     plugin = GaussianFit()
-    assert not plugin.describe(None, plugin.Settings()).hints
+    assert not camera_hints(plugin, plugin.Settings())
     settings = plugin.Settings()
     settings.source.path = "/nowhere/at/all.tif"
-    assert not plugin.describe(None, settings).hints
+    assert not camera_hints(plugin, settings)
 
 
 def _maxima_of_frame(plugin, settings, path, index):

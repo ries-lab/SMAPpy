@@ -21,7 +21,12 @@ errors.  And it needs to know how the widths change with z, a *calibration*:
 measured on beads in the [PSF calibration](plugin:Panels/PSF calibration)
 window with the method *elliptical Gaussian*, or typed.  For simulated frames
 the simulator's own curves can be typed (the defaults are its defaults), and
-*Fit this* in *Simulate* says which values to type.
+*Fit this* in *Simulate* types them in.
+
+Gaussian 2D runs it by itself once the fit is done: with *elliptical* ticked,
+its [*after the fit*](plugin:Analysis/After fit/After the fit) offers
+*astigmatic z*, with these settings under *z calibration*.  It runs there
+before any drift correction, so that the drift is corrected in z as well.
 
 Use it for a quick 3D view of astigmatic data, or when no spline calibration
 is at hand.  A spline fit ([Spline 3D](plugin:Localize/Spline 3D)) uses the
@@ -176,7 +181,8 @@ only the filtered ones.
 
 ### calibration
 *from a file* for real data, made from beads in the PSF calibration window
-(its *Use in Astigmatic z* puts the file here).  *typed* for simulated
+(its *Use in Astigmatic z* puts the file into Gaussian 2D's *after the fit*,
+with *elliptical* and *astigmatic z* ticked).  *typed* for simulated
 frames, or curves taken from elsewhere.
 
 ### path

@@ -197,6 +197,13 @@ Finally positions, precisions and widths are converted to nanometres with
 the *pixel size*, fits that failed (a position or photon count that is not a number) are dropped,
 and the table is saved as `<acquisition>_locs.hdf5` next to the data.
 
+**After the fit.**  Once the last frame is fitted, the steps of the folded
+section [*after the fit*](plugin:Analysis/After fit/After the fit) run over
+the whole table before it is saved: with *elliptical* ticked, *astigmatic z*
+(off by default); a drift correction (none by default); a chain of your own.
+*Run these now*, at the foot of the section, runs them on the open
+localizations later, without fitting again.
+
 ## In detail
 
 **The likelihood.**  For Poisson pixels, maximising the likelihood is
@@ -321,7 +328,9 @@ a script, `smappy.fit(..., cutoff=..., cutoff_mode="absolute")` and
 Six parameters instead of five: a width in x and one in y.  For astigmatic
 data, whose two widths
 [Astigmatic z](plugin:Analysis/After fit/Astigmatic z) turns into z; not for
-2D data.
+2D data.  Ticked, *after the fit* offers *astigmatic z*, so that the fit
+ends with z in the table -- before any drift correction there, which then
+corrects z as well.
 
 ### fit.roisize
 Large enough to hold the spot and some background around it: about 7 PSF

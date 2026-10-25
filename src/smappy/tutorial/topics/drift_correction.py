@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .common import (expand, field, menu, menu_item, open_section, place_beside,
-                     show_tab, tab_button, type_into)
+from .common import (expand, field, menu, menu_item, open_section, pin,
+                     place_beside, show_tab, tab_button, type_into)
 
 TITLE = "Drift correction: RCC and COMET"
 DESCRIPTION = ("Seeing drift, correcting it with RCC or COMET, and checking the "
@@ -125,6 +125,7 @@ def make(d) -> None:
            "it all the frames back first: one layer, no frame filter.",
            spot=[tab.strip, d.rect(tab.filter)], zoom=d.around(tab.filter, 760))
     analysis = show_tab(d, "Analysis")
+    pin(d, analysis, "Analysis/Drift/RCC", "RCC")
     _, rcc = open_section(d, analysis, "RCC")
     d.shot("RCC's main settings: how many time windows, the pixel of the "
            "rendering, and how far the sample may have moved.",
@@ -158,6 +159,7 @@ def make(d) -> None:
     session.undo()
     _all_frames(d, tab)
     analysis = show_tab(d, "Analysis")
+    pin(d, analysis, "Analysis/Drift/COMET", "COMET")
     _, comet = open_section(d, analysis, "COMET")
     d.shot("COMET's settings: the window size, how far the sample may have "
            "moved, and a spline that smooths the drift between windows.",

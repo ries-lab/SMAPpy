@@ -213,13 +213,17 @@ def test_a_calibration_with_nowhere_to_go_says_so(control):
     assert "no Spline 3D 2C fitter is pinned" in control.statusBar().currentMessage()
 
 
-def test_an_elliptical_gaussian_calibration_goes_to_astigmatic_z_not_a_fitter(control, tmp_path):
+def test_an_elliptical_gaussian_calibration_goes_to_the_elliptical_fit_after_the_fit(control, tmp_path):
+    """Its curves turn the widths Gaussian 2D measures into z: the fitter gets
+    *elliptical* ticked and its *after the fit* astigmatic z on, with the file."""
     from smappy.astigmatic_z import simulator_calibration
     path = simulator_calibration().save(tmp_path / "beads_astigz.h5")
     control.use_calibration(str(path), False)
     tab = control.tabs.widget(control.tabs.currentIndex())
     panel = next(tab.slots[i.id].panel for i in tab.tab.instances
-                 if i.plugin == "Analysis/After fit/Astigmatic z")
-    assert panel.form.values()["path"] == str(path)
-    assert panel.form.values()["calibration"] == "file"
-    assert "Astigmatic z now uses" in control.statusBar().currentMessage()
+                 if i.plugin == "Localize/Gaussian 2D")
+    values = panel.form.values()
+    assert values["model.elliptical"] is True and values["finish.astigmatic_z"] is True
+    assert values["finish.astigmatic.path"] == str(path)
+    assert values["finish.astigmatic.calibration"] == "file"
+    assert "Gaussian 2D fitter now uses" in control.statusBar().currentMessage()

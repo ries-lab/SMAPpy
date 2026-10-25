@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .common import (field, open_section, place_beside, section_of, show_tab,
-                     type_into)
+from .common import (expand, field, open_section, place_beside, section_of,
+                     show_tab, type_into)
 
 TITLE = "Two colours in 2D: split camera, fit and colours"
 DESCRIPTION = ("Ratiometric two-colour imaging: the transformation between the "
@@ -196,6 +196,8 @@ def make(d) -> None:
 def after_the_fit(d, fitter) -> None:
     """The fit's last step, on by default: Assign colours over the result."""
     automatic = field(fitter, "finish.assign_colors")
+    expand(automatic)
+    d.settle()
     d.shot("After the fit, assign colours is on: the fit ends by running the "
            "Assign colours plugin, so the table comes out with its colours.",
            spot=[section_of(fitter, "finish")], point=automatic,
@@ -212,25 +214,28 @@ def colours_and_layers(d, fitter, truth) -> None:
     # the words say the colours are the dyes
     agreement = _agreement(locs, truth)
     assert agreement > 0.95, f"only {agreement:.0%} of the colours are the dye"
-    analysis = show_tab(d, "Analysis")
-    _, colours = open_section(d, analysis, "Assign colours")
-    d.shot("The plugin the fit ran is here, in the Analysis tab. Run it to see "
-           "how it decided, or to decide again.",
-           spot=[colours.form], point=colours.run_button, click=True,
-           zoom=d.around(colours.form, 760))
-    colours.run_button.click()
+    settings = section_of(fitter, "finish.colors")
+    expand(field(fitter, "finish.colors.mode"))
+    again = fitter.part_buttons["finish"]
+    d.settle()
+    d.shot("Its settings are under colour assignment. Run these now runs it "
+           "again on the open localizations, without fitting again.",
+           spot=[settings, again], point=again, click=True,
+           zoom=d.around(again, 760))
+    again.click()
     d.settle()
     agreement = _agreement(session.locs, truth)          # it rewrote the table
     assert agreement > 0.95, f"after Assign colours, {agreement:.0%} are the dye"
-    colours.plot()
+    assert session.history[-1]["what"] == "Analysis/After fit/After the fit"
+    fitter.plot()
     d.settle()
-    window = colours._window
+    window = fitter._window
     place_beside(d, window, 0.75)
     d.shot("How the photons split: one peak per dye. Each localization gets the "
            "channel of its peak; the few between the peaks get none.",
            spot=[d.window_rect(window)])
     window.hide()
-    mode = field(colours, "mode")
+    mode = field(fitter, "finish.colors.mode")
     d.shot("Probabilistic is stricter: it gives a channel only to what is "
            "clearly one dye. Run it with all localizations shown, or it sees "
            "only one dye.",

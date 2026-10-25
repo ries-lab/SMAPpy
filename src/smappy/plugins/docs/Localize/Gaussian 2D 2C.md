@@ -22,7 +22,8 @@ as precise as all the photons allow, and the photon split comes out of the
 same fit.  At the end of the run it assigns the colours from that split
 ([Assign colours](plugin:Analysis/After fit/Assign colours)) and, if asked,
 corrects the drift ([RCC](plugin:Analysis/Drift/RCC) or
-[COMET](plugin:Analysis/Drift/COMET)).  The detection, the camera settings and
+[COMET](plugin:Analysis/Drift/COMET)) or runs a chain of your own
+([After the fit](plugin:Analysis/After fit/After the fit)).  The detection, the camera settings and
 the Gaussian [PSF](plugin:Panels/Glossary) (point spread function: the image
 one molecule makes on the camera) are those of
 [Gaussian 2D](plugin:Localize/Gaussian 2D), which explains them.
@@ -237,8 +238,9 @@ right.set_xscale("log"); right.set_ylim(0, 1)
 right.set_xlabel("photons"); right.set_ylabel("ratio")
 ```
 
-**6. Finishing.**  When the last frame is fitted, two plugins run over the
-whole table, in this order (*after the fit*):
+**6. Finishing.**  When the last frame is fitted, the steps of *after the
+fit* run over the whole table, in this order
+([After the fit](plugin:Analysis/After fit/After the fit) has them all):
 
 * **Drift correction**, off by default: [RCC](plugin:Analysis/Drift/RCC) or
   [COMET](plugin:Analysis/Drift/COMET), with their own settings under *RCC
@@ -249,15 +251,19 @@ whole table, in this order (*after the fit*):
   [Assign colours](plugin:Analysis/After fit/Assign colours) reads
   `photons_ch0` and `photons_ch1`, finds the peaks of their ratio and writes
   a `channel` column -- 1 and 2 for the two colours, 0 for what it will not
-  assign.  Its settings are under *colour assignment*.
+  assign.  Its settings are under *colour assignment*, shown while it is
+  ticked.
+* **A chain**, none by default: a saved chain of plugins, run last.
 
 They are the same plugins as in the Analysis tab, so a fit that finishes
-itself and one finished by hand afterwards give the same numbers; running
-Assign colours again later is how to change the rule.  A step that fails is
+itself and one finished by hand afterwards give the same numbers.  *Run these
+now*, at the foot of the section, runs the steps as they are set on the open
+localizations without fitting again: that is how to add a step that was not
+ticked, or to change the colour rule.  A step that fails is
 a line in the output and nothing more -- the table is saved regardless.  The
 localizations are written to the file as they are fitted; when a finishing
 step changed them, the file is written once more with the finished table,
-and both steps go into its history.
+and every step goes into its history.
 
 **Calibrating from the movie.**  With *calibrate from this movie* ticked, a
 first pass runs before the fit.  It fits frames of the movie with a plain
@@ -436,7 +442,7 @@ on its own half.
 ### finish.drift
 Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 [COMET](plugin:Analysis/Drift/COMET), say which to choose; the settings under
-*RCC drift* and *COMET drift* are theirs.
+*RCC drift* and *COMET drift* are theirs, and only the chosen one's is shown.
 
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few

@@ -37,7 +37,8 @@ alone, while the photon split between the halves -- the colour -- is left
 free.  At the end of the run the colours are assigned from that split
 ([Assign colours](plugin:Analysis/After fit/Assign colours)) and, if asked,
 the drift is corrected ([RCC](plugin:Analysis/Drift/RCC) or
-[COMET](plugin:Analysis/Drift/COMET)).
+[COMET](plugin:Analysis/Drift/COMET)), as its section
+[*after the fit*](plugin:Analysis/After fit/After the fit) says.
 
 What it needs:
 
@@ -271,10 +272,12 @@ ax.legend(frameon=False, fontsize=8, loc="center right")
 
 **6. Finishing.**  As in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
 once the last frame is fitted, drift correction (off by default; RCC or
-COMET, which corrects z as well when the table has it) and colour assignment
-(on by default) run over the whole table, with the Analysis tab's own
-plugins, before the file is finished.  A step that fails is a line in the
-output, and the table is saved regardless.
+COMET, which corrects z as well when the table has it), colour assignment
+(on by default) and a chain of your own (none by default) run over the
+whole table, with the Analysis tab's own plugins, before the file is
+finished.  *Run these now* runs them on the open localizations later,
+without fitting again.  A step that fails is a line in the output, and the
+table is saved regardless.
 
 ## In detail
 

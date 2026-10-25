@@ -15,24 +15,21 @@ expandable section.
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, field, is_dataclass, replace
-from datetime import datetime
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
-from ..drift import DriftSettings
 from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
-from ..rcc import RCCSettings
 from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
                PreflightQuestion, Result, ShapeEdit, param, register)
-from .assign_colors import AssignColorSettings
+from .after_fit import AfterFitSettings, Finished, finish_localizations  # noqa: F401 (re-exported)
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
 TIFF_FILTER = ("Image stacks (*.tif *.tiff *.ome.tif *.sim.yaml);;"
@@ -396,115 +393,14 @@ def default_output_path(source_path) -> Path:
 
 # ------------------------------------------------- once the last frame is in
 #
-# Two things a two-colour dataset needs before anybody looks at it, and
-# neither can be done per block: a drift curve is measured *across* the
-# acquisition, and the modes of the colour histogram are a property of the
-# whole sample.  Running them at the end, from the fit itself, means the file
-# on disk is the finished table rather than a raw fit somebody has to remember
-# to correct -- and costs one pass over the localizations, not one per block.
-@dataclass
-class FinishSettings:
-    """What is run over the finished table, before it is saved.
-
-    Drift first, then colours: the correction moves positions and the
-    assignment reads photons, so the order changes neither answer, but a
-    colour histogram is the last thing one looks at and belongs beside the
-    table it will be read from.
-
-    Both are the shipped plugins, with their own settings -- the same code the
-    Analysis tab runs, so a fit that finishes itself and a fit finished by hand
-    afterwards give the same numbers.
-
-    To be redesigned; Astigmatic z after an elliptical Gaussian 2D fit is a
-    candidate step then (NOTES.md, "Astigmatic z from elliptical widths").
-    """
-    assign_colors: bool = param(True, label="assign colours",
-                                help="split the localizations by their photon "
-                                     "ratio and write `channel` "
-                                     "(Analysis/After fit/Assign colours)")
-    drift: str = param("none", label="drift correction",
-                       choices=(("none", "none"), ("rcc", "RCC"),
-                                ("comet", "COMET")),
-                       help="estimate the drift from the finished table and "
-                            "subtract it from every localization.  Off by "
-                            "default: it is minutes of work on a dataset it "
-                            "cannot see beforehand")
-    colors: AssignColorSettings = param(default_factory=AssignColorSettings,
-                                        label="colour assignment", advanced=True)
-    rcc: RCCSettings = param(default_factory=RCCSettings, label="RCC drift",
-                             advanced=True)
-    comet: DriftSettings = param(default_factory=DriftSettings,
-                                 label="COMET drift", advanced=True)
-
-    def steps(self) -> List[tuple]:
-        """``(plugin, settings)`` in the order they run; empty for none.
-
-        The plugins are imported here rather than at the top of the module:
-        their settings are needed to declare the fields above, the plugins
-        themselves not until somebody runs one.
-        """
-        out = []
-        if self.drift == "rcc":
-            from .drift_rcc import RCCDrift
-            out.append((RCCDrift(), self.rcc))
-        elif self.drift == "comet":
-            from .drift_comet import CometDrift
-            out.append((CometDrift(), self.comet))
-        if self.assign_colors:
-            from .assign_colors import AssignColors
-            out.append((AssignColors(), self.colors))
-        return out
-
-
-@dataclass
-class Finished:
-    """The outcome of the finishing steps: what to save, and what to say."""
-    locs: Localizations
-    changed: bool = False               # is the streamed file now out of date?
-    notes: List[str] = field(default_factory=list)
-    plots: Dict[str, Any] = field(default_factory=dict)
-    history: List[Dict[str, Any]] = field(default_factory=list)
-
-
-def finish_localizations(locs: Localizations, settings: FinishSettings,
-                         report=None) -> Finished:
-    """Run the finishing plugins over a finished fit.
-
-    A plain function over a table, so a script can finish a file the same way
-    the Localize tab finishes a fit.
-
-    A step that fails is a note and nothing more.  It has to be: these run
-    when the frames are already fitted, and a colour histogram with one mode
-    or a drift estimate on too few localizations must cost its own step, not
-    the twenty minutes that produced the table.
-    """
-    finished = Finished(locs)
-    for plugin, sub in settings.steps():
-        label = plugin.name or plugin.path.rsplit("/", 1)[-1]
-        if report:
-            report(f"{label}: starting")
-        try:
-            result = plugin.run(Context(locs=finished.locs, progress=report), sub)
-        except Exception as error:
-            finished.notes.append(f"{label} failed -- "
-                                  f"{type(error).__name__}: {error}")
-            continue
-        if result.locs is not None:
-            finished.locs = result.locs
-            finished.changed = True
-            finished.history.append(
-                {"time": datetime.now().isoformat(timespec="seconds"),
-                 "what": plugin.path, "text": result.text,
-                 "settings": asdict(sub) if is_dataclass(sub) else sub,
-                 "changed": True})
-        # the drift curve and the colour histogram are the whole reason for
-        # looking at a finished fit, so they travel with the fit's own result
-        for figure in result.figures():
-            name = f"{label}: {figure.name}" if figure.name else label
-            finished.plots[name] = figure
-        finished.notes.append(f"{label}: {result.text.splitlines()[0]}"
-                              if result.text else label)
-    return finished
+# What a finished fit wants -- z from the widths, the drift taken out, the
+# colours put on, a lab's own chain -- cannot be done per block: a drift curve
+# is measured *across* the acquisition, and the modes of the colour histogram
+# are a property of the whole sample.  Running them at the end, from the fit
+# itself, means the file on disk is the finished table rather than a raw fit
+# somebody has to remember to correct.  The steps, their order and their
+# reasons are `after_fit.py`'s; the names below are kept for scripts.
+FinishSettings = AfterFitSettings
 
 
 def _camera_choices() -> List:
@@ -555,6 +451,10 @@ class _FitPlugin(Plugin):
     #: "single" or "dual" for a fitter that reads a bead calibration (`model.calibration`): then an
     #: empty field is *auto* (`calibration_list`), and a fitted file stands for its calibration
     calibration_kind: Optional[str] = None
+    #: two channels' photons in the table: what *after the fit*'s colours need
+    two_channel = False
+    # *after the fit*'s button: its steps on the open table, without fitting again
+    part_runs = (("finish", "Run these now", "Analysis/After fit/After the fit"),)
 
     def found_calibrations(self, settings) -> list:
         """``[(entry, matching)]`` for this file (`calibration_list.find`): the data's microscope,
@@ -755,7 +655,17 @@ class _FitPlugin(Plugin):
         if region is not None:
             state.titles["region"] = region.summary()
             state.active["region.use"] = bool(region.shapes)
-        if getattr(settings, "finish", None) is not None:
+        finish = getattr(settings, "finish", None)
+        if finish is not None:
+            # a step only where this fitter's table can take it: colours after
+            # two channels, z after an elliptical Gaussian
+            from .after_fit import shown
+            model = getattr(settings, "model", None)
+            can = {"two_channel": self.two_channel,
+                   "widths": bool(getattr(model, "elliptical", False))}
+            state.shown.update({f"finish.{name}": on
+                                for name, on in shown(finish, **can).items()})
+            state.titles["finish"] = finish.summary(**can)
             from ..drift import merge_values
             dx, dt = merge_values(ctx.session if ctx is not None else None)
             for part in ("rcc", "comet"):
@@ -982,20 +892,13 @@ class _FitPlugin(Plugin):
         return None
 
     def finish(self, ctx: Context, settings, locs: Localizations) -> Finished:
-        """What is run over the finished table before it is saved.
-
-        Nothing, unless the settings carry a `finish` part -- which is what a
-        two-channel fit adds, and what a single-channel one has no use for.
-        """
+        """What is run over the finished table before it is saved: the
+        *after the fit* part (`after_fit.py`), nothing without one."""
         wanted = getattr(settings, "finish", None)
         if wanted is None:
             return Finished(locs)
-        # the drift steps merge blinks as the session does, as they would
-        # when run from the Analysis tab (`drift.merge_from_session`)
-        from ..drift import merge_from_session
-        wanted = replace(wanted, rcc=merge_from_session(wanted.rcc, ctx.session),
-                         comet=merge_from_session(wanted.comet, ctx.session))
-        return finish_localizations(locs, wanted, ctx.report)
+        from .after_fit import with_session_merge
+        return finish_localizations(locs, with_session_merge(wanted, ctx.session), ctx.report)
 
     def back_projected(self, settings, camera: CameraMetadata, candidates):
         """Peaks from a second channel, drawn where the first channel sees them.
@@ -1416,18 +1319,19 @@ class _Writing:
 
 @dataclass
 class _Finishing:
-    """What a two-channel fit does once its last frame is in."""
+    """What every fit does once its last frame is in (`after_fit.py`); folded,
+    its title the steps that are on."""
     finish: FinishSettings = param(default_factory=FinishSettings,
-                                   label="after the fit")
+                                   label="after the fit", collapsed=True)
 
 
 @dataclass
-class GaussianFitSettings(_Writing, _Reading):
+class GaussianFitSettings(_Finishing, _Writing, _Reading):
     model: GaussianModelSettings = field(default_factory=GaussianModelSettings)
 
 
 @dataclass
-class SplineFitSettings(_Writing, _Reading):
+class SplineFitSettings(_Finishing, _Writing, _Reading):
     model: SplineModelSettings = field(default_factory=SplineModelSettings)
 
 
@@ -1784,6 +1688,7 @@ class _TwoChannelFit(_FitPlugin):
     """
 
     _loaded = None             # (path, registration) of the run in progress
+    two_channel = True
 
     def registration_path(self, settings) -> str:
         raise NotImplementedError
