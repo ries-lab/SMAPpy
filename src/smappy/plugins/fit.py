@@ -946,6 +946,18 @@ class _FitPlugin(Plugin):
             if settings.output.path in ("", getattr(self, "_default_output", None)):
                 updates["output.path"] = default
                 self._default_output = default
+            # a simulated split camera knows the map between its halves and
+            # writes it beside its recipe: a two-colour fitter takes it, as a
+            # file picked by hand, unless one was chosen
+            transform = getattr(settings, "transform", None)
+            if transform is not None and hasattr(transform, "path"):
+                from ..simulate.source import recipe_transform
+                written = recipe_transform(settings.source.path)
+                if written is not None and transform.path in (
+                        "", getattr(self, "_default_transform", None)):
+                    updates["transform.path"] = str(written)
+                    updates["transform.calibrate"] = False
+                    self._default_transform = str(written)
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
             # the file it is given.  Copying turned the file's numbers into the

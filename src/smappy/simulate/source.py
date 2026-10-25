@@ -56,13 +56,53 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
         fh.write("# a smappy simulation: open it in a fitter as its file\n")
         yaml.safe_dump({"smappy": "simulation", "version": 1, "settings": values},
                        fh, sort_keys=False)
+    if dual_of(settings):
+        write_transform(settings, transform_path(path))
     return path
+
+
+def transform_path(recipe) -> Path:
+    """Where a split camera's transformation is written beside its recipe:
+    ``run.sim.yaml`` -> ``run_2ct.h5``, the name a two-colour fit's own
+    calibration from a movie gets."""
+    recipe = Path(recipe)
+    stem = next((recipe.name[:-len(x)] for x in SUFFIXES if recipe.name.lower().endswith(x)),
+                recipe.stem)
+    return recipe.with_name(stem + "_2ct.h5")
+
+
+def write_transform(settings, path) -> Path:
+    """The map between the split camera's halves (`camera.dual_transformation`)
+    as a two-colour fitter's *transformation* file: the simulation knows it
+    exactly, so its fit need not measure it from the movie."""
+    from ..calibrate.dual import ChannelTransform
+    from ..calibrate.transform import save_channel_transform
+    from .camera import dual_transformation
+    size = settings.camera.size_px
+    geometry = {"layout": "up-down", "main_channel": "upper", "split_position": size,
+                "image_shape": [2 * size, size], "coordinate_system": "camera-chip"}
+    transform = ChannelTransform(dual_transformation(size), geometry,
+                                 {"source": "smappy simulation"})
+    save_channel_transform(path, transform, overwrite=True)
+    return Path(path)
+
+
+def recipe_transform(path) -> Optional[Path]:
+    """The transformation written beside a split camera's recipe, if ``path``
+    is one and it is there: what a two-colour fitter takes for its file."""
+    try:
+        if not is_simulation(path) or not dual_of(read_recipe(path)):
+            return None
+    except (OSError, ValueError):
+        return None
+    found = transform_path(path)
+    return found if found.is_file() else None
 
 
 def dual_of(settings) -> Optional[dict]:
     """How `camera.render` draws a split camera's two halves, or None for
     one camera: the second half's PSF width, the first's on *auto*."""
-    if getattr(settings, "output", "") != "split":
+    if not getattr(getattr(settings, "camera", None), "split", False):
         return None
     first = settings.optics.sigma_nm
     second = settings.camera.split_sigma_nm or first

@@ -65,10 +65,13 @@ at the frame.  Moving whole copies is left for later.
   columns `component`, `emitter`, `copy`, and with motion `track_id_true`
   and `state_true`, the names the tracking tools read.
 * **camera frames**: one camera, all components drawn.
-* **split camera**: two halves, each component's photons split by its ratio,
-  the transformation between the halves written beside the frames -- a
-  direct feeder for the dual-colour fit, with bead stacks for calibrating it
-  if asked.
+* **split camera** (a camera option, *camera frames > split camera*): two
+  halves, each component's photons split by its ratio; the transformation
+  between the halves (`camera.dual_transformation`) is written beside the
+  recipe as `<name>_2ct.h5`, which a two-colour fitter given the recipe
+  takes for its *transformation* (`_FitPlugin.react`), and *Fit this* hands
+  a split recipe to Gaussian 2D 2C.  So simulated two-colour pores go
+  straight into the 2D two-colour workflow.
 
 Each output can load the truth as a file.
 

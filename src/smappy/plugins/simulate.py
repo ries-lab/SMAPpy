@@ -1,6 +1,6 @@
 """*Simulate*: a scene of components -- structures, a homogeneous background,
-beads, diffusing particles -- as localizations, camera frames or a split
-camera (`smappy.simulate.scene`; the design is docs/simulation-redesign.md).
+beads, diffusing particles -- as localizations or camera frames, one camera
+or a split one (`smappy.simulate.scene`; the design is docs/simulation-redesign.md).
 
 It replaces *Simulate structure* and *Simulate tracks*: a single structure
 is a scene of one component, and tracks are a homogeneous component that
@@ -29,16 +29,35 @@ from . import Context, FormState, Notice, Plugin, Result, param, register
 #: the user's saved before keys were written with it
 DEFAULT_KEYS = {"components.0.structure.preset": "structure",
                 "components.0.labelling.efficiency": "labelling",
-                "components.0.blinking.photons": "photons per blink"}
+                "components.0.blinking.photons": "photons per blink",
+                "n_frames": "frames"}
+#: added to any preset's keys while the output is a camera: where the recipe
+#: goes is what a test of a fitting workflow sets first
+CAMERA_KEYS = {"camera.path": "simulation file"}
 
 
 @dataclass
 class SimulateSettings(SceneSettings):
-    # here, not in `SceneSettings`: what happens to the open files is the
-    # plugin's business, not the model's, and scripts build the model alone
-    append: bool = param(False, label="add as a new file",
-                         help="keep the open files and add the simulation as one "
-                              "more; off: it replaces them")
+    """The scene as the plugin's form shows it; *add as a new file* is the
+    scene's own field (`SceneSettings.append`), placed beside *add drift*."""
+
+
+def auto_recipe(settings: SceneSettings):
+    """Where a camera simulation is written when no file is given: named
+    after its preset, in the folder last opened (or the home folder)."""
+    from pathlib import Path
+    from .. import config
+    folder = config.last_folder() or Path.home()
+    name = "".join(c if c.isalnum() or c in " -_" else "_" for c in
+                   (settings.preset or "simulation")).strip() or "simulation"
+    return Path(folder) / f"{name}.sim.yaml"
+
+
+def recipe_of(settings: SceneSettings):
+    """The recipe a camera run writes: the file given, else `auto_recipe`."""
+    from ..simulate.source import recipe_path
+    return recipe_path(settings.camera.path) if settings.camera.path \
+        else auto_recipe(settings)
 
 
 # ------------------------------------------------------------------ presets
@@ -99,7 +118,7 @@ def component_state(scene: SceneSettings) -> FormState:
     and the other components offered to its *same as* lists."""
     state = FormState()
     names = [c.name for c in scene.components]
-    split = scene.output == "split"
+    split = scene.output == "camera" and scene.camera.split
     for i, c in enumerate(scene.components):
         at = f"components.{i}."
         others = [("", "-")] + [(n, n) for n in names if n != c.name]
@@ -194,27 +213,37 @@ class Simulate(Plugin):
 
     Settings = SimulateSettings
     changes_locs = True
-    version = "1"
+    # 2: diffusion in 3D by default; the split camera a camera option, with
+    # its transformation written beside the recipe
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields
         those it reads; the camera's settings for a camera only; and, once
         a camera simulation is written, an offer to fit it."""
         state = component_state(settings)
-        camera = settings.output in ("camera", "split")
+        camera = settings.output == "camera"
         state.shown.update({"camera": camera, "localizations": not camera,
-                            "camera.split_sigma_nm": settings.output == "split"})
-        state.keys = key_labels(settings, preset_keys(settings.preset))
+                            "camera.split_sigma_nm": camera and settings.camera.split})
+        keys = preset_keys(settings.preset)
+        if camera:
+            keys.update(CAMERA_KEYS)
+            state.hints["camera.path"] = str(recipe_of(settings))
+            state.hints["camera.split_sigma_nm"] = settings.optics.sigma_nm
+        # a key whose field the form hides (a split ratio without a split
+        # camera, photophysics taken from another) is not shown at the top
+        hidden = [path for path, on in state.shown.items() if not on]
+        keys = {k: v for k, v in keys.items()
+                if not any(k == h or k.startswith(h + ".") for h in hidden)}
+        state.keys = key_labels(settings, keys)
         state.hints["preset"] = "modified" if modified(settings) else ""
         state.notice = motion_notice(settings)
-        from ..simulate.source import recipe_path
-        if camera and settings.camera.path:
-            path = recipe_path(settings.camera.path)
-            if path.is_file():
-                state.notice = Notice(
-                    f"{path.name} is written: fit it in the Localize tab",
-                    action="Fit this", window="fit file", settings=str(path),
-                    kind="info")
+        path = recipe_of(settings) if camera else None
+        if path is not None and path.is_file():
+            what = "the two-colour fitter" if settings.camera.split else "a fitter"
+            state.notice = Notice(
+                f"{path.name} is written: fit it with {what} in the Localize tab",
+                action="Fit this", window="fit file", settings=str(path), kind="info")
         return state
 
     def react(self, changed: str, settings: SimulateSettings) -> Optional[Dict[str, Any]]:
@@ -244,7 +273,7 @@ class Simulate(Plugin):
         ctx.report(f"simulating {settings.n_frames} frames of "
                    f"{', '.join(c.name for c in on)}...")
         truth = ground_truth(settings)
-        if settings.output in ("camera", "split"):
+        if settings.output == "camera":
             return self._camera(ctx, settings, truth)
         locs = localizations(truth)
         name = f"simulation: {settings.preset}" if settings.preset else "simulation"
@@ -255,22 +284,23 @@ class Simulate(Plugin):
 
     def _camera(self, ctx, settings: SimulateSettings, truth) -> Result:
         from ..simulate.camera import camera_truth, render
-        from ..simulate.source import dual_of, write_recipe
+        from ..simulate.source import dual_of, transform_path, write_recipe
         cam = settings.camera
-        if not cam.path:
-            raise ValueError("camera frames: choose where to write the simulation "
-                             "file (camera frames > simulation file)")
-        path = write_recipe(settings, cam.path)
+        path = write_recipe(settings, recipe_of(settings))
         dual = dual_of(settings)
         n_spots = len(truth.emission)
         text = (f"{n_spots} spots of {len(truth.fluorophores)} emitters over "
                 f"{settings.n_frames} frames of {cam.size_px} x {cam.size_px} pixels"
                 f"{' per half' if dual else ''}: {path} -- open it in a fitter as "
                 f"its file")
+        if dual:
+            text += (f"; the map between the halves in {transform_path(path).name}, "
+                     f"which a two-colour fitter takes with it")
         data = {}
         if cam.tiff:
             import tifffile
-            tif = path.with_name(path.name[:-len(".sim.yaml")] + ".tif")
+            tif = transform_path(path).with_name(
+                transform_path(path).name[:-len("_2ct.h5")] + ".tif")
             ctx.report(f"writing {tif}...")
             with tifffile.TiffWriter(tif, bigtiff=True) as writer:
                 for a in range(0, settings.n_frames, 500):
