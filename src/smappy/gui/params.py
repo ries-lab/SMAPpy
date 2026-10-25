@@ -1615,7 +1615,8 @@ class SettingsForm(QWidget):
                     for widget in target.beside[name]:
                         widget.setVisible(bool(on))
                     continue
-                target.row_layouts[name].setRowVisible(target.row_widgets[name], bool(on))
+                target.row_layouts[name].setRowVisible(
+                    target.row_widgets.get(name, target.fields[name]), bool(on))
             except (KeyError, AttributeError):
                 continue
             touched.add(target)
@@ -1628,7 +1629,8 @@ class SettingsForm(QWidget):
         more = self.more_section.content
         rows = [n for n, lay in self.row_layouts.items() if lay is more.layout()]
         self.more_section.setVisible(any(
-            self.row_layouts[n].isRowVisible(self.row_widgets[n]) for n in rows))
+            self.row_layouts[n].isRowVisible(self.row_widgets.get(n, self.fields[n]))
+            for n in rows))
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""
