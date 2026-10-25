@@ -164,6 +164,48 @@ def test_the_overview_is_the_data_s_extent_at_the_panel_s_shape(app):
     tab.close()
 
 
+def test_a_click_in_the_overview_centres_the_main_view_there(app):
+    from PySide6.QtCore import QPointF, QRectF
+    from smappy.gui.render_tab import Overview
+    from smappy.gui.render_view import RenderView
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(600, 600)
+    view.show()
+    overview = Overview(session, view)
+    overview.resize(380, 300)
+    overview.show()
+    app.processEvents()
+    overview.update_image()
+    view.view.setRange(QRectF(0, 0, 1000, 1000), padding=0)
+    app.processEvents()
+    before = view.view.viewRect()
+
+    class Click:                        # what pyqtgraph hands the item
+        accepted = False
+
+        def pos(self):
+            # three quarters across and a quarter down, in the image's pixels
+            ny, nx = overview.image.image.shape[:2]
+            return QPointF(0.75 * nx, 0.25 * ny)
+
+        def accept(self):
+            self.accepted = True
+
+    click = Click()
+    overview.image.mouseClickEvent(click)
+    target = overview.image.mapToView(click.pos())
+    app.processEvents()
+    after = view.view.viewRect()
+    assert click.accepted
+    assert after.center().x() == pytest.approx(target.x(), abs=1)
+    assert after.center().y() == pytest.approx(target.y(), abs=1)
+    assert 6000 < target.x() < 9000 and 1000 < target.y() < 4000
+    assert after.width() == pytest.approx(before.width(), rel=1e-3)   # the zoom kept
+    overview.close()
+    view.close()
+
+
 def test_the_overview_detached_fills_its_window(app):
     from smappy.gui.render_tab import Overview
     from smappy.gui.render_view import RenderView
