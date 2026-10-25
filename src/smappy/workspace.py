@@ -17,9 +17,9 @@ without a GUI, and window geometry is carried as opaque text the GUI encodes.
 lab, so a value one person typed and the program remembered would silently
 become everyone's default.  A GUI file is written only by *File > Workspace >
 Save* or *Save as*, and read at start only because someone saved or loaded it last
-(`remember`); with none, the shipped default is built afresh.  The one thing
-kept automatically is where the window was (`window_state`), which moves no
-number.
+(`remember`); with none, the shipped default is built afresh.  Where the
+windows are is part of the GUI file too (`Workspace.windows`), written by the
+same Save and by nothing else: an arrangement is kept when someone keeps it.
 """
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ from . import config
 
 VERSION = 1
 GUI_SUFFIX = ".gui.yaml"
-WINDOW_NAME = "window.yaml"          # the window's geometry, and nothing else
 REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
 RECENT = "recent_guis"               # config key: GUI files saved or loaded, newest first
 RECENT_MAX = 8
@@ -104,6 +103,10 @@ class Workspace:
     # (`Session.carried_bounds`); None -- a file from before they were saved
     # -- leaves the layers' as they are and new files on the shipped defaults
     filters: Optional[Dict[str, List[Optional[float]]]] = None
+    # where the windows were when it was saved, ``{name: geometry}``, as
+    # opaque text the GUI encodes (Qt's saveGeometry, base64); {} leaves the
+    # windows where the program puts them
+    windows: Dict[str, str] = field(default_factory=dict)
     version: int = VERSION
     path: Optional[Path] = None            # where it was read from, if anywhere
 
@@ -135,6 +138,8 @@ class Workspace:
         if self.filters is not None:
             data["filters"] = {f: [None if v is None else float(v) for v in b]
                                for f, b in self.filters.items()}
+        if self.windows:
+            data["windows"] = dict(self.windows)
         return data
 
     @classmethod
@@ -163,8 +168,11 @@ class Workspace:
             tabs.append(Tab(name=str(raw["name"]), kind=str(raw.get("kind") or "plugins"),
                             header=str(raw.get("header") or ""), instances=instances))
         layout = data.get("layout")
+        windows = data.get("windows")
+        windows = ({str(k): v for k, v in windows.items() if isinstance(v, str) and v}
+                   if isinstance(windows, dict) else {})
         return cls(tabs=tabs, layout=layout if isinstance(layout, dict) else {},
-                   filters=_filters(data.get("filters")),
+                   filters=_filters(data.get("filters")), windows=windows,
                    version=int(data.get("version") or VERSION), path=path)
 
     # ------------------------------------------------------------ the file
@@ -298,24 +306,3 @@ def recent() -> List[Path]:
 
 def load_startup() -> Workspace:
     return load(remembered())
-
-
-# ------------------------------------------------------- where the window was
-
-def window_file() -> Path:
-    return config.config_dir() / WINDOW_NAME
-
-
-def window_state() -> Dict[str, Any]:
-    """The geometry saved at the last quit, as opaque text; {} if none."""
-    try:
-        data = yaml.safe_load(window_file().read_text()) or {}
-    except (OSError, yaml.YAMLError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def save_window_state(state: Dict[str, Any]) -> None:
-    path = window_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(dict(state), sort_keys=False))

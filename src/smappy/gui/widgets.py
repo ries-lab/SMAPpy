@@ -1,11 +1,12 @@
 """Small widgets the panels are built from."""
 from __future__ import annotations
 
+import math
 from typing import Optional
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLayout, QScrollArea,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtWidgets import (QDoubleSpinBox, QFrame, QHBoxLayout, QLayout,
+                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 # The control window's width.  A tab whose content would ask for more (a long
 # file name in a wrapping label) caps its own hint at this, so one tab never
@@ -14,6 +15,114 @@ CONTROL_WIDTH = 380
 
 # a plugin's title against its parts' (`CollapsibleSection`'s ``major``)
 MAJOR_SCALE = 1.3
+
+
+# ------------------------------------------------------ numbers as shown
+# A value the program fills in -- a colour range from quantiles, a bound
+# dragged on a histogram, the maximum the view has now -- comes with every
+# digit a float carries, and 23.4817 nm reads as more than it means.  So it is
+# rounded where it is made: to 0.1 % of the range it lives in, which is finer
+# than a drag or a quantile can place it, or to a whole number where that
+# step is 1 or more.
+
+def round_in_span(value: float, span: float, resolution: float = 1e-3) -> float:
+    """``value`` to a round step of about ``resolution`` x ``span``: 0.1 % of
+    a 0..100 range is 0.1, of a 0..5000 range a whole number."""
+    if not (math.isfinite(value) and math.isfinite(span)) or span <= 0:
+        return value
+    step = 10.0 ** math.floor(math.log10(span * resolution))
+    if step >= 1:
+        return float(round(value / step) * step)
+    digits = -math.floor(math.log10(step))
+    return round(value, digits)
+
+
+def round_significant(value: float, digits: int = 3) -> float:
+    """``value`` to ``digits`` significant digits: 0.1 % for 3."""
+    if not math.isfinite(value) or value == 0:
+        return value
+    return round(value, digits - 1 - math.floor(math.log10(abs(value))))
+
+
+class CompactSpinBox(QDoubleSpinBox):
+    """A spin box that leaves out the zeros after the point: 2, not 2.00.
+
+    The decimals are still how finely it can be set; they are only not
+    written where they are zero.
+    """
+
+    def textFromValue(self, value: float) -> str:
+        text = super().textFromValue(value)
+        point = self.locale().decimalPoint()
+        if self.decimals() > 0 and point in text:
+            text = text.rstrip("0").rstrip(point)
+        return text
+
+
+class FlowLayout(QLayout):
+    """Widgets side by side in the order added, wrapping to a new row only
+    when the row is full -- the filter's quick buttons, whose number and
+    widths vary with the table."""
+
+    def __init__(self, parent=None, spacing: int = 2):
+        super().__init__(parent)
+        self._items = []
+        self.setSpacing(spacing)
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), move=False)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._arrange(rect, move=True)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(margins.left() + margins.right(),
+                            margins.top() + margins.bottom())
+
+    def _arrange(self, rect: QRect, move: bool) -> int:
+        margins = self.contentsMargins()
+        area = rect.adjusted(margins.left(), margins.top(),
+                             -margins.right(), -margins.bottom())
+        x, y, row = area.x(), area.y(), 0
+        gap = self.spacing()
+        for item in self._items:
+            if item.widget() is not None and item.widget().isHidden():
+                continue
+            hint = item.sizeHint()
+            if x > area.x() and x + hint.width() > area.right() + 1:
+                x, y, row = area.x(), y + row + gap, 0
+            if move:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + gap
+            row = max(row, hint.height())
+        return y + row - rect.y() + margins.bottom()
 
 
 class ColumnScroll(QScrollArea):
@@ -241,8 +350,13 @@ class FloatingWindow(QWidget):
         holder = QWidget()
         inner = QVBoxLayout(holder)
         inner.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
-        inner.addWidget(content)
-        inner.addStretch(1)
+        # a content that grows with the window (the overview) takes the
+        # room; any other keeps its size at the top
+        if getattr(content, "fills_window", False):
+            inner.addWidget(content, 1)
+        else:
+            inner.addWidget(content)
+            inner.addStretch(1)
         self.scroll.setWidget(holder)
         layout.addWidget(self.scroll)
         self.content = content

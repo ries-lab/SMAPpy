@@ -285,9 +285,9 @@ values, which section is open -- is saved:
   opens whichever was saved or loaded last (the shipped default when none
   was, or it has gone).  Nothing is written behind the user's back: one
   installation serves a lab, and a value one person typed that the program
-  remembered would silently become everyone's default.  The window's position
-  is the one exception, kept in `window.yaml` beside the configuration, since
-  it moves no number;
+  remembered would silently become everyone's default.  Where the windows are
+  is saved in the same file by the same Save (`Workspace.windows`), never at
+  quit;
 * and, optionally, **appended to the localization file**, so reopening a dataset
   restores the session that produced it.
 

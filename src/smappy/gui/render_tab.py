@@ -13,12 +13,13 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog,
+                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+                               QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
@@ -28,7 +29,9 @@ from ..lut import FIELD_LUT, INTENSITY_LUT
 from . import folders
 from .merging import merger_for
 from .render_view import nice_below
-from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
+from .widgets import (CollapsibleSection, ColumnScroll, CompactSpinBox, FlowLayout,
+                      detach_to_window,
+                      round_in_span, round_significant)
 
 # an image layer's stack: what its planes are, what it shows of them, and how
 # the 3D view draws a z-stack (`session.Layer.set_image_view`)
@@ -59,7 +62,6 @@ RENDER_MODES: Tuple[Tuple[str, str], ...] = (
     ("tracks", "tracks"),
     ("voronoi", "Voronoi density"),
 )
-QUICK_PER_ROW = 4
 QUICK_TEXT_WIDTH = 64       # px: a bounded column's button, its name elided to this
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
@@ -77,6 +79,28 @@ class _Bound(QLineEdit):
 
     def set(self, value: Optional[float]) -> None:
         self.setText("" if value is None else f"{value:g}")
+
+
+#: px either side of a bound's line that still take it: moving a bound is
+#: what a drag is nearly always for, and pyqtgraph's line is about 2 px wide
+#: to the mouse, so a drag a little off it moved the whole range instead
+HANDLE_REACH = 7
+#: how far past the data the histogram zooms out, in parts of its range
+HIST_MARGIN = 0.1
+
+
+def widen_handles(region: pg.LinearRegionItem) -> None:
+    """Give the region's two lines a wider reach for the mouse.
+
+    The reach is ``_maxMarkerSize`` in `pg.InfiniteLine`'s bounding box (the
+    half-width of its markers, none here), so setting it widens what the
+    mouse finds without drawing anything; the hover pen shows which line
+    a drag will take.
+    """
+    for line in region.lines:
+        line._maxMarkerSize = HANDLE_REACH
+        line.setHoverPen(pg.mkPen((60, 120, 220), width=3))
+        line.prepareGeometryChange()
 
 
 def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]]) -> str:
@@ -121,15 +145,11 @@ class FilterWidget(QWidget):
         # count share the next.  All on one line, a table with all eight quick
         # fields made the panel ~440 px wide in a 380 px window, and the scroll
         # area (no horizontal bar) cut off the histogram's right end -- with
-        # the handle of the upper bound on it.  Named in words they need two
-        # rows of `QUICK_PER_ROW`.
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(2)
-        grid.setColumnStretch(QUICK_PER_ROW, 1)
+        # the handle of the upper bound on it.  Side by side in their fixed
+        # order, a second row only once the first is full.
         self.quick: Dict[str, QToolButton] = {}
-        self.quick_grid = grid
-        layout.addLayout(grid)
+        self.quick_flow = FlowLayout()
+        layout.addLayout(self.quick_flow)
         # Every bound of the layer, whichever field is on show: a picture
         # that comes out sparse should say why without a hunt through the
         # drop-down.  A bound is a link to its field; the cross removes it.
@@ -139,7 +159,15 @@ class FilterWidget(QWidget):
         self.bounds_line.setToolTip("the bounds on this layer: click one to edit "
                                     "it, x to remove it")
         self.bounds_line.linkActivated.connect(self._on_bound_link)
-        layout.addWidget(self.bounds_line)
+        self.clear_all = QToolButton(text="\u00d7")
+        self.clear_all.setToolTip("remove every bound on this layer")
+        self.clear_all.setAutoRaise(True)
+        self.clear_all.clicked.connect(self._on_clear_all)
+        bounds_row = QHBoxLayout()
+        bounds_row.setContentsMargins(0, 0, 0, 0)
+        bounds_row.addWidget(self.bounds_line, 1)
+        bounds_row.addWidget(self.clear_all, 0, Qt.AlignTop)
+        layout.addLayout(bounds_row)
         field_row = QHBoxLayout()
         self.field = QComboBox()
         self.field.setMinimumWidth(110)
@@ -176,6 +204,7 @@ class FilterWidget(QWidget):
                                      fillLevel=0, stepMode="center")
         self.plot.addItem(self.bars)
         self.region = pg.LinearRegionItem(brush=(60, 120, 220, 50))
+        widen_handles(self.region)
         self.plot.addItem(self.region)
         layout.addWidget(self.plot)
 
@@ -243,7 +272,7 @@ class FilterWidget(QWidget):
         b = QToolButton(text=label, checkable=True, autoExclusive=True)
         b.setToolTip(name)
         b.clicked.connect(lambda _=False, n=name: self._select(n))
-        self.quick_grid.addWidget(b, *divmod(len(self.quick), QUICK_PER_ROW))
+        self.quick_flow.addWidget(b)
         self.quick[name] = b
         return b
 
@@ -261,7 +290,7 @@ class FilterWidget(QWidget):
             return
         for n in extra:
             b = self.quick.pop(n)
-            self.quick_grid.removeWidget(b)
+            self.quick_flow.removeWidget(b)
             b.deleteLater()
         shown = self.current_field()
         for n in wanted:
@@ -299,6 +328,8 @@ class FilterWidget(QWidget):
         self._sync_bounded_buttons(bounded)
         self.bounds_line.setText(bounds_text(
             {n: ranges[n] for n in sorted(bounded)}))
+        from ..region_runs import REGION_FILTER
+        self.clear_all.setVisible(bool(bounded - {REGION_FILTER}))
         plain, bold = QFont(self.field.font()), QFont(self.field.font())
         bold.setBold(True)
         for i in range(self.field.count()):
@@ -355,7 +386,17 @@ class FilterWidget(QWidget):
         self.region.setRegion(self._shown_region)
         self._shown_region = tuple(self.region.getRegion())   # as the item keeps it
         self.region.blockSignals(False)
+        # zooming out stops a little past the data and the bounds: beyond, the
+        # histogram is a thin sliver and the handles hard to find
+        left = min(edges[0], self._shown_region[0])
+        right = max(edges[-1], self._shown_region[1])
+        margin = HIST_MARGIN * (right - left)
+        box = self.plot.getViewBox()
+        box.setLimits(xMin=None, xMax=None, maxXRange=None)
         self.plot.setXRange(edges[0], edges[-1], padding=0.02)
+        if margin > 0:
+            box.setLimits(xMin=left - margin, xMax=right + margin,
+                          maxXRange=right - left + 2 * margin)
         self._update_count()
 
     def _show_files(self) -> None:
@@ -454,10 +495,11 @@ class FilterWidget(QWidget):
         # histogram (the 25 nm precision bound over a sharp simulation).
         old_lo, old_hi = self.layer.ranges.get(name, (None, None))
         shown_lo, shown_hi = self._shown_region
+        span = float(edges[-1] - edges[0])       # a drag places 0.1 % of it at best
         if lo != shown_lo:
-            old_lo = None if lo <= edges[0] else float(lo)
+            old_lo = None if lo <= edges[0] else round_in_span(float(lo), span)
         if hi != shown_hi:
-            old_hi = None if hi >= edges[-1] else float(hi)
+            old_hi = None if hi >= edges[-1] else round_in_span(float(hi), span)
         self._apply(old_lo, old_hi)
 
     def _on_numbers(self) -> None:
@@ -468,6 +510,16 @@ class FilterWidget(QWidget):
 
     def _on_clear(self) -> None:
         self._apply(None, None)
+
+    def _on_clear_all(self) -> None:
+        """Every bound of the layer at once; the region filter's tick and
+        the files ticked are not bounds typed here and stay."""
+        from ..region_runs import REGION_FILTER
+        for name, bound in list(self.layer.ranges.items()):
+            if name != REGION_FILTER and bound != (None, None):
+                self.layer.remove_bound(name)
+        self._show_field()
+        self.changed.emit()
 
     def _on_bound_link(self, link: str) -> None:
         action, _, name = link.partition(":")
@@ -625,7 +677,8 @@ class LayerStrip(QWidget):
 
 
 class Overview(QWidget):
-    """The whole field of view, small; click to centre the main image there."""
+    """The whole field, small, with a frame where the main view is: a map to
+    read, not a control -- it neither zooms nor moves the view."""
 
     def __init__(self, session: Session, view, parent=None):
         super().__init__(parent)
@@ -634,8 +687,20 @@ class Overview(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
+        # The picture is the data's extent and nothing else, as large as the
+        # panel allows: docked, the panel's height follows the data's shape;
+        # detached, it fills the window (`fills_window`).  The background is
+        # the panel's, so what is left over around it reads as no data.
         self.graphics = pg.GraphicsLayoutWidget()
-        self.graphics.setFixedHeight(150)
+        self.graphics.setBackground(None)
+        self.graphics.setFixedHeight(OVERVIEW_HEIGHT)
+        self.graphics.installEventFilter(self)
+        self._aspect = OVERVIEW_HEIGHT / 300
+        self._rendered_size = None
+        # a resize draws again once it settles; a timer's signal, not a
+        # singleShot callable, so nothing it raises is left pending (CLAUDE.md)
+        self._resize_timer = QTimer(self, singleShot=True, interval=250)
+        self._resize_timer.timeout.connect(self._update_deferred)
         self.box = self.graphics.addViewBox(lockAspect=True, invertY=True,
                                            enableMenu=False, enableMouse=False)
         self.image = pg.ImageItem(axisOrder="row-major")
@@ -652,7 +717,6 @@ class Overview(QWidget):
         row.addStretch(1)
         layout.addLayout(row)
         self.update_button.clicked.connect(self.update_image)
-        self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
         # A new table draws itself: this is 300 x 200 pixels, which is 0.4 s
@@ -685,6 +749,34 @@ class Overview(QWidget):
             traceback.print_exc()
             self.image.clear()
 
+    fills_window = True                 # detached, it grows with its window
+
+    def detached(self) -> bool:
+        from .widgets import FloatingWindow
+        return isinstance(self.window(), FloatingWindow)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.graphics and event.type() == QEvent.Resize:
+            if event.size() != self._rendered_size and self.image.image is not None:
+                self._resize_timer.start()
+        return super().eventFilter(watched, event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_height()                 # docked again, or detached
+
+    def _fit_height(self) -> None:
+        """Docked, as high as the data's shape asks at the panel's width,
+        within bounds; detached, whatever its window gives it."""
+        if self.detached():
+            self.graphics.setMinimumHeight(OVERVIEW_MIN)
+            self.graphics.setMaximumHeight(16777215)
+            self.graphics.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        else:
+            width = max(self.graphics.width(), 1)
+            self.graphics.setFixedHeight(int(np.clip(round(width * self._aspect),
+                                                     OVERVIEW_MIN, OVERVIEW_MAX)))
+
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)
                                      or any(l.is_image for l in self.session.layers)):
@@ -692,26 +784,36 @@ class Overview(QWidget):
             return
         # the same way up as the main view: a plot of two columns is a plot
         self.box.invertY(self.session.axes().is_default)
+        # every visible layer's extent -- localizations or an image -- and 1 %
         (x0, x1), (y0, y1) = self.session.full_view()
-        fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
+        if x1 > x0 and y1 > y0:
+            self._aspect = (y1 - y0) / (x1 - x0)
+        self._fit_height()
+        size = self.graphics.size()
+        self._rendered_size = size
+        # rendered at the screen's pixels, the extent alone: no black frame
+        ratio = self.graphics.devicePixelRatioF()
+        width = min(max(size.width(), 50) * ratio, OVERVIEW_PIXELS)
+        height = min(max(size.height(), 50) * ratio, OVERVIEW_PIXELS)
+        pixelsize = max((x1 - x0) / width, (y1 - y0) / height)
+        fov = FieldOfView.from_range((x0, x1), (y0, y1), pixelsize)
         rgb = self.view.panel_images(fov, ["overlay"])[0]
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
-        self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
-        self.box.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
-                          padding=0)
+        rect = QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0)
+        self.image.setRect(rect)
+        self.box.setRange(rect, padding=0)
         self._track()
 
     def _track(self) -> None:
         if self.view is not None:
             self.frame.setRect(self.view.view.viewRect())
 
-    def _on_click(self, event) -> None:
-        if self.view is None:
-            return
-        pos = self.image.mapToView(event.pos())
-        self.view.window().show()          # closed by accident: bring it back
-        self.view.center_on(pos.x(), pos.y())
-        event.accept()
+
+#: the overview docked: its height in px follows the data's shape within these
+OVERVIEW_HEIGHT, OVERVIEW_MIN, OVERVIEW_MAX = 150, 80, 300
+#: the overview's render, at most this many pixels a side: a detached window
+#: on a large screen need not cost a full-size render
+OVERVIEW_PIXELS = 1600
 
 
 #: how many render units the 1-99 % of an axis is fitted onto.  An arbitrary
@@ -1037,9 +1139,9 @@ class RenderTab(QWidget):
         # widefield TIFF are chosen the same way
         self.image_source = QComboBox()
         self.image_source.setToolTip("the frames kept with a file, or an image")
-        self.image_pixelsize = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
-        self.image_x0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
-        self.image_y0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
+        self.image_pixelsize = CompactSpinBox(minimum=0.01, maximum=1e6, decimals=2)
+        self.image_x0 = CompactSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
+        self.image_y0 = CompactSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
         self.image_frame = QSlider(Qt.Horizontal)
         self.image_frame_label = QLabel("")
         self.image_frame_label.setToolTip("which frame of the stack is shown")
@@ -1054,7 +1156,7 @@ class RenderTab(QWidget):
         for key, text in IMAGE_AXES:
             self.image_axis.addItem(text, key)
         self.image_axis.setToolTip("what the planes of the stack are")
-        self.image_step = QDoubleSpinBox(minimum=0.0, maximum=1e9, decimals=3)
+        self.image_step = CompactSpinBox(minimum=0.0, maximum=1e9, decimals=3)
         self.image_step.setToolTip("the z step between planes (nm), or the time "
                                    "between frames (s)")
         axis_row = QHBoxLayout()
@@ -1122,7 +1224,7 @@ class RenderTab(QWidget):
         self.track_column.setToolTip("the id column whose localizations are one "
                                      "track; auto: track_id, else tid (MINFLUX), "
                                      "else track_id_true (a simulation)")
-        self.line_width = QDoubleSpinBox(minimum=0.2, maximum=20, singleStep=0.5,
+        self.line_width = CompactSpinBox(minimum=0.2, maximum=20, singleStep=0.5,
                                          decimals=1)
         self.line_width.setToolTip("the tracks' lines, in pixels of the picture")
         self.color = QComboBox()
@@ -1136,7 +1238,8 @@ class RenderTab(QWidget):
         color_row.addWidget(self.color_field, 1)
         self.color_lo, self.color_hi = _Bound(), _Bound()
         self.color_auto = QPushButton("auto")
-        self.color_auto.setToolTip("the field's 0.5-99.5% range")
+        self.color_auto.setToolTip("the field's 0.5-99.5% range over what the "
+                                   "picture shows: filtered, in the ROI, in view")
         range_row = QHBoxLayout()
         range_row.setContentsMargins(0, 0, 0, 0)
         for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto):
@@ -1150,29 +1253,15 @@ class RenderTab(QWidget):
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.invert = QCheckBox("invert")
-        self.invert.setToolTip("the opposite colour at the same brightness: red "
-                               "becomes cyan.  For black on white pick the "
-                               "gray_inverted LUT -- inverting is about hue, not "
-                               "about which end is bright.")
-        # The two inversions are not the same picture past a ramp of one hue,
-        # and which one is wanted depends on what the picture is for, so it is
-        # a choice rather than a decision made here.
-        self.invert_mode = QComboBox()
-        self.invert_mode.addItem("SMAP", "sum")
-        self.invert_mode.addItem("grey", "complement")
-        self.invert_mode.setToolTip(
-            "SMAP: sum(c) - c, as SMAP's lutinvert -- inverted hot runs black "
-            "through cyan to white.\n"
-            "grey: the hue exactly half a turn away at the same lightness, so "
-            "a layer over its inverse goes grey where the two coincide; "
-            "inverted hot runs on to blue instead of saturating at white.")
-        self.invert_mode.setMaximumWidth(90)
+        self.invert.setToolTip("as SMAP: colouring by intensity, the opposite colour "
+                               "at the same brightness (red becomes cyan); "
+                               "colouring by a column, the LUT turned round.  For "
+                               "black on white use white background")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)
         lut_row.addWidget(self.invert)
-        lut_row.addWidget(self.invert_mode)
-        self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
+        self.contrast = CompactSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.contrast.setToolTip("saturate 10^-p of the pixels: 2 is bright, 4 dark")
         # SMAP's toggle: the quantile, or a set maximum -- here a density, so
         # that the picture keeps its brightness as one zooms (`absolute_imax`)
@@ -1183,8 +1272,8 @@ class RenderTab(QWidget):
             "quantile: full scale where 10^-p of the pixels saturate, whatever "
             "the data.\nabsolute: full scale at a set density, the same at every "
             "zoom; switching to it starts from what the view shows now")
-        self.maximum = QDoubleSpinBox(minimum=1e-6, maximum=1e12, decimals=3)
-        self.maximum.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
+        self.maximum = CompactSpinBox(minimum=1e-6, maximum=1e12, decimals=3)
+        self.maximum.setStepType(CompactSpinBox.AdaptiveDecimalStepType)
         self.maximum.setToolTip("full scale, in localizations per µm²; for tracks, "
                                 "lines over one pixel; for an image, its own values")
         contrast_row = QHBoxLayout()
@@ -1220,16 +1309,16 @@ class RenderTab(QWidget):
         more_form = QFormLayout(more)
         more_form.setContentsMargins(0, 0, 0, 0)
         more_form.setVerticalSpacing(2)
-        self.sigma = QDoubleSpinBox(minimum=0.0, maximum=1000, singleStep=1, decimals=1)
-        self.sigma.setToolTip("rendering sigma along x for Gaussian (fixed), in the "
-                              "units of that axis; 0 bins instead of blurring")
+        self.sigma = CompactSpinBox(minimum=0.0, maximum=1000, singleStep=1, decimals=1)
+        self.sigma.setToolTip("rendering sigma for Gaussian (fixed), in the units "
+                              "of the axis; 0 bins instead of blurring")
         self.sigma_y = _Bound()
         self.sigma_y.setToolTip("rendering sigma along y, in the units of that "
                                 "axis.  Empty is the same as x where the two "
                                 "axes are the same quantity, and 0 -- plain "
                                 "binning -- where they are not")
-        self.gamma = QDoubleSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
-        self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
+        self.gamma = CompactSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
+        self.factor = CompactSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
         self.factor.setToolTip("rendering sigma = factor x localization precision "
                                "(Gaussian (precision))")
         self.white = QCheckBox("white background")
@@ -1238,8 +1327,8 @@ class RenderTab(QWidget):
                               "red stays red, hot runs white through red and yellow "
                               "to black, and grey is black on white.  A property of "
                               "the picture, so it is set on every layer at once.")
-        more_form.addRow("sigma x (fixed)", self.sigma)
-        more_form.addRow("sigma y (fixed)", self.sigma_y)
+        more_form.addRow("sigma", self.sigma)
+        more_form.addRow("sigma y", self.sigma_y)
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)
@@ -1283,7 +1372,6 @@ class RenderTab(QWidget):
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.invert.toggled.connect(self._on_display)
-        self.invert_mode.currentIndexChanged.connect(self._on_display)
         self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
         self.maximum.valueChanged.connect(self._on_display)
@@ -1348,7 +1436,7 @@ class RenderTab(QWidget):
         self.filter.layer_index = index
         widgets = (self.mode, self.track_column, self.line_width, self.lines_add,
                    self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
-                   self.lut, self.invert, self.invert_mode, self.white,
+                   self.lut, self.invert, self.white,
                    self.contrast, self.scale, self.maximum, self.gamma,
                    self.grouped,
                    self.image_source, self.image_pixelsize, self.image_x0,
@@ -1363,6 +1451,7 @@ class RenderTab(QWidget):
             w.setEnabled(not layer.is_image)
         if layer.is_image:
             self._show_track_rows(False)
+            self._show_sigma_rows()
             img = layer.image
             self._fill_image_sources(layer)
             self.image_pixelsize.setValue(img.pixelsize)
@@ -1409,6 +1498,7 @@ class RenderTab(QWidget):
         self.sigma.setValue(settings.sigma)
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
+        self._show_sigma_rows()
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
         self._show_invert(display.invert)
         self.white.setChecked(display.white_background)
@@ -1441,6 +1531,7 @@ class RenderTab(QWidget):
             lines_add=self.lines_add.isChecked(),
             track_column=self._chosen_track_column(state.settings.track_column))
         self._show_track_rows(mode == "tracks")
+        self._show_sigma_rows()
         if entering_tracks:
             self._colour_by_track()
         if entering_tracks and self.layer.grouped:
@@ -1458,6 +1549,36 @@ class RenderTab(QWidget):
         for widget in (self.track_column, self.line_width):
             self._display_form.setRowVisible(widget, shown)
         self._more_form.setRowVisible(self.lines_add, shown)
+
+    def _show_sigma_rows(self) -> None:
+        """Only the widths the chosen mode reads (`render.render_sigmas`).
+
+        A fixed width is read by *Gaussian (fixed)*, and by *Gaussian
+        (precision)* on an axis that is no position (photons against x has no
+        precision to draw).  The y width is its own row only where the axes
+        are different quantities -- or one was typed -- since on x against y
+        empty means the same as x: the picture is drawn round, with one sigma.
+        """
+        layer = self.layer
+        form = self._more_form
+        if layer.is_image:
+            for w in (self.sigma, self.sigma_y, self.factor):
+                form.setRowVisible(w, False)
+            return
+        settings = layer.state.settings
+        try:
+            names = settings.axes.names(layer.locs)
+        except Exception:                         # an axis the table no longer has
+            names = ("x_nm", "y_nm")
+        mode = settings.mode
+        fixed = mode == "gauss" or (mode == "precision"
+                                    and not all(is_position(n) for n in names))
+        two = fixed and (axis_unit(names[0]) != axis_unit(names[1])
+                         or settings.sigma_y is not None)
+        form.setRowVisible(self.sigma, fixed)
+        form.setRowVisible(self.sigma_y, two)
+        form.labelForField(self.sigma).setText("sigma x" if two else "sigma")
+        form.setRowVisible(self.factor, mode == "precision")
 
     def _colour_by_track(self) -> None:
         """The first time a layer draws tracks, and only if it is not coloured
@@ -1531,15 +1652,24 @@ class RenderTab(QWidget):
             self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
         self.session.changed("layer")
 
-    def _field_range(self, field: str):
+    def _field_range(self, field: str, shown: bool = False):
+        """The column's 0.5-99.5 %: over all the layer's localizations when a
+        field is first chosen, so the first colours are the whole table's;
+        with ``shown``, over what the picture shows -- filtered, in the ROI
+        and in view -- for *auto*, which rescales to what one is looking at."""
         locs = self.layer.locs
         if field not in locs:
             return None
         values = np.asarray(locs[field], np.float64)
+        if shown and self.session is not None:
+            mask = self._shown_mask()
+            if mask is not None and mask.any():
+                values = values[mask]
         finite = values[np.isfinite(values)]
         if not finite.size:
             return None
-        return (float(np.quantile(finite, 0.005)), float(np.quantile(finite, 0.995)))
+        lo, hi = (float(np.quantile(finite, q)) for q in (0.005, 0.995))
+        return round_in_span(lo, hi - lo), round_in_span(hi, hi - lo)
 
     def _on_color_range(self) -> None:
         state = self.layer.state
@@ -1552,9 +1682,17 @@ class RenderTab(QWidget):
         state.settings = dataclasses.replace(state.settings, color_range=(lo, hi))
         self.session.changed("layer")
 
+    def _shown_mask(self) -> Optional[np.ndarray]:
+        index = self.strip.current
+        rect = self.filter.view_rect() if self.filter.view_rect is not None else None
+        if rect is None:
+            return self.session.shown_selection(index).mask
+        return self.session.shown_in_view(index, rect.left(), rect.right(),
+                                          rect.top(), rect.bottom())
+
     def _auto_color_range(self) -> None:
         field = self.layer.state.settings.color_field
-        rng = self._field_range(field) if field else None
+        rng = self._field_range(field, shown=True) if field else None
         if rng is None:
             return
         self.color_lo.set(rng[0])
@@ -1570,20 +1708,12 @@ class RenderTab(QWidget):
         self.session.changed("layer")
 
     def _show_invert(self, invert) -> None:
-        """The tick and which inversion, from the one field that carries both."""
-        from .. import lut as luts_module
         self.invert.setChecked(bool(invert))
-        self.invert_mode.setCurrentIndex(
-            max(0, self.invert_mode.findData(luts_module.inversion_name(invert))))
-        self.invert_mode.setEnabled(bool(invert))
 
     def _on_display(self) -> None:
         layer = self.layer
-        on = self.invert.isChecked()
-        self.invert_mode.setEnabled(on)
         layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
-                                              invert=self.invert_mode.currentData() if on
-                                              else False,
+                                              invert=self.invert.isChecked(),
                                               contrast=self.contrast.value(),
                                               absolute=bool(self.scale.currentData()),
                                               maximum=self.maximum.value(),
@@ -1623,7 +1753,7 @@ class RenderTab(QWidget):
             fov = FieldOfView.from_range(frame.xrange, frame.yrange, frame.pixelsize)
             display = self.layer.get_display()
             _, rendered = self.layer.render(fov)
-            return display.as_absolute(rendered).maximum
+            return round_significant(display.as_absolute(rendered).maximum)
         except Exception:                # a picture that cannot be made keeps the value
             traceback.print_exc()
             return None

@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -162,7 +162,7 @@ c.set_xlabel("n_in_group (frames)", fontsize=8); c.tick_params(labelsize=7)
 **4. Drawing the localizations.**  *render* chooses the spot each
 localization is drawn as.  *histogram* counts localizations per pixel: exact, but
 at a fine pixel size mostly single bright pixels.  *Gaussian (fixed)* draws every
-localization as the same Gaussian blob, of width *sigma x (fixed)*.
+localization as the same Gaussian blob, of width *sigma* (under *more*).
 *Gaussian (precision)*, the default, draws each one as a Gaussian as wide as its own
 [localization precision](plugin:Panels/Glossary) (also called the CRLB or
 localization uncertainty: how far its fitted position is expected to lie from
@@ -261,7 +261,7 @@ axes = fig.subplots(1, 3)
 by_z = dict(color_field="z_nm", color_range=(-300.0, 300.0), lut="turbo", contrast=2.0)
 draw(axes[0], "colour by z_nm", whole, **by_z)
 draw(axes[1], "colour by z_nm, white background", whole, white_background=True, **by_z)
-draw(axes[2], "hot, inverted", whole, invert="sum", contrast=2.0)
+draw(axes[2], "hot, inverted", whole, invert=True, contrast=2.0)
 ```
 
 **6. Any column against any other.**  The *axes* section says which column
@@ -492,11 +492,12 @@ starts its range at its 0.5th to 99.5th percentile and switches the LUT to
 turbo; going back to intensity switches it to hot.  Because the colour is part
 of the rendering here, changing the LUT of a coloured layer renders it again.
 
-**Inverting, and the white background.**  With $c = (r, g, b)$ a LUT
-colour, *invert*'s SMAP choice gives $\min(r + g + b - c, 1)$ per channel
-(SMAP's `lutinvert`), and its grey choice gives $\max(c) + \min(c) - c$, the
-opposite hue at the same lightness, so that a layer over its inverse turns
-grey where they coincide.  *white background* turns the brightness over and
+**Inverting, and the white background.**  As in SMAP, *invert* depends on
+what the colour codes.  Colouring by intensity, with $c = (r, g, b)$ a LUT
+colour, it gives $\min(r + g + b - c, 1)$ per channel (SMAP's `lutinvert`):
+red becomes cyan, and hot runs black through cyan to white.  Colouring by a
+column, the LUT is turned round, so the low values take its top end; the sum
+of a rainbow's channels would be no colour of it.  *white background* turns the brightness over and
 keeps the hue, $c + 1 - \max(c) - \min(c)$: black becomes white, a saturated
 red stays red.  It is applied once, to the sum of the layers.
 
@@ -601,9 +602,11 @@ zero (plain binning), and put back on the way back to x and y.
 ## Controls
 
 ### overview
-The whole field of view, small, with a yellow frame where the main view is;
-click in it to move the main view there.  It draws itself when a table is
-opened; it can be taken out into a window of its own.
+The whole field, with a yellow frame where the main view is: the extent of
+the visible layers' localizations, or of an image layer, and 1 % around it,
+as large as the panel allows -- docked, its height follows the data's shape;
+taken out into a window of its own, it fills the window.  It draws itself
+when a table is opened.
 
 ### update
 Draws the overview again with the current layers -- after a filter, a LUT or
@@ -800,17 +803,20 @@ colours over the part of the range that matters -- for z, the depth of the
 structure rather than of the outliers.
 
 ### auto
-Sets the colour range to the column's 0.5th to 99.5th percentile.
+Sets the colour range to the column's 0.5th to 99.5th percentile of what the
+picture shows: the localizations that pass the filter, inside the ROI if one
+is drawn, and in view.  Zoom in on a part and press it to spread the colours
+over that part.  Choosing a column in *colour by* starts from the same
+percentiles over all the layer's localizations.
 
 ### LUT
 Hot for intensity, turbo for a column.  For several layers, one pure colour
 each (red, green, cyan, magenta) adds up legibly.
 
 ### invert
-The opposite colour at the same brightness: red becomes cyan.  Beside it,
-which inversion: *SMAP* as SMAP does it (inverted hot runs through cyan to
-white), *grey* so that a layer over its inverse goes grey where they overlap.
-For black on white, pick the gray_inverted LUT or *white background* instead.
+By intensity, the opposite colour at the same brightness: red becomes cyan.
+By a column, the LUT turned round: on z, near and far swap colours.  For black
+on white, pick the gray_inverted LUT or *white background* instead.
 
 ### contrast
 *quantile*: 3 is a good start.  Too low, and the structure saturates into
@@ -848,19 +854,24 @@ it.  The drift corrections take these settings too, unless their own
 *within* and *dark frames* are set.
 
 ### more
-The rendering widths, gamma and the white background.
+The rendering widths, gamma and the white background.  Only the widths the
+chosen *render* mode uses are shown.
 
-### sigma x (fixed)
+### sigma
 The width in *Gaussian (fixed)*, in the units of the horizontal axis; 0 bins.  A
-few times the pixel size, or about the typical precision.
+few times the pixel size, or about the typical precision.  Shown in
+*Gaussian (fixed)*, and in *Gaussian (precision)* when an axis is not a
+position (there is no precision for photons or frames).  On x against y the
+picture is drawn round, with this one width; where the axes are different
+quantities, the row reads *sigma x* and *sigma y* appears beside it.
 
-### sigma y (fixed)
+### sigma y
 The vertical width, for axes that are not the same quantity.  Empty follows
-*sigma x* where the two axes are the same quantity and bins where they are
+*sigma* where the two axes are the same quantity and bins where they are
 not.
 
 ### precision factor
-0.5 draws each localization at half its precision: sharper than the
+In *Gaussian (precision)* only.  0.5 draws each localization at half its precision: sharper than the
 statistics strictly allow, which is what makes fine structure readable.  1
 is the honest width; much below 0.5 the spots fall apart into single pixels.
 
@@ -944,17 +955,10 @@ when a layer is added or removed.
 The path the 3D view is moved along (*How it works*, 8).  *scan*'s first
 choice, *none*, plays the view path alone: as many steps as its seconds
 times *speed*, with nothing narrowed.  The list shows each key's time and
-its box's size in nm.
-
-### move the box
-Moves the 3D view's box between the keys' boxes, where they differ.  The
-box then no longer follows the 2D ROI (the 3D window's *follow* is
-switched off), since the path sets it.  Off, the box stays as it is and
-only the view moves.
-
-### move the 3D view
-Off leaves the 3D view as it is while the player plays, without losing
-the path.
+its box's size in nm.  What moves is what the keys differ in: keys with the
+same view and different boxes move only the box, a face sweeping through
+the sample, and the box then no longer follows the 2D ROI (the 3D window's
+*follow* is switched off), since the path sets it.
 
 ### +
 Adds the 3D view as it is now, with its box, as a key after the selected
@@ -1073,7 +1077,7 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
   section, rather than a plugin that draws into a result window: the plot has
   the layers, filters, ROIs and 3D view of the main picture.  SMAP's line
   overlay (mean or median of y along x) is not there.
-* **White background** and the second inversion (*grey*) are new.
+* **White background** is new.
 
 ## References
 

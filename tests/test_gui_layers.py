@@ -212,15 +212,13 @@ def _layer_table(n=2000):
                           "xy_err_nm": rng.uniform(5, 40, n)}, {})
 
 
-def test_the_invert_tick_and_the_inversion_are_one_setting():
-    """Which inversion is a choice, not a decision made in the render tab, and
-    both live in the one `invert` field so nothing downstream grows a second
-    one to carry through the GPU cache key and the saved workspace."""
+def test_the_invert_tick_is_the_layers_invert():
+    """One tick, as SMAP: what it does follows what the colour codes
+    (`lut.field_inversion`), so there is no second choice beside it."""
     import dataclasses
 
     from PySide6.QtWidgets import QApplication
 
-    from smappy import lut as luts
     from smappy.gui.render_tab import RenderTab
     from smappy.session import Session
 
@@ -230,20 +228,14 @@ def test_the_invert_tick_and_the_inversion_are_one_setting():
     session.set_locs(_layer_table())
     layer = session.layers[0]
 
-    assert layer.get_display().invert is False and not tab.invert_mode.isEnabled()
+    assert layer.get_display().invert is False
     tab.invert.setChecked(True)
-    assert layer.get_display().invert == luts.DEFAULT_INVERSION
-    assert tab.invert_mode.isEnabled()
-    tab.invert_mode.setCurrentIndex(tab.invert_mode.findData("complement"))
-    assert layer.get_display().invert == "complement"
+    assert layer.get_display().invert is True
     tab.invert.setChecked(False)
     assert layer.get_display().invert is False
-
-    # a plain True, from a script that does not choose, is the default
     layer.set_display(dataclasses.replace(layer.get_display(), invert=True))
     tab._bind_layer(0)
     assert tab.invert.isChecked()
-    assert tab.invert_mode.currentData() == luts.DEFAULT_INVERSION
 
 
 def test_render_modes_read_in_words_and_store_the_short_key(app):

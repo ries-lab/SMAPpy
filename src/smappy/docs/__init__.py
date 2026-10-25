@@ -789,3 +789,16 @@ span.more, span.range, code.name { color: #777; }
 table.note { background: #f1f5fb; }
 code { font-family: monospace; }
 """
+
+#: `STYLE` on a dark palette (the Help window, white on black): the light
+#: tints behind the tables would otherwise carry white text on near-white
+DARK_STYLE = STYLE + """
+p.crumbs, span.more, span.range, code.name { color: #b0b0b0; }
+p.caption { color: #c8c8c8; }
+p.missing, p.stale { color: #e0b040; }
+p.error { color: #ff6b6b; }
+table.params th, table.grid th { background: #2a2d33; }
+table.params td, table.grid td { border-bottom: 1px solid #444; }
+tr.part td { background: #22252a; }
+table.note { background: #1b2433; }
+"""

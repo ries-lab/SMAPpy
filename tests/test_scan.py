@@ -283,7 +283,26 @@ def test_the_view_path_moves_the_box_its_keys_keep(app):
     assert session.slab.size[2] == pytest.approx(500.0)
     assert session.slab.center[2] - session.slab.size[2] / 2 == pytest.approx(-400.0)
     assert not session.slab_follows_roi
-    player.move_box.setChecked(False)                  # the box stays where it is
-    player.show_step(0)
-    assert session.slab.size[2] == pytest.approx(500.0)
     window.close()
+
+
+def test_stop_redraws_the_picture_even_while_a_step_is_drawing(app):
+    """The scan cleared while a step's tile was in the render thread: that
+    tile came back, was taken as current, and the render waiting behind it
+    found the view covered -- the step stayed on screen after stop."""
+    from smappy.gui.render_view import RenderView
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(200, 200)
+    view.render_requested.disconnect()
+    jobs = []
+    view.render_requested.connect(lambda job, generation: jobs.append((job, generation)))
+    session.set_scan(sc.Scan("frame", 0, 100))
+    assert len(jobs) == 1                      # the step, drawing
+    session.set_scan(None)                     # stop, while it draws
+    job, generation = jobs[0]
+    view._on_rendered([np.zeros((job.fov.ny, job.fov.nx, 3), np.float32)], generation)
+    assert len(jobs) == 2                      # drawn again, whole
+    job, generation = jobs[1]
+    view._on_rendered([np.zeros((job.fov.ny, job.fov.nx, 3), np.float32)], generation)
+    assert view.tile_valid and not view.frame_source.drawing

@@ -141,52 +141,29 @@ def names() -> list:
     return sorted(_TABLES)
 
 
-def complement(table: np.ndarray) -> np.ndarray:
-    """The complementary ramp: the same brightness, the opposite colour.
-
-    Entry by entry, ``(max + min) - c``, which is the colour half a turn away
-    on the hue circle at the same HSL lightness -- so the two ramps are equally
-    bright everywhere and, added, make a grey of exactly that brightness.  That
-    is what an inverted LUT is for when it is two channels one over the other:
-    each keeps its own intensity, and where they coincide the picture goes grey
-    instead of one colour winning.
-
-    It is *not* what SMAP does (`invert_sum`), and on `hot` the two part
-    company past the red: this sends the yellow end to blue, SMAP's sends it
-    to white.  Both are here and `INVERSIONS` names them.
-
-    Reversing the ramp instead turns a bright localization dark; that is a
-    different thing and lives in its own LUT -- `gray_inverted` for black on
-    white.  A grey ramp is its own complement.
-    """
-    table = np.asarray(table, dtype=np.float32)
-    level = table.max(axis=1, keepdims=True) + table.min(axis=1, keepdims=True)
-    return np.clip(level - table, 0.0, 1.0)
-
-
 def invert_sum(table: np.ndarray) -> np.ndarray:
     """SMAP's inversion: ``sum(c) - c`` per entry, clipped.
 
-    `lutinvert.m`, verbatim.  On a ramp of one hue it agrees with `complement`
-    -- for ``(r, 0, 0)`` both give ``(0, r, r)`` -- and it parts company as
-    soon as a second channel comes up, because the sum counts it twice: `hot`
-    inverted this way runs black through teal and cyan to white and saturates
-    there, where the complement runs on to blue.
+    `lutinvert.m`, verbatim.  On a ramp of one hue it is the opposite colour
+    at the same brightness -- ``(r, 0, 0)`` gives ``(0, r, r)`` -- and the
+    sum counts a second channel twice, so `hot` inverted this way runs black
+    through teal and cyan to white and saturates there.
 
     The clipping is ours; MATLAB leaves the entries above one and the display
-    clips them, which is the same picture.  Added, a ramp and this inversion
-    do not make grey -- they make white wherever both are bright, which is why
-    `complement` is kept as the other choice.
+    clips them, which is the same picture.
+
+    It is the inversion of an intensity ramp only.  A LUT that codes a column
+    is turned round instead (`get` with ``invert="reverse"``), as SMAP does:
+    the sum of a rainbow's channels is no colour of it, and turbo inverted
+    this way was a muddle of whites and greys.
     """
     table = np.asarray(table, dtype=np.float32)
     return np.clip(table.sum(axis=1, keepdims=True) - table, 0.0, 1.0)
 
 
-# Which inversion ``invert=True`` means.  SMAP's, because the pictures are
-# compared against SMAP's and "invert" there is `lutinvert`; `complement` is
-# the one to pick for two channels that should go grey where they overlap.
-INVERSIONS = {"sum": invert_sum, "complement": complement}
-DEFAULT_INVERSION = "sum"
+#: what ``invert`` asks of a LUT that codes a column (`colors`)
+REVERSE = "reverse"
+
 
 INTENSITY_LUT = "hot"    # an intensity ramp: brightness is the only dimension
 FIELD_LUT = "turbo"      # a full-hue ramp, which is what a coded field needs
@@ -206,9 +183,6 @@ def on_white(rgb: np.ndarray) -> np.ndarray:
     ``(n, 3)`` or a whole image ``(ny, nx, 3)``; on an intensity image the two
     are the same thing, and on a field-coloured one, where the colour is baked
     into the accumulation, only the image can be turned over.
-
-    Combined with `complement` this is the plain photographic negative,
-    ``1 - c``: one flips the hue, the other the brightness.
     """
     rgb = np.asarray(rgb, dtype=np.float32)
     level = rgb.max(axis=-1, keepdims=True) + rgb.min(axis=-1, keepdims=True)
@@ -218,9 +192,9 @@ def on_white(rgb: np.ndarray) -> np.ndarray:
 def get(lut: LUT, invert=False) -> np.ndarray:
     """Resolve a LUT name (or pass an array through), inverted if asked.
 
-    ``invert`` is a name from `INVERSIONS` -- which inversion, they are not the
-    same picture -- or a plain ``True`` for `DEFAULT_INVERSION`, so that a
-    script can say ``invert=True`` without choosing.
+    ``invert`` true is SMAP's inversion of an intensity ramp (`invert_sum`);
+    `REVERSE` turns the table round, which is what inverting means for a
+    LUT that codes a column (`colors`).
     """
     if isinstance(lut, str):
         try:
@@ -231,17 +205,14 @@ def get(lut: LUT, invert=False) -> np.ndarray:
         table = np.asarray(lut, dtype=np.float32)
         if table.ndim != 2 or table.shape[1] != 3:
             raise ValueError("a LUT must have shape (n, 3)")
-    return INVERSIONS[inversion_name(invert)](table) if invert else table
+    if invert == REVERSE:
+        return np.ascontiguousarray(table[::-1])
+    return invert_sum(table) if invert else table
 
 
-def inversion_name(invert) -> str:
-    """The inversion ``invert`` asks for; `DEFAULT_INVERSION` for ``True``."""
-    if invert is True or not isinstance(invert, str):
-        return DEFAULT_INVERSION
-    if invert not in INVERSIONS:
-        raise KeyError(f"unknown inversion {invert!r}; "
-                       f"have {', '.join(sorted(INVERSIONS))}")
-    return invert
+def field_inversion(invert) -> object:
+    """``invert`` as a LUT that codes a column takes it: turned round."""
+    return REVERSE if invert else False
 
 
 def register(name: str, table: np.ndarray) -> None:
@@ -251,14 +222,15 @@ def register(name: str, table: np.ndarray) -> None:
 
 def colors(values: np.ndarray, lut: LUT, vmin: float, vmax: float,
            invert: bool = False) -> np.ndarray:
-    """Map field values to ``(n, 3)`` colours, clamped to the range.
+    """Map field values to ``(n, 3)`` colours, clamped to the range; inverted,
+    the low values take the LUT's top end (`field_inversion`).
 
     A value that is not a number -- a MINFLUX localization's `cfr` where its
     iterations did not measure one -- is drawn grey (`NO_VALUE`), not in a
     colour of the table: converted to an index it was the first colour on
     ARM and an index out of range on x86, and either way a value it is not.
     """
-    table = get(lut, invert)
+    table = get(lut, field_inversion(invert))
     scale = (len(table) - 1) / (vmax - vmin) if vmax > vmin else 0.0
     values = np.asarray(values, dtype=np.float32)
     missing = ~np.isfinite(values)

@@ -41,7 +41,7 @@ import math
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -639,10 +639,9 @@ class DisplaySettings:
     then the colour is baked into the accumulation."""
 
     lut: luts.LUT = "hot"
-    # False, or which inversion (`lut.INVERSIONS`): they are not the same
-    # picture past a ramp of one hue.  A plain True, from a script that does
-    # not choose, means `lut.DEFAULT_INVERSION`.
-    invert: Union[bool, str] = False
+    # SMAP's: an intensity ramp is inverted (`lut.invert_sum`), a LUT that
+    # codes a column is turned round (`lut.field_inversion`)
+    invert: bool = False
     contrast: float = DEFAULT_CONTRAST   # saturate 10^-contrast of the pixels
     # SMAP's toggle between the quantile and an absolute scale: with
     # ``absolute`` the picture is full scale at ``maximum`` localizations per

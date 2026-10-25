@@ -148,7 +148,7 @@ def colour_scales(layers: Sequence[LayerSnapshot]) -> List[tuple]:
             continue
         lo, hi = layer.settings.color_range or finite_range(layer.locs[field])
         try:
-            table = luts.get(layer.display.lut, layer.display.invert)
+            table = luts.get(layer.display.lut, luts.field_inversion(layer.display.invert))
         except (KeyError, ValueError):
             continue
         if layer.display.white_background:

@@ -16,8 +16,8 @@ from typing import Optional
 from urllib.parse import unquote
 
 from PySide6.QtCore import QByteArray, QRectF, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontInfo, QFontMetrics, QFontMetricsF, \
-    QGuiApplication, QImage, QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
+from PySide6.QtGui import QColor, QDesktopServices, QFontInfo, QFontMetrics, \
+    QFontMetricsF, QGuiApplication, QImage, QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QMainWindow, QSplitter, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem)
@@ -121,7 +121,18 @@ class HelpWindow(QMainWindow):
         self.browser = QTextBrowser()
         self.browser.setOpenLinks(False)
         self.browser.anchorClicked.connect(self._on_link)
-        self.browser.document().setDefaultStyleSheet(docs.STYLE)
+        # pages are read at length: black on white, or white on black under a
+        # dark scheme, rather than the theme's softer text and grey base
+        self.dark = self.palette().color(QPalette.Window).lightness() < 128
+        self.text_color = "#ffffff" if self.dark else "#000000"
+        palette = self.browser.palette()
+        palette.setColor(QPalette.Base, QColor("#000000" if self.dark else "#ffffff"))
+        palette.setColor(QPalette.Text, QColor(self.text_color))
+        if self.dark:
+            palette.setColor(QPalette.Link, QColor("#7ab8ff"))
+        self.browser.setPalette(palette)
+        self.browser.document().setDefaultStyleSheet(
+            docs.DARK_STYLE if self.dark else docs.STYLE)
         # a page is read, not glanced at like a control: the application's
         # font, sized for a dense column of settings, is small for prose.
         # Set before the first page, whose formulas are drawn to this size.
@@ -216,8 +227,7 @@ class HelpWindow(QMainWindow):
         ref = None if isinstance(plugin_cls, docs.Panel) else plugins.refs().get(path)
         QGuiApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            color = self.palette().color(QPalette.Text).name()
-            rendered = docs.render(plugin_cls, color=color,
+            rendered = docs.render(plugin_cls, color=self.text_color,
                                    size_pt=_size_pt(self.browser),
                                    origin=ref.origin if ref else None,
                                    qt_line=_line(document))
