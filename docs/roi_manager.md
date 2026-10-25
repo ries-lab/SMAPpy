@@ -78,20 +78,23 @@ blinks.  The merge settings are session-wide, under *merge settings...* beside
 ## Find, review, measure, histogram
 
 Candidates are found by **Segment regions** (`Analysis/Regions/Segment
-regions`, pinned in the Regions tab; its other methods are a ring template
-for nuclear pores and an ROI per id of a column).  Its *density peaks*
-method, the default, operates on the current file's filtered localizations. It
-bins coordinates into a density image, smooths it, finds local peaks, recenters
-on nearby localizations, and suppresses nearby centers. Defaults target compact
-structures of about 100 nm diameter:
-
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| bin | 20 nm | Density-image pixel width |
-| smoothing | 50 nm | Gaussian smoothing standard deviation |
-| separation | 150 nm | Minimum distance from an accepted or existing center |
-| count radius | 75 nm | Neighborhood used to recenter and check count |
-| minimum count | 10 | Minimum filtered localizations within that radius |
+regions`, pinned in the Regions tab), on the current file's filtered
+localizations.  Its *circle template*, the default, filters a density image
+with a ring or a filled disc at each radius between a minimum and a maximum,
+takes the maxima as candidates (two kept apart when their circles overlap by
+more than half the smaller radius), and measures each on its own
+localizations: shared values (`n_locs`, `radius_nm`, `roundness`, `psf_nm`,
+`touching`) and the shape's own (a ring's `n_ring`, `n_inside`,
+`n_outside`, `far_p`; a disc's `centre_ratio`).  **keep**, one condition in
+Filter ROIs' syntax, decides which become ROIs; the values are stored on
+each ROI (`origin["values"]`) and are columns of the results table.  The
+defaults are discs of 30 to 150 nm with `n_locs >= 10`; the presets are
+*NPC* (a ring of 55 nm and the pore's checks), *CME* (discs of 30 to 150 nm)
+and *Circles* (rings of 100 to 500 nm).  Its *beads* method puts an ROI on
+each bright, long track (`fiducials.find_beads`), for Fiducials and
+Stability; *positions from a file* puts one at each x, y of a csv, such as
+*Export table* writes; *from an id column* one per id.  The helpers are
+`smappy/segmentation.py`.
 
 These are detection settings, separate from the analysis ROI size. Outlines are amber, grey when the ROI is excluded, green when it is selected,
 and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber

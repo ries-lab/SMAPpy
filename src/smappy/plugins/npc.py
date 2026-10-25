@@ -5,9 +5,11 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 ``segmentNPC`` with ``NPCsegmentCleanup``, ``NPCLabelingQuantify_s`` and
 ``NPCLabelingEfficiency`` (Thevathasan et al. 2019):
 
-* **Segment regions**' ring template (`segment.py`, preset ``NPC``) filters
-  a density image with a ring, fits a circle to every candidate and keeps
-  the ones that look like a pore: `segment_npcs`, here.
+* **Segment regions**' circle template with a ring (`segment.py`, preset
+  ``NPC``) filters a density image with a ring, fits a circle to every
+  candidate and keeps the ones that look like a pore, by its *keep*
+  condition (`smappy.segmentation`; this file only finds its ROIs again,
+  `npc_rois`).
 * **Evaluate/NPC Corners** counts, per pore, the corners seen with the
   precise localizations and the localizations it has -- and SMAP's corner
   count beside them.
@@ -32,24 +34,19 @@ is measured in ``studies/npc_le`` (its README has the numbers):
   loses are the sparse ones, and junk rarely shows 5 corners; fitting from 4
   left up to 18 points of bias with junk, from 5 about 11 at worst and from 6
   about 6, but 6 costs where few pores show that many corners (one blink).
-* The segmenter judges a candidate on its localizations better than the same
-  cutoff: its fitted radius, and how far each lies from the ring in units of
-  its own precision.  Fractions inside and outside counted on every
-  localization reject sparse pores at low photon numbers (imprecise
-  localizations land inside) and pass pore-sized filled blobs (the ring filter
-  puts the site beside a filled blob, not on it, and from there it is an
-  arc).  *min localizations* is 4 -- a pore showing 4 corners has at least 4
-  -- since more loses the sparse pores that still show 5.
+* The NPC preset judges a candidate on its localizations better than the
+  same cutoff: its fitted radius, and how far each lies from the ring in
+  units of its own precision (``far_p``).  Fractions inside and outside
+  counted on every localization reject sparse pores at low photon numbers
+  (imprecise localizations land inside) and pass pore-sized filled blobs
+  (the ring filter puts the site beside a filled blob, not on it, and from
+  there it is an arc).  It asks ``n_ring >= 4`` -- a pore showing 4 corners
+  has at least 4 -- since more loses the sparse pores that still show 5.
 * Corners are counted from 40 nm out: nearer the centre a corner's segment is
   narrower than a localization's spread.
 
 Smaller departures:
 
-* The ring filter is a zero-sum kernel -- a Gaussian ring minus a disc of the
-  same weight -- instead of SMAP's ring followed by a difference of Gaussians
-  with a cutoff in filtered-image units.  A uniform background gives zero by
-  construction, and the threshold that decides becomes a number of
-  localizations, which means the same at any pixel size.
 * The circle fits use a soft-L1 loss, so the background inside the window
   does not pull the centre; SMAP's ``fitposring`` is plain least squares.
 * The rotation of a pore is the weighted circular mean of ``8 theta`` instead
@@ -61,341 +58,35 @@ Smaller departures:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
-from .roi import EVALUATION_HELP, MAX_FINDER_PIXELS, SiteAnalysisPlugin, auto_only
+from .roi import EVALUATION_HELP, SiteAnalysisPlugin, auto_only
+# the circle fit and the ring filter are the segmenter's, in `smappy.segmentation`
+from ..segmentation import fit_circle, ring_kernel  # noqa: F401
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
 PRECISION_OF_ARC = 0.4
 SMAP_RADIUS_NM, SMAP_RING_WIDTH_NM = 50.0, 20.0
-# fixed-radius fits of a candidate's centre: the second is on the window
-# around the first answer, which a filter peak a pixel or two off can need
+# fixed-radius fits of a pore's centre: the second is on the window around
+# the first answer, which an ROI centre a few nm off can need
 FIT_PASSES = 2
-# a localization further than this many of its precisions from the ring is
-# "far"; on a pore that happens 0.3 % of the time
-FAR_SIGMAS = 3.0
 
 
 def precision_column(locs) -> Optional[str]:
     return next((n for n in ("xy_err_nm", "x_err_nm") if n in locs), None)
 
 
-# ------------------------------------------------------------------ geometry
-
-def fit_circle(x, y, center, radius: Optional[float] = None,
-               scale: float = 15.0, iterations: int = 30) -> Tuple[float, float, float]:
-    """A circle through the points: ``(x0, y0, r)``.
-
-    With ``radius`` given only the centre is fitted, which is robust even on
-    a pore with two corners; without it the radius is fitted too, which is
-    what says whether the structure is a ring of the expected size.  The loss
-    is soft-L1 with ``scale``, so points further than about ``scale`` from the
-    circle count with their distance rather than its square.
-
-    Gauss-Newton with reweighting (the soft-L1 weight is
-    ``1 / sqrt(1 + (d / scale)^2)``) rather than scipy's ``least_squares``:
-    the same minimum, twenty times faster, and the segmenter fits thousands.
-    """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    p = np.asarray(center, dtype=float).copy()
-    free = radius is None
-    if len(x) < (3 if free else 2):
-        return float(p[0]), float(p[1]), float(np.nan if free else radius)
-    r = float(np.median(np.hypot(x - p[0], y - p[1]))) if free else float(radius)
-    for _ in range(iterations):
-        dx, dy = x - p[0], y - p[1]
-        d = np.maximum(np.hypot(dx, dy), 1e-9)
-        residual = d - r
-        w = 1.0 / np.sqrt(1.0 + (residual / scale) ** 2)
-        J = [-dx / d, -dy / d] + ([-np.ones_like(d)] if free else [])
-        J = np.column_stack(J)
-        step = np.linalg.lstsq(J * np.sqrt(w)[:, None], -residual * np.sqrt(w),
-                               rcond=None)[0]
-        p += step[:2]
-        if free:
-            r = abs(r + step[2])
-        if np.max(np.abs(step)) < 1e-3:
-            break
-    return float(p[0]), float(p[1]), float(r)
-
-
-def ring_kernel(radius_nm: float, width_nm: float, pixel_nm: float) -> np.ndarray:
-    """A Gaussian ring minus a disc of the same weight: zero sum.
-
-    The ring has radius ``radius_nm`` and a Gaussian profile of width
-    ``width_nm``; the disc reaches to ``radius + 2 width``.  Convolved with a
-    density, it gives the mean density on the ring minus the mean density
-    over the disc, so a uniform background gives zero, a filled blob of the
-    pore's size gives about zero or less, and a ring gives its peak at its
-    centre.
-    """
-    extent = radius_nm + 3 * width_nm
-    n = int(np.ceil(extent / pixel_nm))
-    grid = np.arange(-n, n + 1) * pixel_nm
-    r = np.hypot(*np.meshgrid(grid, grid))
-    ring = np.exp(-(r - radius_nm) ** 2 / (2 * width_nm ** 2))
-    disc = (r <= radius_nm + 2 * width_nm).astype(float)
-    return ring / ring.sum() - disc / disc.sum()
-
-
 # --------------------------------------------------------------- segmenting
 
-@dataclass
-class NPCSegmentSettings:
-    radius_nm: float = param(55.0, label="radius", unit="nm", min=1.0,
-                             help="radius of the pore: the ring the filter looks for "
-                                  "and the one the band is drawn around")
-    ring_width_nm: float = param(15.0, label="ring width", unit="nm", min=1.0,
-                                 help="half the width of the ring band; also the "
-                                      "width of the filter's ring")
-    min_locs: int = param(4, label="min localizations", min=1,
-                          help="localizations a candidate needs in the ring band")
-    precision_nm: float = param(20.0, label="judge on precision", unit="nm", min=0.1,
-                                help="the checks use only localizations more "
-                                     "precise than this")
-    min_radius_nm: float = param(40.0, label="min fitted radius", unit="nm", min=0.0,
-                                 help="smallest fitted radius that is a pore")
-    max_radius_nm: float = param(70.0, label="max fitted radius", unit="nm", min=0.0,
-                                 help="largest fitted radius that is a pore")
-    max_far: float = param(0.01, label="max far", min=0.0, max=1.0,
-                           help="largest fraction of localizations more than 3 "
-                                "of their precisions from the ring")
-    keep_rejected: bool = param(False, label="keep rejected",
-                                help="add candidates that fail the checks as ROIs "
-                                     "that are not used, to look at them")
-    radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
-                                advanced=True,
-                                help="a candidate fails when its far ones are this "
-                                     "unlikely for a pore")
-    radial_extra_nm: float = param(5.0, label="ring spread", unit="nm", min=0.0,
-                                   advanced=True,
-                                   help="tilt and label, added to each precision "
-                                        "in the far test")
-    window_nm: float = param(100.0, label="window", unit="nm", min=1.0, advanced=True,
-                             help="radius around a candidate that is fitted and judged")
-    separation_nm: float = param(120.0, label="separation", unit="nm", min=0.0,
-                                 advanced=True,
-                                 help="reject a candidate this close to a stronger "
-                                      "one or to an existing ROI")
-    bin_nm: float = param(10.0, label="bin", unit="nm", min=0.1, advanced=True,
-                          help="pixel size of the density image that is filtered")
-
-
-def ring_filtered(xy: np.ndarray, settings: NPCSegmentSettings
-                  ) -> Tuple[np.ndarray, np.ndarray]:
-    """The ring-filtered square root of the density, and its origin in nm.
-
-    The square root is SMAP's: a molecule that blinks fifty times in one
-    place otherwise draws a ring of response around itself that outshines
-    the pores.
-    """
-    from scipy.signal import fftconvolve
-    pixel = float(settings.bin_nm)
-    pad = settings.radius_nm + 3 * settings.ring_width_nm + pixel
-    origin = np.floor((xy.min(axis=0) - pad) / pixel) * pixel
-    shape = np.ceil((xy.max(axis=0) + pad - origin) / pixel).astype(int) + 1
-    if int(shape[0]) * int(shape[1]) > MAX_FINDER_PIXELS:
-        raise ValueError("the density image exceeds 16 million pixels; "
-                         "increase the bin size")
-    bins = np.floor((xy - origin) / pixel).astype(int)
-    density = np.zeros(tuple(shape[::-1]), dtype=float)
-    np.add.at(density, (bins[:, 1], bins[:, 0]), 1)
-    kernel = ring_kernel(settings.radius_nm, settings.ring_width_nm, pixel)
-    return fftconvolve(np.sqrt(density), kernel, mode="same"), origin
-
-
-def candidates(image: np.ndarray, origin, pixel: float, separation_nm: float
-               ) -> List[Tuple[float, np.ndarray]]:
-    """Positive local maxima of the filtered image, strongest first:
-    ``(response, centre in nm)``."""
-    from scipy.ndimage import maximum_filter
-    size = max(3, 2 * int(round(separation_nm / pixel / 2)) + 1)
-    maxima = (image == maximum_filter(image, size=size, mode="constant")) & (image > 0)
-    yy, xx = np.nonzero(maxima)
-    response = image[yy, xx]
-    order = np.lexsort((xx, yy, -response))
-    return [(float(response[i]),
-             np.asarray(origin) + (np.array([xx[i], yy[i]]) + 0.5) * pixel)
-            for i in order]
-
-
-def ring_quality(x, y, center, settings: NPCSegmentSettings, sigma=None
-                 ) -> Dict[str, Any]:
-    """Fit and judge one candidate, on its precise localizations.
-
-    The centre is fitted with the radius fixed, twice, the second time on the
-    window around the first answer, using the localizations better than
-    *judge on precision* (all of them when the table has no precision, or
-    fewer than 3 are); that centre is the site.  On the same localizations
-    the radius is fitted free, and each one's distance from that circle is
-    taken in units of its own precision (widened by the *ring spread*):
-    ``z = (r - radius) / sqrt(sigma^2 + extra^2)``.  A pore has few with
-    |z| > 3; a filled structure, whether the site is on it or beside it, has
-    many.  The candidate fails when the count of far ones is more than
-    *max far* explains (binomial, at *far test level*) -- by count, so that a
-    sparse pore is not rejected for one stray.
-    """
-    from scipy.stats import binom
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    R, dR = settings.radius_nm, settings.ring_width_nm
-    precise = (np.ones(len(x), bool) if sigma is None
-               else np.asarray(sigma, float) < settings.precision_nm)
-    c = np.asarray(center, dtype=float)
-    for _ in range(FIT_PASSES):
-        near = np.hypot(x - c[0], y - c[1]) <= settings.window_nm
-        on = near & precise if np.sum(near & precise) >= 3 else near
-        c = np.array(fit_circle(x[on], y[on], c, radius=R, scale=dR)[:2])
-    r = np.hypot(x - c[0], y - c[1])
-    near = r <= settings.window_nm
-    ring = int(np.sum(near & (r >= R - dR) & (r <= R + dR)))
-    use = near & precise
-    n = int(use.sum())
-    radius = fit_circle(x[use], y[use], c, scale=dR)[2] if n >= 3 else np.nan
-    far, p_far = 0, 1.0
-    if sigma is not None and n >= 3 and np.isfinite(radius):
-        z = (r[use] - radius) / np.sqrt(np.asarray(sigma, float)[use] ** 2
-                                        + settings.radial_extra_nm ** 2)
-        far = int(np.sum(np.abs(z) > FAR_SIGMAS))
-        p_far = float(binom.sf(far - 1, n, settings.max_far)) if far else 1.0
-    failed = []
-    if ring < settings.min_locs:
-        failed.append("localizations")
-    if n < 3:
-        failed.append("precise localizations")
-    elif not settings.min_radius_nm <= radius <= settings.max_radius_nm:
-        failed.append("radius")
-    if p_far < settings.radial_alpha:
-        failed.append("far")
-    return {"center": c.tolist(), "radius_nm": float(radius), "n_ring": ring,
-            "n_precise": n, "far_fraction": far / n if n else np.nan,
-            "far_p": p_far, "failed": failed, "use": not failed}
-
-
-class KDList:
-    """Centres accepted so far, asked "is anything within d of this?"."""
-
-    def __init__(self, centres: Sequence = ()):
-        self.xy = np.zeros((max(len(centres), 64), 2))
-        self.n = 0
-        for c in centres:
-            self.add(c)
-
-    def add(self, c) -> None:
-        if self.n == len(self.xy):
-            self.xy = np.concatenate([self.xy, np.zeros_like(self.xy)])
-        self.xy[self.n] = c
-        self.n += 1
-
-    def near(self, c, distance: float) -> bool:
-        d = self.xy[:self.n] - np.asarray(c, dtype=float)
-        return bool(np.any(d[:, 0] ** 2 + d[:, 1] ** 2 < distance ** 2))
-
-
-def segment_npcs(locs, settings: NPCSegmentSettings, existing: Sequence = ()
-                 ) -> List[Dict[str, Any]]:
-    """Every candidate with enough localizations on its ring, judged.
-
-    One dict per candidate, strongest filter response first, from
-    `ring_quality` plus the ``response``.  A candidate with fewer than
-    ``min_locs`` localizations in the ring band around the filter's maximum is
-    not reported at all: it is background, not a pore that failed a check.
-    Candidates closer than the separation to a stronger one -- or to an
-    ``existing`` centre -- are suppressed, after the fit has moved them.
-    """
-    from scipy.spatial import cKDTree
-    for name in ("radius_nm", "ring_width_nm", "window_nm", "bin_nm"):
-        if not getattr(settings, name) > 0:
-            raise ValueError(f"{name} must be positive")
-    xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
-                          np.asarray(locs["y_nm"], dtype=float)))
-    column = precision_column(locs)
-    sigma = None if column is None else np.asarray(locs[column], dtype=float)
-    finite = np.isfinite(xy).all(axis=1)
-    xy = xy[finite]
-    if sigma is not None:
-        sigma = sigma[finite]
-    if len(xy) < settings.min_locs:
-        return []
-    image, origin = ring_filtered(xy, settings)
-    tree = cKDTree(xy)
-    R, dR = settings.radius_nm, settings.ring_width_nm
-    found = []
-    peaks = candidates(image, origin, settings.bin_nm, settings.separation_nm)
-    if not peaks:
-        return found
-    centres = np.array([c for _, c in peaks])
-    # the ring band's count for every maximum at once: most are background
-    ring = (tree.query_ball_point(centres, R + dR, return_length=True)
-            - tree.query_ball_point(centres, max(R - dR, 0.0), return_length=True))
-    accepted = KDList(existing)
-    for (response, center), n_ring in zip(peaks, ring):
-        # too few, or inside a pore already accepted: one of its own maxima
-        if n_ring < settings.min_locs or accepted.near(center, settings.separation_nm):
-            continue
-        window = np.asarray(tree.query_ball_point(center, settings.window_nm + 2 * dR))
-        site = ring_quality(xy[window, 0], xy[window, 1], center, settings,
-                            None if sigma is None else sigma[window])
-        c = np.asarray(site["center"])
-        if accepted.near(c, settings.separation_nm):
-            continue
-        accepted.add(c)
-        site["response"] = response
-        found.append(site)
-    return found
-
-
-def draw_quality(figure, sites: Sequence[Dict[str, Any]],
-                 settings: NPCSegmentSettings) -> None:
-    """The checks as histograms, the limits drawn in, kept and rejected
-    stacked: where the cut falls against the distribution."""
-    checks = (("radius_nm", "fitted radius (nm)",
-               (settings.min_radius_nm, settings.max_radius_nm)),
-              ("far_fraction", "fraction far from the ring", (None, None)),
-              ("n_precise", "precise localizations", (None, None)))
-    used = np.array([s["use"] for s in sites], dtype=bool)
-    axes = figure.subplots(1, 3, gridspec_kw={"wspace": 0.45})
-    for ax, (key, label, limits) in zip(np.ravel(axes), checks):
-        values = np.array([s[key] for s in sites], dtype=float)
-        finite = np.isfinite(values)
-        if finite.any():
-            edges = np.histogram_bin_edges(values[finite], bins=20)
-            ax.hist([values[finite & used], values[finite & ~used]], bins=edges,
-                    stacked=True, color=["#2f7fd0", "0.75"],
-                    label=["kept", "rejected"])
-        for limit in limits:
-            if limit is not None:
-                ax.axvline(limit, color="#d62728", lw=1)
-        ax.set_xlabel(label)
-        ax.set_ylabel("candidates")
-    figure.axes[0].legend(fontsize=7, frameon=False)
-
-
-def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
-               settings: NPCSegmentSettings) -> None:
-    """The localizations with each candidate's fitted circle: kept in blue,
-    rejected in grey."""
-    from matplotlib.patches import Circle
-    ax.scatter(xy[:, 0], xy[:, 1], s=0.3, c="k", linewidths=0, alpha=0.5)
-    for site in sites:
-        radius = site["radius_nm"] if np.isfinite(site["radius_nm"]) else settings.radius_nm
-        ax.add_patch(Circle(site["center"], radius, fill=False, lw=0.8,
-                            color="#2f7fd0" if site["use"] else "0.6"))
-    ax.set_aspect("equal")
-    ax.set_xlabel("x (nm)")
-    ax.set_ylabel("y (nm)")
-
-
 def npc_rois(project, file_id) -> List[Any]:
-    """The ROIs the ring template of *Segment regions* made in this file."""
+    """The ROIs the circle template of *Segment regions* made in this file."""
     from .segment import made_by
     return [roi for roi in project.rois.values()
-            if roi.file_id == file_id and made_by(roi, "ring")]
+            if roi.file_id == file_id and made_by(roi, "circle")]
 
 
 # ---------------------------------------------------------------- corners

@@ -397,6 +397,19 @@ The spread between pools is 0.5 to 0.8 points.  Without junk
 * The checks matter more than k: without them, the same k ≥ 6 is up to 18
   points off.
 
+**14. The circle template (2026-10-25).**  *Segment regions*' ring template
+became a circle template with a *keep* condition (wave 6 of the porting
+plan); its *NPC* preset is the adaptive checks above as
+`n_ring >= 4 and 40 <= radius_nm <= 70 and far_p >= 0.05`.  Run against the
+ring template it replaced on `selection.py`'s simulations with junk (3 seeds
+per condition, the 18 conditions of table 13, the joint fit from k ≥ 4), it
+found 14976 pores against 14906 and kept 1758 junk sites against 1794; the
+fitted ELE moved by 0.017 at most and its mean error by 0.2 points.  Not a
+material change, so the tables above stand.  `selection.py` now names the
+preset's *keep* as *default* (the *lenient* segmentation is the same now)
+and drops the fractions the old one asked of a segmenter that no longer
+has them.
+
 ## What follows
 
 * **Make the selection explicit and model it.**  Keep a pore when it shows at

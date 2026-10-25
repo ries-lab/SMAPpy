@@ -273,8 +273,9 @@ def four_sites():
 
 
 SEGMENT = {"plugin": "Analysis/Regions/Segment regions", "label": "find",
-           "values": {"method": "peaks", "peaks.sigma_nm": 60.0,
-                      "peaks.separation_nm": 1000.0, "peaks.min_count": 20}}
+           "values": {"method": "circle", "circle.shape": "disc",
+                      "circle.min_radius_nm": 20.0, "circle.max_radius_nm": 80.0,
+                      "keep": "n_locs >= 20"}}
 
 
 def each_roi(*steps, label="sites"):

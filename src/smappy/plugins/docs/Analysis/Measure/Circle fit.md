@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.circle_fit.circle_fit, smappy.plugins.npc.fit_circle, smappy.plugins.circle_fit.draw, smappy.plugins.circle_fit.CircleFit.run]
+covers: [smappy.plugins.circle_fit.circle_fit, smappy.segmentation.fit_circle, smappy.plugins.circle_fit.draw, smappy.plugins.circle_fit.CircleFit.run]
 ---
 
 ## What it does
@@ -121,8 +121,8 @@ $\sum_i 2 c^2 \left( \sqrt{1 + (d_i/c)^2} - 1 \right)$, with $c$ the
 is minimised by Gauss-Newton with reweighting -- each step a weighted least
 squares with weights $w_i = 1/\sqrt{1 + (d_i/c)^2}$ -- for up to 30 steps,
 or until no parameter moves by more than 0.001 nm.  This is the same fit the
-ring template of [Segment regions](plugin:Analysis/Regions/Segment regions)
-uses for each candidate pore.
+circle template of [Segment regions](plugin:Analysis/Regions/Segment regions)
+uses for each candidate ring.
 
 **The errors** are those of a weighted least-squares fit at its minimum:
 the covariance $s^2 (J^T W J)^{-1}$, with $J$ the derivatives of the $d_i$

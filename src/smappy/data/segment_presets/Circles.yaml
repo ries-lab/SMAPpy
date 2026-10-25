@@ -1,0 +1,11 @@
+# Any larger ring-like structure, 100 to 500 nm in radius: enough
+# localizations on the ring, and round.
+method: circle
+circle:
+  shape: ring
+  min_radius_nm: 100.0
+  max_radius_nm: 500.0
+  ring_width_nm: 20.0
+  precision_nm: 20.0
+  bin_nm: 10.0
+keep: n_ring >= 10 and roundness >= 0.6

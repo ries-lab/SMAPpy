@@ -21,8 +21,9 @@ steps*, the measurements to make in every ROI, with what they measured in
 the ROI selected in the manager; and it holds what all ROIs share -- their
 shape and size.  Below the tab's own controls sit the ROI plugins pinned to
 it.  By default these are
-the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by density peaks for
-any compact structure or a ring template for nuclear pores -- and
+the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by a circle
+template (a ring for nuclear pores, a disc for pits and other compact
+structures), beads, an id column or positions from a file -- and
 [Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
 what was measured in every ROI to a file.  The summaries, such as
 [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), and
@@ -62,7 +63,7 @@ session = Session(locs)                           # the GUI's model, no window
 session.show_grouped(0, False)                    # localizations, not blinks
 project = session.rois
 source = project.source_of(0)                     # the one file
-rois = project.find(source.id)                    # Segment regions: density peaks
+rois = project.find(source.id)                    # Segment regions: its default discs
 state = project.state(source.id)
 kept = state.locs[state.filter.indices]           # what passes the filter
 # the ROI with the nearest neighbour, so that the geometry matters
@@ -84,7 +85,7 @@ an ROI*).  Each ROI is a centre in one file; its outline is the shape and
 size set here, the same for all of them, unless the ROI has an outline of its
 own (a polygon).
 
-```figure Left: simulated nuclear pores, with the ROIs density peaks (Segment regions) proposed on them, each a circle of the default 300 nm.  Right: one ROI as the ROI manager shows it -- a field three ROIs wide around it, with its neighbour outside.
+```figure Left: simulated nuclear pores, with the ROIs Segment regions proposed on them with its defaults (discs of 30 to 150 nm), each a circle of the default 300 nm.  Right: one ROI as the ROI manager shows it -- a field three ROIs wide around it, with its neighbour outside.
 fig.set_size_inches(7.5, 3.4)
 a, b = fig.subplots(1, 2)
 whole = FieldOfView.from_range((0, 10000), (0, 10000), 20.0)

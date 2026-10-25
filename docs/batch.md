@@ -175,7 +175,7 @@ succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 
 The shipped `Analysis/Regions/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, Segment regions'
-ring template (preset NPC), NPC
+circle template with the NPC preset's ring and *keep*, NPC
 Corners, NPC labelling efficiency, which takes the counts by the plugin that
 made them and its cutoffs from their settings.
 

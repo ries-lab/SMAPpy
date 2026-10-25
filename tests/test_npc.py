@@ -7,9 +7,9 @@ from smappy import npc as model
 from smappy import plugins
 from smappy.locs import Localizations
 from smappy.plugins.npc import (FITS, LabelingEfficiencySettings, NPCCornersSettings,
-                                NPCSegmentSettings, count_corners, fit_circle,
-                                labeling_efficiency, ring_kernel, ring_quality,
-                                segment_npcs)
+                                count_corners, fit_circle, labeling_efficiency,
+                                ring_kernel)
+from smappy.segmentation import VALUES, find_circles, judge, measure_ring
 from smappy.simulate import simulate
 from smappy.simulate.settings import (BlinkingSettings, LabellingSettings,
                                       SimulationSettings, StructureSettings)
@@ -18,11 +18,22 @@ from test_roi_session import rois_of                          # noqa: E402
 SEGMENT = "Analysis/Regions/Segment regions"
 
 
-def ring(replace=True, **values):
-    """Segment regions' settings for the ring template with these values."""
-    from smappy.plugins.segment import SegmentSettings
-    return SegmentSettings(method="ring", ring=NPCSegmentSettings(**values),
-                           replace=replace)
+NPC_KEEP = "n_ring >= 4 and 40 <= radius_nm <= 70 and far_p >= 0.05"
+
+
+def ring(replace=True, keep_rejected=False, **values):
+    """Segment regions' settings for the NPC preset's ring with these values."""
+    from smappy.plugins.segment import CircleSettings, SegmentSettings
+    values = {"shape": "ring", "min_radius_nm": 55.0, "max_radius_nm": 55.0, **values}
+    return SegmentSettings(method="circle", circle=CircleSettings(**values),
+                           keep=NPC_KEEP, keep_rejected=keep_rejected, replace=replace)
+
+
+def judged(x, y, start, sigma):
+    """One candidate measured as the NPC preset's ring and judged by its keep."""
+    site = measure_ring(x, y, start, 55.0, 15.0, sigma)
+    judge([site], NPC_KEEP, VALUES["ring"])
+    return site
 
 R = 53.7
 
@@ -78,27 +89,27 @@ def test_every_simulated_pore_is_found_centred_and_nothing_else():
     locs = pores(0.6, seed=3)
     truth = np.column_stack((locs.metadata["copies"]["x_nm"],
                              locs.metadata["copies"]["y_nm"]))
-    sites = segment_npcs(locs, NPCSegmentSettings())
+    sites = find_circles(locs, "ring", 55.0, 55.0)
+    judge(sites, NPC_KEEP, VALUES["ring"])
     used = np.array([s["center"] for s in sites if s["use"]])
     from scipy.spatial import cKDTree
     distance, index = cKDTree(truth).query(used)
     assert len(set(index[distance < 10])) >= 0.97 * len(truth)
     assert np.sum(distance >= 20) <= 0.02 * len(truth)
     assert np.median(distance) < 3
-    radius = np.array([s["radius_nm"] for s in sites if s["use"]])
+    radius = np.array([s["values"]["radius_nm"] for s in sites if s["use"]])
     assert abs(np.median(radius) - R) < 3
 
 
 def test_a_pore_passes_and_a_blob_fails_on_its_radius():
     rng = np.random.default_rng(0)
-    settings = NPCSegmentSettings()
     full = corners_at(range(8), rng, sd=4)
     sigma = np.full(len(full), 4.0)
-    quality = ring_quality(full[:, 0], full[:, 1], (5, -5), settings, sigma)
-    assert quality["use"] and abs(quality["radius_nm"] - R) < 3
+    quality = judged(full[:, 0], full[:, 1], (5, -5), sigma)
+    assert quality["use"] and abs(quality["values"]["radius_nm"] - R) < 3
     blob = corners_at([0], rng, sd=4)
-    quality = ring_quality(blob[:, 0], blob[:, 1], (0, 0), settings, sigma[:len(blob)])
-    assert "radius" in quality["failed"]
+    quality = judged(blob[:, 0], blob[:, 1], (0, 0), sigma[:len(blob)])
+    assert "40 <= radius_nm <= 70" in quality["failed"]
 
 
 def test_a_sparse_pore_is_kept():
@@ -107,8 +118,7 @@ def test_a_sparse_pore_is_kept():
     measured from."""
     rng = np.random.default_rng(1)
     arc = corners_at([0, 1, 2], rng, n=4, sd=4)
-    quality = ring_quality(arc[:, 0], arc[:, 1], (0, 0), NPCSegmentSettings(),
-                           np.full(len(arc), 4.0))
+    quality = judged(arc[:, 0], arc[:, 1], (0, 0), np.full(len(arc), 4.0))
     assert quality["use"], quality["failed"]
 
 
@@ -117,17 +127,16 @@ def test_a_filled_disc_fails_on_its_localizations_far_from_the_ring(offset):
     """Centred on it, or beside it, as the ring filter often puts the site."""
     rng = np.random.default_rng(2)
     xy = disc(rng)
-    quality = ring_quality(xy[:, 0], xy[:, 1], (offset, 0), NPCSegmentSettings(),
-                           np.full(len(xy), 5.0))
+    quality = judged(xy[:, 0], xy[:, 1], (offset, 0), np.full(len(xy), 5.0))
     assert not quality["use"]
-    assert "far" in quality["failed"] or "radius" in quality["failed"]
+    assert {"far_p >= 0.05", "40 <= radius_nm <= 70"} & set(quality["failed"])
 
 
 def test_the_far_test_is_off_without_a_precision():
     rng = np.random.default_rng(2)
     xy = corners_at(range(8), rng, sd=4)
-    quality = ring_quality(xy[:, 0], xy[:, 1], (0, 0), NPCSegmentSettings(), None)
-    assert quality["use"] and quality["far_fraction"] == 0
+    quality = judged(xy[:, 0], xy[:, 1], (0, 0), None)
+    assert quality["use"] and quality["values"]["far_p"] == 1.0
 
 
 def test_rejected_candidates_become_unused_rois_only_when_asked():
@@ -147,8 +156,8 @@ def test_rejected_candidates_become_unused_rois_only_when_asked():
         assert len(found) >= expected and found[0].use
         assert np.hypot(*(np.asarray(found[0].center) - 1000)) < 3
         assert found[0].origin["method"] == SEGMENT
-        assert found[0].origin["segment"] == "ring"
-        assert abs(found[0].origin["radius_nm"] - R) < 3
+        assert found[0].origin["segment"] == "circle"
+        assert abs(found[0].origin["values"]["radius_nm"] - R) < 3
         assert all(not roi.use for roi in found[1:])
     assert all(roi.origin["failed"] for roi in found[1:])
 
@@ -281,7 +290,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
     found = plugins.get(SEGMENT)()(ctx=session.context(), settings=ring())
-    assert "pores of" in found.text and found.plots["checks"].panels == 3
+    assert "structures of" in found.text and found.plots["keep"].panels == 3
     project = session.rois
     assert len(project.rois) == len(found.data["centers"]) > 140
 
@@ -339,7 +348,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
         "ValueError: no localizations in this ROI"
     fitted = steps["labelling_efficiency"].data
     assert abs(fitted["efficiency"] - 0.5) < 0.04
-    assert {"find the pores", "find the pores: checks",
+    assert {"find the pores", "find the pores: keep",
             "labelling efficiency"} <= set(result.plots)
     assert drawn.id in project.rois and len(project.rois) == len(found) + 1
     assert [i.plugin for i in project.block.steps] == ["Analysis/Measure/Localization Statistics"]
