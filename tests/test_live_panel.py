@@ -150,6 +150,7 @@ class Streams(Plugin):
     path = "Test/Streams"
     name = "Streams"
     changes_locs = True
+    grouping = "ungrouped"
 
     def run(self, ctx, settings):
         ctx.emit("start", {"extent": (0, 5000, 0, 5000)})
@@ -180,3 +181,21 @@ def test_a_fit_whose_table_cannot_be_put_in_place_fails_and_ends_the_live_table(
     assert panel.status.text() == "the table would not go in"
     assert panel.run_button.text() == "Run"
     assert not session.live and len(session.locs) == 300   # what came, kept
+
+
+def test_a_fit_started_with_the_render_tab_on_layer_two_finishes_its_table(app):
+    """A live fit started with one new layer; the Render tab, still on
+    layer 2, raised inside `begin_live`, and the fit's own table was then
+    refused as if the fit were still running.  Now the layers stay."""
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.gui.render_tab import RenderTab
+    session = Session(block(1))
+    session.add_layer()
+    tab = RenderTab(session)
+    tab.strip.select(1)
+    panel = PluginPanel(Streams, session)
+    run_and_wait(panel, app)
+    assert panel.status.text() == "done"
+    assert not session.live and len(session.locs) == 300
+    assert len(tab.strip.buttons) == len(session.layers) == 2
+    assert tab.layer is session.layers[1]

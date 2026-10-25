@@ -364,7 +364,8 @@ class Session:
         # no such column: a GUI file's (`Workspace.filters`), else None, the
         # shipped `DEFAULT_BOUNDS` (`carried_bounds`)
         self.default_filters: Optional[Dict[str, Tuple]] = None
-        self._live_bounds: Optional[Dict[str, Tuple]] = None
+        # each layer's bounds and columns before a live fit, by id (`begin_live`)
+        self._live_bounds: Dict[int, Tuple[Dict[str, Tuple], set]] = {}
         self.layers: List[Layer] = [Layer(self.tables)]
         self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
         self._rois = None                          # the ROI manager's project
@@ -1020,11 +1021,13 @@ class Session:
         there is nothing left to go back to.
         """
         if self._live:                     # the finished form of the live table
-            # the filters from before the run, and any set while it ran
-            carried = self.carried_bounds(self._live_bounds)
-            self.tables = self._new_tables(locs, self._group_settings)
-            self.layers = [Layer(self.tables, base=carried)]    # (the step before the run is already pushed)
+            # into the same layers, with the bounds set while it ran and those
+            # from before it (the step before the run is already pushed)
+            self._take_tables(self._new_tables(locs, self._group_settings))
             self._live = False
+            self._restore_live_bounds()
+            if self.files and len(self.files) == 1:
+                self.files[0].n = len(locs)
         elif undoable or keep_layers:      # the same data, corrected: keep the layers
             if undoable:
                 self._push_undo(label or "change", text)
@@ -1304,16 +1307,47 @@ class Session:
             self._push_undo("live acquisition")
         self._live = True
         self._recipes = []
-        # the filters the finished table's layer starts with: an empty table
-        # has no column to hold them meanwhile
-        self._live_bounds = self.carried_bounds()
-        self.tables = self._new_tables(Localizations({}, {}), self._group_settings,
-                             live=True, extent=extent)
-        self.layers = [Layer(self.tables)]
+        # The layers stay as they are -- their bounds, display and file
+        # choice -- and look at the fit's table: layer 1 shows it, a layer
+        # set to a file that is gone shows nothing.  Replaced by one new
+        # layer, as before, the render tab still on layer 2 raised inside
+        # this method, and every layer's settings were lost to the fit.
+        # The bounds are kept aside: an empty table has no column to hold
+        # them until the first block (`_restore_live_bounds`).
+        self._live_bounds = {id(layer): (layer.ranges, set(layer.locs))
+                             for layer in self.layers if not layer.is_image}
+        self._take_tables(self._new_tables(Localizations({}, {}), self._group_settings,
+                                           live=True, extent=extent))
+        first = next((l for l in self.layers if not l.is_image), None)
+        if first is None:
+            self.layers.insert(0, Layer(self.tables))
+        else:
+            first.set_files(None)
+        from .io.formats import FileInfo
+        name = Path(path).name if path is not None else "live fit"
+        self.files = [FileInfo(name=name, path=str(path or ""), format="fit")]
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
         self.set_unsaved(True)
+
+    def _restore_live_bounds(self) -> None:
+        """Give each layer back the bounds it had before the live fit, on the
+        columns the table has now -- and the defaults where its old table had
+        no such column (a 2D file's layer meeting a 3D fit's z).  A bound set
+        since is kept."""
+        saved = self._live_bounds
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            ranges, columns = saved.get(id(layer), ({}, set()))
+            current = layer.ranges
+            for field, (lo, hi) in default_bounds(self.locs, self.default_filters).items():
+                if field not in columns and field not in current:
+                    layer.set_bound(field, lo, hi)
+            for field, (lo, hi) in ranges.items():
+                if field not in current:
+                    layer.set_bound(field, lo, hi)
 
     def _take_identity(self, saved) -> None:
         name = colour = ""
@@ -1400,8 +1434,8 @@ class Session:
             if layer.is_image:
                 continue
             layer.state.catch_up()
-            if first:
-                layer.apply_defaults()          # the columns exist only now
+        if first and n:
+            self._restore_live_bounds()         # the columns exist only now
         for recipe in self._recipes:
             if recipe.whole and n:
                 self._set_columns(recipe.columns(self.locs))

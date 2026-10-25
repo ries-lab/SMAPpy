@@ -673,6 +673,12 @@ class ViewState:
             f.remove("files")
         elif "filenumber" in locset.locs:
             f.set_mask("files", np.isin(locset.locs["filenumber"], self._files))
+        elif 0 in self._files:
+            f.remove("files")       # a table without the column is one file, 0
+        else:
+            # a file that is not there: nothing, rather than every row -- a
+            # layer kept through a live fit, set to the file before's second
+            f.set_mask("files", np.zeros(len(locset.locs), bool))
 
     def filter_for(self, locset: LocSet) -> LocFilter:
         """This layer's filter over ``locset`` -- the ungrouped or the grouped
@@ -737,6 +743,10 @@ class ViewState:
             return self.tables.ungrouped
         tables = self.tables
         if tables.growing:
+            if not len(tables.locs):
+                # before the first block: no columns to link (a grouped
+                # layer kept through the start of a live fit)
+                return tables.ungrouped
             # a live fit's: as linked last, linked here the first time
             return tables.peek_grouped() or tables.grouped()
         if tables.deferred():
