@@ -78,7 +78,7 @@ def test_the_z_grid_runs_down_from_the_highest_emitter_with_focus_at_z0():
     assert z0 == 3.0 and z.tolist() == [150.0, 100.0, 50.0, 0.0, -50.0, -100.0, -150.0]
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_spline_3d_with_the_learnt_model_finds_the_true_z_and_the_bead_average_agrees_on_its_sign(learnt):
     model, shared, cal, average, _ = learnt
     spline = spline_calibration(cal, 25.0, 900.0, roi_size=ROI, camera=CAMERA)
@@ -98,7 +98,7 @@ def test_spline_3d_with_the_learnt_model_finds_the_true_z_and_the_bead_average_a
     assert np.median(ours["photons"] / theirs["photons"]) == pytest.approx(1.0, abs=0.05)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_the_calibration_and_its_model_file_are_saved_side_by_side(learnt, tmp_path):
     _, _, cal, _, _ = learnt
     spline = spline_calibration(cal, 50.0, 600.0, roi_size=ROI)
@@ -114,7 +114,7 @@ def test_the_calibration_and_its_model_file_are_saved_side_by_side(learnt, tmp_p
         save(path, cal, spline)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_the_whole_chain_gives_spline_3d_a_z_slope_of_one_and_the_bead_averages_photons(learnt):
     """Plan §9 M6.  Measured: slope 0.9986, the photons 0.2 % above the bead average's; the spline sampled with
     its pixels integrated once more (4 × 4, before October 2026) gave 0.992 and 1.2 %."""
@@ -131,7 +131,7 @@ def test_the_whole_chain_gives_spline_3d_a_z_slope_of_one_and_the_bead_averages_
     assert np.median(ours["photons"] / theirs["photons"]) == pytest.approx(1.0, abs=0.03)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_spline_3d_and_uipsfs_own_localisation_agree_on_the_same_bead_rois(learnt):
     """Plan §6.5: every slice of every bead localised by the pupil model (`scoring.slice_fits`, from the beads' stack
     fits) and by Spline 3D on the exported spline, the same pixels (the spline 4 px larger than the ROI, for the

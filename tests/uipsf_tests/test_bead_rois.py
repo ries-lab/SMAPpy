@@ -114,6 +114,7 @@ def test_pairs_their_rois_and_a_starting_transform_come_back_from_a_simulated_ch
     assert torch.equal(batch.field_xy, batch.roi_xy[:, 0])
 
 
+@pytest.mark.slow
 def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
     """End to end: beads drawn by uipsf's model into ADU stacks on a chip, read, converted and cut by smappy,
     learnt by `calibrate_beads`."""

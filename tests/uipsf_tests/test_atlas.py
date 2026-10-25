@@ -27,6 +27,7 @@ def test_the_atlas_names_the_missing_physics(kind, check):
     assert [c for c in flagged if c in SPECIFIC] == [check], atlas.checks
 
 
+@pytest.mark.long
 @pytest.mark.parametrize("kind,term,kw", [("piezo scale", "z scale", dict(K=41, z_range_nm=1000.0)),
                                           ("background ramp", "planar background", {}),
                                           ("laser", "per-slice photons", {})])

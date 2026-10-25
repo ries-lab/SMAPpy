@@ -23,8 +23,9 @@ file, which adds what is particular to uipsf.
 ## Tests
 
     pip install -e .[test,uipsf]        # torch is an extra: without it these tests are not collected
-    python -m pytest tests/uipsf_tests -q -n auto            # fast tier, after every change (~10 s)
-    python -m pytest tests/uipsf_tests -q -n auto --slow     # adds benchmarks and end-to-end fits
+    python -m pytest tests/uipsf_tests -q -n auto            # fast tier, after every change
+    python -m pytest tests/uipsf_tests -q -n auto --slow     # adds the end-to-end fits of a few seconds each
+    python -m pytest tests/uipsf_tests -q -n auto --long     # adds the studies and benchmarks: when the learning changes
     python -m pytest tests/uipsf_tests/test_gpu.py --gpu     # by hand, on a Mac and on a CUDA machine
     ruff check src/uipsf tests/uipsf_tests benchmarks/uipsf scripts/uipsf
 

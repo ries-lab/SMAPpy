@@ -15,7 +15,7 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "benchmarks", "uipsf", "synthetic"))
 import beads  # noqa: E402
 
-pytestmark = [pytest.mark.slow, pytest.mark.timeout(3600)]
+pytestmark = [pytest.mark.long, pytest.mark.timeout(3600)]
 
 _cache = {}
 

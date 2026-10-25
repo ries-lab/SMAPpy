@@ -106,7 +106,7 @@ def test_the_window_offers_the_tilt_in_situ_and_for_beads_only_through_another_g
     window.close()
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_the_window_learns_the_coverslips_tilt_from_water_beads_and_shows_it(tilted_stack, monkeypatch):
     # The tilted plate's coma through a water objective, apart from the pupil's own up to n = 4 (its secondary
     # coma, n = 5, among what tells them apart): `test_tilt.py` for the model alone.

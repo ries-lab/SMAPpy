@@ -121,6 +121,7 @@ def test_without_a_start_model_the_astigmatism_typed_in_starts_the_pupil():
     assert float(phase.abs().sum()) == pytest.approx(float(phase.abs().max()))
 
 
+@pytest.mark.slow
 def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monkeypatch):
     # The plumbing, on a small model: a TIFF through the camera, one round, saved and read back.  How well the
     # rounds learn is test_insitu_rounds', the window's full-size model the benchmark's
@@ -144,6 +145,7 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
     assert float(learned.shared["geometry.focus"]) == pytest.approx(float(result.cal.shared()["geometry.focus"]))
 
 
+@pytest.mark.slow
 def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_file, tmp_path, monkeypatch):
     # *learn coverslip tilt* through to the model, its result and both files.  The movie has no tilt, but its
     # pupil a coma (Noll 7, -0.2 rad) that order 2 cannot hold, so the tilt along y takes it: no value is
@@ -170,6 +172,7 @@ def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_
     assert np.allclose(np.degrees(learned.shared["geometry.tilt"].numpy()), degrees, atol=1e-6)
 
 
+@pytest.mark.slow
 def test_the_focus_from_the_data_moves_a_guess_toward_the_truth_before_any_learning(movie_file, monkeypatch):
     import uipsf.workflows.insitu_rounds as rounds
     from uipsf.noise import ShiftedPoisson
@@ -268,6 +271,7 @@ def test_a_start_model_s_pupil_is_held_whole_its_own_held_modes_included():
     assert phase == pytest.approx({22: 0.03}) and magnitude == pytest.approx({4: 0.01, 11: -0.07})
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("hold", ["start", "nothing"])
 def test_in_situ_holds_the_start_or_learns_the_symmetric_magnitude_with_the_focus_pinned(movie_file, monkeypatch,
                                                                                          hold):
@@ -295,6 +299,7 @@ def test_in_situ_holds_the_start_or_learns_the_symmetric_magnitude_with_the_focu
         assert any("pinned to the coverslip" in m for m in result.messages)
 
 
+@pytest.mark.slow
 def test_in_situ_holding_every_aberration_learns_only_the_focus_and_finds_it(movie_file, monkeypatch):
     # the movie's own pupil kept with the microscope, every mode of it held: nothing of the pupil is learnt, no
     # twin test, and the focus comes from the molecules

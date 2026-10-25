@@ -1,5 +1,6 @@
-"""uipsf's fixtures.  The tiers are SMAPpy's root conftest's: ``--slow`` adds benchmarks and end-to-end
-runs, ``--gpu`` the checks that need CUDA or Apple's GPU (run by hand on a Mac and a CUDA machine)."""
+"""uipsf's fixtures.  The tiers are SMAPpy's root conftest's: ``--slow`` adds end-to-end runs of seconds,
+``--long`` the studies and benchmarks of 20 s to minutes, ``--gpu`` the checks that need CUDA or Apple's GPU
+(run by hand on a Mac and a CUDA machine)."""
 import os
 import sys
 

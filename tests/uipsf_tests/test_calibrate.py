@@ -53,6 +53,7 @@ def test_settings_refuse_a_choice_they_do_not_have():
         BeadSettings(blur="maybe")
 
 
+@pytest.mark.slow
 def test_a_calibration_recovers_the_aberrations_and_the_blur_with_everything_free(beads):
     cal = calibrate_beads(beads, OPTICS, BeadSettings(zernike_order=4), device="cpu")
     shared = cal.shared()
@@ -92,7 +93,7 @@ def test_a_previous_model_starts_a_higher_order_by_its_noll_modes(symmetric_fixe
     assert "psf.sigma" not in start_values(fixed, symmetric_fixed)   # a fixed blur keeps the settings' value
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_a_previous_model_starts_the_first_stage_and_lands_on_the_truth(beads, symmetric_fixed):
     """Into stage 1, not instead of it: on the lab's M2 that was faster and never failed, where replacing
     stage 1 from another camera's model once did (docs/uipsf/architecture.md, "How a bead fit starts")."""
@@ -152,7 +153,7 @@ def test_the_phase_is_shown_in_rad_waves_or_nm_of_the_channels_wavelength(symmet
         assert row[columns.index("± (nm)")] == pytest.approx(err * 660 / (2 * np.pi), nan_ok=True)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_halves_of_simulated_beads_scatter_as_the_crlb_says_and_are_kept_in_the_model_file(beads, tmp_path):
     import numpy as np
 

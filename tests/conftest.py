@@ -34,6 +34,10 @@ if importlib.util.find_spec("torch") is None:
     collect_ignore = ["uipsf_tests"]
 
 
+#: a long test's limit: the region study takes four minutes and more alone
+LONG_TIMEOUT = 1200
+
+
 def pytest_addoption(parser):
     """`timeout` in pyproject.toml belongs to pytest-timeout; without that
     plugin it is declared here, so that it is not an unknown-option warning.
@@ -43,6 +47,9 @@ def pytest_addoption(parser):
     parser.addoption("--slow", action="store_true",
                      help="also run the tests marked slow: the tutorials, the "
                           "pages' figures and the large numerical checks")
+    parser.addoption("--long", action="store_true",
+                     help="also run the tests marked long, uipsf's learning studies "
+                          "of 20 s to minutes each (implies --slow)")
     try:
         import pytest_timeout  # noqa: F401
     except ImportError:
@@ -52,6 +59,8 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: seconds or more each; skipped unless --slow is given")
+    config.addinivalue_line(
+        "markers", "long: 20 s to minutes each; skipped unless --long is given (uipsf)")
     config.addinivalue_line(
         "markers", "gpu: needs CUDA or Apple's MPS; skipped unless --gpu is given (uipsf)")
 
@@ -63,22 +72,45 @@ def pytest_collection_modifyitems(config, items):
     every edit might.  They are skipped, not deselected, so the summary says
     how many were left out; `--slow` runs everything, as before a PR.
 
-    uipsf's GPU tier is a third, `--gpu`: run by hand on a Mac and a CUDA
+    `--long` is a third, above `--slow` and including it: uipsf's learning
+    studies -- a benchmark against the CRLB, a pupil learned in the window,
+    one region size against another -- of 20 s to over four minutes each.
+    In `--slow` they had taken it from 3.5 to 10.5 minutes on four cores, so
+    they are run by hand when uipsf's learning changes, not before every PR.
+    Their limit is `LONG_TIMEOUT`, not the 300 s every other test has.
+
+    uipsf's GPU tier is another, `--gpu`: run by hand on a Mac and a CUDA
     machine, since no CI runner has the GPU."""
     if not config.getoption("--gpu"):
         gpu = pytest.mark.skip(reason="gpu tier: run with --gpu")
         for item in items:
             if "gpu" in item.keywords:
                 item.add_marker(gpu)
-    if config.getoption("--slow"):
+    long_ = config.getoption("--long")
+    if long_:
+        try:
+            import pytest_timeout  # noqa: F401
+        except ImportError:
+            pass
+        else:
+            for item in items:
+                if "long" in item.keywords and item.get_closest_marker("timeout") is None:
+                    item.add_marker(pytest.mark.timeout(LONG_TIMEOUT))
+    else:
+        skip = pytest.mark.skip(reason="long: run with --long")
+        for item in items:
+            if "long" in item.keywords:
+                item.add_marker(skip)
+    if long_ or config.getoption("--slow"):
         # longest first: collected last (`test_tutorial`), the tutorials were
         # a tail of 20-50 s tests that four workers sat through after
         # everything else had finished
-        items.sort(key=lambda item: "slow" not in item.keywords)
+        items.sort(key=lambda item: ("long" not in item.keywords,
+                                     "slow" not in item.keywords))
         return
     skip = pytest.mark.skip(reason="slow: run with --slow")
     for item in items:
-        if "slow" in item.keywords:
+        if "slow" in item.keywords and "long" not in item.keywords:
             item.add_marker(skip)
 
 

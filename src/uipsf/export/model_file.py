@@ -172,6 +172,10 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     return ForwardModel(channels, geometry, intensity, background)
 
 
+#: positions `sample_psf` draws at once
+SAMPLE_CHUNK = 256
+
+
 def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=None, include_bead=False,
                upsample: int | None = None, channel: int = 0) -> torch.Tensor:
     """The learned PSF of ``channel`` at positions ``xyz_nm`` [N, 3]: [N, Y, X] expected photons per pixel
@@ -215,8 +219,18 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
         # one depth for every position, or one per position (in situ: the heights through a fixed focus)
         depth = depth.reshape(1) if depth.numel() == 1 else depth.reshape(1, -1)
     with torch.no_grad():
-        # on the CPU, for NumPy, wherever it was computed
-        return (model.share(shared, channel) * psf(p, xyz, depth, z_step_nm=step)[0]).cpu()
+        # on the CPU, for NumPy, wherever it was computed.  The positions in chunks: the field of one
+        # takes about 1.5 MB, and 2500 at once took 3.6 GB, enough to lose a test worker to the memory
+        # limit.  Each is drawn on its own except a bead's stack, blurred along z, which stays whole.
+        share = model.share(shared, channel)
+        n = xyz.shape[1]
+        if step is not None or n <= SAMPLE_CHUNK:
+            return (share * psf(p, xyz, depth, z_step_nm=step)[0]).cpu()
+        parts = []
+        for i in range(0, n, SAMPLE_CHUNK):
+            d = depth if depth is None or depth.numel() == 1 else depth[:, i:i + SAMPLE_CHUNK]
+            parts.append((share * psf(p, xyz[:, i:i + SAMPLE_CHUNK], d)[0]).cpu())
+        return torch.cat(parts)
 
 
 def sample_heights(model: ForwardModel, shared: dict, heights_nm, roi_px=None, upsample: int | None = None,

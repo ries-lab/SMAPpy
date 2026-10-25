@@ -31,7 +31,7 @@ def _from_centroids(batch, pixel_nm):
     return h / h[2, 2]                         # smappy's fit leaves the scale free; H₂₂ = 1 here
 
 
-@pytest.mark.slow
+@pytest.mark.long
 @pytest.mark.parametrize("kind, mirrored, n_max", [("biplane", False, 4), ("ratiometric", True, 6)])
 def test_two_channels_are_learned_to_their_crlbs_from_a_pairings_transform(kind, mirrored, n_max):
     optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.516, n_med=1.335, pixel_size_nm=(127, 116))

@@ -196,6 +196,7 @@ def _shared(truth):
     return {n: v for n, v in truth.physical().items() if truth.specs[n].scope == "shared"}
 
 
+@pytest.mark.slow
 def test_linking_four_frames_halves_the_crlb_of_the_height(optics):
     # Four frames of the same photons: four times the information, so the height's CRLB is halved.  Both
     # localised on the true pupil and focus, from the true heights' neighbourhood.
