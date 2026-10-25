@@ -257,7 +257,9 @@ class Simulate(Plugin):
             # Fit this writes the recipe from the settings as they are and
             # hands it to a fitter (the GUI's "fit simulation" window), as Run
             # writes it: a file left by an earlier run is never what is fitted
-            what = "the two-colour fitter" if settings.camera.split else "a fitter"
+            what = ("the two-colour fitter" if settings.camera.split
+                    else "the spline fitter, with its PSF calibration"
+                    if settings.optics.calibration else "a fitter")
             text = (f"Fit this writes {recipe_of(settings).name} with these settings "
                     f"and opens it in {what}")
             motion = state.notice.text + ".  " if state.notice is not None else ""

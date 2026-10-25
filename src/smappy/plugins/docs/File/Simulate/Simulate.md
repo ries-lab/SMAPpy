@@ -348,7 +348,8 @@ empty, the recipe is named after the preset, in the folder last opened.
 Open it in a fitter as its file, as you would open a TIFF.  *Fit this*
 under the form does both at once, without Run: it writes the recipe from
 the settings as they are and opens it in the Localize tab's open fitter
-(or Gaussian 2D), and for a split camera in Gaussian 2D 2C.  Run and *Fit
+(or Gaussian 2D); drawn with a *PSF calibration*, in Spline 3D with that
+calibration filled in; and for a split camera in Gaussian 2D 2C.  Run and *Fit
 this* always write the current settings over whatever file is there, so
 what is fitted is never what an earlier run left.  The frames are drawn as the fitter reads them, identically
 every time, and the fitter takes the camera's pixel size, conversion and

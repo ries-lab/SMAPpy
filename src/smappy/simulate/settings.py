@@ -143,8 +143,9 @@ class OpticsSettings:
                              file_filter="Calibrations (*_3dcal.mat *_3Dcal.mat *.h5);;"
                                          "All files (*)",
                              help="camera frames drawn with a measured spline PSF "
-                                  "(a bead calibration) instead of a Gaussian: a fit "
-                                  "then meets a PSF it did not make itself")
+                                  "(a bead calibration) instead of a Gaussian, and "
+                                  "fitted with it by Spline 3D; one camera only, a "
+                                  "split camera's halves stay Gaussian")
 
 
 @dataclass
