@@ -36,7 +36,7 @@ DEFAULT_KEYS = {"components.0.structure.preset": "structure",
 CAMERA_KEYS = {"camera.path": "simulation file"}
 #: added too while the scene has two colours: the split camera is how they
 #: reach the two-colour fit, and folded under *camera frames* it was missed
-SPLIT_KEYS = {"camera.split": "split camera (two colours)"}
+SPLIT_KEYS = {"camera.split": "split camera"}
 
 
 @dataclass
@@ -227,8 +227,8 @@ class Simulate(Plugin):
 
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields
-        those it reads; the camera's settings for a camera only; and, once
-        a camera simulation is written, an offer to fit it."""
+        those it reads; the camera's settings for a camera only; and, for
+        a camera, *Fit this*."""
         state = component_state(settings)
         camera = settings.output == "camera"
         state.shown.update({"camera": camera, "localizations": not camera,
@@ -248,20 +248,21 @@ class Simulate(Plugin):
         state.keys = key_labels(settings, keys)
         state.hints["preset"] = "modified" if modified(settings) else ""
         state.notice = motion_notice(settings)
-        # two colours on one unsplit camera are one colour to any fitter: said
-        # before the run, and beside *Fit this* after it
+        # two colours on one unsplit camera are one colour to any fitter
         unsplit = (f"{colours(settings)} colours drawn on one camera, as one: tick "
                    f"split camera for frames the two-colour fitter can tell apart"
                    if camera and colours(settings) > 1 and not settings.camera.split
                    else "")
-        if unsplit:
-            state.notice = Notice(unsplit)
-        path = recipe_of(settings) if camera else None
-        if path is not None and path.is_file():
+        if camera:
+            # Fit this writes the recipe from the settings as they are and
+            # hands it to a fitter (the GUI's "fit simulation" window), as Run
+            # writes it: a file left by an earlier run is never what is fitted
             what = "the two-colour fitter" if settings.camera.split else "a fitter"
-            text = f"{path.name} is written: fit it with {what} in the Localize tab"
-            state.notice = Notice(text + (f".  {unsplit}" if unsplit else ""),
-                                  action="Fit this", window="fit file", settings=str(path),
+            text = (f"Fit this writes {recipe_of(settings).name} with these settings "
+                    f"and opens it in {what}")
+            motion = state.notice.text + ".  " if state.notice is not None else ""
+            state.notice = Notice(unsplit or motion + text, action="Fit this",
+                                  window="fit simulation",
                                   kind="warning" if unsplit else "info")
         return state
 

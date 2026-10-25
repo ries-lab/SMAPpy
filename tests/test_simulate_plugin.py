@@ -105,19 +105,19 @@ def test_a_camera_recipe_without_a_file_is_named_after_its_preset(tmp_path, monk
     assert state.hints["camera.path"] == str(tmp_path / "Nuclear pores _Nup96_.sim.yaml")
     result = Simulate().run(Context(), settings)
     assert result.written == str(tmp_path / "Nuclear pores _Nup96_.sim.yaml")
-    # and Fit this is offered for it
-    assert Simulate().describe(None, settings).notice.window == "fit file"
+    # Fit this is offered whatever is on disk: it writes these settings first
+    assert Simulate().describe(None, settings).notice.window == "fit simulation"
 
 
 def test_two_colours_as_camera_frames_put_the_split_camera_at_the_top_and_say_why():
     settings = preset("Two-colour pores")
     settings.output = "camera"
     state = Simulate().describe(None, settings)
-    assert state.keys["camera.split"] == "split camera (two colours)"
-    assert "split camera" in state.notice.text
+    assert state.keys["camera.split"] == "split camera"
+    assert "tick split camera" in state.notice.text
     settings.camera.split = True
     state = Simulate().describe(None, settings)
-    assert "camera.split" in state.keys and state.notice is None
+    assert "camera.split" in state.keys and "two-colour fitter" in state.notice.text
     one = preset("Nuclear pores (Nup96)")
     one.output = "camera"
     assert "camera.split" not in Simulate().describe(None, one).keys

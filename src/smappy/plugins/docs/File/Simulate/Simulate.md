@@ -345,10 +345,12 @@ The frames are not written out as images.  The plugin saves the
 the seed -- a few hundred bytes instead of hundreds of megabytes.  It is
 shown among the key parameters while the output is camera frames; left
 empty, the recipe is named after the preset, in the folder last opened.
-Open it in a fitter as its file, as you would open a TIFF -- once it is
-written, *Fit this* under the form does that, without running it: in the
-Localize tab's open fitter (or Gaussian 2D), and for a split camera in
-Gaussian 2D 2C.  The frames are drawn as the fitter reads them, identically
+Open it in a fitter as its file, as you would open a TIFF.  *Fit this*
+under the form does both at once, without Run: it writes the recipe from
+the settings as they are and opens it in the Localize tab's open fitter
+(or Gaussian 2D), and for a split camera in Gaussian 2D 2C.  Run and *Fit
+this* always write the current settings over whatever file is there, so
+what is fitted is never what an earlier run left.  The frames are drawn as the fitter reads them, identically
 every time, and the fitter takes the camera's pixel size, conversion and
 offset from it.  Tick *also write a TIFF* for other software.
 
@@ -358,7 +360,7 @@ writes it as a transformation file, `<name>_2ct.h5`, the kind a two-colour
 fitter reads.  A two-colour fitter given the recipe as its file takes that
 transformation without being asked, instead of measuring it from the movie.
 So two-colour pores as frames are: the preset *Two-colour pores*, *simulate*
-set to *camera frames*, *split camera* ticked, Run, *Fit this*, Run -- and
+set to *camera frames*, *split camera* ticked, *Fit this*, Run -- and
 the fit assigns each localization its colour by how its light split, which
 the table's truth (`channel`) can check.  While a scene in two colours is
 simulated as camera frames, *split camera* is among the key parameters at
