@@ -310,8 +310,6 @@ def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):
     from smappy.plugins import Context
     plugin = plugins.get("File/Simulate/Simulate")()
     settings = plugin.Settings(output="camera", n_frames=20)
-    with pytest.raises(ValueError, match="where to write"):
-        plugin.run(Context(), settings)
     settings.camera.path = str(tmp_path / "x.sim.yaml")
     settings.camera.tiff = True
     result = plugin.run(Context(), settings)

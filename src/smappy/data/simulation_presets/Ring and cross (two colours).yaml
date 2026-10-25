@@ -3,6 +3,7 @@
 # tutorials.
 n_frames: 20000
 key:
+  n_frames: frames
   components.0.blinking.photons: photons per blink
   components.0.split_ratio: split ratio
   components.1.split_ratio: split ratio

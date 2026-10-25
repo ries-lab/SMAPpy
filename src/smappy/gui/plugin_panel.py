@@ -362,6 +362,8 @@ class PluginPanel(QWidget):
                 self.session.context(grouping=self.plugin.grouping), self.form.value())
         except Exception:
             state = FormState()
+        # the key parameters first: their copies take the hints too
+        self.form.set_keys(state.keys)
         if state.hints:
             self.form.set_hints(state.hints)
         if state.choices:
@@ -372,7 +374,6 @@ class PluginPanel(QWidget):
             self.form.set_titles(state.titles)
         if state.shown:
             self.form.set_shown(state.shown)
-        self.form.set_keys(state.keys)
         self._show_notice(state.notice)
 
     def _shapes_drawn(self, field: str, shapes) -> None:

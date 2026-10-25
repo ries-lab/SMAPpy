@@ -6,6 +6,7 @@ field_um: 20.0
 frame_time_ms: 10.0
 background: 10.0
 key:
+  n_frames: frames
   components.0.motion.d_um2_s: D, fast
   components.0.motion.d2_um2_s: D, slow
   components.0.motion.slow_fraction: slow fraction

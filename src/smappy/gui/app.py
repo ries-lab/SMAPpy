@@ -1668,6 +1668,16 @@ class ControlWindow(QMainWindow):
                     return index, tab, instance
         return None
 
+    def _pinned(self, plugin: str):
+        """``(tab index, tab, instance)`` of the first instance of ``plugin``
+        pinned to a tab, or None."""
+        for index, tab in enumerate(self._tab_widgets()):
+            if isinstance(tab, PluginTab):
+                for instance in tab.tab.instances:
+                    if instance.plugin == plugin:
+                        return index, tab, instance
+        return None
+
     def fit_file(self, path) -> bool:
         """Set a fitter's *file* to ``path`` as if it had been picked with the
         field's own button: the fitter hears of it (`react` fills the camera
@@ -1677,6 +1687,10 @@ class ControlWindow(QMainWindow):
         """
         path = Path(path)
         found = self._fitter_for_file()
+        from ..simulate.source import recipe_transform
+        if recipe_transform(path) is not None:
+            # a simulated split camera: the two-colour fitter, wherever it is
+            found = self._pinned(TWO_COLOUR_FITTER) or found
         panel = None
         if found is not None:
             index, tab, instance = found
@@ -1828,6 +1842,7 @@ class RenderWindow(QMainWindow):
 
 
 DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
+TWO_COLOUR_FITTER = "Localize/Gaussian 2D 2C"   # a simulated split camera's
 
 
 def _takes_a_stack(panel) -> bool:

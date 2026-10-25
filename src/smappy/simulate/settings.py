@@ -180,7 +180,8 @@ class CameraOutputSettings:
                       file_filter=SIMULATION_FILTER,
                       help="written as the recipe (*.sim.yaml); open it in a "
                            "fitter as its file, and the frames are made as they "
-                           "are read")
+                           "are read.  Empty: named after the preset, in the "
+                           "folder last opened")
     tiff: bool = param(False, label="also write a TIFF",
                        help="the frames themselves, beside the recipe, for other "
                             "software")
@@ -193,6 +194,10 @@ class CameraOutputSettings:
                           help="the camera count of a dark pixel")
     read_noise: float = param(1.5, label="read noise", unit="ADU", min=0,
                               help="Gaussian noise per pixel and frame, in counts")
+    split: bool = param(False, label="split camera",
+                        help="two halves, one above the other: each molecule in "
+                             "both, its component's split ratio of the light in the "
+                             "lower one, for the two-colour fit")
     split_sigma_nm: Optional[float] = param(None, label="second half's PSF",
                                             unit="nm", min=1,
                                             help="split camera: the PSF width in the "
@@ -302,7 +307,7 @@ class MotionSettings:
                             help="the diffusion coefficient of the second state")
     switch_probability: float = param(0.0, label="switching", min=0, max=1,
                                       help="per frame: the state is drawn again")
-    in_z: bool = param(False, label="in z too",
+    in_z: bool = param(True, label="in z too",
                        help="diffuse in 3D; off: in the plane, as in a membrane")
 
 
@@ -358,22 +363,25 @@ class SceneSettings:
                              "any can then be changed")
     output: str = param("localizations", label="simulate",
                         choices=(("localizations", "localizations"),
-                                 ("camera", "camera frames"),
-                                 ("split", "split camera")),
-                        help="a localization table directly; camera frames for a "
-                             "fitter; or a split camera, two halves, for the "
-                             "two-colour fit")
-    n_frames: int = param(20000, label="frames", min=1,
-                          help="the length of the measurement")
-    background: float = param(20.0, label="background", unit="photons/px", min=0,
-                              help="per pixel and frame: in the precision, or "
-                                   "drawn into the frames")
-    background_std: float = param(0.0, label="std", min=0, beside=True,
-                                  help="spread between localizations, or between "
-                                       "frames for the camera; 0: always the same")
+                                 ("camera", "camera frames")),
+                        help="a localization table directly, or camera frames "
+                             "for a fitter -- one camera, or a split one for the "
+                             "two-colour fit (camera frames > split camera)")
     drift: bool = param(False, label="add drift",
                         help="a random walk plus a slow creep of ~100 nm; the "
                              "truth is kept in the metadata as drift_truth")
+    append: bool = param(False, label="add as a new file",
+                         help="keep the open files and add the simulation as one "
+                              "more; off: it replaces them")
+    n_frames: int = param(20000, label="frames", min=1, advanced=True,
+                          help="the length of the measurement")
+    background: float = param(20.0, label="background", unit="photons/px", min=0,
+                              advanced=True,
+                              help="per pixel and frame: in the precision, or "
+                                   "drawn into the frames")
+    background_std: float = param(0.0, label="std", min=0, beside=True, advanced=True,
+                                  help="spread between localizations, or between "
+                                       "frames for the camera; 0: always the same")
     field_um: float = param(10.0, label="field", unit="µm", min=0.1, advanced=True,
                             help="the side of the square field copies set in a "
                                  "component, homogeneous labels and beads are in")

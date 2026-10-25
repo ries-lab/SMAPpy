@@ -1513,6 +1513,8 @@ class SettingsForm(QWidget):
         the form the way a stale saved value must not.
         """
         for path, value in values.items():
+            if path in self.key_fields:              # its copy at the top says it too
+                self.key_fields[path].set_hint(value)
             if self._routed("set_hints", path, value):
                 continue
             target = self

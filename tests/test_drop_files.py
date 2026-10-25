@@ -258,3 +258,23 @@ def test_a_written_simulation_offers_fit_this_which_fills_the_fitters_file(
     opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
     assert localize.slots[opened.id].panel.form.values()["source.path"] == str(path)
     assert not len(session.locs)                            # set, not fitted
+
+
+def test_fit_this_gives_a_split_camera_to_the_two_colour_fitter_with_its_map(
+        app, windows, tmp_path):
+    """A simulated split camera goes to Gaussian 2D 2C, whichever fitter is
+    open, and the fitter takes the transformation written beside the recipe."""
+    from smappy.plugins import Context
+    from smappy.plugins.simulate import Simulate
+    session, control, _ = windows
+    settings = Simulate.Settings(output="camera", n_frames=20)
+    settings.camera.split = True
+    settings.camera.path = str(tmp_path / "two.sim.yaml")
+    made = Simulate().run(Context(), settings)
+    assert control.fit_file(made.written)
+    localize = control.tabs.currentWidget()
+    opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
+    assert opened.plugin == "Localize/Gaussian 2D 2C"
+    values = localize.slots[opened.id].panel.form.values()
+    assert values["source.path"] == made.written
+    assert values["transform.path"] == str(tmp_path / "two_2ct.h5")

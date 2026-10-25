@@ -3,6 +3,7 @@
 # labelling-efficiency analysis are tried on.
 n_frames: 20000
 key:
+  n_frames: frames
   components.0.labelling.efficiency: labelling efficiency
   components.0.blinking.photons: photons per blink
   components.0.blinking.blinks: blinks

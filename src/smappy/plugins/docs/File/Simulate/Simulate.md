@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of]
 ---
 
@@ -10,9 +10,9 @@ makes such data: a **scene** of one or more **components** -- a structure
 such as nuclear pores or filaments, labels spread evenly as a background or
 as particles that diffuse, fiducial beads -- each labelled, blinking the way
 a dye does, in a colour of its own.  It gives the **localizations** a fit
-would have produced, the raw **camera frames** for a fitter to fit, or a
-**split camera** -- each molecule in two halves of the chip -- for the
-two-colour fit.
+would have produced, or the raw **camera frames** for a fitter to fit --
+on one camera, or on a **split camera**, each molecule in two halves of the
+chip, for the two-colour fit.
 
 Start from a **preset**: a whole scene (nuclear pores, two-colour pores,
 diffusing particles, ...) that fills every setting and puts the few that
@@ -244,7 +244,8 @@ time it was on in it.
 
 **8. Diffusion**, if a component's *diffusion* is ticked: each of its labels
 takes a random step every frame, larger the larger the diffusion
-coefficient *D*, in the plane unless *in z too* is ticked.  With a *second
+coefficient *D*, in 3D, or in the plane (a membrane) with *in z too*
+unticked.  With a *second
 state*, a label spends that fraction of the time diffusing with the second
 state's coefficient instead; with *switching* above 0 it changes state as
 it goes.  The table then carries what the tracking tools read as the truth:
@@ -331,23 +332,35 @@ fluorophore's photons spread over the pixels as a Gaussian of the *PSF
 sigma* (astigmatic, whose shape changes with z, if *astigmatic* is ticked,
 or a measured PSF from a *PSF calibration*), on the *background*, with the
 camera's shot noise, read noise and gain.  Nothing is removed, however dim
-or crowded: sorting that out is the fitter's job.  A **split camera** draws
-two halves, one above the other: each molecule in both, its component's
-*split ratio* of the photons in the lower half, which is placed by a known
-transformation (a slight turn, scale and shift) and sees a PSF of its own
-(*second half's PSF*).  Which colour a molecule is shows only in how its
-light splits -- what the two-colour fitters and
+or crowded: sorting that out is the fitter's job.  With *split camera*
+ticked the frames have two halves, one above the other: each molecule in
+both, its component's *split ratio* of the photons in the lower half, which
+is placed by a known transformation (a slight turn, scale and shift) and
+sees a PSF of its own (*second half's PSF*).  Which colour a molecule is
+shows only in how its light splits -- what the two-colour fitters and
 [Assign colours](plugin:Analysis/Dual-colour/Assign colours) measure.
 
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
-the seed -- a few hundred bytes instead of hundreds of megabytes.  Open it in
-a fitter as its file, as you would open a TIFF -- once it is written, *Fit
-this* under the form does that, in the Localize tab's open fitter (or
-Gaussian 2D), without running it: the frames are drawn as the
-fitter reads them, identically every time, and the fitter takes the camera's
-pixel size, conversion and offset from it.  Tick *also write a TIFF* for
-other software.
+the seed -- a few hundred bytes instead of hundreds of megabytes.  It is
+shown among the key parameters while the output is camera frames; left
+empty, the recipe is named after the preset, in the folder last opened.
+Open it in a fitter as its file, as you would open a TIFF -- once it is
+written, *Fit this* under the form does that, without running it: in the
+Localize tab's open fitter (or Gaussian 2D), and for a split camera in
+Gaussian 2D 2C.  The frames are drawn as the fitter reads them, identically
+every time, and the fitter takes the camera's pixel size, conversion and
+offset from it.  Tick *also write a TIFF* for other software.
+
+**Two colours, straight into the two-colour fit.**  The simulation knows
+the map between the split camera's halves exactly, so beside the recipe it
+writes it as a transformation file, `<name>_2ct.h5`, the kind a two-colour
+fitter reads.  A two-colour fitter given the recipe as its file takes that
+transformation without being asked, instead of measuring it from the movie.
+So two-colour pores as frames are: the preset *Two-colour pores*, *simulate*
+set to *camera frames*, *split camera* ticked, Run, *Fit this*, Run -- and
+the fit assigns each localization its colour by how its light split, which
+the table's truth (`channel`) can check.
 
 ```figure Three frames of the same simulation as camera frames (counts), with the true positions of the spots on in each marked.  Some are dim -- the start or end of a blink -- and some overlap; all are drawn.
 fig.set_size_inches(7.5, 2.6)
@@ -486,8 +499,11 @@ electrons; with an *EM gain* -- the electron multiplication of an EMCCD
 camera -- that count is multiplied by a gamma of its size,
 which doubles the variance.  The counts are electrons / *conversion* +
 *offset* plus Gaussian *read noise*, rounded and clipped to 16 bits.  The
-background is flat over a frame, and with *background std* it varies from
-frame to frame.  Each frame's noise has its own seed, so a frame is the same
+background is flat over a frame, and with its *std* it varies from frame to
+frame.  The split camera's lower half is the upper one mapped by
+`dual_transformation`: a turn of 0.4°, a scale of 1.004 and a shift of
+(1.6, −0.9) pixels about the half's centre, written beside the recipe as
+the `_2ct.h5` a two-colour fitter reads.  Each frame's noise has its own seed, so a frame is the same
 whichever block of the stack it is drawn in.
 
 **Drift.**  A random walk of 0.6 nm per frame and axis, plus a straight creep
@@ -515,9 +531,15 @@ setting, so *modified* means a value differs from it.
 
 ### output
 *localizations* is quick and needs nothing else: the table appears at once,
-replacing what is open.  *camera frames* and *split camera* write the
-*simulation file* and open nothing unless *load the truth* is ticked; fit the
-file to get localizations.
+replacing what is open (or beside it, with *add as a new file*).  *camera
+frames* write the *simulation file* and open nothing unless *load the truth*
+is ticked; fit the file to get localizations.
+
+### camera.split
+For the two-colour fit: give the components different *colours* and *split
+ratios* -- 0.25 and 0.75 tell the colours apart well at a few thousand
+photons; closer ratios make the assignment harder, which is what testing it
+needs.
 
 ### n_frames
 The number of blinks per fluorophore is set by *blinks* whatever the length,
@@ -589,7 +611,9 @@ gain*.
 
 ### camera.path
 Ground Truth finds the simulation again by this path, so a fit whose file has
-been moved or deleted has no truth to compare with.
+been moved or deleted has no truth to compare with.  Left empty, the recipe
+is named after the preset and overwritten by the next run of it: give a name
+to keep one.
 
 ### camera.conversion
 With these defaults and *EM gain* 0 the camera is an sCMOS.  The fitter reads

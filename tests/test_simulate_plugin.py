@@ -72,7 +72,8 @@ def test_choosing_a_built_in_structure_forgets_a_file():
 def test_a_split_camera_is_written_as_a_recipe_with_two_halves(tmp_path):
     from smappy.io.tiff import open_stack
     settings = preset("Ring and cross (two colours)")
-    settings.output = "split"
+    settings.output = "camera"
+    settings.camera.split = True
     settings.n_frames = 20
     settings.camera.path = str(tmp_path / "two.sim.yaml")
     settings.camera.split_sigma_nm = 145.0
@@ -86,6 +87,67 @@ def test_a_split_camera_is_written_as_a_recipe_with_two_halves(tmp_path):
     assert set(np.unique(truth["channel"])) == {1, 2}
     assert sorted(np.unique(truth["ratio"])) == [0.25, 0.75]
     assert truth.metadata["sigma_nm"] == [130.0, 145.0]
+    # the map between the halves is written beside the recipe, as a fitter's file
+    from smappy.calibrate.transform import load_transform
+    from smappy.simulate.camera import dual_transformation
+    written = load_transform(tmp_path / "two_2ct.h5")
+    np.testing.assert_allclose(written.transformation, dual_transformation(100))
+
+
+def test_a_camera_recipe_without_a_file_is_named_after_its_preset(tmp_path, monkeypatch):
+    from smappy import config
+    monkeypatch.setattr(config, "last_folder", lambda: tmp_path)
+    settings = preset("Nuclear pores (Nup96)")
+    settings.output = "camera"
+    settings.n_frames = 10
+    state = Simulate().describe(None, settings)
+    assert state.keys["camera.path"] == "simulation file"
+    assert state.hints["camera.path"] == str(tmp_path / "Nuclear pores _Nup96_.sim.yaml")
+    result = Simulate().run(Context(), settings)
+    assert result.written == str(tmp_path / "Nuclear pores _Nup96_.sim.yaml")
+    # and Fit this is offered for it
+    assert Simulate().describe(None, settings).notice.window == "fit file"
+
+
+@pytest.mark.slow
+def test_two_colour_pores_as_a_split_camera_are_fitted_by_the_two_colour_fitter(tmp_path):
+    """The two-colour workflow on simulated pores: the recipe is the fitter's
+    file, the transformation written beside it is taken without measuring it,
+    and the colours the fit assigns are the components'."""
+    from scipy.spatial import cKDTree
+    from smappy.plugins.fit import (CameraSettings, DualGaussianFit, OutputSettings)
+    settings = preset("Two-colour pores")
+    settings.output = "camera"
+    settings.camera.split = True
+    settings.camera.load_truth = True
+    settings.n_frames = 400
+    for c in settings.components:
+        c.labelling.efficiency = 0.15                   # sparse enough to fit
+    settings.camera.path = str(tmp_path / "pores.sim.yaml")
+    made = Simulate().run(Context(), settings)
+    truth = made.files[0][0]
+    fitter = DualGaussianFit()
+    fit = fitter.Settings()
+    fit.source.path = made.written
+    fit.output = OutputSettings(path=str(tmp_path / "pores.hdf5"))
+    fit.camera = CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1)
+    updates = fitter.react("source.path", fit)
+    assert updates["transform.path"] == str(tmp_path / "pores_2ct.h5")
+    fit.transform.path = updates["transform.path"]
+    locs = fitter.run(Context(), fit).locs
+    got, want = [], []
+    for f in np.unique(locs["frame"]):
+        m, t = locs["frame"] == f, (truth["frame"] == f) & (truth["photons"] > 1500)
+        if not t.any():
+            continue
+        d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(
+            np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
+        near = (d < 60) & (locs["channel"][m] > 0)
+        got += list(locs["channel"][m][near])
+        want += list(truth["channel"][t][i[near]])
+    assert len(got) > 100
+    agree = np.mean(np.asarray(got) == np.asarray(want))
+    assert max(agree, 1 - agree) > 0.9               # which colour is 1 is the ratios' order
 
 
 def test_single_structure_settings_still_run_as_a_scene_of_one():
