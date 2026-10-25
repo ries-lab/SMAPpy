@@ -28,6 +28,7 @@ from ..regions import Region
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
+from .widgets import CompactSpinBox
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
 FIELD_WIDTH = 64    # px: the toolbar's line width and pixel size
@@ -247,6 +248,8 @@ class RenderView(QWidget):
         self.stacked = False             # panels one above another
         self.label = _panel_label(self.view)
         self.fov = None                  # the field of view of the shown tile
+        self._content = 0                # counts what the picture shows changing
+        self._job_content = 0            # ... as it was when the job in flight began
         self.tile_valid = False
         self._generation = 0             # the newest request; older results are dropped
         self._busy = False
@@ -558,6 +561,21 @@ class RenderView(QWidget):
                 and t.x0 <= view.x0 and t.y0 <= view.y0
                 and t.x1 >= view.x1 and t.y1 >= view.y1)
 
+    @property
+    def tile_valid(self) -> bool:
+        return self._tile_valid
+
+    @tile_valid.setter
+    def tile_valid(self, valid: bool) -> None:
+        # A picture that changes while a job is drawing the old one makes that
+        # job's tile stale.  Counted, so the job's return does not declare it
+        # valid again: it did, and the player's stop -- the scan cleared while
+        # a step was drawing -- was answered with the step's picture, the
+        # pending render finding the view "covered" by it.
+        if not valid:
+            self._content += 1
+        self._tile_valid = valid
+
     def render(self) -> None:
         """Ask for a tile around the current view; nothing here blocks.
 
@@ -587,6 +605,7 @@ class RenderView(QWidget):
                                int(view.nx * scale), int(view.ny * scale))
         self._generation += 1
         self._busy = True
+        self._job_content = self._content
         # frozen here, on the GUI thread: the worker sees nothing else
         self._job = PanelJob(self.snapshot(), tile, tuple(self.panels), to_screen=True)
         self.render_requested.emit(self._job, self._generation)
@@ -631,7 +650,10 @@ class RenderView(QWidget):
                               autoLevels=False)
                 item.setRect(rect)
             self.fov = fov
-            self.tile_valid = True
+            if self._job_content == self._content:
+                self._tile_valid = True
+            else:                        # the picture changed while it drew
+                self._pending = True
         if self._pending:
             self._pending = False
             self.render()
@@ -1090,7 +1112,7 @@ class RenderToolBar(QToolBar):
         self.pixel_button.setToolTip(f"zoom to {DEFAULT_PIXEL:g} nm per screen pixel")
         self.pixel_button.clicked.connect(lambda: self.pixel.setValue(DEFAULT_PIXEL))
         self.addWidget(self.pixel_button)
-        self.pixel = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
+        self.pixel = CompactSpinBox(minimum=0.1, maximum=1e6, decimals=1)
         self.pixel.setKeyboardTracking(False)
         self.pixel.setMaximumWidth(FIELD_WIDTH)
         self.pixel.valueChanged.connect(view.set_pixel_size)

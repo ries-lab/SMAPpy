@@ -162,7 +162,7 @@ c.set_xlabel("n_in_group (frames)", fontsize=8); c.tick_params(labelsize=7)
 **4. Drawing the localizations.**  *render* chooses the spot each
 localization is drawn as.  *histogram* counts localizations per pixel: exact, but
 at a fine pixel size mostly single bright pixels.  *Gaussian (fixed)* draws every
-localization as the same Gaussian blob, of width *sigma x (fixed)*.
+localization as the same Gaussian blob, of width *sigma* (under *more*).
 *Gaussian (precision)*, the default, draws each one as a Gaussian as wide as its own
 [localization precision](plugin:Panels/Glossary) (also called the CRLB or
 localization uncertainty: how far its fitted position is expected to lie from
@@ -848,19 +848,24 @@ it.  The drift corrections take these settings too, unless their own
 *within* and *dark frames* are set.
 
 ### more
-The rendering widths, gamma and the white background.
+The rendering widths, gamma and the white background.  Only the widths the
+chosen *render* mode uses are shown.
 
-### sigma x (fixed)
+### sigma
 The width in *Gaussian (fixed)*, in the units of the horizontal axis; 0 bins.  A
-few times the pixel size, or about the typical precision.
+few times the pixel size, or about the typical precision.  Shown in
+*Gaussian (fixed)*, and in *Gaussian (precision)* when an axis is not a
+position (there is no precision for photons or frames).  On x against y the
+picture is drawn round, with this one width; where the axes are different
+quantities, the row reads *sigma x* and *sigma y* appears beside it.
 
-### sigma y (fixed)
+### sigma y
 The vertical width, for axes that are not the same quantity.  Empty follows
-*sigma x* where the two axes are the same quantity and bins where they are
+*sigma* where the two axes are the same quantity and bins where they are
 not.
 
 ### precision factor
-0.5 draws each localization at half its precision: sharper than the
+In *Gaussian (precision)* only.  0.5 draws each localization at half its precision: sharper than the
 statistics strictly allow, which is what makes fine structure readable.  1
 is the honest width; much below 0.5 the spots fall apart into single pixels.
 

@@ -426,6 +426,11 @@ class ControlWindow(QMainWindow):
         from .updates import Updates
         self.updates = Updates(self)     # started by `main`, so no test asks PyPI
         self._action(help_, "Check for updates...", None, self.updates.check_now)
+        help_.addSeparator()
+        # AboutRole: on a Mac Qt moves it into the application's own menu
+        # (*SMAPpy > About SMAPpy*), where a Mac user looks for it
+        about = self._action(help_, "About SMAPpy", None, self.show_about)
+        about.setMenuRole(QAction.AboutRole)
         # Reset view is the render window's button, Ctrl+0 its key from either
         # window (`RenderToolBar`); a menu item as well said it twice
         self._action(view, "Show render window", None, render.show)
@@ -445,6 +450,10 @@ class ControlWindow(QMainWindow):
         session.on_change(self._on_session)
         self._on_session("locs")
         self.restore_layout()
+
+    def show_about(self) -> None:
+        from .about import show_about
+        show_about(self)
 
     def show_plugin_docs(self) -> None:
         from .help_window import show_help

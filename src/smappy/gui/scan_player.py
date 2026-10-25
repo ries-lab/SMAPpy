@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBo
 from .. import view_path as vp
 from .. import scan as sc
 from ..session import Session
-from .widgets import CollapsibleSection
+from .widgets import CollapsibleSection, CompactSpinBox
 
 #: the coordinates offered before the table's other columns
 FIRST = ("frame", "time_s", "z_nm")
@@ -172,7 +172,7 @@ class ScanPlayer(QWidget):
 
     @staticmethod
     def _spin(tip: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox(minimum=0.0, maximum=1e9, decimals=2)
+        spin = CompactSpinBox(minimum=0.0, maximum=1e9, decimals=2)
         spin.setSpecialValueText("auto")
         spin.setKeyboardTracking(False)
         spin.setToolTip(tip)
@@ -207,7 +207,7 @@ class ScanPlayer(QWidget):
         buttons.addStretch(1)
         buttons.addWidget(self.save_path)
         buttons.addWidget(self.load_path)
-        self.key_seconds = QDoubleSpinBox(minimum=0.0, maximum=3600.0, decimals=1, value=2.0)
+        self.key_seconds = CompactSpinBox(minimum=0.0, maximum=3600.0, decimals=1, value=2.0)
         self.key_seconds.setSuffix(" s")
         self.key_seconds.setKeyboardTracking(False)
         self.key_seconds.setToolTip("the time from the key before to the selected one")
@@ -215,15 +215,15 @@ class ScanPlayer(QWidget):
         self.turn_axis.addItems(vp.AXES)
         self.turn_axis.setToolTip("what the turn is about: the data's z, x or y through "
                                   "the middle of the screen, or the screen's own axes")
-        self.turn_degrees = QDoubleSpinBox(minimum=-3600.0, maximum=3600.0, decimals=0,
+        self.turn_degrees = CompactSpinBox(minimum=-3600.0, maximum=3600.0, decimals=0,
                                            value=360.0)
         self.turn_degrees.setSuffix("°")
         self.turn_degrees.setToolTip("how far it turns; 0 for a zoom alone")
-        self.turn_zoom = QDoubleSpinBox(minimum=0.01, maximum=1000.0, decimals=2, value=1.0)
+        self.turn_zoom = CompactSpinBox(minimum=0.01, maximum=1000.0, decimals=2, value=1.0)
         self.turn_zoom.setPrefix("×")
         self.turn_zoom.setToolTip("how much larger the picture is at the end; below 1 "
                                   "zooms out")
-        self.turn_seconds = QDoubleSpinBox(minimum=0.1, maximum=3600.0, decimals=1, value=12.0)
+        self.turn_seconds = CompactSpinBox(minimum=0.1, maximum=3600.0, decimals=1, value=12.0)
         self.turn_seconds.setSuffix(" s")
         self.turn_seconds.setToolTip("how long the turn takes")
         self.add_turn = QPushButton("add turn")
@@ -626,6 +626,7 @@ class ScanPlayer(QWidget):
     def stop(self) -> None:
         """Stop and show everything again."""
         self.pause()
+        self.timer.stop()                 # whatever the play button says
         self.session.set_scan(None)
         blocked = self.slider.blockSignals(True)
         self.slider.setValue(0)
