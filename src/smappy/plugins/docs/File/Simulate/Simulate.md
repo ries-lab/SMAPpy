@@ -358,10 +358,10 @@ the settings as they are and opens it in the Localize tab's open fitter
 (or Gaussian 2D); drawn with a *PSF calibration*, in Spline 3D with that
 calibration filled in; for a split camera in Gaussian 2D 2C, or with a
 dual-colour calibration in Spline 3D 2C with that calibration.  Astigmatic
-Gaussian frames on one camera go to Gaussian 2D with *elliptical* ticked, and
-the status line gives the curves to type into
+Gaussian frames on one camera go to Gaussian 2D with *elliptical* ticked,
+and its *after the fit* runs
 [Astigmatic z](plugin:Analysis/After fit/Astigmatic z), which turns the two
-widths into z.  Run and *Fit
+widths into z, on the simulator's own curves, typed in.  Run and *Fit
 this* always write the current settings over whatever file is there, so
 what is fitted is never what an earlier run left.  The frames are drawn as the fitter reads them, identically
 every time, and the fitter takes the camera's pixel size, conversion and

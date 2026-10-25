@@ -315,8 +315,9 @@ the curves cross, and the range of the beads is the range the curves are
 trusted over.
 
 It takes seconds and needs no PyTorch.  Its file, `<name>_astigz.h5` beside
-the stacks, is handed to Astigmatic z and never to a fitter: it is not listed
-for the fitters' *auto*.  Its pages are *Widths in z* -- every bead's widths
+the stacks, is handed to Astigmatic z -- the step of Gaussian 2D's *after the
+fit* -- and never to a fitter's model: it is not listed for the fitters'
+*auto*.  Its pages are *Widths in z* -- every bead's widths
 over the curves, the selected beads ringed -- and *z from the widths*: each
 bead plane's widths turned back into z by Astigmatic z's own method, against
 the z it was taken at, and the error it reports there.  A good calibration
@@ -716,8 +717,9 @@ wavelength.
 ### Use in the Spline 3D fitter
 Puts the saved calibration into the fitter again (it is put there when it is
 saved).  For dual colour, the Spline 3D 2C fitter; for the elliptical
-Gaussian, *Use in Astigmatic z*: its file goes into Astigmatic z, with its
-*calibration* set to *from a file*.  Every saved calibration is
+Gaussian, *Use in Astigmatic z*: Gaussian 2D gets *elliptical* ticked and,
+in its *after the fit*, *astigmatic z* on with this file, *calibration* set
+to *from a file*.  Every saved calibration is
 also listed, with the microscope and the device states of its beads, so that
 a fitter left on *auto* finds it for data taken the same way, without this
 button ([Spline 3D](plugin:Localize/Spline 3D)).

@@ -1003,6 +1003,12 @@ class Plugin:
     # the GUI's, opened the same way.  *Load*'s *Add* is the window's File >
     # Open adding rather than replacing.
     window_buttons: Tuple[Tuple[str, str], ...] = ()
+    # Buttons inside a part of the form, each ``(part, label, path)``: the
+    # plugin at ``path`` run on the session with that part's settings, as if
+    # it had been run from its own panel -- logged and undone under its name.
+    # A fitter's *after the fit*, whose steps one forgot to tick, run on the
+    # table without fitting again.
+    part_runs: Tuple[Tuple[str, str, str], ...] = ()
 
     def __init_subclass__(cls, **kwargs):
         # At definition, not at the first run: a dropped-in plugin that does

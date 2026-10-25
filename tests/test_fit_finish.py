@@ -80,14 +80,143 @@ def test_nothing_is_asked_for_and_nothing_happens():
 
 
 def test_a_finishing_step_that_fails_costs_only_itself():
-    """A fit that ran for twenty minutes must not be lost to a histogram."""
-    locs = Localizations({"frame": np.arange(100, dtype=np.int64),
-                          "x_nm": np.zeros(100), "y_nm": np.zeros(100),
-                          "photons": np.full(100, 500.0)}, {"units": "nm"})
-    finished = finish_localizations(locs, FinishSettings(assign_colors=True))
+    """A fit that ran for twenty minutes must not be lost to a missing file."""
+    locs, _ = widths_table(100)
+    finished = finish_localizations(locs, FinishSettings(astigmatic_z=True))
 
     assert finished.locs is locs and not finished.changed
     assert len(finished.notes) == 1 and "failed" in finished.notes[0]
+
+
+def test_a_step_the_table_cannot_take_is_passed_over_not_failed():
+    """One part for every fitter: colours after a one-colour fit, z without
+    the widths, are nothing to run rather than a failure to report."""
+    locs = Localizations({"frame": np.arange(100, dtype=np.int64),
+                          "x_nm": np.zeros(100), "y_nm": np.zeros(100),
+                          "photons": np.full(100, 500.0)}, {"units": "nm"})
+    finished = finish_localizations(
+        locs, FinishSettings(assign_colors=True, astigmatic_z=True))
+    assert finished.locs is locs and not finished.changed and not finished.notes
+
+
+def widths_table(n=400, seed=0):
+    """An elliptical Gaussian fit's table: each localization's widths at a known
+    z, on the typed calibration's curves (the after-fit part's default)."""
+    from smappy.plugins.astigmatic_z import TypedCalibration
+    cal = TypedCalibration().calibration()
+    rng = np.random.default_rng(seed)
+    z = rng.uniform(-500.0, 500.0, n)
+    sx, sy = cal.widths(z)
+    return Localizations({"frame": np.arange(n, dtype=np.int64),
+                          "x_nm": rng.uniform(0, 5000, n), "y_nm": rng.uniform(0, 5000, n),
+                          "photons": np.full(n, 1000.0),
+                          "sigma_x_nm": np.asarray(sx), "sigma_y_nm": np.asarray(sy)},
+                         {"units": "nm"}), z
+
+
+def typed_z(**more):
+    from smappy.plugins.astigmatic_z import AstigmaticZSettings
+    return FinishSettings(astigmatic_z=True, assign_colors=False,
+                          astigmatic=AstigmaticZSettings(calibration="typed"), **more)
+
+
+def test_astigmatic_z_turns_the_widths_into_the_z_they_were_drawn_at():
+    locs, z = widths_table()
+    finished = finish_localizations(locs, typed_z())
+    assert finished.changed
+    assert np.abs(finished.locs["z_nm"] - z).max() < 1.0
+    assert [entry["what"] for entry in finished.history] == ["Analysis/After fit/Astigmatic z"]
+
+
+def test_z_comes_before_the_drift_so_that_the_drift_can_correct_it():
+    settings = FinishSettings(astigmatic_z=True, drift="comet", assign_colors=True)
+    assert [plugin.path for plugin, _ in settings.steps()] == [
+        "Analysis/After fit/Astigmatic z", "Analysis/Drift/COMET",
+        "Analysis/After fit/Assign colours"]
+
+
+def test_a_chain_runs_last_on_the_finished_table(tmp_path):
+    from smappy.chain import ChainSpec, Step, write
+    from smappy.plugins.after_fit import AfterFitSettings
+    spec = ChainSpec(steps=[Step(plugin="Analysis/After fit/Astigmatic z",
+                                 values={"calibration": "typed"})])
+    path = write(spec, tmp_path / "z.chain.yaml")
+    locs, z = widths_table()
+    settings = AfterFitSettings(assign_colors=False, chain=str(path))
+    finished = finish_localizations(locs, settings)
+    assert finished.changed and np.abs(finished.locs["z_nm"] - z).max() < 1.0
+    assert [entry["what"] for entry in finished.history][-1].startswith("Analysis/Chains/")
+
+
+def test_a_chain_that_fits_is_refused_and_the_rest_still_runs(tmp_path):
+    from smappy.chain import ChainSpec, Step, write
+    spec = ChainSpec(steps=[Step(plugin="Localize/Gaussian 2D")])
+    path = write(spec, tmp_path / "fits.chain.yaml")
+    locs, z = widths_table()
+    finished = finish_localizations(locs, typed_z(chain=str(path)))
+    assert "nothing to fit" in finished.notes[0]
+    assert np.abs(finished.locs["z_nm"] - z).max() < 1.0
+
+
+def test_each_fitter_shows_only_the_steps_its_table_can_take():
+    """Colours after two channels, z after an elliptical Gaussian; each
+    step's settings only while it is on, a drift method's only when chosen."""
+    from smappy.plugins.fit import (DualGaussianFit, DualSplineFit, GaussianFit,
+                                    GaussianFitSettings, SplineFit)
+
+    def shown(cls, settings=None):
+        state = cls().describe(None, settings or cls.Settings())
+        return {k[len("finish."):]: v for k, v in state.shown.items()
+                if k.startswith("finish.")}
+
+    for cls in (GaussianFit, SplineFit):
+        assert shown(cls)["assign_colors"] is False and shown(cls)["colors"] is False
+    for cls in (DualGaussianFit, DualSplineFit):
+        assert shown(cls)["assign_colors"] is True and shown(cls)["colors"] is True
+        assert shown(cls)["astigmatic_z"] is False
+    plain = shown(GaussianFit)
+    assert plain["astigmatic_z"] is False and plain["rcc"] is False and plain["comet"] is False
+    elliptical = GaussianFitSettings()
+    elliptical.model.elliptical = True
+    assert shown(GaussianFit, elliptical)["astigmatic_z"] is True
+    assert shown(GaussianFit, elliptical)["astigmatic"] is False      # until ticked
+    elliptical.finish.astigmatic_z = True
+    elliptical.finish.drift = "rcc"
+    on = shown(GaussianFit, elliptical)
+    assert on["astigmatic"] and on["rcc"] and not on["comet"]
+    assert GaussianFit().describe(None, elliptical).titles["finish"] == \
+        "after the fit: astigmatic z, RCC"
+
+
+def test_the_fitters_button_runs_after_the_fit_on_the_open_table_as_its_own_step():
+    """Not ticked during the fit: the button inside *after the fit* runs the
+    steps on the session's table, one undo step, logged as After the fit."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+
+    locs, z = widths_table()
+    session = Session(locs)
+    panel = PluginPanel(GaussianFit, session)
+    panel.form.set_values({"model.elliptical": True, "finish.astigmatic_z": True,
+                           "finish.astigmatic.calibration": "typed"})
+    button = panel.part_buttons["finish"]
+    assert button.isEnabled()
+    loop = QEventLoop()
+    panel.ended.connect(lambda *_: loop.quit())
+    button.click()
+    QTimer.singleShot(20000, loop.quit)
+    loop.exec()
+    app.processEvents()
+
+    assert np.abs(session.locs["z_nm"] - z).max() < 1.0
+    assert session.history[-1]["what"] == "Analysis/After fit/After the fit"
+    session.undo()
+    assert "z_nm" not in session.locs
 
 
 def test_colours_are_assigned_by_default_and_drift_is_not():

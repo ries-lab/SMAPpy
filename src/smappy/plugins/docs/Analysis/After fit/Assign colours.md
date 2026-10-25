@@ -38,10 +38,11 @@ It offers two ways to decide:
   given a colour close to the boundary; a dim one cannot.  It also refuses a
   localization that is too far from *every* colour to be either.
 
-Both fitters run this plugin at the end of every fit (*assign colours*, in
-their *after the fit* section, on by default, with the minima method), so a
-two-colour table normally arrives with its colours.  Run it again from the
-Analysis tab to see how it decided, or to decide differently.
+Both two-colour fitters run this plugin at the end of every fit (*assign
+colours*, in their *after the fit* section, on by default, with the minima
+method), so a two-colour table normally arrives with its colours.  To decide
+differently, change the settings there and press *Run these now* at the foot
+of the section, or pin this plugin to a tab with its +.
 
 **What it needs.**  Two columns of photons per localization: `photons_ch0`
 and `photons_ch1`, as the two-colour fitters write them, or another pair (see

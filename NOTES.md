@@ -1136,13 +1136,32 @@ at the top of the file.
 
 ### Finishing the fit
 
-A two-colour fit is not finished when the last frame is: the localizations
-want the drift taken out and the colours put on, and only then is the file
-worth opening.  Both are already plugins, so the fit runs them -- `finish`
-in `plugins/fit.py`, an `after the fit` section on both 2C fitters, colour
-assignment on and drift off by default.
+A fit is not finished when the last frame is: the localizations want z
+from the widths, the drift taken out, the colours put on, and only then is
+the file worth opening.  These are all plugins already, so every fitter runs
+them -- the *after the fit* part (`finish`, `plugins/after_fit.py`), in this
+order: astigmatic z (off), drift none / RCC / COMET (none), colours (on), then
+a saved chain (none).
 
-**At the end, not per block.**  Neither step can see one block.  A drift curve
+**Fixed steps, then any chain.**  Not a chain of anything with switches: the
+known steps have typed settings, so choosing COMET shows COMET's settings and
+nothing else, a step is shown only in a fitter whose table can take it
+(colours after two channels, z after an elliptical Gaussian), and saved
+workspaces keep naming the fields.  What the lab does beyond them is a chain
+run last.  z comes before the drift so that the drift corrects z too.
+
+**One part for every fitter, judged by the table.**  When the steps run, a
+step whose columns are missing is passed over rather than failed
+(`after_fit.applicable`), so the default colours do nothing to a one-colour
+fit and the same settings serve the plugin *After the fit* on any table.
+
+**Again, from a button.**  A step not ticked during the fit is run later
+with *Run these now* inside the part: `Plugin.part_runs` runs the plugin
+*After the fit* on the session with the part's settings, one undo step under
+its own name.  RCC, COMET, Assign colours and Astigmatic z are no longer
+pinned to the default Analysis tab; they are in the tree, and + pins them.
+
+**At the end, not per block.**  No step can see one block.  A drift curve
 is measured *across* the acquisition, and the modes of the colour histogram are
 a property of the sample that the first two hundred localizations do not yet
 show; running either per package would also cost the fit its throughput, which
@@ -1154,8 +1173,8 @@ streams while the frames come in, which is what makes a crash cost one block;
 the finishing steps add columns, which an append-only writer cannot do to what
 it has already written.  So the streamed file is the raw fit, and it is
 replaced by the finished table once the steps have run -- the saved file is the
-one somebody should open, and the raw fit is what survives a crash.  Both runs
-go into the file's `history` in the same shape `Session.log` uses, so a file
+one somebody should open, and the raw fit is what survives a crash.  Every step
+goes into the file's `history` in the same shape `Session.log` uses, so a file
 says which drift estimator corrected it and with which numbers.
 
 **A failed step is a note.**  These run when the frames are already fitted.  A
@@ -1465,9 +1484,8 @@ decisions:
   beads with the same elliptical Gaussian in the data's fit box -- widths of
   a Gaussian on a non-Gaussian PSF depend on both.  Its `_astigz.h5` is never
   listed for the fitters' *auto*; `use_calibration` sends it to Astigmatic z.
-* **Not a finishing step of the fit, yet.**  `FinishSettings` (drift and
-  colours after a two-colour fit) is to be redesigned; Astigmatic z after an
-  elliptical Gaussian 2D fit is a candidate for it then.
+* **A finishing step of the fit.**  Gaussian 2D with *elliptical* ticked
+  offers it in *after the fit* ("Finishing the fit"), before the drift.
 
 ## Tracking
 

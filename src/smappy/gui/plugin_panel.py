@@ -90,6 +90,9 @@ class PluginPanel(QWidget):
     def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
         super().__init__(parent)
         self.plugin = plugin_cls()
+        # what the run in flight runs: the plugin, or the one a button inside
+        # a part names (`Plugin.part_runs`), which is applied under its own name
+        self._runner = self.plugin
         self.session = session
         self.result: Optional[Result] = None
         # the window this plugin's figures live in, made on the first Plot
@@ -113,6 +116,19 @@ class PluginPanel(QWidget):
             layout.addWidget(about)
         self.form = SettingsForm(plugin_cls.Settings, plugin_cls.specs())
         layout.addWidget(self.form)
+        # a button at the foot of a part, running another plugin on that
+        # part's settings: a fitter's *after the fit* on the open table
+        self.part_buttons = {}
+        for part, label, path in plugin_cls.part_runs:
+            target = self.form.fields.get(part)
+            if not isinstance(target, SettingsForm):
+                continue
+            button = QPushButton(label)
+            button.setToolTip("run the steps above on the open localizations, "
+                              "without fitting again: one undo step")
+            button.clicked.connect(lambda _=False, p=part, r=path: self.run_part(p, r))
+            target.layout().addWidget(button, 0, Qt.AlignLeft)
+            self.part_buttons[part] = button
         # a field that reads the session -- the layers editor offers its
         # columns and copies its layers -- is told which one
         for leaf in self.form.leaves():
@@ -256,6 +272,7 @@ class PluginPanel(QWidget):
         self.streamed.connect(self._on_stream)
         self._notice_settings = None
         self._describe()
+        self._enable_parts()
         session.on_change(self._on_session)
         self._take_saved()
 
@@ -272,6 +289,8 @@ class PluginPanel(QWidget):
             # Register layers offers to apply what it measured
             # (only those: a fitter's description opens its file)
             self._describe()
+        if what == "locs":
+            self._enable_parts()
         if what in ("locs", "results"):
             self._take_saved()
         elif what in ("roi", "roi-edited") and self.follow_roi is not None \
@@ -457,6 +476,26 @@ class PluginPanel(QWidget):
     def run(self) -> None:
         self._start("run", "running...")
 
+    def run_part(self, part: str, path: str) -> bool:
+        """Run the plugin at ``path`` with the form's part ``part`` as its
+        settings, on the session, as its own panel would."""
+        from .. import plugins
+        try:
+            runner = plugins.get(path)()
+        except KeyError:
+            self.status.setText(f"no plugin {path} in this program")
+            return False
+        return self._start("run", "running...", runner=runner, part=part)
+
+    def _enable_parts(self) -> None:
+        """A part's button needs localizations to run on, and no run going."""
+        has = self.session.locs is not None and len(self.session.locs) > 0
+        for button in self.part_buttons.values():
+            button.setEnabled(bool(has) and self._thread_idle())
+
+    def _thread_idle(self) -> bool:
+        return self._stop is None and self._merge_wait is None
+
     def _run_or_stop(self) -> None:
         if self._merge_wait is not None:
             self._cancel_wait()
@@ -505,19 +544,23 @@ class PluginPanel(QWidget):
         return self._start("run", "running...", context=context, ask=ask)
 
     def _start(self, job: str, message: str, context=None, ask: bool = True,
+               runner: Optional[Plugin] = None, part: Optional[str] = None,
                **kwargs) -> bool:
         try:
             settings = self.form.value()
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
             return False
+        if part is not None:
+            settings = getattr(settings, part)
+        self._runner = runner = runner or self.plugin
         if (job == "run" and self.session.live and not self._owns_live
-                and self.plugin.changes_locs_for(settings)
-                and not self.plugin.column_recipe_for(settings)):
+                and runner.changes_locs_for(settings)
+                and not runner.column_recipe_for(settings)):
             # (a recipe -- an expression, a colour assignment -- follows the
             # live table instead: `Session._follow`)
             # known before the run: say so now, not after minutes of work
-            name = self.plugin.name or self.plugin.path
+            name = runner.name or runner.path
             self._offer_new_window(
                 settings, f"The fit is still adding localizations, and {name} "
                           "changes them, so it cannot run on this session now.\n\n"
@@ -533,7 +576,10 @@ class PluginPanel(QWidget):
                 # form's; showing them is what keeps the run from being a
                 # surprise afterwards
                 settings = chosen
-                self.form.set(settings)
+                if part is not None:
+                    self.form.fields[part].set(settings)
+                else:
+                    self.form.set(settings)
         context = dict(context or {})
         stop = None
         if job == "run":
@@ -542,7 +588,7 @@ class PluginPanel(QWidget):
             stop = context.get("stop") or threading.Event()
             context["stop"] = stop
         merger = self._merger()
-        if merger is not None and reads_locs(self.plugin):
+        if merger is not None and reads_locs(runner):
             if merger.pending():
                 # not on localizations standing in for blinks being merged:
                 # the run waits for them and starts by itself
@@ -618,7 +664,7 @@ class PluginPanel(QWidget):
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
                                        stream=self.streamed.emit,
-                                       grouping=self.plugin.grouping,
+                                       grouping=self._runner.grouping,
                                        **context)
         self._job = job
         # a run somebody asked for shows its figures when it is done; one
@@ -645,7 +691,7 @@ class PluginPanel(QWidget):
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
         # the fitter's own threads' bookkeeping: a bus error, not an exception
         self._thread.setStackSize(32 * 1024 * 1024)
-        self._worker = _Worker(self.plugin, context, settings, job, **kwargs)
+        self._worker = _Worker(self._runner, context, settings, job, **kwargs)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.done.connect(self._on_done)
@@ -690,8 +736,8 @@ class PluginPanel(QWidget):
 
         try:
             context = self.session.context(progress=self.output.appendPlainText,
-                                           grouping=self.plugin.grouping)
-            question = self.plugin.preflight(context, settings)
+                                           grouping=self._runner.grouping)
+            question = self._runner.preflight(context, settings)
         except Exception as e:
             # An estimate is a courtesy.  One that cannot be made -- a table in
             # pixels with no pixel size, a plugin that does not expect this
@@ -702,7 +748,7 @@ class PluginPanel(QWidget):
             return True, settings, None
         if not question:
             return True, settings, None
-        title = f"{self.plugin.name}: before running"
+        title = f"{self._runner.name}: before running"
         if not isinstance(question, PreflightQuestion):
             # the plain yes-or-no is the same dialog with no alternatives, so
             # that every question before a run has the same default (Cancel)
@@ -738,7 +784,7 @@ class PluginPanel(QWidget):
         if opener is None:
             self.status.setText("no new window in this program")
             return False
-        if opener(run=(self.plugin, settings)) is None:
+        if opener(run=(self._runner, settings)) is None:
             return False
         self.status.setText("running in a new window")
         return True
@@ -833,7 +879,8 @@ class PluginPanel(QWidget):
         self.output.verticalScrollBar().setValue(self.output.verticalScrollBar().maximum())
 
     def _buttons(self):
-        return [b for b in (self.run_button, self.preview_button) if b is not None]
+        return [b for b in (self.run_button, self.preview_button) if b is not None] \
+            + list(self.part_buttons.values())
 
     def _release_buttons(self) -> bool:
         """Run is Run again and the buttons take clicks; whether Stop had
@@ -844,6 +891,7 @@ class PluginPanel(QWidget):
             self.run_button.setToolTip("")
         for button in self._buttons():
             button.setEnabled(True)
+        self._enable_parts()
         return stop is not None and stop.is_set()
 
     def _on_done(self, result: Result) -> None:
@@ -857,7 +905,7 @@ class PluginPanel(QWidget):
         if self._job not in ("preview", "follow"):
             owns, self._owns_live = self._owns_live, False
             try:
-                self.session.apply(self.plugin, result, finishes_live=owns)
+                self.session.apply(self._runner, result, finishes_live=owns)
             except LiveTableError as e:
                 # a plugin whose `changes_locs` is wrong, or a fit that began
                 # while this ran: what was declared is asked about before the

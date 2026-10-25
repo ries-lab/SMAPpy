@@ -214,6 +214,14 @@ the plane in focus marked, and the Run after it uses what Preview found.  An
 session.  A bead-average calibration has no model: there the setting is not
 shown, and *auto* fits as calibrated.
 
+**After the fit.**  Once the last frame is fitted, the steps of the folded
+section [*after the fit*](plugin:Analysis/After fit/After the fit) run over
+the whole table before it is saved: a drift correction (none by default),
+which corrects z as well unless its *correct z* says otherwise, and a chain
+of your own.  *Run these now*, at the
+foot of the section, runs them on the open localizations later, without
+fitting again.
+
 ## In detail
 
 **The spline.**  The calibration is a grid of $n_z \times n_y \times n_x$
