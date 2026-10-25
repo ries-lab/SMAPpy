@@ -76,6 +76,7 @@ def test_a_drawn_spline_with_another_sample_index_moves_the_plane_in_focus(learn
     assert glycerol > water + 50              # a better matched sample: the focus moves nearly as the objective
 
 
+@pytest.mark.slow
 def test_the_auto_depth_finds_the_focus_from_the_molecules_on_the_coverslip(learned, beads):
     rng = np.random.default_rng(1)
     n = 2500
@@ -86,6 +87,7 @@ def test_the_auto_depth_finds_the_focus_from_the_molecules_on_the_coverslip(lear
     assert found.spike > 0 and not found.messages
 
 
+@pytest.mark.slow
 def test_the_auto_depth_without_molecules_on_the_coverslip_stays_short_of_the_focus_and_says_so(learned, beads):
     rng = np.random.default_rng(2)
     n = 2500
@@ -97,6 +99,7 @@ def test_the_auto_depth_without_molecules_on_the_coverslip_stays_short_of_the_fo
 
 
 
+@pytest.mark.slow
 def test_spline_3d_on_auto_finds_the_focus_once_draws_it_and_names_it(tmp_path, learned, beads, monkeypatch):
     """The whole plugin: a TIFF of molecules through 700 nm of sample, a bead calibration with its model
     beside it; *sample depth* on auto writes the depth it found into the settings, and z is the height."""

@@ -46,7 +46,7 @@ def test_the_microscope_has_no_default_for_its_na_or_wavelength():
     assert [o.wavelength_nm for o in two] == [600.0, 680.0] and two[0].pixel_size_nm == (100.0, 100.0)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_a_run_learns_saves_beside_the_stacks_and_recalculates_into_the_same_files(stack_file):
     run = run_calibration([stack_file], False, OPTICS, MODEL, DETECTION, camera=CAMERA)
     assert len(run.cal.beads.rows) == 10 and run.saved.parent == stack_file.parent.parent
@@ -185,7 +185,7 @@ def test_the_bead_average_calibrates_in_the_window_as_in_the_bead_calibration(st
     window.close()
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_calibration_on(
         stack_file, monkeypatch):
     window, handed, wait = _window(stack_file, monkeypatch, "pupil model (uiPSF)")

@@ -94,7 +94,7 @@ def pytest_collection_modifyitems(config, items):
             pass
         else:
             for item in items:
-                if "long" in item.keywords:
+                if "long" in item.keywords and item.get_closest_marker("timeout") is None:
                     item.add_marker(pytest.mark.timeout(LONG_TIMEOUT))
     else:
         skip = pytest.mark.skip(reason="long: run with --long")

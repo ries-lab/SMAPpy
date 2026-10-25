@@ -125,7 +125,7 @@ def test_smappys_global_fitter_reads_a_two_channel_model_as_its_own_dual_calibra
         assert np.median(locs["photons"][mine]) == pytest.approx(photons * in_box, rel=0.03)
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_the_learnt_ratio():
     """`calibrate.pupil.fit_quality` on a learnt two-channel model: every slice of every pair fitted by Spline 3D
     2C's global fit, x, y and z shared through the learnt transform, as the data will be fitted.  Measured

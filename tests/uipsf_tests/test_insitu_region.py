@@ -32,7 +32,7 @@ def test_a_region_set_by_hand_is_kept_and_auto_becomes_pixels_where_the_movie_co
     assert I.InSituSettings().resolved((116.0, 127.0)).roi_px == 25
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_on_an_exact_model_a_15_and_a_21_px_region_learn_the_same_astigmatism():
     # M2's optics and its beads' astigmatism, 0-1300 nm deep, focus 430 nm, ~3000 photons on 55 per pixel,
     # learnt from the truth: whatever moves is a bias of the region.  ~1 min on 4 cores.

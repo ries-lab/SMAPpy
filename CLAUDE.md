@@ -53,10 +53,11 @@ A fresh container has **no numpy**.  Before anything else:
     pip install -e .                    # builds the C++ extensions too
     pip install -e .[test]              # pytest, pytest-timeout (a 300 s limit per test), pytest-xdist
 
-Running the tests -- two tiers:
+Running the tests -- three tiers:
 
     python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
-    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: everything, ~4 min
+    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: ~4 min on four cores
+    python -m pytest tests -q -n auto --long    # by hand, when uipsf's learning changes: --slow and the studies
 
 * **Run the slow tier before you open a PR, and before you call major work
   done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
@@ -72,7 +73,13 @@ Running the tests -- two tiers:
 * **A PR description states the `--slow` run's result** on a line of its own
   -- "`--slow -n auto`: 1321 passed, 4 skipped" -- or says plainly that it was
   not run and why, so a reviewer can see from the PR whether it was done.
-* Mark a new test `slow` when it takes more than about 4 s.
+* Mark a new test `slow` when it takes more than about 4 s, and `long` when
+  it takes more than about 20 s: `--long` is uipsf's learning studies (a
+  benchmark against the CRLB, a pupil learned in the window, one region size
+  against another), which had taken `--slow` from 3.5 to 10.5 minutes.  It
+  includes `--slow`; its tests have a 1200 s limit (`LONG_TIMEOUT` in
+  `conftest.py`) where every other has 300 s.  A `slow` test that grows past
+  20 s is shortened or moved to `long`, not left to stretch `--slow`.
 * `-n auto` needs pytest-xdist (the `test` extra).  `conftest.py` gives each
   worker one BLAS thread (without it four workers are barely faster than one),
   makes work stealing the default (xdist's own piles the tutorials onto one
@@ -110,7 +117,7 @@ Running the tests -- two tiers:
 * uipsf's tests (`tests/uipsf_tests/`) need torch, the extra `uipsf`:
   `pip install -e .[test,uipsf]`.  Without torch they are not collected at
   all (`collect_ignore` in `tests/conftest.py`), so the count drops by about
-  160 and nothing says so; `--gpu` adds their GPU tier, run by hand on a Mac
+  300 and nothing says so; `--gpu` adds their GPU tier, run by hand on a Mac
   and a CUDA machine.
 
 ## Writing a plugin
