@@ -279,9 +279,9 @@ presets NPC, CME and Circles; the helpers in `smappy/segmentation.py`.
 
 | step | what | size | needs |
 |---|---|---|---|
-| **6.1** | `smappy/segmentation.py`, the circle template with its values and *keep*, density peaks removed, the presets | M-L | - |
-| **6.2** | beads, on `fiducials.find_beads` | S | 6.1 |
-| **6.3** | positions from a file | S | 6.1 |
+| **6.1** ✅ | `smappy/segmentation.py`, the circle template with its values and *keep*, density peaks removed, the presets | M-L | - |
+| **6.2** ✅ | beads, on `fiducials.find_beads` | S | 6.1 |
+| **6.3** ✅ | positions from a file | S | 6.1 |
 
 ### Done
 
@@ -666,6 +666,33 @@ presets NPC, CME and Circles; the helpers in `smappy/segmentation.py`.
   leaves no file.  The windows' frames are now kept as plain data
   (`picture.FrameSource`, refreshed on the GUI thread as the view moves),
   so a plugin's worker never reads a widget.
+
+* **Wave 6** (2026-10-25, `wave6_design.md`): *Segment regions* version 2.
+  **6.1** -- the *circle template* (a ring or a disc, over a range of radii
+  spaced by 15 % or the ring width, the best radius per pixel by signal to
+  noise) replaces the ring template and density peaks (no aliases); each
+  candidate measured with `n_locs`, `radius_nm`, `roundness`, `psf_nm`,
+  `touching` and its shape's own (`n_ring`, `n_inside`, `n_outside`,
+  `far_p`; `centre_ratio`), judged by one *keep* condition in Filter ROIs'
+  syntax, the values kept in `origin["values"]` and shown as results columns
+  (`core.segment_columns`), so un-evaluated ROIs have rows; presets *NPC*,
+  *CME*, *Circles*; the defaults discs of 30-150 nm with `n_locs >= 10`.
+  Decided here: two candidates are kept apart when their circles overlap by
+  more than half the smaller radius; each claims its localizations and a
+  weaker one is measured on what is left (a ring's far test sees all); a
+  ring's window is `max(1.5 R, R + 3 w)`; a disc's centre is its mean
+  position and its radius `sqrt(2 (<d^2> - <sigma^2>))`, clipped twice;
+  `touching` is against candidates that pass *keep*.  With these the *NPC*
+  preset finds on `studies/npc_le`'s simulations what the ring template
+  found (ELE within 0.017; README, finding 14).  The preset cannot add
+  `psf_nm <= 150` by itself (it cannot see the table): the page says to.
+  Helpers in `smappy/segmentation.py`.  **6.2** -- *beads*: an ROI on each
+  bead of `fiducials.find_beads`, with `frames_fraction`, `photons`,
+  `spread_nm`; refused on merged blinks; Fiducials on those ROIs gives the
+  drift it finds itself.  **6.3** -- *positions from a file*: a csv / tsv by
+  the csv reader's names and units, each position to the file its
+  `file_id`, `file` or `filenumber` names; *Export table*'s positions read
+  back as the same ROIs.
 
 ### Start here
 

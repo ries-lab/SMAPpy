@@ -159,7 +159,8 @@ def test_find_rings_and_blobs_review_evaluate_histogram():
     assert hist['n_localizations']['counts'].sum() == 4
     set_bounds(p, {'photons': (2000, None)})
     assert not p.find(s.id)
-    assert not p.results()
+    # the statistics are out of date; what the segmenter measured stays
+    assert not any('n_localizations' in row for row in p.results())
 
 
 def test_a_failing_step_costs_its_columns_and_not_the_run():
@@ -229,9 +230,12 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     p.find(s.id)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
+    # and what Segment regions measured on each candidate
+    from smappy.segmentation import VALUES
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
                           'photons_n0', 'mean_precision_nm', 'median_precision_nm',
-                          'sigma_c_nm', 'on_time_frames', 'on_time_s', 'n_blinks'}
+                          'sigma_c_nm', 'on_time_frames', 'on_time_s', 'n_blinks',
+                          *VALUES['disc']}
 
 
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():

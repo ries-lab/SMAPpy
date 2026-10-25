@@ -200,7 +200,7 @@ numbers lie within `mean +- 2 std` (`std_range`), and discard candidates
 overlapping accepted ones.  Rectangles are additionally rotated onto the
 principal axis of the enclosed localizations and get the median length
 (`_pick_similar_rectangular`, `:1602`).
-SMAPpy instead: `segment.py` (ring template, density peaks, id column).  Pick
+SMAPpy instead: `segment.py` (circle template, beads, id column, positions from a file).  Pick
 similar is the method with no parameters to choose: draw five ROIs on good
 structures, get all the others.  Fit: a fourth *method* of *Segment regions*
 ("like the selected ROIs"), reading the statistics from the ROI manager's selected

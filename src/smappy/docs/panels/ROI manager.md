@@ -128,7 +128,7 @@ step the zoom from one square to the next, row by row, so that every part of
 the data is looked at once, in a fixed order, and not only where the eye
 happened to land.
 
-```figure Simulated nuclear pores (Nup96, 60 % labelling) after Density Peaks, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *direction* drawn on it (magenta).
+```figure Simulated nuclear pores (Nup96, 60 % labelling) after Segment regions with its defaults, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *direction* drawn on it (magenta).
 x0, y0, x1, y1 = state.index.bounds
 here = 5
 tx0, ty0, tx1, ty1 = tiles[here]
@@ -394,7 +394,7 @@ brings a removed ROI back under its own number.
 Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
 added, and any it replaced), an ROI added, removed, included or excluded,
 an outline, a line drawn, reversed or cleared.  Ctrl+Z in this window does the same.  The button
-names the edit it would undo -- *Undo remove ROI 3*, *Undo Density Peaks* --
+names the edit it would undo -- *Undo remove ROI 3*, *Undo Segment regions: 141 ROIs* --
 where the main window's *Edit > Undo* names a change of the table (*Undo
 RCC*).  This is the ROI manager's own undo, apart
 from the main window's, which undoes changes to the localizations: one

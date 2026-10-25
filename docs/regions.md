@@ -21,7 +21,11 @@ annotates and organises ROIs; it is not the only place they can be measured.
   (`ROI.lines`, names from `ROIProject.line_names`), keywords, *use*,
   *comment* and *origin* are annotations beside it; the lines' angles and
   lengths and the keywords are columns of its results row
-  (`core.annotation_columns`).  The ROIs a run covers
+  (`core.annotation_columns`), and so is what *Segment regions* measured on
+  the candidate it was made from (`origin["values"]`, `core.segment_columns`:
+  `n_locs`, `radius_nm`, `roundness`, ... -- `segmentation.VALUES`), which
+  describes the candidate as found and does not go stale when the ROI is
+  moved.  The ROIs a run covers
   are the **included** ones: *use* ticked.  `ROI.number`
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
@@ -261,7 +265,7 @@ square on its centre.
 
 ```
 Analysis/Measure/...                every measurement: on the view, per ROI, per cluster
-Analysis/Regions/Segment regions    ROIs: a ring template, density peaks, or an id column
+Analysis/Regions/Segment regions    ROIs: a circle template (ring, disc), beads, an id column, a file
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
 Analysis/Regions/Regions to column  what was measured per region onto the table

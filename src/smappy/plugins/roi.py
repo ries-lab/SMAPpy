@@ -5,8 +5,8 @@ Three kinds, all ordinary plugins:
 * **Segment** proposes candidate ROIs on a whole file.  It runs once, and
   derives from `SegmenterPlugin`, which gives it a Preview: the same
   proposals, drawn in the ROI manager and not added.  The one shipped is
-  *Segment regions* (`segment.py`); the density-peaks finder it offers is
-  here, `density_peaks`.
+  *Segment regions* (`segment.py`), on the helpers of
+  `smappy.segmentation`.
 * **Evaluate** measures *one* ROI and returns that site's row in
   `Result.values`.  It declares ``per_region = True``, which is what the
   evaluation window offers -- a property of the plugin, not of its folder, so
@@ -32,9 +32,6 @@ from . import (Context, FormState, Plot, Plugin, PreflightChoice, PreflightQuest
 from .. import region_results
 from ..region_results import Evaluation
 
-MAX_FINDER_PIXELS = 16_000_000
-
-
 def replace_param(what: str = "ROIs"):
     """The *replace* setting every segmenter's settings end with.
 
@@ -51,76 +48,6 @@ def replace_param(what: str = "ROIs"):
 
 
 # ------------------------------------------------------------ segmentation
-
-@dataclass
-class DensityPeakSettings:
-    bin_nm: float = param(20.0, label="bin", unit="nm", min=0.1,
-                          help="pixel size of the density image the peaks are found in")
-    sigma_nm: float = param(50.0, label="smoothing", unit="nm", min=0.1,
-                            help="Gaussian blur applied before looking for maxima")
-    separation_nm: float = param(150.0, label="separation", unit="nm", min=0.1,
-                                 help="reject a peak this close to one already accepted")
-    count_radius_nm: float = param(75.0, label="count radius", unit="nm", min=0.1,
-                                   help="localizations within this radius must reach "
-                                        "the minimum count")
-    min_count: int = param(10, label="minimum count", min=1,
-                           help="a peak with fewer localizations is not made an ROI")
-
-
-def density_peaks(locs, settings: DensityPeakSettings,
-                  existing: Sequence = ()) -> List[List[float]]:
-    """Candidate centres, brightest first, no two closer than the separation."""
-    from scipy.ndimage import gaussian_filter, label, find_objects, maximum_filter
-    from scipy.spatial import cKDTree
-
-    for name in ("bin_nm", "sigma_nm", "separation_nm", "count_radius_nm", "min_count"):
-        if not getattr(settings, name) > 0:
-            raise ValueError(f"{name} must be positive")
-    xy = np.column_stack((locs["x_nm"], locs["y_nm"])).astype(float)
-    xy = xy[np.isfinite(xy).all(axis=1)]
-    if len(xy) < settings.min_count:
-        return []
-    pixel = float(settings.bin_nm)
-    # Padding keeps peaks at the data extent from being reflected/omitted.
-    pad = 4 * settings.sigma_nm + pixel
-    origin = np.floor((xy.min(axis=0) - pad) / pixel) * pixel
-    shape = np.ceil((xy.max(axis=0) + pad - origin) / pixel).astype(int) + 1
-    if int(shape[0]) * int(shape[1]) > MAX_FINDER_PIXELS:
-        raise ValueError("finder image exceeds 16 million pixels; increase the bin size")
-    bins = np.floor((xy - origin) / pixel).astype(int)
-    density = np.zeros(tuple(shape[::-1]), dtype=float)
-    np.add.at(density, (bins[:, 1], bins[:, 0]), 1)
-    density = gaussian_filter(density, settings.sigma_nm / pixel, mode="constant")
-    # Small local-max neighborhood, followed by radial suppression in nm.
-    maxima = (density == maximum_filter(density, size=3, mode="constant")) & (density > 0)
-    labels, _ = label(maxima)
-    peaks = []
-    for index, region in enumerate(find_objects(labels), 1):
-        if region is None:
-            continue
-        yy, xx = np.nonzero(labels[region] == index)
-        yy, xx = yy + region[0].start, xx + region[1].start
-        peaks.append((float(density[yy[0], xx[0]]), float(xx.mean()), float(yy.mean())))
-    peaks.sort(key=lambda v: (-v[0], v[2], v[1]))
-    tree = cKDTree(xy)
-    accepted = [np.asarray(c, dtype=float) for c in existing]
-    found = []
-    for _, x, y in peaks:
-        center = origin + (np.array([x, y]) + 0.5) * pixel
-        neighbors = tree.query_ball_point(center, settings.count_radius_nm)
-        if len(neighbors) < settings.min_count:
-            continue
-        # Recenter using the compact structure, not the full analysis ROI.
-        center = xy[neighbors].mean(axis=0)
-        if len(tree.query_ball_point(center, settings.count_radius_nm)) < settings.min_count:
-            continue
-        if any(np.linalg.norm(center - other) < settings.separation_nm
-               for other in accepted):
-            continue
-        accepted.append(center)
-        found.append(center.tolist())
-    return found
-
 
 class SegmenterPlugin(Plugin):
     """A finder: proposes ROIs on the file the manager is showing.

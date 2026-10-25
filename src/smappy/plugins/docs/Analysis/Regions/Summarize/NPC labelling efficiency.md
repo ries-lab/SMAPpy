@@ -57,9 +57,10 @@ from smappy.group import group
 from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings, BlinkingSettings)
-from smappy.plugins.npc import (NPCSegmentSettings, NPCCornersSettings, segment_npcs,
-                                count_corners, joint_efficiency, draw_joint, true_corners,
-                                labeling_efficiency, LabelingEfficiencySettings)
+from smappy.plugins.npc import (NPCCornersSettings, count_corners, joint_efficiency,
+                                draw_joint, true_corners, labeling_efficiency,
+                                LabelingEfficiencySettings)
+from smappy.segmentation import VALUES, find_circles, judge
 from smappy import npc as model
 from scipy.spatial import cKDTree
 sim = SimulationSettings(n_frames=3000, seed=2, structure=StructureSettings(preset="npc"),
@@ -72,7 +73,9 @@ sigma = np.asarray(locs["xy_err_nm"])
 tree = cKDTree(xy)
 cs = NPCCornersSettings()
 k, n, radii = [], [], []
-for site in segment_npcs(locs, NPCSegmentSettings()):
+sites = find_circles(locs, "ring", 55.0, 55.0)          # Segment regions' NPC preset
+judge(sites, "n_ring >= 4 and 40 <= radius_nm <= 70 and far_p >= 0.05", VALUES["ring"])
+for site in sites:
     if site["use"]:
         near = tree.query_ball_point(site["center"], 150)
         v = count_corners(xy[near, 0], xy[near, 1], site["center"], cs, sigma[near])

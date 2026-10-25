@@ -383,6 +383,19 @@ def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def segment_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
+    """What *Segment regions* measured on the candidate an ROI was made
+    from (``origin["values"]``), as columns of its row in the results table
+    -- ``segment.<name>`` where a measurement already has the name -- so
+    Filter, Sort and the summaries read them like anything measured.  They
+    describe the candidate as it was found, and stay when the ROI is moved."""
+    found = (roi.origin or {}).get("values")
+    if not isinstance(found, dict):
+        return {}
+    return {(name if name not in values else f"segment.{name}"): value
+            for name, value in found.items()}
+
+
 def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
     """A copy that later edits cannot reach.  Shallow per ROI, which is
     enough because an ROI is only ever edited by assigning its fields --
@@ -1170,7 +1183,8 @@ class ROIProject:
     def sort_rows(self) -> Dict[str, Dict[str, Any]]:
         """What a sort or a filter reads of each ROI: where it is (its
         centre, ``roi_x_nm`` and ``roi_y_nm``, and ``in_drawn_roi``), the newest stored values of every evaluation,
-        current or not, named as in the results table, and its keywords."""
+        current or not, and what its segmenter measured, named as in the
+        results table, and its keywords."""
         from . import pipeline as pipeline_module
         inside = self.in_drawn_roi()
         out = {}
@@ -1181,6 +1195,7 @@ class ROIProject:
                 if entry and "values" in entry:
                     steps[label] = entry
             values = pipeline_module.merged_values({"steps": steps})
+            values.update(segment_columns(roi, values))
             place = {"roi_x_nm": float(roi.center[0]), "roi_y_nm": float(roi.center[1]),
                      "in_drawn_roi": None if inside is None else inside[roi_id]}
             out[roi_id] = {**place, **values, **annotation_columns(roi, values)}
@@ -1524,7 +1539,8 @@ class ROIProject:
     def results(self, steps=None, labels=None):
         """The site table: a row per included ROI that has results.
 
-        A row holds every evaluation the ROI has that still describes it
+        A row holds what *Segment regions* measured on the ROI's candidate
+        (`segment_columns`) and every evaluation the ROI has that still describes it
         (`evaluations`), whoever ran it -- the evaluation window's pipeline,
         a chain, a script -- the pipeline's first, then the rest by name.  A
         column keeps its plain name while one evaluation writes it, and is
@@ -1555,8 +1571,12 @@ class ROIProject:
                            key=lambda l: (order.get(l, len(order)), l))
             values = pipeline_module.merged_values(
                 {"steps": {label: found[label][0] for label in names}})
-            if values:
-                roi = self.rois[roi_id]
+            roi = self.rois[roi_id]
+            # what the segmenter measured is in the table too, unless the
+            # table is of chosen evaluations only
+            own = segment_columns(roi, values) if labels is None else {}
+            if values or own:
+                values = {**values, **own}
                 rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values,
                              **annotation_columns(roi, values)})
         return rows

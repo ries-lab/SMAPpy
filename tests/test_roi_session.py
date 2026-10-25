@@ -109,7 +109,7 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     s = Session(_table())
     s.show_grouped(0, False)
     project = s.rois
-    project.find(next(iter(project.sources)), parameters={"min_count": 5})
+    project.find(next(iter(project.sources)), parameters={"keep": "n_locs >= 5"})
     project.evaluate()
     ungrouped = len(project.results())
     assert ungrouped == len(project.rois)
@@ -468,7 +468,7 @@ def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
     s = Session(_table())
     s.show_grouped(0, False)
     project = s.rois
-    project.find(next(iter(project.sources)), parameters={"min_count": 5})
+    project.find(next(iter(project.sources)), parameters={"keep": "n_locs >= 5"})
     project.evaluate()
     n = len(project.results())
     out = s.save(tmp_path / "with.hdf5", gui_state=False)
@@ -487,4 +487,6 @@ def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
     back = Session()
     back.load(out)
     back.show_grouped(0, False)
-    assert len(back.rois.rois) == len(project.rois) and back.rois.results() == []
+    # what the segmenter measured goes with the ROIs; the evaluations do not
+    assert len(back.rois.rois) == len(project.rois)
+    assert not any("n_localizations" in row for row in back.rois.results())

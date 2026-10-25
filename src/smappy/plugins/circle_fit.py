@@ -5,7 +5,7 @@ circle to the localizations.  ``per_region``, so it measures the view (the
 drawn ROI), every ROI, or every cluster; *Centre ROIs* moves each ROI onto
 the centre it finds.
 
-**The fit is the NPC segmenter's** (`npc.fit_circle`): Gauss-Newton on the
+**The fit is the segmenter's** (`segmentation.fit_circle`): Gauss-Newton on the
 distances from the circle with a soft-L1 loss, so a localization further
 than about *outlier scale* from the circle counts with its distance rather
 than its square, and the background inside the ROI does not pull the centre.
@@ -40,7 +40,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register
-from .npc import fit_circle
+from ..segmentation import fit_circle
 
 # below this a free circle is not determined (three points fix one exactly)
 MIN_FREE, MIN_FIXED = 4, 3
