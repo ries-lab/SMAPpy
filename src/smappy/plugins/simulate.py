@@ -63,6 +63,19 @@ def recipe_of(settings: SceneSettings):
         else auto_recipe(settings)
 
 
+def astigmatic_note(settings: SceneSettings) -> Optional[str]:
+    """For astigmatic Gaussian frames on one camera, what *Fit this* says after opening them in
+    Gaussian 2D with *elliptical* ticked: Astigmatic z, and the curves to type there.  None for any
+    other -- frames drawn with a PSF calibration go to Spline 3D."""
+    optics = settings.optics
+    if (settings.output != "camera" or settings.camera.split or not optics.astigmatism
+            or optics.calibration):
+        return None
+    return (f"then Analysis > After fit > Astigmatic z with typed curves: widths {optics.sigma_nm:g} nm, "
+            f"focus x {optics.focal_offset_nm:g} and y {-optics.focal_offset_nm:g} nm, "
+            f"depths {optics.depth_nm:g} nm")
+
+
 # ------------------------------------------------------------------ presets
 
 def presets() -> List[str]:
@@ -270,6 +283,7 @@ class Simulate(Plugin):
                     if settings.camera.split and drawn
                     else "the two-colour fitter" if settings.camera.split
                     else "Spline 3D, with its PSF calibration" if drawn
+                    else "Gaussian 2D, elliptical, for Astigmatic z" if astigmatic_note(settings)
                     else "a fitter")
             text = (f"Fit this writes {recipe_of(settings).name} with these settings "
                     f"and opens it in {what}")

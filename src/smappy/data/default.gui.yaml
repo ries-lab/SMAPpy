@@ -27,7 +27,8 @@ tabs:
   - plugin: Analysis/Measure/Localization Statistics
   - plugin: Analysis/Drift/RCC
   - plugin: Analysis/Drift/COMET
-  - plugin: Analysis/Dual-colour/Assign colours
+  - plugin: Analysis/After fit/Assign colours
+  - plugin: Analysis/After fit/Astigmatic z
 - name: Regions
   header: roi
   instances:

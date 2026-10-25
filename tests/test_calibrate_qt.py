@@ -211,3 +211,15 @@ def test_a_calibration_with_nowhere_to_go_says_so(control):
                                  if not i.plugin.startswith("Localize/Spline")]
     control.use_calibration("/tmp/beads_cal.h5", True)
     assert "no Spline 3D 2C fitter is pinned" in control.statusBar().currentMessage()
+
+
+def test_an_elliptical_gaussian_calibration_goes_to_astigmatic_z_not_a_fitter(control, tmp_path):
+    from smappy.astigmatic_z import simulator_calibration
+    path = simulator_calibration().save(tmp_path / "beads_astigz.h5")
+    control.use_calibration(str(path), False)
+    tab = control.tabs.widget(control.tabs.currentIndex())
+    panel = next(tab.slots[i.id].panel for i in tab.tab.instances
+                 if i.plugin == "Analysis/After fit/Astigmatic z")
+    assert panel.form.values()["path"] == str(path)
+    assert panel.form.values()["calibration"] == "file"
+    assert "Astigmatic z now uses" in control.statusBar().currentMessage()

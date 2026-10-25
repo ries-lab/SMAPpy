@@ -82,6 +82,9 @@ class GaussianPSF(PSFModel):
         if self.elliptical:
             out["sigma_x_pix"] = p[:, 4]
             out["sigma_y_pix"] = p[:, 5]
+            # the widths' errors: what Astigmatic z weighs the two widths by, and its z error
+            out["sigma_x_err_pix"] = np.sqrt(crlb[:, 4])
+            out["sigma_y_err_pix"] = np.sqrt(crlb[:, 5])
         else:
             out["sigma_pix"] = p[:, 4]
             out["sigma_err_pix"] = np.sqrt(crlb[:, 4])

@@ -7,7 +7,11 @@ window shows the chosen one's and knows none of them (`docs/uipsf/plan.md` §7.5
 
 A third method, *in situ (blinking molecules)*, learns from movies: its files are
 movies, its section *in situ*, its *Detect molecules* rings them on their frames,
-and its table counts them by state (`psf_methods.InSitu`).
+and its table counts them by state (`psf_methods.InSitu`).  A fourth,
+*elliptical Gaussian*, makes no PSF: the curves of an elliptical Gaussian's
+widths in z, for Astigmatic z, from its own section (`psf_methods.EllipticalGaussian`);
+its *Use* button and the `calibrated` signal hand them to that plugin, and it is
+never listed for the fitters.
 
 What every method shares is the window's: the stacks and their *Stacks*
 page (`stack_browser`), *mode* (single channel or dual colour), the two steps
@@ -38,6 +42,7 @@ from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from .core import CalibrationSettings
 from .dual import DualColorSettings
+from .elliptical import EllipticalCalibrationSettings
 from .input import acquisition_kind, discover_acquisitions
 from .psf_methods import AVERAGE_ONLY, METHODS, LearningProgress, duration
 from .insitu import InSituSettings
@@ -245,9 +250,13 @@ class PSFCalibrationWindow(QMainWindow):
         ilayout.setContentsMargins(0, 0, 0, 0)
         ilayout.addWidget(self.insitu_form)
         ilayout.addWidget(self.insitu_detection_form)
+        # elliptical Gaussian: the fit box and the curves' terms
+        self.elliptical_form = SettingsForm(EllipticalCalibrationSettings)
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=False),
                          "model": CollapsibleSection("model", model, expanded=True),
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
+                         "elliptical": CollapsibleSection("elliptical Gaussian", self.elliptical_form,
+                                                          expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -324,6 +333,7 @@ class PSFCalibrationWindow(QMainWindow):
         if hasattr(self, "paths"):
             self._show_optics()
         self.sections["in situ"].setVisible(insitu)
+        self.sections["elliptical"].setVisible(reads.get("elliptical", False))
         self.sections["beads"].setVisible(not insitu)
         # in situ decides the magnitude itself, by its *hold*: held from the start, or symmetric and learnt
         self.model_form.set_shown({"magnitude": not insitu})
@@ -352,7 +362,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.table_hint.setText("beads - space marks a used bead to be excluded"
                                 + (" or a rejected one to be included" if self.method.marks_include else "")
                                 + ", then Calibrate")
-        self.use_button.setText("Use in the Spline 3D 2C fitter" if self.is_dual else "Use in the Spline 3D fitter")
+        self.use_button.setText(getattr(self.method, "use_label", None) or (
+            "Use in the Spline 3D 2C fitter" if self.is_dual else "Use in the Spline 3D fitter"))
         self._update_buttons()
 
     def _forget(self, message: str) -> None:
@@ -794,6 +805,8 @@ class PSFCalibrationWindow(QMainWindow):
         from .. import calibration_list
         from ..io.tiff import camera_tags, open_stack
         from ..microscope_db import acquisition_date
+        if not getattr(self.method, "listed", True):
+            return                                 # not a PSF: the elliptical Gaussian's curves
         camera = getattr(self, "optics_camera", None)
         made = None
         try:
@@ -815,6 +828,8 @@ class PSFCalibrationWindow(QMainWindow):
         inputs = dict(detection=self.insitu_detection_form.value() if insitu else self.detection_form.value(), run=run)
         if insitu:
             inputs["insitu"] = self.insitu_form.value()
+        if self.method.sections.get("elliptical", False):
+            inputs["elliptical"] = self.elliptical_form.value()
         if self.paths:
             # a value typed that will not do stops the run, naming it: `_stacks_camera` would
             # otherwise put the file's in its place without a word
@@ -1245,8 +1260,9 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is None or self.run_result.saved is None:
             return
         self.calibrated.emit(str(self.run_result.saved), self.run_result.dual)
-        fitter = "Spline 3D 2C" if self.run_result.dual else "Spline 3D"
-        self.status_bar.showMessage(f"the {fitter} fitter now uses {Path(self.run_result.saved).name}")
+        fitter = ("Astigmatic z" if not getattr(self.method, "listed", True) else
+                  "Spline 3D 2C fitter" if self.run_result.dual else "Spline 3D fitter")
+        self.status_bar.showMessage(f"the {fitter} now uses {Path(self.run_result.saved).name}")
 
 
 def show_psf_calibration(paths=()):

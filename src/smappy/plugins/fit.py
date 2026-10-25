@@ -414,11 +414,14 @@ class FinishSettings:
     Both are the shipped plugins, with their own settings -- the same code the
     Analysis tab runs, so a fit that finishes itself and a fit finished by hand
     afterwards give the same numbers.
+
+    To be redesigned; Astigmatic z after an elliptical Gaussian 2D fit is a
+    candidate step then (NOTES.md, "Astigmatic z from elliptical widths").
     """
     assign_colors: bool = param(True, label="assign colours",
                                 help="split the localizations by their photon "
                                      "ratio and write `channel` "
-                                     "(Analysis/Dual-colour/Assign colours)")
+                                     "(Analysis/After fit/Assign colours)")
     drift: str = param("none", label="drift correction",
                        choices=(("none", "none"), ("rcc", "RCC"),
                                 ("comet", "COMET")),
