@@ -2134,6 +2134,13 @@ class Session:
             self.rois.segment_preview = preview
             self.changed("roi-preview")
 
+    def add_preview(self) -> list:
+        """Add a segmenter's proposals as they were previewed, without
+        running it again (`ROIProject.add_preview`); the ROIs made."""
+        made = self.rois.add_preview()
+        self.changed("rois")
+        return made
+
     def clear_preview(self) -> None:
         """Drop a segmenter's proposals without adding them."""
         if self._rois is not None and self._rois.segment_preview is not None:

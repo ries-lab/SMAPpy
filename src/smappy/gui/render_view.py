@@ -1011,6 +1011,24 @@ def toolbar_border(colour: str) -> str:
     return f" QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else ""
 
 
+def fill_canvas(graphics) -> None:
+    """A canvas whose one view box fills it: pyqtgraph's layout keeps a
+    margin round its items, so a picture rendered at the widget's size and
+    shown with its aspect locked left the view wider (or taller) than the
+    picture -- a black rim on two sides, where the structures at the edge
+    looked cut off (140 nm each side in the ROI manager's file pane).
+    Render at `canvas_pixels` afterwards."""
+    graphics.ci.setContentsMargins(0, 0, 0, 0)
+    graphics.ci.setSpacing(0)
+
+
+def canvas_pixels(graphics) -> Tuple[int, int]:
+    """The size a picture for a `fill_canvas` canvas is rendered at: its
+    viewport, which is the widget less any frame drawn round it."""
+    size = graphics.viewport().size()
+    return max(size.width(), 16), max(size.height(), 16)
+
+
 def frame_canvas(graphics) -> None:
     """A thin grey line around a picture.  The 2D and the 3D view are both
     black, and where one window overlaps the other nothing said where the

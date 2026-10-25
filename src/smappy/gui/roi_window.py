@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
+from .render_view import canvas_pixels, fill_canvas
 from .widgets import CollapsibleSection
 
 DRAFT_PEN = pg.mkPen("#2f7fd0", width=2, style=Qt.DashLine)
@@ -177,6 +178,7 @@ class ImagePane(QWidget):
         self.graphics = pg.GraphicsLayoutWidget()
         self.view = self.graphics.addViewBox(lockAspect=True, invertY=True, enableMenu=False,
                                              enableMouse=False)
+        fill_canvas(self.graphics)          # the picture reaches the pane's edges
         self.image = pg.ImageItem(axisOrder="row-major")
         self.view.addItem(self.image)
         self.shapes = {name: pg.PlotDataItem(pen=pen, connect="finite")
@@ -253,9 +255,7 @@ class ImagePane(QWidget):
                emphasis=None) -> None:
         """The picture of ``x0..x1, y0..y1``; ``emphasis``, marks of track
         ROIs to draw into it (`emphasised`)."""
-        size = self.graphics.size()
-        nx, ny = max(size.width(), 32), max(size.height(), 32)
-        fov = FieldOfView.fit((x0, x1), (y0, y1), nx, ny)
+        fov = FieldOfView.fit((x0, x1), (y0, y1), *canvas_pixels(self.graphics))
         if emphasis is None:
             rgb, _ = state.image(fov)
         else:
@@ -568,12 +568,21 @@ class ROIManagerWindow(QMainWindow):
         llayout.addWidget(CollapsibleSection("annotate", self.annotation, expanded=True))
         # shown only while a segmenter's preview is drawn: Run adds it, a
         # new preview replaces it, and this is the way to have neither
+        self.add_preview_button = QPushButton("Add previewed ROIs")
+        self.add_preview_button.setToolTip("add the grey ROIs as the Preview "
+                                           "proposed them, without running the "
+                                           "segmenter again")
+        self.add_preview_button.clicked.connect(self._add_preview)
         self.clear_preview_button = QPushButton("Discard preview")
         self.clear_preview_button.setToolTip("remove the grey ROIs a segmenter's "
                                              "Preview proposed, adding none of them")
         self.clear_preview_button.clicked.connect(self.session.clear_preview)
-        self.clear_preview_button.setVisible(False)
-        llayout.addWidget(self.clear_preview_button)
+        previews = QHBoxLayout()
+        previews.addWidget(self.add_preview_button)
+        previews.addWidget(self.clear_preview_button)
+        for button in (self.add_preview_button, self.clear_preview_button):
+            button.setVisible(False)
+        llayout.addLayout(previews)
         # the platform's keys, and Ctrl+Shift+Z everywhere, as the main window
         # has them; once each, since two shortcuts on one key fire neither
         keys = [(QKeySequence(QKeySequence.Undo), self.undo),
@@ -759,8 +768,9 @@ class ROIManagerWindow(QMainWindow):
             waiting = [i for i in self.rows.ids if self.rows.waiting(i)]
         preview = project.segment_preview
         self.clear_preview_button.setVisible(preview is not None)
-        proposed = (f"; previewing {len(preview['sites'])} (grey): Run adds them"
-                    if preview is not None else "")
+        self.add_preview_button.setVisible(preview is not None)
+        proposed = (f"; previewing {len(preview['sites'])} (grey): Add previewed "
+                    "ROIs or Run adds them" if preview is not None else "")
         self.status.showMessage(f"{len(self.rows.ids)} ROIs, {used} used"
                                 + (f", {len(waiting)} to measure" if waiting else "")
                                 + proposed)
@@ -1342,6 +1352,15 @@ class ROIManagerWindow(QMainWindow):
         roi = self._selected()
         number = self.project.numbers().get(roi.id) if roi is not None else None
         return self.project.edit(f"{what} ROI {number}" if number else what)
+
+    def _add_preview(self) -> None:
+        """The previewed ROIs, added as they were proposed."""
+        try:
+            made = self.session.add_preview()
+        except ValueError as error:
+            self.status.showMessage(str(error))
+            return
+        self.status.showMessage(f"added {len(made)} previewed ROIs")
 
     def undo(self) -> None:
         self._travel(self.project.undo, "undid")

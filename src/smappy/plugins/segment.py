@@ -424,10 +424,14 @@ class SegmentRegions(SegmenterPlugin):
 
         targets = {fid for fid, _ in placed}
         note = f"; {unknown} name a file the ROI manager does not have" if unknown else ""
+        origin = {"method": self.path, "segment": "file",
+                  "parameters": settings_values(settings),
+                  "source": str(settings.file.path)}
         if not commit:
             replaced = ([r.id for r in project.rois.values()
                          if r.file_id == current and ours(r)] if settings.replace else [])
-            sites = [{"center": list(c), "use": True} for fid, c in placed if fid == current]
+            sites = [{"center": list(c), "use": True, "origin": dict(origin)}
+                     for fid, c in placed if fid == current]
             return Result(text=f"preview: {len(sites)} ROIs on this file of "
                                f"{len(read['x_nm'])} positions" + note,
                           settings=settings, data={"centers": [s["center"] for s in sites]},
@@ -441,9 +445,6 @@ class SegmentRegions(SegmenterPlugin):
                             if ours(r) and r.file_id in targets]
                 for roi_id in replaced:
                     project.rois.pop(roi_id, None)
-            origin = {"method": self.path, "segment": "file",
-                      "parameters": settings_values(settings),
-                      "source": str(settings.file.path)}
             for fid, centre in placed:
                 made.append(project.add_roi(fid, centre, origin=origin))
             step.label = f"{self.name}: {len(made)} ROIs" + (
@@ -480,14 +481,26 @@ class SegmentRegions(SegmenterPlugin):
         def ours(r) -> bool:
             return made_by(r, "ids") and (r.origin or {}).get("column") == column
 
+        def site(region) -> Dict[str, Any]:
+            """The ROI of a region, as `ROIProject.add_roi` takes it: what a
+            run adds and a preview proposes."""
+            origin = {"method": self.path, "segment": "ids",
+                      "parameters": settings_values(settings), "column": column,
+                      "cluster": region["id"], "localizations": int(len(region["rows"]))}
+            if by_id:
+                origin["draw"] = draw
+                return {"center": region["center"], "use": True, "origin": origin,
+                        "ids": {column: region["id"]}, "spatial": False}
+            return {"center": region["center"], "use": True, "origin": origin,
+                    "polygon": region["polygon"]}
+
+        first = next(iter(sources.values()))
         if not commit:
-            # the preview, as the other methods': the centres on the file shown
+            # the preview, as the other methods': the ROIs on the file shown
             file_id = current_file(project)
-            first = next(iter(sources.values()))
             replaced = ([r.id for r in project.rois.values()
                          if r.file_id == file_id and ours(r)] if settings.replace else [])
-            sites = [{"center": r["center"], "use": True} for r in found
-                     if sources.get(r["file"], first) == file_id]
+            sites = [site(r) for r in found if sources.get(r["file"], first) == file_id]
             return Result(text=f"preview: {len(sites)} ROIs of {column} on this file",
                           settings=settings, data={"centers": [s["center"] for s in sites]},
                           roi_preview={"file_id": file_id, "method": self.path,
@@ -502,19 +515,11 @@ class SegmentRegions(SegmenterPlugin):
             for region in found:
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
-                file_id = sources.get(region["file"], next(iter(sources.values())))
-                origin = {"method": self.path, "segment": "ids",
-                          "parameters": settings_values(settings), "column": column,
-                          "cluster": region["id"],
-                          "localizations": int(len(region["rows"]))}
-                if by_id:
-                    origin["draw"] = draw
-                    made.append(project.add_roi(
-                        file_id, region["center"], origin=origin,
-                        ids={column: region["id"]}, spatial=False))
-                else:
-                    made.append(project.add_roi(file_id, region["center"],
-                                                polygon=region["polygon"], origin=origin))
+                roi = site(region)
+                made.append(project.add_roi(
+                    sources.get(region["file"], first), roi["center"],
+                    polygon=roi.get("polygon"), origin=roi["origin"],
+                    ids=roi.get("ids"), spatial=roi.get("spatial", True)))
             step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
         text = f"{len(made)} ROIs of {column}, from {ids.min_size} localizations"

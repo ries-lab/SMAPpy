@@ -32,8 +32,8 @@ from ..picture import FrameSource, ViewFrame
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
-from .render_view import (RenderWorker, bar_label, frame_canvas, nice_step,
-                          toolbar_border, toolbar_sheet)
+from .render_view import (RenderWorker, bar_label, canvas_pixels, fill_canvas,
+                          frame_canvas, nice_step, toolbar_border, toolbar_sheet)
 from .widgets import CollapsibleSection, Popup
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, engine_for,
                       render_3d, snapshot_3d, upscale)
@@ -129,6 +129,7 @@ class View3D(QWidget):
         # a change of units, and the zoom and the pivot mean nothing across it
         self._render_axes = session.axes()
         frame_canvas(self.graphics)
+        fill_canvas(self.graphics)          # the picture reaches the edges
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
@@ -225,8 +226,7 @@ class View3D(QWidget):
             slab = session.slab_from_roi()
         else:
             slab = session.slab
-        size = self.graphics.size()
-        self.projection.fit(slab, max(size.width(), 16), max(size.height(), 16))
+        self.projection.fit(slab, *canvas_pixels(self.graphics))
         self.changed.emit()
         self.schedule()
 
@@ -245,14 +245,14 @@ class View3D(QWidget):
         if self._busy:
             self._pending = preview if self._pending is None else (self._pending and preview)
             return
-        size = self.graphics.size()
+        nx, ny = canvas_pixels(self.graphics)
         self._generation += 1
         self._busy = True
         # frozen here, on the GUI thread: the worker sees nothing else
         job = Job3D(self.session.scanned(snapshot_3d(self.session.layers)),
                     copy.deepcopy(self.projection),
                     copy.deepcopy(self.session.slab),
-                    max(size.width(), 16), max(size.height(), 16), preview)
+                    nx, ny, preview)
         self.render_requested.emit(job, self._generation)
 
     def _on_render_failed(self, message: str, generation: int) -> None:
@@ -482,8 +482,7 @@ class View3D(QWidget):
         slab, the canvas at the zoom.  The picture is drawn on the CPU, the
         summed look of the *auto*, *cpu* and *gpu* engines."""
         proj = copy.deepcopy(self.projection)
-        size = self.graphics.size()
-        fov = proj.fov(max(size.width(), 16), max(size.height(), 16))
+        fov = proj.fov(*canvas_pixels(self.graphics))
         return ViewFrame((fov.x0, fov.x1), (fov.y0, fov.y1), fov.pixelsize,
                          projection=proj, slab=self.session.slab)
 
