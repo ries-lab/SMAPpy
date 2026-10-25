@@ -17,6 +17,23 @@ CONTROL_WIDTH = 380
 MAJOR_SCALE = 1.3
 
 
+def section_title_style(button, major: bool = False) -> str:
+    """The style of a section's title: bold, a major one larger
+    (`MAJOR_SCALE`).  On macOS a minor one also takes the size of the text
+    around it: there a tool button gets a smaller font than a label (11
+    against 13 pt), so the parts and "more" folds of a form were titled
+    smaller than the fields they hold.  Elsewhere the two are the same."""
+    import sys
+    from PySide6.QtWidgets import QApplication
+    style = "border: none; font-weight: bold;"
+    size = (button.font().pointSizeF() * MAJOR_SCALE if major
+            else QApplication.font("QLabel").pointSizeF() if sys.platform == "darwin"
+            else 0.0)
+    if size > 0:
+        style += f" font-size: {size:.1f}pt;"
+    return style
+
+
 # ------------------------------------------------------ numbers as shown
 # A value the program fills in -- a colour range from quantiles, a bound
 # dragged on a histogram, the maximum the view has now -- comes with every
@@ -184,12 +201,9 @@ class CollapsibleSection(QWidget):
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        style = "border: none; font-weight: bold;"
-        if major:
-            size = self.button.font().pointSizeF()
-            if size > 0:
-                style += f" font-size: {size * MAJOR_SCALE:.1f}pt;"
-        self.button.setStyleSheet(f"QToolButton {{ {style} }}")
+        # kept, for a title that adds a colour to it (`microscope_form`)
+        self.title_style = section_title_style(self.button, major)
+        self.button.setStyleSheet(f"QToolButton {{ {self.title_style} }}")
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)

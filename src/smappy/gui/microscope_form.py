@@ -135,8 +135,8 @@ class MicroscopeForm(SettingsForm):
             shown = section.button.fontMetrics().elidedText(text, Qt.ElideRight, CONTROL_WIDTH - 90)
             section.set_title(shown)
             section.button.setToolTip(text if shown != text else "")
-            style = "border: none; font-weight: bold;" + (" " + STATUS[self.status] + ";"
-                                                         if STATUS.get(self.status) else "")
+            style = section.title_style + (" " + STATUS[self.status] + ";"
+                                           if STATUS.get(self.status) else "")
             section.button.setStyleSheet(f"QToolButton {{ {style} }}")
         wrong = STATUS.get(self.status, "")
         self.line.setVisible(bool(wrong))
