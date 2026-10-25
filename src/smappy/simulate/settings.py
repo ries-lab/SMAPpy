@@ -193,6 +193,11 @@ class CameraOutputSettings:
                           help="the camera count of a dark pixel")
     read_noise: float = param(1.5, label="read noise", unit="ADU", min=0,
                               help="Gaussian noise per pixel and frame, in counts")
+    split_sigma_nm: Optional[float] = param(None, label="second half's PSF",
+                                            unit="nm", min=1,
+                                            help="split camera: the PSF width in the "
+                                                 "second half, which sees another "
+                                                 "wavelength; auto: the first's")
     em_gain: float = param(0.0, label="EM gain", min=0,
                            help="camera frames only.  0: an sCMOS; otherwise an "
                                 "EMCCD with this gain, its multiplication noise "
@@ -268,7 +273,7 @@ class PlacementSettings:
                              help="each copy moved by up to this per axis")
     min_distance_nm: float = param(0.0, label="minimum distance", unit="nm", min=0,
                                    help="between the copies' centres")
-    same_as: str = param("", label="component",
+    same_as: str = param("", label="component", choices=lambda: [("", "-")],
                          help="the component whose copies' places and turns "
                               "this one takes; it must have as many copies")
 
@@ -287,7 +292,7 @@ class PlacementSettings:
 @dataclass
 class MotionSettings:
     """Brownian motion of each label, frame to frame (no motion blur)."""
-    on: bool = param(False, label="diffusion", help="the labels diffuse")
+    diffusion: bool = param(False, label="diffusion", help="the labels diffuse")
     d_um2_s: float = param(0.5, label="D", unit="µm²/s", min=0,
                            help="the diffusion coefficient of the first state")
     slow_fraction: float = param(0.0, label="second state", min=0, max=1,
@@ -297,6 +302,8 @@ class MotionSettings:
                             help="the diffusion coefficient of the second state")
     switch_probability: float = param(0.0, label="switching", min=0, max=1,
                                       help="per frame: the state is drawn again")
+    in_z: bool = param(False, label="in z too",
+                       help="diffuse in 3D; off: in the plane, as in a membrane")
 
 
 @dataclass
@@ -306,7 +313,8 @@ class ComponentSettings:
     name: str = param("structure", label="name",
                       help="what the list calls it, and what another "
                            "component's 'same as' names")
-    on: bool = param(True, label="on", help="untick to leave it out")
+    # not `on`: YAML reads a bare `on:` as true, and a hand-written preset broke
+    enabled: bool = param(True, label="on", help="untick to leave it out")
     channel: int = param(1, label="colour", min=1,
                          help="the localizations' channel; a split camera sends "
                               "the ratio below of its light to the second half")
@@ -320,12 +328,20 @@ class ComponentSettings:
     labelling: LabellingSettings = param(default_factory=LabellingSettings,
                                          label="labelling", collapsed=True)
     photophysics_from: str = param("", label="photophysics as",
+                                   choices=lambda: [("", "its own")],
                                    help="another component whose photophysics "
                                         "this one takes; empty: its own, below")
     blinking: BlinkingSettings = param(default_factory=BlinkingSettings,
                                        label="photophysics")
     motion: MotionSettings = param(default_factory=MotionSettings, label="motion",
                                    collapsed=True)
+
+
+def preset_folders(kind: str) -> list:
+    """Where saved scenes or components are: the user's, then the shipped."""
+    from pathlib import Path
+    from ..config import config_dir
+    return [config_dir() / kind, Path(__file__).resolve().parent.parent / "data" / kind]
 
 
 def default_components() -> list:
@@ -336,6 +352,10 @@ def default_components() -> list:
 class SceneSettings:
     """A scene: components, each with its own labelling, photophysics and
     motion, and what they share -- frames, background, optics, output."""
+    preset: str = param("", label="preset", kind="preset",
+                        store=lambda: preset_folders("simulation_presets"),
+                        help="a scene to start from: it fills every setting, and "
+                             "any can then be changed")
     output: str = param("localizations", label="simulate",
                         choices=(("localizations", "localizations"),
                                  ("camera", "camera frames"),
@@ -345,13 +365,6 @@ class SceneSettings:
                              "two-colour fit")
     n_frames: int = param(20000, label="frames", min=1,
                           help="the length of the measurement")
-    field_um: float = param(10.0, label="field", unit="µm", min=0.1,
-                            help="the side of the square field copies set in a "
-                                 "component, homogeneous labels and beads are in")
-    frame_time_ms: float = param(10.0, label="frame time", unit="ms", min=0.001,
-                                 advanced=True,
-                                 help="what one frame is in seconds: recorded with "
-                                      "the file, and the time diffusion has per frame")
     background: float = param(20.0, label="background", unit="photons/px", min=0,
                               help="per pixel and frame: in the precision, or "
                                    "drawn into the frames")
@@ -361,10 +374,19 @@ class SceneSettings:
     drift: bool = param(False, label="add drift",
                         help="a random walk plus a slow creep of ~100 nm; the "
                              "truth is kept in the metadata as drift_truth")
+    field_um: float = param(10.0, label="field", unit="µm", min=0.1, advanced=True,
+                            help="the side of the square field copies set in a "
+                                 "component, homogeneous labels and beads are in")
+    frame_time_ms: float = param(10.0, label="frame time", unit="ms", min=0.001,
+                                 advanced=True,
+                                 help="what one frame is in seconds: recorded with "
+                                      "the file, and the time diffusion has per frame")
     seed: int = param(0, label="seed", min=0, advanced=True,
                       help="the same seed and settings give the same simulation")
     components: List[ComponentSettings] = param(
-        default_factory=default_components, label="components",
+        default_factory=default_components, label="components", collapsed=True,
+        item_on="enabled",
+        store=lambda: preset_folders("simulation_components"),
         help="the things in the sample; select one to set it")
     optics: OpticsSettings = param(default_factory=OpticsSettings, label="optics",
                                    collapsed=True)

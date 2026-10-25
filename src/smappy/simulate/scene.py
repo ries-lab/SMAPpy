@@ -23,7 +23,10 @@ and frame, as `tracks` did, with diffusive states drawn again with
 are needed: with one state the step between two of them is one Gaussian of
 the variance of all the frames between; with two, the frames between are
 walked one by one, which is what a state that may switch every frame needs.
-No motion blur: a frame sees the position at that frame.
+No motion blur: a frame sees the position at that frame.  In the plane
+unless *in z* is ticked.  With motion the table also carries the truth the
+tracking tools read: ``track_id_true`` (the emitter, from 1; 0 for a label
+that does not move) and ``state_true`` (-1 for one that does not).
 """
 from __future__ import annotations
 
@@ -53,7 +56,7 @@ def active(scene: SceneSettings) -> List[ComponentSettings]:
     """The components switched on, in an order where every component comes
     after the one it is placed *same as*; a link that cannot be followed is
     refused, naming it."""
-    on = [c for c in scene.components if c.on]
+    on = [c for c in scene.components if c.enabled]
     names = [c.name for c in scene.components]
     for c in on:
         if names.count(c.name) > 1:
@@ -120,11 +123,11 @@ def component_labels(scene: SceneSettings, c: ComponentSettings, rng,
 
 
 def motion(settings: MotionSettings, em: Emission, frame_time_ms: float,
-           rng) -> Optional[np.ndarray]:
+           rng) -> Optional[tuple]:
     """Each emission row's displacement from where its fluorophore started,
-    (len(em), 3) nm, or None without motion.  ``em`` is one component's,
-    sorted by frame."""
-    if not settings.on or not len(em):
+    (len(em), 3) nm, and the diffusive state it was in -- or None without
+    motion.  ``em`` is one component's, sorted by frame."""
+    if not settings.diffusion or not len(em):
         return None
     two = settings.slow_fraction > 0
     d = np.array([settings.d_um2_s, settings.d2_um2_s] if two else [settings.d_um2_s])
@@ -141,13 +144,17 @@ def motion(settings: MotionSettings, em: Emission, frame_time_ms: float,
         state = rng.choice(len(d), int(owner.max()) + 1, p=fractions)[owner]
         step = rng.normal(size=(len(owner), 3)) * (sigma[state] * np.sqrt(gap))[:, None]
     else:
-        step = _switching_steps(owner, frame, start, sigma, fractions,
-                                settings.switch_probability, rng)
+        step, state = _switching_steps(owner, frame, start, sigma, fractions,
+                                       settings.switch_probability, rng)
+    if not settings.in_z:
+        step[:, 2] = 0.0                  # diffusion in the plane, as a membrane
     walked = np.cumsum(step, axis=0)
     first = np.maximum.accumulate(np.where(start, np.arange(len(owner)), 0))
     displacement = np.empty_like(walked)
     displacement[order] = walked - walked[first]
-    return displacement
+    states = np.empty(len(owner), np.int32)
+    states[order] = state
+    return displacement, states
 
 
 def _switching_steps(owner, frame, start, sigma, fractions, p_switch, rng):
@@ -174,7 +181,7 @@ def _switching_steps(owner, frame, start, sigma, fractions, p_switch, rng):
                     s = draws[j]
             steps[i] = (rng.normal(size=(k, 3)) * sigma[path][:, None]).sum(axis=0)
         state[i] = s
-    return steps
+    return steps, state
 
 
 def scene_truth(scene: SceneSettings):
@@ -204,9 +211,10 @@ def scene_truth(scene: SceneSettings):
     fluorophores, blinks, emitted, moved = _merge(parts, scene.n_frames)
     drift = drift_trace(scene.n_frames, rng) if scene.drift else None
     one = len(parts) == 1
+    displacement, state = moved if moved is not None else (None, None)
     return GroundTruth(scene, names[0] if one else ", ".join(names), n_labels,
                        fluorophores, blinks, emitted, drift,
-                       next(iter(poses.values())) if one else poses, moved)
+                       next(iter(poses.values())) if one else poses, displacement, state)
 
 
 def _merge(parts, n_frames):
@@ -242,7 +250,8 @@ def _merge(parts, n_frames):
         e_photons.append(em.photons)
         e_blink.append(em.blink + n_bl)
         if any_motion:
-            moved.append(mv if mv is not None else np.zeros((len(em), 3)))
+            moved.append(mv if mv is not None
+                         else (np.zeros((len(em), 3)), np.full(len(em), -1, np.int32)))
         n_fl += len(fl)
         n_bl += len(bl)
     offs = [bl.off_time for _, bl, _, _ in parts if np.isfinite(bl.off_time)]
@@ -257,7 +266,12 @@ def _merge(parts, n_frames):
     order = np.argsort(frame, kind="stable")
     emitted = Emission(np.concatenate(e_owner)[order], frame[order],
                        np.concatenate(e_photons)[order], np.concatenate(e_blink)[order])
-    return fluorophores, blinks, emitted, (np.vstack(moved)[order] if any_motion else None)
+    if any_motion:
+        motion_out = (np.vstack([m for m, _ in moved])[order],
+                      np.concatenate([st for _, st in moved])[order])
+    else:
+        motion_out = None
+    return fluorophores, blinks, emitted, motion_out
 
 
 def two_colour_scene(n_frames: int, seed: int, ratios=(0.25, 0.75),

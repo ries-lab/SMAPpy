@@ -1,0 +1,13 @@
+# Nuclear pore complexes labelled at Nup96 (the `npc` structure), dSTORM-like
+# blinking, about 60 % of the labels carrying a dye: what NPC Corners and the
+# labelling-efficiency analysis are tried on.
+n_frames: 20000
+key:
+  components.0.labelling.efficiency: labelling efficiency
+  components.0.blinking.photons: photons per blink
+  components.0.blinking.blinks: blinks
+components:
+  - name: NPC
+    structure: {kind: structure, preset: npc}
+    labelling: {efficiency: 0.6}
+    blinking: {photons: 4000, photons_std: 2000, blinks: 3}

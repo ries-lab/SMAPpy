@@ -1,0 +1,8 @@
+# Forty filaments over the field, each a random walk of a line.
+n_frames: 20000
+key:
+  components.0.labelling.efficiency: labelling efficiency
+  components.0.blinking.photons: photons per blink
+components:
+  - name: filaments
+    structure: {kind: structure, preset: filaments}

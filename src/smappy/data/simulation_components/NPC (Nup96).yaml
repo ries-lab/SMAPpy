@@ -1,0 +1,6 @@
+name: NPC
+structure.kind: structure
+structure.preset: npc
+labelling.efficiency: 0.6
+blinking.photons: 4000
+blinking.photons_std: 2000

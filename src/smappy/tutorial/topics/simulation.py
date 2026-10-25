@@ -1,8 +1,8 @@
-"""Simulating data: a structure, its labelling and blinking, and camera frames.
+"""Simulating data: a scene from a preset, its components, and camera frames.
 
 The simulator is where every other tutorial's data comes from; this one is
-about using it on purpose.  A built-in structure (nuclear pores) with a
-realistic labelling efficiency, the blinking in the terms one knows a dye by,
+about using it on purpose.  A preset (nuclear pores) and its key parameters,
+the components a scene is made of, the blinking in the terms one knows a dye by,
 then the same simulation as camera frames -- written as a recipe the fitter
 opens like an acquisition, camera included -- and the fit scored against the
 truth by Compare to ground truth.
@@ -18,8 +18,8 @@ import numpy as np
 from .common import (expand, field, figure_panels, open_section, pin, place_beside,
                      section_of, show_tab, type_into)
 
-TITLE = "Simulating data: structures, blinking and camera frames"
-DESCRIPTION = ("Simulating a labelled structure as localizations or camera "
+TITLE = "Simulating data: scenes, blinking and camera frames"
+DESCRIPTION = ("Simulating a scene from a preset as localizations or camera "
                "frames, fitting the frames, and scoring the fit against the truth.")
 
 _YAML = """<pre style="font-size:80%;line-height:1.25">elements:
@@ -49,44 +49,60 @@ def make(d) -> None:
            say="Simulated data has a known truth: to try the program, to choose "
                "settings, and to check a fit.")
 
-    d.chapter("The structure")
+    d.chapter("A scene from a preset")
     file_tab = show_tab(d, "File")
-    _, sim = open_section(d, file_tab, "Simulate structure")
-    top = d.union(field(sim, "output"), field(sim, "seed"))
-    d.shot("Simulate is in the File tab. What to make, how many frames, the "
-           "background, drift and the random seed come first.",
-           spot=[top], zoom=d.around(top, 760))
-    preset = field(sim, "structure.preset")
-    type_into(sim, "structure.preset", "npc")
+    _, sim = open_section(d, file_tab, "Simulate")
+    preset = field(sim, "preset")
+    d.shot("Simulate is in the File tab. A preset is a whole scene to start "
+           "from; your own are saved beside the shipped ones.",
+           spot=[preset], zoom=d.around(preset, 760))
+    type_into(sim, "preset", "Nuclear pores (Nup96)")
     d.settle()
-    d.shot("The structure: a built-in, here nuclear pores, or a file of your "
-           "own.",
-           spot=[preset], point=preset, click=True, zoom=d.around(preset, 760))
+    keys = sim.form.keys_section
+    assert keys.isVisible() and sim.form.key_fields, "no key parameters shown"
+    d.shot("Nuclear pores: the preset fills every setting and puts the few "
+           "that matter most at the top.",
+           spot=[keys], zoom=d.around(keys, 760))
+    efficiency = sim.form.key_fields["components.0.labelling.efficiency"]
+    efficiency.set(0.55)
+    efficiency.changed.emit()
+    d.settle()
+    assert sim.form.value().components[0].labelling.efficiency == 0.55
+    d.shot("Not every copy of the protein carries a dye: change the labelling "
+           "efficiency here, and the preset says it was modified.",
+           spot=[efficiency, preset], point=efficiency, click=True,
+           zoom=d.around(efficiency, 760))
+
+    d.chapter("Components")
+    components = section_of(sim, "components")
+    components.set_expanded(True)
+    d.settle()
+    d.shot("The scene is made of components: here the pores. A background, "
+           "beads or a second colour are added with +, or saved for later.",
+           spot=[components], zoom=d.around(components, 760))
+    structure = section_of(sim, "components.0.structure")
+    d.shot("Each component has its structure: a built-in, a file of your own, "
+           "labels spread evenly, or beads.",
+           spot=[structure], zoom=d.around(structure, 760))
     d.card("A structure file",
            "<p>Label positions, or lines, circles, areas and images filled at "
            "a density; and how many copies, placed and turned at random.</p>"
            + _YAML,
            say="A structure file lists label positions, or shapes filled at a "
                "density, and how many copies to place.")
-
-    d.chapter("Labelling and blinking")
-    efficiency = field(sim, "labelling.efficiency")
-    expand(efficiency)
-    section_of(sim, "labelling").set_expanded(True)
-    type_into(sim, "labelling.efficiency", 0.6)
+    blinking = section_of(sim, "components.0.blinking")
+    blinking.set_expanded(True)
     d.settle()
-    d.shot("Not every copy of the protein carries a dye: a labelling "
-           "efficiency near 60 % is typical for the pores. Each label gets one fluorophore.",
-           spot=[efficiency], point=efficiency, click=True,
-           zoom=d.around(efficiency, 760))
-    blinking = section_of(sim, "blinking")
     d.shot("Blinking in the numbers a dye is known by: how long it is on, how "
            "often it comes back, and its photons per blink.",
            spot=[blinking], zoom=d.around(blinking, 760))
     d.shot("The off time follows from the number of blinks, and switching "
            "happens anywhere within a frame, as in a real movie.",
-           spot=[field(sim, "blinking.blinks"), field(sim, "blinking.on_time")],
+           spot=[field(sim, "components.0.blinking.blinks"),
+                 field(sim, "components.0.blinking.on_time")],
            zoom=d.around(blinking, 760))
+    components.set_expanded(False)
+    d.settle()
     _run(d, sim)
     assert "copy" in session.locs, sorted(session.locs.keys())
     copy = np.bincount(session.locs["copy"])
@@ -188,8 +204,10 @@ def make(d) -> None:
 
     d.chapter("Next")
     d.card("What to remember",
-           "<ul><li><b>Structure:</b> a built-in or a file of positions and "
-           "shapes, copied many times.</li>"
+           "<ul><li><b>Presets:</b> a whole scene, its key parameters at "
+           "the top; your own saved beside them.</li>"
+           "<li><b>Components:</b> structures, a background, beads, a second "
+           "colour, each with its own labelling and blinking.</li>"
            "<li><b>Labelling and blinking:</b> efficiency, on time, blinks and "
            "photons, in the terms a dye is known by.</li>"
            "<li><b>Camera frames:</b> a recipe the fitter opens, camera "

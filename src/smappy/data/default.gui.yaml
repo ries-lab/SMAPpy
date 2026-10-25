@@ -10,7 +10,7 @@ tabs:
   - plugin: File/Load/Load
   - plugin: File/Export/Localizations
   - plugin: File/Export/Stack
-  - plugin: File/Simulate/Blinking Structure
+  - plugin: File/Simulate/Simulate
 - name: Localize
   header: localize
   instances:

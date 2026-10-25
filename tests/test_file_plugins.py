@@ -32,7 +32,7 @@ def test_every_file_plugin_is_in_the_tree():
         "File/Load/Auto", "File/Load/Load", "File/Save/smappy HDF5",
         "File/Export/Image", "File/Export/Stack", "File/Export/Localizations",
         "File/Export/ROI images",
-        "File/Simulate/Blinking Structure", "File/Simulate/Tracks"}
+        "File/Simulate/Simulate"}
 
 
 def test_the_one_loader_offers_every_format_and_reads_columns_for_a_csv_only():
@@ -175,7 +175,7 @@ def test_export_writes_a_picture(tmp_path):
 
 def test_simulate_makes_a_dataset_to_try():
     session = Session()
-    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    plugin = plugins.get("File/Simulate/Simulate")()
     result = session.run(plugin, plugin.Settings(n_frames=200, seed=1))
     assert len(session.locs) > 100
     assert session.files[0].format == "simulated"
@@ -185,51 +185,41 @@ def test_simulate_makes_a_dataset_to_try():
 
 def test_a_simulation_can_be_added_as_a_new_file():
     session = Session()
-    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    plugin = plugins.get("File/Simulate/Simulate")()
     session.run(plugin, plugin.Settings(n_frames=200, seed=1))
     first = len(session.locs)
     session.run(plugin, plugin.Settings(n_frames=200, seed=2, append=True))
     assert len(session.files) == 2 and len(session.locs) > first
-    tracks = plugins.get("File/Simulate/Tracks")()
-    session.run(tracks, tracks.Settings(n_frames=50, seed=3, append=True))
+    session.run(plugin, plugin.Settings(n_frames=50, seed=3, append=True))
     assert len(session.files) == 3
     # off, the default, a simulation replaces what is open
-    session.run(tracks, tracks.Settings(n_frames=50, seed=3))
+    session.run(plugin, plugin.Settings(n_frames=50, seed=3))
     assert len(session.files) == 1
 
 
 def test_simulated_drift_records_the_truth():
-    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    plugin = plugins.get("File/Simulate/Simulate")()
     result = plugin.run(Context(), plugin.Settings(n_frames=200, seed=1, drift=True))
     assert "drift_truth" in result.files[0][0].metadata
 
 
-def simulate_tracks_table(plugin, settings):
-    return plugin.run(Context(), settings).files[0][0]
-
-
-def test_simulate_tracks_adds_tracks_with_their_truth():
+def test_the_diffusion_preset_adds_tracks_with_their_truth():
+    """Tracks are a homogeneous component that diffuses: the table carries
+    the truth the tracking tools read, and the file the frame time."""
+    from smappy.plugins.simulate import preset_values
+    from smappy.plugins import settings_from
     session = Session()
-    plugin = plugins.get("File/Simulate/Tracks")()
-    settings = plugin.Settings(n_frames=100, seed=2)
-    settings.diffusion.slow_fraction = 0.3
-    result = session.run(plugin, settings)
+    plugin = plugins.get("File/Simulate/Simulate")()
+    settings = settings_from(plugin.Settings, preset_values("Two-state diffusion"))
+    settings.n_frames = 100
+    session.run(plugin, settings)
     locs = session.locs
     assert session.files[0].format == "simulated"
     assert {"x_nm", "y_nm", "frame", "xy_err_nm", "track_id_true",
             "state_true"} <= set(locs.keys())
     assert set(np.unique(locs["state_true"])) == {0, 1}
-    assert "tracks" in result.text
-    # the file's frame time is the one simulated
     from smappy.metadata import table_frame_time
-    assert table_frame_time(simulate_tracks_table(plugin, settings)) == 10.0
-    assert session.files[0].frame_time_ms == 10.0
-    # a second state's fields are greyed while it has no time
-    plain = plugin.describe(None, plugin.Settings())
-    assert plain.active["diffusion.d2_um2_s"] is False
-
-
-# ------------------------------------------------------- the /gui group
+    assert table_frame_time(locs) == 10.0
 
 def test_gui_state_is_a_dataset_so_a_big_one_fits(tmp_path):
     """An HDF5 attribute is bounded by the object header, about 64 kB."""
@@ -274,7 +264,7 @@ def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
     # batch
     assert pinned[0] == "File/Load/Load"
     assert set(pinned) == {"File/Load/Load", "File/Export/Localizations",
-                           "File/Export/Stack", "File/Simulate/Blinking Structure"}
+                           "File/Export/Stack", "File/Simulate/Simulate"}
     assert "open files" in session.window_openers
     # the window is what supplies the state a save embeds, and it leaves
     # geometry out: machine-specific, and worthless as provenance

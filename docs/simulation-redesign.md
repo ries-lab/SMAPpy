@@ -1,9 +1,13 @@
 # The simulator, redesigned: a scene of components
 
-Status: agreed design, not yet built (2026-10).  It replaces *Simulate
-structure* and *Simulate tracks* with one plugin, *Simulate*
-(`File/Simulate/Simulate`).  Backwards compatibility is not kept: old
-`.sim.yaml` recipes, saved settings and the structure YAML's `dye` go.
+Status: built (2026-10).  *Simulate* (`File/Simulate/Simulate`,
+`plugins/simulate.py`) replaces *Simulate structure* and *Simulate tracks*.
+Backwards compatibility is not kept: the structure YAML's `dye` is gone and
+saved settings of the old plugins are not read.  Where the build departs
+from the plan below, it says so.  `simulate_tracks()`, the tracking tests'
+model, is kept as it was rather than rebuilt on scenes: its per-frame
+blinking and fixed precision are what those tests and benchmarks are
+calibrated on.
 
 ## The model
 
@@ -17,7 +21,7 @@ output, seed.
 
 | part | settings |
 | --- | --- |
-| name, on | the name the list shows; a tick to leave it out |
+| name, enabled | the name the list shows; a tick to leave it out (not `on`: YAML reads a bare `on:` as true) |
 | structure | a built-in, a file, *homogeneous* (random positions at a density over the field and a z range) or *beads* |
 | placement | copies: number or density, field, rotation, tilt, jitter, minimum distance; or **same as** another component |
 | labelling | efficiency, fluorophores per label (Poisson), linkage error fixed and free |
@@ -58,8 +62,8 @@ at the frame.  Moving whole copies is left for later.
 ## Outputs
 
 * **localizations**: one table, `channel` = the component's colour; truth
-  columns `component`, `emitter` (also the track id), `copy`, and `state`
-  with motion.
+  columns `component`, `emitter`, `copy`, and with motion `track_id_true`
+  and `state_true`, the names the tracking tools read.
 * **camera frames**: one camera, all components drawn.
 * **split camera**: two halves, each component's photons split by its ratio,
   the transformation between the halves written beside the frames -- a

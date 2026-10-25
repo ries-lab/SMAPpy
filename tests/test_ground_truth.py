@@ -112,7 +112,7 @@ def test_a_fit_of_simulated_frames_finds_the_isolated_spots_and_is_honest(tmp_pa
         output="camera", n_frames=300, seed=2,
         labelling=LabellingSettings(efficiency=0.1),
         camera=CameraOutputSettings(path=str(tmp_path / "run.sim.yaml")))
-    made = get("File/Simulate/Blinking Structure")().run(Context(), settings)
+    made = get("File/Simulate/Simulate")().run(Context(), settings)
     fitted = GaussianFit().run(Context(), GaussianFitSettings(
         source=SourceSettings(path=made.written),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))).locs

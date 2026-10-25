@@ -43,8 +43,10 @@ class GroundTruth:
     emission: Emission
     drift_nm: Optional[np.ndarray]   # (n_frames, 3), or None
     poses: Optional[dict] = None     # where each copy was put and how it was turned
-    # each emission row's displacement by diffusion (`scene.motion`), or None
+    # each emission row's displacement by diffusion (`scene.motion`), or None,
+    # and its diffusive state (-1 for a component that does not move)
     motion_nm: Optional[np.ndarray] = None
+    state: Optional[np.ndarray] = None
 
     def positions(self) -> np.ndarray:
         """Where each emitting row was, motion and drift included:
@@ -187,7 +189,10 @@ def localizations(truth: GroundTruth) -> Localizations:
     em = truth.emission
     photons = rng.poisson(em.photons).astype(np.float64)
     found = photons >= max(out.min_photons, 1.0)
-    frame, owner, photons = em.frame[found], em.owner[found], photons[found]
+    # each localization's emission row, through the removal or the averaging:
+    # what it was (the owner), and its diffusive state
+    rows = np.flatnonzero(found)
+    frame, photons = em.frame[found], photons[found]
     xyz = truth.positions()[found]
     background = np.round(draw_background(settings, len(frame), rng), 3)
 
@@ -197,13 +202,14 @@ def localizations(truth: GroundTruth) -> Localizations:
     n_merged = None
     if out.close == "remove":
         keep = size == 1
-        frame, owner, photons, xyz, background = (
-            frame[keep], owner[keep], photons[keep], xyz[keep], background[keep])
+        frame, rows, photons, xyz, background = (
+            frame[keep], rows[keep], photons[keep], xyz[keep], background[keep])
     elif out.close == "average":
-        frame, owner, photons, xyz, background, n_merged = _average(
-            group, frame, owner, photons, xyz, background)
+        frame, rows, photons, xyz, background, n_merged = _average(
+            group, frame, rows, photons, xyz, background)
     else:
         raise ValueError(f"close emitters {out.close!r}: remove or average")
+    owner = em.owner[rows]
 
     n = len(frame)
     sigma = spot_sigma(xyz[:, 2], optics)
@@ -228,6 +234,11 @@ def localizations(truth: GroundTruth) -> Localizations:
     }
     if n_merged is not None:
         columns["n_merged"] = n_merged.astype(np.int32)
+    if truth.state is not None:
+        # the tracks' truth, as the tracking tools read it (`tracking.columns`)
+        state = truth.state[rows]
+        columns["track_id_true"] = np.where(state >= 0, owner + 1, 0).astype(np.int64)
+        columns["state_true"] = state.astype(np.int32)
     metadata = _metadata(truth, "smappy blinking structure")
     metadata.update({"n_localizations": n, "close_emitters": out.close,
                      "min_separation_nm": out.min_separation_nm,
@@ -244,7 +255,7 @@ def draw_background(settings: SimulationSettings, n: int, rng) -> np.ndarray:
 
 def _average(group, frame, owner, photons, xyz, background):
     """One row per group: positions weighted by photons, photons added, the
-    brightest member's identity."""
+    brightest member's identity (``owner``: whatever names a row)."""
     unique, inverse = np.unique(group, return_inverse=True)
     m = len(unique)
     total = np.bincount(inverse, weights=photons, minlength=m)
@@ -266,7 +277,7 @@ def _metadata(truth: GroundTruth, what: str) -> dict:
     scene = isinstance(s, SceneSettings)
     return {"units": "nm", "simulation": what, "seed": s.seed,
             "structure": ([c.structure.source() if c.structure.kind == "structure"
-                           else c.structure.kind for c in s.components if c.on]
+                           else c.structure.kind for c in s.components if c.enabled]
                           if scene else s.structure.source()),
             "structure_name": truth.name,
             # what `component` numbers: the scene's components by position

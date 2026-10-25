@@ -1,0 +1,18 @@
+# As Diffusion, the particles switching between a fast state and a slow,
+# nearly bound one: 30 % of the time slow, the state drawn again with 5 % per
+# frame -- what the tracking analysis separates.
+n_frames: 1000
+field_um: 20.0
+frame_time_ms: 10.0
+background: 10.0
+key:
+  components.0.motion.d_um2_s: D, fast
+  components.0.motion.d2_um2_s: D, slow
+  components.0.motion.slow_fraction: slow fraction
+  components.0.motion.switch_probability: switching
+components:
+  - name: particles
+    structure: {kind: homogeneous, density_um2: 2.5}
+    blinking: {activation: all, blinks: 1, on_time: 40, photons: 40000, photons_std: 10000}
+    motion: {diffusion: true, d_um2_s: 0.5, slow_fraction: 0.3, d2_um2_s: 0.02,
+             switch_probability: 0.05}

@@ -29,7 +29,7 @@ Fiducial beads too (`beads`): bright, still but for the drift, with gaps and
 late arrivals, the truth in ``bead_true``.
 
 In the package rather than in ``scripts/`` because it is also a plugin
-(``File/Simulate/Blinking Structure``): something to try the whole pipeline
+(``File/Simulate/Simulate``): something to try the whole pipeline
 on without a microscope.
 """
 from .beads import simulate_bead_tracks, simulate_beads, with_beads

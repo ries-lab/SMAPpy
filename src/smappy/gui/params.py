@@ -787,6 +787,10 @@ class ShapesField(QWidget):
         pass
 
 
+#: px: a key parameter's label wraps beyond this, a component's name before it
+KEY_LABEL_WIDTH = 150
+
+
 class PresetField(QWidget):
     """A name from saved settings (`smappy.presets`), with *save...* and
     *delete* beside it: ``kind="preset"``.
@@ -801,16 +805,21 @@ class PresetField(QWidget):
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
-        from PySide6.QtWidgets import QPushButton
         self.spec = spec
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 0, 6, 0)
         self.widget = QComboBox()
-        self.save_button = QPushButton("save...")
+        self.widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.widget.setMinimumContentsLength(8)
+        self.save_button = QToolButton(text="save...")
         self.save_button.setToolTip("keep these settings under a name of yours")
-        self.delete_button = QPushButton("delete")
-        self.delete_button.setToolTip("remove the chosen preset of yours")
+        self.delete_button = QToolButton(text="\u2212")
+        self.delete_button.setToolTip("delete the chosen preset of yours")
+        # "modified" once the settings have moved from the preset's (`set_hint`)
+        self.state = QLabel("")
+        self.state.setStyleSheet("color: grey")
         row.addWidget(self.widget, 1)
+        row.addWidget(self.state)
         row.addWidget(self.save_button)
         row.addWidget(self.delete_button)
         if spec.info.help:
@@ -883,7 +892,9 @@ class PresetField(QWidget):
         self._fill(self.value())
 
     def set_hint(self, value) -> None:
-        pass
+        """A word beside the name: "modified" when the settings have moved
+        from the preset's (`FormState.hints`)."""
+        self.state.setText(str(value) if value else "")
 
 
 class ListField(QWidget):
@@ -915,7 +926,6 @@ class ListField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         self.list = QListWidget()
-        self.list.setMaximumHeight(110)
         if spec.info.help:
             self.list.setToolTip(spec.info.help)
         layout.addWidget(self.list)
@@ -977,6 +987,11 @@ class ListField(QWidget):
                 row.setCheckState(Qt.Checked if getattr(item, on) else Qt.Unchecked)
             self.list.addItem(row)
         self.list.blockSignals(False)
+        # as tall as its rows, up to five: two components need no empty box
+        rows = max(len(self.items), 1)
+        self.list.setFixedHeight(min(rows, 5) * self.list.sizeHintForRow(0)
+                                 + 2 * self.list.frameWidth() + 2
+                                 if self.items else 2 * self.list.frameWidth() + 20)
         has = bool(self.items)
         for b in (self.copy_button, self.remove_button, self.up_button,
                   self.down_button, self.save_button):
@@ -1301,6 +1316,21 @@ class SettingsForm(QWidget):
             box.setLayout(more)
             self.more_section = CollapsibleSection("more", box, expanded=False)
             layout.addWidget(self.more_section)
+        # the key parameters (`FormState.keys`): copies of a few fields, at
+        # the top after the first rows, shown once the plugin names some
+        self._specs = specs
+        self._keys: Dict[str, str] = {}
+        self.key_fields: Dict[str, QWidget] = {}
+        keys_box = QWidget()
+        self._keys_form = form_layout()
+        keys_box.setLayout(self._keys_form)
+        self.keys_section = CollapsibleSection("key parameters", keys_box, expanded=True)
+        self.keys_section.hide()
+        first_section = next((k for k in range(layout.count())
+                              if isinstance(layout.itemAt(k).widget(), CollapsibleSection)),
+                             layout.count())
+        layout.insertWidget(first_section, self.keys_section)
+        self.changed.connect(self._sync_keys)
 
     def value(self):
         if self.settings_cls is None:
@@ -1358,6 +1388,93 @@ class SettingsForm(QWidget):
             except (KeyError, AttributeError, ValueError, TypeError):
                 dropped.append(path)
         return dropped
+
+    # ------------------------------------------------------- key parameters
+    def spec_at(self, path: str) -> Optional[ParamSpec]:
+        """The spec of the field at ``path``: through parts, and through a
+        list's item (``components.0.photons``)."""
+        specs = self._specs
+        parts = path.split(".")
+        spec = None
+        k = 0
+        while k < len(parts):
+            spec = specs.get(parts[k]) if specs else None
+            if spec is None:
+                return None
+            if spec.items is not None:
+                specs = spec.items
+                k += 2                      # the item's index
+                continue
+            specs = spec.children
+            k += 1
+        return spec
+
+    def value_at(self, path: str):
+        """The value at ``path`` as the form holds it now."""
+        parts = path.split(".")
+        target: Any = self
+        k = 0
+        while k < len(parts):
+            if isinstance(target, SettingsForm):
+                target = target.fields[parts[k]]
+                k += 1
+            elif isinstance(target, ListField):
+                item = target.items[int(parts[k])]
+                for name in parts[k + 1:]:
+                    item = getattr(item, name)
+                return item
+            else:
+                break
+        return target.value()
+
+    def set_keys(self, keys: Dict[str, str]) -> None:
+        """Show these fields again at the top (`FormState.keys`), with these
+        labels; an edit there sets the field itself and says so as an edit
+        of it, so the plugin hears ``components.0.blinking.photons``."""
+        keys = dict(keys)
+        if keys == self._keys:
+            self._sync_keys()
+            return
+        self._keys = keys
+        while self._keys_form.rowCount():
+            self._keys_form.removeRow(0)
+        self.key_fields = {}
+        for path, label in keys.items():
+            spec = self.spec_at(path)
+            if spec is None or spec.children is not None or spec.items is not None:
+                continue                    # a key names one field, never a part
+            proxy = _Field(dataclasses.replace(spec, info=dataclasses.replace(
+                spec.info, label=label, beside=False)))
+            proxy.changed.connect(lambda p=path, w=proxy: self._key_edited(p, w))
+            name = QLabel(label)
+            # "second label: labelling efficiency" on two lines, not wider
+            name.setWordWrap(True)
+            name.setFixedWidth(min(name.fontMetrics().horizontalAdvance(label) + 4,
+                                   KEY_LABEL_WIDTH))
+            if spec.info.help:
+                name.setToolTip(spec.info.help)
+            self._keys_form.addRow(name, proxy)
+            self.key_fields[path] = proxy
+        self.keys_section.setVisible(bool(self.key_fields))
+        self._sync_keys()
+
+    def _key_edited(self, path: str, proxy) -> None:
+        try:
+            value = proxy.value()
+        except (ValueError, TypeError):
+            return
+        self.set_values({path: value})
+        self.field_changed.emit(path)
+
+    def _sync_keys(self) -> None:
+        for path, proxy in self.key_fields.items():
+            try:
+                value = self.value_at(path)
+            except (KeyError, IndexError, AttributeError, ValueError, TypeError):
+                continue
+            proxy.blockSignals(True)
+            proxy.set(value)
+            proxy.blockSignals(False)
 
     def _routed(self, method: str, path: str, value) -> bool:
         """Hand ``path`` to a list of parts on the way, if there is one:

@@ -308,7 +308,7 @@ def test_a_simulation_file_opens_as_an_acquisition_with_its_camera(tmp_path):
 def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):
     from smappy import plugins
     from smappy.plugins import Context
-    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    plugin = plugins.get("File/Simulate/Simulate")()
     settings = plugin.Settings(output="camera", n_frames=20)
     with pytest.raises(ValueError, match="where to write"):
         plugin.run(Context(), settings)

@@ -330,9 +330,9 @@ Seeded with what the File menu does not do (Load and Save stay in the
 plugin tree, for chains, the batch and the Plugins menu):
 
     File/Export/Image         the rendered view as a picture
-    File/Simulate/Blinking Structure   `smappy.simulate`: localizations into
-                              the session, or camera frames as a `*.sim.yaml`
-                              recipe that a fitter opens as its file
+    File/Simulate/Simulate    `smappy.simulate`: a scene as localizations
+                              into the session, or camera frames as a
+                              `*.sim.yaml` recipe that a fitter opens as its file
 
 A named format *means* it: `load` takes an explicit reader, because dispatching
 by extension underneath would have *format* SMAP on a `.hdf5` quietly read it

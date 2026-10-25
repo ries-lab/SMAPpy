@@ -372,6 +372,7 @@ class PluginPanel(QWidget):
             self.form.set_titles(state.titles)
         if state.shown:
             self.form.set_shown(state.shown)
+        self.form.set_keys(state.keys)
         self._show_notice(state.notice)
 
     def _shapes_drawn(self, field: str, shapes) -> None:

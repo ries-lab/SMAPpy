@@ -59,6 +59,16 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     return path
 
 
+def dual_of(settings) -> Optional[dict]:
+    """How `camera.render` draws a split camera's two halves, or None for
+    one camera: the second half's PSF width, the first's on *auto*."""
+    if getattr(settings, "output", "") != "split":
+        return None
+    first = settings.optics.sigma_nm
+    second = settings.camera.split_sigma_nm or first
+    return {"sigma_nm": (first, second)}
+
+
 def read_recipe(path) -> SimulationSettings:
     import yaml
     with open(path, encoding="utf-8") as fh:
@@ -83,7 +93,7 @@ class SimulatedSource(ImageSource):
     def truth(self):
         """Every spot drawn, as a localization table (`camera.camera_truth`)."""
         from .camera import camera_truth
-        return camera_truth(self._truth)
+        return camera_truth(self._truth, dual=dual_of(self.settings))
 
     def frames(self, chunk: int = 100, start: int = 0,
                stop: Optional[int] = None) -> Iterator[Tuple[int, np.ndarray]]:
@@ -91,7 +101,7 @@ class SimulatedSource(ImageSource):
         stop = self.n_frames if stop is None else min(stop, self.n_frames)
         for a in range(start, stop, chunk):
             b = min(a + chunk, stop)
-            yield a, render(self._truth, a, b)
+            yield a, render(self._truth, a, b, dual=dual_of(self.settings))
 
     def watch(self, chunk: int = 100, **kwargs):
         # nothing is being written: the whole stack is already "there"
@@ -109,7 +119,8 @@ def open_simulation(path) -> SimulatedSource:
               "em_on": settings.camera.em_gain > 0,
               "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
               "frame_time_ms": settings.frame_time_ms, "camera_name": "simulation"}
+    height = 2 * size if dual_of(settings) else size      # a split camera's two halves
     return SimulatedSource(
-        files=[Path(path)], shape=(size, size), dtype=np.dtype(np.uint16),
+        files=[Path(path)], shape=(height, size), dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,
         mm_metadata={}, summary={}, settings=settings, camera=camera, _truth=truth)

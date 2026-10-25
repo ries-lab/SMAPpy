@@ -86,7 +86,7 @@ def test_diffusing_labels_spread_as_four_d_t():
                           structure=StructureSettings(kind="homogeneous", density_um2=20),
                           blinking=BlinkingSettings(activation="always", photons=1000,
                                                     photons_std=0),
-                          motion=MotionSettings(on=True, d_um2_s=d))])
+                          motion=MotionSettings(diffusion=True, d_um2_s=d))])
     truth = ground_truth(scene)
     em, moved = truth.emission, truth.motion_nm
     last = em.frame == 59
@@ -100,7 +100,7 @@ def test_links_that_cannot_be_followed_are_refused_with_their_names():
     loose = npc("Nup2", placement=PlacementSettings(mode="same", same_as="gone"))
     with pytest.raises(ValueError, match="gone"):
         ground_truth(SceneSettings(n_frames=10, components=[npc(), loose]))
-    off = npc(on=False)
+    off = npc(enabled=False)
     linked = npc("Nup2", placement=PlacementSettings(mode="same", same_as="Nup96"))
     with pytest.raises(ValueError, match="switched off"):
         ground_truth(SceneSettings(n_frames=10, components=[off, linked]))

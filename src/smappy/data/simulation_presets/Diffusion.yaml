@@ -1,0 +1,16 @@
+# Single-particle tracking: particles at random over a 20 um field, each one
+# long blink (on for 20 frames on average, then bleached) while it diffuses
+# at 0.5 um^2/s.  About 0.05 particles per um^2 are on in a frame.
+n_frames: 1000
+field_um: 20.0
+frame_time_ms: 10.0
+background: 10.0
+key:
+  components.0.motion.d_um2_s: D
+  components.0.structure.density_um2: density
+  components.0.blinking.on_time: track length
+components:
+  - name: particles
+    structure: {kind: homogeneous, density_um2: 2.5}
+    blinking: {activation: all, blinks: 1, on_time: 20, photons: 20000, photons_std: 5000}
+    motion: {diffusion: true, d_um2_s: 0.5}

@@ -736,6 +736,7 @@ class FormState:
       greyed form three times the length of the one in use is a form to scroll
       past.  A hidden field keeps its value, as a greyed one does, so it
       cannot change what a run does; what can change a run is shown.
+    * ``keys`` -- settings shown again at the top, ``{dotted name: label}``.
     """
     hints: Dict[str, Any] = field(default_factory=dict)
     active: Dict[str, bool] = field(default_factory=dict)
@@ -745,6 +746,12 @@ class FormState:
     # holds, said while it is folded ("camera: auto - iXon 888, ...")
     titles: Dict[str, str] = field(default_factory=dict)
     shown: Dict[str, bool] = field(default_factory=dict)
+    # the few settings shown again at the top of the form, by dotted name --
+    # an item of a list too, ``components.0.blinking.photons`` -- with the
+    # label they are shown with there: a simulated scene's preset names the
+    # ones it is about, and the rest stay folded below.  Editing one edits
+    # the setting itself.  Empty leaves the form without such a section.
+    keys: Dict[str, str] = field(default_factory=dict)
 
     def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
         """This state as part ``key`` of a larger form -- a chain's step: the
@@ -761,7 +768,8 @@ class FormState:
             choices={f"{key}.{k}": v for k, v in self.choices.items()},
             notice=notice,
             titles={f"{key}.{k}": v for k, v in self.titles.items()},
-            shown={f"{key}.{k}": v for k, v in self.shown.items()})
+            shown={f"{key}.{k}": v for k, v in self.shown.items()},
+            keys={f"{key}.{k}": v for k, v in self.keys.items()})
 
     def update(self, other: "FormState") -> None:
         """Add ``other``'s parts; the first notice stays, as the panel has
@@ -771,6 +779,7 @@ class FormState:
         self.choices.update(other.choices)
         self.titles.update(other.titles)
         self.shown.update(other.shown)
+        self.keys.update(other.keys)
         if self.notice is None:
             self.notice = other.notice
 
