@@ -107,6 +107,10 @@ class AssistantServer(QObject):
         self.calls: Deque[Tuple[str, str, bool]] = deque(maxlen=20)  # time, tool, ok
         self.error: str = ""                # why listening failed
         self._announced = None              # the next call, shown before it runs
+        # the panels opened on a proposal, by the panel: the proposal its next
+        # run carries out (`watch`)
+        self._watched: Dict[int, str] = {}
+        self._listening_to: set = set()     # the panels whose `ended` is connected
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._tick)
@@ -265,6 +269,31 @@ class AssistantServer(QObject):
             client.socket.write((answer + "\n").encode("utf-8"))
             client.socket.flush()
         self.changed.emit()
+
+    # -------------------------------------------------------------- proposals
+    def watch(self, panel, ident: str) -> None:
+        """The next run of ``panel`` carries out proposal ``ident``: when the
+        user runs it, the proposal is done and its result goes to the
+        assistant.  A panel opened on another proposal since answers that one."""
+        key = id(panel)
+        if key not in self._listening_to:
+            self._listening_to.add(key)
+            panel.ended.connect(lambda kind, result, panel=panel: self._ran(panel, kind, result))
+        self._watched[key] = ident
+
+    def _ran(self, panel, kind: str, result) -> None:
+        try:
+            if kind != "done" or panel.job != "run":
+                return                      # a preview, a failure, a stop
+            ident = self._watched.pop(id(panel), None)
+            if ident is None:
+                return
+            proposal = self.assistant.proposal(ident)
+            if proposal.status in ("opened", "proposed"):
+                self.assistant.ran(ident, result, getattr(panel.plugin, "path", ""))
+            self.changed.emit()
+        except Exception:
+            traceback.print_exc()
 
     # ------------------------------------------------------------ for the pane
     def client_names(self) -> List[str]:

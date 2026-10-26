@@ -103,6 +103,10 @@ class Proposal:
     # what the user did with it: "proposed", "opened" (its panel, filled in),
     # "done" or "dismissed" -- so the model can ask what became of it
     status: str = "proposed"
+    # a run the user made from the panel it opened: its kept result (for
+    # `figure`) and the settings it ran with, which the user may have changed
+    result: str = ""
+    ran_with: Optional[Dict[str, Any]] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -220,6 +224,20 @@ class Assistant:
         fills a proposal's panel with."""
         cls = self._plugin(path)
         return self._settings(cls, self._in_output(cls, values))
+
+    def ran(self, ident: str, result, path: str = "") -> str:
+        """The user ran a proposal from its panel: it is done, and its result
+        is kept as any run's is.  Returns the result's id."""
+        from ..plugins import settings_values
+        proposal = self.proposal(ident)
+        kept = self._keep(path or proposal.arguments.get("path") or "chain", True, result)
+        proposal.status, proposal.result = "done", kept.id
+        if getattr(result, "settings", None) is not None:
+            try:
+                proposal.ran_with = _plain(settings_values(result.settings))
+            except Exception:           # a chain's settings are not flat values
+                proposal.ran_with = None
+        return kept.id
 
     def carry_out(self, ident: str):
         """Do what a proposal proposed, as the user's decision: the call is
@@ -844,7 +862,9 @@ class Assistant:
 
     @tool("What was proposed in suggest mode, and what the user did with "
           "each: its status is proposed, opened (its panel shown to the user, "
-          "filled in), done or dismissed.")
+          "filled in), done or dismissed.  A run the user made from the panel "
+          "has its result's id (for figure) and the settings it ran with, "
+          "which the user may have changed.")
     def list_proposals(self) -> List[Dict[str, Any]]:
         return [p.as_dict() for p in self.proposals]
 

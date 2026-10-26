@@ -64,13 +64,31 @@ only ever touched where the render expects them.  The cost: a long applied
 run holds the window while it runs.  Moving long runs onto a worker, as a
 plugin's panel does, is left for when it is missed.
 
-The *Assistant* pane (`docs/panels/Assistant.md`) shows the connection, the
-suggest/act switch (*suggest* by default), the output folder (the first
-open file's, or one chosen) and the proposals: a proposed run has *Open*,
-which shows the plugin's own window filled in (`PluginPanel.take_settings`)
-for the user to run; the rest has *Do it*.  Each proposal's `status` --
-proposed, opened, done, dismissed -- is in `list_proposals`, so the model
-can see what the user did with it.
+What is looked at every moment is kept apart from what is set once
+(`gui/assistant_pane.py`, `docs/panels/Assistant.md`):
+
+* **Every moment** -- is an assistant connected, may it act, what did it
+  propose -- is a button in the render window's toolbar
+  (`[● Claude · suggest · 2 ▾]`, highlighted while proposals are unseen),
+  whose popup is the list of proposals; the same list is a small window
+  placed above the assistant's terminal.  A proposed run has *Open*, which
+  shows the plugin's own window filled in (`PluginPanel.take_settings`); the
+  user's Run there carries the proposal out (`AssistantServer.watch`): it
+  becomes `done`, with the result kept and the settings it ran with, so the
+  model can read what the user ran.  The rest has *Do it*; × dismisses.
+* **Once** -- which client to start, the folder it starts in, the folder it
+  may write into, the mode to start in, listening at start -- is a settings
+  window, kept in the configuration.
+
+*Assistant > Start assistant* (Ctrl+Shift+A) allows connections and starts
+the chosen client already connected, in a column beside the picture
+(`assistant/launch.py`): Claude Code or Codex in a terminal, the server on
+their command line (`claude --mcp-config`, Codex's `-c`), so the user's
+settings are not touched; the Claude app, which cannot be started on a
+folder from outside, through the folder's `.mcp.json`; or a command of the
+user's own.  The server command is SMAPpy's own Python
+(`-m smappy.assistant.server --attach PID`), which needs nothing on the PATH.
+Typing to the assistant from SMAPpy itself stays step 5.
 
 ### Two tiers, by what the client can do
 
@@ -172,7 +190,9 @@ solved, with its chain -- come later.
    from a menu, every call queued onto the GUI thread with its exceptions
    caught; the *Assistant* pane with the proposals, the switch and the
    connection's state; view changes allowed in *suggest*; `smappy-mcp
-   --attach`; `tests/test_assistant_gui.py`.
+   --attach`; `tests/test_assistant_gui.py`.  Then the everyday layout: the
+   toolbar button, the proposals beside the terminal, *Start assistant*,
+   proposals carried out by the user's run.
 3. **Test tasks** with a coding agent and one non-Claude client; what they
    get wrong goes into the pages or a short note of lab knowledge.
 4. **Solutions in the knowledge base**: a problem, how it was solved and
@@ -195,7 +215,9 @@ starts in suggest mode, `--open FILE` with a file loaded, `--knowledge DIR`
 keeps the notes elsewhere.  Nothing to install beyond SMAPpy: the server has
 no dependency of its own.
 
-With the GUI: *Assistant > Allow connections* in SMAPpy, then
+With the GUI: *Assistant > Start assistant* starts the client chosen in
+its settings, connected.  For a client started by hand, *Assistant > Allow
+connections*, then
 
     claude mcp add smappy-gui -- smappy-mcp --attach
 
