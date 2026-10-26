@@ -73,6 +73,7 @@ From a checkout, activate the venv first or run `.venv/bin/smappy-gui`.
 **Tutorials.** [ries-lab.github.io/SMAPpy](https://ries-lab.github.io/SMAPpy/)
 has short guided tours on simulated data you can follow along with. Start with
 [SMAPpy in three minutes](https://ries-lab.github.io/SMAPpy/quickstart/).
+In the program, *Help → Tutorials* opens them in your browser.
 
 **Help pages.** Every plugin and the main parts of the GUI have a help page.
 It explains the theoretical background and every control. Open it with the

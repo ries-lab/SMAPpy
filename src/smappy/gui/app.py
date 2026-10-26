@@ -110,6 +110,9 @@ class LoadTask(QThread):
             self.failed.emit(message_of(e), traceback.format_exc())
 
 
+TUTORIALS_URL = "https://ries-lab.github.io/SMAPpy/"
+
+
 def _keys(standard, fallback: str):
     """The platform's standard sequence, plus the fallback if it is different
     (a duplicate would make the shortcut ambiguous and dead)."""
@@ -456,6 +459,11 @@ class ControlWindow(QMainWindow):
         render.toolbar.add_right(self.assistant_button)
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
+        # the tutorials are videos on the published site, rebuilt from the
+        # program on every push (`.github/workflows/tutorials.yml`): in the
+        # system's browser, which plays them, not in the Help window
+        self._action(help_, "Tutorials", None, self.show_tutorials).setToolTip(
+            f"short videos of the program in use, in your browser ({TUTORIALS_URL})")
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
         self._action(help_, "Show the log folder", None, self.show_log_folder)
@@ -543,6 +551,11 @@ class ControlWindow(QMainWindow):
     def show_about(self) -> None:
         from .about import show_about
         show_about(self)
+
+    def show_tutorials(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(TUTORIALS_URL))
 
     def show_plugin_docs(self) -> None:
         from .help_window import show_help
