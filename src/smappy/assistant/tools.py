@@ -147,7 +147,8 @@ class Assistant:
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
-                 knowledge_folder=None, viewer=None, panels=None):
+                 knowledge_folder=None, viewer=None, panels=None,
+                 missing_tools=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -159,6 +160,7 @@ class Assistant:
         self.knowledge = Path(knowledge_folder or knowledge.default_folder()).expanduser()
         self.viewer = viewer
         self.panels = panels
+        self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
         self._ids = itertools.count(1)
@@ -880,6 +882,18 @@ class Assistant:
             raise ToolError(f"no note {name!r}")
         return {"forgotten": gone.stem}
 
+    @tool("Note a tool SMAPpy lacks, for its developers.  When you had to take a "
+          "detour because no tool does what the user asked directly, say so in "
+          "one sentence after helping and ask whether to note it; call this "
+          "ONLY after the user said yes.",
+          asked={"type": "string", "description": "what the user wanted, in their words"},
+          workaround={"type": "string", "description": "how you got there instead"},
+          tool={"type": "string",
+                "description": "the tool that would have done it, in a line"})
+    def note_missing_tool(self, asked: str, workaround: str, tool: str) -> Dict[str, Any]:
+        path = knowledge.note_missing_tool(self.missing_tools, asked, workaround, tool)
+        return {"noted": tool, "file": str(path)}
+
     @tool("What was proposed in suggest mode, and what the user did with "
           "each: its status is proposed, opened (its panel shown to the user, "
           "filled in), done or dismissed.  A run the user made from the panel "
@@ -912,4 +926,6 @@ How to work:
 * recall before deciding what the user may have decided already; remember
   and save_chain only when the user has agreed to keep it.
 * In suggest mode changes become proposals: explain each one to the user.
+* A detour because no tool does what was asked: after helping, offer in one
+  sentence to note the missing tool (note_missing_tool), and only on a yes.
 """

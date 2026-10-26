@@ -367,5 +367,11 @@ def bug_report(path, session=None, note: str = "") -> Path:
                 z.write(folder / name, name)
         if config_file().exists():
             z.write(config_file(), "config.yaml")
+        # the tools the assistant noted as missing (`assistant.knowledge`):
+        # read here by path, as nothing outside the assistant imports it
+        from .config import config_dir
+        missing = config_dir() / "assistant" / "missing-tools.md"
+        if missing.exists():
+            z.write(missing, "assistant-missing-tools.md")
     logger.info("bug report written to %s", path)
     return path

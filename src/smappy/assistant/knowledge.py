@@ -85,3 +85,33 @@ def forget(folder: Path, name: str) -> Optional[Path]:
         return None
     path.unlink()
     return path
+
+
+# ------------------------------------------------------------ missing tools
+# What the assistant could not do directly, noted for SMAPpy's developers:
+# one file, appended to, beside the knowledge folder rather than in it -- a
+# lab's shared notes are its practice, this is a wish list for the program.
+# `diagnostics.bug_report` takes it along under the same name.
+MISSING_TOOLS = "missing-tools.md"
+
+
+def missing_tools_file() -> Path:
+    from .. import config
+    return config.config_dir() / "assistant" / MISSING_TOOLS
+
+
+def note_missing_tool(path: Path, asked: str, workaround: str, tool: str) -> Path:
+    """Append one gap to ``path``: what was asked, the detour, the tool."""
+    from .. import __version__
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with path.open("a", encoding="utf-8") as out:
+        if new:
+            out.write("# Tools the assistant was missing\n\n"
+                      "Noted in conversations, with the user's agreement, for "
+                      "SMAPpy's developers.\n")
+        out.write(f"\n## {datetime.now():%Y-%m-%d %H:%M} -- {tool.strip()}\n\n"
+                  f"- asked: {asked.strip()}\n"
+                  f"- instead: {workaround.strip()}\n"
+                  f"- SMAPpy {__version__}\n")
+    return path

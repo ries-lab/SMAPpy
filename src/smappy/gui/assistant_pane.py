@@ -37,7 +37,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QRadioButton, QScrollArea, QToolButton,
+                               QRadioButton, QToolButton,
                                QVBoxLayout, QWidget)
 
 from .widgets import note_style
@@ -60,6 +60,16 @@ def save_preferences(values: Dict) -> None:
     config.set("assistant", {**preferences(), **values})
 
 
+def _name_of(path) -> str:
+    """A plugin as the menus name it ("RCC drift correction"), not its path."""
+    from .. import plugins
+    try:
+        ref = plugins.refs().get(path)
+    except Exception:
+        ref = None
+    return (ref.name if ref is not None and ref.name else None) or str(path)
+
+
 def describe(proposal) -> str:
     """A proposal in a line, as the user reads it."""
     a = proposal.arguments
@@ -67,7 +77,7 @@ def describe(proposal) -> str:
         values = a.get("settings") or {}
         shown = ", ".join(f"{k} = {v}" for k, v in values.items())
         layer = f" on layer {a['layer']}" if a.get("layer") else ""
-        return f"Run {a.get('path')}{layer}" + (f": {shown}" if shown else "")
+        return f"Run {_name_of(a.get('path'))}{layer}" + (f": {shown}" if shown else "")
     if proposal.tool == "run_chain":
         return "Run a chain of plugins"
     if proposal.tool == "load":
@@ -354,7 +364,14 @@ class AssistantControls(QObject):
 
 class ProposalList(QWidget):
     """The everyday part: what is connected and running, the proposals, the
-    switch.  In the toolbar's popup and in the proposals' window."""
+    switch.  Dropped down under the toolbar's button (`ProposalOverlay`).
+
+    One proposal at a time, its reason written out under it, ``‹ 2 / 4 ›``
+    to step through the others: the panel sits over the picture, and a list
+    that grew with the proposals hid either the picture or, in a scroll
+    area sized to one row, all but the first.  A new proposal is shown as it
+    arrives; one dealt with gives its place to the next.
+    """
 
     def __init__(self, controls: AssistantControls, parent=None):
         super().__init__(parent)
@@ -366,21 +383,45 @@ class ProposalList(QWidget):
         self.state.setStyleSheet(note_style())
         column.addWidget(self.state)
 
-        self.rows = QWidget()
-        self.rows_layout = QVBoxLayout(self.rows)
-        self.rows_layout.setContentsMargins(0, 0, 0, 0)
-        self.rows_layout.setSpacing(2)
         self.empty = QLabel("No proposals.  In suggest mode what the assistant would "
                             "change waits here.")
         self.empty.setWordWrap(True)
         self.empty.setStyleSheet(note_style())
-        self.rows_layout.addWidget(self.empty)
-        self.rows_layout.addStretch(1)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(self.rows)
-        column.addWidget(scroll, 1)
+        column.addWidget(self.empty)
+        # the proposal shown: what, why, and what to do with it
+        self.card = QWidget()
+        card = QVBoxLayout(self.card)
+        card.setContentsMargins(0, 0, 0, 0)
+        self.text = QLabel("")
+        self.text.setWordWrap(True)
+        self.text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.why = QLabel("")
+        self.why.setWordWrap(True)
+        self.why.setStyleSheet(note_style())
+        card.addWidget(self.text)
+        card.addWidget(self.why)
+        actions = QHBoxLayout()
+        self.previous = QToolButton(text="\u2039", autoRaise=True)
+        self.previous.setToolTip("the proposal before")
+        self.previous.clicked.connect(lambda: self._step(-1))
+        self.page = QLabel("")
+        self.page.setStyleSheet(note_style())
+        self.next = QToolButton(text="\u203a", autoRaise=True)
+        self.next.setToolTip("the next proposal")
+        self.next.clicked.connect(lambda: self._step(1))
+        for widget in (self.previous, self.page, self.next):
+            actions.addWidget(widget)
+        actions.addStretch(1)
+        self.go = QPushButton("Open")
+        self.go.clicked.connect(self._go)
+        self.dismiss = QToolButton(text="\u00d7")
+        self.dismiss.setToolTip("dismiss: off the list; the assistant can see you did")
+        self.dismiss.clicked.connect(self._dismiss)
+        actions.addWidget(self.go)
+        actions.addWidget(self.dismiss)
+        card.addLayout(actions)
+        column.addWidget(self.card)
+        column.addStretch(1)
 
         footer = QHBoxLayout()
         self.suggest = QRadioButton("suggest")
@@ -410,7 +451,9 @@ class ProposalList(QWidget):
         for button in (self.start_button, self.stop_button, settings):
             footer.addWidget(button)
         column.addLayout(footer)
-        self._shown: Optional[tuple] = None
+        self.current: Optional[str] = None      # the id of the proposal shown
+        self._index = 0                         # its place, kept when it goes
+        self._known: set = set()                # ids seen, to tell a new one
         controls.changed.connect(self.refresh)
         self.refresh()
 
@@ -440,43 +483,59 @@ class ProposalList(QWidget):
         if self.controls.message:
             state += "\n" + self.controls.message
         self.state.setText(state)
-        live = self.controls.live()
-        key = tuple((p.id, p.status) for p in live)
-        if key == self._shown:
-            return
-        self._shown = key
-        while self.rows_layout.count() > 2:  # the note and the stretch stay
-            item = self.rows_layout.takeAt(1)
-            if item.widget() is not None:
-                item.widget().deleteLater()
-        self.empty.setVisible(not live)
-        for n, proposal in enumerate(reversed(live)):     # the newest first
-            self.rows_layout.insertWidget(1 + n, self._row(proposal))
 
-    def _row(self, proposal) -> QWidget:
-        row = QWidget()
-        line = QHBoxLayout(row)
-        line.setContentsMargins(0, 0, 0, 0)
-        text = QLabel(describe(proposal) + ("  (opened)" if proposal.status == "opened" else ""))
-        text.setWordWrap(True)
-        if proposal.reason:
-            text.setToolTip(proposal.reason)
-        line.addWidget(text, 1)
+        live = self.controls.live()             # oldest first
+        ids = [p.id for p in live]
+        new = [i for i in ids if i not in self._known]
+        self._known.update(ids)
+        if new:
+            self.current = new[-1]              # what just arrived
+        elif self.current not in ids:
+            # dealt with: the one that took its place, or the last
+            self.current = ids[min(self._index, len(ids) - 1)] if ids else None
+        self.empty.setVisible(not live)
+        self.card.setVisible(bool(live))
+        if not live:
+            return
+        self._index = ids.index(self.current)
+        proposal = live[self._index]
+        self.text.setText(describe(proposal)
+                          + ("  (opened)" if proposal.status == "opened" else ""))
+        self.why.setText(proposal.reason)
+        self.why.setVisible(bool(proposal.reason))
+        several = len(live) > 1
+        for widget in (self.previous, self.page, self.next):
+            widget.setVisible(several)
+        self.page.setText(f"{self._index + 1} / {len(live)}")
+        self.previous.setEnabled(self._index > 0)
+        self.next.setEnabled(self._index < len(live) - 1)
         if proposal.tool in OPENS:
-            go = QPushButton("Open")
-            go.setToolTip("the plugin's window with these settings: check them, then "
-                          "run it there; that run carries the proposal out")
-            go.clicked.connect(lambda _=False, p=proposal.id: self.controls.open_proposal(p))
+            self.go.setText("Open")
+            self.go.setToolTip("the plugin's window with these settings: check them, "
+                               "then run it there; that run carries the proposal out")
         else:
-            go = QPushButton("Do it")
-            go.setToolTip("do what is proposed, now")
-            go.clicked.connect(lambda _=False, p=proposal.id: self.controls.do_proposal(p))
-        dismiss = QToolButton(text="×")
-        dismiss.setToolTip("dismiss: off the list; the assistant can see you did")
-        dismiss.clicked.connect(lambda _=False, p=proposal.id: self.controls.dismiss(p))
-        line.addWidget(go)
-        line.addWidget(dismiss)
-        return row
+            self.go.setText("Do it")
+            self.go.setToolTip("do what is proposed, now")
+
+    def _step(self, by: int) -> None:
+        live = self.controls.live()
+        if live:
+            self._index = max(0, min(len(live) - 1, self._index + by))
+            self.current = live[self._index].id
+        self.refresh()
+
+    def _go(self) -> None:
+        proposal = next((p for p in self.controls.live() if p.id == self.current), None)
+        if proposal is None:
+            return
+        if proposal.tool in OPENS:
+            self.controls.open_proposal(proposal.id)
+        else:
+            self.controls.do_proposal(proposal.id)
+
+    def _dismiss(self) -> None:
+        if self.current is not None:
+            self.controls.dismiss(self.current)
 
 
 class FirstStart(QWidget):
