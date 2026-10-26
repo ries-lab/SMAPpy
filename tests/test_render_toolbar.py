@@ -150,3 +150,14 @@ def test_the_assistant_settings_stay_in_the_assistant_menu_on_a_mac(app):
     assert roles["Preferences..."] == QAction.PreferencesRole
     render.close()
     control.close()
+
+
+def test_a_right_click_offers_no_menu_that_hides_the_toolbar(app):
+    """Qt's menu of toolbars had one item, the toolbar, and unticking it left
+    the window with no way to bring it back."""
+    from smappy.gui.app import RenderWindow
+    from smappy.gui.view3d import View3DWindow
+    session = Session(uniform())
+    for window in (RenderWindow(session), View3DWindow(session)):
+        assert window.createPopupMenu() is None
+        window.close()
