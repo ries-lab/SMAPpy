@@ -105,7 +105,11 @@ def client_command(key: str, config_file: Path, own: str = "",
     with ``{server}`` (the server's command) and ``{config}`` (the JSON
     file) filled in."""
     if key == "claude":
-        command = ["claude", "--mcp-config", str(config_file)]
+        from .tools import source_folder
+        # SMAPpy's own code beside the data it works in: read and grepped
+        # without a question each time (edits there still ask)
+        command = ["claude", "--mcp-config", str(config_file),
+                   "--add-dir", str(source_folder())]
         if pre_allow:
             # SMAPpy's own switch decides what the assistant may change, so
             # asking again before every tool call would only be clicks

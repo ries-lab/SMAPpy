@@ -65,7 +65,7 @@ def main(argv=None) -> int:
     import matplotlib
     matplotlib.use("Agg")          # never a window: there is nobody to see it
     from .protocol import Server
-    from .tools import INSTRUCTIONS, Assistant
+    from .tools import INSTRUCTIONS, Assistant, source_note
     assistant = Assistant(mode=args.mode, output=args.output,
                           knowledge_folder=args.knowledge)
     if args.open:
@@ -73,7 +73,8 @@ def main(argv=None) -> int:
     print(f"smappy-mcp: {args.mode} mode, writing under {assistant.output}",
           file=sys.stderr)
     try:
-        Server(assistant, instructions=INSTRUCTIONS).serve(sys.stdin, protocol_out)
+        Server(assistant, instructions=INSTRUCTIONS + source_note()).serve(
+            sys.stdin, protocol_out)
     except KeyboardInterrupt:
         pass
     return 0

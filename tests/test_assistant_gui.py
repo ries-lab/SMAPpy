@@ -124,6 +124,8 @@ def test_a_client_on_the_socket_gets_the_tools_and_each_call_runs_on_the_gui_thr
                                "clientInfo": {"name": "test", "version": "1"}})
     hello = client.answer()["result"]
     assert "running SMAPpy GUI" in hello["instructions"]
+    from smappy.assistant.tools import source_folder
+    assert str(source_folder()) in hello["instructions"]      # where its code is
     assert server.client_names() == ["test 1"]
     client.send("tools/list")
     names = {t["name"] for t in client.answer()["result"]["tools"]}
@@ -480,8 +482,10 @@ def test_claude_code_starts_with_the_server_on_its_command_line(tmp_path, monkey
     entry = json.loads(config.read_text())["mcpServers"]["smappy-gui"]
     assert entry == {"command": sys.executable,
                      "args": ["-m", "smappy.assistant.server", "--attach", "4242"]}
+    from smappy.assistant.tools import source_folder
     assert launch.client_command("claude", config) == [
-        "claude", "--mcp-config", str(config), "--allowedTools", "mcp__smappy-gui"]
+        "claude", "--mcp-config", str(config), "--add-dir", str(source_folder()),
+        "--allowedTools", "mcp__smappy-gui"]
     assert "--allowedTools" not in launch.client_command("claude", config, pre_allow=False)
     codex = launch.client_command("codex", config)
     assert codex[0] == "codex" and f'mcp_servers.smappy_gui.command="{sys.executable}"' in codex
