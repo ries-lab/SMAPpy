@@ -21,17 +21,19 @@ or *split + overlay* with the added-up picture after them (SMAP's *split* and
 *comp*).
 The panels go across or one above another, whichever shows the data larger in
 the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
-(region of interest: a rectangle, line or polygon drawn on the picture) is
-drawn and edited on the first and its outline is on all of them.
+(region of interest: a rectangle, circle, line or polygon drawn on the
+picture) is drawn and edited on the first and its outline is on all of them.
 
 The picture's toolbar holds, from the left, what draws and what looks.  The
-*ROI* button draws a region of interest (right-click it for the kind); while
+*ROI* button draws a region of interest (right-click it for the kind; a
+circle is drawn from its centre out); Escape cancels the drawing, and a
+right-click on the ROI deletes it.  While
 the kind is a line, the field beside it is the line's width.  ⤢ (*Reset view*,
 Ctrl+0) shows everything; *3D* opens the [3D view](plugin:Panels/3D view);
 with two layers or more, the layout button chooses overlay or side by side; the field after it is
 what one screen pixel is -- the zoom, as a number.  Type a size to zoom to
 it, or right-click it to go to 10 nm.  Right-click the picture to move that
-place to the middle; double-click it to show everything.  At the right edge
+place to the middle (on the ROI, to delete it); double-click it to show everything.  At the right edge
 are the [assistant](plugin:Panels/Assistant)'s button and ⋯ (*more*): saving
 the picture, the colour bar, and what the mouse and the keys do in the
 picture, the keys that turn a line ROI among them.  Under the picture is how

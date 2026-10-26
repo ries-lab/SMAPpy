@@ -19,8 +19,14 @@ steps for you.
 Some AI assistants can run commands on your computer: Claude Code (also in the
 *Code* tab of the Claude desktop app), OpenAI's Codex, Cursor and others. One
 of these can do every step below for you, including the desktop icon, and
-sort out what goes wrong on the way. A chat in a web browser cannot: it can
-only tell you what to type, which is what this page does.
+sort out what goes wrong on the way.
+
+Use one of those, not a chat. A chat -- in a web browser, or the *Chat* tab
+of the Claude desktop app -- either cannot run commands at all, or works in
+a sandbox that cannot reach your home folder, where SMAPpy and uv are
+installed and the desktop icon goes; it gets stuck on folder permissions
+halfway through. In the Claude desktop app, open the *Code* tab and choose
+your home folder as the folder to work in.
 
 Give it this request:
 

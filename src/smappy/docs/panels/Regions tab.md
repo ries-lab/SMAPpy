@@ -280,7 +280,7 @@ times the ROI size.  Wider shows more context; narrower, more detail of the
 ROI.
 
 ### Add the drawn region as an ROI
-Draw a rectangle, a line or a polygon in the 2D view first.  Useful for
+Draw a rectangle, a circle, a line or a polygon in the 2D view first.  Useful for
 structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.
 

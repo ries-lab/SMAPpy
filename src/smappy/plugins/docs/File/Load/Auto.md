@@ -1,6 +1,6 @@
 ---
 version: "6"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -199,6 +199,23 @@ first file's `info`, and from a `-v7.3` file also the frame count, the
 conversion, the offset and the EM gain, kept in the metadata under `smap`.
 A `.mat` without `saveloc` is refused; one that held several SMAP files is
 read as one table.
+
+The sites of SMAP's ROI manager come along as the
+[ROI manager](plugin:Panels/ROI manager)'s ROIs, from a `-v7.3` file (SMAP's
+default) -- a `-v7` one keeps them where they are not read.  Each site is
+an ROI at its position, numbered by its SMAP ID, with its *use* and its
+comment.  Its lines become the ROI's named lines: the orientation line
+(`rotationpos`, the one the site image is turned along) is `direction`,
+and `line1` and `line2` keep their names.  The shape drawn by hand inside a
+site (`line3`) becomes the ROI's own outline: a polygon or a free-hand
+shape as drawn, a rectangle by its corners, an ellipse as 64 points round
+it; a polyline, not being a shape, is left out.  SMAP drew that shape on
+the site image, which it turns along the orientation line when its
+*rotate* is on, so for such a site the outline is turned by that angle.
+The keyword lists (`list1` to `list4`) become annotation lists with SMAP's
+keywords, and each site's choice its annotation.  The ROI size is not in
+the file -- SMAP keeps it in its settings -- so the ROI manager's own is
+used.
 
 **MINFLUX.**  MINFLUX ([Balzarotti et al. 2017](https://doi.org/10.1126/science.aak9913))
 takes no camera frames: it homes in on a molecule in a few iterations, each
@@ -468,9 +485,10 @@ Based on SMAP's `Loader_sml` and `Loader_minflux_json`
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main
 changes:
 
-* From a SMAP file only the localizations and the camera numbers are read.
-  SMAP also restores the file's history, the ROI manager's sites and the
-  GUI parameters; those describe SMAP's own windows and plugins.
+* From a SMAP file the localizations, the camera numbers and the ROI
+  manager's sites are read.  SMAP also restores the file's history, the
+  sites' evaluations, its cells and the GUI parameters; those describe
+  SMAP's own windows and plugins.
 * Frames count from 0, and the columns are renamed to this program's names.
 * A csv is read by `Loader_csvAndMore`'s idea -- the mapping, the units and
   a saved conversion per program -- with two changes: every column is read,

@@ -28,6 +28,7 @@ def table(n=2000):
 
 @pytest.mark.parametrize("region", [
     Region.rect(0, 0, 1000, 1000),
+    Region.circle((500, 500), 400),
     Region.line((0, 0), (1000, 1000), 200),
     Region("polygon", [(0, 0), (1000, 0), (500, 900)]),
 ])
