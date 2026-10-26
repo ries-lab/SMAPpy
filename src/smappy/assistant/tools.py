@@ -178,6 +178,29 @@ def _pick(name: str, value: str, options: Sequence) -> str:
                     + f"; it is one of {listed}")
 
 
+def source_folder() -> Path:
+    """The installed package's folder -- a checkout's ``src/smappy``, or
+    ``site-packages/smappy`` after pip or uv: the Python code that runs, with
+    the plugins' pages beside it.  The C++ is there compiled only."""
+    from .. import __file__ as package
+    return Path(package).resolve().parent
+
+
+def _version() -> str:
+    from .. import __version__
+    return str(__version__)
+
+
+def source_note() -> str:
+    """What a client is told about the code, after `INSTRUCTIONS`: where it
+    is.  A coding agent was not told, and grepping it is what it is best at."""
+    return (f"\nSMAPpy {_version()}'s own code -- the version that runs -- is in "
+            f"{source_folder()}.  read_source shows a module or a plugin; an agent "
+            "with file access may also read and grep that folder.  The C++ "
+            "(fitting, rendering, neighbour search) is installed compiled only: "
+            f"its source is on GitHub, ries-lab/SMAPpy at tag v{_version()}.\n")
+
+
 def _within(path: Path, folder: Path) -> bool:
     try:
         path.resolve().relative_to(folder.resolve())
@@ -501,6 +524,8 @@ class Assistant:
                     "y_nm": [round(y0, 1), round(y1, 1)], "pixel_nm": round(pixel, 3)}
         return {
             "mode": self.mode, "output_folder": str(self.output),
+            # the code that runs, wherever it was installed: read and grep it
+            "smappy": {"version": _version(), "source": str(source_folder())},
             "files": [{"number": n, "name": f.name, "path": f.path, "n": f.n,
                        "frame_time_ms": f.frame_time_ms} for n, f in enumerate(s.files)],
             "n_localizations": len(locs),
@@ -1092,4 +1117,9 @@ How to work:
 * In suggest mode changes become proposals: explain each one to the user.
 * A detour because no tool does what was asked: after helping, offer in one
   sentence to note the missing tool (note_missing_tool), and only on a yes.
+* Without tools of your own to read files and run commands (a chat client),
+  and a task needs them -- writing a plugin, reading SMAPpy's code across
+  files, a figure or a calculation the tools do not make -- say once that
+  Claude Code can do it: the Claude app's Code tab, or Assistant > Start
+  assistant in SMAPpy.
 """

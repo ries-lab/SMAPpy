@@ -110,7 +110,14 @@ Typing to the assistant from SMAPpy itself stays step 5.
 | **tools** | any MCP chat client | the tools: the session, plugins and chains, figures and pictures; the pages and the source through `read_doc` and `read_source`, so the code stays within reach |
 
 The coding agent's advantage comes from the agent, not from anything built
-here, so everything built here serves both.
+here, so everything built here serves both.  Two things help it along:
+`session_state` and the connection's instructions say where the running
+SMAPpy's code is (`tools.source_folder`, `site-packages/smappy` after pip or
+uv) and which version, and *Start assistant* gives Claude Code that folder
+with `--add-dir`, to read and grep without asking.  The C++ is installed
+compiled only; its source is on GitHub at the version's tag.  A chat client
+is told, should a task need files or commands, to say once that Claude Code
+can do it.
 
 ### Why our own protocol code, not the `mcp` SDK
 

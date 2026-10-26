@@ -53,7 +53,12 @@ running one's terminal to the front (on a Mac).  To start another, *stop*
 the first.
 
 * **Claude Code in a terminal** is started with the connection on its
-  command line, so your Claude Code settings are not changed.
+  command line, so your Claude Code settings are not changed, and with
+  SMAPpy's own code folder added, so it can read the code it is working with
+  without asking.  It is the best choice: besides SMAPpy's tools it reads
+  files, runs its own calculations and writes plugins.  A plain chat (the
+  Claude app's Chat) can use SMAPpy's tools too, set up by hand with
+  *copy JSON*, but none of that; it says so when a task needs it.
 * **Claude app (Code tab)**: the app cannot be started on a folder from
   outside.  SMAPpy adds the connection to the folder's `.mcp.json`, after
   asking, and opens the app; start a Code session in that folder and approve

@@ -354,3 +354,16 @@ def test_describe_lists_the_names_a_preset_may_take_so_none_is_guessed(tmp_path)
     a = Assistant(output=tmp_path, knowledge_folder=tmp_path / "kb")
     options = a.call("describe_plugin", {"path": "File/Simulate/Simulate"})["options"]
     assert "Nuclear pores (Nup96)" in options["preset"]
+
+
+def test_the_state_says_where_the_running_code_is_and_its_version(tmp_path):
+    """A coding agent was not told where an installed SMAPpy's code is, and
+    grepping it is what it is best at."""
+    import smappy
+    from smappy.assistant.tools import source_note
+    a = Assistant(output=tmp_path, knowledge_folder=tmp_path / "kb")
+    state = a.call("session_state")["smappy"]
+    folder = Path(state["source"])
+    assert folder == Path(smappy.__file__).resolve().parent
+    assert (folder / "plugins" / "drift_rcc.py").exists() and state["version"]
+    assert str(folder) in source_note() and f"v{state['version']}" in source_note()

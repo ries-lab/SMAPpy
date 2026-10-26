@@ -213,12 +213,13 @@ class AssistantServer(QObject):
     # ------------------------------------------------------------ connections
     def _on_connection(self) -> None:
         from ..assistant.protocol import Server
-        from ..assistant.tools import INSTRUCTIONS
+        from ..assistant.tools import INSTRUCTIONS, source_note
         while self.server is not None and self.server.hasPendingConnections():
             socket = self.server.nextPendingConnection()
             key = id(socket)
             self.clients[key] = _Client(socket, Server(
-                self.assistant, name="smappy", instructions=INSTRUCTIONS + GUI_NOTE))
+                self.assistant, name="smappy",
+                instructions=INSTRUCTIONS + source_note() + GUI_NOTE))
             socket.readyRead.connect(lambda key=key: self._read(key))
             socket.disconnected.connect(lambda key=key: self._gone(key))
         self.changed.emit()
