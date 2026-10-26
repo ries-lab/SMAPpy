@@ -4,8 +4,8 @@
 # A tutorial is a storyboard that drives the real GUI (src/smappy/tutorial), so
 # it is built here rather than kept as files: every push to main that touches
 # the package re-runs it, and the pages always show the GUI as it is.  Each
-# subtitle is read aloud by Piper, offline, with a voice model fetched from
-# Piper's own release on GitHub and cached between runs.
+# subtitle is read aloud by Kokoro, offline on the CPU, with its weights
+# fetched from the Hugging Face hub and cached between runs.
 #
 # Needs Pages switched on once: Settings -> Pages -> Build and deployment ->
 # Source: "GitHub Actions".  The site is then https://ries-lab.github.io/SMAPpy/
@@ -31,8 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VOICE: en-us-lessac-medium
-  VOICE_URL: https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-en-us-lessac-medium.tar.gz
+  VOICE: bf_emma
 
 jobs:
   build:
@@ -51,24 +50,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libxkbcommon0 ffmpeg
 
-      - name: Install smappy and Piper
-        run: python -m pip install -e . piper-tts colorama
+      # torch from its CPU index: the default wheel on Linux carries CUDA, 4 GB
+      - name: Install smappy and Kokoro
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e . kokoro colorama
 
       - name: Voice model (cached)
-        id: voice
         uses: actions/cache@v4
         with:
-          path: voices
-          key: piper-${{ env.VOICE }}
-
-      - name: Fetch the voice
-        if: steps.voice.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p voices
-          curl -sSL "$VOICE_URL" | tar xz -C voices
+          path: ~/.cache/huggingface
+          key: kokoro-82m-${{ env.VOICE }}
 
       - name: Build the tutorials
-        run: python -m smappy.tutorial -o site --voice "voices/$VOICE.onnx"
+        run: python -m smappy.tutorial -o site --voice "$VOICE"
 
       # the help pages beside them, the same the ? button opens in the program
       - name: Build the help pages

@@ -99,9 +99,9 @@ gpu = ["wgpu>=0.19"]
 # `python -m smappy.tutorial TOPIC --video`: the tutorial page played by
 # headless Chromium and encoded by ffmpeg (which is not a pip package).  The
 # page itself needs nothing beyond the GUI.
-# --voice: Piper, an offline neural voice; the voice model is a download of
-# its own (see smappy.tutorial.voice).
-tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
+# --voice: Kokoro, an offline neural voice on PyTorch; its weights are a
+# download of their own from the Hugging Face hub (see smappy.tutorial.voice).
+tutorial = ["playwright>=1.40", "kokoro>=0.9"]
 # HDBSCAN in Find clusters (`plugins/clusters.py`): the hdbscan package, whose
 # Boruvka spanning tree is 20x faster than scikit-learn's Prim's at 100 k
 # localizations and scales where it does not.  DBSCAN and Voronoi need

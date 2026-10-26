@@ -94,12 +94,16 @@ def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
 def test_the_voice_reads_shortcuts_numbers_and_names_as_they_are_said():
     from smappy.tutorial.voice import spoken
     assert spoken("Open with Ctrl+O, or Ctrl+Shift+P.") == \
-        "Open with control O, or control shift P."
+        "Open with control O, or control shift P ."
     assert spoken("Reset view, or Ctrl+0.") == "Reset view, or control zero."
     assert spoken("Add file... puts") == "Add file puts"
     assert spoken("25 888 of 29 088 kept") == "25888 of 29088 kept"
     assert spoken("click ROI, 4 nm, z and PSF") == "click R O I, 4 nanometres, zed and P S F"
-    assert spoken("SMAPpy opens two windows") == "smappy opens two windows"
+    assert spoken("SMAPpy opens two windows") == "Smappy opens two windows"
+    # a letter before a full stop is not an initial: the sentence ends there
+    assert spoken("with Ctrl+O. SMAPpy reads") == "with control O . Smappy reads"
+    assert spoken("x and y. In 2D. Click ROI.") == "x and y . In 2D . Click R O I ."
+    assert spoken("4.5 nm. Ends.") == "4.5 nanometres. Ends."
     # names inside other words are left alone
     assert spoken("ROIManager and smappy-batch") == "ROIManager and smappy-batch"
 
@@ -118,12 +122,12 @@ def test_a_spoken_step_lasts_as_long_as_its_clip():
 
 def test_the_voice_makes_a_clip_per_step(tmp_path):
     import os
-    pytest.importorskip("piper")
-    model = os.environ.get("SMAPPY_PIPER_VOICE")
-    if not model:
-        pytest.skip("set SMAPPY_PIPER_VOICE to a Piper voice to test it")
+    pytest.importorskip("kokoro")
+    if not os.environ.get("SMAPPY_VOICE"):
+        pytest.skip("set SMAPPY_VOICE to a Kokoro voice (bf_emma) to test it: "
+                    "the first run downloads 330 MB")
     from smappy.tutorial.voice import narrate
-    steps = narrate(tmp_path, [_step("Click Run."), _step("The picture is drawn.")], model)
+    steps = narrate(tmp_path, [_step("Click Run."), _step("The picture is drawn.")])
     for step in steps:
         assert (tmp_path / step["audio"]).stat().st_size > 1000
         assert 0.3 < step["audio_seconds"] < 5
