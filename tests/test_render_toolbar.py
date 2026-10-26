@@ -161,3 +161,19 @@ def test_a_right_click_offers_no_menu_that_hides_the_toolbar(app):
     for window in (RenderWindow(session), View3DWindow(session)):
         assert window.createPopupMenu() is None
         window.close()
+
+
+def test_help_opens_the_tutorials_in_the_browser(app, monkeypatch):
+    from PySide6.QtGui import QDesktopServices
+    from smappy.gui.app import TUTORIALS_URL, ControlWindow, RenderWindow
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    menus = {a.text(): a.menu() for a in control.menuBar().actions() if a.menu()}
+    tutorials = next(a for a in menus["Help"].actions() if a.text() == "Tutorials")
+    tutorials.trigger()
+    assert opened == [TUTORIALS_URL]
+    render.close()
+    control.close()
