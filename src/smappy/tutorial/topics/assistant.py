@@ -146,7 +146,7 @@ def make(d) -> None:
                "it uses SMAPpy's plugins for you.")
 
     # where the assistant may write: the demo's folder, as a user's own data
-    # folder would be, rather than wherever the tutorial was built
+    # folder would be, rather than the home folder of whoever built it
     from ...gui.assistant_pane import save_preferences
     save_preferences({"output": str(d.data_dir())})
 

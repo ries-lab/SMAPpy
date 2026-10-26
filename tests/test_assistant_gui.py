@@ -457,6 +457,8 @@ def test_one_started_by_hand_is_listened_for_and_nothing_is_started(controls, mo
 def test_the_output_folder_follows_the_first_file_until_the_user_sets_one(server, tmp_path):
     simulate(server)
     a = server.assistant
+    # a simulation is no file on disk: not "." beside its label, but home
+    assert a.output == Path.home()
     a.mode = "act"
     server.set_output(str(tmp_path / "out"))
     assert a.output == tmp_path / "out" and server.output_pinned

@@ -148,7 +148,8 @@ The only folder the assistant may write files into; *choose...* sets
 another.
 
 ### follow file
-Back to the folder of the first open file, which changes as files are opened.
+Back to the folder of the first open file, which changes as files are opened;
+your home folder while no open file is on disk (a simulation, say).
 
 ### starts in
 The mode each time SMAPpy starts: *suggest* or *act*.  It is switched at

@@ -183,9 +183,12 @@ class AssistantServer(QObject):
     def _follow_output(self) -> None:
         if self.output_pinned:
             return
-        files = [f for f in self.session.files if getattr(f, "path", None)]
-        self.assistant.output = Path(files[0].path).expanduser().parent if files \
-            else Path.home()
+        # a file on disk: a simulation's "path" is its label ("simulation:
+        # Nuclear pores (Nup96)"), whose parent was ".", wherever SMAPpy started
+        files = [Path(f.path).expanduser() for f in self.session.files
+                 if getattr(f, "path", None)]
+        files = [f for f in files if f.is_absolute() and f.is_file()]
+        self.assistant.output = files[0].parent if files else Path.home()
 
     def set_output(self, folder: Optional[str]) -> None:
         """A folder the user chose, or None to follow the first file again."""
