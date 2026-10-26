@@ -118,7 +118,8 @@ class AssistantControls(QObject):
         self._reconnect_check.setSingleShot(True)
         self._reconnect_check.setInterval(6000)
         self._reconnect_check.timeout.connect(self._check_reconnected)
-        server.changed.connect(self.changed.emit)
+        server.changed.connect(self._server_changed)
+        self._about_connecting = False      # `message` says a client is awaited
 
     # ---------------------------------------------------------------- state
     def live(self):
@@ -140,6 +141,16 @@ class AssistantControls(QObject):
         from ..assistant.launch import CLIENTS
         chosen = CLIENTS.get(preferences()["client"])
         return "" if chosen is None else chosen.label.split(" ")[0]
+
+    def _server_changed(self) -> None:
+        try:
+            if self._about_connecting and self.server.clients:
+                # it came: what was said while waiting for it is not true now
+                self._about_connecting = False
+                self.message = ""
+        except Exception:
+            traceback.print_exc()
+        self.changed.emit()
 
     def say(self, text: str) -> None:
         self.message = text
@@ -195,6 +206,7 @@ class AssistantControls(QObject):
             # (`attach._Forwarder`) once this listens
             self.show_proposals()
             self.say("Your assistant's terminal is still open: it reconnects in a moment.")
+            self._about_connecting = True
             self._reconnect_check.start()
             return
         terminal, list_box = self._column()
@@ -213,6 +225,7 @@ class AssistantControls(QObject):
     def _check_reconnected(self) -> None:
         try:
             if not self.server.clients:
+                self._about_connecting = True     # cleared if it comes late
                 self.say("The open terminal did not reconnect (a Claude started "
                          "before this version?).  Type /mcp in it and reconnect "
                          "smappy-gui, or close it and press Start assistant again.")

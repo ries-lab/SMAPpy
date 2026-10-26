@@ -210,8 +210,12 @@ def test_show_frames_an_roi_of_the_roi_manager_by_its_number(server):
 
 @pytest.fixture
 def controls(server, app, monkeypatch):
+    from smappy.assistant import launch
     from smappy.gui import assistant_pane
     monkeypatch.setattr(assistant_pane, "preferences", lambda: dict(assistant_pane.DEFAULTS))
+    # never the developer's own Terminal: an assistant open there would be
+    # raised by the test, and a start skipped for it
+    monkeypatch.setattr(launch, "raise_terminal", lambda: False)
     made = assistant_pane.AssistantControls(server.session, server)
     yield made
     for window in made._windows.values():
@@ -324,6 +328,10 @@ def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
     assert "reconnects in a moment" in controls.message
     controls._check_reconnected()       # and if it does not
     assert "/mcp" in controls.message
+    client = Client(controls.server.address)    # it comes late, after /mcp say
+    client.send("initialize", {"clientInfo": {"name": "claude-code"}})
+    client.answer()
+    assert controls.message == ""       # nothing left saying it did not come
     controls.server.stop()
     controls.proposals_window.close()
 
