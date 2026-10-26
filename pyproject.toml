@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 # package (a Smappee energy-monitor wrapper, last released in 2018).  The import
 # name is unaffected: `pip install smappy-smlm`, then `import smappy`.
 name = "smappy-smlm"
-version = "0.5.3"
+version = "0.5.4"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -48,7 +48,9 @@ dependencies = [
     # imports Qt inside `main()`.
     #
     # PySide6-Essentials, not PySide6: the whole codebase imports QtCore,
-    # QtGui and QtWidgets and nothing else, and pyqtgraph is happy with them.
+    # QtGui, QtWidgets and QtNetwork (the assistant's local socket,
+    # `gui/assistant_server.py`) and nothing else, all four in Essentials,
+    # and pyqtgraph is happy with them.
     # The PySide6 meta-package additionally pulls PySide6-Addons (QtWebEngine,
     # Qt3D, Multimedia, ...), which measures 800 MB installed for nothing.
     # 6.9 and 6.10 crashed until two PySide bugs were worked around: the
