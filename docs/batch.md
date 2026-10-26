@@ -395,7 +395,10 @@ the batch and never the GUI -- and reads its progress lines.
 ## For agents
 
 This section is for an agent asked to "analyse these files with ...".  You
-have the code base; you do not need the GUI.
+have the code base; you do not need the GUI.  To work on one session
+interactively -- try a plugin, look at its figures, scan a setting -- the
+MCP server `smappy-mcp` serves the same plugins as tools
+(`docs/ai-integration.md`).
 
 **The loop.**
 
