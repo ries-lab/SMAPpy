@@ -137,6 +137,12 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   where the plugin tree, the GUI and `smappy-batch` find it).
 * **remembering** -- `remember`, `recall`, `forget`: the knowledge base below.
 * `list_proposals` -- what *suggest* mode proposed, and what became of it.
+* `open_window` -- the GUI only (`needs="windows"`): one of SMAPpy's own
+  windows that is not a plugin -- the ROI manager (on an ROI by its
+  number), the 3D view, the batch window, the calibrations, the microscope
+  manager, the camera editor, the help -- by the names the menus give them
+  (`ControlWindow._assistant_windows`).  Not the modal dialogs, which would
+  hold the call.  The first tool built from a `note_missing_tool` note.
 * `note_missing_tool` -- a gap, for SMAPpy's developers: what was asked,
   the detour taken, the tool that would have done it, appended to
   `<config dir>/assistant/missing-tools.md` on the user's yes (offered by
