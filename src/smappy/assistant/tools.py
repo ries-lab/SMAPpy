@@ -78,8 +78,9 @@ class ToolSpec:
 def tool(description: str, needs: str = "", **params: Dict[str, Any]):
     """Mark a method as a tool.  Each keyword is an argument's JSON schema;
     one with a ``default`` in the method's signature is optional.
-    ``needs="viewer"`` lists the tool only where there is a view to move:
-    a model shown a tool that always refuses would keep trying it."""
+    ``needs="viewer"`` (or ``"panels"``) lists the tool only where the
+    assistant has that -- the running GUI's view, its plugin windows: a
+    model shown a tool that always refuses would keep trying it."""
     def mark(function):
         function._tool = (description, params)
         function._needs = needs
@@ -140,11 +141,13 @@ class Assistant:
     ``output`` is the folder files may be written to; ``knowledge`` the
     folder of remembered notes.  ``viewer`` is the running GUI's 2D view, or
     None headless: anything with ``frame(xrange, yrange)``, ``reset()`` and
-    ``current()`` -> ``((x0, x1), (y0, y1), pixel_nm)``.
+    ``current()`` -> ``((x0, x1), (y0, y1), pixel_nm)``.  ``panels`` opens a
+    plugin's window in the GUI filled in, ``panels(path, settings)``; None
+    headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
-                 knowledge_folder=None, viewer=None):
+                 knowledge_folder=None, viewer=None, panels=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -155,6 +158,7 @@ class Assistant:
         self.output = Path(output or Path.cwd()).expanduser()
         self.knowledge = Path(knowledge_folder or knowledge.default_folder()).expanduser()
         self.viewer = viewer
+        self.panels = panels
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
         self._ids = itertools.count(1)
@@ -178,7 +182,8 @@ class Assistant:
         """The tools this assistant offers: `specs` less those that need
         what it does not have."""
         return {name: spec for name, spec in self.specs().items()
-                if spec.function._needs != "viewer" or self.viewer is not None}
+                if not spec.function._needs
+                or getattr(self, spec.function._needs, None) is not None}
 
     def call(self, name: str, arguments: Optional[Dict[str, Any]] = None):
         """Call a tool by name; a `ToolError` for a call that cannot be made."""
@@ -781,6 +786,21 @@ class Assistant:
         return {"view": {"x_nm": [round(x0, 1), round(x1, 1)],
                          "y_nm": [round(y0, 1), round(y1, 1)],
                          "pixel_nm": round(pixel, 3)}}
+
+    @tool("Open a plugin in its own window in SMAPpy, its settings filled in -- "
+          "those given, the rest at their defaults -- for the user to look at "
+          "and run with its Run.  Runs nothing and changes no data, so it works "
+          "in suggest mode too.  When the user asks to open, show or set up a "
+          "plugin, this is the call; say in a few words what you opened.",
+          needs="panels",
+          path={"type": "string", "description": "the plugin's path"},
+          settings={"type": "object",
+                    "description": "flat dotted names, as describe_plugin lists them"})
+    def open_plugin(self, path: str, settings: Optional[Dict[str, Any]] = None
+                    ) -> Dict[str, Any]:
+        cls = self._plugin(path)
+        self.panels(path, self.settings_for(path, settings))
+        return {"opened": cls.name or path, "settings": settings or {}}
 
     @tool("Undo the last changes to the table.",
           steps={"type": "integer", "description": "how many, default 1"},

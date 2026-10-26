@@ -88,8 +88,9 @@ Under the list: *suggest* and *act*, *start* or *stop*, and *settings...*.
 In *suggest* mode the assistant reads and tries on copies of the session,
 and a change it would make -- running a plugin on the data, opening or
 saving a file, undoing -- waits in the list for you.  What only changes what
-is shown it makes at once: a layer's filter, grouping, and moving the 2D
-view onto a place or an ROI.  In *act* mode it changes the session itself;
+is shown it makes at once: a layer's filter, grouping, moving the 2D view
+onto a place or an ROI, and opening a plugin's window with its settings
+filled in ("open Tracking analysis"), which you then run yourself.  In *act* mode it changes the session itself;
 each change is in *Edit > Undo* as one from a panel is.  The assistant
 cannot switch between the two; only you can.
 
