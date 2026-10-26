@@ -174,13 +174,14 @@ def make(d) -> None:
     d.settle()
 
     d.chapter("Saving")
-    save = bar.widgetForAction(bar.actions()[0])
-    save_menu = save.menu()
+    more = bar.more_button
+    save_menu = more.menu()
     from PySide6.QtCore import QPoint
-    save_menu.popup(save.mapToGlobal(QPoint(0, save.height())))
+    save_menu.popup(more.mapToGlobal(QPoint(0, more.height())))
     d.settle()
-    d.shot("Save keeps a PNG as you see it. Save image renders it again at "
-           "a pixel size you choose, for a figure or to measure.",
+    d.shot("The more button (⋯) at the right of the toolbar saves the picture: "
+           "PNG as displayed keeps what you see, Save image renders it again "
+           "at a pixel size you choose, for a figure or to measure.",
            spot=[d.rect(save_menu)], zoom=d.around(save_menu, 800))
     save_menu.close()
     d.settle()
@@ -252,7 +253,8 @@ def make(d) -> None:
            "exactly what is there.</li>"
            "<li><b>Contrast, LUT, white background:</b> how it looks, never "
            "what it is.</li>"
-           "<li><b>Save:</b> a PNG as shown, or Save image at a chosen pixel size.</li>"
+           "<li><b>Save:</b> under ⋯, a PNG as shown, or Save image at a chosen "
+           "pixel size.</li>"
            "<li><b>3D view:</b> the same layers, turned, with a slab.</li></ul>",
            say="That is rendering. Next: plugins, which measure what is drawn.")
 
