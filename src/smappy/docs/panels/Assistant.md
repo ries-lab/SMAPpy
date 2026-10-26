@@ -21,7 +21,8 @@ running as your user on this computer can.
 
 The tutorial [An AI assistant](https://ries-lab.github.io/SMAPpy/assistant/)
 shows it on simulated nuclear pores: starting it, its proposals, suggest and
-act, running it on its own, and writing plugins with it.
+act; a whole analysis of a file without the window, kept as a chain; and
+writing plugins with it.
 
 ## Starting it
 

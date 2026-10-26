@@ -12,6 +12,11 @@ is done for it, through the same doors:
   the tools an assistant calls: `show`, then `run_plugin` in suggest mode,
   so the proposals in the overlay are real ones, *Open* fills the real
   window and its Run carries the proposal out.
+* Without the window, the assistant's tools run for real over a session of
+  their own (`assistant.tools.Assistant`, what ``smappy-mcp`` serves) on the
+  pores saved as a measurement would be: the chain it runs, its figure, the
+  chain file it saves -- which then is in the GUI's Plugins menu -- and the
+  Python it writes for what no plugin does, run and its output shown.
 * The terminal and the chat are drawn on cards, and say they are drawings.
   The terminal's welcome is `launch.welcome`'s, as the real one prints it.
 
@@ -20,17 +25,49 @@ The plugin part builds on `own_plugins` rather than repeating it.
 from __future__ import annotations
 
 import html
+import io
 import json
+import os
+import re
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+from pathlib import Path
 
 from .common import menu, menu_item, open_section, show_tab, type_into
 
 TITLE = "An AI assistant: asking SMAPpy in plain words"
 DESCRIPTION = ("Starting an assistant beside the picture, its proposals, suggest "
-               "and act; running it on its own; and writing plugins with it.")
+               "and act; a whole analysis without the window; and writing "
+               "plugins with it.")
 
 CLIENT = "claude-code"          # what Claude Code calls itself on connecting
+
+# what an assistant writes for "correct the drift, find the pores and measure
+# their labelling efficiency": the shipped NPC chain after RCC
+_CHAIN = """schema: smappy-chain-v1
+path: User/Pore labelling
+description: Corrects the drift, then measures the labelling efficiency of the
+  nuclear pores.
+steps:
+  - plugin: Analysis/Drift/RCC
+    values: {}
+  - plugin: Analysis/Regions/Workflow/NPC Analysis
+    values: {}
+"""
+
+# and for a question no plugin answers: run as it is, its output shown
+_SCRIPT = """
+import numpy as np
+import smappy
+
+locs = smappy.load("pores.h5")
+x, y, photons = locs["x_nm"], locs["y_nm"], locs["photons"]
+r = np.hypot(x - x.mean(), y - y.mean())    # from the field's centre
+for lo, hi in [(0, 2000), (2000, 4000), (4000, 8000)]:
+    ring = (r >= lo) & (r < hi)
+    print(f"{lo / 1000:g} to {hi / 1000:g} um: "
+          f"median {np.median(photons[ring]):.0f} photons")
+"""
 
 
 def _terminal(lines, label: str, prompt_from: int = 0) -> str:
@@ -38,7 +75,8 @@ def _terminal(lines, label: str, prompt_from: int = 0) -> str:
     ``prompt_from`` dimmed (what was there before, or the program's own)."""
     height = 40 + 20 * len(lines)
     rows = "".join(
-        f'<text x="28" y="{36 + 20 * i}"{"" if i >= prompt_from else " opacity=\".7\""}>'
+        f'<text x="28" y="{36 + 20 * i}" xml:space="preserve" style="white-space:pre"'
+        f'{"" if i >= prompt_from else " opacity=\".7\""}>'
         f"{html.escape(line)}</text>"
         for i, line in enumerate(lines))
     return (f'<svg viewBox="0 0 600 {height}" role="img" aria-label="{html.escape(label)}">'
@@ -112,6 +150,19 @@ def _menu_action(d, title: str, text: str):
     return next(a for a in menu_.actions() if a.text().replace("&", "") == text)
 
 
+def _open_user_menu(d):
+    """Plugins, and its User submenu beside it, as a person opens them."""
+    from PySide6.QtCore import QPoint
+    plugins_menu = menu(d, "Plugins")
+    action = next(a for a in plugins_menu.actions() if a.text() == "User")
+    r = plugins_menu.actionGeometry(action)
+    submenu = action.menu()
+    plugins_menu.setActiveAction(action)
+    submenu.popup(plugins_menu.mapToGlobal(QPoint(r.right(), r.top())))
+    d.settle()
+    return plugins_menu, submenu
+
+
 def _place(d, window) -> None:
     """A window at the left of the picture, clear of the proposals' corner,
     as tall as its contents."""
@@ -123,6 +174,8 @@ def _place(d, window) -> None:
 def make(d) -> None:
     from PySide6.QtWidgets import QPushButton, QToolButton
     from ...assistant import launch
+    from ...assistant.tools import Assistant
+    from ...session import Session
     control = d.control
     button = control.assistant_button
 
@@ -134,6 +187,9 @@ def make(d) -> None:
     simulate.run_button.click()
     d.settle()
     show_tab(d, "Render")
+    # the same pores as a file on disk, for the assistant without the window
+    measurement = d.data_dir() / "pores.h5"
+    d.session.save(measurement)
 
     d.chapter("An assistant")
     d.card(TITLE,
@@ -291,28 +347,6 @@ def make(d) -> None:
            "into, and the mode it starts in.",
            spot=[d.window_rect(settings)], point=settings.output)
 
-    d.chapter("On its own")
-    d.card("Without the window",
-           "<p>The assistant can also use SMAPpy on its own, with no window "
-           "open: it opens files, tries methods on simulated data whose truth "
-           "it knows, and compares settings.</p>"
-           "<p>Connect it once with one line. Then ask it, in a folder of your "
-           "data.</p>",
-           figure=_terminal(
-               ["$ claude mcp add smappy -- smappy-mcp --output ~/analysis",
-                "$ claude",
-                "> Which radius counts the pores best? Check it on",
-                "  simulated pores, then make it a chain."],
-               "a drawing of a terminal: SMAPpy's tools added to Claude Code "
-               "once, then a question", prompt_from=2),
-           say="On its own, the assistant can try methods on simulated data, "
-               "with no window open.")
-    d.card("Ending in a chain",
-           "<p>What it settles on, it writes as a chain of plugins. You can open "
-           "the chain in SMAPpy, and run it over all your files with "
-           "smappy-batch.</p>"
-           "<p>The tutorial on chains and batch runs shows how.</p>",
-           say="What it finds, it writes as a chain, which runs over many files.")
     settings.client.setCurrentIndex(settings.client.findData("manual"))
     d.settle()
     assert settings.other.isVisible()
@@ -324,6 +358,98 @@ def make(d) -> None:
     server.stop()
     overlay.collapse()
     d.settle()
+
+    d.chapter("Without the window")
+    d.card("SMAPpy without the window",
+           "<p>The assistant can also use SMAPpy's functions directly, with no "
+           "window open: on your own files, a whole analysis from the raw "
+           "localizations to the numbers, step by step.</p>"
+           "<p>Connect it once with one line. Then start it in the folder of "
+           "your data and ask.</p>",
+           figure=_terminal(
+               ["$ claude mcp add smappy -- smappy-mcp --output ~/analysis",
+                "$ cd ~/data/pores",
+                "$ claude",
+                "> Open pores.h5, correct the drift, find the nuclear pores",
+                "  and measure their labelling efficiency."],
+               "a drawing of a terminal: SMAPpy's tools added to Claude Code "
+               "once, then a request", prompt_from=3),
+           say="Without the window, the assistant uses SMAPpy's functions "
+               "directly, on your own files.")
+    # what it does for that request, for real: SMAPpy's tools over a session
+    # of their own, as smappy-mcp serves them, on a file saved as a
+    # measurement would be
+    headless = Assistant(Session(), mode="act", output=d.data_dir())
+    headless.call("load", {"path": str(measurement)})
+    chain = _CHAIN
+    assert headless.call("validate_chain", {"chain": chain})["ok"]
+    ran = headless.call("run_chain", {"chain": chain, "apply": True})
+    kept = headless.results[-1].result
+    names = [p.name for p in kept.figures()]
+    efficiency = next(i for i, n in enumerate(names) if n.endswith("labelling efficiency"))
+    # the NPC chain's own text in full: the chain's summary has each step's
+    # first line, which for a chain is its first step's
+    text = kept.data["steps"][-1]["text"]
+    found = re.search(r"labelling efficiency ([\d.]+ \u00b1 [\d.]+ %).*?from (\d+) pores"
+                      r".*?simulated with ([\d.]+ %)", text)
+    assert found, text
+    line = (f"Labelling efficiency {found[1]}, from {found[2]} pores. "
+            f"Simulated with {found[3]}.")
+    picture = headless.call("figure", {"result": ran["result"], "index": efficiency})
+    d.card("A whole analysis",
+           "<p>It opens the file, corrects the drift, finds the pores and fits "
+           "the labelling efficiency to them. It reads each step's numbers and "
+           "figures before going on, as you would.</p>"
+           f"<p>{html.escape(line)}</p>",
+           figure=f'<img alt="the labelling efficiency fitted to the pores, '
+                  f'as SMAPpy draws it" style="max-width:100%;max-height:250px" '
+                  f'src="data:image/png;base64,{picture.base64()}">',
+           say="It runs the whole analysis, and reads every step's numbers and "
+               "figures before going on.")
+    saved = Path(headless.call("save_chain", {"chain": chain,
+                                              "name": "pore labelling"})["saved"])
+    d.card("Ending in a chain",
+           "<p>What it did, it keeps as a chain of plugins, when you agree. The "
+           "chain runs again on the next file, or over all of them with "
+           "smappy-batch.</p>",
+           figure=_terminal(saved.read_text(encoding="utf-8").splitlines(),
+                            "the chain the assistant saved, as its file reads"),
+           say="It keeps what it did as a chain, to run again on the next file "
+               "or over all of them.")
+    plugins_menu, user = _open_user_menu(d)
+    item = menu_item(d, user, "Pore labelling")
+    d.shot("The chain is a plugin like any other, here under Plugins, User.",
+           spot=[item], point=item, click=True)
+    user.close()
+    plugins_menu.close()
+    d.settle()
+    window = control.open_plugin_window("User/Pore labelling")
+    assert window is not None, "the saved chain is not in the plugin tree"
+    _place(d, window)
+    d.shot("Its window shows the steps. Run it on the next file, and look at "
+           "the numbers yourself.",
+           spot=[d.window_rect(window)], point=window.panel.run_button)
+    window.hide()
+    d.settle()
+    script = _SCRIPT
+    out = io.StringIO()
+    here = os.getcwd()
+    try:
+        os.chdir(measurement.parent)
+        with redirect_stdout(out):
+            exec(compile(script, "edge.py", "exec"), {"__name__": "__main__"})
+    finally:
+        os.chdir(here)
+    printed = "<br>".join(html.escape(line) for line in out.getvalue().strip().splitlines())
+    d.card("And what no plugin does",
+           "<p>Asked whether the molecules are dimmer at the edge of the field, "
+           "it writes a few lines of Python that call SMAPpy's functions, and "
+           "runs them. What they printed:</p>"
+           f'<p><code style="font-size:.8em">{printed}</code></p>',
+           figure=_terminal(script.strip().splitlines(),
+                            "the script the assistant wrote, as it ran"),
+           say="For what no plugin does, it writes a few lines of Python with "
+               "SMAPpy's functions, and runs them.")
 
     d.chapter("Writing plugins")
     plugins_menu = menu(d, "Plugins")
@@ -356,8 +482,9 @@ def make(d) -> None:
            "<li>What it would change waits under its button: <b>Open</b>, then "
            "your Run, or the cross.</li>"
            "<li><b>suggest</b> or <b>act</b>: only you switch.</li>"
-           "<li>On its own, with <b>smappy-mcp</b>; and in your plugin folder, "
-           "for plugins of your own.</li>"
+           "<li>Without the window, with <b>smappy-mcp</b>: a whole analysis "
+           "of your files, kept as a chain.</li>"
+           "<li>In your plugin folder, for plugins of your own.</li>"
            "<li>The help page <b>Assistant</b> has the details.</li></ul>",
            say="That is the assistant: ask in plain words, and decide what it "
                "may change.")
