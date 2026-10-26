@@ -89,6 +89,15 @@ A file saved there appears under *Plugins → User*. The help page
 [Your own plugins](https://ries-lab.github.io/SMAPpy/help/panels-your-own-plugins.html)
 explains how.
 
+**An AI assistant.** Your own assistant -- Claude Code, Codex or the Claude
+app -- can use SMAPpy's plugins for you: *Assistant → Start assistant* starts
+it beside the picture, and what it would change waits for you to open or
+dismiss. The tutorial
+[An AI assistant](https://ries-lab.github.io/SMAPpy/assistant/) shows it, and
+the help page
+[Assistant](https://ries-lab.github.io/SMAPpy/help/panels-assistant.html) has
+the details.
+
 **For developers.** [GUI.md](GUI.md) describes the architecture.
 [docs/](docs/) holds design notes on the plugin system and individual
 algorithms. [NOTES.md](NOTES.md) records design decisions and measurements.

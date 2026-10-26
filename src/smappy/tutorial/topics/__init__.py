@@ -22,5 +22,6 @@ SERIES = (
     ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),
     ("Many files", ("batch",), ()),
     ("Simulation", ("simulation",), ()),
+    ("AI assistant", ("assistant",), ()),
 )
 TOPICS = tuple(t for _, built, _ in SERIES for t in built)
