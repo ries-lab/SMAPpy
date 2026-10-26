@@ -13,6 +13,9 @@ tiers, *suggest* and *act*, and what comes next.
     knowledge            the notes `remember` keeps
     protocol             the part of MCP the server speaks, JSON-RPC
     server               ``smappy-mcp``, the command a client launches
+    attach               ``smappy-mcp --attach``: a client to the running GUI
 
-Nothing outside this package imports it.
+The GUI serves the same tools over a local socket (`gui/assistant_server.py`,
+*Assistant > Allow connections*) and imports this package only then; nothing
+else imports it.
 """

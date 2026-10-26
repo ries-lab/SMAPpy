@@ -66,7 +66,7 @@ class Server:
     def tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {"tools": [{"name": spec.name, "description": spec.description,
                            "inputSchema": spec.schema()}
-                          for spec in self.assistant.specs().values()]}
+                          for spec in self.assistant.tools().values()]}
 
     def tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         name = params.get("name")

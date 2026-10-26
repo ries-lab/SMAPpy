@@ -422,6 +422,20 @@ class ControlWindow(QMainWindow):
             self.open_bead_selector(settings, plugin, reply)
         open_bead_selector.replies = True
         session.window_openers["bead selector"] = open_bead_selector
+        # an AI assistant in the user's own client, reaching this session
+        # through `smappy-mcp --attach` (`assistant_server`); nothing of it is
+        # imported until it is asked for, and it listens only when allowed
+        assistant = _add_menu(self.menuBar(), "Assistant", self)
+        assistant.setToolTipsVisible(True)
+        self.assistant_server = None
+        self.assistant_pane = None
+        self.allow_assistant = self._action(assistant, "Allow connections", None,
+                                            self.allow_connections)
+        self.allow_assistant.setCheckable(True)
+        self.allow_assistant.setToolTip("let an AI assistant on this computer use "
+                                        "this session (smappy-mcp --attach)")
+        self._action(assistant, "Assistant pane", None, self.show_assistant_pane).setToolTip(
+            "the connection, what the assistant may do, and what it proposed")
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -447,6 +461,7 @@ class ControlWindow(QMainWindow):
                     self._shared_menus.addMenu(action.menu())
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
         QApplication.instance().aboutToQuit.connect(self.release_offers)
+        QApplication.instance().aboutToQuit.connect(self._stop_assistant)
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
         self._on_session("locs")
@@ -480,6 +495,42 @@ class ControlWindow(QMainWindow):
         window.show()
         window.raise_()
         window.activateWindow()
+
+    def _assistant(self):
+        if self.assistant_server is None:
+            from .assistant_server import AssistantServer, RenderViewer
+            self.assistant_server = AssistantServer(
+                self.session, RenderViewer(self.render_window.view), self)
+            self.assistant_server.changed.connect(
+                lambda: self.allow_assistant.setChecked(self.assistant_server.listening))
+        return self.assistant_server
+
+    def allow_connections(self, on: bool) -> None:
+        """*Assistant > Allow connections*; the pane opens with it, so what
+        is connected and what it may do are in sight."""
+        server = self._assistant()
+        if on:
+            if not server.start():
+                QMessageBox.warning(self, "Assistant",
+                                    f"Could not listen for connections:\n{server.error}")
+            self.show_assistant_pane()
+        else:
+            server.stop()
+
+    def show_assistant_pane(self) -> None:
+        if self.assistant_pane is None:
+            from .assistant_pane import AssistantPane
+            self.assistant_pane = AssistantPane(
+                self.session, self._assistant(), self,
+                open_plugin=self.open_plugin_window,
+                load=lambda paths, append: self.load_paths(paths, append=append))
+            place_beside(self.assistant_pane, self)
+        self.assistant_pane.show()
+        self.assistant_pane.raise_()
+
+    def _stop_assistant(self) -> None:
+        if self.assistant_server is not None:
+            self.assistant_server.stop()
 
     def show_about(self) -> None:
         from .about import show_about
