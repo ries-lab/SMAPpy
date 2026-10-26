@@ -296,15 +296,35 @@ def test_start_assistant_brings_a_connected_one_forward_rather_than_a_second(
     monkeypatch.setattr(assistant_pane, "preferences",
                         lambda: {**assistant_pane.DEFAULTS, "client": "claude"})
     monkeypatch.setattr(launch, "start", lambda *a, **k: started.append(a) or "started")
-    monkeypatch.setattr(launch, "raise_terminal", lambda: raised.append(1) or True)
+    open_terminal = []                  # no terminal of SMAPpy's is open yet
+    monkeypatch.setattr(launch, "raise_terminal",
+                        lambda: raised.append(1) or bool(open_terminal))
     controls.start()
     assert len(started) == 1 and controls.server.listening
     client = Client(controls.server.address)
     client.send("initialize", {"clientInfo": {"name": "claude-code"}})
     client.answer()
     controls.start()
-    assert len(started) == 1 and raised == [1]
+    assert len(started) == 1 and len(raised) == 2
     assert "connected already" in controls.message
+    controls.proposals_window.close()
+
+
+def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
+        controls, monkeypatch):
+    from smappy.assistant import launch
+    from smappy.gui import assistant_pane
+    started = []
+    monkeypatch.setattr(assistant_pane, "preferences",
+                        lambda: {**assistant_pane.DEFAULTS, "client": "claude"})
+    monkeypatch.setattr(launch, "start", lambda *a, **k: started.append(a) or "started")
+    monkeypatch.setattr(launch, "raise_terminal", lambda: True)
+    controls.start()                    # nobody connected, but its terminal is open
+    assert not started and controls.server.listening
+    assert "reconnects in a moment" in controls.message
+    controls._check_reconnected()       # and if it does not
+    assert "/mcp" in controls.message
+    controls.server.stop()
     controls.proposals_window.close()
 
 
@@ -482,6 +502,44 @@ def test_smappy_mcp_attach_forwards_a_client_to_the_running_window(server, tmp_p
     assert process.returncode == 0
     assert wait_for(lambda: not server.clients)
     server.stop()                       # while the registry is the configuration's
+
+
+@pytest.mark.slow
+def test_the_forwarder_outlives_smappy_and_attaches_again_when_it_is_back(
+        server, monkeypatch):
+    """Quitting SMAPpy left the client's forwarder dead -- and Python aborting
+    as it went.  Now the client is told SMAPpy is gone, and goes on once a
+    SMAPpy listens again."""
+    from smappy.gui.assistant_server import AssistantServer
+    monkeypatch.setattr(server, "registry", None)
+    server.start()
+    process = _attach()
+    lines = []
+    threading.Thread(target=lambda: lines.extend(process.stdout), daemon=True).start()
+
+    def ask(n, method, params):
+        process.stdin.write((json.dumps({"jsonrpc": "2.0", "id": n, "method": method,
+                                         "params": params}) + "\n").encode())
+        process.stdin.flush()
+        assert wait_for(lambda: len(lines) >= n, 60), process.stderr.read1(4000)
+        return json.loads(lines[n - 1])
+
+    ask(1, "initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "fwd"}})
+    call = {"name": "session_state", "arguments": {}}
+    assert not ask(2, "tools/call", call)["result"]["isError"]
+    server.stop()                       # SMAPpy quits
+    gone = ask(3, "tools/call", call)["result"]
+    assert gone["isError"] and "not running" in gone["content"][0]["text"]
+    assert process.poll() is None       # still there for the client
+    again = AssistantServer(server.session, parent=None)
+    again.start()                       # SMAPpy is back
+    assert wait_for(lambda: again.client_names() == ["fwd"], 20)
+    back = ask(4, "tools/call", call)["result"]
+    assert not back["isError"] and len(lines) == 4   # the replayed hello not seen
+    process.stdin.close()
+    assert wait_for(lambda: process.poll() is not None, 20)
+    assert process.returncode == 0      # not an abort
+    again.stop()
 
 
 @pytest.mark.slow

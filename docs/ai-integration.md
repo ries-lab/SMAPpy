@@ -54,7 +54,11 @@ needed a secret.  An MCP client launches `smappy-mcp --attach`, which finds
 the window from a file per listening GUI in `<config dir>/assistant/gui/`
 and copies stdio to the socket and back (`assistant/attach.py`, on Qt's
 `QLocalSocket`, the one way to reach a Windows pipe in both directions at
-once); `--attach NAME` picks a window by its session's name.
+once); `--attach NAME` picks a window by its session's name.  The forwarder
+outlives the window: while SMAPpy is gone it answers the client's calls with
+why they cannot be made, and when a SMAPpy listens again it attaches to it and
+replays the client's `initialize`, so the conversation -- which knows what
+was analysed -- goes on across a restart.
 
 The tools are the same `Assistant`, over the GUI's session.  Every line from
 the socket is queued and handled on the GUI thread, one per tick of a timer

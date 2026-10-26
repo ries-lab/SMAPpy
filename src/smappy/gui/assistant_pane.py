@@ -29,7 +29,7 @@ import traceback
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -113,6 +113,11 @@ class AssistantControls(QObject):
         self.proposals_window: Optional[QWidget] = None
         self.message = ""                   # the last thing said to the user
         self.seen = 0                       # proposals the user has looked at
+        # after Start found the old terminal: did it come back?
+        self._reconnect_check = QTimer(self)
+        self._reconnect_check.setSingleShot(True)
+        self._reconnect_check.setInterval(6000)
+        self._reconnect_check.timeout.connect(self._check_reconnected)
         server.changed.connect(self.changed.emit)
 
     # ---------------------------------------------------------------- state
@@ -184,6 +189,14 @@ class AssistantControls(QObject):
             return
         if prefs["client"] == "claude-app" and not self._may_write_project(folder):
             return
+        if client.terminal and launch.raise_terminal():
+            # the terminal of a SMAPpy quit and started again: its conversation
+            # goes on, and its connection comes back by itself
+            # (`attach._Forwarder`) once this listens
+            self.show_proposals()
+            self.say("Your assistant's terminal is still open: it reconnects in a moment.")
+            self._reconnect_check.start()
+            return
         terminal, list_box = self._column()
         try:
             line = launch.start(prefs["client"], folder,
@@ -196,6 +209,15 @@ class AssistantControls(QObject):
             return
         self.show_proposals(list_box if client.terminal else None)
         self.say(line)
+
+    def _check_reconnected(self) -> None:
+        try:
+            if not self.server.clients:
+                self.say("The open terminal did not reconnect (a Claude started "
+                         "before this version?).  Type /mcp in it and reconnect "
+                         "smappy-gui, or close it and press Start assistant again.")
+        except Exception:
+            traceback.print_exc()
 
     def _may_write_project(self, folder: Path) -> bool:
         from ..assistant.launch import NAME

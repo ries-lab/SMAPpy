@@ -4,8 +4,10 @@ An MCP client launches a command and talks to it over stdio; the GUI is
 already running and listens on a local socket (`gui/assistant_server.py`,
 switched on by *Assistant > Allow connections*).  ``smappy-mcp --attach``
 joins the two: it finds the GUI and copies the client's lines to the socket
-and the GUI's answers back, nothing more -- the tools, the session and the
-mode are the GUI's.
+and the GUI's answers back -- the tools, the session and the mode are the
+GUI's.  It outlives the GUI: SMAPpy quit and started again finds the same
+client, whose conversation knows what was done, attached again by itself
+(`_Forwarder`).
 
 **Where a GUI listens** is a small JSON file per GUI in
 ``<config dir>/assistant/gui/``, written while connections are allowed and
@@ -113,15 +115,32 @@ def connect(entries: List[Dict[str, Any]], log=None):
     return None, None
 
 
-def forward(name: str = "", stdin=None, stdout=None, where: Optional[Path] = None) -> int:
-    """Copy lines between stdio and the GUI's socket until either ends."""
-    from PySide6.QtCore import QCoreApplication, QObject, Signal, Slot
+NOT_RUNNING = ("SMAPpy is not running, or does not allow connections.  Ask the "
+               "user to start SMAPpy and choose Assistant > Start assistant (or "
+               "Allow connections); this reconnects by itself, so then call again.")
+RETRY_MS = 1000
 
-    stdin = stdin or sys.stdin.buffer
-    stdout = stdout or sys.stdout.buffer
+
+def forward(name: str = "", stdin=None, stdout=None, where: Optional[Path] = None) -> int:
+    """Copy lines between stdio and the GUI's socket until the client ends.
+
+    When the GUI goes -- quit, or connections switched off -- the client is
+    not dropped with it: it is the user's conversation, which has learnt
+    what the session is about.  So this stays, answers the client's calls
+    with why they cannot be made, and looks for a GUI every `RETRY_MS`;
+    when one listens again it connects and replays the client's
+    ``initialize``, whose answer the client already had, so the client goes
+    on as if nothing happened.
+    """
+    from PySide6.QtCore import QCoreApplication
+
     app = QCoreApplication.instance() or QCoreApplication([sys.argv[0]])
     entries = listening(where)
     candidates = choose(entries, name)
+    if not candidates and name.isdigit() and entries:
+        # a process number from a file written for a SMAPpy that has since
+        # quit: the newest that listens is the one meant now
+        candidates = entries
     if not candidates:
         if entries and name:
             print(f"smappy-mcp: no SMAPpy window called {name!r} allows connections; "
@@ -140,52 +159,153 @@ def forward(name: str = "", stdin=None, stdout=None, where: Optional[Path] = Non
     print(f"smappy-mcp: attached to {_describe(entry)}"
           + (f"; also listening: {', '.join(_describe(e) for e in others)} "
              "(--attach NAME chooses)" if others else ""), file=sys.stderr)
+    forwarder = _Forwarder(app, stdin or sys.stdin.buffer, stdout or sys.stdout.buffer,
+                           where, entry)
+    forwarder.attach(socket)
+    return forwarder.run()
 
-    class Pipe(QObject):
-        """Lines read on the stdin thread, written to the socket on this one:
-        a QLocalSocket is used only from the thread that made it."""
-        line = Signal(bytes)
-        ended = Signal()
 
-        @Slot(bytes)
-        def write(self, data: bytes) -> None:
-            socket.write(data)
-            socket.flush()
+class _Forwarder:
+    """The state between the client and whichever GUI it is attached to."""
 
-        @Slot()
-        def finish(self) -> None:
-            # the client went: an orderly end, not the window's (`gone`)
-            socket.disconnected.disconnect(gone)
-            socket.waitForBytesWritten(CONNECT_MS)
-            app.exit(0)
+    def __init__(self, app, stdin, stdout, where, entry):
+        from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
-    pipe = Pipe()
-    pipe.line.connect(pipe.write)          # queued: emitted on the reader thread
-    pipe.ended.connect(pipe.finish)
-    status = {"code": 0}
+        self.app, self.stdin, self.stdout, self.where = app, stdin, stdout, where
+        self.session = entry.get("session") or ""
+        self.socket = None
+        self.buffer = b""
+        self.hello: Optional[Dict[str, Any]] = None    # the client's initialize
+        self.waiting: Dict[Any, str] = {}               # id -> method, sent to the GUI
+        self.swallow: set = set()                       # ids of replayed initializes
+        self.replays = 0
 
-    def answer() -> None:
+        forwarder = self
+
+        class Pipe(QObject):
+            """Lines read on the stdin thread, handled on this one: a
+            QLocalSocket is used only from the thread that made it."""
+            line = Signal(bytes)
+            ended = Signal()
+
+            @Slot(bytes)
+            def take(self, data: bytes) -> None:
+                forwarder._from_client(data)
+
+            @Slot()
+            def finish(self) -> None:
+                if forwarder.socket is not None:
+                    forwarder.socket.disconnected.disconnect()
+                    forwarder.socket.waitForBytesWritten(CONNECT_MS)
+                forwarder.app.exit(0)
+
+        self.pipe = Pipe()
+        self.pipe.line.connect(self.pipe.take)       # queued: emitted on the reader thread
+        self.pipe.ended.connect(self.pipe.finish)
+        self.retry = QTimer()
+        self.retry.setInterval(RETRY_MS)
+        self.retry.timeout.connect(self._look_again)
+
+    def run(self) -> int:
+        def read() -> None:
+            for line in self.stdin:
+                self.pipe.line.emit(bytes(line))
+            self.pipe.ended.emit()
+
+        threading.Thread(target=read, daemon=True, name="stdin").start()
+        return self.app.exec()
+
+    # ------------------------------------------------------------ the client
+    def _from_client(self, data: bytes) -> None:
         try:
-            data = bytes(socket.readAll().data())
-        except RuntimeError:            # the socket is already being deleted
+            message = json.loads(data)
+        except ValueError:
+            message = None
+        if isinstance(message, dict):
+            if message.get("method") == "initialize" and self.hello is None:
+                self.hello = message
+            if "id" in message and "method" in message:
+                self.waiting[message["id"]] = message["method"]
+        if self.socket is not None:
+            self.socket.write(data)
+            self.socket.flush()
+        elif isinstance(message, dict) and "id" in message and "method" in message:
+            self.waiting.pop(message["id"], None)
+            self._unanswerable(message["id"], message["method"])
+
+    def _to_client(self, message: Dict[str, Any]) -> None:
+        self.stdout.write((json.dumps(message) + "\n").encode("utf-8"))
+        self.stdout.flush()
+
+    def _unanswerable(self, ident, method: str) -> None:
+        """What the client is told while no GUI is there: a tool's error,
+        which the model reads, for a tool call; a protocol error otherwise."""
+        if method == "tools/call":
+            self._to_client({"jsonrpc": "2.0", "id": ident, "result": {
+                "content": [{"type": "text", "text": NOT_RUNNING}], "isError": True}})
+        elif method == "ping":
+            self._to_client({"jsonrpc": "2.0", "id": ident, "result": {}})
+        else:
+            self._to_client({"jsonrpc": "2.0", "id": ident,
+                             "error": {"code": -32000, "message": NOT_RUNNING}})
+
+    # ---------------------------------------------------------------- the GUI
+    def attach(self, socket) -> None:
+        self.socket = socket
+        self.buffer = b""
+        socket.readyRead.connect(self._from_gui)
+        socket.disconnected.connect(self._gone)
+
+    def _from_gui(self) -> None:
+        try:
+            self.buffer += bytes(self.socket.readAll().data())
+        except (RuntimeError, AttributeError):    # being deleted
             return
-        stdout.write(data)
-        stdout.flush()
+        *lines, self.buffer = self.buffer.split(b"\n")
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                message = json.loads(line)
+            except ValueError:
+                message = None
+            if isinstance(message, dict) and "id" in message:
+                if message["id"] in self.swallow:
+                    self.swallow.discard(message["id"])
+                    continue                  # a replayed initialize's answer
+                self.waiting.pop(message["id"], None)
+            self.stdout.write(line + b"\n")
+        self.stdout.flush()
 
-    def gone() -> None:
-        answer()
-        print("smappy-mcp: the SMAPpy window closed the connection", file=sys.stderr)
-        status["code"] = 1
-        app.exit(1)
+    def _gone(self) -> None:
+        self._from_gui()
+        socket, self.socket = self.socket, None
+        if socket is not None:
+            socket.deleteLater()
+        for ident, method in list(self.waiting.items()):
+            self._unanswerable(ident, method)    # asked, and now never answered
+        self.waiting.clear()
+        print("smappy-mcp: the SMAPpy window went; waiting for it to allow "
+              "connections again", file=sys.stderr)
+        self.retry.start()
 
-    socket.readyRead.connect(answer)
-    socket.disconnected.connect(gone)
-
-    def read() -> None:
-        for line in stdin:
-            pipe.line.emit(bytes(line))
-        pipe.ended.emit()
-
-    threading.Thread(target=read, daemon=True, name="stdin").start()
-    code = app.exec()
-    return code or status["code"]
+    def _look_again(self) -> None:
+        entries = listening(self.where)
+        if not entries:
+            return
+        # the same session first, if it is there again
+        entries.sort(key=lambda e: (e.get("session") or "") != self.session)
+        socket, entry = connect(entries, log=lambda text: None)
+        if socket is None:
+            return
+        self.retry.stop()
+        self.session = entry.get("session") or ""
+        self.attach(socket)
+        if self.hello is not None:
+            self.replays += 1
+            replay = dict(self.hello, id=f"smappy-reattach-{self.replays}")
+            self.swallow.add(replay["id"])
+            socket.write((json.dumps(replay) + "\n").encode("utf-8"))
+            socket.write(b'{"jsonrpc": "2.0", "method": "notifications/initialized"}\n')
+            socket.flush()
+        print(f"smappy-mcp: attached again, to {_describe(entry)}", file=sys.stderr)

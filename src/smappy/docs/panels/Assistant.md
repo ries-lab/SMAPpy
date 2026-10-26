@@ -34,6 +34,14 @@ with its maker's own installer and starts it.  The first time, the assistant
 asks you to sign in with your account, in the browser, and whether to trust
 the folder it works in.  Then you type your questions there.
 
+**Quitting SMAPpy leaves the assistant open**, with its conversation: what
+was looked at and decided stays with it.  While SMAPpy is gone, the
+assistant is told so when it tries to use SMAPpy; when SMAPpy allows
+connections again -- *Start assistant* after a restart -- it reconnects by
+itself, and *Start assistant* brings its window forward instead of opening a
+new one.  To end it, quit the assistant in its window (`/exit` in Claude
+Code).
+
 With an assistant connected already it
 starts no second one -- two would share one list and one switch, and in
 *act* mode change the table without knowing of each other -- but brings the
