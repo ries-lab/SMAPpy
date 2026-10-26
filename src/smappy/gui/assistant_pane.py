@@ -46,7 +46,8 @@ OPENS = ("run_plugin", "run_chain")      # proposals shown in a panel, not done 
 NEW_STYLE = "font-weight: bold; color: #c06000;"
 
 DEFAULTS = {"client": "", "command": "", "folder": "", "output": "",
-            "mode": "suggest", "allow_at_start": False, "pre_allow": True}
+            "mode": "suggest", "allow_at_start": False, "pre_allow": True,
+            "show_runs": True}
 
 
 def preferences() -> Dict:
@@ -124,6 +125,10 @@ class AssistantControls(QObject):
         self.beside = beside                # the render window, for placing
         # the assistant's open_plugin: a plugin's window, filled in
         server.assistant.panels = self.show_plugin
+        # a pinned plugin's panel, shown in its tab: the main window's
+        # (`ControlWindow._assistant_panel`); without one, its window
+        self.find_panel: Optional[Callable] = None
+        self.show_runs(prefs["show_runs"])
         self._windows: Dict[str, QWidget] = {}
         self.settings_window: Optional[QWidget] = None
         # shows the list of proposals: the toolbar button's overlay
@@ -293,6 +298,50 @@ class AssistantControls(QObject):
         self.settings_window.show()
         self.settings_window.raise_()
         return self.settings_window
+
+    def show_runs(self, on: bool) -> None:
+        """Whether the assistant's applied runs go through the plugins' own
+        panels, to be watched, or straight to the session, a little faster."""
+        self.server.assistant.runner = self.run_in_panel if on else None
+
+    def run_in_panel(self, path: str, cls, settings):
+        """An applied run as the user makes it: the plugin's section shown in
+        its tab, or its window; the settings in its form; its Run pressed.
+        A `Later` of the result, when the panel says the run ended."""
+        from .. import plugins
+        from ..assistant.tools import Later, ToolError
+        panel = self.find_panel(path) if (self.find_panel is not None and path) else None
+        if panel is None:
+            known = bool(path) and path in plugins.refs()
+            window = self.open_plugin(path) if known else self._own_window(path or "chain", cls)
+            panel = getattr(window, "panel", None)
+        if panel is None or not hasattr(panel, "run_asked"):
+            return None                     # the session's own run, then
+        if panel.busy:
+            raise ToolError(f"{cls.name or path} is still running in its panel; wait "
+                            "for it or ask the user to stop it")
+        panel.take_settings(settings)
+        later = Later()
+
+        def ended(kind: str, payload) -> None:
+            try:
+                if panel.job != "run":
+                    return                  # a preview the user made meanwhile
+                panel.ended.disconnect(ended)
+                if kind == "done":
+                    later.resolve(payload)
+                elif kind == "stopped":
+                    later.fail(f"stopped in SMAPpy{': ' + str(payload) if payload else ''}")
+                else:
+                    lines = str(payload).strip().splitlines()
+                    later.fail(f"failed: {lines[-1] if lines else 'see its panel'}")
+            except Exception:
+                traceback.print_exc()
+        panel.ended.connect(ended)
+        if not panel.run_asked():
+            panel.ended.disconnect(ended)
+            later.fail(f"did not start: {panel.status.text() or 'see its panel'}")
+        return later
 
     def show_plugin(self, path: str, settings=None) -> Optional[QWidget]:
         """A plugin's window, its settings filled in; nothing run."""
@@ -844,7 +893,13 @@ class AssistantSettings(QWidget):
         self.pre_allow.setToolTip("what the assistant may change is decided by suggest "
                                   "and act here; its shell and files still ask")
         self.pre_allow.toggled.connect(lambda on: save_preferences({"pre_allow": on}))
-        for box in (self.at_start, self.pre_allow):
+        self.show_runs = QCheckBox("show its runs in the plugins' panels")
+        self.show_runs.setChecked(prefs["show_runs"])
+        self.show_runs.setToolTip("in act mode, each run it makes opens the plugin's "
+                                  "section or window, fills it in and presses Run, so you "
+                                  "see it, its progress and its figures, and can stop it")
+        self.show_runs.toggled.connect(self._show_runs)
+        for box in (self.at_start, self.pre_allow, self.show_runs):
             column.addWidget(box)
 
         # for "one I start myself": what to give that client
@@ -915,6 +970,10 @@ class AssistantSettings(QWidget):
             widget.setVisible(key != "manual")      # it starts wherever its user does
         self.pre_allow.setVisible(key == "claude")
         self.refresh()
+
+    def _show_runs(self, on: bool) -> None:
+        save_preferences({"show_runs": on})
+        self.controls.show_runs(on)
 
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(

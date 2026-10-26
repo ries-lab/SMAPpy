@@ -481,6 +481,17 @@ class PluginPanel(QWidget):
     def run(self) -> None:
         self._start("run", "running...")
 
+    def run_asked(self) -> bool:
+        """Run, its questions already put to the user by whoever starts it --
+        the assistant, which asked through the plugin's preflight before its
+        call -- so none is asked again here.  False if it did not start."""
+        return self._start("run", "running...", ask=False)
+
+    @property
+    def busy(self) -> bool:
+        """Whether a run or a preview is going."""
+        return self._thread is not None and self._thread.isRunning()
+
     def run_part(self, part: str, path: str) -> bool:
         """Run the plugin at ``path`` with the form's part ``part`` as its
         settings, on the session, as its own panel would."""

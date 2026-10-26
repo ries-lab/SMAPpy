@@ -88,6 +88,37 @@ def tool(description: str, needs: str = "", **params: Dict[str, Any]):
     return mark
 
 
+class Later:
+    """An answer that comes later: a run the GUI makes through the plugin's
+    own panel, on its thread, ends after the call has returned
+    (`Assistant.runner`).  ``then(callback)`` is told ``(value, None)`` or
+    ``(None, why)`` once, whenever that is -- at once if it has been."""
+
+    def __init__(self):
+        self._outcome: Optional[tuple] = None
+        self._callbacks: List[Callable] = []
+
+    def then(self, callback: Callable) -> None:
+        if self._outcome is not None:
+            callback(*self._outcome)
+        else:
+            self._callbacks.append(callback)
+
+    def resolve(self, value) -> None:
+        self._end((value, None))
+
+    def fail(self, why: str) -> None:
+        self._end((None, why))
+
+    def _end(self, outcome: tuple) -> None:
+        if self._outcome is not None:
+            return                      # once: a run ends one way
+        self._outcome = outcome
+        callbacks, self._callbacks = self._callbacks, []
+        for callback in callbacks:
+            callback(*outcome)
+
+
 class ToolError(Exception):
     """A call that cannot be done, with what to do instead.  The client gets
     the message as the tool's answer, marked as an error, and not a
@@ -164,7 +195,10 @@ class Assistant:
     ``current()`` -> ``((x0, x1), (y0, y1), pixel_nm)``.  ``panels`` opens a
     plugin's window in the GUI filled in, ``panels(path, settings)``; None
     headless.  ``windows`` the GUI's own windows that are not plugins, a
-    mapping of name to ``open(roi_id=None)``; None headless.
+    mapping of name to ``open(roi_id=None)``; None headless.  ``runner``
+    makes an applied run in the GUI through the plugin's own panel --
+    shown, filled in, its Run pressed -- ``runner(path, cls, settings)`` ->
+    a `Later` of the result, or None where it cannot; None headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
@@ -182,6 +216,7 @@ class Assistant:
         self.viewer = viewer
         self.panels = panels
         self.windows = windows
+        self.runner = None
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
@@ -667,6 +702,10 @@ class Assistant:
                 return {"question": text, "alternatives": choices,
                         "note": "nothing ran: ask the user, then call again with "
                                 "confirm=true (and an alternative's settings if chosen)"}
+        if apply and layer == 0:
+            later = self._through_panel(path, cls, values)
+            if later is not None:
+                return later
         started = time.perf_counter()
         try:
             result = target.run(plugin, values, layer=layer)
@@ -676,6 +715,29 @@ class Assistant:
             raise ToolError(f"{path} failed: {type(error).__name__}: {error}\n"
                             + traceback.format_exc(limit=4)) from None
         return self._answer(self._keep(path, apply, result), time.perf_counter() - started)
+
+    def _through_panel(self, path: str, cls, values, answer=None) -> Optional[Later]:
+        """An applied run made as the user makes it, in the GUI: its section
+        or window shown, the settings in its form, its Run pressed, on its
+        thread -- so the run is seen, can be stopped, and holds nothing.
+        The answer comes when the run ends.  None headless, or where the
+        GUI cannot (`runner`)."""
+        if self.runner is None:
+            return None
+        started = time.perf_counter()
+        pending = self.runner(path, cls, values)
+        if pending is None:
+            return None
+        out = Later()
+
+        def ended(result, why) -> None:
+            if why is not None:
+                out.fail(f"{path}: {why}")
+                return
+            kept = self._answer(self._keep(path, True, result), time.perf_counter() - started)
+            out.resolve(answer(kept, result) if answer is not None else kept)
+        pending.then(ended)
+        return out
 
     @tool("Try a plugin over several values of one setting, on copies of the "
           "session: each value's numbers side by side.  Nothing changes.",
@@ -746,19 +808,25 @@ class Assistant:
             return self._propose("run_chain", {"chain": chain, "apply": apply}, reason)
         for written in writes:
             written.parent.mkdir(parents=True, exist_ok=True)
+        def with_steps(answer, result):
+            steps = (result.data or {}).get("results", {})
+            answer["steps"] = {key: {"text": r.text or "", "data": _plain(r.data or {})}
+                               for key, r in steps.items()}
+            answer.pop("data", None)
+            return answer
+
+        if apply:
+            later = self._through_panel(cls.path or "", cls, cls.Settings(), with_steps)
+            if later is not None:
+                return later
         target = self.session if apply else self.session.scratch()
         started = time.perf_counter()
         try:
             result = target.run(cls(), cls.Settings())
         except Exception as error:
             raise ToolError(f"the chain failed: {type(error).__name__}: {error}") from None
-        answer = self._answer(self._keep(cls.path or "chain", apply, result),
-                              time.perf_counter() - started)
-        steps = (result.data or {}).get("results", {})
-        answer["steps"] = {key: {"text": r.text or "", "data": _plain(r.data or {})}
-                           for key, r in steps.items()}
-        answer.pop("data", None)
-        return answer
+        return with_steps(self._answer(self._keep(cls.path or "chain", apply, result),
+                                       time.perf_counter() - started), result)
 
     # ----------------------------------------------------------------- changing
     @tool("Open a localization file (or images) into the session.  "

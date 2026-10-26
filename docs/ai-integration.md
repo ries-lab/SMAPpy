@@ -64,9 +64,13 @@ The tools are the same `Assistant`, over the GUI's session.  Every line from
 the socket is queued and handled on the GUI thread, one per tick of a timer
 whose `timeout` is a connected signal -- not `QTimer.singleShot`, and with
 everything caught (`CLAUDE.md`) -- so the session and its listeners are
-only ever touched where the render expects them.  The cost: a long applied
-run holds the window while it runs.  Moving long runs onto a worker, as a
-plugin's panel does, is left for when it is missed.
+only ever touched where the render expects them.  An applied run goes
+through the plugin's own panel -- its section shown in its tab, or its
+window, the settings in its form, its Run pressed -- on the panel's thread,
+and is answered when it ends (`tools.Later`): the user watches it run, can
+stop it, sees its figures, and the window stays free; the client's next
+lines wait in order.  Tries on copies stay out of sight and on the GUI
+thread.  The settings' *show its runs in the plugins' panels* turns it off.
 
 What is looked at every moment is kept apart from what is set once
 (`gui/assistant_pane.py`, `docs/panels/Assistant.md`):
