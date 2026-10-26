@@ -132,6 +132,22 @@ def test_a_chain_runs_its_steps_in_order_as_one_undo_step_and_one_log_entry():
     assert [s["changed"] for s in steps] == [True, True, False]
 
 
+def test_a_chain_in_a_chain_says_every_step_of_its_own_and_not_only_the_first():
+    """The NPC chain after RCC said only its layers: the labelling
+    efficiency, its last step, was in no line an assistant read."""
+    inner = register("Test/Chain/Inner")(chain_class(spec(
+        {"plugin": "Test/Chain/Rewrite", "grouping": "ungrouped"},
+        {"plugin": "Test/Chain/Count", "label": "counted"}), path="Test/Chain/Inner"))
+    assert inner.path == "Test/Chain/Inner"
+    outer = chain_class(spec({"plugin": "Test/Chain/Count", "label": "before"},
+                             {"plugin": "Test/Chain/Inner", "label": "inner"}))
+    text = Session(with_sigma(blinks())).run(outer(), outer.Settings()).text
+    lines = text.splitlines()
+    assert lines[0].startswith("before: ") and len(lines) == 3
+    assert lines[1] == "inner: Rewrite: halved"
+    assert lines[2].startswith("  counted: ") and lines[2].endswith(" selected")
+
+
 def test_the_grouping_is_the_layers_then_the_chains_then_the_steps_then_the_plugins():
     def rows(chain_grouping, step_grouping, plugin="Test/Chain/Count"):
         session = Session(blinks())           # the layer shows grouped

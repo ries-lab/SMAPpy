@@ -619,8 +619,13 @@ class ChainPlugin(Plugin):
             written = result.written or written
             # a fit's kept frames go on with the table, as its path does
             images = list(result.images or ()) or images
-            first = result.text.splitlines()[0] if result.text else "done"
+            first, *rest = result.text.splitlines() if result.text else ["done"]
             lines.append(f"{label}: {first}")
+            if isinstance(plugin, ChainPlugin):
+                # a chain's first line is its own first step's -- NPC
+                # Analysis's is its layers -- and its result is in the rest:
+                # indented under it, so the line a panel shows stays the same
+                lines.extend(f"  {line}" for line in rest)
             stopped = stopped or result.stopped
         changed = any(r["changed"] for r in records)
         return Result(locs=session.locs if changed else None,
