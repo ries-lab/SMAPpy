@@ -202,7 +202,21 @@ class Assistant:
         errors = [p.message for p in problems if p.level == "error"]
         if errors:
             raise ToolError("; ".join(errors) + ".  describe_plugin lists the fields.")
-        return settings_from(cls.Settings, values)
+        settings = settings_from(cls.Settings, values)
+        # what the form does on an edit: the plugin's `react` fills other
+        # fields -- a preset fills every setting.  Without it a preset named
+        # here was silently ignored, and Simulate made its demo scene.  The
+        # values given win over what was filled, as an edit after the preset.
+        filled: Dict[str, Any] = {}
+        plugin = cls()
+        for name in values:
+            try:
+                filled.update(plugin.react(name, settings) or {})
+            except (ValueError, TypeError):
+                pass                       # as the panel's `_react`
+        if filled:
+            settings = settings_from(cls.Settings, {**filled, **values})
+        return settings
 
     def _in_output(self, cls, values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """``values`` with each file to write that is given relative made
