@@ -387,9 +387,9 @@ def make(d) -> None:
     kept = headless.results[-1].result
     names = [p.name for p in kept.figures()]
     efficiency = next(i for i, n in enumerate(names) if n.endswith("labelling efficiency"))
-    # the NPC chain's own text in full: the chain's summary has each step's
-    # first line, which for a chain is its first step's
-    text = kept.data["steps"][-1]["text"]
+    # what the assistant reads: run_chain's text, where the NPC chain's own
+    # steps follow its line
+    text = ran["text"]
     found = re.search(r"labelling efficiency ([\d.]+ \u00b1 [\d.]+ %).*?from (\d+) pores"
                       r".*?simulated with ([\d.]+ %)", text)
     assert found, text
