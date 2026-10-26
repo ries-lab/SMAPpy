@@ -145,8 +145,8 @@ def welcome(client: Client) -> List[str]:
     seen one should know where to type and where its proposals go."""
     name = client.name or "The assistant"
     return [f"{name}, connected to the session open in SMAPpy.",
-            "Ask your question here.  What it proposes to change waits in SMAPpy's",
-            "Assistant window, for you to open or dismiss.",
+            "Ask your question here.  What it proposes to change waits in SMAPpy,",
+            "under the Assistant button over the picture, to open or dismiss.",
             "The first time it asks you to sign in and whether to trust this folder."]
 
 

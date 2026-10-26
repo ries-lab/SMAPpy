@@ -19,6 +19,10 @@ Connected to the open session, it looks at and changes what you see.
 Nothing can connect until connections are allowed, and only programs
 running as your user on this computer can.
 
+The tutorial [An AI assistant](https://ries-lab.github.io/SMAPpy/assistant/)
+shows it on simulated nuclear pores: starting it, its proposals, suggest and
+act, running it on its own, and writing plugins with it.
+
 ## Starting it
 
 *Start assistant* -- in the toolbar button's list, in the *Assistant* menu,
@@ -148,7 +152,8 @@ The only folder the assistant may write files into; *choose...* sets
 another.
 
 ### follow file
-Back to the folder of the first open file, which changes as files are opened.
+Back to the folder of the first open file, which changes as files are opened;
+your home folder while no open file is on disk (a simulation, say).
 
 ### starts in
 The mode each time SMAPpy starts: *suggest* or *act*.  It is switched at

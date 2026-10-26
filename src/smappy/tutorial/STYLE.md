@@ -102,3 +102,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### simulation -- Simulating data: scenes, blinking and camera frames
 
 * (none yet)
+
+### assistant -- An AI assistant: asking SMAPpy in plain words
+
+* (none yet)
