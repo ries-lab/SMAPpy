@@ -268,8 +268,9 @@ def test_the_server_answers_initialize_list_and_call_as_mcp_says(tmp_path):
     assert server.handle_line(json.dumps(
         {"jsonrpc": "2.0", "method": "notifications/initialized"})) is None
     listed = _ask(server, "tools/list")["result"]["tools"]
-    # headless there is no view to move: `show` is the GUI's
-    assert {t["name"] for t in listed} == set(Assistant.specs()) - {"show"}
+    # headless there is no view to move and no window: `show` and
+    # `open_plugin` are the GUI's
+    assert {t["name"] for t in listed} == set(Assistant.specs()) - {"show", "open_plugin"}
     called = _ask(server, "tools/call", {"name": "list_plugins",
                                          "arguments": {"prefix": "Analysis/Drift"}})
     assert not called["result"]["isError"]

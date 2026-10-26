@@ -44,11 +44,16 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 # what the client is told on connecting, after the tools' own instructions
 GUI_NOTE = """
 You are connected to the running SMAPpy GUI: the user sees this session in
-its windows as you work.  In suggest mode a proposal appears in the GUI's
-Assistant pane, with a button that opens the plugin's panel filled in for the
-user to check and run; filters, grouping and show() change what is shown and
-are made at once.  Tell the user what you propose and why.  Each call holds
-the GUI while it runs: try long runs on a part of the data first.
+its windows as you work.  open_plugin opens a plugin's window filled in, for
+the user to run; filters, grouping and show() change what is shown; all are
+made at once, in either mode.  In suggest mode a change to the data appears
+in the GUI's Assistant pane as a proposal, with a button that opens the
+plugin's window filled in.  Each call holds the GUI while it runs: try long
+runs on a part of the data first.
+
+The user is usually a biologist at the microscope, not a programmer: answer
+briefly, in plain words, and say what you did or found -- not how your tools
+work or what they cannot do.
 """
 
 

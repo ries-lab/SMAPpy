@@ -125,6 +125,7 @@ def test_a_client_on_the_socket_gets_the_tools_and_each_call_runs_on_the_gui_thr
     assert server.client_names() == ["test 1"]
     client.send("tools/list")
     names = {t["name"] for t in client.answer()["result"]["tools"]}
+    # no `open_plugin` here: the bare server has no windows to open
     assert {"show", "session_state", "run_plugin"} <= names
     state = json.loads(client.call("session_state")["content"][0]["text"])
     assert state["mode"] == "suggest"
@@ -250,6 +251,20 @@ def test_a_proposed_run_opens_filled_in_and_running_it_there_carries_it_out(cont
     assert a.call("figure", {"result": done["result"]})
     assert server.session.can_undo
     assert listed.empty.isVisibleTo(listed)
+
+
+def test_open_plugin_opens_its_window_filled_in_and_proposes_nothing(controls):
+    """"Open Tracking analysis" in a chat: the window, not a proposal to run."""
+    a = controls.server.assistant
+    assert a.mode == "suggest" and "open_plugin" in a.tools()
+    opened = a.call("open_plugin", {"path": "Analysis/Drift/RCC",
+                                    "settings": {"n_timepoints": 7}})
+    assert opened["opened"] and not a.proposals
+    window = controls._windows["Analysis/Drift/RCC"]
+    assert window.isVisible() and window.panel.form.value().n_timepoints == 7
+    assert not controls.server.session.can_undo          # nothing ran
+    with pytest.raises(Exception, match="no plugin"):
+        a.call("open_plugin", {"path": "Analysis/Nothing"})
 
 
 def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(controls):

@@ -108,6 +108,8 @@ class AssistantControls(QObject):
         self.open_plugin = open_plugin or self._own_window
         self.load = load
         self.beside = beside                # the render window, for placing
+        # the assistant's open_plugin: a plugin's window, filled in
+        server.assistant.panels = self.show_plugin
         self._windows: Dict[str, QWidget] = {}
         self.settings_window: Optional[QWidget] = None
         self.proposals_window: Optional[QWidget] = None
@@ -292,6 +294,13 @@ class AssistantControls(QObject):
         self.settings_window.show()
         self.settings_window.raise_()
         return self.settings_window
+
+    def show_plugin(self, path: str, settings=None) -> Optional[QWidget]:
+        """A plugin's window, its settings filled in; nothing run."""
+        window = self.open_plugin(path)
+        if window is not None and settings is not None:
+            window.panel.take_settings(settings)
+        return window
 
     def open_proposal(self, ident: str) -> Optional[QWidget]:
         """The proposal's plugin in its window, filled in; nothing run.  Its
