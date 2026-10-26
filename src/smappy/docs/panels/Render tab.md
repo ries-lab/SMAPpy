@@ -28,7 +28,7 @@ The picture's toolbar holds, from the left, what draws and what looks.  The
 *ROI* button draws a region of interest (right-click it for the kind); while
 the kind is a line, the field beside it is the line's width.  ⤢ (*Reset view*,
 Ctrl+0) shows everything; *3D* opens the [3D view](plugin:Panels/3D view);
-the layout button chooses overlay or side by side; the field after it is
+with two layers or more, the layout button chooses overlay or side by side; the field after it is
 what one screen pixel is -- the zoom, as a number.  Type a size to zoom to
 it, or right-click it to go to 10 nm.  Right-click the picture to move that
 place to the middle; double-click it to show everything.  At the right edge

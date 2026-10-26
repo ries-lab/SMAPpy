@@ -335,10 +335,33 @@ def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls
     assert not window.command.isVisibleTo(window)
     window.client.setCurrentIndex(window.client.findData("command"))
     assert kept["client"] == "command" and window.command.isVisibleTo(window)
-    assert not window.pre_allow.isEnabled()
+    assert not window.pre_allow.isVisibleTo(window) and not window.other.isVisibleTo(window)
     window.client.setCurrentIndex(window.client.findData("claude"))
-    assert window.pre_allow.isEnabled()
+    assert window.pre_allow.isVisibleTo(window) and not window.command.isVisibleTo(window)
+    # one started by hand: what to give it, and only then
+    window.client.setCurrentIndex(window.client.findData("manual"))
+    assert window.other.isVisibleTo(window) and not window.pre_allow.isVisibleTo(window)
+    assert not window.folder.isVisibleTo(window)
+    # the mode it starts in: both choices in sight
+    window.start_act.setChecked(True)
+    assert kept["mode"] == "act"
+    window.start_suggest.setChecked(True)
+    assert kept["mode"] == "suggest"
     window.close()
+
+
+def test_one_started_by_hand_is_listened_for_and_nothing_is_started(controls, monkeypatch):
+    from smappy.assistant import launch
+    from smappy.gui import assistant_pane
+    monkeypatch.setattr(assistant_pane, "preferences",
+                        lambda: {**assistant_pane.DEFAULTS, "client": "manual"})
+    started = []
+    monkeypatch.setattr(launch, "start", lambda *a, **k: started.append(a))
+    controls.start()
+    assert controls.server.listening and not started
+    assert "Start your assistant" in controls.message
+    controls.server.stop()
+    controls.proposals_window.close()
 
 
 def test_the_output_folder_follows_the_first_file_until_the_user_sets_one(server, tmp_path):

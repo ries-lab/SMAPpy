@@ -1132,7 +1132,8 @@ class RenderToolBar(QToolBar):
             layouts.addAction(action)
             self.layout_actions[mode] = action
         self.layers_button.setMenu(layers_menu)
-        self.addWidget(self.layers_button)
+        # a choice between one layer and the same one layer: shown from two on
+        self.layers_action = self.addWidget(self.layers_button)
         self._layout_text()
 
         # The size of a screen pixel, as SMAP shows it: the zoom, written as a
@@ -1195,8 +1196,14 @@ class RenderToolBar(QToolBar):
         view.view.sigRangeChanged.connect(lambda *_: self._count_timer.start())
         view.session.on_change(self._update_counts)
         self._update_counts("locs")
+        view.session.on_change(self._show_layout_choice)
+        self._show_layout_choice()
         self.border = ""
         self._style_buttons()
+
+    def _show_layout_choice(self, what: str = "layers") -> None:
+        if what in ("layers", "locs"):
+            self.layers_action.setVisible(len(self.view.session.layers) > 1)
 
     def add_right(self, widget: QWidget):
         """A widget at the right edge, before *more*: the assistant's button."""

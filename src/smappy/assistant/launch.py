@@ -65,6 +65,9 @@ CLIENTS: Dict[str, Client] = {c.key: c for c in (
            "(https://nodejs.org) to install.'; false; fi",
            "npm install -g @openai/codex"),
     Client("command", "a command of your own"),
+    # any other MCP client, started by the user with the command or the JSON
+    # the settings copy; SMAPpy only listens
+    Client("manual", "one I start myself", terminal=False),
 )}
 
 
@@ -290,7 +293,9 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
     do next."""
     client = CLIENTS[key]
     folder = Path(folder).expanduser()
-    if not client.terminal:
+    if key == "manual":
+        raise ValueError("an assistant started by hand is not started here")
+    if key == "claude-app":
         written = add_to_project(folder)
         open_app(run)
         return (f"Claude app opened.  Start a Code session in {folder} and approve "
