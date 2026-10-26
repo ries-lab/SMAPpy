@@ -19,6 +19,7 @@ server's log.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 
@@ -52,7 +53,12 @@ def main(argv=None) -> int:
             p.error("--attach takes the window's settings: no --mode, --output, "
                     "--knowledge or --open")
         from .attach import forward
-        return forward(args.attach)
+        code = forward(args.attach)
+        # out at once: the thread reading stdin is still blocked in a read,
+        # and Python's own shutdown aborts on it ("Python quit unexpectedly")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
 
     protocol_out = sys.stdout
     sys.stdout = sys.stderr
