@@ -23,8 +23,8 @@ running as your user on this computer can.
 
 *Start assistant* -- in the toolbar button's list, in the *Assistant* menu,
 or Ctrl+Shift+A -- does it in one go: SMAPpy allows connections, starts your
-assistant already connected to this window, and puts its window in a column
-beside the picture with the list of proposals above it.  The first time it
+assistant already connected to this window, and puts its window beside the
+picture.  The first time it
 asks one question, which assistant: Claude, Codex or the Claude app; *another
 assistant...* opens these settings.
 
@@ -65,10 +65,13 @@ the picture; elsewhere it opens where the system puts it.
 
 The render window's toolbar has the assistant's button.  It shows a dot --
 filled when an assistant is connected, hollow while SMAPpy only listens --
-the assistant's name, the mode, and how many proposals wait; it is
-highlighted while there are ones you have not looked at.  Clicking it opens
-the list of proposals.  *Assistant > Proposals* shows the same list as a
-window, which *Start assistant* places above the terminal.
+the assistant's name, the mode, and how many proposals wait.  Under it, in
+the picture's top-right corner, the list of proposals drops down: by itself
+when the assistant proposes something, and on a click on the button.  It
+stays open while you work; **—** collapses it, to look at the whole picture
+first, and the button then stays highlighted while something waits.  When
+the last proposal is dealt with, the list folds away by itself.
+*Assistant > Proposals* opens it too.
 
 In the list, the newest proposal is first; its reason is in its tooltip.
 

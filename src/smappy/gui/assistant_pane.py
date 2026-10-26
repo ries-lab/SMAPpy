@@ -5,11 +5,15 @@ is here is SMAPpy's side of it, shaped by what is looked at how often:
 
 * **Every moment**: whether an assistant is connected, whether it may act
   or only suggest, and what it proposed.  That is one button in the render
-  window's toolbar (`AssistantButton`, where one's eyes are), whose popup is
-  the list of proposals (`ProposalList`); and the same list as a small window
-  (`ProposalsWindow`) set beside the terminal *Start assistant* opens, so
-  the conversation and what it proposes sit together.  The mode is in sight
-  in both: it decides what the assistant may do to the data.
+  window's toolbar (`AssistantButton`, where one's eyes are), and under it
+  the list of proposals (`ProposalList`), dropped down inside the window
+  over the picture's corner (`ProposalOverlay`).  It opens by itself when
+  something arrives, stays until it is collapsed -- the button still says
+  what waits -- and collapses by itself when the last proposal is dealt
+  with.  Inside the window rather than a window of its own: it moves with
+  the picture, never takes the focus from the terminal one types in, and
+  cannot get lost behind it.  The mode is in sight there: it decides what
+  the assistant may do to the data.
 * **Once**: which client to start and where, the folder it may write into,
   the mode to start in, whether to listen from the start.  That is the
   settings window (`AssistantSettings`), behind *settings...*, kept in the
@@ -29,14 +33,14 @@ import traceback
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
                                QRadioButton, QScrollArea, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .widgets import Popup, note_style
+from .widgets import note_style
 
 OPENS = ("run_plugin", "run_chain")      # proposals shown in a panel, not done here
 NEW_STYLE = "font-weight: bold; color: #c06000;"
@@ -112,9 +116,10 @@ class AssistantControls(QObject):
         server.assistant.panels = self.show_plugin
         self._windows: Dict[str, QWidget] = {}
         self.settings_window: Optional[QWidget] = None
-        self.proposals_window: Optional[QWidget] = None
+        # shows the list of proposals: the toolbar button's overlay
+        # (`AssistantButton.attach`); nothing without one
+        self.reveal: Callable[[], None] = lambda: None
         self.message = ""                   # the last thing said to the user
-        self.seen = 0                       # proposals the user has looked at
         # after Start found the old terminal: did it come back?
         self._reconnect_check = QTimer(self)
         self._reconnect_check.setSingleShot(True)
@@ -127,14 +132,6 @@ class AssistantControls(QObject):
     def live(self):
         return [p for p in self.server.assistant.proposals
                 if p.status in ("proposed", "opened")]
-
-    def unseen(self) -> int:
-        return max(0, len(self.server.assistant.proposals) - self.seen)
-
-    def mark_seen(self) -> None:
-        if self.seen != len(self.server.assistant.proposals):
-            self.seen = len(self.server.assistant.proposals)
-            self.changed.emit()
 
     def client_label(self) -> str:
         names = self.server.client_names()
@@ -172,8 +169,8 @@ class AssistantControls(QObject):
         return ok
 
     def start(self) -> None:
-        """*Start assistant*: listen, start the chosen client, place it and
-        the proposals beside the picture.  The first time, the settings."""
+        """*Start assistant*: listen, start the chosen client and place it
+        beside the picture.  The first time, one question."""
         from .. import config
         from ..assistant import launch
         prefs = preferences()
@@ -211,7 +208,7 @@ class AssistantControls(QObject):
             self._about_connecting = True
             self._reconnect_check.start()
             return
-        terminal, list_box = self._column()
+        terminal = self._column()
         try:
             line = launch.start(prefs["client"], folder,
                                 config.config_dir() / "assistant", os.getpid(),
@@ -221,7 +218,7 @@ class AssistantControls(QObject):
             self.say(f"could not start {client.label}: {error}")
             self.show_settings()
             return
-        self.show_proposals(list_box if client.terminal else None)
+        self.show_proposals()
         self.say(line)
 
     def _check_reconnected(self) -> None:
@@ -252,10 +249,9 @@ class AssistantControls(QObject):
         return answer == QMessageBox.Yes
 
     def _column(self):
-        """Where the terminal and the proposals go: a column beside the
-        picture -- right of it if the screen has room, else over its right
-        edge.  (left, top, right, bottom) for the terminal, as AppleScript
-        takes it; (left, top, width, height) for the proposals above it."""
+        """Where the terminal goes: a column beside the picture -- right of
+        it if the screen has room, else over its right edge -- as
+        AppleScript takes it, (left, top, right, bottom)."""
         window = self.beside
         screen = (window.screen() if window is not None else
                   QApplication.primaryScreen()).availableGeometry()
@@ -268,18 +264,11 @@ class AssistantControls(QObject):
                 width = min(width, screen.right() - left)
         else:
             left = screen.right() - width
-        top, bottom = screen.top() + 30, screen.bottom()
-        split = top + 230
-        return (left, split + 30, left + width, bottom), (left, top, width, split - top)
+        return (left, screen.top() + 30, left + width, screen.bottom())
 
-    def show_proposals(self, rectangle=None) -> QWidget:
-        if self.proposals_window is None:
-            self.proposals_window = ProposalsWindow(self)
-        if rectangle is not None:
-            left, top, width, height = rectangle
-            self.proposals_window.setGeometry(left, top, width, height)
-        self.proposals_window.show()
-        return self.proposals_window
+    def show_proposals(self) -> None:
+        """The list of proposals, dropped down under the toolbar's button."""
+        self.reveal()
 
     def ask_which(self) -> QWidget:
         """The first *Start assistant*: which assistant, and Start."""
@@ -546,80 +535,142 @@ class FirstStart(QWidget):
         self.controls.show_settings()
 
 
-class ProposalsWindow(QWidget):
-    """The list as a window of its own, beside the assistant's terminal."""
+class ProposalOverlay(QFrame):
+    """The list dropped down inside the render window, over the picture's
+    top-right corner, under the button: *collapse* folds it back into it."""
 
-    def __init__(self, controls: AssistantControls, parent=None):
-        super().__init__(parent)
-        self.setWindowFlag(Qt.Window, True)
-        self.setWindowTitle("Assistant")
-        layout = QVBoxLayout(self)
+    WIDTH = 440
+
+    def __init__(self, controls: AssistantControls, host: QWidget):
+        super().__init__(host)
+        self.host = host
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setAutoFillBackground(True)        # over the picture, not see-through
+        column = QVBoxLayout(self)
+        column.setContentsMargins(8, 4, 8, 8)
+        top = QHBoxLayout()
+        title = QLabel("Assistant")
+        title.setStyleSheet("font-weight: bold")
+        top.addWidget(title)
+        top.addStretch(1)
+        self.collapse_button = QToolButton(text="\u2014", autoRaise=True)
+        self.collapse_button.setToolTip("collapse: look at the whole picture first; "
+                                        "the button keeps showing what waits")
+        self.collapse_button.clicked.connect(self.collapse)
+        top.addWidget(self.collapse_button)
+        column.addLayout(top)
         self.list = ProposalList(controls, self)
-        layout.addWidget(self.list)
-        self.controls = controls
-        self.resize(480, 220)
+        column.addWidget(self.list)
+        host.installEventFilter(self)
+        self.hide()
 
-    def changeEvent(self, event) -> None:            # noqa: N802 (Qt's name)
-        super().changeEvent(event)
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt's name)
         try:
-            if self.isActiveWindow():
-                self.controls.mark_seen()
+            if watched is self.host and event.type() == QEvent.Resize and self.isVisible():
+                self.place()
         except Exception:
             traceback.print_exc()
+        return False
+
+    def place(self) -> None:
+        width = min(self.WIDTH, max(200, self.host.width() - 16))
+        height = min(max(self.sizeHint().height(), 160), max(120, self.host.height() - 16))
+        self.setGeometry(self.host.width() - width - 8, 8, width, height)
+
+    def open(self) -> None:
+        self.place()
+        self.show()
+        self.raise_()
+
+    def collapse(self) -> None:
+        self.hide()
 
 
 class AssistantButton(QToolButton):
     """The toolbar's button: the connection, the client, the mode and how
-    many proposals wait, highlighted while some are unseen; its popup is the
-    list.  Made before anything of the assistant is imported: ``controls``
-    is called on the first click."""
+    many proposals wait -- highlighted while they wait out of sight -- and a
+    click opens or collapses the list under it (`ProposalOverlay`, inside
+    ``host``, the picture).  Made before anything of the assistant is
+    imported: ``controls`` is called on the first click."""
 
-    def __init__(self, controls: Callable[[], AssistantControls], parent=None):
+    def __init__(self, controls: Callable[[], AssistantControls],
+                 host: Optional[QWidget] = None, parent=None):
         super().__init__(parent)
         self._controls = controls
         self._made: Optional[AssistantControls] = None
-        self.popup: Optional[Popup] = None
-        self.setText("Assistant ▾")
+        self.host = host
+        self.overlay: Optional[ProposalOverlay] = None
+        self._known = 0                 # proposals there were at the last look
+        self._had_live = False
+        self._said = ""
+        self.setText("Assistant \u25be")
         self.setToolTip("an AI assistant working with this session: who is connected, "
                         "what it may do, what it proposed")
-        self.clicked.connect(self.open_popup)
+        self.clicked.connect(self.toggle)
 
     def attach(self, controls: AssistantControls) -> None:
         if self._made is controls:
             return
         self._made = controls
-        controls.changed.connect(self.refresh)
+        host = self.host if self.host is not None else self.window()
+        self.overlay = ProposalOverlay(controls, host)
+        self.overlay.installEventFilter(self)       # shown or hidden: the highlight
+        controls.reveal = self.overlay.open
+        self._known = len(controls.server.assistant.proposals)
+        controls.changed.connect(self._react)
         self.refresh()
 
-    def open_popup(self) -> None:
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt's name)
+        if watched is self.overlay and event.type() in (QEvent.Show, QEvent.Hide):
+            self.refresh()
+        return False
+
+    def toggle(self) -> None:
         try:
-            controls = self._controls()
-            self.attach(controls)
-            if self.popup is None:
-                self.popup = Popup(ProposalList(controls), self)
-                self.popup.content.setMinimumWidth(420)
-            self.popup.show_below(self)
-            controls.mark_seen()
+            self.attach(self._controls())
+            if self.overlay.isVisible():
+                self.overlay.collapse()
+            else:
+                self.overlay.open()
         except Exception:
             traceback.print_exc()
+
+    def _react(self) -> None:
+        """Open for what arrives; collapse once nothing is left to do."""
+        try:
+            controls = self._made
+            proposals = controls.server.assistant.proposals
+            live = bool(controls.live())
+            if len(proposals) > self._known and live:
+                self.overlay.open()             # a new proposal
+            elif self._had_live and not live:
+                self.overlay.collapse()         # the last one dealt with
+            if controls.message and controls.message != self._said:
+                self.overlay.open()             # something said to the user
+            self._known, self._had_live, self._said = len(proposals), live, controls.message
+        except Exception:
+            traceback.print_exc()
+        self.refresh()
 
     def refresh(self) -> None:
         try:
             controls = self._made
+            if controls is None:
+                return
             server = controls.server
-            if not server.listening:
-                self.setText("Assistant ▾")
+            count = len(controls.live())
+            waiting = count and not (self.overlay is not None and self.overlay.isVisible())
+            if not server.listening and not count:
+                self.setText("Assistant \u25be")
                 self.setStyleSheet("")
                 return
-            dot = "●" if server.clients else "○"
+            dot = "\u25cf" if server.clients else "\u25cb"
             name = controls.client_label() or "Assistant"
-            count = len(controls.live())
-            text = f"{dot} {name} · {server.assistant.mode}"
+            text = f"{dot} {name} \u00b7 {server.assistant.mode}"
             if count:
-                text += f" · {count}"
-            self.setText(text + " ▾")
-            self.setStyleSheet(f"QToolButton {{ {NEW_STYLE} }}"
-                               if count and controls.unseen() else "")
+                text += f" \u00b7 {count}"
+            self.setText(text + " \u25be")
+            self.setStyleSheet(f"QToolButton {{ {NEW_STYLE} }}" if waiting else "")
         except Exception:
             traceback.print_exc()
 

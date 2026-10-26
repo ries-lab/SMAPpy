@@ -442,7 +442,7 @@ class ControlWindow(QMainWindow):
                                         "session (smappy-mcp --attach)")
         self._action(assistant, "Proposals", None,
                      lambda: self._assistant().show_proposals()).setToolTip(
-            "what the assistant proposed, in a window of its own")
+            "what the assistant proposed, under its button in the picture's window")
         settings = self._action(assistant, "Settings...", None,
                                 lambda: self._assistant().show_settings())
         settings.setToolTip("which assistant to start and where, the folder it may "
@@ -452,7 +452,7 @@ class ControlWindow(QMainWindow):
         # assistant's -- and where File > Preferences... belongs
         settings.setMenuRole(QAction.NoRole)
         from .assistant_pane import AssistantButton
-        self.assistant_button = AssistantButton(self._assistant)
+        self.assistant_button = AssistantButton(self._assistant, host=render.view)
         render.toolbar.add_right(self.assistant_button)
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
