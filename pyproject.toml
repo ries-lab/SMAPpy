@@ -134,6 +134,7 @@ smappy-calibrate = "smappy.cli.calibrate:main"
 smappy-batch = "smappy.cli.batch:main"
 smappy-batch-gui = "smappy.gui.batch_window:main"
 smappy-plugins = "smappy.user_plugins:main"
+smappy-mcp = "smappy.assistant.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

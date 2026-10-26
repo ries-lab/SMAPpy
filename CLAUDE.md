@@ -17,6 +17,13 @@ working there), its docs in `docs/uipsf/` and its tests in
 `tests/uipsf_tests/`.  Where smappy uses it, it imports it inside the
 functions that need a model, so that nothing else loads torch.
 
+`src/smappy/assistant/` is the AI assistant's side: SMAPpy's tools served over
+MCP (`smappy-mcp`), plain functions over a `Session` in `assistant/tools.py`,
+which nothing else imports; the design and the plan are `docs/ai-integration.md`.
+A tool's description is what a model reads, so a change to a plugin's
+interface that a tool describes (`run_plugin`'s settings, `INSTRUCTIONS`)
+updates it too.
+
 ## Before you edit anything
 
 Pull first:
