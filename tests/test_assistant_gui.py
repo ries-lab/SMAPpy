@@ -208,51 +208,137 @@ def test_show_frames_an_roi_of_the_roi_manager_by_its_number(server):
 
 # ------------------------------------------------------------------ the pane
 
-def test_the_pane_opens_a_proposed_run_in_the_plugins_panel_filled_in(server, app):
-    from smappy.gui.assistant_pane import AssistantPane
+@pytest.fixture
+def controls(server, app, monkeypatch):
+    from smappy.gui import assistant_pane
+    monkeypatch.setattr(assistant_pane, "preferences", lambda: dict(assistant_pane.DEFAULTS))
+    made = assistant_pane.AssistantControls(server.session, server)
+    yield made
+    for window in made._windows.values():
+        window.close()
+
+
+def test_a_proposed_run_opens_filled_in_and_running_it_there_carries_it_out(controls):
+    from smappy.gui.assistant_pane import ProposalList
+    server = controls.server
     simulate(server)
-    pane = AssistantPane(server.session, server)
+    listed = ProposalList(controls)
     a = server.assistant
-    proposed = a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True,
-                                     "settings": {"n_timepoints": 7},
-                                     "reason": "the structure smears along x"})
-    ident = proposed["proposed"]["id"]
+    ident = a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True,
+                                  "settings": {"n_timepoints": 7},
+                                  "reason": "the structure smears along x"})["proposed"]["id"]
     server.changed.emit()
-    assert not pane.empty.isVisibleTo(pane)
-    texts = [w.text() for w in pane.rows.findChildren(type(pane.state))]
-    assert any("Run Analysis/Drift/RCC: n_timepoints = 7" in t for t in texts)
-    assert "the structure smears along x" in texts
-    window = pane.open_proposal(ident)
+    assert not listed.empty.isVisibleTo(listed)
+    labels = listed.rows.findChildren(type(listed.state))
+    row = next(l for l in labels if "Run Analysis/Drift/RCC: n_timepoints = 7" in l.text())
+    assert row.toolTip() == "the structure smears along x"
+    window = controls.open_proposal(ident)
     assert window.panel.form.value().n_timepoints == 7
-    assert a.proposal(ident).status == "opened"
-    assert a.call("list_proposals")[0]["status"] == "opened"
-    # nothing ran: the user runs it from the panel
-    assert not server.session.can_undo
-    pane.dismiss(ident)
-    assert a.proposal(ident).status == "dismissed"
-    assert pane.empty.isVisibleTo(pane)
-    window.close()
-    pane.close()
+    assert a.proposal(ident).status == "opened" and not server.session.can_undo
+    # the user changes a setting and runs it from the panel
+    settings = window.panel.form.value()
+    settings.n_timepoints = 6
+    window.panel.form.set(settings)
+    window.panel.run()
+    assert wait_for(lambda: a.proposal(ident).status == "done", 60)
+    done = a.call("list_proposals")[0]
+    assert done["ran_with"]["n_timepoints"] == 6 and done["result"].startswith("r")
+    assert a.call("figure", {"result": done["result"]})
+    assert server.session.can_undo
+    assert listed.empty.isVisibleTo(listed)
 
 
-def test_the_pane_does_a_proposed_undo_and_follows_the_switch(server, app):
-    from smappy.gui.assistant_pane import AssistantPane
+def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(controls):
+    from smappy.gui.assistant_pane import ProposalList
+    server = controls.server
     simulate(server)
     a = server.assistant
     a.mode = "act"
     a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True,
                           "settings": {"n_timepoints": 5}})
-    pane = AssistantPane(server.session, server)
-    pane.suggest.setChecked(True)
+    listed = ProposalList(controls)
+    listed.suggest.setChecked(True)
     assert a.mode == "suggest"
-    ident = a.call("undo")["proposed"]["id"]
-    assert server.session.can_undo
-    pane.do_proposal(ident)
-    assert not server.session.can_undo and a.proposal(ident).status == "done"
+    undo = a.call("undo")["proposed"]["id"]
+    other = a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True})["proposed"]["id"]
+    controls.do_proposal(undo)
+    assert not server.session.can_undo and a.proposal(undo).status == "done"
+    controls.dismiss(other)
+    assert a.proposal(other).status == "dismissed" and controls.live() == []
     assert a.mode == "suggest"
-    pane.act.setChecked(True)
+    listed.act.setChecked(True)
     assert a.mode == "act"
-    pane.close()
+
+
+def test_the_toolbar_button_says_who_is_connected_the_mode_and_what_waits(controls):
+    from smappy.gui.assistant_pane import AssistantButton
+    button = AssistantButton(lambda: controls)
+    button.attach(controls)
+    assert button.text() == "Assistant \u25be"
+    controls.server.start()
+    client = Client(controls.server.address)
+    client.send("initialize", {"clientInfo": {"name": "claude-code", "version": "2"}})
+    client.answer()
+    assert button.text() == "\u25cf claude-code \u00b7 suggest \u25be"
+    simulate(controls.server)
+    client.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True})
+    assert button.text().endswith("\u00b7 1 \u25be") and "bold" in button.styleSheet()
+    button.open_popup()                 # looked at: no longer highlighted
+    assert button.styleSheet() == ""
+    button.popup.close()
+
+
+def test_start_assistant_brings_a_connected_one_forward_rather_than_a_second(
+        controls, monkeypatch):
+    from smappy.assistant import launch
+    from smappy.gui import assistant_pane
+    started, raised = [], []
+    monkeypatch.setattr(assistant_pane, "preferences",
+                        lambda: {**assistant_pane.DEFAULTS, "client": "claude"})
+    monkeypatch.setattr(launch, "start", lambda *a, **k: started.append(a) or "started")
+    monkeypatch.setattr(launch, "raise_terminal", lambda: raised.append(1) or True)
+    controls.start()
+    assert len(started) == 1 and controls.server.listening
+    client = Client(controls.server.address)
+    client.send("initialize", {"clientInfo": {"name": "claude-code"}})
+    client.answer()
+    controls.start()
+    assert len(started) == 1 and raised == [1]
+    assert "connected already" in controls.message
+    controls.proposals_window.close()
+
+
+def test_the_first_start_asks_one_question_and_starts_what_was_chosen(controls, monkeypatch):
+    from smappy.assistant import launch
+    from smappy.gui import assistant_pane
+    prefs = dict(assistant_pane.DEFAULTS)
+    monkeypatch.setattr(assistant_pane, "preferences", lambda: dict(prefs))
+    monkeypatch.setattr(assistant_pane, "save_preferences", prefs.update)
+    started = []
+    monkeypatch.setattr(launch, "start", lambda key, *a, **k: started.append(key) or "ok")
+    controls.start()
+    chooser = controls.chooser
+    assert chooser.isVisible() and chooser.chosen() == "claude" and not started
+    chooser.buttons["codex"].setChecked(True)
+    chooser.start()
+    assert started == ["codex"] and prefs["client"] == "codex"
+    assert not chooser.isVisible()
+    controls.server.stop()
+    controls.proposals_window.close()
+
+
+def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls, monkeypatch):
+    from smappy.gui import assistant_pane
+    kept = {}
+    monkeypatch.setattr(assistant_pane, "save_preferences", kept.update)
+    window = assistant_pane.AssistantSettings(controls.session, controls)
+    assert not window.command.isVisibleTo(window)
+    window.client.setCurrentIndex(window.client.findData("command"))
+    assert kept["client"] == "command" and window.command.isVisibleTo(window)
+    assert not window.pre_allow.isEnabled()
+    window.client.setCurrentIndex(window.client.findData("claude"))
+    assert window.pre_allow.isEnabled()
+    window.close()
 
 
 def test_the_output_folder_follows_the_first_file_until_the_user_sets_one(server, tmp_path):
@@ -265,6 +351,78 @@ def test_the_output_folder_follows_the_first_file_until_the_user_sets_one(server
     server.set_output(None)
     server.session.load(saved)
     assert not server.output_pinned and a.output == saved.parent
+
+
+# ------------------------------------------------------------- starting one
+
+def test_claude_code_starts_with_the_server_on_its_command_line(tmp_path, monkeypatch):
+    from smappy.assistant import launch
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    config = launch.write_config(tmp_path / "settings", pid=4242)
+    entry = json.loads(config.read_text())["mcpServers"]["smappy-gui"]
+    assert entry == {"command": sys.executable,
+                     "args": ["-m", "smappy.assistant.server", "--attach", "4242"]}
+    assert launch.client_command("claude", config) == [
+        "claude", "--mcp-config", str(config), "--allowedTools", "mcp__smappy-gui"]
+    assert "--allowedTools" not in launch.client_command("claude", config, pre_allow=False)
+    codex = launch.client_command("codex", config)
+    assert codex[0] == "codex" and f'mcp_servers.smappy_gui.command="{sys.executable}"' in codex
+    own = launch.client_command("command", config, own="agent --mcp {config} -- {server}")
+    assert own.startswith("agent --mcp ") and own.endswith("--attach 4242")
+    with pytest.raises(ValueError, match="braces"):
+        launch.client_command("command", config, own="agent {nonsense}")
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a shell script; Windows runs a .cmd")
+def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(tmp_path):
+    from smappy.assistant import launch
+    ran = []
+    line = launch.start("claude", tmp_path / "work dir", tmp_path / "settings", 4242,
+                        bounds=(10, 20, 500, 800), run=ran.append)
+    assert "started" in line
+    file = tmp_path / "settings" / "start-claude.sh"
+    script = file.read_text()
+    assert "cd '" + str(tmp_path / "work dir") + "'" in script
+    assert "Install it now? [Y/n]" in script and "claude.ai/install.sh | bash" in script
+    assert "Ask your question here." in script
+    assert script.rstrip().split("\n")[-1].startswith("exec claude --mcp-config ")
+    if sys.platform == "darwin":
+        assert ran[0][0] == "osascript" and "{10, 20, 500, 800}" in ran[0][2]
+    # not installed, and the user says no: nothing is installed, and they are
+    # told the one line that would.  (Answered, never left to the default yes:
+    # a test must not reach a real installer.)
+    (tmp_path / "work dir").mkdir()
+    empty = tmp_path / "bin"
+    empty.mkdir()
+    out = subprocess.run(["/bin/sh", str(file)], input="n\n", capture_output=True,
+                         text=True, env={"PATH": str(empty), "HOME": str(tmp_path)})
+    assert out.returncode == 1
+    assert "Claude Code is not installed on this computer yet." in out.stdout
+    assert "Not installed." in out.stdout and "claude.ai/install.sh" in out.stdout
+    # installed: the welcome, then the client
+    fake = empty / "claude"
+    fake.write_text("#!/bin/sh\necho CLAUDE \"$@\"\n")
+    fake.chmod(0o755)
+    out = subprocess.run(["/bin/sh", str(file)], capture_output=True, text=True,
+                         env={"PATH": f"{empty}:/bin:/usr/bin", "HOME": str(tmp_path)})
+    assert out.returncode == 0, out.stderr
+    assert "Ask your question here." in out.stdout and "CLAUDE --mcp-config" in out.stdout
+
+
+def test_for_the_claude_app_the_server_goes_into_the_folders_mcp_json(tmp_path):
+    from smappy.assistant import launch
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}))
+    ran = []
+    if sys.platform.startswith("linux"):
+        with pytest.raises(RuntimeError):
+            launch.start("claude-app", tmp_path, tmp_path / "s", 4242, run=ran.append)
+    else:
+        line = launch.start("claude-app", tmp_path, tmp_path / "s", 4242, run=ran.append)
+        assert "Code session" in line
+    servers = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+    assert set(servers) == {"other", "smappy-gui"}
+    # no process number: the file outlives this SMAPpy
+    assert servers["smappy-gui"]["args"][-1] == "--attach"
 
 
 # --------------------------------------------------------- smappy-mcp --attach

@@ -20,8 +20,10 @@ functions that need a model, so that nothing else loads torch.
 `src/smappy/assistant/` is the AI assistant's side: SMAPpy's tools served over
 MCP (`smappy-mcp`), plain functions over a `Session` in `assistant/tools.py`,
 which nothing else imports but the GUI's socket server and pane
-(`gui/assistant_server.py`, `gui/assistant_pane.py`, *Assistant > Allow
-connections*, reached by `smappy-mcp --attach`), and they only when asked;
+(`gui/assistant_server.py`; `gui/assistant_pane.py`, the render toolbar's
+button, the proposals and the settings; *Assistant > Start assistant*, which
+starts the user's client through `assistant/launch.py`, reached by
+`smappy-mcp --attach`), and they only when asked;
 the design and the plan are `docs/ai-integration.md`.
 A tool's description is what a model reads, so a change to a plugin's
 interface that a tool describes (`run_plugin`'s settings, `INSTRUCTIONS`)

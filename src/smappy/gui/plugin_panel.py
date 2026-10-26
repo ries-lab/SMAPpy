@@ -441,6 +441,11 @@ class PluginPanel(QWidget):
             return {}
         return {"plugin": self.plugin, "reply": self.take_settings}
 
+    @property
+    def job(self) -> str:
+        """What the panel runs or last ran: "run", "preview" or "follow"."""
+        return self._job
+
     def take_settings(self, settings) -> None:
         """Settings sent back by a window this panel opened (`_reply_to`)."""
         self.form.set(settings)
