@@ -619,3 +619,37 @@ def test_attach_with_no_window_listening_says_how_to_allow_it(tmp_path):
     assert process.returncode == 1
     assert b"no SMAPpy window" in err
 
+
+
+def test_open_window_opens_the_roi_manager_on_an_roi_and_the_3d_view(app, tmp_path):
+    """"Open the ROI manager for me": a window that is not a plugin, which
+    open_plugin had to refuse (noted as a missing tool, 2026-10-26)."""
+    from smappy.assistant.tools import Assistant
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    a = control._assistant().server.assistant
+    a.knowledge = tmp_path / "kb"
+    a.mode = "act"
+    a.call("run_plugin", {"path": "File/Simulate/Simulate", "settings": SIMULATION,
+                          "apply": True})
+    a.mode = "suggest"
+    assert "ROI manager" in a.call("session_state")["windows"]
+    project = session.rois
+    roi = project.add_roi(next(iter(project.sources)), [5000.0, 6000.0])
+    assert a.call("open_window", {"name": "roi manager", "roi": roi.number}) == {
+        "opened": "ROI manager", "roi": roi.number}
+    manager = control.roi_tab.manager
+    assert manager.isVisible() and manager.active == roi.id
+    a.call("open_window", {"name": "3D view"})
+    assert control.view3d_window is not None and control.view3d_window.isVisible()
+    with pytest.raises(Exception, match="no 'mitochondria'.*ROI manager"):
+        a.call("open_window", {"name": "mitochondria"})
+    with pytest.raises(Exception, match="no ROI 99"):
+        a.call("open_window", {"name": "ROI manager", "roi": 99})
+    assert not a.proposals
+    assert "open_window" not in Assistant(output=tmp_path, knowledge_folder=tmp_path).tools()
+    for window in (manager, control.view3d_window, render, control):
+        window.close()

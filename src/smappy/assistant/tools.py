@@ -163,12 +163,13 @@ class Assistant:
     None headless: anything with ``frame(xrange, yrange)``, ``reset()`` and
     ``current()`` -> ``((x0, x1), (y0, y1), pixel_nm)``.  ``panels`` opens a
     plugin's window in the GUI filled in, ``panels(path, settings)``; None
-    headless.
+    headless.  ``windows`` the GUI's own windows that are not plugins, a
+    mapping of name to ``open(roi_id=None)``; None headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
                  knowledge_folder=None, viewer=None, panels=None,
-                 missing_tools=None):
+                 missing_tools=None, windows=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -180,6 +181,7 @@ class Assistant:
         self.knowledge = Path(knowledge_folder or knowledge.default_folder()).expanduser()
         self.viewer = viewer
         self.panels = panels
+        self.windows = windows
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
@@ -476,6 +478,7 @@ class Assistant:
             "results": [{"result": k.id, "plugin": k.path, "applied": k.applied}
                         for k in self.results[-10:]],
             "proposals": len(self.proposals),
+            **({"windows": list(self.windows)} if self.windows is not None else {}),
         }
 
     @tool("Every plugin and saved chain by path, with its one-line summary.  "
@@ -871,6 +874,31 @@ class Assistant:
         cls = self._plugin(path)
         self.panels(path, self.settings_for(path, settings))
         return {"opened": cls.name or path, "settings": settings or {}}
+
+    @tool("Open one of SMAPpy's own windows that is not a plugin: the ROI "
+          "manager (on an ROI, given its number), the 3D view, the batch "
+          "window, the bead or PSF calibration, the microscope manager, the "
+          "camera editor, the help window.  session_state lists them under "
+          "'windows'.  Changes nothing, so it works in suggest mode too.",
+          needs="windows",
+          name={"type": "string", "description": "e.g. 'ROI manager', '3D view'"},
+          roi={"type": "integer",
+               "description": "for the ROI manager: the ROI to show, by its number"})
+    def open_window(self, name: str, roi: Optional[int] = None) -> Dict[str, Any]:
+        chosen = _pick("name", name, [(n, n) for n in self.windows])
+        roi_id = None
+        if roi is not None:
+            if chosen != "ROI manager":
+                raise ToolError("roi is for the ROI manager")
+            found = next((r for r in self.session.rois.rois.values()
+                          if r.number == roi), None)
+            if found is None:
+                numbers = sorted(r.number for r in self.session.rois.rois.values())
+                raise ToolError(f"no ROI {roi}; there are "
+                                f"{', '.join(map(str, numbers)) or 'none'}")
+            roi_id = found.id
+        self.windows[chosen](roi_id)
+        return {"opened": chosen, **({"roi": roi} if roi is not None else {})}
 
     @tool("Undo the last changes to the table.",
           steps={"type": "integer", "description": "how many, default 1"},

@@ -532,11 +532,31 @@ class ControlWindow(QMainWindow):
                 self.session, server, self, open_plugin=self.open_plugin_window,
                 load=lambda paths, append: self.load_paths(paths, append=append),
                 beside=self.render_window)
+            server.assistant.windows = self._assistant_windows()
             controls.changed.connect(
                 lambda: self.allow_assistant.setChecked(server.listening))
             self.assistant_button.attach(controls)
             self.assistant_controls = controls
         return self.assistant_controls
+
+    def _assistant_windows(self) -> dict:
+        """The windows the assistant's `open_window` opens, by the names the
+        menus give them; each takes an ROI's id (only the ROI manager uses
+        it).  Not *Preferences* or *File properties*: modal dialogs, which
+        would hold the call until they were closed."""
+        def roi_manager(roi_id=None):
+            self._open_manager()
+            manager = getattr(self.roi_tab, "manager", None)
+            if roi_id is not None and manager is not None:
+                manager.select(roi_id)
+        return {"ROI manager": roi_manager,
+                "3D view": lambda roi_id=None: self.show_3d(),
+                "batch window": lambda roi_id=None: self.open_batch(),
+                "bead calibration": lambda roi_id=None: self.open_calibration(),
+                "PSF calibration": lambda roi_id=None: self.open_psf_calibration(),
+                "microscope manager": lambda roi_id=None: self.open_microscope_manager(),
+                "camera editor": lambda roi_id=None: self.open_camera_editor(),
+                "help": lambda roi_id=None: self.show_plugin_docs()}
 
     def listen_if_asked(self) -> None:
         """*allow connections when SMAPpy starts*, from the settings."""

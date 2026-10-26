@@ -45,7 +45,8 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 GUI_NOTE = """
 You are connected to the running SMAPpy GUI: the user sees this session in
 its windows as you work.  open_plugin opens a plugin's window filled in, for
-the user to run; filters, grouping and show() change what is shown; all are
+the user to run; open_window one of SMAPpy's other windows (the ROI manager,
+the 3D view, ...); filters, grouping and show() change what is shown; all are
 made at once, in either mode.  In suggest mode a change to the data appears
 in the GUI's Assistant pane as a proposal, with a button that opens the
 plugin's window filled in.  Each call holds the GUI while it runs: try long
