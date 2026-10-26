@@ -278,7 +278,7 @@ def _superseded(name: str, names) -> bool:
 
 def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     import h5py
-    columns, info = {}, {}
+    columns, info, sites = {}, {}, None
     try:
         f = h5py.File(path, "r")
     except OSError:
@@ -290,6 +290,7 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 if name in SML_DROP or _superseded(name, loc):
                     continue
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
+            sites = _sml_sites(f)
             file = f["saveloc"].get("file")
             if file is not None and "info" in file:
                 # `file` may be a struct array: the first file's info then
@@ -333,6 +334,8 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     camera = _sml_camera(info)
     if camera:
         metadata["camera"] = camera
+    if sites:
+        metadata["roi_project"] = sites
     locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "SMAP",
                           pixelsize_nm=px * 1000 if px else None, metadata=info)
@@ -354,6 +357,132 @@ def _sml_camera(info: Dict) -> Dict:
     if cycle is not None and cycle > 0 and cycle >= camera.get("exposure_ms", np.inf):
         camera["frame_time_ms"] = float(cycle)
     return camera
+
+
+# SMAP's site lines, by the names an ROI's lines take here: ``rotationpos``
+# is the line the site image is turned along, which is what `direction` is
+SML_LINES = (("rotationpos", "direction"), ("line1", "line1"), ("line2", "line2"))
+SML_LISTS = ("list1", "list2", "list3", "list4")
+DIRECTION_LINE = "direction"            # `roi_manager.core.DIRECTION`
+
+
+def _sml_sites(f) -> Optional[dict]:
+    """The ROI manager's sites of a v7.3 `_sml.mat`, as an ROI project
+    (`ROIProject.from_dict`), or None.  SMAP keeps them as objects, which
+    `io.mcos` reads; a v5-v7 file keeps them in a store that is not read."""
+    from .mcos import read_objects
+    sites = read_objects(f, "saveloc/siteexplorer/sites")
+    return sml_sites_project(sites) if sites else None
+
+
+def sml_sites_project(sites: List[dict]) -> Optional[dict]:
+    """SMAP's sites -- each a dict of an ``SEsites`` object's properties --
+    as an ROI project of one file.
+
+    A site is an ROI at its ``pos`` (nm), numbered by its SMAP ID, with
+    *use* and the comment.  Its lines (µm in SMAP) become named lines in nm:
+    the orientation line ``rotationpos`` is `direction`, ``line1`` and
+    ``line2`` keep their names; a line never drawn is all zeros and is left
+    out.  ``line3``, the shape drawn by hand inside the site, is the ROI's
+    polygon: a polygon or free-hand outline as drawn, a rectangle
+    (``[x y w h]``) by its corners, an ellipse (``[cx cy a b angle]``) as
+    64 vertices; a polyline is not a shape and is left out.  SMAP stores
+    that shape as it was drawn on the site image, which it turns along the
+    orientation line when *rotate* is on (a setting the file does not keep),
+    so for such a site the polygon is turned by that angle.  The keyword
+    lists ``list1``-``list4`` become annotations with the keywords SMAP
+    offered; a list of nothing but ``empty`` is not one.  All sites go to
+    the first file, as the localizations do.  The ROI size is not in the
+    file (SMAP keeps it in its GUI's settings), so the project's stays.
+    """
+    rois, lists, numbers = [], {}, []
+    for site in sites:
+        pos = _numbers(site.get("pos"))
+        if pos is None or len(pos) < 2:
+            continue
+        note = site.get("annotation") or {}
+        lines = {}
+        for smap, name in SML_LINES:
+            line = _numbers((note.get(smap) or {}).get("pos"))
+            if line is not None and line.size == 4 and np.any(line):
+                lines[name] = (line.reshape(2, 2) * 1000).tolist()
+        annotations = {}
+        for name in SML_LISTS:
+            entry = note.get(name) or {}
+            words = entry.get("string")
+            words = [words] if isinstance(words, str) else list(words or [])
+            words = [str(w).strip() for w in words]
+            if not words or words == ["empty"]:
+                continue
+            lists.setdefault(name, words)
+            value = _numbers(entry.get("value"))
+            if value is not None and value.size and 1 <= int(value[0]) <= len(words):
+                annotations[name] = words[int(value[0]) - 1]
+        ident = _numbers(site.get("ID"))
+        number = int(ident[0]) if ident is not None and ident.size else len(rois) + 1
+        numbers.append(number)
+        use = _numbers(note.get("use"))
+        comment = note.get("comments")
+        rois.append({"file_id": "file0", "center": [float(pos[0]), float(pos[1])],
+                     "number": number, "polygon": _sml_shape(note.get("line3")),
+                     "lines": lines, "use": bool(use[0]) if use is not None and use.size else True,
+                     "comment": comment if isinstance(comment, str) else "",
+                     "origin": {"method": "SMAP", "name": str(site.get("name") or "")},
+                     "annotations": annotations})
+    if not rois:
+        return None
+    names = [DIRECTION_LINE] + [n for _, n in SML_LINES[1:]
+                                if any(n in r["lines"] for r in rois)]
+    project = {"format_version": 1, "sources": [{"id": "file0", "number": 0, "name": ""}],
+               "rois": rois, "next_number": max(numbers) + 1, "line_names": names}
+    if lists:
+        project["annotation_lists"] = lists
+    return project
+
+
+def _numbers(value) -> Optional[np.ndarray]:
+    """A MATLAB number read by `io.mcos` as a flat float array, or None."""
+    if value is None or isinstance(value, (str, dict, list)):
+        return None
+    try:
+        return np.asarray(value, dtype=float).ravel()
+    except (TypeError, ValueError):
+        return None
+
+
+def _sml_shape(entry) -> Optional[list]:
+    """SMAP's ``line3`` as polygon vertices in nm, or None (see
+    `sml_sites_project`)."""
+    if not isinstance(entry, dict) or entry.get("pos") is None:
+        return None
+    pos = np.asarray(entry["pos"], dtype=float) * 1000
+    if pos.ndim == 2 and pos.shape[1] == 2 and len(pos) >= 3:
+        if "polyline" in _roi_function(entry):
+            return None
+        return pos.tolist()
+    flat = pos.ravel()
+    if flat.size == 4:                                     # x, y, width, height
+        x, y, w, h = flat
+        return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+    if flat.size == 5:                                     # centre, semi-axes, angle
+        cx, cy, a, b = flat[:4]
+        turn = np.deg2rad(flat[4] / 1000)                  # the angle was not in µm
+        t = np.linspace(0, 2 * np.pi, 64, endpoint=False)
+        x, y = a * np.cos(t), b * np.sin(t)
+        return np.column_stack([cx + x * np.cos(turn) - y * np.sin(turn),
+                                cy + x * np.sin(turn) + y * np.cos(turn)]).tolist()
+    return None
+
+
+def _roi_function(entry) -> str:
+    """The name of the MATLAB function that drew a ``line3``, or ''."""
+    found = entry.get("roifun")
+    for item in found if isinstance(found, list) else [found]:
+        if isinstance(item, dict):
+            handle = item.get("function_handle") or {}
+            if isinstance(handle, dict) and isinstance(handle.get("function"), str):
+                return handle["function"]
+    return ""
 
 
 register(Reader("SMAP", ("_sml.mat", ".mat"), _load_sml,

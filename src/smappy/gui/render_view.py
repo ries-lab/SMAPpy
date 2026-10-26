@@ -88,11 +88,12 @@ LINE_TURN_FINE = 1.0         # with Shift
 KEYS = """<table cellspacing="0" cellpadding="3">
 <tr><td><b>drag</b></td><td>pan</td></tr>
 <tr><td><b>wheel</b>, pinch, right-drag</td><td>zoom</td></tr>
-<tr><td><b>right-click</b></td><td>put that place in the middle</td></tr>
+<tr><td><b>right-click</b></td><td>put that place in the middle; on the ROI, delete it</td></tr>
 <tr><td><b>double-click</b>, Ctrl+0</td><td>show everything</td></tr>
 <tr><td><b>[ ]</b> or <b>, .</b></td><td>turn a line ROI by 5°, with Shift by 1°</td></tr>
 <tr><td><b>Esc</b></td><td>stop drawing an ROI</td></tr>
 <tr><td><b>polygon ROI</b></td><td>a click per corner, double-click closes</td></tr>
+<tr><td><b>circle ROI</b></td><td>press at the centre, drag out to the rim</td></tr>
 <tr><td><b>Ctrl+3</b></td><td>show or hide the 3D view</td></tr>
 </table>"""
 
@@ -264,8 +265,8 @@ class RenderView(QWidget):
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
 
-        # ROI drawing: click to start, click to finish (polygon: click per
-        # vertex, double-click to close), Escape to cancel
+        # ROI drawing: press, drag, release (a circle from its centre;
+        # polygon: click per vertex, double-click to close), Escape to cancel
         self.roi_item = None
         self.drawing: Optional[str] = None
         self.line_width = 100.0
@@ -310,6 +311,11 @@ class RenderView(QWidget):
                 scene = self.graphics.mapToScene(pos)
                 if press is not None and (pos - press).manhattanLength() <= 3 \
                         and self.view.sceneBoundingRect().contains(scene):
+                    if self._on_roi(scene):
+                        # on the ROI a right click is about the ROI
+                        self._roi_menu(event.globalPosition().toPoint())
+                        event.accept()
+                        return True
                     at = self.view.mapSceneToView(scene)
                     self.center_on(at.x(), at.y())
         if event.type() == QEvent.NativeGesture and \
@@ -732,6 +738,10 @@ class RenderView(QWidget):
         self.graphics.setFocus()
 
     def clear_roi(self) -> None:
+        """No ROI, and no drawing of one either: *clear ROI* while the
+        cross is waiting for a press meant that one too."""
+        if self.drawing:
+            self._stop_drawing()
         if self.roi_item is not None:
             self.view.removeItem(self.roi_item)
             self.roi_item = None
@@ -767,9 +777,24 @@ class RenderView(QWidget):
         self.session.set_roi(roi.turned(-degrees if self.view.yInverted() else degrees))
         return True
 
+    def _on_roi(self, scene_pos) -> bool:
+        """Is this point of the scene on the ROI drawn, its outline, inside
+        or a handle?"""
+        item = self.roi_item
+        if item is None:
+            return False
+        if item.contains(item.mapFromScene(scene_pos)):
+            return True
+        return any(h.contains(h.mapFromScene(scene_pos)) for h in item.getHandles())
+
+    def _roi_menu(self, where) -> None:
+        menu = QMenu(self.graphics)
+        menu.addAction("delete ROI", self.clear_roi)
+        menu.exec(where)
+
     def _draw_event(self, event) -> bool:
-        """Rectangle and line: press, drag, release.  Polygon: a press per
-        vertex, a double-click (or right button) closes it."""
+        """Rectangle, circle and line: press, drag, release.  Polygon: a
+        press per vertex, a double-click (or right button) closes it."""
         pos = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
         kind = event.type()
         if kind == QEvent.MouseButtonDblClick or event.button() == Qt.RightButton:
@@ -785,7 +810,7 @@ class RenderView(QWidget):
             return True
         if kind == QEvent.MouseButtonRelease and self._pressed:
             self._pressed = False
-            if self.drawing in ("rect", "line") and self._points:
+            if self.drawing in ("rect", "circle", "line") and self._points:
                 start = self._points[0]
                 if (pos - start).manhattanLength() > 0:        # a drag, not a tap
                     self._finish([start, pos])
@@ -802,6 +827,8 @@ class RenderView(QWidget):
         if self.drawing == "rect":
             (x0, y0), (x1, y1) = (pts[0].x(), pts[0].y()), (pos.x(), pos.y())
             xs, ys = [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0]
+        elif self.drawing == "circle":
+            xs, ys = self._circle(pts[0], pos).outline()
         else:
             xs, ys = [p.x() for p in pts], [p.y() for p in pts]
         self._preview_halo.setData(xs, ys)
@@ -812,6 +839,8 @@ class RenderView(QWidget):
         self._stop_drawing()
         if kind == "rect":
             region = Region.rect(pts[0].x(), pts[0].y(), pts[1].x(), pts[1].y())
+        elif kind == "circle":
+            region = self._circle(pts[0], pts[1])
         elif kind == "line":
             region = Region.line((pts[0].x(), pts[0].y()), (pts[1].x(), pts[1].y()),
                                  self.line_width)
@@ -819,6 +848,12 @@ class RenderView(QWidget):
             region = Region("polygon", [(p.x(), p.y()) for p in pts])
         self._show_roi(region)
         self.session.set_roi(region)
+
+    @staticmethod
+    def _circle(centre: QPointF, rim: QPointF) -> Region:
+        """The circle drawn from its centre out to a point of its rim."""
+        return Region.circle((centre.x(), centre.y()),
+                             float(np.hypot(rim.x() - centre.x(), rim.y() - centre.y())))
 
     def _show_roi(self, region: Optional[Region]) -> None:
         """An editable pyqtgraph ROI for the region; edits go back to the session."""
@@ -835,6 +870,9 @@ class RenderView(QWidget):
             x0, y0, x1, y1 = region.bounds
             item = pg.RectROI([x0, y0], [x1 - x0, y1 - y0], pen=ROI_PEN)
             item.addScaleHandle([0, 0], [1, 1])
+        elif region.kind == "circle":
+            (cx, cy), r = region.points[0], region.radius
+            item = pg.CircleROI([cx - r, cy - r], [2 * r, 2 * r], pen=ROI_PEN)
         elif region.kind == "line":
             p = region.points                      # corners: p0+n, p1+n, p1-n, p0-n
             start, end = (p[0] + p[3]) / 2, (p[1] + p[2]) / 2
@@ -873,6 +911,9 @@ class RenderView(QWidget):
         if old.kind == "rect":
             pos, size = item.pos(), item.size()
             region = Region.rect(pos.x(), pos.y(), pos.x() + size.x(), pos.y() + size.y())
+        elif old.kind == "circle":
+            pos, size = item.pos(), item.size()
+            region = Region.circle((pos.x() + size.x() / 2, pos.y() + size.y() / 2), size.x() / 2)
         elif old.kind == "line":
             size = item.size()
             corners = [item.mapToParent(QPointF(x, y)) for x, y in
@@ -1057,13 +1098,16 @@ class RenderToolBar(QToolBar):
 
         # --- draw
         self.roi_button = QToolButton(text="ROI: line")
-        self.roi_button.setToolTip("left: draw a new ROI (press, drag, release; polygon: "
-                                   "click per vertex, double-click closes); right: the kind; "
+        self.roi_button.setToolTip("left: draw a new ROI (press, drag, release -- a circle "
+                                   "from its centre; polygon: click per vertex, double-click "
+                                   "closes; Escape cancels); right: the kind; right-click on "
+                                   "the ROI deletes it; "
                                    "[ ] or , . turn a line ROI by 5 degrees, with Shift by 1")
         self.roi_menu = QMenu(self.roi_button)
         kinds = QActionGroup(self.roi_menu)
         self.kind = "line"
-        for kind, name in (("line", "line"), ("rect", "rectangle"), ("polygon", "polygon")):
+        for kind, name in (("line", "line"), ("rect", "rectangle"), ("circle", "circle"),
+                           ("polygon", "polygon")):
             action = self.roi_menu.addAction(name)
             action.setCheckable(True)
             action.setChecked(kind == "line")

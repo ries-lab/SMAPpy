@@ -83,6 +83,77 @@ def test_a_right_click_moves_that_place_to_the_middle(app):
     view.close()
 
 
+def test_a_right_click_on_the_roi_offers_to_delete_it_and_does_not_move_the_view(app):
+    from PySide6.QtCore import QEvent, QRectF, Qt
+    from smappy.gui.render_view import RenderView
+    from smappy.regions import Region
+    session = Session(uniform())
+    view = RenderView(session)
+    view.resize(400, 400)
+    view.show()
+    app.processEvents()
+    view.view.setRange(QRectF(0, 0, 4000, 4000), padding=0)
+    session.set_roi(Region.rect(500, 500, 1500, 1500))
+    view._show_roi(session.roi)
+    app.processEvents()
+    menus = []
+    view._roi_menu = lambda where: (menus.append(where), view.clear_roi())
+    before = view.view.viewRect().center()
+    _click_at(view, QEvent.MouseButtonPress, Qt.RightButton, 1000, 1000)
+    assert _click_at(view, QEvent.MouseButtonRelease, Qt.RightButton, 1000, 1000)
+    assert len(menus) == 1 and session.roi is None and view.roi_item is None
+    assert view.view.viewRect().center() == before
+    # off the ROI a right click still moves that place to the middle
+    session.set_roi(Region.rect(500, 500, 1500, 1500))
+    view._show_roi(session.roi)
+    _click_at(view, QEvent.MouseButtonPress, Qt.RightButton, 3000, 3000)
+    _click_at(view, QEvent.MouseButtonRelease, Qt.RightButton, 3000, 3000)
+    assert len(menus) == 1 and session.roi is not None
+    centre = view.view.viewRect().center()
+    assert abs(centre.x() - 3000) < 40 and abs(centre.y() - 3000) < 40
+    view.close()
+
+
+def test_clearing_the_roi_while_drawing_one_stops_the_drawing(app):
+    """*clear ROI* from the button's menu left the cross waiting for a press."""
+    from smappy.gui.render_view import RenderView
+    from smappy.regions import Region
+    session = Session(uniform())
+    view = RenderView(session)
+    session.set_roi(Region.rect(0, 0, 100, 100))
+    view.start_drawing("rect")
+    assert view.drawing == "rect" and session.roi is None
+    view.clear_roi()
+    assert view.drawing is None
+    assert all(view.view.state["mouseEnabled"])
+
+
+def test_a_circle_is_drawn_from_its_centre_and_edited_as_a_circle(app):
+    from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+    from smappy.gui.render_view import RenderView
+    session = Session(uniform())
+    view = RenderView(session)
+    view.resize(400, 400)
+    view.show()
+    app.processEvents()
+    view.view.setRange(QRectF(0, 0, 4000, 4000), padding=0)
+    app.processEvents()
+    view.start_drawing("circle")
+    _click_at(view, QEvent.MouseButtonPress, Qt.LeftButton, 2000, 2000)
+    _click_at(view, QEvent.MouseButtonRelease, Qt.LeftButton, 2300, 2400)
+    roi = session.roi
+    assert roi.kind == "circle" and view.drawing is None
+    assert np.allclose(roi.points[0], (2000, 2000), atol=20)
+    assert abs(roi.radius - 500) < 20
+    # dragged on screen, it stays a circle
+    view.roi_item.setPos(QPointF(900, 900), finish=False)
+    view.roi_item.setSize((200, 200))                # finishes the change
+    roi = session.roi
+    assert roi.kind == "circle" and roi.radius == 100
+    assert np.allclose(roi.points[0], (1000, 1000))
+    view.close()
+
+
 def test_a_double_click_shows_everything(app):
     from PySide6.QtCore import QEvent, QRectF, Qt
     from smappy.gui.render_view import RenderView

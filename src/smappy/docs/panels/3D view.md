@@ -15,8 +15,8 @@ from above does not show whether it is hollow.
 
 The 3D view shows a box of the data, the **slab**, from any angle.  You cut
 out a small volume around what you want to see, with an
-[ROI](plugin:Panels/Glossary) (region of interest: a rectangle, line or
-polygon drawn) in the 2D view, and turn it with the mouse.  The picture is drawn the same way as the 2D
+[ROI](plugin:Panels/Glossary) (region of interest: a rectangle, circle, line
+or polygon drawn) in the 2D view, and turn it with the mouse.  The picture is drawn the same way as the 2D
 image: the layers, filters, look-up tables and colour fields of the
 [Render tab](plugin:Panels/Render tab) all apply.  Only the direction you
 look from is new.
