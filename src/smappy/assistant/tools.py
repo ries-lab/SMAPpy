@@ -127,6 +127,26 @@ def _plain(value):
     return json_safe(value)
 
 
+def _pick(name: str, value: str, options: Sequence) -> str:
+    """The entry of ``options`` -- ``(value, label)`` pairs -- that ``value``
+    means (`Assistant._named`)."""
+    low = value.strip().lower()
+    for exact, label in options:
+        if value == exact:
+            return exact
+    for exact, label in options:
+        if low in (exact.lower(), label.lower()):
+            return exact
+    found = {exact for exact, label in options
+             if low in exact.lower() or low in label.lower()}
+    if len(found) == 1:
+        return found.pop()
+    listed = ", ".join(repr(exact) if exact == label else f"{exact!r} ({label})"
+                       for exact, label in options)
+    raise ToolError(f"{name}: no {value!r}" + (" that is one entry" if found else "")
+                    + f"; it is one of {listed}")
+
+
 def _within(path: Path, folder: Path) -> bool:
     try:
         path.resolve().relative_to(folder.resolve())
@@ -267,13 +287,51 @@ class Assistant:
             hint = ", ".join(e["path"] for e in near) or "find_plugins lists them"
             raise ToolError(f"no plugin {path!r}; perhaps {hint}") from None
 
+    def _options(self, cls) -> Dict[str, List[tuple]]:
+        """Each field's list of names, as ``(value, label)``: a preset's
+        saved names, a field's choices.  The one list `describe_plugin`
+        shows and `_named` checks against."""
+        from .. import presets as store
+        from ..batch import _flat_specs
+        out: Dict[str, List[tuple]] = {}
+        for name, spec in _flat_specs(cls.specs()).items():
+            info = spec.info
+            try:
+                if info.kind == "preset" and info.store is not None:
+                    options = [(n, n) for n in store.names(info.store())]
+                elif info.choices is not None:
+                    raw = info.choices() if callable(info.choices) else info.choices
+                    options = [(str(c[0]), str(c[1])) if isinstance(c, (tuple, list))
+                               else (str(c), str(c)) for c in raw]
+                else:
+                    continue
+            except Exception:           # a list that needs a session to be made
+                continue
+            if options:
+                out[name] = options
+        return out
+
+    def _named(self, cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """``values`` with each name from a list -- a preset, one of a
+        field's choices -- made the entry it means.  An unknown name used to
+        pass and be ignored: "Nuclear pores" for the preset "Nuclear pores
+        (Nup96)" filled nothing, and Simulate made its demo scene.  So: the
+        name exactly, or a choice's label as the form shows it; else the one
+        entry that contains it, case aside; else a refusal listing them."""
+        options = self._options(cls)
+        out = dict(values)
+        for name, value in values.items():
+            if name in options and isinstance(value, str) and value:
+                out[name] = _pick(name, value, options[name])
+        return out
+
     def _settings(self, cls, values: Optional[Dict[str, Any]]):
         """Settings from flat dotted values, refusing a name the plugin does
         not have -- `settings_from` drops it silently, which is right for a
         file saved by an older version and wrong for a model that guessed."""
         from ..batch import Problem, _check_values, _flat_specs
         from ..plugins import settings_from
-        values = dict(values or {})
+        values = self._named(cls, dict(values or {}))
         problems: List[Problem] = []
         _check_values(values, _flat_specs(cls.specs()), cls.path, problems)
         errors = [p.message for p in problems if p.level == "error"]
@@ -438,7 +496,9 @@ class Assistant:
         return index.search(query, limit)
 
     @tool("A plugin's settings as run_plugin takes them -- flat dotted names "
-          "with type, default, unit, range, choices and help -- whether it "
+          "with type, default, unit, range, choices and help; under 'options' "
+          "the names a field may take (a preset's saved names, a choice's "
+          "values) -- whether it "
           "changes the table, which table it reads, and what its form says "
           "about these settings on this session (values on auto, a warning).",
           path={"type": "string", "description": "the plugin's path"},
@@ -449,6 +509,12 @@ class Assistant:
         cls = self._plugin(path)
         values = self._settings(cls, settings)
         out: Dict[str, Any] = {"fields": describe_plugin(path),
+                               # what a field may be: a preset's names, its
+                               # choices (value: label) -- never guess one
+                               "options": {
+                                   name: {v: l for v, l in options} if any(
+                                       v != l for v, l in options) else [v for v, _ in options]
+                                   for name, options in self._options(cls).items()},
                                "changes_table": bool(cls().changes_locs_for(values)),
                                "per_region": bool(getattr(cls, "per_region", False)),
                                "reads": cls.grouping or "the table the layer shows"}
@@ -793,7 +859,9 @@ class Assistant:
           "those given, the rest at their defaults -- for the user to look at "
           "and run with its Run.  Runs nothing and changes no data, so it works "
           "in suggest mode too.  When the user asks to open, show or set up a "
-          "plugin, this is the call; say in a few words what you opened.",
+          "plugin, this is the call; say in a few words what you opened.  A "
+          "preset or a choice is one of the names describe_plugin lists under "
+          "'options'.",
           needs="panels",
           path={"type": "string", "description": "the plugin's path"},
           settings={"type": "object",
