@@ -1,4 +1,4 @@
-"""python -m smappy.tutorial [TOPIC ...] [-o DIR] [--voice VOICE.onnx] [--video]"""
+"""python -m smappy.tutorial [TOPIC ...] [-o DIR] [--voice [NAME]] [--video]"""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from typing import Optional
 def build(topic: str, out: Path, video: bool = False,
           voice: Optional[str] = None) -> Path:
     """Run a storyboard and write its page to ``out/topic``: with a spoken
-    clip per step if given a Piper ``voice``, and a video if asked."""
+    clip per step if given a Kokoro ``voice``, and a video if asked."""
     module = importlib.import_module(f"smappy.tutorial.topics.{topic}")
     target = Path(out) / topic
     from .director import Director
@@ -41,9 +41,10 @@ def main(argv=None) -> int:
     parser.add_argument("topic", nargs="*",
                         help=f"which to build, of {', '.join(TOPICS)}; all if none is named")
     parser.add_argument("-o", "--out", default="build/tutorials", type=Path)
-    parser.add_argument("--voice", metavar="VOICE.onnx",
-                        help="read every subtitle aloud with this Piper voice "
-                             "(needs piper-tts and ffmpeg; see smappy.tutorial.voice)")
+    parser.add_argument("--voice", metavar="NAME", nargs="?", const="bf_emma",
+                        help="read every subtitle aloud with this Kokoro voice, "
+                             "bf_emma if none is named (needs kokoro and ffmpeg; "
+                             "see smappy.tutorial.voice)")
     parser.add_argument("--video", action="store_true",
                         help="also record tutorial.mp4 (needs playwright and ffmpeg)")
     args = parser.parse_args(argv)
