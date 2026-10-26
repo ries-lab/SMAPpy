@@ -63,11 +63,13 @@ def server(app, tmp_path):
 
 
 def simulate(server):
+    """Data to work on, made straight on the session: not through a panel,
+    whose run would end after this returns."""
     a = server.assistant
-    mode, a.mode = a.mode, "act"
+    (mode, a.mode), (runner, a.runner) = (a.mode, "act"), (a.runner, None)
     a.call("run_plugin", {"path": "File/Simulate/Simulate", "settings": SIMULATION,
                           "apply": True})
-    a.mode = mode
+    a.mode, a.runner = mode, runner
 
 
 class Client:
@@ -311,6 +313,7 @@ def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(cont
     simulate(server)
     a = server.assistant
     a.mode = "act"
+    controls.show_runs(False)           # applied at once, to have one to undo
     a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True,
                           "settings": {"n_timepoints": 5}})
     listed = ProposalList(controls)
@@ -632,10 +635,7 @@ def test_open_window_opens_the_roi_manager_on_an_roi_and_the_3d_view(app, tmp_pa
     control = ControlWindow(session, render)
     a = control._assistant().server.assistant
     a.knowledge = tmp_path / "kb"
-    a.mode = "act"
-    a.call("run_plugin", {"path": "File/Simulate/Simulate", "settings": SIMULATION,
-                          "apply": True})
-    a.mode = "suggest"
+    simulate(control._assistant().server)
     assert "ROI manager" in a.call("session_state")["windows"]
     project = session.rois
     roi = project.add_roi(next(iter(project.sources)), [5000.0, 6000.0])
@@ -653,3 +653,71 @@ def test_open_window_opens_the_roi_manager_on_an_roi_and_the_3d_view(app, tmp_pa
     assert "open_window" not in Assistant(output=tmp_path, knowledge_folder=tmp_path).tools()
     for window in (manager, control.view3d_window, render, control):
         window.close()
+
+
+# ------------------------------------------------- act mode through the panels
+
+def test_in_act_mode_a_run_goes_through_its_panel_and_is_answered_when_it_ends(controls):
+    """Act mode used to run plugins straight on the session: nothing in the
+    GUI showed which plugin or settings, no progress, no Stop, the window
+    held.  Now the run is the user's own click, watched."""
+    server = controls.server
+    simulate(server)
+    server.assistant.mode = "act"
+    server.start()
+    client = Client(server.address)
+    client.send("initialize", {"clientInfo": {"name": "claude-code"}})
+    client.answer()
+    # two calls at once: the second waits for the first run's end
+    client.send("tools/call", {"name": "run_plugin", "arguments": {
+        "path": "Analysis/Drift/RCC", "apply": True, "settings": {"n_timepoints": 6}}})
+    client.send("tools/call", {"name": "session_state", "arguments": {}})
+    assert wait_for(lambda: "Analysis/Drift/RCC" in controls._windows)
+    window = controls._windows["Analysis/Drift/RCC"]
+    assert window.isVisible() and window.panel.form.value().n_timepoints == 6
+    ran = client.answer(120)
+    assert ran["id"] == 2
+    answer = json.loads(ran["result"]["content"][0]["text"])
+    assert answer["applied"] and answer["changed_table"] and server.session.can_undo
+    state = client.answer()
+    assert state["id"] == 3 and "RCC" in " ".join(
+        json.loads(state["result"]["content"][0]["text"])["undo"])
+    server.stop()
+
+
+def test_a_pinned_plugin_runs_in_its_tab_with_its_section_open(app, tmp_path):
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    controls = control._assistant()
+    a = controls.server.assistant
+    a.knowledge = tmp_path / "kb"
+    a.mode = "act"
+    simulate(controls.server)
+    path = "Analysis/Measure/Localization Statistics"
+    pinned = control._pinned(path)
+    assert pinned is not None, "pinned in the shipped GUI's Analysis tab"
+    index, tab, instance = pinned
+    control.tabs.setCurrentIndex(0)
+    outcome = []
+    later = a.call("run_plugin", {"path": path, "apply": True})
+    later.then(lambda value, why: outcome.append((value, why)))
+    assert control.tabs.currentIndex() == index               # its tab in front
+    assert tab.open_instance() == instance.id                   # its section open
+    assert wait_for(lambda: outcome, 120)
+    value, why = outcome[0]
+    assert why is None and value["applied"] and value["figures"]
+    render.close()
+    control.close()
+
+
+def test_with_the_panels_switched_off_a_run_goes_straight_to_the_session(controls):
+    server = controls.server
+    simulate(server)
+    server.assistant.mode = "act"
+    controls.show_runs(False)
+    answer = server.assistant.call("run_plugin", {"path": "Analysis/Drift/RCC",
+                                                  "apply": True})
+    assert isinstance(answer, dict) and answer["applied"] and not controls._windows

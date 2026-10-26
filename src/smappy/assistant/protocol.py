@@ -18,7 +18,7 @@ import json
 import traceback
 from typing import Any, Dict, Optional, TextIO
 
-from .tools import Assistant, Image, ToolError
+from .tools import Assistant, Image, Later, ToolError
 
 # the revisions this server answers; a client asking for one gets it, any
 # other the newest, and the client decides whether it can work with that
@@ -81,6 +81,13 @@ class Server:
             return {"content": content(f"{type(error).__name__}: {error}\n"
                                        + traceback.format_exc(limit=6)),
                     "isError": True}
+        if isinstance(value, Later):
+            # a run the GUI makes in its panel: answered when it ends
+            out = Later()
+            value.then(lambda v, why: out.resolve(
+                {"content": content(why if why is not None else v),
+                 "isError": why is not None}))
+            return out
         return {"content": content(value), "isError": False}
 
     METHODS = {"initialize": initialize, "tools/list": tools_list,
@@ -107,7 +114,13 @@ class Server:
         if not isinstance(params, dict):
             return _error(ident, INVALID_PARAMS, "params must be an object")
         try:
-            return {"jsonrpc": "2.0", "id": ident, "result": function(self, params)}
+            result = function(self, params)
+            if isinstance(result, Later):
+                out = Later()
+                result.then(lambda v, why: out.resolve(
+                    {"jsonrpc": "2.0", "id": ident, "result": v}))
+                return out
+            return {"jsonrpc": "2.0", "id": ident, "result": result}
         except _Invalid as error:
             return _error(ident, INVALID_PARAMS, str(error))
         except Exception as error:
@@ -126,15 +139,24 @@ class Server:
             answers = [a for a in (self.handle(m) for m in message) if a is not None]
             return json.dumps(answers) if answers else None
         answer = self.handle(message)
+        if isinstance(answer, Later):
+            out = Later()
+            answer.then(lambda v, why: out.resolve(json.dumps(v, ensure_ascii=False)))
+            return out
         return None if answer is None else json.dumps(answer, ensure_ascii=False)
 
     def serve(self, reader: TextIO, writer: TextIO) -> None:
         """Answer every line until the reader ends."""
+        def write(answer: str, why=None) -> None:
+            writer.write(answer + "\n")
+            writer.flush()
+
         for line in reader:
             answer = self.handle_line(line)
-            if answer is not None:
-                writer.write(answer + "\n")
-                writer.flush()
+            if isinstance(answer, Later):
+                answer.then(write)      # never headless: no runner there
+            elif answer is not None:
+                write(answer)
 
 
 class _Invalid(ValueError):

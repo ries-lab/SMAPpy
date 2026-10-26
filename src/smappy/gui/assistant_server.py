@@ -19,11 +19,14 @@ override it calls (`CLAUDE.md`).  A tool's own failure is the protocol's
 answer already (`protocol.Server.tools_call`); what is caught here is the
 rest.
 
-**The window is busy while a call runs**: a long applied run -- a fit, COMET
--- holds the GUI as it would hold a script.  A tool call is announced in the
-pane one tick before it runs, so the pane says what is running while it
-does.  A worker thread for the long ones is a later step
-(`docs/ai-integration.md`).
+**An applied run is answered when it ends.**  With the GUI's runner on
+(`AssistantControls.show_runs`), a run made on the data goes through the
+plugin's own panel, on the panel's thread, and the call's answer is a
+`tools.Later`: the window stays free, and the client's next lines wait in
+the queue until the run ends, so they keep their order.  Every other call
+-- a try on a copy, a read -- holds the window while it runs, a moment for
+most.  A tool call is announced in the pane one tick before it runs, so the
+pane says what is running while it does.
 
 Each connection has its own `protocol.Server` -- its own ``initialize`` --
 and all share the one `Assistant`: one session, one switch, one list of
@@ -41,6 +44,8 @@ from typing import Deque, Dict, List, Optional, Tuple
 from PySide6.QtCore import QObject, QRectF, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from ..assistant.tools import Later
+
 # what the client is told on connecting, after the tools' own instructions
 GUI_NOTE = """
 You are connected to the running SMAPpy GUI: the user sees this session in
@@ -49,8 +54,9 @@ the user to run; open_window one of SMAPpy's other windows (the ROI manager,
 the 3D view, ...); filters, grouping and show() change what is shown; all are
 made at once, in either mode.  In suggest mode a change to the data appears
 in the GUI's Assistant pane as a proposal, with a button that opens the
-plugin's window filled in.  Each call holds the GUI while it runs: try long
-runs on a part of the data first.
+plugin's window filled in.  In act mode a run you apply opens in the
+plugin's own panel and the user sees it run; a try on a copy holds the GUI
+while it runs, so try long runs on a part of the data first.
 
 The user is usually a biologist at the microscope, not a programmer: answer
 briefly, in plain words, and say what you did or found -- not how your tools
@@ -113,6 +119,7 @@ class AssistantServer(QObject):
         self.calls: Deque[Tuple[str, str, bool]] = deque(maxlen=20)  # time, tool, ok
         self.error: str = ""                # why listening failed
         self._announced = None              # the next call, shown before it runs
+        self._waiting = False               # an answer that comes when a run ends
         # the panels opened on a proposal, by the panel: the proposal its next
         # run carries out (`watch`)
         self._watched: Dict[int, str] = {}
@@ -153,6 +160,7 @@ class AssistantServer(QObject):
             client.socket.abort()
         self.clients.clear()
         self.queue.clear()
+        self._waiting = False
         if self.server is not None:
             self.server.close()
             self.server.deleteLater()
@@ -247,8 +255,8 @@ class AssistantServer(QObject):
                 traceback.print_exc()
 
     def _handle_next(self) -> None:
-        if not self.queue:
-            return
+        if not self.queue or self._waiting:
+            return                  # an answer still to come keeps the order
         key, line = self.queue[0]
         tool = _tool_of(line)
         if tool and self._announced != (key, line):
@@ -266,15 +274,38 @@ class AssistantServer(QObject):
             return
         try:
             answer = client.server.handle_line(line)
-        finally:
+        except BaseException:
             self.running = ""
-        if tool:
-            self.calls.append((time.strftime("%H:%M:%S"), tool, _succeeded(answer)))
-        if answer is not None and key in self.clients \
-                and client.socket.state() == QLocalSocket.ConnectedState:
-            client.socket.write((answer + "\n").encode("utf-8"))
-            client.socket.flush()
-        self.changed.emit()
+            raise
+        if isinstance(answer, Later):
+            # a run in a plugin's panel, on its own thread: the window stays
+            # free, and the answer -- and the client's next lines -- wait for
+            # its end (`Assistant._through_panel`)
+            self._waiting = True
+            answer.then(lambda text, why, key=key, tool=tool: self._answered(key, tool, text))
+            return
+        self._answered(key, tool, answer)
+
+    def _answered(self, key: int, tool: str, answer: Optional[str]) -> None:
+        """An answer written back, now or when a run ended.  Never raises."""
+        try:
+            self.running = ""
+            self._waiting = False
+            if tool:
+                self.calls.append((time.strftime("%H:%M:%S"), tool, _succeeded(answer)))
+            client = self.clients.get(key)
+            if answer is not None and client is not None \
+                    and client.socket.state() == QLocalSocket.ConnectedState:
+                client.socket.write((answer + "\n").encode("utf-8"))
+                client.socket.flush()
+            self.changed.emit()
+        except Exception:
+            traceback.print_exc()
+        finally:
+            try:
+                self._wake()
+            except Exception:
+                traceback.print_exc()
 
     # -------------------------------------------------------------- proposals
     def watch(self, panel, ident: str) -> None:

@@ -113,9 +113,13 @@ cannot switch between the two; only you can.
 
 Files are written only under the folder after *writes under*.
 
-While the assistant's call runs, the window is busy: a long run it applies
--- a fit, a drift correction over a large file -- holds the window until it
-ends, and the list says what is running.
+**In act mode you see it work.**  A plugin it runs on the data opens where
+you would run it -- its section in its tab, or its own window -- with the
+settings it chose filled in, and its Run is pressed: the progress line, its
+figures, *Stop* and the undo step are as if you had clicked.  The window
+stays free while it runs.  What it only tries, on copies, is not shown: it
+often tries many settings before it chooses.  *show its runs in the plugins'
+panels* in the settings switches this off, for a little more speed.
 
 ## Controls
 
@@ -152,6 +156,12 @@ any time under the list of proposals.
 
 ### allow connections when SMAPpy starts
 Listen from the start, for an assistant you keep running.
+
+### show its runs in the plugins' panels
+In act mode, each run the assistant makes on the data goes through the
+plugin's section or window, filled in, as if you pressed its Run -- to be
+watched and stopped.  Off, it runs straight on the session, the window
+held until it ends.
 
 ### Claude Code uses SMAPpy's tools without asking
 Shown for Claude Code.  Claude Code asks before each tool call unless told otherwise.  What the

@@ -533,11 +533,25 @@ class ControlWindow(QMainWindow):
                 load=lambda paths, append: self.load_paths(paths, append=append),
                 beside=self.render_window)
             server.assistant.windows = self._assistant_windows()
+            controls.find_panel = self._assistant_panel
             controls.changed.connect(
                 lambda: self.allow_assistant.setChecked(server.listening))
             self.assistant_button.attach(controls)
             self.assistant_controls = controls
         return self.assistant_controls
+
+    def _assistant_panel(self, path: str):
+        """The panel of ``path`` where it is pinned -- its tab in front, its
+        section open -- for the assistant's run to be seen where the user
+        would make it; None if it is pinned nowhere."""
+        pinned = self._pinned(path)
+        if pinned is None:
+            return None
+        index, tab, instance = pinned
+        self.tabs.setCurrentIndex(index)
+        tab.open_section(instance.id)
+        slot = tab.slots.get(instance.id)
+        return slot.ensure() if slot is not None else None
 
     def _assistant_windows(self) -> dict:
         """The windows the assistant's `open_window` opens, by the names the
