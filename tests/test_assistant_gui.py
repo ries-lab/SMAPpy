@@ -467,3 +467,4 @@ def test_attach_with_no_window_listening_says_how_to_allow_it(tmp_path):
     _, err = process.communicate(timeout=60)
     assert process.returncode == 1
     assert b"no SMAPpy window" in err
+

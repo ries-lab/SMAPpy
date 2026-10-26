@@ -22,15 +22,21 @@ or *split + overlay* with the added-up picture after them (SMAP's *split* and
 The panels go across or one above another, whichever shows the data larger in
 the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
 (region of interest: a rectangle, line or polygon drawn on the picture) is
-drawn and edited on the first and its outline is on all of them; the field
-beside the *ROI* button is a line ROI's width.  Further on, the field beside
-*pixel* says what one
-screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
-*pixel* to go to 10 nm.  Right-click the picture to move that place to the
-middle; double-click it to show everything, as *Reset view* (Ctrl+0) does.  *keys* on the toolbar lists what the mouse and the keys do in the
-picture, the keys that turn a line ROI among them.  At the end of the toolbar is how many localizations each layer draws
-in the view -- counted again after every zoom -- or in the ROI when one is
-drawn; *3D* opens the [3D view](plugin:Panels/3D view).  Every control below the layer strip edits one layer,
+drawn and edited on the first and its outline is on all of them.
+
+The picture's toolbar holds, from the left, what draws and what looks.  The
+*ROI* button draws a region of interest (right-click it for the kind); while
+the kind is a line, the field beside it is the line's width.  ⤢ (*Reset view*,
+Ctrl+0) shows everything; *3D* opens the [3D view](plugin:Panels/3D view);
+the layout button chooses overlay or side by side; the field after it is
+what one screen pixel is -- the zoom, as a number.  Type a size to zoom to
+it, or right-click it to go to 10 nm.  Right-click the picture to move that
+place to the middle; double-click it to show everything.  At the right edge
+are the [assistant](plugin:Panels/Assistant)'s button and ⋯ (*more*): saving
+the picture, the colour bar, and what the mouse and the keys do in the
+picture, the keys that turn a line ROI among them.  Under the picture is how
+many localizations each layer draws in the view -- counted again after every
+zoom -- or in the ROI when one is drawn.  Every control below the layer strip edits one layer,
 the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin

@@ -42,7 +42,7 @@ def test_the_toolbar_counts_follow_the_zoom(app):
     rect = view.view.viewRect()
     expected = session.count_in_view(0, rect.left(), rect.right(), rect.top(), rect.bottom())
     assert expected < len(session.layers[0].filter) / 4
-    assert bar.counts.text() == f"{expected:,}"
+    assert bar.counts.text() == f"{expected:,} shown in the view"
 
 
 def test_the_session_colour_keeps_the_buttons_framed(app):
@@ -98,3 +98,29 @@ def test_a_double_click_shows_everything(app):
     shown = view.view.viewRect()
     assert abs(shown.width() - full.width()) < 1e-6 * full.width() + 1
     view.close()
+
+def test_the_render_toolbar_fits_its_window_with_the_assistant_on_it(app):
+    """Eleven items had made it wider than the window, and the assistant's
+    button fell into the overflow arrow, where nobody saw it."""
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    render.resize(900, 700)
+    bar = render.toolbar
+    assert bar.sizeHint().width() <= 860
+    widgets = [bar.widgetForAction(a) for a in bar.actions()]
+    assert widgets.index(control.assistant_button) == widgets.index(bar.more_button) - 1
+    # the line width is there while the ROI kind is a line
+    assert bar.line_width_action.isVisible()
+    bar._set_kind("rect", "rectangle")
+    assert not bar.line_width_action.isVisible()
+    bar._set_kind("line", "line")
+    assert bar.line_width_action.isVisible()
+    # the count is under the picture, and says nothing about an empty table
+    assert bar.counts.parent() is render.statusBar() and bar.counts.text() == ""
+    more = [a.text() for a in bar.more_button.menu().actions() if a.text()]
+    assert more == ["Save image...", "PNG as displayed...", "colour bar", "Mouse and keys..."]
+    render.close()
+    control.close()
