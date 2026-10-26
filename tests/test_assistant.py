@@ -332,3 +332,24 @@ def test_a_missing_tool_is_noted_for_the_developers_and_goes_with_a_bug_report(t
     with zipfile.ZipFile(diagnostics.bug_report(tmp_path / "report.zip")) as z:
         assert "open the analysis plugin" in z.read("assistant-missing-tools.md").decode()
     Path(noted["file"]).unlink()
+
+
+def test_a_choice_is_taken_by_its_value_or_its_label_and_an_unknown_one_refused(tmp_path):
+    from smappy import plugins
+    from smappy.batch import _flat_specs
+    a = Assistant(output=tmp_path, knowledge_folder=tmp_path / "kb")
+    assert a.settings_for("Analysis/Regions/Segment regions",
+                          {"method": "circle"}).method == "circle"
+    spec = _flat_specs(plugins.get("Analysis/Regions/Segment regions").specs())["method"]
+    choices = spec.info.choices() if callable(spec.info.choices) else spec.info.choices
+    value, label = next((v, l) for v, l in choices if v != l)
+    assert a.settings_for("Analysis/Regions/Segment regions",
+                          {"method": label.upper()}).method == value
+    with pytest.raises(ToolError, match="method: no 'nonsense'"):
+        a.settings_for("Analysis/Regions/Segment regions", {"method": "nonsense"})
+
+
+def test_describe_lists_the_names_a_preset_may_take_so_none_is_guessed(tmp_path):
+    a = Assistant(output=tmp_path, knowledge_folder=tmp_path / "kb")
+    options = a.call("describe_plugin", {"path": "File/Simulate/Simulate"})["options"]
+    assert "Nuclear pores (Nup96)" in options["preset"]

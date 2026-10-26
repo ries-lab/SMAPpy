@@ -290,6 +290,21 @@ def test_several_proposals_are_paged_the_newest_shown_and_the_next_after_one_goe
     assert a.proposal(ids[0]).status == "opened" and "(opened)" in listed.text.text()
 
 
+def test_a_preset_named_loosely_fills_the_window_and_a_wrong_one_is_refused(controls):
+    """"Simulate NPCs" opened Simulate with preset "Nuclear pores", which is
+    no preset's name: the form showed it as missing and simulated the demo's
+    ring and cross."""
+    a = controls.server.assistant
+    a.call("open_plugin", {"path": "File/Simulate/Simulate",
+                           "settings": {"preset": "nuclear pores"}})
+    form = controls._windows["File/Simulate/Simulate"].panel.form.value()
+    assert form.preset == "Nuclear pores (Nup96)"
+    assert form.components[0].structure.preset == "npc"      # the scene, filled
+    with pytest.raises(Exception, match="Nuclear pores \\(Nup96\\)"):
+        a.call("open_plugin", {"path": "File/Simulate/Simulate",
+                               "settings": {"preset": "mitochondria"}})
+
+
 def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(controls):
     from smappy.gui.assistant_pane import ProposalList
     server = controls.server
