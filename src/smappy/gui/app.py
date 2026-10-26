@@ -448,7 +448,7 @@ class ControlWindow(QMainWindow):
             "which assistant to start and where, the folder it may write into")
         from .assistant_pane import AssistantButton
         self.assistant_button = AssistantButton(self._assistant)
-        render.toolbar.addWidget(self.assistant_button)
+        render.toolbar.add_right(self.assistant_button)
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -1915,6 +1915,9 @@ class RenderWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.toolbar = RenderToolBar(self.view)
         self.addToolBar(self.toolbar)
+        # the count under the picture, where a readout is looked for
+        self.statusBar().addWidget(self.toolbar.counts)
+        self.statusBar().setSizeGripEnabled(False)
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)

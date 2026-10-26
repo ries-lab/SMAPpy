@@ -14,8 +14,8 @@ the panels' names.  Rendered again, at the pixel size the window shows or
 one you set, so a 5 nm pixel over a whole cell gives a file thousands of
 pixels wide however small the window is.
 
-It is the one way a picture is made: the render window's *Save* menu and
-the 3D view's write through it too.  *PNG as displayed...* there is this
+It is the one way a picture is made: the render window's ⋯ menu and the
+3D view's *Save* menu write through it too.  *PNG as displayed...* there is this
 plugin at its defaults, on the view as it is; *Save image...* opens it,
 set to the window it was asked from.
 

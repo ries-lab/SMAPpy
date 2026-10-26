@@ -18,7 +18,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QPainter
 from PySide6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
-                               QLabel, QMenu, QToolBar, QToolButton,
+                               QLabel, QMenu, QSizePolicy, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
 from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
@@ -1037,20 +1037,25 @@ def frame_canvas(graphics) -> None:
 
 
 class RenderToolBar(QToolBar):
-    """Save (with a menu of what to save) and, later, ROI tools."""
+    """What is done to the picture, in groups: draw an ROI, then look --
+    everything, 3D, the layers' layout, the zoom -- then, at the right edge,
+    the assistant (`add_right`) and *more* (``⋯``), which holds what is used
+    now and then: saving, the colour bar, the keys.
+
+    It had grown to a row of eleven items as wide as the window, every one as
+    loud as the next, and the last thing added fell into Qt's overflow arrow
+    where nobody saw it.  So the occasional went into one menu, the pixel's
+    button into its field, the line width to where it means something (a
+    line ROI), and the count to the window's status bar
+    (`RenderWindow`), where a readout is looked for.
+    """
 
     def __init__(self, view: RenderView, parent=None):
         super().__init__("render", parent)
         self.view = view
         self.setMovable(False)
 
-        save = QToolButton(text="Save", popupMode=QToolButton.InstantPopup)
-        menu = QMenu(save)
-        menu.addAction("PNG as displayed...", self._png)
-        menu.addAction("Save image...", self._save_image)
-        save.setMenu(menu)
-        self.addWidget(save)
-
+        # --- draw
         self.roi_button = QToolButton(text="ROI: line")
         self.roi_button.setToolTip("left: draw a new ROI (press, drag, release; polygon: "
                                    "click per vertex, double-click closes); right: the kind; "
@@ -1076,24 +1081,30 @@ class RenderToolBar(QToolBar):
         # a profile is taken across it -- and it lived behind a right-click on
         # the button and a modal dialog, which is where nobody found it.  On
         # the toolbar, beside the ROI button, and it resizes the line that is
-        # already drawn.  Its name and unit are in the tooltip: a label and a
-        # suffix took a third of the toolbar's width.
-        # whole nanometres, 10 a wheel step: a tenth of a nanometre was a
-        # precision nobody draws a line to, and a wheel step of 1 took
-        # thirty turns to go from a thin line to a wide one
+        # already drawn; shown while the ROI kind is a line, the one it means
+        # something for.  Whole nanometres, 10 a wheel step: a tenth of a
+        # nanometre was a precision nobody draws a line to, and a wheel step
+        # of 1 took thirty turns to go from a thin line to a wide one
         self.line_width = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, singleStep=10)
         self.line_width.setKeyboardTracking(False)
         self.line_width.setValue(view.line_width)
-        self.line_width.setMaximumWidth(FIELD_WIDTH)
+        self.line_width.setMaximumWidth(FIELD_WIDTH + 24)
         self.line_width.valueChanged.connect(self._on_width)
-        self.addWidget(self.line_width)
+        self.line_width_action = self.addWidget(self.line_width)
+        self.addSeparator()
 
-        # Ctrl+0 from either window: the View menu's item it was is gone
+        # --- look
+        # Ctrl+0 from either window: the View menu's item it was is gone.  An
+        # arrow out to the corners, the one picture here everybody reads the
+        # same; the action keeps its name for the menus, tooltips and tours
         reset = QAction("Reset view", self, triggered=view.reset)
+        reset.setIconText("\u2922")
         reset.setShortcut("Ctrl+0")
         reset.setShortcutContext(Qt.ApplicationShortcut)
-        reset.setToolTip("show everything (Ctrl+0)")
+        reset.setToolTip("Reset view: show everything (Ctrl+0, or double-click the picture)")
         self.addAction(reset)
+        self.reset_button = self.widgetForAction(reset)
+        self.reset_button.setObjectName("reset_view")   # its glyph larger (`_style_buttons`)
         # the 3D window is a menu item away in the control window, and the
         # picture is where one decides to look at it in 3D; ControlWindow
         # connects it, since this toolbar does not know that window.  A
@@ -1124,54 +1135,61 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.layers_button)
         self._layout_text()
 
-        # The size of a screen pixel, as SMAP shows it: the zoom, written as
-        # a number.  Typing one zooms to it; the button goes to DEFAULT_PIXEL.
-        self.pixel_button = QToolButton(text="pixel")
-        self.pixel_button.setToolTip(f"zoom to {DEFAULT_PIXEL:g} nm per screen pixel")
-        self.pixel_button.clicked.connect(lambda: self.pixel.setValue(DEFAULT_PIXEL))
-        self.addWidget(self.pixel_button)
+        # The size of a screen pixel, as SMAP shows it: the zoom, written as a
+        # number, its unit after it.  Typing one zooms to it; its right-click
+        # menu goes to DEFAULT_PIXEL, which was a button of its own
         self.pixel = CompactSpinBox(minimum=0.1, maximum=1e6, decimals=1)
         self.pixel.setKeyboardTracking(False)
-        self.pixel.setMaximumWidth(FIELD_WIDTH)
+        self.pixel.setMaximumWidth(FIELD_WIDTH + 40)
         self.pixel.valueChanged.connect(view.set_pixel_size)
+        self.pixel.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.pixel.customContextMenuRequested.connect(self._pixel_menu)
         self.addWidget(self.pixel)
         view.view.sigRangeChanged.connect(self._show_pixel)
         self._show_pixel()
         self._width_unit()
 
+        # --- the right edge: the assistant (added by the control window), more
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.addWidget(spacer)
+
         from .widgets import Popup
-        self.keys_button = QToolButton(text="keys")
-        self.keys_button.setToolTip("what the mouse and the keys do in the picture")
         keys = QLabel(KEYS)
         keys.setTextFormat(Qt.RichText)
         self.keys = Popup(keys, self)
-        self.keys_button.clicked.connect(lambda: self.keys.show_below(self.keys_button))
-        self.addWidget(self.keys_button)
-
+        self.more_button = QToolButton(text="\u22ef", popupMode=QToolButton.InstantPopup)
+        self.more_button.setToolTip("more: save the picture, the colour bar, "
+                                    "the mouse and the keys")
+        more = QMenu(self.more_button)
+        more.addAction("Save image...", self._save_image).setToolTip(
+            "the picture at any resolution, with scale bar and colour bar")
+        more.addAction("PNG as displayed...", self._png)
+        more.addSeparator()
         # How the picture is dressed, as opposed to what it shows: the colour
         # bar to begin with.  What is hidden here is hidden in what Save and
         # Copy take too (`RenderView.quick_settings`): they are the window's
         # picture.
-        self.options_button = QToolButton(text="options",
-                                          popupMode=QToolButton.InstantPopup)
-        self.options_button.setToolTip("what the window draws over the picture")
-        options = QMenu(self.options_button)
-        self.colour_bar_action = options.addAction("colour bar")
+        self.colour_bar_action = more.addAction("colour bar")
         self.colour_bar_action.setCheckable(True)
         self.colour_bar_action.setChecked(view.colour_bar_shown)
         self.colour_bar_action.setToolTip("the colour scale of a layer coloured "
                                           "by a column, top right")
         self.colour_bar_action.toggled.connect(view.show_colour_bars)
-        self.options_button.setMenu(options)
-        self.addWidget(self.options_button)
+        more.addSeparator()
+        more.addAction("Mouse and keys...",
+                       lambda: self.keys.show_below(self.more_button))
+        more.setToolTipsVisible(True)
+        self.more_button.setMenu(more)
+        self.more_action = self.addWidget(self.more_button)
 
         # what each layer draws in the view: counted again once a zoom or a
         # pan settles, since a count of the whole table beside a zoomed
-        # picture answers a question nobody asked
+        # picture answers a question nobody asked.  Made here, shown in the
+        # window's status bar (`RenderWindow`)
         self.counts = QLabel("")
         self.counts.setToolTip("localizations each layer draws in the view "
                                "(in the ROI when one is drawn)")
-        self.addWidget(self.counts)
         self._count_timer = QTimer(self, singleShot=True, interval=150)
         self._count_timer.timeout.connect(lambda: self._update_counts("view"))
         view.view.sigRangeChanged.connect(lambda *_: self._count_timer.start())
@@ -1179,6 +1197,20 @@ class RenderToolBar(QToolBar):
         self._update_counts("locs")
         self.border = ""
         self._style_buttons()
+
+    def add_right(self, widget: QWidget):
+        """A widget at the right edge, before *more*: the assistant's button."""
+        return self.insertWidget(self.more_action, widget)
+
+    def zoom_to_default(self) -> None:
+        """*pixel*'s old click: DEFAULT_PIXEL per screen pixel."""
+        self.pixel.setValue(DEFAULT_PIXEL)
+
+    def _pixel_menu(self, pos) -> None:
+        menu = QMenu(self.pixel)
+        menu.addAction(f"zoom to {DEFAULT_PIXEL:g} per screen pixel", self.zoom_to_default)
+        menu.addAction("show everything", self.view.reset)
+        menu.exec(self.pixel.mapToGlobal(pos))
 
     def _style_buttons(self) -> None:
         """Buttons in the label's font, framed, so they read as buttons.
@@ -1194,8 +1226,12 @@ class RenderToolBar(QToolBar):
         the colour used to be set as the whole sheet, which silently undid
         the buttons the first time the title was written.
         """
-        sheet, small = toolbar_sheet(QApplication.font("QLabel"), self.border)
-        self.setStyleSheet(sheet)
+        font = QApplication.font("QLabel")
+        sheet, small = toolbar_sheet(font, self.border)
+        # the reset glyph at the label's size is a speck: half again as large
+        size = (font.pointSizeF() if font.pointSizeF() > 0 else 12) * 1.5
+        self.setStyleSheet(sheet + f" QToolButton#reset_view {{ font-size: {size:.0f}pt; "
+                           "padding-top: 0px; padding-bottom: 0px; }")
         self.counts.setStyleSheet(f"font-size: {small}; color: gray;"
                                   " padding-left: 8px")
 
@@ -1229,8 +1265,10 @@ class RenderToolBar(QToolBar):
             else:
                 n = f"{session.count_in_view(i, rect.left(), rect.right(), rect.top(), rect.bottom()):,}"
             # the layer's number, as its button in the Render tab shows it
-            parts.append(f"{i + 1}: {n}" if len(session.layers) > 1 else n)
-        self.counts.setText("   ".join(parts))
+            parts.append(f"layer {i + 1}: {n}" if len(session.layers) > 1 else n)
+        where = "" if session.roi is not None else " in the view"
+        self.counts.setText(("   ".join(parts) + f" shown{where}")
+                            if parts and len(session.locs) else "")
 
     def set_layout(self, mode: str) -> None:
         """Overlay, side by side, or both: `LAYOUTS`."""
@@ -1250,6 +1288,7 @@ class RenderToolBar(QToolBar):
     def _set_kind(self, kind: str, name: str) -> None:
         self.kind = kind
         self.roi_button.setText(f"ROI: {name}")
+        self.line_width_action.setVisible(kind == "line")
 
     def _on_width(self, width: float) -> None:
         """The width the next line gets, and the one on screen now."""
@@ -1269,6 +1308,8 @@ class RenderToolBar(QToolBar):
         except KeyError:
             name = "x_nm"
         unit = axis_unit(name)
+        self.line_width.setSuffix(" nm" if unit == "nm" else "")
+        self.pixel.setSuffix(" nm/px" if unit == "nm" else "")
         unit = f" ({unit})" if unit in ("nm", "pixels") else ""
         self.line_width.setToolTip(f"line width{unit}: how wide a line ROI is, the "
                                    "band a profile is taken over, and the slab's "

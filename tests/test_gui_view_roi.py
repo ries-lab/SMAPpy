@@ -94,9 +94,9 @@ def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
     view.view.scaleBy((2, 2))                  # a zoom moves the number
     assert bar.pixel.value() == pytest.approx(8.0, rel=0.02)
 
-    bar.pixel_button.click()
+    bar.zoom_to_default()                      # its right-click menu
     assert view.pixel_size() == pytest.approx(DEFAULT_PIXEL, rel=0.01)
-    assert "(nm)" in bar.pixel.toolTip()                # the unit, without a suffix's width
+    assert bar.pixel.suffix() == " nm/px" and "(nm)" in bar.pixel.toolTip()
 
 
 def blinks(n_emitters=300, on=3):

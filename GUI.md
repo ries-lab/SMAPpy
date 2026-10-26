@@ -65,12 +65,15 @@ reasoning is here so that it does not have to be re-derived.
   swallows whatever is drawn on either.  *White background* over the *grey*
   inversion is the plain photographic negative.  A plugin section can be detached
   into its own window (the arrow on its title), so several stay open.  The
-  render window has a toolbar: *Save* (PNG as shown, or a TIFF re-rendered at
-  a chosen pixel size, colour or float intensity, with the pixel size in the
-  resolution tags) and *ROI*: left-click draws one (click, click; polygon:
-  click per vertex, double-click closes; Escape cancels), right-click picks
-  the kind or clears; the line width is a spin box beside it, which resizes
-  the line already drawn.  The ROI is a `Region` (`regions.py`)
+  render window has a toolbar, grouped: *ROI* -- left-click draws one
+  (click, click; polygon: click per vertex, double-click closes; Escape
+  cancels), right-click picks the kind or clears; while the kind is a line,
+  its width is a spin box beside it, which resizes the line already drawn --
+  then the view (reset, 3D, the layers' layout, the pixel size), and at the
+  right edge the assistant's button and ⋯: *Save image...* (a TIFF
+  re-rendered at a chosen pixel size, colour or float intensity, with the
+  pixel size in the resolution tags), *PNG as displayed...*, the colour bar,
+  the keys.  The count of what is drawn is in the status bar.  The ROI is a `Region` (`regions.py`)
   in the session; a plugin's `Selection` is the layer's filter *inside* the
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the
