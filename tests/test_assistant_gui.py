@@ -290,21 +290,34 @@ def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(cont
 
 
 def test_the_toolbar_button_says_who_is_connected_the_mode_and_what_waits(controls):
+    from PySide6.QtWidgets import QWidget
     from smappy.gui.assistant_pane import AssistantButton
-    button = AssistantButton(lambda: controls)
+    picture = QWidget()
+    picture.resize(900, 700)
+    picture.show()
+    button = AssistantButton(lambda: controls, host=picture)
     button.attach(controls)
-    assert button.text() == "Assistant \u25be"
+    overlay = button.overlay
+    assert button.text() == "Assistant \u25be" and not overlay.isVisible()
     controls.server.start()
     client = Client(controls.server.address)
     client.send("initialize", {"clientInfo": {"name": "claude-code", "version": "2"}})
     client.answer()
     assert button.text() == "\u25cf claude-code \u00b7 suggest \u25be"
     simulate(controls.server)
-    client.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True})
-    assert button.text().endswith("\u00b7 1 \u25be") and "bold" in button.styleSheet()
-    button.open_popup()                 # looked at: no longer highlighted
-    assert button.styleSheet() == ""
-    button.popup.close()
+    proposed = client.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True})
+    ident = json.loads(proposed["content"][0]["text"])["proposed"]["id"]
+    # a proposal opens the list, inside the picture's window, top right
+    assert overlay.isVisible() and overlay.parent() is picture
+    assert overlay.geometry().right() < picture.width() and overlay.y() < 20
+    assert button.text().endswith("\u00b7 1 \u25be") and button.styleSheet() == ""
+    overlay.collapse()                  # to look at the whole picture first
+    assert "bold" in button.styleSheet()        # it still says something waits
+    button.toggle()
+    assert overlay.isVisible() and button.styleSheet() == ""
+    controls.dismiss(ident)             # the last one dealt with: it folds away
+    assert not overlay.isVisible() and button.text() == "\u25cf claude-code \u00b7 suggest \u25be"
+    picture.close()
 
 
 def test_start_assistant_brings_a_connected_one_forward_rather_than_a_second(
@@ -326,7 +339,6 @@ def test_start_assistant_brings_a_connected_one_forward_rather_than_a_second(
     controls.start()
     assert len(started) == 1 and len(raised) == 2
     assert "connected already" in controls.message
-    controls.proposals_window.close()
 
 
 def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
@@ -348,7 +360,6 @@ def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
     client.answer()
     assert controls.message == ""       # nothing left saying it did not come
     controls.server.stop()
-    controls.proposals_window.close()
 
 
 def test_the_first_start_asks_one_question_and_starts_what_was_chosen(controls, monkeypatch):
@@ -367,7 +378,6 @@ def test_the_first_start_asks_one_question_and_starts_what_was_chosen(controls, 
     assert started == ["codex"] and prefs["client"] == "codex"
     assert not chooser.isVisible()
     controls.server.stop()
-    controls.proposals_window.close()
 
 
 def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls, monkeypatch):
@@ -404,7 +414,6 @@ def test_one_started_by_hand_is_listened_for_and_nothing_is_started(controls, mo
     assert controls.server.listening and not started
     assert "Start your assistant" in controls.message
     controls.server.stop()
-    controls.proposals_window.close()
 
 
 def test_the_output_folder_follows_the_first_file_until_the_user_sets_one(server, tmp_path):

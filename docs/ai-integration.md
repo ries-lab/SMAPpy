@@ -73,9 +73,13 @@ What is looked at every moment is kept apart from what is set once
 
 * **Every moment** -- is an assistant connected, may it act, what did it
   propose -- is a button in the render window's toolbar
-  (`[● Claude · suggest · 2 ▾]`, highlighted while proposals are unseen),
-  whose popup is the list of proposals; the same list is a small window
-  placed above the assistant's terminal.  A proposed run has *Open*, which
+  (`[● Claude · suggest · 2 ▾]`), and under it the list of proposals,
+  dropped down inside the render window over the picture's corner
+  (`ProposalOverlay`): it opens by itself when a proposal arrives, stays
+  until collapsed -- the button highlighted while something waits -- and
+  folds away when the last is dealt with.  Inside the window, not a window
+  of its own (as it first was, beside the terminal): it moves with the
+  picture and never takes the focus from the terminal.  A proposed run has *Open*, which
   shows the plugin's own window filled in (`PluginPanel.take_settings`); the
   user's Run there carries the proposal out (`AssistantServer.watch`): it
   becomes `done`, with the result kept and the settings it ran with, so the
