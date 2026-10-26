@@ -1937,6 +1937,11 @@ class RenderWindow(QMainWindow):
         for widget in (self.view.graphics, self.view.graphics.viewport()):
             widget.setAcceptDrops(False)
 
+    def createPopupMenu(self):                      # noqa: N802 (Qt's name)
+        """No menu of toolbars on a right-click: its one item hid the
+        toolbar, and nothing in the window could bring it back."""
+        return None
+
     def dragEnterEvent(self, event) -> None:
         if self.dropped is not None and drops.accepts(event.mimeData()):
             event.acceptProposedAction()

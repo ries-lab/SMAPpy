@@ -953,6 +953,11 @@ class View3DWindow(QMainWindow):
         self.addToolBar(self.toolbar)
         self.resize(900, 760)
 
+    def createPopupMenu(self):                      # noqa: N802 (Qt's name)
+        """No menu of toolbars on a right-click: its one item hid the
+        toolbar, and nothing in the window could bring it back."""
+        return None
+
     def _preset(self, name: str) -> None:
         self.view.preset(name)
 
