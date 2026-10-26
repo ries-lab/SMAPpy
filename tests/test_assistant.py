@@ -312,3 +312,23 @@ def test_a_real_mcp_client_lists_the_tools_and_gets_a_picture(tmp_path):
     names, picture = anyio.run(session)
     assert names == set(Assistant.specs())
     assert not picture.is_error and picture.content[0].type == "image"
+
+
+def test_a_missing_tool_is_noted_for_the_developers_and_goes_with_a_bug_report(tmp_path):
+    import zipfile
+    from smappy import diagnostics
+    from smappy.assistant import knowledge
+    a = Assistant(output=tmp_path, knowledge_folder=tmp_path / "kb")
+    assert a.missing_tools == knowledge.missing_tools_file()     # in the config folder
+    noted = a.call("note_missing_tool", {
+        "asked": "open the analysis plugin",
+        "workaround": "proposed a run, whose button opened it",
+        "tool": "open a plugin's window filled in"})
+    text = Path(noted["file"]).read_text()
+    assert "## " in text and "open a plugin's window filled in" in text
+    assert "- asked: open the analysis plugin" in text and "- SMAPpy " in text
+    a.call("note_missing_tool", {"asked": "b", "workaround": "c", "tool": "d"})
+    assert Path(noted["file"]).read_text().count("\n## ") == 2   # appended
+    with zipfile.ZipFile(diagnostics.bug_report(tmp_path / "report.zip")) as z:
+        assert "open the analysis plugin" in z.read("assistant-missing-tools.md").decode()
+    Path(noted["file"]).unlink()

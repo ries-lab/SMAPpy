@@ -73,7 +73,9 @@ first, and the button then stays highlighted while something waits.  When
 the last proposal is dealt with, the list folds away by itself.
 *Assistant > Proposals* opens it too.
 
-In the list, the newest proposal is first; its reason is in its tooltip.
+The list shows one proposal at a time, with the assistant's reason under
+it; with several, ‹ and › step through them (*2 / 4*).  A new one is shown
+as it arrives, and one dealt with gives its place to the next.
 
 * A run of a plugin or a chain has **Open**: the plugin's own window with
   the proposed settings filled in.  Nothing runs until you press its Run --
@@ -84,7 +86,17 @@ In the list, the newest proposal is first; its reason is in its tooltip.
 * **×** dismisses a proposal.  The assistant can see what became of each:
   proposed, opened, done or dismissed.
 
-Under the list: *suggest* and *act*, *start* or *stop*, and *settings...*.
+Under the list: *suggest* and *act*, *Start assistant* or *stop*, and
+*settings...*.
+
+## Tools it was missing
+
+Sometimes the assistant gets to what you asked by a detour, because none of
+its tools does it directly.  It then says so in a sentence and offers to note
+the missing tool; only if you agree does it write what was asked, how it got
+there and what tool would have done it, to `missing-tools.md` in SMAPpy's
+settings folder.  *Help > Save a bug report...* takes the file along, so the
+tools that keep coming up can be built.
 
 ## Suggest and act
 

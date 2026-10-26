@@ -234,9 +234,9 @@ def test_a_proposed_run_opens_filled_in_and_running_it_there_carries_it_out(cont
                                   "reason": "the structure smears along x"})["proposed"]["id"]
     server.changed.emit()
     assert not listed.empty.isVisibleTo(listed)
-    labels = listed.rows.findChildren(type(listed.state))
-    row = next(l for l in labels if "Run Analysis/Drift/RCC: n_timepoints = 7" in l.text())
-    assert row.toolTip() == "the structure smears along x"
+    assert listed.text.text() == "Run RCC drift correction: n_timepoints = 7"
+    assert listed.why.text() == "the structure smears along x"
+    assert not listed.page.isVisibleTo(listed)          # one: no pager
     window = controls.open_proposal(ident)
     assert window.panel.form.value().n_timepoints == 7
     assert a.proposal(ident).status == "opened" and not server.session.can_undo
@@ -265,6 +265,29 @@ def test_open_plugin_opens_its_window_filled_in_and_proposes_nothing(controls):
     assert not controls.server.session.can_undo          # nothing ran
     with pytest.raises(Exception, match="no plugin"):
         a.call("open_plugin", {"path": "Analysis/Nothing"})
+
+
+def test_several_proposals_are_paged_the_newest_shown_and_the_next_after_one_goes(
+        controls):
+    from smappy.gui.assistant_pane import ProposalList
+    simulate(controls.server)
+    listed = ProposalList(controls)
+    a = controls.server.assistant
+    ids = [a.call("run_plugin", {"path": "Analysis/Drift/RCC", "apply": True,
+                                 "settings": {"n_timepoints": n}})["proposed"]["id"]
+           for n in (4, 5, 6)]
+    controls.changed.emit()
+    assert listed.current == ids[-1] and listed.page.text() == "3 / 3"
+    assert listed.page.isVisibleTo(listed) and not listed.next.isEnabled()
+    listed.previous.click()
+    assert listed.current == ids[1] and "n_timepoints = 5" in listed.text.text()
+    listed.dismiss.click()              # dealt with: the next takes its place
+    assert listed.current == ids[2] and listed.page.text() == "2 / 2"
+    listed.previous.click()
+    listed.go.click()                   # Open: the first one's window, filled in
+    window = controls._windows["Analysis/Drift/RCC"]
+    assert window.panel.form.value().n_timepoints == 4
+    assert a.proposal(ids[0]).status == "opened" and "(opened)" in listed.text.text()
 
 
 def test_a_proposal_is_done_from_the_list_dismissed_and_the_switch_followed(controls):

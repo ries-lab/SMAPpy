@@ -137,6 +137,12 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   where the plugin tree, the GUI and `smappy-batch` find it).
 * **remembering** -- `remember`, `recall`, `forget`: the knowledge base below.
 * `list_proposals` -- what *suggest* mode proposed, and what became of it.
+* `note_missing_tool` -- a gap, for SMAPpy's developers: what was asked,
+  the detour taken, the tool that would have done it, appended to
+  `<config dir>/assistant/missing-tools.md` on the user's yes (offered by
+  the model in a sentence after a detour), and zipped into *Save a bug
+  report*.  The tools are written by hand, through review; this is how a
+  conversation's gap reaches whoever writes them.
 * `show` -- the GUI only (a tool `needs="viewer"`, not listed headless):
   moves the user's 2D view onto a point, an ROI or everything.
 * `open_plugin` -- the GUI only (`needs="panels"`): opens a plugin's window
