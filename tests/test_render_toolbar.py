@@ -124,3 +124,29 @@ def test_the_render_toolbar_fits_its_window_with_the_assistant_on_it(app):
     assert more == ["Save image...", "PNG as displayed...", "colour bar", "Mouse and keys..."]
     render.close()
     control.close()
+
+
+def test_the_layout_choice_is_shown_from_two_layers_on(app):
+    from smappy.gui.render_view import RenderToolBar, RenderView
+    session = Session(uniform())
+    bar = RenderToolBar(RenderView(session))
+    assert len(session.layers) == 1 and not bar.layers_action.isVisible()
+    session.add_layer()
+    assert bar.layers_action.isVisible()
+
+
+def test_the_assistant_settings_stay_in_the_assistant_menu_on_a_mac(app):
+    """Qt moves an item called "Settings..." into a Mac's application menu,
+    where it took the place of File > Preferences...."""
+    from PySide6.QtGui import QAction
+    from smappy.gui.app import ControlWindow, RenderWindow
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    menus = {a.text(): a.menu() for a in control.menuBar().actions() if a.menu()}
+    roles = {a.text(): a.menuRole() for m in (menus["Assistant"], menus["File"])
+             for a in m.actions()}
+    assert roles["Settings..."] == QAction.NoRole
+    assert roles["Preferences..."] == QAction.PreferencesRole
+    render.close()
+    control.close()

@@ -48,10 +48,9 @@ the first.
   the `smappy-gui` server it offers.
 * **Codex CLI in a terminal**, the same way as Claude Code.
 * **A command of your own**, run in a terminal, for any other client.
-
-A client SMAPpy does not start connects with the command *copy command*
-copies (`smappy-mcp --attach`), or the settings entry *copy JSON* copies;
-then *allow connections*.  On a Mac the terminal is Terminal, placed beside
+* **One I start myself**: SMAPpy only listens; start your client with the
+  command *copy command* copies (`smappy-mcp --attach`), or give its settings
+  the entry *copy JSON* copies.  On a Mac the terminal is Terminal, placed beside
 the picture; elsewhere it opens where the system puts it.
 
 ## Every day: the toolbar button
@@ -111,7 +110,8 @@ this window and `{config}` by a JSON file naming it, the form most clients'
 ### works in
 The folder the assistant starts in: what its own file tools see first, and
 for the Claude app the folder whose `.mcp.json` gets the connection.  *same*
-makes it the folder after *writes under*.
+makes it the folder after *writes under*.  Not shown for *one I start
+myself*, which starts wherever you start it.
 
 ### writes under
 The only folder the assistant may write files into; *choose...* sets
@@ -120,23 +120,23 @@ another.
 ### follow file
 Back to the folder of the first open file, which changes as files are opened.
 
-### start in suggest mode
-The mode each time SMAPpy starts.  Unticked, it starts in *act*.
+### starts in
+The mode each time SMAPpy starts: *suggest* or *act*.  It is switched at
+any time under the list of proposals.
 
 ### allow connections when SMAPpy starts
 Listen from the start, for an assistant you keep running.
 
 ### Claude Code uses SMAPpy's tools without asking
-Claude Code asks before each tool call unless told otherwise.  What the
+Shown for Claude Code.  Claude Code asks before each tool call unless told otherwise.  What the
 assistant may change in SMAPpy is decided by *suggest* and *act*, so this
 lets it use SMAPpy's tools without that question; its shell and its own
 file edits still ask.
 
-### copy command
-The command another client runs to reach this window.
-
-### copy JSON
-The same as the `mcpServers` entry most clients' settings take.
+### connect it with
+For *one I start myself*: *copy command* copies the command your client
+runs to reach this window; *copy JSON* the same as the `mcpServers` entry
+most clients' settings take.
 
 ### Start assistant
 Allows connections, starts the assistant chosen above, and places it and

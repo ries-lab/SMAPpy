@@ -176,7 +176,13 @@ class AssistantControls(QObject):
         folder = Path(prefs["folder"]).expanduser() if prefs["folder"] \
             else self.server.assistant.output
         client = launch.CLIENTS[prefs["client"]]
-        if not client.terminal and not self._may_write_project(folder):
+        if prefs["client"] == "manual":
+            # SMAPpy listens; the user starts theirs with what the settings copy
+            self.show_proposals()
+            self.say("Listening.  Start your assistant with the command (or the "
+                     "JSON) the settings copy.")
+            return
+        if prefs["client"] == "claude-app" and not self._may_write_project(folder):
             return
         terminal, list_box = self._column()
         try:
@@ -623,13 +629,14 @@ class AssistantSettings(QWidget):
         grid.addWidget(self.command_label, 1, 0)
         grid.addWidget(self.command, 1, 1, 1, 2)
 
-        grid.addWidget(QLabel("works in"), 2, 0)
+        self.folder_label = QLabel("works in")
+        grid.addWidget(self.folder_label, 2, 0)
         self.folder = QLabel("")
         self.folder.setWordWrap(True)
         self.folder.setTextInteractionFlags(Qt.TextSelectableByMouse)
         grid.addWidget(self.folder, 2, 1)
         folder_buttons = QHBoxLayout()
-        folder_button = QToolButton(text="choose...")
+        folder_button = self.folder_button = QToolButton(text="choose...")
         folder_button.setToolTip("the folder the assistant starts in")
         folder_button.clicked.connect(self._choose_folder)
         self.same = QToolButton(text="same")
@@ -657,11 +664,24 @@ class AssistantSettings(QWidget):
         grid.setColumnStretch(1, 1)
         column.addLayout(grid)
 
-        self.start_suggest = QCheckBox("start in suggest mode")
-        self.start_suggest.setChecked(prefs["mode"] == "suggest")
-        self.start_suggest.setToolTip("the mode SMAPpy starts in; unticked, act")
+        # the mode each start, both choices in sight: a tick for one of two
+        # left the other to be guessed
+        modes = QHBoxLayout()
+        modes.addWidget(QLabel("starts in"))
+        self.start_suggest = QRadioButton("suggest")
+        self.start_suggest.setToolTip("it reads and tries; what it would change "
+                                      "waits for you")
+        self.start_act = QRadioButton("act")
+        self.start_act.setToolTip("it changes the session itself")
+        start_mode = QButtonGroup(self)
+        for button in (self.start_suggest, self.start_act):
+            start_mode.addButton(button)
+            modes.addWidget(button)
+        modes.addStretch(1)
+        (self.start_suggest if prefs["mode"] == "suggest" else self.start_act).setChecked(True)
         self.start_suggest.toggled.connect(
             lambda on: save_preferences({"mode": "suggest" if on else "act"}))
+        column.addLayout(modes)
         self.at_start = QCheckBox("allow connections when SMAPpy starts")
         self.at_start.setChecked(prefs["allow_at_start"])
         self.at_start.toggled.connect(lambda on: save_preferences({"allow_at_start": on}))
@@ -670,11 +690,14 @@ class AssistantSettings(QWidget):
         self.pre_allow.setToolTip("what the assistant may change is decided by suggest "
                                   "and act here; its shell and files still ask")
         self.pre_allow.toggled.connect(lambda on: save_preferences({"pre_allow": on}))
-        for box in (self.start_suggest, self.at_start, self.pre_allow):
+        for box in (self.at_start, self.pre_allow):
             column.addWidget(box)
 
-        other = QHBoxLayout()
-        other.addWidget(QLabel("another client:"))
+        # for "one I start myself": what to give that client
+        self.other = QWidget()
+        other = QHBoxLayout(self.other)
+        other.setContentsMargins(0, 0, 0, 0)
+        other.addWidget(QLabel("connect it with"))
         copy_command = QToolButton(text="copy command")
         copy_command.setToolTip("the command an MCP client runs to reach this window")
         copy_command.clicked.connect(self._copy_command)
@@ -684,7 +707,7 @@ class AssistantSettings(QWidget):
         other.addWidget(copy_command)
         other.addWidget(copy_json)
         other.addStretch(1)
-        column.addLayout(other)
+        grid.addWidget(self.other, 1, 1, 1, 2)
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -729,10 +752,14 @@ class AssistantSettings(QWidget):
         key = self.client.currentData() or ""
         if key != preferences()["client"]:
             save_preferences({"client": key})
+        # each choice shows what it needs, and nothing else
         own = key == "command"
         self.command_label.setVisible(own)
         self.command.setVisible(own)
-        self.pre_allow.setEnabled(key == "claude")
+        self.other.setVisible(key == "manual")
+        for widget in (self.folder_label, self.folder, self.folder_button, self.same):
+            widget.setVisible(key != "manual")      # it starts wherever its user does
+        self.pre_allow.setVisible(key == "claude")
         self.refresh()
 
     def _choose_folder(self) -> None:

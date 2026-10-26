@@ -306,7 +306,7 @@ class ControlWindow(QMainWindow):
             "the microscope entries: which devices set the pixel and the optics; "
             "EMU configurations to start them from")
         self._action(menu, "Preferences...", QKeySequence.Preferences,
-                     self.open_preferences)
+                     self.open_preferences).setMenuRole(QAction.PreferencesRole)
         menu.addSeparator()
         quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
@@ -443,9 +443,14 @@ class ControlWindow(QMainWindow):
         self._action(assistant, "Proposals", None,
                      lambda: self._assistant().show_proposals()).setToolTip(
             "what the assistant proposed, in a window of its own")
-        self._action(assistant, "Settings...", None,
-                     lambda: self._assistant().show_settings()).setToolTip(
-            "which assistant to start and where, the folder it may write into")
+        settings = self._action(assistant, "Settings...", None,
+                                lambda: self._assistant().show_settings())
+        settings.setToolTip("which assistant to start and where, the folder it may "
+                            "write into")
+        # left where it is: a Mac's Qt moves an item called "Settings..." into
+        # the application menu as its Preferences, where nobody looked for the
+        # assistant's -- and where File > Preferences... belongs
+        settings.setMenuRole(QAction.NoRole)
         from .assistant_pane import AssistantButton
         self.assistant_button = AssistantButton(self._assistant)
         render.toolbar.add_right(self.assistant_button)
