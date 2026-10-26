@@ -1,8 +1,10 @@
 # AI integration
 
 How an AI assistant works with SMAPpy: what it can do, through what, and
-why it is built this way.  Decided in 2026-10; the first step is built
-(`src/smappy/assistant/`), the rest is the plan.
+why it is built this way.  Decided in 2026-10; the first two steps are
+built (`src/smappy/assistant/`, and the GUI's side in
+`src/smappy/gui/assistant_server.py` and `assistant_pane.py`), the rest is
+the plan.
 
 ## What it is for
 
@@ -35,12 +37,40 @@ it:
   their products", the Agent SDK's overview), and most users have the
   subscription, not a key.
 * **Offline stays offline.**  The server is started only when asked
-  (`smappy-mcp`, and later a menu item in the GUI); nothing else imports it,
-  and SMAPpy works as before without a network.
+  (`smappy-mcp`, or *Assistant > Allow connections* in the GUI); nothing else
+  imports it, and SMAPpy works as before without a network.
 
 The client runs on the same computer as SMAPpy: the server speaks over
-stdio (headless) and, later, a local socket (the running GUI).  A cloud
-session cannot reach a GUI on a lab PC.
+stdio (headless) and a local socket (the running GUI).  A cloud session
+cannot reach a GUI on a lab PC.
+
+### The running GUI
+
+*Assistant > Allow connections* makes the GUI listen on a `QLocalServer`: a
+Unix socket on macOS and Linux, a named pipe on Windows, readable only by
+the user who started it.  Not a TCP port: a port on 127.0.0.1 is open to
+every program on the computer, a web page's POST included, and would have
+needed a secret.  An MCP client launches `smappy-mcp --attach`, which finds
+the window from a file per listening GUI in `<config dir>/assistant/gui/`
+and copies stdio to the socket and back (`assistant/attach.py`, on Qt's
+`QLocalSocket`, the one way to reach a Windows pipe in both directions at
+once); `--attach NAME` picks a window by its session's name.
+
+The tools are the same `Assistant`, over the GUI's session.  Every line from
+the socket is queued and handled on the GUI thread, one per tick of a timer
+whose `timeout` is a connected signal -- not `QTimer.singleShot`, and with
+everything caught (`CLAUDE.md`) -- so the session and its listeners are
+only ever touched where the render expects them.  The cost: a long applied
+run holds the window while it runs.  Moving long runs onto a worker, as a
+plugin's panel does, is left for when it is missed.
+
+The *Assistant* pane (`docs/panels/Assistant.md`) shows the connection, the
+suggest/act switch (*suggest* by default), the output folder (the first
+open file's, or one chosen) and the proposals: a proposed run has *Open*,
+which shows the plugin's own window filled in (`PluginPanel.take_settings`)
+for the user to run; the rest has *Do it*.  Each proposal's `status` --
+proposed, opened, done, dismissed -- is in `list_proposals`, so the model
+can see what the user did with it.
 
 ### Two tiers, by what the client can do
 
@@ -80,7 +110,9 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   `set_filter`, `set_grouped`, `undo`, `save`, `save_chain` (a workflow kept
   where the plugin tree, the GUI and `smappy-batch` find it).
 * **remembering** -- `remember`, `recall`, `forget`: the knowledge base below.
-* `list_proposals` -- what *suggest* mode proposed.
+* `list_proposals` -- what *suggest* mode proposed, and what became of it.
+* `show` -- the GUI only (a tool `needs="viewer"`, not listed headless):
+  moves the user's 2D view onto a point, an ROI or everything.
 
 A refused call -- an unknown setting, a file outside the output folder, a
 plugin that does not exist -- answers with why and what exists instead, as
@@ -91,9 +123,12 @@ plugin that does not exist -- answers with why and what exists instead, as
 One switch, `mode`:
 
 * **suggest** -- reading and trying are allowed; a change is not made but
-  recorded as a proposal (`proposals`), which the GUI will show with the
+  recorded as a proposal (`proposals`), which the GUI shows with the
   plugin's panel filled in for the user to run.  Exports, which write files
-  even on a copy, are proposals too.
+  even on a copy, are proposals too.  In the GUI the changes to what is
+  shown rather than to the data -- `set_filter`, `set_grouped`, `show` --
+  are made at once: the user sees them, and a proposal to look somewhere
+  would be a click to make a click.  Headless they stay proposals.
 * **act** -- changes are made.  A file is written only under the allowed
   folder (`--output`, the session's folder by default); elsewhere the call is
   refused and says where it may write.
@@ -133,10 +168,11 @@ solved, with its chain -- come later.
    `read_doc` and `read_source`, suggest and act, the knowledge base,
    `tests/test_assistant.py` (with the `mcp` package's client when it is
    installed).
-2. **The running GUI**: the same tools over a local socket, opt-in from a
-   menu, every call queued onto the GUI thread with its exceptions caught
-   (`CLAUDE.md` on `QTimer.singleShot`); a small pane with the proposals,
-   the switch and the connection's state; view changes allowed in *suggest*.
+2. **The running GUI** (built): the same tools over a local socket, opt-in
+   from a menu, every call queued onto the GUI thread with its exceptions
+   caught; the *Assistant* pane with the proposals, the switch and the
+   connection's state; view changes allowed in *suggest*; `smappy-mcp
+   --attach`; `tests/test_assistant_gui.py`.
 3. **Test tasks** with a coding agent and one non-Claude client; what they
    get wrong goes into the pages or a short note of lab knowledge.
 4. **Solutions in the knowledge base**: a problem, how it was solved and
@@ -158,3 +194,11 @@ Other clients take the same command in their MCP settings.  `--mode suggest`
 starts in suggest mode, `--open FILE` with a file loaded, `--knowledge DIR`
 keeps the notes elsewhere.  Nothing to install beyond SMAPpy: the server has
 no dependency of its own.
+
+With the GUI: *Assistant > Allow connections* in SMAPpy, then
+
+    claude mcp add smappy-gui -- smappy-mcp --attach
+
+(or `smappy-mcp --attach` in another client's settings).  The window's
+mode, output folder and session apply; the client is (re)started after
+connections are allowed.

@@ -5,7 +5,9 @@ The command an MCP client launches -- in Claude Code::
     claude mcp add smappy -- smappy-mcp --output ~/analysis
 
 and the same command in any other client's MCP settings.  It holds one
-session, headless, for as long as the client keeps it running.
+session, headless, for as long as the client keeps it running.  With
+``--attach`` it holds none: it forwards to the running GUI, whose session,
+mode and output folder are used (`attach`).
 `docs/ai-integration.md` says what it is for and what comes next.
 
 stdout is the protocol's: the real one is kept for the messages and
@@ -39,7 +41,18 @@ def main(argv=None) -> int:
                         "configuration folder)")
     p.add_argument("--open", default=None, metavar="FILE",
                    help="a localization file to open first")
+    p.add_argument("--attach", nargs="?", const="", default=None, metavar="NAME",
+                   help="use the running SMAPpy window instead (Assistant > Allow "
+                        "connections there); NAME picks one of several by its "
+                        "session's name.  The window's mode and output folder "
+                        "apply")
     args = p.parse_args(argv)
+    if args.attach is not None:
+        if args.mode != "act" or args.output or args.knowledge or args.open:
+            p.error("--attach takes the window's settings: no --mode, --output, "
+                    "--knowledge or --open")
+        from .attach import forward
+        return forward(args.attach)
 
     protocol_out = sys.stdout
     sys.stdout = sys.stderr

@@ -3,8 +3,8 @@
 Every tool is a method of `Assistant` marked with `tool`, which records its
 description and its arguments' JSON schema -- what an MCP client is shown --
 so the protocol layer only lists them and calls them.  Nothing here imports
-Qt or the protocol: a test, a script and the GUI's server (to come) call the
-same methods.
+Qt or the protocol: a test, a script and the GUI's server
+(`gui/assistant_server.py`) call the same methods.
 
 **Reading, trying, changing.**  Most tools only read.  `run_plugin` with
 ``apply=false`` *tries*: it runs on a copy of the session (`Session.scratch`,
@@ -12,8 +12,14 @@ which shares the arrays and copies nothing) and hands back what the plugin
 said, its numbers and its figures, while the user's session stays as it was.
 A *change* -- a run applied, a file loaded, a filter set, an undo -- is made
 only in *act* mode; in *suggest* mode it is recorded as a proposal, which the
-GUI will offer the user to run.  The assistant cannot switch the mode: the
-user sets it, here with ``--mode``.
+GUI offers the user to run.  The assistant cannot switch the mode: the
+user sets it, here with ``--mode`` and in the GUI with its pane's switch.
+
+**View changes in the running GUI.**  With the GUI attached (a ``viewer``),
+the changes to what is shown rather than to the data -- a filter, grouping,
+the 2D view moved by `show` -- are made in *suggest* mode too: the user sees
+them at once, and a proposal to look somewhere would be a click to make a
+click.  Headless there is nobody looking, and they stay proposals.
 
 **Files are written only under the output folder.**  A setting that names a
 file to write (``kind="save_file"``) must name one under it, in either mode
@@ -69,11 +75,14 @@ class ToolSpec:
                 "required": self.required, "additionalProperties": False}
 
 
-def tool(description: str, **params: Dict[str, Any]):
+def tool(description: str, needs: str = "", **params: Dict[str, Any]):
     """Mark a method as a tool.  Each keyword is an argument's JSON schema;
-    one with a ``default`` in the method's signature is optional."""
+    one with a ``default`` in the method's signature is optional.
+    ``needs="viewer"`` lists the tool only where there is a view to move:
+    a model shown a tool that always refuses would keep trying it."""
     def mark(function):
         function._tool = (description, params)
+        function._needs = needs
         return function
     return mark
 
@@ -91,6 +100,9 @@ class Proposal:
     arguments: Dict[str, Any]
     reason: str
     time: str = field(default_factory=lambda: time.strftime("%Y-%m-%d %H:%M:%S"))
+    # what the user did with it: "proposed", "opened" (its panel, filled in),
+    # "done" or "dismissed" -- so the model can ask what became of it
+    status: str = "proposed"
 
     def as_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -122,11 +134,13 @@ class Assistant:
     """The tools, over one session.
 
     ``output`` is the folder files may be written to; ``knowledge`` the
-    folder of remembered notes.
+    folder of remembered notes.  ``viewer`` is the running GUI's 2D view, or
+    None headless: anything with ``frame(xrange, yrange)``, ``reset()`` and
+    ``current()`` -> ``((x0, x1), (y0, y1), pixel_nm)``.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
-                 knowledge_folder=None):
+                 knowledge_folder=None, viewer=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -136,6 +150,7 @@ class Assistant:
         self.mode = mode
         self.output = Path(output or Path.cwd()).expanduser()
         self.knowledge = Path(knowledge_folder or knowledge.default_folder()).expanduser()
+        self.viewer = viewer
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
         self._ids = itertools.count(1)
@@ -155,11 +170,18 @@ class Assistant:
             out[name] = ToolSpec(name, description, params, required, function)
         return out
 
+    def tools(self) -> Dict[str, ToolSpec]:
+        """The tools this assistant offers: `specs` less those that need
+        what it does not have."""
+        return {name: spec for name, spec in self.specs().items()
+                if spec.function._needs != "viewer" or self.viewer is not None}
+
     def call(self, name: str, arguments: Optional[Dict[str, Any]] = None):
         """Call a tool by name; a `ToolError` for a call that cannot be made."""
-        spec = self.specs().get(name)
+        tools = self.tools()
+        spec = tools.get(name)
         if spec is None:
-            raise ToolError(f"no tool {name!r}; there are {', '.join(sorted(self.specs()))}")
+            raise ToolError(f"no tool {name!r}; there are {', '.join(sorted(tools))}")
         arguments = dict(arguments or {})
         unknown = sorted(set(arguments) - set(spec.params))
         if unknown:
@@ -180,6 +202,36 @@ class Assistant:
 
     def _changing(self) -> bool:
         return self.mode == "act"
+
+    def _viewing(self) -> bool:
+        """Whether a change to what is shown is made: in act mode, and in
+        suggest mode with the GUI attached (the module's docstring)."""
+        return self._changing() or self.viewer is not None
+
+    def proposal(self, ident: str) -> Proposal:
+        found = next((p for p in self.proposals if p.id == ident), None)
+        if found is None:
+            raise ToolError(f"no proposal {ident!r}")
+        return found
+
+    def settings_for(self, path: str, values: Optional[Dict[str, Any]] = None):
+        """A plugin's settings from a call's flat values, files to write
+        under the output folder as `run_plugin` makes them: what the GUI
+        fills a proposal's panel with."""
+        cls = self._plugin(path)
+        return self._settings(cls, self._in_output(cls, values))
+
+    def carry_out(self, ident: str):
+        """Do what a proposal proposed, as the user's decision: the call is
+        made in act mode whatever the switch says, and the proposal is done."""
+        proposal = self.proposal(ident)
+        mode, self.mode = self.mode, "act"
+        try:
+            answer = self.call(proposal.tool, proposal.arguments)
+        finally:
+            self.mode = mode
+        proposal.status = "done"
+        return answer
 
     def _plugin(self, path: str):
         from .. import plugins
@@ -299,10 +351,11 @@ class Assistant:
         return layers[layer]
 
     # ------------------------------------------------------------------ reading
-    @tool("What is open: the files, the table's columns, each layer's filter "
-          "and grouping and how many localizations it shows, the ROIs, what "
-          "can be undone, the results kept, the mode and the output folder.  "
-          "Call it first, and after anything that changes the session.")
+    @tool("What is open: the files, the table's columns, where the data lie "
+          "(extent_nm) and, in the GUI, what the 2D view shows, each layer's "
+          "filter and grouping and how many localizations it shows, the ROIs, "
+          "what can be undone, the results kept, the mode and the output "
+          "folder.  Call it first, and after anything that changes the session.")
     def session_state(self) -> Dict[str, Any]:
         s = self.session
         locs = s.locs
@@ -316,12 +369,24 @@ class Assistant:
                                k: list(v) for k, v in layer.ranges.items()},
                            **self._shown(i)})
         rois = getattr(s, "_rois", None)
+        extent = None
+        if len(locs):
+            (x0, x1), (y0, y1) = s.full_view(margin_fraction=0)
+            extent = {"x": [round(float(x0), 1), round(float(x1), 1)],
+                      "y": [round(float(y0), 1), round(float(y1), 1)]}
+        view = None
+        if self.viewer is not None:
+            (x0, x1), (y0, y1), pixel = self.viewer.current()
+            view = {"x_nm": [round(x0, 1), round(x1, 1)],
+                    "y_nm": [round(y0, 1), round(y1, 1)], "pixel_nm": round(pixel, 3)}
         return {
             "mode": self.mode, "output_folder": str(self.output),
             "files": [{"number": n, "name": f.name, "path": f.path, "n": f.n,
                        "frame_time_ms": f.frame_time_ms} for n, f in enumerate(s.files)],
             "n_localizations": len(locs),
             "columns": list(locs.columns) if len(locs) else [],
+            "extent_nm": extent,
+            **({"view": view} if view is not None else {}),
             "layers": layers,
             "rois": len(rois.rois) if rois is not None and hasattr(rois, "rois") else 0,
             "undo": s.undo_labels()[-5:],
@@ -632,7 +697,7 @@ class Assistant:
         columns = list(self.session.locs.columns)
         if column not in columns and not remove:
             raise ToolError(f"no column {column!r}; the table has {', '.join(columns)}")
-        if not self._changing():
+        if not self._viewing():
             return self._propose("set_filter", {"column": column, "lo": lo, "hi": hi,
                                                 "layer": layer, "remove": remove}, reason)
         if remove:
@@ -649,10 +714,55 @@ class Assistant:
           reason={"type": "string", "description": "why, for the user (a proposal)"})
     def set_grouped(self, on: bool, layer: int = 0, reason: str = "") -> Dict[str, Any]:
         self._layer(layer)
-        if not self._changing():
+        if not self._viewing():
             return self._propose("set_grouped", {"on": on, "layer": layer}, reason)
         self.session.show_grouped(layer, on)
         return {"layer": layer, "grouped": on, **self._shown(layer)}
+
+    @tool("Move the user's 2D view: onto a point (x_nm, y_nm, with width_nm "
+          "across), onto an ROI of the ROI manager by its number, or out to "
+          "everything.  Changes no data, so it is made in suggest mode too.  "
+          "picture(region='view') then shows what the user sees.",
+          needs="viewer",
+          x_nm={"type": "number"}, y_nm={"type": "number"},
+          width_nm={"type": "number", "description": "how much to show across; "
+                                                       "default: as now"},
+          roi={"type": "integer", "description": "an ROI's number, from the ROI manager"},
+          everything={"type": "boolean", "description": "show all the data"})
+    def show(self, x_nm: Optional[float] = None, y_nm: Optional[float] = None,
+             width_nm: Optional[float] = None, roi: Optional[int] = None,
+             everything: bool = False) -> Dict[str, Any]:
+        viewer = self.viewer
+        given = sum((x_nm is not None or y_nm is not None, roi is not None, bool(everything)))
+        if given != 1:
+            raise ToolError("give one of: x_nm and y_nm, roi, everything=true")
+        if everything:
+            viewer.reset()
+        elif roi is not None:
+            project = self.session.rois
+            found = next((r for r in project.rois.values() if r.number == roi), None)
+            if found is None:
+                numbers = sorted(r.number for r in project.rois.values())
+                raise ToolError(f"no ROI {roi}; there are "
+                                f"{', '.join(map(str, numbers)) or 'none'}")
+            x0, y0, x1, y1 = project.region(found).bounds
+            # a margin, so the ROI's outline is seen with what is around it
+            mx, my = 0.1 * (x1 - x0), 0.1 * (y1 - y0)
+            viewer.frame((x0 - mx, x1 + mx), (y0 - my, y1 + my))
+        else:
+            if x_nm is None or y_nm is None:
+                raise ToolError("a point needs both x_nm and y_nm")
+            (x0, x1), (y0, y1), _ = viewer.current()
+            width = float(width_nm) if width_nm else x1 - x0
+            if not width > 0:
+                raise ToolError("width_nm must be positive")
+            height = width * (y1 - y0) / (x1 - x0) if x1 > x0 else width
+            viewer.frame((x_nm - width / 2, x_nm + width / 2),
+                         (y_nm - height / 2, y_nm + height / 2))
+        (x0, x1), (y0, y1), pixel = viewer.current()
+        return {"view": {"x_nm": [round(x0, 1), round(x1, 1)],
+                         "y_nm": [round(y0, 1), round(y1, 1)],
+                         "pixel_nm": round(pixel, 3)}}
 
     @tool("Undo the last changes to the table.",
           steps={"type": "integer", "description": "how many, default 1"},
@@ -732,7 +842,9 @@ class Assistant:
             raise ToolError(f"no note {name!r}")
         return {"forgotten": gone.stem}
 
-    @tool("What was proposed in suggest mode and not yet acted on.")
+    @tool("What was proposed in suggest mode, and what the user did with "
+          "each: its status is proposed, opened (its panel shown to the user, "
+          "filled in), done or dismissed.")
     def list_proposals(self) -> List[Dict[str, Any]]:
         return [p.as_dict() for p in self.proposals]
 
