@@ -21,8 +21,13 @@ import sys
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="smappy-mcp", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    # the help is for the person setting a client up, not the module's notes
+    p = argparse.ArgumentParser(
+        prog="smappy-mcp",
+        description="SMAPpy's tools for an AI assistant, over MCP (stdio).  "
+                    "An MCP client launches this; in Claude Code: "
+                    "claude mcp add smappy -- smappy-mcp --output ~/analysis.  "
+                    "docs/ai-integration.md has the rest.")
     p.add_argument("--mode", choices=("act", "suggest"), default="act",
                    help="act: the assistant may change the session; suggest: "
                         "changes become proposals (default: act)")
