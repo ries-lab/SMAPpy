@@ -157,6 +157,43 @@ def test_a_chain_is_validated_tried_and_saved_where_the_tree_finds_it(tmp_path,
         plugins.discover(force=True)
 
 
+def test_a_preset_fills_the_settings_and_the_values_given_beside_it_win(tmp_path):
+    """As in the form: the plugin's react fills every setting from the preset.
+    It used to be ignored, and Simulate made its demo scene instead."""
+    a = Assistant(output=tmp_path / "out", knowledge_folder=tmp_path / "kb")
+    a.call("run_plugin", {"path": "File/Simulate/Simulate", "apply": True,
+                          "settings": {"preset": "Nuclear pores (Nup96)",
+                                       "n_frames": 2000}})
+    assert a.session.locs.metadata["structure"] == ["npc"]
+    assert a.session.locs.metadata["n_frames"] == 2000
+
+
+PORES_IN_BLOCK = """
+steps:
+  - plugin: Analysis/Regions/Segment regions
+    values: {circle.shape: ring, circle.min_radius_nm: 55.0, circle.max_radius_nm: 55.0,
+             keep: "n_ring >= 4"}
+  - block: each pore
+    steps:
+      - plugin: Analysis/Measure/Circle fit
+        values: {scale_nm: 20.0}
+"""
+
+
+def test_a_chain_with_a_block_is_validated_into_the_blocks_steps_and_runs(tmp_path):
+    a = Assistant(output=tmp_path / "out", knowledge_folder=tmp_path / "kb")
+    a.call("run_plugin", {"path": "File/Simulate/Simulate", "apply": True,
+                          "settings": {"preset": "Nuclear pores (Nup96)",
+                                       "n_frames": 3000}})
+    assert a.call("validate_chain", {"chain": PORES_IN_BLOCK})["ok"]
+    bad = a.call("validate_chain", {"chain": PORES_IN_BLOCK.replace("scale_nm", "scale")})
+    assert not bad["ok"]
+    assert "'each pore'" in " ".join(bad["problems"]) and "scale_nm" in " ".join(bad["problems"])
+    ran = a.call("run_chain", {"chain": PORES_IN_BLOCK})
+    assert set(ran["steps"]) == {"segment_regions", "each_pore"}
+    assert ran["steps"]["each_pore"]["data"]["regions"] > 20
+
+
 def test_describe_gives_the_fields_by_their_flat_names_and_what_the_form_says(tmp_path):
     a = simulated(tmp_path)
     described = a.call("describe_plugin", {"path": "Analysis/Drift/RCC"})

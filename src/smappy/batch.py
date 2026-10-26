@@ -367,6 +367,26 @@ def _check_values(values: Dict[str, Any], fields: Dict[str, ParamSpec], where: s
             problems.append(Problem("error", where, f"{key}: {why}"))
 
 
+def _check_steps(cls, fields: Dict[str, ParamSpec], where: str,
+                 problems: List[Problem]) -> None:
+    """Each step's values against its fields, into the steps of a block: a
+    block has no values of its own, and is a chain of its steps (`blocks.
+    BlockPlugin`), its fields under its key."""
+    for key, step, plugin in cls.steps:
+        mine = {k[len(key) + 1:]: v for k, v in fields.items() if k.startswith(key + ".")}
+        mine.pop(chains.GROUPING_FIELD, None)
+        here = f"{where}: step {step.title()!r}"
+        if isinstance(step, chains.Block):
+            _check_steps(plugin, mine, here, problems)
+            continue
+        _check_values(step.values, mine, here, problems)
+        if step.version and step.version != plugin.version:
+            problems.append(Problem(
+                "warning", here,
+                f"saved with version {step.version} of {plugin.path}; version "
+                f"{plugin.version} is installed"))
+
+
 def validate_chain(spec: ChainSpec, overrides: Optional[Dict[str, Any]] = None,
                    where: str = "chain") -> Tuple[Optional[type], List[Problem]]:
     """The chain's plugin class, and everything wrong with the chain."""
@@ -378,15 +398,7 @@ def validate_chain(spec: ChainSpec, overrides: Optional[Dict[str, Any]] = None,
     if not cls.steps:
         problems.append(Problem("error", where, "no enabled steps"))
     fields = _flat_specs(cls.specs())
-    for key, step, plugin in cls.steps:
-        mine = {k[len(key) + 1:]: v for k, v in fields.items() if k.startswith(key + ".")}
-        mine.pop(chains.GROUPING_FIELD, None)
-        _check_values(step.values, mine, f"{where}: step {step.title()!r}", problems)
-        if step.version and step.version != plugin.version:
-            problems.append(Problem(
-                "warning", f"{where}: step {step.title()!r}",
-                f"saved with version {step.version} of {plugin.path}; version "
-                f"{plugin.version} is installed"))
+    _check_steps(cls, fields, where, problems)
     for n, (key, step, plugin) in enumerate(cls.steps):
         if n and is_source(plugin):
             problems.append(Problem(
