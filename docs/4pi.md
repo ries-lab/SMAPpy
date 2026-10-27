@@ -1,7 +1,8 @@
 # 4Pi in SMAPpy: what exists, what is wrong with it, and a plan
 
-Status, 2026-10-27: M0 (data and formats) and M1 (the fitter) are done.  The
-rest is still a proposal.  §6 says
+Status, 2026-10-27: M0 (data and formats), M1 (the fitter) and M3 (phase to
+z) are done.  M2 is done for simulated ROIs; its frames and the *Simulate*
+preset move to M4.  The rest is still a proposal.  §6 says
 what the first milestones found.
 
 This page is written from four sources:
@@ -611,3 +612,40 @@ transforms it keeps stay in v1's frame.
 to be centred on the sensor's rows, which puts the bad 4 pixels in row 83 of
 168.  The four images sit at x = 151, 389, 1474 and 1713, each 168 wide, with
 the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
+
+## 7. What M2 and M3 found (2026-10-27)
+
+**What exists now.**
+- **Simulation:** `fourpi.spots` evaluates the model for thousands of
+  emitters at once, so 3000 ROIs take 0.65 s.  `simulate_rois` takes photons
+  and the cavity's phase per emitter, and `cavity_drift` makes a cavity
+  phase that drifts steadily with a random walk on top.
+- **Phase to z:** `fourpi.cavity_phase`, `unwrap` and `refine_period`.
+- **The plugin** *Analysis/After fit/4Pi z* (`plugins/fourpi_z.py`), with its
+  page.
+
+**Still to do for M2.**
+- **Frames:** simulated frames in the common multi-channel layout.
+- **The *Simulate* preset:** both wait for M4's front end, which is what
+  would read the frames.
+
+**Measured on a simulation:** 5000 molecules over 5000 frames, 1500 photons
+(lognormal), the cavity drifting 1.5 rad per 1000 frames with a random walk.
+- **The cavity's phase** is recovered to 0.04 rad rms with windows of 500
+  frames.  The linear extrapolation past the end windows matters: holding
+  the end values left 0.18 rad of error there.
+- **Wrong fringes:** 1.3 %, against the 1.1 % the probabilities predicted.
+  The envelope's errors needed scaling by only 1.03.
+- **z on the right fringe** scatters by 3.8 nm, against 45 nm for the
+  envelope alone.
+- **Refining the period** without a correction lands at 0.99 of the true
+  slope.  This is errors-in-variables attenuation.  Dividing each term by
+  exp(−k²s²/2) brings it within 0.3 %.
+
+**For M4.**
+- Grouping averages `phase_rad` linearly, which is wrong across ±π.  It
+  needs a circular, weighted rule, or the phase has to be taken off before
+  grouping.  *4Pi z* reads the ungrouped localizations.
+- The 4Pi fit has to keep `phase_per_nm` in the table's metadata
+  (`metadata["fourpi"]`), which *4Pi z* reads by default.
+- The fitter plugin's *after the fit* gets a *4Pi z* step.

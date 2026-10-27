@@ -199,37 +199,91 @@ def evaluate(cal: FourPiCalibration, channel: int, x: float, y: float, z_index: 
     return parts[0] + parts[1] * np.cos(phase) + parts[2] * np.sin(phase)
 
 
+def spots(cal: FourPiCalibration, x, y, z_index, phase, roisize: int,
+          chunk: int = 512) -> np.ndarray:
+    """Every channel's model for many emitters at once, one photon each:
+    (n, C, roisize, roisize).
+
+    The fitter's evaluation (`evaluate`), vectorised over the emitters: each
+    one's 64 monomials against the coefficient block its ROI reads.  x and y
+    are ROI coordinates, z in index units; a page simulates thousands of
+    spots this way in a second.
+    """
+    x, y, z, phase = (np.atleast_1d(np.asarray(v, float)) for v in (x, y, z_index, phase))
+    n = len(x)
+    C = cal.n_channels
+    nz, ny, nx = cal.shape
+    out = np.empty((n, C, roisize, roisize), np.float32)
+    off_x = int(np.floor((nx + 1 - roisize) / 2))
+    off_y = int(np.floor((ny + 1 - roisize) / 2))
+    powers = np.arange(4)
+    pixels = np.arange(roisize)
+    for start in range(0, n, chunk):
+        sl = slice(start, min(start + chunk, n))
+        xc = -((x[sl] - roisize / 2) + 0.5)
+        yc = -((y[sl] - roisize / 2) + 0.5)
+        x0, y0, z0 = np.floor(xc).astype(int), np.floor(yc).astype(int), np.floor(z[sl]).astype(int)
+        dx, dy, dz = xc - x0, yc - y0, z[sl] - z0
+        delta = (dz[:, None, None, None] ** powers[None, :, None, None]
+                 * dy[:, None, None, None] ** powers[None, None, :, None]
+                 * dx[:, None, None, None] ** powers[None, None, None, :]).reshape(-1, 64)
+        ix = np.clip(pixels[None, :] + x0[:, None] + off_x, 0, nx - 1)
+        iy = np.clip(pixels[None, :] + y0[:, None] + off_y, 0, ny - 1)
+        iz = np.clip(z0, 0, nz - 1)
+        cos, sin = np.cos(phase[sl]), np.sin(phase[sl])
+        for c in range(C):
+            parts = []
+            for k in range(3):
+                plane = cal.coeff[c, k]                       # (64, nz, ny, nx)
+                block = plane[:, iz[:, None, None], iy[:, :, None], ix[:, None, :]]
+                parts.append(np.einsum("kn,knij->nij", delta.T, block))
+            out[sl, c] = (parts[0] + parts[1] * cos[:, None, None]
+                          + parts[2] * sin[:, None, None])
+    return out
+
+
 def simulate_rois(cal: FourPiCalibration, n: int, roisize: int = 13,
-                  photons: float = 3000.0, background: float = 10.0,
-                  z_nm=(-400.0, 400.0), phase0: float = None, xy_spread: float = 0.5,
+                  photons=3000.0, background: float = 10.0,
+                  z_nm=(-400.0, 400.0), phase0=None, xy_spread: float = 0.5,
                   seed: int = 0):
     """Poisson ROIs of single emitters in every channel, with their truth.
 
     Returns ``rois`` (n, C, roisize, roisize) and a dict of the truth: x, y
     (ROI pixels), z_nm, the phase the fitter should find, photons and the
-    background per channel.  Each emitter's phase is tied to its z by
-    `phase_per_nm`, plus ``phase0`` (the cavity's phase; random per emitter
-    when None, which is what a test of the fitter alone wants).
+    background per channel.  ``z_nm`` is a range to draw from or a value per
+    emitter, ``photons`` a number or one per emitter.  Each emitter's phase is
+    tied to its z by `phase_per_nm`, plus ``phase0``, the cavity's phase: one
+    number, one per emitter (a drift, `cavity_drift`), or None for a random
+    one each, which is what a test of the fitter alone wants.
     """
     rng = np.random.default_rng(seed)
-    C = cal.n_channels
     centre = (roisize - 1) / 2
     x = centre + rng.uniform(-xy_spread, xy_spread, n)
     y = centre + rng.uniform(-xy_spread, xy_spread, n)
     z = rng.uniform(*z_nm, n) if np.ndim(z_nm) == 1 and len(z_nm) == 2 else \
         np.broadcast_to(np.asarray(z_nm, float), (n,)).copy()
-    offset = rng.uniform(-np.pi, np.pi, n) if phase0 is None else np.full(n, float(phase0))
+    offset = (rng.uniform(-np.pi, np.pi, n) if phase0 is None
+              else np.broadcast_to(np.asarray(phase0, float), (n,)))
     phase = cal.phase_per_nm * z + offset
-    zi = cal.z_nm_to_index(z)
-    rois = np.empty((n, C, roisize, roisize), np.float32)
-    for i in range(n):
-        for c in range(C):
-            mu = photons * np.clip(evaluate(cal, c, x[i], y[i], zi[i], phase[i], roisize),
-                                   0, None) + background
-            rois[i, c] = rng.poisson(mu)
+    photons = np.broadcast_to(np.asarray(photons, float), (n,))
+    model = spots(cal, x, y, cal.z_nm_to_index(z), phase, roisize)
+    mu = photons[:, None, None, None] * np.clip(model, 0, None) + background
+    rois = rng.poisson(mu).astype(np.float32)
     truth = {"x": x, "y": y, "z_nm": z, "phase": np.angle(np.exp(1j * phase)),
-             "photons": np.full(n, float(photons)), "background": np.full(n, float(background))}
+             "phase0": np.angle(np.exp(1j * offset)),
+             "photons": photons.copy(), "background": np.full(n, float(background))}
     return rois, truth
+
+
+def cavity_drift(n_frames: int, rate_rad: float = 0.0, wander_rad: float = 0.0,
+                 start_rad: float = 0.0, seed: int = 0) -> np.ndarray:
+    """The cavity's phase in each frame: a steady drift of ``rate_rad`` per
+    frame and a random walk of ``wander_rad`` per frame on top -- the slow
+    change of the arms' path difference that 4Pi data have to follow
+    (0.04 rad/s was measured by Liu & Huang 2020)."""
+    rng = np.random.default_rng(seed)
+    walk = np.cumsum(rng.normal(0.0, wander_rad, n_frames)) if wander_rad else 0.0
+    return start_rad + rate_rad * np.arange(n_frames) + walk
 
 
 def link(n: int, channels: int, dx=None, dy=None) -> np.ndarray:
@@ -375,3 +429,212 @@ def load_uipsf_v1(path, transpose: bool = None) -> FourPiCalibration:
     if T is not None:
         cal.parameters["uipsf_v1_T"] = np.asarray(T).tolist()
     return cal
+
+
+# ---------------------------------------------------------------- phase to z
+#
+# The fit gives two answers for z: the envelope's, z_env, unambiguous and as
+# precise as the PSF's shape makes it (tens of nm), and the phase, a few nm
+# but only modulo the fringe period.  With k = `phase_per_nm`, an emitter at
+# z has the phase k z + phase0(t), phase0 the cavity's, which drifts.  So
+#
+#   1. phase0(t) is the circular mean of phase - k z_env over a time window
+#      (`cavity_phase`); and
+#   2. each localization's z is the candidate (phase - phase0 + 2 pi n) / k
+#      nearest its z_env -- and how near, against z_env's error, is the
+#      probability that it is the right fringe (`unwrap`).
+#
+# SMAP's Phase2z4Pi did both with a hard rounding and no use of the errors;
+# its reported error ignored the chance of a wrong fringe, which is what a
+# ghost is.
+
+@dataclass
+class CavityPhase:
+    """phase0 per time window, and per localization by interpolation."""
+
+    centres: np.ndarray        # frame at each window's centre
+    phase0: np.ndarray         # unwrapped along the windows, rad
+    error: np.ndarray          # rad
+    counts: np.ndarray         # localizations in each window
+    at: np.ndarray             # phase0 at each localization, rad
+
+
+def _weights(phase_err, z_env_err_nm, k):
+    """How much a localization says about phase0: one over the variance of
+    phase - k z_env.  One whose z_env is uncertain by more than a fringe says
+    nearly nothing, and is weighted so."""
+    var = np.asarray(phase_err, float) ** 2 + (k * np.asarray(z_env_err_nm, float)) ** 2
+    w = np.where(np.isfinite(var) & (var > 0), 1.0 / np.maximum(var, 1e-12), 0.0)
+    return w
+
+
+def cavity_phase(phase, phase_err, z_env_nm, z_env_err_nm, frame, phase_per_nm: float,
+                 window_frames: int = 1000, smoothing: int = 1,
+                 min_count: int = 20) -> CavityPhase:
+    """The cavity's phase over time, from the localizations themselves.
+
+    In each window of ``window_frames`` frames, phase0 is the argument of
+    sum w exp(i (phase - k z_env)) -- the maximum-likelihood mean of a von
+    Mises spread, weighted by `_weights`.  Its error is the circular spread
+    over the effective count.  Windows with fewer than ``min_count``
+    localizations are skipped; ``smoothing`` > 1 is a running mean over that
+    many windows of the complex sums, so a window's estimate borrows from its
+    neighbours without the jump at +-pi a mean of angles would have.  Between
+    window centres phase0 is interpolated linearly (unwrapped), and held
+    beyond the first and last.
+    """
+    phase, z_env, frame = (np.asarray(v, float) for v in (phase, z_env_nm, frame))
+    w = _weights(phase_err, z_env_err_nm, phase_per_nm)
+    ok = np.isfinite(phase) & np.isfinite(z_env) & np.isfinite(frame) & (w > 0)
+    psi = np.exp(1j * (phase - phase_per_nm * z_env))
+    first = np.nanmin(frame[ok]) if ok.any() else 0.0
+    window = np.floor((frame - first) / max(int(window_frames), 1)).astype(int)
+    n_windows = int(window[ok].max()) + 1 if ok.any() else 0
+    sums = np.zeros(n_windows, complex)
+    weights = np.zeros(n_windows)
+    squares = np.zeros(n_windows)
+    counts = np.zeros(n_windows, int)
+    np.add.at(sums, window[ok], w[ok] * psi[ok])
+    np.add.at(weights, window[ok], w[ok])
+    np.add.at(squares, window[ok], w[ok] ** 2)
+    np.add.at(counts, window[ok], 1)
+    if smoothing > 1:
+        kernel = np.ones(int(smoothing))
+        sums, weights, squares, counts = (np.convolve(v, kernel, mode="same")
+                                          for v in (sums, weights, squares, counts))
+        counts = counts.astype(int)
+    keep = counts >= min_count
+    if not keep.any():
+        raise ValueError(f"fewer than {min_count} localizations with a phase and a z in "
+                         "every window: make the window longer")
+    centres = first + (np.arange(n_windows) + 0.5) * window_frames
+    mean = sums[keep] / weights[keep]
+    length = np.clip(np.abs(mean), 1e-9, 1.0)
+    n_eff = weights[keep] ** 2 / squares[keep]
+    error = np.sqrt(-2 * np.log(length)) / np.sqrt(n_eff)
+    phase0 = np.unwrap(np.angle(mean))
+    return CavityPhase(centres[keep], phase0, error, counts[keep],
+                       _interpolate(frame, centres[keep], phase0))
+
+
+def _interpolate(frame, centres, phase0):
+    """Linear between window centres and continued with the end windows'
+    slope beyond them: a cavity drifting steadily keeps drifting through the
+    first and last half windows (held constant, a drift of 1.5 rad per
+    window left 0.18 rad of error there)."""
+    at = np.interp(frame, centres, phase0)
+    if len(centres) > 1:
+        for side, (a, b) in ((frame < centres[0], (0, 1)), (frame > centres[-1], (-2, -1))):
+            slope = (phase0[b] - phase0[a]) / (centres[b] - centres[a])
+            edge = centres[b] if b == -1 else centres[a]
+            value = phase0[b] if b == -1 else phase0[a]
+            at[side] = value + slope * (frame[side] - edge)
+    return at
+
+
+@dataclass
+class Unwrapped:
+    """z from the phase on the most probable fringe."""
+
+    z_nm: np.ndarray
+    z_err_nm: np.ndarray
+    fringe: np.ndarray          # which fringe, counted from the one through z = 0
+    probability: np.ndarray     # that it is the right one
+    envelope_scale: float       # how much wider z_env scatters than its error says
+
+
+def unwrap(phase, phase_err, z_env_nm, z_env_err_nm, phase0, phase_per_nm: float,
+           calibrate_errors: bool = True, reach: int = 2) -> Unwrapped:
+    """Each localization's z on the fringe its envelope z makes most probable.
+
+    The candidates are z_n = (phase - phase0 + 2 pi n) / k; with z_env
+    Gaussian about the true z by its error, the probability of fringe n is
+    proportional to exp(-(z_env - z_n)^2 / 2 s^2), normalised over the
+    ``reach`` fringes either side of the nearest.  ``calibrate_errors``
+    measures s first: the CRLB of z_env is the least it can scatter, and a
+    model that fits the data imperfectly scatters more -- then every
+    probability would be too confident.  The scatter of z_env about the
+    chosen z, in units of its error, is measured robustly (1.4826 times the
+    median absolute deviation, which the few wrong fringes do not move) and
+    the errors are scaled up by it when it is above one.
+
+    z's error is the phase's, |phase_err / k|: on the right fringe the
+    envelope adds nothing worth having.  The probability says how likely the
+    fringe is right; one minus it is the chance of a ghost a fringe away.
+    """
+    k = float(phase_per_nm)
+    period = 2 * np.pi / abs(k)
+    phase, z_env = np.asarray(phase, float), np.asarray(z_env_nm, float)
+    env_err = np.asarray(z_env_err_nm, float)
+    base = (phase - np.asarray(phase0, float)) / k          # the candidate of n = 0
+    nearest = np.round((z_env - base) / period)
+    n = nearest[:, None] + np.arange(-reach, reach + 1)[None, :]
+    candidates = base[:, None] + n * period
+
+    def choose(scale):
+        s = np.maximum(env_err * scale, 1e-3)[:, None]
+        logp = -0.5 * ((z_env[:, None] - candidates) / s) ** 2
+        logp -= logp.max(axis=1, keepdims=True)
+        p = np.exp(logp)
+        p /= p.sum(axis=1, keepdims=True)
+        best = np.argmax(p, axis=1)
+        rows = np.arange(len(best))
+        return candidates[rows, best], n[rows, best], p[rows, best]
+
+    scale = 1.0
+    z, fringe, probability = choose(scale)
+    if calibrate_errors:
+        chi = (z_env - z) / env_err
+        chi = chi[np.isfinite(chi)]
+        if len(chi) >= 20:
+            scale = max(1.4826 * float(np.median(np.abs(chi - np.median(chi)))), 1.0)
+            z, fringe, probability = choose(scale)
+    bad = ~(np.isfinite(z) & np.isfinite(env_err))
+    z[bad] = np.nan
+    probability[bad] = np.nan
+    fringe = np.where(bad, 0, fringe).astype(int)
+    return Unwrapped(z, np.abs(np.asarray(phase_err, float) / k), fringe, probability, scale)
+
+
+def refine_period(phase, phase_err, z_env_nm, z_env_err_nm, frame, phase_per_nm: float,
+                  window_frames: int = 1000, span: float = 0.1, steps: int = 201) -> float:
+    """The phase's slope in z that the data agree with best.
+
+    For each trial k within +-``span`` of the calibration's, the windows'
+    resultants |sum w exp(i (phase - k z_env))| are added: the right slope
+    lines the phases of a window up into one direction at every z, a wrong
+    one spreads them by (k - k_true) z.  The bead calibration's period is
+    the stage's, and a dye a little redder than the beads, or a sample whose
+    index differs from the immersion's, has another.  Needs z_env over well
+    more than a fringe, and is otherwise flat; returns the calibration's
+    then.
+
+    z_env's own noise biases the slope low, as an error in x flattens a
+    regression line: the resultant of a localization whose z_env errs by s
+    shrinks by exp(-k^2 s^2 / 2), more for a steeper k, so the trial slopes
+    are compared with each term divided by that factor -- measured on
+    simulations, it took the answer from 0.991 of the true slope to within
+    0.3 % of it.  Only localizations with |k| s < 1 take part, where the correction
+    stays small.
+    """
+    phase, z_env, frame, env_err = (np.asarray(v, float)
+                                    for v in (phase, z_env_nm, frame, z_env_err_nm))
+    w = _weights(phase_err, env_err, phase_per_nm)
+    ok = (np.isfinite(phase) & np.isfinite(z_env) & np.isfinite(frame) & (w > 0)
+          & (abs(phase_per_nm) * env_err < 1))
+    phase, z_env, frame, w, env_err = phase[ok], z_env[ok], frame[ok], w[ok], env_err[ok]
+    if len(phase) < 50 or np.ptp(z_env) < 2 * np.pi / abs(phase_per_nm):
+        return float(phase_per_nm)
+    window = np.floor((frame - frame.min()) / max(int(window_frames), 1)).astype(int)
+    trials = phase_per_nm * (1 + np.linspace(-span, span, steps))
+    score = np.empty(steps)
+    for i, k in enumerate(trials):
+        sums = np.zeros(window.max() + 1, complex)
+        np.add.at(sums, window, w * np.exp(1j * (phase - k * z_env) + 0.5 * (k * env_err) ** 2))
+        score[i] = np.abs(sums).sum()
+    best = int(np.argmax(score))
+    if 0 < best < steps - 1:                      # a parabola through the peak
+        a, b, c = score[best - 1:best + 2]
+        shift = 0.5 * (a - c) / (a - 2 * b + c) if (a - 2 * b + c) != 0 else 0.0
+        return float(trials[best] + shift * (trials[1] - trials[0]))
+    return float(trials[best])

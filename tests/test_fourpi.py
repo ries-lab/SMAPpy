@@ -246,3 +246,95 @@ def test_v1s_beads_measure_the_fringe_period_and_the_mirror_steps():
     steps = np.angle(np.exp(1j * (phase[:, 1:] - phase[:, :1])))
     assert np.median(steps[:, 0]) == pytest.approx(2.0, abs=0.15)
     assert np.median(steps[:, 1]) == pytest.approx(-2.0, abs=0.15)
+
+
+# ---------------------------------------------------------------- phase to z
+
+@pytest.fixture(scope="module")
+def drifting(cal):
+    """A 4Pi acquisition of 5000 frames whose cavity drifts steadily with a
+    random walk on top, fitted: the table 4Pi z works on."""
+    rng = np.random.default_rng(0)
+    n = 5000
+    frame = np.sort(rng.integers(0, n, n))
+    drift = fourpi.cavity_drift(n, rate_rad=0.0015, wander_rad=0.003, start_rad=1.0, seed=1)
+    photons = rng.lognormal(np.log(1500), 0.5, n)
+    rois, truth = fourpi.simulate_rois(cal, n, photons=photons, background=10,
+                                       z_nm=(-500, 500), phase0=drift[frame], seed=2)
+    model = Global4PiPSF(cal)
+    return model.unpack(model.fit(rois)), truth, frame, drift
+
+
+def test_the_cavity_phase_follows_its_drift_from_the_localizations(cal, drifting):
+    fit, _, frame, drift = drifting
+    cav = fourpi.cavity_phase(fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"],
+                              fit["z_env_err_nm"], frame, cal.phase_per_nm, window_frames=500)
+    error = _wrapped(cav.at - drift[frame])
+    assert np.sqrt(np.mean(error ** 2)) < 0.06
+    assert np.sqrt(np.mean(error ** 2)) == pytest.approx(np.median(cav.error), rel=0.5)
+
+
+def test_wrong_fringes_are_as_frequent_as_their_probabilities_say(cal, drifting):
+    fit, truth, frame, _ = drifting
+    cav = fourpi.cavity_phase(fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"],
+                              fit["z_env_err_nm"], frame, cal.phase_per_nm, window_frames=500)
+    found = fourpi.unwrap(fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"],
+                          fit["z_env_err_nm"], cav.at, cal.phase_per_nm)
+    d = found.z_nm - truth["z_nm"]
+    wrong = np.abs(d) > cal.period_nm / 2
+    expected = np.mean(1 - found.probability)
+    assert 0.002 < wrong.mean() < 0.05
+    assert wrong.mean() == pytest.approx(expected, rel=0.5)
+    # the few wrong ones are whole periods off -- ghosts -- and are the unsure ones
+    off = d[wrong] / cal.period_nm
+    assert np.all(np.abs(off - np.round(off)) < 0.15)
+    assert np.median(found.probability[wrong]) < np.median(found.probability[~wrong])
+    # on the right fringe z is several times sharper than the envelope's
+    assert np.std(d[~wrong]) < 0.15 * np.std(fit["z_env_nm"] - truth["z_nm"])
+
+
+def test_refining_the_period_corrects_a_wrong_one(cal, drifting):
+    fit, _, frame, _ = drifting
+    args = (fit["phase_rad"], fit["phase_err_rad"], fit["z_env_nm"], fit["z_env_err_nm"], frame)
+    for wrong in (0.95, 1.05):
+        found = fourpi.refine_period(*args, cal.phase_per_nm * wrong, 500)
+        assert found / cal.phase_per_nm == pytest.approx(1.0, abs=0.005)
+
+
+def _table(fit, frame, k):
+    from smappy.locs import Localizations
+    columns = {"frame": frame.astype(np.int32),
+               **{c: np.asarray(fit[c], np.float32)
+                  for c in ("phase_rad", "phase_err_rad", "z_nm", "z_err_nm")}}
+    return Localizations(columns, {"fourpi": {"phase_per_nm": k}})
+
+
+def test_the_plugin_writes_z_from_the_phase_and_can_run_again(cal, drifting):
+    from smappy.plugins import Context
+    from smappy.plugins.fourpi_z import FourPiZ, FourPiZSettings
+    fit, truth, frame, _ = drifting
+    locs = _table(fit, frame, cal.phase_per_nm)
+    settings = FourPiZSettings(window_frames=500)
+    out = FourPiZ().run(Context(locs=locs), settings).locs
+    assert np.array_equal(out["z_env_nm"], locs["z_nm"])
+    d = out["z_nm"] - truth["z_nm"]
+    assert np.mean(np.abs(d) < 20) > 0.95
+    assert ((out["fringe_probability"] > 0) & (out["fringe_probability"] <= 1)).all()
+    again = FourPiZ().run(Context(locs=out), settings).locs
+    assert np.allclose(again["z_nm"], out["z_nm"], equal_nan=True)
+
+
+def test_without_the_slope_the_plugin_asks_for_the_model(cal, drifting, tmp_path):
+    from smappy.locs import Localizations
+    from smappy.plugins import Context
+    from smappy.plugins.fourpi_z import FourPiZ, FourPiZSettings
+    fit, _, frame, _ = drifting
+    bare = _table(fit, frame, cal.phase_per_nm)
+    bare = Localizations(bare.columns, {})
+    with pytest.raises(ValueError, match="model file"):
+        FourPiZ().run(Context(locs=bare), FourPiZSettings())
+    path = tmp_path / "model.h5"
+    fourpi.save_fourpi_calibration(path, cal)
+    out = FourPiZ().run(Context(locs=bare), FourPiZSettings(slope="file", path=str(path),
+                                                            window_frames=500)).locs
+    assert np.isfinite(out["z_nm"]).mean() > 0.99
