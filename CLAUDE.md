@@ -111,6 +111,10 @@ Running the tests -- three tiers:
   from Preferences > General), and one that makes a session installs its
   identity too (`gui/identity.install_identity`: its name and colour in
   every window title).
+* **A colour is read from the palette, never fixed for a light window**:
+  the windows can be dark.  A secondary grey is `widgets.note_style()`,
+  which a switch of theme finds and rewrites (`theme._rebake`); a warning
+  or error colour is a mid tone that reads on both, `#c06000` or `#e0453a`.
 * **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
   exception pending inside `processEvents`, and the next Python override Qt
   calls segfaults (6.10) or hangs.  Catch and print inside it, or connect a
