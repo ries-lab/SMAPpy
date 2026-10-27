@@ -1,0 +1,613 @@
+# 4Pi in SMAPpy: what exists, what is wrong with it, and a plan
+
+Status, 2026-10-27: M0 (data and formats) and M1 (the fitter) are done.  The
+rest is still a proposal.  §6 says
+what the first milestones found.
+
+This page is written from four sources:
+- a read of SMAP's 4Pi code (`../SMAP`);
+- a read of uiPSF v1's 4Pi learning (`../uiPSF`);
+- a read of SMAPpy's own multi-channel code;
+- the papers listed under [References](#references).
+
+The point is a 4Pi path that works, not a port.  Where SMAP or v1 did something
+fragile, the plan says what replaces it and why.
+
+## 1. The method in one paragraph
+
+**Two objectives, four images.**  Two opposing objectives collect the light of
+one molecule.  The two beams interfere.  The microscope splits the result into
+four images, p1, s1, p2 and s2, whose interference phases differ by roughly
+0, π/2, π and 3π/2.
+
+**What the phase gives.**  The relative intensity of the four images gives the
+interference phase Φ, which changes by 2π every fringe period z_T.  z_T is
+about 260 nm at NA 1.35 and λ 600 nm, longer than λ/2n because of the high NA.
+So Φ gives z with a precision several times better than the PSF shape can,
+but only modulo z_T.
+
+**What the envelope gives.**  The PSF envelope (its width, or its astigmatism)
+gives a coarse z that has no such ambiguity.  Unwrapping picks the fringe that
+agrees with it.  The cavity phase drifts with time (0.04 rad/s has been
+reported), so the offset between Φ and the coarse z has to be followed through
+the measurement.
+
+**The fitter's model.**  The model that makes a global fit of the four
+channels possible is the IAB model (Li et al. 2020).  It is a cubic spline
+for each of three volumes I, A and B:
+
+    μ_c(x, y, z, Φ) = N · [ I_c(x,y,z) + A_c(x,y,z)·cos Φ + B_c(x,y,z)·sin Φ ] + b_c
+
+- I_c is the incoherent part of channel c.
+- A_c and B_c are the interference part, demodulated by the fringe, so they
+  vary slowly in z and can be splined.
+- z and Φ are separate fit parameters.  The fit returns an envelope z and a
+  wrapped phase, and unwrapping is a separate step.
+
+## 2. What exists
+
+### SMAP
+
+SMAP has two 4Pi routes that share almost no code.
+
+**The native route** (`calibrate_4pi_v2` → `MLE_global_spline` 4pi mode →
+`CPUmleFit_LM_MultiChannel_4pi`) **cannot run to the end**:
+- `calibrate_4pi_v2` uses `shiftedstack`, `allPSFs` and `out.transformation`
+  after the code that defines them was commented out (v2:65–67, 100–101,
+  179–206).
+- The multi-bead `IABfrom4PiPSFfitmany` crashes on an undefined `zshift0h`
+  (L70) and indexes a 4-D array with three subscripts, so it always takes
+  bead 1 (L158).
+- `RegisterLocs4Pi` passes no `Tmode`, so it errors.
+- The legacy fitter path adds the stack centre to `zstart` twice, appends a
+  seventh entry to a six-entry link vector, and divides the data by `normf`
+  before a Poisson fit.
+
+**The uiPSF route** is the one that works: `learnPSF_invmodeling` → uiPSF v1
+h5 → `MLE_4Pi` → the closed-source `CPU/GPUmleFit_LM_4Pi_v1`, then
+`Channeldrift4Pi`, then `Phase2z4Pi`.  Its weaknesses:
+- **The fitter is binary-only.**  Its source is not public; GlobLoc's public
+  repository has only the non-4Pi multi-channel source.  The GPU build is
+  Windows-only.
+- **Phase starts cover only part of the circle.**  They are
+  `[0, 1/3, 2/3]·π`, a third of it, where `2π·[0, 1/3, 2/3]` was surely meant
+  (`resetparam_4Pi_fit.m:28`).  The GUI's z start is ignored.  The sCMOS
+  variance is computed and never passed to the fitter.
+- **The peak combiner adds channel 1's drift twice** (L226, L271).  It applies
+  `inv(T)` in both directions, weights by `phot` here but by `sqrt(phot)` in
+  the other branch, and its result depends on the order the channels are
+  merged in.
+- **The combined columns are wrong.**  They weight by 1/σ but compute the
+  error as if the weights were 1/σ², and the error uses channels 1 and 2 only
+  (`MLE_4Pi.m:151`).  `phot` comes out as a weighted mean of the channels, not
+  a sum.
+- **`Phase2z4Pi` makes a hard decision.**
+  - It rounds to the nearest fringe and ignores the precision of the coarse z.
+    It gives no probability of having picked the wrong fringe, and the error
+    it reports ignores that possibility.
+  - It flips signs in several places: the fitter flips z but not Φ, and the
+    result is negated at the end.
+  - It applies the first file's calibration to every file, needs a single
+    `phase` column, and drops the frames on window boundaries.
+- **The spline z-centre is defined five different ways** across the files:
+  `nz/2`, `ceil((nz+2)/2)`, `round(nz/2)`, `ceil(nz/2+0.5)`, and a magic
+  `−0.7`.
+
+### uiPSF v1
+
+**The model** is a scalar pupil model:
+- one pupil per objective;
+- the two fields are summed coherently with a per-bead phase, a shared phase
+  for each deformable-mirror step, and a channel offset fixed at a multiple
+  of π/2;
+- a coherence fraction α for each channel.
+
+**Export** evaluates the model at three phases, demodulates the result into
+I, A and B by a fringe period z_T, splines each, and writes them into
+`locres/coeff`, shaped `[C, 3 (A, B, I), 64, z, y, x]`.  The channel offsets
+and channel brightness go into each channel's A, B and I, so the fitter gets
+φ_c = 0.  This is the convention to keep.
+
+**Weaknesses:**
+- **z_T is typed in, not derived.**  It is a user constant (0.26 µm), not
+  measured from the model's own phase slope.  A wrong z_T biases both the
+  demodulation and z.
+- **The model is over-parametrised.**  Each channel has its own relative tip,
+  tilt and defocus between the objectives, although that misalignment is
+  physically common to all channels.  The per-bead phase, the mirror phase and
+  the per-channel piston all trade against each other, and no gauge is fixed.
+- **The objective misalignment is learned but never used.**  `pos_d` is a
+  learned variable that never enters the forward model, and it is exported
+  anyway.
+- **Channel positions ignore mirroring.**  The subpixel position in channel c
+  is the reference position plus a shift of the ROI centre.  It never goes
+  through the linear part of the transform, so it is wrong for a mirrored or
+  rotated channel.
+- **`coeff_reverse` is not a true reversal.**  A is flipped in z without being
+  conjugated.
+- **The photon scale is ambiguous.**  Each channel's I sums to about 0.5 per
+  plane, so N is roughly half the detected photons.
+
+### SMAPpy
+
+**The C++ global fitter already takes four channels.**  `csrc/global.hpp`
+(`MAX_CHANNELS = 4`) is a GlobLoc port.  Its parameter link
+`θ_c = global·factor + offset` can share Φ across the channels and can hold a
+per-channel phase offset, should we need one.
+
+**Everything around the fitter assumes two halves of one chip:**
+- `dualfit.py`: `combine_peaks`, `build_link` and `cut_paired_rois`;
+- `detect.PeakFinder.split`;
+- `DualColorCalibration`, with `main` and `secondary`;
+- `psf._GlobalPSF`, which fixes five parameters;
+- `_TwoChannelFit` and `simulate/camera.render`;
+- `microscope_db.SIDES`;
+- `io/tiff.ImageSource`, which is one 2-D frame series.
+
+**uiPSF v2 can learn many channels** (`ForwardModel`, `Channel` with a 3×3
+transform, a photon share and a defocus).  It has no interference and no
+phase axis.
+
+### The data
+
+**Ries-lab 4Pi, `Fig2_4pi_dataset`.**  This is zenodo 10823308; the same
+beads are in uiPSF's 8267520.
+- NA 1.35 silicone objectives, n 1.406 matched, λ 600 nm, 129 nm pixels,
+  sCMOS.
+- **`40nm_600/`** holds 26 bead files.  Each `.mat` (HDF5) contains `qd1..qd4`,
+  shaped (z 21 × phase 3 × 200 × 200): 50 nm steps and three mirror phase
+  steps.
+- **`cell3_nup96_mMaple_045/`** holds 69 × 234 MB of Nup96 4Pi SMLM.
+- uiPSF's record also has v1's result files, among them
+  `results/4pi_40nm_bead/psfmodel_zernike_4pi.h5`, with I, A and B splines in
+  `locres/coeff`.  These are a ready-made model for a first fitter, and a
+  regression target.
+
+**Bewersdorf-design astigmatic 4Pi, zenodo 14287640.**  It holds 61 DCIMG
+frames, 2048 × 168 pixels, with four images side by side on the strip and
+20 nm steps.  It has no phase steps and no metadata.  It needs a DCIMG reader,
+which SMAPpy does not have.  This data is a target, not only a test case: the
+Ries-lab 4Pi writes the same kind of file (§5).
+
+### The 4Pi fitter's source
+
+The C/CUDA source of the 4Pi fitter is not available.  Everything that was
+found is binary:
+- SMAP's `CPUmleFit_LM_4Pi_v1` / `_nIAB` mex files;
+- GlobLoc's `CPU/GPUmleFit_LM_4Pi.dll`;
+- uiPSF v1's `libCPUmleFit_LM_4Pi.dylib`.
+
+GlobLoc's public C++ and CUDA hold only the non-4Pi fitters.
+
+**The fitter is written from the IAB model itself** (Li et al. 2020) and from
+v1's export convention, not from any of the binaries.  With θ = (x, y, N, bg,
+z, Φ), each channel evaluates its own I, A and B splines, and Φ is shared:
+
+    μ_c = bg_c + N·(I_c + A_c·cos Φ + B_c·sin Φ)
+
+The derivatives follow from the spline, and ∂μ/∂Φ = N(−A_c sin Φ +
+B_c cos Φ).
+
+**A black-box reference runs on a Mac.**  uiPSF v1's dylib is a universal
+binary that includes arm64 and exports `CPUmleFit_LM_4Pi`.  A benchmark can
+fit the same spots with it and with SMAPpy's fitter and compare the two.  This
+is a script, not a test the suite depends on.
+
+## 3. Design decisions
+
+### D1. One model in the fitter: per-channel I, A and B, the phase offsets inside them
+
+The fitter's model is exactly the one in §1.  It has no φ_c, no channel ratio
+and no Dz of its own, because all of those live in each channel's splines:
+- **It is general.**  A channel offset that is not exactly π/2, an arm
+  imbalance, or an s-channel with less modulation (Bates et al. 2022 show that
+  an unequal channel amplitude costs 5–10 nm of z bias) are all just
+  different splines.
+- **It matches v1's export,** so v1's models load unchanged.
+
+The link in `global.hpp` still allows a per-channel phase offset δφ_c, kept
+for a later per-channel phase drift.  It is zero by default.
+
+### D2. Parameters, photon scale, columns
+
+The fit parameters are x, y, z, N, Φ and b_c:
+- x, y, z, N and Φ are shared by the channels;
+- b_c is free per channel;
+- any of them can be unlinked, as in Gaussian 2D 2C and Spline 3D 2C.  Linking
+  N gains up to 1.5× in z (Li et al. 2022).
+
+**The calibration is normalised** so that Σ_c Σ_xy I_c = 1 in the focal plane,
+which makes N the total detected photons.  This fixes v1's factor of 2.  v1
+files are renormalised when they are loaded.
+
+**Columns:**
+- `x_nm`, `y_nm`, `photons`;
+- `bg_ch0..3`;
+- `z_env_nm`: the envelope z;
+- `phase_rad` and `phase_err_rad`: wrapped to (−π, π];
+- `z_nm`: the envelope z until unwrapping replaces it;
+- precisions as usual;
+- with x and y unlinked, `x_nm_ch1..3`, and so on.
+
+**The spline's z origin has one definition,** that of `SplineCalibration.z0`,
+used everywhere.  The direction of z and the sign of Φ are fixed by a test on
+a simulation: a molecule moved by +δz must give Φ moved by +2π·δz/z_T.
+
+### D3. Starting values without a blind multi-start
+
+The model is **linear in N, N·cos Φ and N·sin Φ** once x, y and z are fixed.
+So for each z on a coarse grid we can do the following:
+- At the peak's centre, solve the 3 × (4 channels × pixels) linear least
+  squares for those three numbers.  This needs a weighted fit, the
+  "phasor" start.
+- Φ = atan2 of the two interference terms, and N comes out directly.
+- Pick the z with the smallest residual.
+- Start the LM from the best one or two z values.
+
+Every Φ is covered with no phase grid, and the starts fall on the right fringe
+far more often than a ±150 nm z grid does.  This replaces SMAP's 0–120° phase
+grid and v1's {0, π} × {±150 nm}.
+
+A fallback multi-start over Φ ∈ {0, 2π/3, 4π/3} remains as a setting, so the
+two can be compared on simulations.
+
+### D4. Unwrapping by likelihood
+
+The fit gives z_env (with σ_env) and Φ (with σ_Φ).  With the phase offset
+Φ0(t), the candidate positions are
+
+    z_n = z_T·(Φ + 2πn − Φ0(t))/2π
+
+**Each candidate gets a probability** from the Gaussian likelihood of
+z_env − z_n under σ_env:
+- the most probable candidate is the answer, `z_nm`;
+- its probability is a column, `fringe_prob`, so a user can filter out
+  ambiguous localizations;
+- `z_err_nm` comes from σ_Φ.
+
+**Φ0(t) is estimated in time windows** by a weighted circular mean of
+Φ − 2π·z_env/z_T, which is a von Mises maximum-likelihood estimate.  It uses
+only well-determined localizations and is smoothed over time.
+
+**z_T comes from the calibration.**  It can optionally be refined from the
+data, as the slope of Φ against z_env over all localizations.  A
+refractive-index or wavelength scale factor is a setting; it is 1 for
+matched indices, as in the Ries-lab data.
+
+**Diagnostics:**
+- a 2-D histogram of Φ − Φ0 against z_env, with the fringes drawn on it;
+- Φ0(t);
+- the expected ghost fraction.
+
+**Later, a "locked" refit:** fix Φ = 2π·z/z_T + Φ0(t), so the fit has five
+parameters, and fit from one start per fringe, keeping the best likelihood.
+This is how PR-4Pi and Bates et al. choose the fringe.  It uses all of the
+PSF's shape information and gives fewer ghosts at large |z|, so it is the
+upgrade once Φ0(t) is known.
+
+### D5. Channel geometry: N channels, of which dual colour is the case N = 2
+
+One `ChannelLayout` describes, for each channel c:
+- where its pixels come from: a rectangle on one camera's chip, a separate
+  TIFF stack, or a plane of a multi-D TIFF;
+- a mirror flag;
+- a 3×3 projective map onto channel 0.
+
+**`dualfit`'s halves become a two-channel layout,** and the engine becomes a
+`MultiChannelEngine`:
+- peak combining loops over C − 1 maps;
+- ROI cutting loops over C;
+- the link has shape (n, 2, C, P).
+
+**Dual colour must give identical numbers before and after.**  This refactor
+is the riskiest step for regressions, so it is done behind the existing
+two-channel tests, with a bit-for-bit comparison on a saved run.
+
+**Detection for 4Pi runs on the sum of the four channels mapped onto
+channel 0.**  The interference cancels in the sum, the signal-to-noise ratio
+is about twice that of one channel, and nothing has to be paired.  This is
+an option of the layout, so a two-channel fit can use it too.
+
+**`PeakFinder.split`** becomes a per-channel label rather than an axis and a
+position.
+
+**The microscope database** gets channel regions: a rectangle and a mirror
+flag in place of a side.  A `4Pi` microscope entry describes the quadrants.
+
+**Input goes through one preprocessing front end** that turns whatever the
+microscope wrote into a common multi-channel source.  Downstream code
+(detection, the fitters, the bead calibration, uiPSF) sees only that source:
+- **The source:** frames of shape (n, C, h, w), the per-channel camera
+  description, and the layout's rectangles and mirrors, so a localization can
+  be put back on the chip.
+- **The readers behind it:**
+  - Hamamatsu DCIMG with all four quadrants in one frame, including the
+    newer `0x1000000` version and its 4-pixel correction.  This is what the
+    Ries-lab and Bewersdorf-design 4Pi microscopes write.
+  - Rectangles of a TIFF.
+  - Four separate stacks.
+  - A multi-D TIFF with a channel axis.
+  - The already-cut `qd1..qd4` `.mat` of the example data.
+- **Reading is lazy.**  Frames are cut on the fly, never written out as a new
+  file, so a live fit can follow a growing acquisition.
+
+**One camera** is implemented first.  `CameraMetadata` per channel is designed
+in from the start, because some 4Pi set-ups use two cameras.
+
+### D6. Registration and channel drift
+
+**Bead registration** is the existing robust projective fit
+(`calibrate/dual.fit_dual_transform`), run for each channel onto channel 0.
+The beads are found on the z-projection, summed over the phase steps,
+because the interference makes a bead look different in each channel at any
+one z.  uiPSF v2 refines the maps jointly with the model.
+
+**Channel drift** (SMAP's `Channeldrift4Pi`, done properly):
+- fit in frame blocks with x and y unlinked;
+- take each channel's weighted offset from channel 0, smoothed in time;
+- fit again with the drift folded into the link offsets.
+
+This is a step of the 4Pi fitter, not a three-pass routine that drives the
+GUI.
+
+### D6a. Coarse z comes from astigmatism
+
+Both target microscopes are astigmatic.  The envelope I_c therefore carries
+the astigmatic z information.  z_env is precise, typically tens of nm, and it
+is what unwrapping relies on.
+
+The fringe probabilities of D4 use σ_env from the fit's CRLB.  As a check, a
+setting can fall back to Huang et al.'s shape metric
+m = σx³/σy − σy³/σx from an elliptical Gaussian fit.
+
+### D7. Learning: uiPSF v2 gets a `FourPiPSF`
+
+**The forward model** is
+
+    E_c = t_c^up·P_up·e^{−ikz·z} + t_c^lo·P_lo·e^{+ikz·z}·e^{i(Φ_e + δ_c)}
+
+The intensity is α_c·|E_c|² + (1 − α_c)·(|E_up|² + |E_lo|²), followed by the
+bead OTF and the blur v2 already has.
+
+**Parameters:**
+- **Aberrations:** one pupil per objective, with Zernikes shared by all
+  channels.
+- **Misalignment between the objectives:** the relative piston, tip, tilt
+  and defocus between the arms, as a few shared physical parameters, not a
+  set per channel as in v1.
+- **Per channel:** the arm transmissions t_c, the phase offset δ_c (free,
+  with δ_0 = 0 as the gauge) and the coherence α_c.
+- **Polarisation:** the first version is scalar, as v1 is.  Making it
+  vectorial is a later step (M7).  v2's `VectorPSF` already has the six dipole
+  fields and an analyser per channel, so the s and p images could be modelled
+  as what they are: different polarisations, with their own PSFs and
+  modulation.  With the vector model, part of what α_c and δ_c now absorb
+  would become physics instead of free parameters.
+
+**A phase axis:**
+- each bead has a phase Φ_e;
+- the mirror phase steps of a stack are shared and the first is fixed;
+- in situ, each molecule has a free Φ_e.
+
+**Export:**
+- sample at three phases and demodulate to I, A and B;
+- z_T comes from the model's own phase slope (the unwrapped arg A_c against z,
+  fitted), never typed;
+- write the per-channel splines, the maps, z_T and α into the 4Pi
+  calibration file (D8).
+
+**In situ** uses the SMAPpy 4Pi fitter for its starting values, as v1 used
+its C fitter, and detects on the summed channels.  It follows the bead path.
+
+### D8. The calibration file
+
+The file is `format = "smappy-4pi-calibration"`, HDF5, and holds:
+- `channel_<c>/{I, A, B}`: coefficients of shape (64, nz, ny, nx), on one
+  shared z grid;
+- dz and z0;
+- the C maps onto channel 0;
+- z_T, λ, and the refractive indices;
+- the per-channel α and δ_c, kept for display;
+- the layout.
+
+**The format generalises.**  The same container with only I is an N-channel
+spline calibration, so a later three- or four-colour fit needs no new format.
+`DualColorCalibration` stays readable, and one-channel spline files are
+unchanged.
+
+**The loader also reads v1's `psfmodel_*_4pi.h5`.**  It renormalises, and
+reorders A, B, I into I, A, B.
+
+## 4. Plan
+
+The milestones are ordered so that a fitter exists early, on v1's ready-made
+models, and the risky refactor happens behind tests.
+
+**M0. Data and formats**
+- Fetch `4pi_40nm_bead/`, `results/4pi_40nm_bead/` and the two
+  `4pi_smlm_nup96` files: about 0.8 GB, through
+  `scripts/uipsf/fetch_zenodo.py`.
+- Fetch the astigmatic DCIMG beads from zenodo 14287640 (25 MB).
+- Write the DCIMG reader.
+- Write a reader for `qd1..qd4` `.mat` files.
+- Write a loader for v1's 4Pi h5 → `FourPiCalibration`, renormalised.
+
+**M1. The fitter**
+- `CSpline4Pi` in `csrc/models.hpp`: six parameters, three coefficient
+  planes, the Φ derivative N(−A sin Φ + B cos Φ), and Φ wrapped in `clamp`.
+- `fit_cspline4pi_global` in `fit.cpp`.
+- The phasor start (D3).
+- `_GlobalPSF` generalised from five parameters to P.
+- `Global4PiPSF`.
+- Tests:
+  - simulated 4Pi spots from v1's model reach the CRLB in x, y, z and Φ;
+  - Φ is recovered over the whole circle;
+  - the fitter agrees with v1's `locres` on the training beads.
+- A benchmark script fits the same spots with v1's dylib and compares.
+
+**M2. Simulation**
+- An N-channel camera layout.
+- A 4Pi draw from a `FourPiCalibration`, with Φ = 2πz/z_T + Φ0(t) and a
+  drift in Φ0.
+- A 4Pi preset in *Simulate*.
+- The truth includes `phase_true`.
+- This is what every later test stands on.
+
+**M3. Phase to z**
+- `smappy/fourpi.py`, array functions: Φ0(t), fringe probabilities, z_T
+  refinement.
+- A plugin, *Analysis/After fit/4Pi z from phase*, which is also an *After
+  the fit* step.
+- Tests on M2's simulations:
+  - Φ0(t) drift is recovered;
+  - the ghost fraction matches `fringe_prob`;
+  - the sign convention holds.
+- Its page.
+
+**M4. N channels end to end**
+- The preprocessing front end (D5) and `ChannelLayout`.
+- `MultiChannelEngine`, keeping dual colour's numbers.
+- Detection on the summed channels.
+- The 4-channel bead registration and channel drift.
+- The readers.
+- The 4Pi microscope entry.
+- The plugin *Localize/Spline 4Pi*, with its page, tests and line in
+  `default.gui.yaml`.
+- First real result: Nup96 4Pi with v1's model.  The two rings, about 50 nm
+  apart, are the test of z.
+
+**M5. uiPSF v2 4Pi from beads**
+- `FourPiPSF`, the phase axis, the gauges, and the export with a measured z_T.
+- Comparison with v1's model on `4pi_40nm_bead`:
+  - the fitted bead positions;
+  - the CRLB;
+  - z_T.
+- *4Pi beads* as a method of the PSF calibration window.
+
+**M6. uiPSF v2 4Pi in situ** on the Nup96 data, compared with v1's in-situ
+result files.  This comes after the bead model, and after the in-situ learning
+work in progress elsewhere, which it builds on.
+
+**M7. Later, as needed**
+- The uiPSF 4Pi model made vectorial: dipole fields and the s and p
+  polarisations of the channels (D7).
+- The locked refit (D4).
+- A model-free bead average of I, A and B in SMAPpy.  For each voxel this is
+  a linear least-squares fit over beads × phases, with the bead phases taken
+  from the fitter.  It is an independent check of the learned model.
+- Multicolour 4Pi, from the s/p ratio.
+- Two cameras.
+
+**What can run in parallel:**
+- M2 can start alongside M1.
+- M5 needs only M0's data and the calibration format, so it can start with
+  M1.
+- M4 is the long one; it needs M1.
+
+## 5. Answered questions (2026-10-27)
+
+1. **What the Ries-lab 4Pi writes:** Hamamatsu DCIMG, with all four quadrants
+   in one frame.  This led to the preprocessing front end in D5.  Still to be
+   settled from a real file: the channel order and the mirrors.
+2. **Astigmatism:** yes.  It is the main source of the coarse z (D6a).
+3. **Order:** beads first (M5).  In situ comes later (M6), after the in-situ
+   learning work in progress elsewhere.
+4. **The DCIMG data is a target,** not only a test case.  The DCIMG reader
+   moves into M0.
+5. **The fitter's source:** none was found; the 4Pi fitters exist only as
+   binaries (`.mex*`, `.dll`, `.dylib`, `.so`).  The fitter is written from
+   the IAB model, and v1's dylib is the black-box comparison (§2).
+
+## References
+
+- Li Y, Buglakova E, Zhang Y, Thevathasan JV, Bewersdorf J, Ries J (2020).
+  Accurate 4Pi single-molecule localization using an experimental PSF model.
+  *Opt Lett* 45:3765. [doi:10.1364/OL.397754](https://doi.org/10.1364/OL.397754).
+  The IAB model.
+- Li Y, Shi W, Liu S, … Ries J (2022). Global fitting for high-accuracy
+  multi-channel single-molecule localization. *Nat Commun* 13:3133.
+  [doi:10.1038/s41467-022-30719-4](https://doi.org/10.1038/s41467-022-30719-4).
+  globLoc; linking photons across channels.
+- Liu S, Chen J, Hellgoth J, … Ries J (2024). Universal inverse modeling of
+  point spread functions for SMLM localization and microscope
+  characterization. *Nat Methods* 21:1082.
+  [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x).
+  uiPSF; the 4Pi pupil and voxel models.
+- Liu S, Huang F (2020). Enhanced 4Pi single-molecule localization microscopy
+  with coherent pupil based localization. *Commun Biol* 3:220.
+  [doi:10.1038/s42003-020-0908-2](https://doi.org/10.1038/s42003-020-0908-2).
+  Partial coherence; cavity phase drift; ghosts.
+- Huang F, Sirinakis G, Allgeyer ES, … Bewersdorf J (2016). Ultra-high
+  resolution 3D imaging of whole cells. *Cell* 166:1028.
+  [doi:10.1016/j.cell.2016.06.016](https://doi.org/10.1016/j.cell.2016.06.016).
+  Astigmatic unwrapping; drift.
+- Bates M, Keller-Findeisen J, Przybylski A, … Jakobs S (2022). Optimal
+  precision and accuracy in 4Pi-STORM using dynamic spline PSF models.
+  *Nat Methods* 19:603.
+  [doi:10.1038/s41592-022-01465-8](https://doi.org/10.1038/s41592-022-01465-8).
+  Phase-shifted models; phase drift; the bias from channel imbalance.
+- Wang J, Allgeyer ES, Sirinakis G, … Bewersdorf J (2021). Implementation of a
+  4Pi-SMS super-resolution microscope. *Nat Protoc* 16:677.
+  [doi:10.1038/s41596-020-00428-7](https://doi.org/10.1038/s41596-020-00428-7).
+
+## 6. What M0 and M1 found (2026-10-27)
+
+**What exists now.**
+- `smappy/fourpi.py`:
+  - `FourPiCalibration`;
+  - `from_volumes`, which normalises the channels together and splines each of
+    I, A and B;
+  - `load_uipsf_v1`;
+  - the native file, which keeps the knots and splines them again on load
+    (64 times smaller than the coefficients);
+  - `model_calibration`, an analytic astigmatic 4Pi model for tests;
+  - `simulate_rois` and `link`.
+- `csrc`: `CSpline4Pi` and `fit_cspline4pi_global`, with the phasor start.
+- `psf.Global4PiPSF`, and `_GlobalPSF` generalised beyond five parameters.
+- `io/dcimg.py`: both versions, with the 4 pixels put back.
+- `io/quadrants.py`: the `qd1..qd4` `.mat` files.
+- `tests/test_fourpi.py`.
+
+**The fitter reproduces v1's closed-source one.**
+- The test fits v1's 18 training beads (1134 localizations) with v1's model
+  and v1's channel offsets.
+- Per localization, it agrees with v1's own results to 0.0003 px in x and y,
+  0.001 rad in phase and 0.02 slices in z.
+- Apart from that there are only constant offsets, v1's half-pixel
+  convention, and v1's photon number, which is half ours.
+- On the analytic model the fit reaches the CRLB in x, y, z and phase.  It
+  finds the phase all round the circle from the phasor start, with no phase
+  grid.  300 fits take 50 ms.
+
+**v1's beads measure the fringe period.**
+- The phase moves 0.0243 rad per nm of stage, a period of 258.5 nm.  v1 had
+  been given 260 nm.
+- The deformable mirrors' steps come out at +2.06 and −2.12 rad; they were set
+  to [2, 0, −2].
+- The model's modulation depth |(A, B)|/I has a median of 0.30 in the core and
+  a maximum of 0.73.
+
+**Photons must be linked.**  The phase is the photons' split between the
+channels.  A photon number free in each channel absorbs the interference and
+leaves the phase undetermined: exactly so for the analytic model, nearly so
+for a real one.  SMAP's `MLE_4Pi` defaulted to that.  `Global4PiPSF` shares
+the photons by default and says why.
+
+**v1's `.mat` models are transposed.**  v1 read MATLAB files as h5py gives
+them, with rows and columns swapped.  `io/quadrants` reads them the right way
+round, and `load_uipsf_v1` transposes such a model to match.  The channel
+transforms it keeps stay in v1's frame.
+
+**The product form I·(1 + a cos Φ + b sin Φ) was considered and not used.**
+- At the knots it is the same function as the sum.
+- Its gain would have been positivity.  v1's additive splines evaluated
+  between knots never go below zero; the worst is +7·10⁻⁵ of the peak.
+- The ratio a = A/I is ill-defined in the wings.
+- The sum keeps building I, A and B from beads a linear problem.
+- a and b are worth showing as a diagnostic: the modulation map.
+
+**DCIMG.**  The Bewersdorf-design file of zenodo 14287640 is version
+`0x1000000` and leaves the crop record empty.  The reader then takes the ROI
+to be centred on the sensor's rows, which puts the bad 4 pixels in row 83 of
+168.  The four images sit at x = 151, 389, 1474 and 1713, each 168 wide, with
+the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
