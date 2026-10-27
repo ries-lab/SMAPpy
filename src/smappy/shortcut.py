@@ -36,6 +36,9 @@ def windows_script(python: str, icon: Path, folder: Path | None = None) -> str:
     """The PowerShell that makes the shortcut in ``folder`` (the desktop) and prints its path."""
     where = _quote_ps(folder) if folder else "([Environment]::GetFolderPath('Desktop'))"
     return "; ".join([
+        # the path printed back in UTF-8: in the ANSI code page a desktop in a
+        # user folder named with an umlaut came back garbled
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
         f"$p = Join-Path {where} 'SMAPpy.lnk'",
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($p)",
         f"$s.TargetPath = {_quote_ps(python)}",
@@ -64,25 +67,25 @@ def make(home: Path | None = None) -> Path:
     if system == "Windows":
         done = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                                windows_script(python, ICONS / "smappy.ico", home)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
         if done.returncode != 0:
             raise RuntimeError(done.stderr.strip() or "PowerShell could not make the shortcut")
         return Path(done.stdout.strip().splitlines()[-1])
     home = home or Path.home()
     if system == "Darwin":
         path = home / "Desktop" / "SMAPpy.command"
-        path.write_text(f'#!/bin/sh\nexec "{python}" -m smappy.cli.gui "$@"\n')
+        path.write_text(f'#!/bin/sh\nexec "{python}" -m smappy.cli.gui "$@"\n', encoding="utf-8")
         path.chmod(0o755)
         return path
     entry = desktop_entry(python, ICONS / "smappy_256.png")
     apps = Path(os.environ.get("XDG_DATA_HOME", home / ".local" / "share")) / "applications"
     apps.mkdir(parents=True, exist_ok=True)
     path = apps / "smappy.desktop"
-    path.write_text(entry)
+    path.write_text(entry, encoding="utf-8")
     path.chmod(0o755)
     desktop = home / "Desktop"
     if desktop.is_dir():
-        (desktop / "smappy.desktop").write_text(entry)
+        (desktop / "smappy.desktop").write_text(entry, encoding="utf-8")
         (desktop / "smappy.desktop").chmod(0o755)
         return desktop / "smappy.desktop"
     return path
