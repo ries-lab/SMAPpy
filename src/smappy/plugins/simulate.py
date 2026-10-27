@@ -358,8 +358,12 @@ class Simulate(Plugin):
         n_spots = len(truth.emission)
         text = (f"{n_spots} spots of {len(truth.fluorophores)} emitters over "
                 f"{settings.n_frames} frames of {cam.size_px} x {cam.size_px} pixels"
-                f"{' per half' if dual else ''}: {path} -- open it in a fitter as "
-                f"its file")
+                f"{' per half' if dual else ' per 4Pi channel' if cam.fourpi else ''}: "
+                f"{path} -- open it in a fitter as its file")
+        if cam.fourpi and not settings.optics.calibration:
+            from ..simulate.source import fourpi_path
+            text += (f"; the 4Pi model it is drawn with in {fourpi_path(path).name}, which "
+                     f"Spline 4Pi takes with it")
         if dual:
             text += (f"; the map between the halves in {transform_path(path).name}, "
                      f"which a two-colour fitter takes with it")

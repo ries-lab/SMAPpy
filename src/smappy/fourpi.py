@@ -696,18 +696,32 @@ def render_frames(cal: FourPiCalibration, layout, frame, x, y, z_nm, photons, ph
     bounding box unless ``frame_shape`` is given.
     """
     rng = np.random.default_rng(seed)
+    frames = np.zeros((n_frames,) + tuple(frame_shape or frame_size(layout)), np.float32)
+    add_frames(frames, cal, layout, frame, x, y, z_nm, photons, phase0, roisize)
+    for (rx, ry, rw, rh) in layout.regions:
+        frames[:, ry:ry + rh, rx:rx + rw] += background
+    return rng.poisson(frames).astype(np.float32)
+
+
+def frame_size(layout) -> tuple:
+    """(H, W) of the smallest frame that holds every channel's rectangle."""
+    return (max(r[1] + r[3] for r in layout.regions), max(r[0] + r[2] for r in layout.regions))
+
+
+def add_frames(frames: np.ndarray, cal: FourPiCalibration, layout, frame, x, y, z_nm, photons,
+               phase0, roisize: int = None) -> None:
+    """Add every emitter's expected photons to ``frames`` (n, H, W), in
+    place, without noise: `render_frames`' drawing, for a caller with its
+    own background and camera (`smappy.simulate.camera`)."""
     w, h = layout.size
     C = layout.n_channels
-    if frame_shape is None:
-        frame_shape = (max(r[1] + r[3] for r in layout.regions),
-                       max(r[0] + r[2] for r in layout.regions))
     roisize = roisize or min(cal.shape[1], cal.shape[2]) - 3
     half = roisize // 2
     frame, x, y = np.asarray(frame, int), np.asarray(x, float), np.asarray(y, float)
     z = np.asarray(z_nm, float)
     phase = cal.phase_per_nm * z + np.asarray(phase0, float)
     photons = np.broadcast_to(np.asarray(photons, float), x.shape)
-    channels = np.zeros((n_frames, C, h, w), np.float32)
+    channels = np.zeros((len(frames), C, h, w), np.float32)
     zi = cal.z_nm_to_index(z)
     for c in range(C):
         at = np.c_[x, y] if c == 0 else layout.to_channel(c, np.c_[x, y])
@@ -720,15 +734,13 @@ def render_frames(cal: FourPiCalibration, layout, frame, x, y, z_nm, photons, ph
             if x1 > x0 and y1 > y0:
                 channels[frame[k], c, y0:y1, x0:x1] += photons[k] * np.clip(
                     model[k, y0 - cy:y1 - cy, x0 - cx:x1 - cx], 0, None)
-    frames = np.zeros((n_frames,) + tuple(frame_shape), np.float32)
     for c, ((rx, ry, rw, rh), (fx, fy)) in enumerate(zip(layout.regions, layout.flips)):
-        part = channels[:, c] + background
+        part = channels[:, c]
         if fx:
             part = part[:, :, ::-1]
         if fy:
             part = part[:, ::-1, :]
-        frames[:, ry:ry + rh, rx:rx + rw] = part
-    return rng.poisson(frames).astype(np.float32)
+        frames[:, ry:ry + rh, rx:rx + rw] += part
 
 
 def load_smap_4pi(path, dz_sign: float = 1.0) -> FourPiCalibration:

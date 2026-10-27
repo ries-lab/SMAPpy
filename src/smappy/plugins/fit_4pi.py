@@ -222,6 +222,9 @@ class FourPiFit(_FitPlugin):
     Settings = FourPiFitSettings
     version = "1"
     phase = True
+    # a simulated 4Pi camera's model, with the maps it was drawn with
+    calibration_kind = "fourpi"
+    calibration_extras = {"model.channels.registration": "model"}
 
     def _calibration(self, settings):
         from ..fourpi import load_fourpi_calibration
@@ -262,10 +265,16 @@ class FourPiFit(_FitPlugin):
         here on nothing sees the camera's frames."""
         from ..channels import ChannelSource
         from .fit import _open
-        if watch:
-            raise ValueError("Spline 4Pi does not follow a growing file yet")
-        base = _open(settings.source, watch=False, stop_event=stop_event)
+        if watch and settings.model.channel_drift:
+            raise ValueError("the channels' drift is measured over the whole acquisition, "
+                             "which a live fit does not have yet: untick channel drift")
+        base = _open(settings.source, watch=watch, stop_event=stop_event)
         return ChannelSource.wrap(base, self.channel_layout(settings, base))
+
+    def watch_blocks(self, source, path, **options):
+        # the camera's frames as the channels, cut as the file grows (a
+        # DCIMG followed by its frames' footers, `io.dcimg.DcimgSource.watch`)
+        return source.watch(**options)
 
     def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
         # positions are in channel 0's own pixels, where the camera ROI is

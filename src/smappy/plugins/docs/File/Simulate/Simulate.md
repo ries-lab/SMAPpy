@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem]
+covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem, smappy.simulate.camera.fourpi_model, smappy.simulate.camera.closed_form_fourpi, smappy.simulate.camera.cavity_phases, smappy.simulate.source.fourpi_path, smappy.fourpi.add_frames]
 ---
 
 ## What it does
@@ -347,6 +347,18 @@ where and as the two-colour spline fit's model puts it.  A one-camera
 calibration with a split camera, or a dual-colour one without, is refused
 with a line under the form.
 
+With *4Pi* ticked the camera is a 4Pi microscope's: four phase images side
+by side, each molecule in all four.  How its light divides between them
+follows its z through the interference, and the cavity's phase, which
+drifts at *cavity drift* (0.04 rad/s, as Liu and Huang measured).  With a
+4Pi model as the *PSF calibration* (made by PSF calibration in the 4Pi
+mode) the frames are drawn with that model, its channels where its layout
+puts them and mapped by its registration.  Without one they are drawn with
+a closed-form model: an elliptical Gaussian envelope of the *PSF sigma*, a
+fringe of 260 nm, four channels of the frame's *size* each.  Tick
+*astigmatic* for it, or the envelope cannot tell z from −z.  The preset
+*4Pi pores (Nup96)* is such a scene.
+
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
 the seed -- a few hundred bytes instead of hundreds of megabytes.  It is
@@ -357,7 +369,10 @@ under the form does both at once, without Run: it writes the recipe from
 the settings as they are and opens it in the Localize tab's open fitter
 (or Gaussian 2D); drawn with a *PSF calibration*, in Spline 3D with that
 calibration filled in; for a split camera in Gaussian 2D 2C, or with a
-dual-colour calibration in Spline 3D 2C with that calibration.  Astigmatic
+dual-colour calibration in Spline 3D 2C with that calibration; for a 4Pi
+camera in [Spline 4Pi](plugin:Localize/Spline 4Pi), its model filled in
+(the closed-form one written beside the recipe as `<name>_4pi.h5`) with
+the registration it was drawn with.  Astigmatic
 Gaussian frames on one camera go to Gaussian 2D with *elliptical* ticked,
 and its *after the fit* runs
 [Astigmatic z](plugin:Analysis/After fit/Astigmatic z), which turns the two

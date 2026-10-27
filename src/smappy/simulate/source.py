@@ -52,7 +52,18 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     if dual_of(settings) and not settings.optics.calibration:
         # (a dual-colour calibration carries its own registration)
         write_transform(settings, transform_path(path))
+    if settings.camera.fourpi and not settings.optics.calibration:
+        # the closed-form model the frames are drawn with, for the fitter
+        from ..fourpi import save_fourpi_calibration
+        from .camera import fourpi_model
+        save_fourpi_calibration(fourpi_path(path), fourpi_model(settings)[0], overwrite=True)
     return path
+
+
+def fourpi_path(recipe) -> Path:
+    """Where a 4Pi camera's closed-form model is written beside its recipe."""
+    recipe = Path(recipe)
+    return recipe.with_name(recipe.name.split(".")[0] + "_4pi.h5")
 
 
 def recipe_values(settings: SimulationSettings) -> dict:
@@ -112,15 +123,21 @@ def recipe_transform(path) -> Optional[Path]:
 def recipe_calibration(path) -> Optional[Tuple[str, str]]:
     """The PSF calibration a recipe draws its spots with, if ``path`` is
     such a recipe: ``("single", path)`` for one camera's bead calibration,
-    ``("dual", path)`` for a split camera's dual-colour one -- what a spline
-    fitter of that kind takes for its own, so the fit meets the PSF the
-    frames were made with.  None for Gaussian spots."""
+    ``("dual", path)`` for a split camera's dual-colour one, ``("fourpi",
+    path)`` for a 4Pi camera's model, written beside the recipe when it is
+    the closed-form one -- what a spline fitter of that kind takes for its
+    own, so the fit meets the PSF the frames were made with.  None for
+    Gaussian spots."""
     try:
         if not is_simulation(path):
             return None
         settings = read_recipe(path)
     except (OSError, ValueError):
         return None
+    if getattr(settings.camera, "fourpi", False):
+        written = fourpi_path(path)
+        model = settings.optics.calibration or (str(written) if written.is_file() else "")
+        return ("fourpi", model) if model else None
     if not settings.optics.calibration:
         return None
     return ("dual" if dual_of(settings) else "single"), settings.optics.calibration
@@ -151,6 +168,8 @@ class SimulatedSource(ImageSource):
     """Frames made as they are read."""
     settings: SimulationSettings = None
     camera: Dict[str, Any] = field(default_factory=dict)
+    #: a 4Pi camera's channels (`ChannelLayout`), as the quadrant files give theirs
+    layout: Any = None
     _truth: Any = field(default=None, repr=False)
 
     @property
@@ -186,13 +205,21 @@ def open_simulation(path) -> SimulatedSource:
               "em_on": settings.camera.em_gain > 0,
               "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
               "frame_time_ms": settings.frame_time_ms, "camera_name": "simulation"}
+    from .camera import fourpi_model
+    fourpi = fourpi_model(settings)
+    layout = None
     if dual_of(settings):
         # a split camera's two halves, laid out as its calibration's, if any
         from .camera import split_layout
         shape = split_layout(settings)["shape"]
+    elif fourpi is not None:
+        from ..fourpi import frame_size
+        layout = fourpi[1]
+        shape = frame_size(layout)
     else:
         shape = (size, size)
     return SimulatedSource(
         files=[Path(path)], shape=shape, dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,
-        mm_metadata={}, summary={}, settings=settings, camera=camera, _truth=truth)
+        mm_metadata={}, summary={}, settings=settings, camera=camera, _truth=truth,
+        layout=layout)

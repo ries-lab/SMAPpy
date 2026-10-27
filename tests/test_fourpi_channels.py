@@ -537,6 +537,147 @@ def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
     assert abs(np.median(np.asarray(locs["x_nm"])[same] / 100 - x[i[same]])) < 0.02
 
 
+def _growing_dcimg(path, frames, first: int, step: int, pause: float):
+    """``frames`` written as a camera writes a DCIMG: the file with its
+    first ``first`` frames, the header saying none yet, then ``step`` more
+    every ``pause`` seconds from a thread -- each frame's pixels before its
+    footer, as the footer follows them on the disk."""
+    import threading
+    import time
+    from tests.test_fourpi import _write_new_dcimg
+    whole = path.with_suffix(".whole")
+    _write_new_dcimg(whole, frames, frames[:, 1023 - (1024 - frames.shape[1] // 2), :4])
+    data = whole.read_bytes()
+    n, h, w = frames.shape
+    stride = h * w * 2 + 32
+    start = len(data) - n * stride
+    head = bytearray(data[:start])
+    np.frombuffer(head, "<u4", 1, 112 + 8 + 52)[0] = 0          # the header's count: none yet
+    path.write_bytes(bytes(head) + data[start:start + first * stride])
+
+    def write():
+        for k in range(first, n, step):
+            time.sleep(pause)
+            with open(path, "ab") as fh:
+                for j in range(k, min(k + step, n)):
+                    at = start + j * stride
+                    fh.write(data[at:at + stride - 32])
+                    fh.flush()
+                    fh.write(data[at + stride - 32:at + stride])
+    thread = threading.Thread(target=write, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_a_dcimg_file_being_written_is_followed_frame_by_frame_to_its_end(tmp_path):
+    """The header says no frames, the file grows: the watch reads every
+    frame once, in order, as it arrives, and stops when the file has been
+    still for its timeout; a file grown ahead of its frames (zeros) gives
+    only the frames written."""
+    from smappy.io.dcimg import DcimgFile, open_dcimg
+    from smappy.io.watch import WatchSettings
+    rng = np.random.default_rng(4)
+    frames = rng.integers(100, 300, (60, 24, 40)).astype(np.uint16)
+    path = tmp_path / "live.dcimg"
+    thread = _growing_dcimg(path, frames, first=10, step=10, pause=0.1)
+    source = open_dcimg(path)
+    got = list(source.watch(chunk=7, settings=WatchSettings(poll=0.02, timeout=0.5)))
+    thread.join()
+    firsts = [first for first, block in got if len(block)]
+    assert firsts == sorted(firsts)
+    assert np.array_equal(np.concatenate([b for _, b in got]), frames)
+    # grown ahead: the camera's file longer than its frames
+    with open(path, "ab") as fh:
+        fh.write(bytes(5 * (24 * 40 * 2 + 32)))
+    assert len(DcimgFile(path)) == 60
+
+
+def test_spline_4pi_fits_a_dcimg_live_as_it_would_the_finished_file(cal, tmp_path):
+    """A live fit of a DCIMG being written, through the channel layer:
+    the same localizations as the fit of the file once it is complete."""
+    from smappy.plugins import Context
+    from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    model_path = tmp_path / "model_4pi.h5"
+    fourpi.save_fourpi_calibration(model_path, cal)
+    layout = side_by_side(4, 40, 40)
+    rng = np.random.default_rng(12)
+    n = 60
+    x, y = rng.uniform(10, 30, (2, n))
+    frames = fourpi.render_frames(cal, layout, np.arange(n), x, y, rng.uniform(-300, 300, n),
+                                  4000, phase0=0.2, n_frames=n, background=8)
+    adu = (frames / 0.5 + 100).astype(np.uint16)
+    path = tmp_path / "live.dcimg"
+    thread = _growing_dcimg(path, adu, first=10, step=10, pause=0.2)
+
+    def settings(live):
+        s = FourPiFitSettings(
+            source=SourceSettings(path=str(path), live=live, live_timeout=1.0, chunk=20),
+            camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+            model=FourPiModelSettings(calibration=str(model_path)),
+            output=OutputSettings(path="", save=False))
+        part = s.model.channels
+        part.layout, part.registration = "typed", "none"
+        part.x_corners, part.y_corners, part.width, part.height = "0, 40, 80, 120", "0,0,0,0", 40, 40
+        s.finish.fourpi_z = False
+        return s
+
+    live = FourPiFit().run(Context(), settings(True)).locs
+    thread.join()
+    done = FourPiFit().run(Context(), settings(False)).locs
+    assert len(live) == len(done) > 0.8 * n
+    order = np.lexsort((np.asarray(live["x_nm"]), np.asarray(live["frame"])))
+    again = np.lexsort((np.asarray(done["x_nm"]), np.asarray(done["frame"])))
+    assert np.allclose(np.asarray(live["x_nm"])[order], np.asarray(done["x_nm"])[again])
+
+
+# ---------------------------------------------------------------- simulated 4Pi cameras
+
+@pytest.mark.slow
+def test_a_simulated_4pi_camera_draws_four_channels_and_its_recipe_fills_spline_4pi(tmp_path):
+    """The Simulate preset's 4Pi camera: four phase images side by side, the
+    closed-form model written beside the recipe and taken by Spline 4Pi with
+    its maps; the camera and the truth read through the channel layer."""
+    from smappy.io.tiff import open_stack
+    from smappy.plugins import settings_from
+    from smappy.plugins.fit import OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings
+    from smappy.plugins.simulate import SimulateSettings, preset_values
+    from smappy.simulate.source import fourpi_path, write_recipe
+    values = preset_values("4Pi pores (Nup96)")
+    values["n_frames"] = 50
+    s = settings_from(SimulateSettings, values)
+    path = write_recipe(s, tmp_path / "npc.sim.yaml")
+    assert fourpi_path(path).is_file()
+    source = open_stack(path)
+    assert source.shape == (64, 256) and source.layout.n_channels == 4
+    first, block = next(source.frames(chunk=10))
+    assert block.shape == (10, 64, 256)
+    truth = source.truth()
+    assert "phase_rad" in truth.keys() and truth.metadata["fourpi"]["period_nm"] == 260.0
+    fit = FourPiFit()
+    settings = FourPiFitSettings(source=SourceSettings(path=str(path)),
+                                 output=OutputSettings(path="", save=False))
+    updates = fit.react("source.path", settings)
+    assert updates["model.calibration"] == str(fourpi_path(path))
+    assert updates["model.channels.registration"] == "model"
+    settings.model.calibration = updates["model.calibration"]
+    settings.model.channels.registration = "model"
+    channels = fit.open_source(settings)
+    assert channels.camera["conversion"] == s.camera.conversion
+    assert channels.frame(0).shape == (4, 64, 64)
+
+
+def test_a_4pi_camera_wants_a_4pi_model_or_none_and_no_split():
+    from dataclasses import replace
+    from smappy.plugins.simulate import SimulateSettings
+    from smappy.simulate.camera import psf_problem
+    s = SimulateSettings(output="camera")
+    s = replace(s, camera=replace(s.camera, fourpi=True))
+    assert psf_problem(s) == ""
+    assert "two different cameras" in psf_problem(replace(s, camera=replace(s.camera, split=True)))
+
+
 # ---------------------------------------------------------------- detection's resampling
 
 def test_the_nearest_pixel_lookup_reads_each_pixel_where_the_map_puts_it_to_half_a_pixel():

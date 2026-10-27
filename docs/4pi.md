@@ -1194,3 +1194,44 @@ They make every slice determined from one bead.
   - fringe period 250 nm (uiPSF v1's model: 260 nm);
   - fitted back to their own beads: z slope median 1.01 (0.85–1.11),
     scatter 2–7 nm, phase slope 0.99–1.02.
+
+## 16. Simulated 4Pi cameras and live DCIMG (2026-10-27)
+
+**Simulate's 4Pi camera** (*camera frames* > *4Pi*; the preset *4Pi nuclear
+pores (Nup96)*):
+- Four phase images side by side.  Each molecule is drawn in all four with
+  the model's I, A, B at phase = phase_per_nm · z + the cavity's phase,
+  drifting at *cavity drift* (0.04 rad/s), through `fourpi.add_frames`
+  (`render_frames` without its noise).
+- The model is the *PSF calibration* if it is a 4Pi model, with its layout
+  and maps.  Otherwise it is the closed-form `model_calibration`, at 21 px,
+  40 nm slices and ±800 nm (50 MB of spline), written beside the recipe as
+  `<name>_4pi.h5`.
+- The source carries its `layout`, as the quadrant files do, so Spline 4Pi's
+  *auto* takes it.  `recipe_calibration` gives `("fourpi", model)`, and the
+  fitter's `react` fills the model and the registration "model"
+  (`_FitPlugin.calibration_kind`).
+- `ChannelSource` reads through to the wrapped source for what it lacks: the
+  simulation's camera, settings and truth.
+- **On the preset**, 1500 frames: 4289 localizations, the rings at −30 and
+  +29 nm (10th and 90th percentiles; truth ±25), envelope scatter 1.06× its
+  error, 2.3 % expected wrong fringes.  With 300 frames the cavity windows
+  are too thin, and over 10 % land one fringe off.
+
+**Live DCIMG.**
+- In a new-format file each frame's 32-byte footer follows its pixels and
+  holds its frame number and time.  `DcimgFile` counts the frames whose
+  numbers run on from the first (and have a time, where the camera records
+  any).  It does not trust the header's count, which a file being written
+  may not have yet.  A file grown ahead of its frames reads zeros there,
+  which fail.
+- `DcimgSource.watch` is `watch_stack`'s stream (poll, idle timeout, the
+  writer's *finished*, idle blocks), with the series listed again each time.
+- Old-format files keep the stamps at the end, and are refused live.
+- The fit reads a live stream through `_FitPlugin.watch_blocks`.  Spline 4Pi
+  takes it from its `ChannelSource`, so the channels are cut as the file
+  grows.
+- Channel drift is refused live: it needs the whole acquisition.
+- **Assumed, not checked on a camera:** that DCAM writes a frame's footer
+  after its pixels and leaves the header's count until the end.  The test
+  writes a file that way (`_growing_dcimg`).

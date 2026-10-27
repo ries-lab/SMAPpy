@@ -1,0 +1,22 @@
+# Nup96 pores on a 4Pi camera: four phase images side by side, each molecule
+# in all four at the cavity's phase, drawn with a closed-form astigmatic 4Pi
+# model written beside the recipe (or a 4Pi model chosen as the optics' PSF
+# calibration).  Fit this opens Spline 4Pi with that model; its 4Pi z puts the
+# two rings, 50 nm apart, on their fringe.
+n_frames: 5000
+output: camera
+field_um: 6.4
+key:
+  n_frames: frames
+  components.0.blinking.photons: photons per blink
+  camera.cavity_drift_rad_s: cavity drift
+components:
+  - name: NPC
+    structure: {kind: structure, preset: npc}
+    labelling: {efficiency: 0.6}
+    blinking: {photons: 4000, photons_std: 2000, blinks: 3}
+optics:
+  astigmatism: true
+camera:
+  fourpi: true
+  size_px: 64

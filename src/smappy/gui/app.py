@@ -1838,8 +1838,8 @@ class ControlWindow(QMainWindow):
         if drawn is not None:
             # drawn with a PSF calibration: the spline fitter of its kind,
             # which takes it -- for a split camera that replaces the above
-            found = self._pinned(DUAL_SPLINE_FITTER if drawn[0] == "dual"
-                                 else SPLINE_FITTER) or found
+            found = self._pinned({"dual": DUAL_SPLINE_FITTER, "fourpi": FOURPI_FITTER}
+                                 .get(drawn[0], SPLINE_FITTER)) or found
         elif elliptical:
             found = self._pinned(DROP_FITTER) or found
         panel = None
@@ -2011,6 +2011,7 @@ class RenderWindow(QMainWindow):
 DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
 SPLINE_FITTER = "Localize/Spline 3D"            # a simulation drawn with a calibration
 DUAL_SPLINE_FITTER = "Localize/Spline 3D 2C"    # ... a split one, with a dual-colour one
+FOURPI_FITTER = "Localize/Spline 4Pi"           # ... a 4Pi camera, with its model
 TWO_COLOUR_FITTER = "Localize/Gaussian 2D 2C"   # a simulated split camera's
 ASTIGMATIC_FITTER = "Localize/Gaussian 2D"     # where an elliptical Gaussian calibration goes
 

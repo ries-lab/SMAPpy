@@ -455,6 +455,10 @@ class _FitPlugin(Plugin):
     two_channel = False
     #: a 4Pi interference phase in the table: what *after the fit*'s 4Pi z needs
     phase = False
+    #: the kind of calibration a simulated recipe's (`simulate.source.recipe_calibration`) this
+    #: fitter takes, where its model settings do not say; and what it sets beside it
+    calibration_kind: Optional[str] = None
+    calibration_extras: Dict[str, Any] = {}
     # *after the fit*'s button: its steps on the open table, without fitting again
     part_runs = (("finish", "Run these now", "Analysis/After fit/After the fit"),)
 
@@ -559,6 +563,14 @@ class _FitPlugin(Plugin):
         instead (`channels.ChannelSource`), and everything after sees
         channels."""
         return _open(settings.source, watch=watch, stop_event=stop_event)
+
+    def watch_blocks(self, source, path, **options):
+        """A live fit's blocks of frames (`smappy.io.watch.watch_stack`'s
+        stream): read from the path, whatever opened it.  A fitter whose
+        source reads the frames its own way (the channel layer) reads them
+        from the source."""
+        from ..io.watch import watch_stack
+        return watch_stack(path, **options)
 
     def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
         """The camera of the space positions are reported in: the chip's,
@@ -890,14 +902,16 @@ class _FitPlugin(Plugin):
             # a recipe drawn with a bead calibration: a spline fitter fits
             # with that calibration, unless one was chosen
             model = getattr(settings, "model", None)
-            kind = ("single" if isinstance(model, SplineModelSettings)
-                    else "dual" if isinstance(model, DualModelSettings) else None)
+            kind = self.calibration_kind or (
+                "single" if isinstance(model, SplineModelSettings)
+                else "dual" if isinstance(model, DualModelSettings) else None)
             if kind is not None:
                 from ..simulate.source import recipe_calibration
                 drawn = recipe_calibration(settings.source.path)
                 if drawn is not None and drawn[0] == kind and model.calibration in (
                         "", getattr(self, "_default_calibration", None)):
                     updates["model.calibration"] = drawn[1]
+                    updates.update(self.calibration_extras)
                     self._default_calibration = drawn[1]
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
@@ -1102,17 +1116,18 @@ class _FitPlugin(Plugin):
         tags = FrameTags()
         behind = [0]              # frames written and not yet read: the lag
         if src.live:
-            from ..io.watch import WatchSettings, watch_stack
+            from ..io.watch import WatchSettings
             # given `ctx.writer_finished`, the writer's word ends the watch
             # and *stop after* is never consulted (`smappy.io.watch`)
             def on_behind(frames: int) -> None:
                 behind[0] = frames
-            blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
-                                 settings=WatchSettings(timeout=src.live_timeout,
-                                                        poll=LIVE_POLL_SECONDS),
-                                 tags=tags, stop_event=ctx.stop,
-                                 finished=ctx.writer_finished, idle_blocks=True,
-                                 on_behind=on_behind)
+            blocks = self.watch_blocks(source, src.path, chunk=src.chunk, start=src.start,
+                                       stop=src.stop,
+                                       settings=WatchSettings(timeout=src.live_timeout,
+                                                              poll=LIVE_POLL_SECONDS),
+                                       tags=tags, stop_event=ctx.stop,
+                                       finished=ctx.writer_finished, idle_blocks=True,
+                                       on_behind=on_behind)
             total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None

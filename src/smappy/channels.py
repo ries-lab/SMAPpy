@@ -527,6 +527,14 @@ class ChannelSource(ImageSource):
     def n_channels(self) -> int:
         return self.layout.n_channels
 
+    def __getattr__(self, name):
+        # what the wrapped source knows beyond frames -- a simulation's
+        # camera, settings and truth -- read through, as the fit reads them
+        base = self.__dict__.get("base")
+        if base is None or name.startswith("__"):
+            raise AttributeError(name)
+        return getattr(base, name)
+
     def frames(self, chunk: int = 100, start: int = 0, stop: Optional[int] = None):
         self.base.tags = self.tags
         for first, block in self.base.frames(chunk=chunk, start=start, stop=stop):

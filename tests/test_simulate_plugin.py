@@ -14,10 +14,14 @@ def preset(name):
     return settings_from(SimulateSettings, preset_values(name))
 
 
-def test_every_shipped_preset_is_a_scene_that_runs():
+def test_every_shipped_preset_is_a_scene_that_runs(tmp_path):
     for name in presets():
         settings = preset(name)
         settings.n_frames = 300
+        if settings.output == "camera":
+            # a camera preset writes its recipe, here rather than in the last folder
+            settings.camera.path = str(tmp_path / "preset.sim.yaml")
+            settings.camera.load_truth = True
         result = Simulate().run(Context(), settings)
         locs = result.files[0][0]
         assert len(locs) > 0, name

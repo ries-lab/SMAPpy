@@ -17,6 +17,14 @@ there.  They are put back on reading (`DcimgFile.frames`), which is the
 "4-pixel correction" the 4Pi data need: without it a hot spot of four pixels
 sits in the middle of the strip, in one of the channels.
 
+A file still being written (`DcimgSource.watch`): the header's frame count
+is not to be trusted then -- it may be what was planned, or nothing yet -- so
+a new-format file counts the frames that are there, by their footers: frame
+k is written once its footer, which follows its pixels, holds the frame
+number after frame k - 1's (and a time, where the camera records them).  A file the writer has grown ahead of
+the frames reads zeros there, which never pass.  An old-format file keeps
+its stamps in a footer written at the end and cannot be followed.
+
 The layout follows Giacomo Mazzamuto's ``dcimg`` package (MIT), which pieced
 it together from earlier readers; nothing here imports it.
 """
@@ -104,6 +112,7 @@ class DcimgFile:
                 # starts at 1024 - height / 2.
                 self.y0 = 1024 - self.height // 2
             stride = image + _NEW_FRAME_FOOTER
+            self.n_frames = _written(self._mm, data, image, stride, self.n_frames)
             self._data = np.ndarray((self.n_frames, self.height, self.width), self.dtype,
                                     self._mm, data, (stride, row, depth))
             self._stamps = np.ndarray((self.n_frames,), "<u4", self._mm, data + image,
@@ -158,6 +167,25 @@ class DcimgFile:
 
     def close(self) -> None:
         self._mm = self._data = self._four = self._stamps = self._times = None
+
+
+def _written(mm, data: int, image: int, stride: int, declared: int) -> int:
+    """How many frames of a new-format file are written (the module
+    docstring): those the file is long enough for, up to the first whose
+    footer's frame number does not follow on or whose time is zero."""
+    fits = max((len(mm) - data) // stride, 0)
+    if fits == 0:
+        return 0
+    stamps = np.ndarray((fits,), "<u4", mm, data + image, (stride,))
+    seconds = np.ndarray((fits,), "<u4", mm, data + image + 4, (stride,))
+    good = stamps == stamps[0] + np.arange(fits, dtype=np.uint32)
+    if seconds.any():
+        # a camera that records times: a first frame not yet written has none
+        good &= seconds != 0
+    bad = np.flatnonzero(~good)
+    n = int(bad[0]) if len(bad) else fits
+    # a finished file says how many it has; a longer one's tail is not frames
+    return min(n, declared) if declared and n >= declared else n
 
 
 def read_dcimg(paths: Sequence) -> np.ndarray:
@@ -223,5 +251,55 @@ class DcimgSource(ImageSource):
         if pending:
             yield at, np.concatenate(pending)
 
-    def watch(self, chunk: int = 100, **kwargs):
-        raise NotImplementedError("following a DCIMG file as it is written is not supported yet")
+    def watch(self, chunk: int = 100, settings=None, start: int = 0, stop: int = None,
+              stop_event=None, on_wait=None, tags=None, finished=None, idle_blocks: bool = False,
+              on_behind=None):
+        """Like `frames`, for an acquisition the camera is still writing:
+        `smappy.io.watch.watch_stack`'s stream and options, the frames counted
+        by their footers (the module docstring), the series' files listed
+        again on every look.  ``tags`` is accepted and left alone: a DCIMG
+        records no metadata per frame."""
+        import time
+
+        from .quadrants import numbered_series
+        from .watch import WatchSettings, _sleep, _stopped
+        settings = settings or WatchSettings()
+        at, last_new, final = start, time.monotonic(), False
+        empty = np.empty((0,) + tuple(self.shape), self.dtype)
+        while not _stopped(stop_event):
+            if _stopped(finished):
+                final = True          # read before the frames: nothing written is left behind
+            files = numbered_series(self.files[0])
+            counts = []
+            for f in files:
+                d = DcimgFile(f)
+                if d.version != NEW:
+                    raise ValueError(f"{f.name} is an old-format DCIMG, which keeps its frame "
+                                     "stamps at the end: it can be fitted once written, not followed")
+                counts.append(len(d))
+                d.close()
+            there = sum(counts) if stop is None else min(sum(counts), stop)
+            if on_behind is not None:
+                on_behind(max(there - at, 0))
+            if there > at:
+                grown = DcimgSource(files=files, shape=self.shape, dtype=self.dtype,
+                                    n_frames=there, n_frames_declared=None, mm_metadata={},
+                                    summary={}, counts=counts)
+                for first, block in grown.frames(chunk=chunk, start=at, stop=there):
+                    if _stopped(stop_event):
+                        return
+                    yield first, block
+                at, last_new = there, time.monotonic()
+                if not final:
+                    continue          # there may be more already: look again at once
+            if final or (stop is not None and at >= stop):
+                return
+            waited = time.monotonic() - last_new
+            if finished is None and waited >= settings.timeout:
+                final = True
+                continue
+            if on_wait is not None:
+                on_wait(waited)
+            if idle_blocks:
+                yield at, empty
+            _sleep(settings.poll, stop_event)

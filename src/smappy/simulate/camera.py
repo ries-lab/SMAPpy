@@ -57,7 +57,12 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
     stop = s.n_frames if stop is None else min(stop, s.n_frames)
     size = s.camera.size_px
     layout = split_layout(s) if dual else None
+    fourpi = fourpi_model(s)
     height, width = layout["shape"] if dual else (size, size)
+    if fourpi is not None:
+        from ..fourpi import frame_size
+        height, width = frame_size(fourpi[1])
+        cavity = cavity_phases(s)
     out = np.empty((max(stop - start, 0), height, width), np.uint16)
     background = frame_backgrounds(s)
     em = truth.emission
@@ -71,7 +76,11 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
         frame = em.frame[rows] - a
         if hi > lo:
             px = xyz[rows, :2] / s.optics.pixelsize_nm
-            if dual is None and s.optics.calibration:
+            if fourpi is not None:
+                from ..fourpi import add_frames
+                add_frames(image, fourpi[0], fourpi[1], frame, px[:, 0], px[:, 1], xyz[rows, 2],
+                           em.photons[rows], cavity[em.frame[rows]])
+            elif dual is None and s.optics.calibration:
                 if is_dual_calibration(s.optics.calibration):
                     raise ValueError(psf_problem(replace(s, output="camera")))
                 _draw_spline(image, frame, px, xyz[rows, 2], em.photons[rows],
@@ -144,6 +153,14 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
                      "read_noise": s.camera.read_noise, "sigma_nm": s.optics.sigma_nm,
                      "astigmatism": ([s.optics.focal_offset_nm, s.optics.depth_nm]
                                      if s.optics.astigmatism else None)})
+    if fourpi_model(s) is not None:
+        cal = fourpi_model(s)[0]
+        metadata["fourpi"] = {"model": s.optics.calibration or "closed form",
+                              "period_nm": cal.period_nm, "phase_per_nm": cal.phase_per_nm,
+                              "cavity_drift_rad_s": s.camera.cavity_drift_rad_s}
+        # the phase each spot was drawn at, the fit's phase_rad wrapped as it is
+        phase = cal.phase_per_nm * xyz[:, 2] + cavity_phases(s)[em.frame]
+        columns["phase_rad"] = np.angle(np.exp(1j * phase)).astype(np.float32)
     if dual:
         columns["ratio"] = fl.ratio[em.owner].astype(np.float32)
         layout = split_layout(s)
@@ -334,12 +351,24 @@ def is_dual_calibration(path) -> bool:
 def psf_problem(s: SimulationSettings) -> str:
     """What is wrong with the PSF calibration for this camera, or "": a
     split camera draws a dual-colour calibration's two PSFs, one camera a
-    bead calibration's one."""
+    bead calibration's one, a 4Pi camera a 4Pi model or none."""
     path = s.optics.calibration
-    if not path or s.output != "camera":
+    fourpi = getattr(s.camera, "fourpi", False)
+    if s.output != "camera":
+        return ""
+    if fourpi and s.camera.split:
+        return "4Pi and split camera are two different cameras: tick one"
+    if not path:
         return ""
     if not Path(path).is_file():
         return f"no PSF calibration at {path}"
+    from ..fourpi import is_fourpi_calibration
+    if is_fourpi_calibration(path) != fourpi:
+        return (f"{Path(path).name} is a 4Pi model: tick 4Pi" if not fourpi else
+                f"{Path(path).name} is not a 4Pi model: a 4Pi camera needs one (PSF "
+                f"calibration in the 4Pi mode), or none for a closed-form one")
+    if fourpi:
+        return ""
     dual = is_dual_calibration(path)
     if s.camera.split and not dual:
         return (f"{Path(path).name} is a one-camera calibration: a split camera needs a "
@@ -349,6 +378,54 @@ def psf_problem(s: SimulationSettings) -> str:
         return (f"{Path(path).name} is a dual-colour calibration: tick split camera, or "
                 f"choose a one-camera calibration")
     return ""
+
+
+_FOURPI: dict = {}
+
+
+def fourpi_model(s) -> Optional[tuple]:
+    """``(model, layout)`` a 4Pi camera draws with, or None for any other
+    camera: the PSF calibration's 4Pi model and the layout its maps belong
+    to, or `closed_form_fourpi` on four channels of the frame's size side by
+    side.  Built once per model and settings."""
+    camera = getattr(s, "camera", None)
+    if not getattr(camera, "fourpi", False):
+        return None
+    from ..channels import ChannelLayout, side_by_side
+    from ..fourpi import load_fourpi_calibration
+    path = s.optics.calibration
+    o = s.optics
+    key = (str(Path(path).resolve()) if path else None, camera.size_px, o.pixelsize_nm,
+           o.sigma_nm, o.astigmatism, o.focal_offset_nm, o.depth_nm)
+    if key not in _FOURPI:
+        cal = load_fourpi_calibration(path) if path else closed_form_fourpi(s)
+        layout = (ChannelLayout.from_dict(cal.layout) if cal.layout else
+                  side_by_side(cal.n_channels, camera.size_px, camera.size_px, name="simulation"))
+        maps = cal.maps()
+        _FOURPI[key] = (cal, layout.with_maps(maps) if maps is not None else layout)
+    return _FOURPI[key]
+
+
+def closed_form_fourpi(s):
+    """The 4Pi model of a simulation without a 4Pi calibration
+    (`fourpi.model_calibration`): an elliptical Gaussian envelope of the
+    optics' width, astigmatic as the optics say, a 260 nm fringe.  Without
+    astigmatism the envelope cannot tell z from -z, and neither can a fit."""
+    from dataclasses import replace as replaced
+    from ..fourpi import model_calibration
+    o = s.optics
+    # 21 px and 40 nm slices: its spline is 64 numbers a voxel, 50 MB
+    # this size, five times that at the tests' 27 px and 20 nm
+    cal = model_calibration(size=21, dz=40.0, z_range_nm=800.0, sigma_px=o.sigma_nm / o.pixelsize_nm,
+                            astigmatism_nm=2 * o.focal_offset_nm if o.astigmatism else 0.0,
+                            depth_nm=o.depth_nm)
+    return replaced(cal, pixelsize_nm=(o.pixelsize_nm, o.pixelsize_nm))
+
+
+def cavity_phases(s) -> np.ndarray:
+    """The cavity's phase in every frame, drifting at the set rate."""
+    seconds = np.arange(s.n_frames) * s.frame_time_ms / 1000.0
+    return s.camera.cavity_drift_rad_s * seconds
 
 
 def split_layout(s: SimulationSettings) -> dict:

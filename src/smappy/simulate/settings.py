@@ -206,6 +206,14 @@ class CameraOutputSettings:
                                             help="split camera: the PSF width in the "
                                                  "second half, which sees another "
                                                  "wavelength; auto: the first's")
+    fourpi: bool = param(False, label="4Pi",
+                         help="four phase images of a 4Pi microscope side by side, each "
+                              "molecule in all four at the cavity's phase, for Spline 4Pi: "
+                              "drawn with the PSF calibration if it is a 4Pi model, else "
+                              "with a closed-form astigmatic one written beside the recipe")
+    cavity_drift_rad_s: float = param(0.04, label="cavity drift", unit="rad/s", advanced=True,
+                                      help="4Pi: how fast the cavity's phase drifts, the "
+                                           "slow change of the arms' path difference")
     em_gain: float = param(0.0, label="EM gain", min=0,
                            help="camera frames only.  0: an sCMOS; otherwise an "
                                 "EMCCD with this gain, its multiplication noise "
