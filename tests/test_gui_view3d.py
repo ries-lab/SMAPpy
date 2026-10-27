@@ -224,7 +224,7 @@ def test_a_spin_stops_where_it_is_and_a_view_button_takes_over(app):
     window.show()
     app.processEvents()
     motion, proj = window.view.motion, window.view.projection
-    window.toolbar._set_kind(motion, "spin")
+    window.toolbar._restart(motion, "kind", "spin")
     motion.speed = 90.0
     motion.toggle()
     _wait(app, 0.3)
@@ -260,4 +260,24 @@ def test_make_a_movie_hands_the_rock_to_the_players_view_path(app):
     np.testing.assert_allclose(player.path.keys[0].view.rotation, start, atol=1e-9)
     assert player.coordinate.currentText() == NONE
     assert player.ends.currentData() == "loop" and player.record_from.currentData() == "3D"
+    window.close()
+
+
+def test_a_rock_about_an_axis_chosen_in_its_menu_tips_z_from_the_front(app):
+    from smappy.gui.view3d import View3DWindow
+
+    window = View3DWindow(Session(table()))
+    window.show()
+    app.processEvents()
+    window._preset("front")
+    motion, proj = window.view.motion, window.view.projection
+    start = proj.matrix.copy()
+    window.toolbar.motion_axes["x"].trigger()
+    assert motion.axis == "x"
+    motion.toggle()
+    _wait(app, 0.4)
+    assert proj.matrix[1, 2] != pytest.approx(start[1, 2], abs=1e-3)     # z tips
+    np.testing.assert_allclose(proj.matrix[:, 0], start[:, 0], atol=1e-9)   # about x
+    motion.reset()
+    np.testing.assert_allclose(proj.matrix, start, atol=1e-9)
     window.close()

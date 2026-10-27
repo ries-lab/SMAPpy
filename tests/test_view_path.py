@@ -166,3 +166,16 @@ def test_a_rock_made_a_path_turns_as_far_either_way_and_loops_without_a_seam():
     assert spin.seconds == pytest.approx(12.0) and spin.closed
     with pytest.raises(ValueError):
         vp.motion_path(start, "spin", 15.0, 3.0, 0.0)
+
+
+def test_an_axis_chosen_for_the_motion_is_taken_whatever_the_view():
+    front = viewpoint(el=90.0)
+    assert vp.motion_axis(front.rotation, "x") == "x"
+    assert vp.motion_axis(front.rotation, vp.FROM_VIEW) == "z"
+    with pytest.raises(ValueError):
+        vp.motion_axis(front.rotation, "w")
+    # a rock about x from the front tips z towards the viewer and back
+    path = vp.motion_path(front, "rock", 20.0, 2.0, 30.0, "x")
+    R = path.at(0.25).rotation
+    assert abs(R[1, 2]) == pytest.approx(math.cos(math.radians(20.0)), abs=1e-9)
+    np.testing.assert_allclose(R[:, 0], front.rotation[:, 0], atol=1e-9)    # x stays put
