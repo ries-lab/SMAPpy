@@ -30,7 +30,8 @@ answers for z, kept separate:
 together.  It follows the slow drift of the cavity, and writes z from the
 phase on the fringe the envelope's z points to.
 
-It needs a 4Pi model of the microscope, made from beads: this program's, or
+It needs a 4Pi model of the microscope, made from beads: with the
+[PSF calibration](plugin:Panels/PSF calibration) window's *4Pi beads*, or
 uiPSF v1's `psfmodel_*_4pi.h5`.  The model carries each channel's PSF and
 how the channels map onto each other.  It also needs to know where the
 channels are on the camera frame (*channels*).
@@ -241,7 +242,8 @@ put the channels side by side.  Otherwise it takes the microscope's: in its
 entry of the microscope database, each channel can have a `region`
 (`[x, y, width, height]` on the chip, or one per camera) and a `mirror`
 (`"x"`, `"y"` or `"xy"`).  Set it there once and every acquisition finds
-it, whatever its camera ROI.  To try a layout first, type the corners, on
+it, whatever its camera ROI.  The shipped entry *4Pi-SMS example*, with its
+camera, is one: the layout of the 4Pi-SMS consortium's example data.  To try a layout first, type the corners, on
 the chip: SMAP's 4Pi settings file gives them as `x4pi`, `y4pi`,
 `width4pi`, `height4pi` and `mirror4pi`.  *4Pi-SMS* is the Bewersdorf-lab
 design: four 168-pixel images on a 2048 x 168 strip, the last two mirrored.

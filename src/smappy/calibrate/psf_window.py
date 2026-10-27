@@ -275,11 +275,16 @@ class PSFCalibrationWindow(QMainWindow):
         ilayout.addWidget(self.insitu_detection_form)
         # elliptical Gaussian: the fit box and the curves' terms
         self.elliptical_form = SettingsForm(EllipticalCalibrationSettings)
+        # 4Pi beads: where the channels are, the scan's z step and mirror steps, the model's order
+        from .fourpi_beads import FourPiBeadSettings
+        self.fourpi_form = SettingsForm(FourPiBeadSettings)
+        self.fourpi_form.changed.connect(self._show_fourpi)
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=False),
                          "model": CollapsibleSection("model", model, expanded=True),
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
                          "elliptical": CollapsibleSection("elliptical Gaussian", self.elliptical_form,
                                                           expanded=True),
+                         "4Pi": CollapsibleSection("4Pi beads", self.fourpi_form, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -357,14 +362,18 @@ class PSFCalibrationWindow(QMainWindow):
             self._show_optics()
         self.sections["in situ"].setVisible(insitu)
         self.sections["elliptical"].setVisible(reads.get("elliptical", False))
-        self.sections["beads"].setVisible(not insitu)
+        fourpi = reads.get("4Pi", False)
+        self.sections["4Pi"].setVisible(fourpi)
+        self._show_fourpi()
+        # 4Pi finds its beads on channel 0 by itself, and its channels are its section's
+        self.sections["beads"].setVisible(not insitu and not fourpi)
         # in situ decides the magnitude itself, by its *hold*: held from the start, or symmetric and learnt
         self.model_form.set_shown({"magnitude": not insitu})
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
-        if insitu and self.is_dual:
+        if (insitu or fourpi) and self.is_dual:
             self.mode_box.setCurrentText("Single channel")          # one channel only, for now
-        self.mode_box.setEnabled(not insitu)
+        self.mode_box.setEnabled(not insitu and not fourpi)
         self.stack_browser.set_movie(getattr(self.method, "files", "") == "movies")
         self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
@@ -372,7 +381,7 @@ class PSFCalibrationWindow(QMainWindow):
         for cls, form in self.detection_forms.items():
             form.setVisible(cls is wanted)
             form.set_shown({name: reads["averaging"] for name in AVERAGE_ONLY if name in shared})
-        pupil = self.method.key in ("pupil", "insitu")          # what needs torch
+        pupil = self.method.key in ("pupil", "insitu") or getattr(self.method, "needs_torch", False)
         missing = torch_missing()
         self.notice.setText(missing or "")
         self.notice.setVisible(pupil and missing is not None)
@@ -388,6 +397,11 @@ class PSFCalibrationWindow(QMainWindow):
         self.use_button.setText(getattr(self.method, "use_label", None) or (
             "Use in the Spline 3D 2C fitter" if self.is_dual else "Use in the Spline 3D fitter"))
         self._update_buttons()
+
+    def _show_fourpi(self) -> None:
+        """The typed corners only while the channels are typed."""
+        typed = self.fourpi_form.value().layout == "typed"
+        self.fourpi_form.set_shown({n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")})
 
     def _forget(self, message: str) -> None:
         """A change of method or mode makes the result another calibration's: dropped, settings kept."""
@@ -566,7 +580,8 @@ class PSFCalibrationWindow(QMainWindow):
         return ", ".join(bits)
 
     def _update_buttons(self) -> None:
-        ready = not (self.method.key in ("pupil", "insitu") and torch_missing() is not None)
+        ready = not ((self.method.key in ("pupil", "insitu") or getattr(self.method, "needs_torch", False))
+                     and torch_missing() is not None)
         done = self.run_result is not None
         self.toggle_button.setEnabled(done or self.detected is not None)
         self.detect_button.setEnabled(ready and not self.busy)
@@ -698,7 +713,7 @@ class PSFCalibrationWindow(QMainWindow):
             self.add_dropped(chosen)
             return
         paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", folders.start(),
-                                                "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)")
+                                                "Image stacks (*.tif *.tiff *.ome.tif *.dcimg *.mat);;All files (*)")
         folders.remember(paths, stack=True)
         self.add_paths(paths)
 
@@ -853,6 +868,8 @@ class PSFCalibrationWindow(QMainWindow):
             inputs["insitu"] = self.insitu_form.value()
         if self.method.sections.get("elliptical", False):
             inputs["elliptical"] = self.elliptical_form.value()
+        if self.method.sections.get("4Pi", False):
+            inputs["fourpi"] = self.fourpi_form.value()
         if self.paths:
             # a value typed that will not do stops the run, naming it: `_stacks_camera` would
             # otherwise put the file's in its place without a word
@@ -1283,7 +1300,8 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is None or self.run_result.saved is None:
             return
         self.calibrated.emit(str(self.run_result.saved), self.run_result.dual)
-        fitter = ("Astigmatic z" if not getattr(self.method, "listed", True) else
+        fitter = ("Spline 4Pi fitter" if self.method.key == "fourpi" else
+                  "Astigmatic z" if not getattr(self.method, "listed", True) else
                   "Spline 3D 2C fitter" if self.run_result.dual else "Spline 3D fitter")
         self.status_bar.showMessage(f"the {fitter} now uses {Path(self.run_result.saved).name}")
 

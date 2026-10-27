@@ -453,6 +453,27 @@
           "read": "number"
         }
       }
+    },
+    {
+      "name": "4Pi-SMS example camera",
+      "comment": "The camera of the 4Pi-SMS consortium's Example Data II (zenodo 4022827), as SMAP's 4Pi settings give it (Cell01_642_000_000_3dcal.mat): an ORCA-Flash 4.0, 100 nm pixels on the sample, offset 100, 0.5 photons per ADU. No tag identifies it in a DCIMG file: chosen by hand. An example until the Ries-lab 4Pi has its own entry.",
+      "parameters": {
+        "em_on": {
+          "fixed": false
+        },
+        "pixelsize_um": {
+          "fixed": 0.1
+        },
+        "conversion": {
+          "fixed": 0.5
+        },
+        "emgain": {
+          "fixed": 1.0
+        },
+        "offset": {
+          "fixed": 100.0
+        }
+      }
     }
   ],
   "microscopes": [
@@ -775,6 +796,58 @@
         }
       },
       "camera": "Fusion BT 1"
+    },
+    {
+      "name": "4Pi-SMS example",
+      "comment": "The Bewersdorf-design astigmatic 4Pi-SMS of the consortium's Example Data II (zenodo 4022827), as an example of a 4Pi microscope's entry until the Ries-lab 4Pi has its own. Its four phase images on one chip, from SMAP's 4Pi settings of that data (x4pi 93, 469, 1409, 1769; 168 px; the last two mirrored in x), the geometry Spline 4Pi and 4Pi beads read under 'the microscope's'. Silicone objectives (NA 1.35, n 1.406); the emission is a placeholder: a model learnt with 680 nm gave a period 4 % longer than its beads show, so the beads' is nearer 660 nm. Not identified from a file: chosen by hand.",
+      "identify": {},
+      "devices": {},
+      "parameters": {
+        "NA": 1.35,
+        "n_immersion": 1.406,
+        "wavelength_nm": 660
+      },
+      "channels": {
+        "p1": {
+          "filter": "",
+          "region": [
+            93,
+            0,
+            168,
+            168
+          ]
+        },
+        "s1": {
+          "filter": "",
+          "region": [
+            469,
+            0,
+            168,
+            168
+          ]
+        },
+        "p2": {
+          "filter": "",
+          "region": [
+            1409,
+            0,
+            168,
+            168
+          ],
+          "mirror": "x"
+        },
+        "s2": {
+          "filter": "",
+          "region": [
+            1769,
+            0,
+            168,
+            168
+          ],
+          "mirror": "x"
+        }
+      },
+      "camera": "4Pi-SMS example camera"
     }
   ]
 }

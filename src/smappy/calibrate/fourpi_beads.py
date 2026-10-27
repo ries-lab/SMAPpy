@@ -24,6 +24,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from ..plugins import param
+
 
 @dataclass
 class FourPiBeads:
@@ -131,11 +133,282 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
 
 
 def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Optional[int] = None,
-         overwrite: bool = False):
-    """The learnt model as a `FourPiCalibration` file (`fourpi.save_fourpi_calibration`); the calibration."""
+         overwrite: bool = False, layout=None):
+    """The learnt model as a `FourPiCalibration` file (`fourpi.save_fourpi_calibration`); the calibration.
+    ``layout`` (a `channels.ChannelLayout`) is the geometry its maps are between, kept with it."""
     from uipsf.workflows.fourpi import calibration
 
     from ..fourpi import save_fourpi_calibration
     cal = calibration(fit, z_range_nm=z_range_nm, dz_nm=dz_nm, roi_px=roi_px)
+    if layout is not None:
+        cal.layout = layout.to_dict()
     save_fourpi_calibration(path, cal, overwrite=overwrite)
     return cal
+
+
+# ---------------------------------------------------------------- any scan, through the channel layer
+#
+# The PSF calibration window's *4Pi beads*.  A scan comes in as the fitter reads its data: through the
+# channel layer (`channels`), whatever wrote it -- quadrant .mat scans with their mirror steps, or a
+# DCIMG z stack of one phase per slice, the four images on one chip.  The beads are found on channel 0's
+# image summed over the scan, the channels registered from the same scans (`channels.register_channels`)
+# so that every channel's ROI is cut where the bead is, and those ROIs are what uiPSF learns from; it
+# refines the maps itself.
+
+
+LAYOUTS = (("file", "as the file lays them out"), ("microscope", "the microscope's"),
+           ("typed", "typed corners"), ("yale", "4Pi-SMS (Bewersdorf lab)"))
+
+
+@dataclass
+class FourPiBeadSettings:
+    """The *4Pi beads* section of the PSF calibration window."""
+    layout: str = param("file", label="channels", choices=LAYOUTS,
+                        help="where the phase channels are: the quadrant files' own layout, the microscope "
+                             "database's, typed, or the 4Pi-SMS design")
+    x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
+                           help="each channel's left edge on the chip, comma-separated")
+    y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
+                           help="each channel's top edge on the chip")
+    width: int = param(200, label="width", unit="px", min=8, help="one channel's width")
+    height: int = param(200, label="height", unit="px", min=8, beside=True, help="one channel's height")
+    mirrored: str = param("", label="mirrored in x",
+                          help="the channels mirrored left-right, by number from 1; empty: none")
+    z_step_nm: float = param(0.0, label="z step", unit="nm", min=0.0,
+                             help="the stage's step between slices; 0: from the scan's own record")
+    mirror_steps: str = param("2, 0, -2", label="mirror steps", unit="rad",
+                              help="a scan's phase steps per slice, as set; a scan of one phase per slice "
+                                   "has none")
+    roi_size: int = param(21, label="box", unit="px", min=9, help="the box each bead is cut to, per channel")
+    n_max: int = param(6, label="Zernike order", min=2, max=10, advanced=True,
+                       help="the highest Zernike order of each objective's pupil")
+    photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
+                                          help="a bead's photon count free in every frame, as its light varies")
+    model_z_range_nm: float = param(600.0, label="model z range", unit="nm", min=100.0, advanced=True,
+                                    help="+- this: the z range the saved model covers")
+    model_dz_nm: float = param(20.0, label="model z step", unit="nm", min=5.0, advanced=True,
+                               help="the saved model's z step")
+
+
+def scan_layout(settings: FourPiBeadSettings, source, camera=None):
+    """The layout of a scan's frames: the source's own, the microscope's for ``camera``, typed or 4Pi-SMS,
+    the last three on the chip and put on the camera's ROI."""
+    from ..channels import YALE_4PI, from_corners
+    roi = camera.roi_offset if camera is not None else (0, 0)
+    if settings.layout == "file":
+        layout = getattr(source, "layout", None)
+        if layout is None:
+            raise ValueError("this file does not lay out its channels itself (only the quadrant .mat files "
+                             "do): use the microscope's channels, or type them")
+        return layout
+    if settings.layout == "yale":
+        return YALE_4PI.on_camera(roi)
+    if settings.layout == "microscope":
+        from ..microscope_db import database
+        scope = (getattr(camera, "microscope", None) or {}).get("name") if camera is not None else None
+        entry = database().get(scope) if scope else None
+        layout = entry.channel_layout(getattr(camera, "camera_name", "") or "") if entry else None
+        if layout is None:
+            raise ValueError("the microscope database gives no channel rectangles for these stacks' "
+                             "microscope: choose one that has them, or type the corners")
+        return layout.on_camera(roi)
+    numbers = lambda text: [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
+    x, y = numbers(settings.x_corners), numbers(settings.y_corners)
+    if len(x) != len(y) or not 1 <= len(x) <= 4:
+        raise ValueError("give one x and one y corner per channel, one to four of them")
+    mirrored = set(numbers(settings.mirrored))
+    return from_corners(x, y, settings.width, settings.height,
+                        flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
+
+
+def scan_step_nm(path, given: float = 0.0) -> float:
+    """The stage's step between slices: ``given``, or the scan's own record -- the median step of a
+    ``Z Positions.txt`` beside quadrant files (`stage_z`), or the ``Step Size (um)`` of the ``.txt`` a
+    4Pi-SMS DCIMG scan's folder holds."""
+    if given:
+        return float(given)
+    from ..io.quadrants import read_z_positions
+    folder = Path(path).parent
+    positions = read_z_positions(folder)
+    if positions is not None and len(positions) > 1:
+        return float(np.median(np.diff(positions))) * 1000
+    import re
+    for text in sorted(folder.glob("*.txt")) + sorted(folder.parent.glob("*.txt")):
+        found = re.search(r"Step Size \(um\):\s*([0-9.]+)", text.read_text(encoding="utf-8", errors="replace"))
+        if found:
+            return float(found.group(1)) * 1000
+    raise ValueError(f"{Path(path).name}: no record of the z step beside it; give the z step")
+
+
+def read_scan(path, settings: FourPiBeadSettings, camera):
+    """One scan in photons as (channel, slice, mirror step, y, x), and its layout.  Quadrant files keep
+    their mirror steps; any other scan is one phase per slice, its frames the slices."""
+    from ..camera import to_photons
+    from ..channels import ChannelSource
+    from ..io.quadrants import is_quadrant_mat, read_quadrant_mat
+    from ..io.tiff import open_stack
+    if is_quadrant_mat(path) and settings.layout == "file":
+        from ..channels import side_by_side
+        raw = read_quadrant_mat(path)                                          # (C, J, M, y, x)
+        C, J, M, H, W = raw.shape
+        layout = side_by_side(C, W, H, name="quadrant files")
+        return to_photons(raw, camera), layout
+    base = open_stack(path)
+    layout = scan_layout(settings, base, camera)
+    source = ChannelSource.wrap(base, layout)
+    frames = np.concatenate([b for _, b in source.frames(chunk=200)])         # (J, C, h, w)
+    return to_photons(frames, camera).transpose(1, 0, 2, 3)[:, :, None], layout
+
+
+def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
+    """Every bead of the scans ``paths`` in every channel (`FourPiBeads`), with the layout and the
+    registration the ROIs were cut by.  A series of files (one DCIMG per slice) is read once, through
+    any of its files."""
+    from ..channels import bead_positions, register_channels
+    tell = progress or (lambda text: None)
+    scans, seen = [], set()
+    for path in paths:
+        from ..io.tiff import open_stack
+        key = tuple(str(p) for p in getattr(open_stack(path), "files", [path]))
+        if key in seen:
+            continue
+        seen.add(key)
+        tell(f"reading {Path(path).name} ({len(scans) + 1})")
+        stack, layout = read_scan(path, settings, camera)
+        scans.append((path, stack, layout))
+    layout = scans[0][2]
+    if any(s[2].size != layout.size or s[2].n_channels != layout.n_channels for s in scans):
+        raise ValueError("the scans' channels differ in size or number")
+    projections = [s[1].sum(axis=(1, 2)) for s in scans]                      # (C, h, w) each
+    tell("registering the channels")
+    registration = register_channels(projections)
+    layout = layout.with_maps(registration.maps)
+    half = int(settings.roi_size) // 2
+    data, roi_xy, records = [], [], []
+    steps = scans[0][1].shape[2]
+    for k, (path, stack, own) in enumerate(scans):
+        C, J, M, H, W = stack.shape
+        if M != steps:
+            raise ValueError("the scans' mirror steps differ")
+        for p0 in bead_positions(projections[k][0]):
+            centres = [np.rint(p0 if c == 0 else layout.to_channel(c, [p0])[0]).astype(int) for c in range(C)]
+            if any(not (half <= cx < W - half and half <= cy < H - half) for cx, cy in centres):
+                continue
+            data.append(np.stack([stack[c, :, :, cy - half:cy + half + 1, cx - half:cx + half + 1]
+                                  for c, (cx, cy) in enumerate(centres)]))
+            roi_xy.append([(cx, cy) for cx, cy in centres])
+            x_frame, y_frame = own.on_frame(0, [p0])[0]
+            records.append({"stack": k, "path": str(path), "x_px": int(round(x_frame)),
+                            "y_px": int(round(y_frame)),
+                            "brightness": float(stack[0, :, :, centres[0][1], centres[0][0]].max())})
+    if not data:
+        raise ValueError("no bead lies far enough from every channel's edge for its box")
+    J = scans[0][1].shape[1]
+    z_nm = -(np.arange(J) - (J - 1) // 2) * scan_step_nm(scans[0][0], settings.z_step_nm)
+    return FourPiBeads(np.stack(data), np.asarray(roi_xy, float), z_nm, records), layout, registration
+
+
+def steps_of(settings: FourPiBeadSettings, n_steps: int) -> tuple:
+    """The mirror steps the learning starts from: as set for a scan with ``n_steps`` of them, (0,) for
+    one phase per slice."""
+    if n_steps == 1:
+        return (0.0,)
+    steps = tuple(float(w) for w in str(settings.mirror_steps).replace(";", ",").split(",") if w.strip())
+    if len(steps) != n_steps:
+        raise ValueError(f"the scans have {n_steps} mirror steps per slice; give {n_steps} under mirror steps")
+    return steps
+
+
+# ---------------------------------------------------------------- after a calibration
+
+def bead_fits(beads: FourPiBeads, cal, box: int = 15) -> dict:
+    """Every frame of every bead fitted with the saved model (`psf.Global4PiPSF`), each channel's box at
+    its own pixel and the rest of the model's map in the link: z and the phase against the stage, and per
+    bead the slope of z on the stage and its scatter about it over the middle half of the scan."""
+    from ..fourpi import link
+    from ..psf import Global4PiPSF
+    E, C, J, M, H, W = beads.data.shape
+    o = (H - box) // 2
+    rois = beads.data[..., o:o + box, o:o + box].transpose(0, 2, 3, 1, 4, 5).reshape(-1, C, box, box)
+    maps = cal.maps()
+    dx, dy = np.zeros((E, C)), np.zeros((E, C))
+    if maps is not None:
+        from ..channels import ChannelLayout
+        layout = ChannelLayout([(0, 0, W, H)] * C, maps=maps)
+        for c in range(1, C):
+            there = layout.to_channel(c, beads.roi_xy[:, 0])
+            dx[:, c], dy[:, c] = (there - beads.roi_xy[:, c]).T
+    per = J * M
+    lk = link(len(rois), C, dx=np.repeat(dx, per, 0), dy=np.repeat(dy, per, 0))
+    model = Global4PiPSF(cal)
+    values = model.unpack(model.fit(np.ascontiguousarray(rois, np.float32), lk, iterations=100), lk)
+    z = values["z_nm"].reshape(E, J, M).astype(float)
+    # beyond the model's z range a fit is held at its edge (`Global4PiPSF.unpack`): no z at all
+    z[values["z_err_nm"].reshape(E, J, M) >= cal.shape[0] * cal.dz] = np.nan
+    phase = values["phase_rad"].reshape(E, J, M)
+    middle = slice(J // 4, 3 * J // 4)
+    slope, scatter, phase_slope = {}, {}, {}
+    for b in range(E):
+        zz, st = z[b, middle].ravel(), np.repeat(beads.z_nm[middle], M)
+        ok = np.isfinite(zz)
+        if ok.sum() > 3:
+            p = np.polyfit(st[ok], zz[ok], 1)
+            slope[b], scatter[b] = float(p[0]), float(np.std(zz[ok] - np.polyval(p, st[ok])))
+        # z from the phase, unwrapped along the scan, against the stage: the model's period against the
+        # data's -- off by as much as the emission wavelength typed is off
+        from_phase = np.unwrap(phase[b, middle, 0]) / cal.phase_per_nm
+        phase_slope[b] = float(np.polyfit(beads.z_nm[middle], from_phase, 1)[0])
+    return {"z": z, "phase": phase, "stage": beads.z_nm, "slope": slope, "scatter": scatter,
+            "phase_slope": phase_slope, "phase_per_nm": float(cal.phase_per_nm)}
+
+
+def draw_model(figure, cal) -> str:
+    """The saved model: each channel's incoherent part through focus (x against z) and its modulation
+    |A, B| / I at the centre against z."""
+    V = cal.volumes                                   # (C, 3, z, y, x)
+    C, _, Z, H, W = V.shape
+    axes = figure.subplots(1, C + 1)
+    z = cal.z_index_to_nm(np.arange(Z))
+    for c in range(C):
+        axes[c].imshow(V[c, 0, :, H // 2, :], aspect="auto", cmap="magma",
+                       extent=(-W / 2, W / 2, z[-1], z[0]))
+        axes[c].set_title(f"channel {c + 1}: I", fontsize="small")
+        axes[c].set_xlabel("x (px)")
+    axes[0].set_ylabel("z (nm)")
+    for c in range(C):
+        i, a, b = V[c, 0, :, H // 2, W // 2], V[c, 1, :, H // 2, W // 2], V[c, 2, :, H // 2, W // 2]
+        axes[C].plot(z, np.hypot(a, b) / np.maximum(i, 1e-12), label=f"{c + 1}")
+    axes[C].set_xlabel("z (nm)")
+    axes[C].set_ylabel("modulation at the centre")
+    axes[C].set_ylim(0, 1.05)
+    axes[C].legend(frameon=False, fontsize="small")
+    return f"fringe period {cal.period_nm:.1f} nm, the model's own"
+
+
+def draw_against_stage(figure, fits: dict, selected=(), excluded=()) -> str:
+    """z of every bead against the stage: the envelope's (left) and the phase's, unwrapped (right), each
+    less the stage; the selected beads drawn darker, the excluded ones not at all."""
+    left, right = figure.subplots(1, 2)
+    stage = fits["stage"]
+    E, J, M = fits["z"].shape
+    for b in range(E):
+        if b in excluded:
+            continue
+        strong = not selected or b in selected
+        kw = dict(lw=1.5 if strong else 0.7, alpha=1.0 if strong else 0.35)
+        left.plot(stage, np.nanmean(fits["z"][b], axis=1) - stage, **kw)
+        phase = np.unwrap(fits["phase"][b, :, 0])
+        from_phase = phase / fits["phase_per_nm"]
+        offset = np.nanmedian(from_phase - stage)
+        right.plot(stage, from_phase - stage - offset, **kw)
+    for ax, what in ((left, "envelope z - stage (nm)"), (right, "z from the phase - stage (nm)")):
+        ax.set_xlabel("stage z (nm)")
+        ax.set_ylabel(what)
+        ax.axhline(0, color="0.5", lw=0.5)
+    scatter = [v for k, v in fits["scatter"].items() if k not in excluded]
+    slopes = [v for k, v in fits.get("phase_slope", {}).items() if k not in excluded]
+    if not scatter:
+        return ""
+    return (f"the envelope's z scatters {np.median(scatter):.1f} nm about the stage (median); z from the "
+            f"phase runs at {np.median(slopes):.3f} nm per nm of stage -- far from 1, check the emission "
+            "wavelength")

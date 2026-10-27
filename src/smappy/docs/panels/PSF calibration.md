@@ -1,8 +1,8 @@
 ---
 title: PSF calibration
-summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, and shows what each found and how well it fits.
+summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or a 4Pi model for Spline 4Pi from 4Pi bead scans, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiBeads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings]
 ---
 
 ## What it does
@@ -325,6 +325,45 @@ scatters a few nanometres about zero near focus and more towards the ends,
 with no trend; a trend means the curves miss the beads, and the table's
 *residual (nm)* says which bead misses most.
 
+## 4Pi beads
+
+A 4Pi microscope sees each molecule through two objectives, in four phase
+images ([Spline 4Pi](plugin:Localize/Spline 4Pi)).  This method makes the
+model that fitter reads, from a bead scan.
+
+**1. The scan comes in as the fitter's data do,** through the channel layer:
+a Hamamatsu DCIMG z stack with the four images on one chip, or MATLAB
+quadrant files.  *channels* says where the images are: the quadrant files'
+own layout, the microscope's from the microscope database, typed corners,
+or the 4Pi-SMS design.  A scan may have phase steps of the deformable
+mirrors at every slice (*mirror steps*), or one phase per slice, as a scan
+that only moves the stage has.
+
+**2. The beads** are found on the first channel's image, summed over the
+whole scan, where the interference averages out.  The channels are
+registered from the same images (an affine map from a few beads, a
+projective one from eight or more), and every channel's box (*box*) is cut
+where the registration puts the bead.
+
+**3. The model** is uiPSF's 4Pi pupil model: one pupil per objective,
+shared by the channels, the two arms' fields added with each channel's phase
+offset, coherence and arm balance, and each bead's phase.  It refines the
+maps between the channels itself.
+
+**4. The saved model** is rendered from the pupil model at three phases and
+separated into the incoherent part I and the interference A, B, demodulated
+by the fringe period the model itself shows.  It is saved with the channel
+layout its maps belong to, as `<name>_4pi.h5` beside the scans.
+
+The pages are *Model* -- each channel's I through focus, and its modulation
+|A, B| / I at the centre -- and *z against the stage*: every bead fitted back
+with the saved model, the envelope's z and z from the phase, each less the
+stage.  A good model gives a flat line for the envelope's z, a few tens of
+nanometres wide, in the model's z range.  It should give a flat line for the
+phase's z too.  If the phase's z runs at a slope, the model's fringe period
+is not the beads': the emission wavelength under *microscope* is likely off.
+On the 4Pi-SMS example data, 680 nm made z from the phase run 7 % steep.
+
 ## In situ
 
 A PSF measured with beads on the coverslip is not quite the PSF of molecules
@@ -431,8 +470,8 @@ Whether *Add folder...*, and a folder dropped on the window, looks inside the
 folder's subfolders.
 
 ### method
-*bead average*, *pupil model (uiPSF)*, *in situ (blinking molecules)* or
-*elliptical Gaussian*.  The
+*bead average*, *pupil model (uiPSF)*, *in situ (blinking molecules)*,
+*elliptical Gaussian* or *4Pi beads*.  The
 window shows only what the method reads.  Switching keeps the files and
 settings and clears the result.
 
@@ -544,6 +583,29 @@ its spline.
 
 ### elliptical Gaussian
 The elliptical Gaussian method's own settings (*Elliptical Gaussian*).
+
+### 4Pi beads
+The 4Pi beads method's own settings (*4Pi beads*).
+
+### channels
+*the microscope's* reads the rectangles from the microscope database entry
+of the stacks' microscope (each channel's `region` and `mirror`).  The
+shipped *4Pi-SMS example* is one.
+
+### x corners
+On the chip, as SMAP's 4Pi settings give them (`x4pi`).
+
+### mirror steps
+As set on the deformable mirrors.  Which way round they act is found from
+the data.
+
+### box
+Large enough for a defocused bead, small enough that beads near the edge of
+a channel are kept: 21 pixels for 100-130 nm pixels.
+
+### photons per frame
+On by default: on uiPSF's bead scans it lowered the deviance from 1.16 to
+1.06, the largest single term found.
 
 ### fit box
 The box each bead plane is fitted in, in pixels.  Use the *fit box* of the

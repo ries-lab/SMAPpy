@@ -1392,7 +1392,13 @@ class ControlWindow(QMainWindow):
         nobody has opened yet would land nowhere.
         """
         from ..astigmatic_z import is_calibration
-        if is_calibration(path):
+        from ..fourpi import is_fourpi_calibration
+        if is_fourpi_calibration(path):
+            # a 4Pi model: its maps between the channels come with it
+            wanted, values, name = ("Localize/Spline 4Pi", {
+                "model.calibration": str(path), "model.channels.registration": "model"},
+                "Spline 4Pi fitter")
+        elif is_calibration(path):
             # the elliptical Gaussian's curves: for the fit that measures the
             # widths, which turns them into z once it is done
             wanted, values, name = (ASTIGMATIC_FITTER, {

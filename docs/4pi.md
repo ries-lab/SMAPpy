@@ -990,8 +990,24 @@ z) and each bead's scatter about that pattern:
   so n ≤ 8 takes 14 min on the Mac's GPU.  Linearising the pupils' columns as `VectorPSF` does is the
   next step for speed.
 
+**Done since (2026-10-27).**
+- **The method in the window.** *4Pi beads* in the PSF calibration window
+  (`psf_methods.FourPiBeads`, `fourpi_beads.scan_beads`).
+  - Any bead scan comes in through the channel layer: DCIMG or quadrant
+    files, one phase per slice or with mirror steps.  The geometry comes
+    from the file, the microscope database, typed corners, or 4Pi-SMS.
+  - Beads are found on channel 0, and the channels registered from the
+    same scans.
+  - The model is saved with its layout.  Then the beads are fitted back:
+    the envelope's z and z from the phase against the stage.
+  - On the 4Pi-SMS example beads: 3.6 min, z slopes 0.90–0.99, scatter
+    9–22 nm.  z from the phase ran 7 % steep, the sign of a wrong emission
+    wavelength (680 nm typed).
+- **The example entry.** The microscope database ships *4Pi-SMS example*
+  and its camera: the example data's layout, NA 1.35, n 1.406, an emission
+  placeholder of 660 nm.  With them chosen, *Spline 4Pi* finds the layout
+  and the camera with nothing typed.  It stands in until the Ries-lab 4Pi
+  has its own entry.
+
 **Still to do for M5.**
-- *4Pi beads* in the PSF calibration window.  It waits for M4's multi-channel source (D5): the window
-  reads TIFF stacks and takes the camera from their tags, and a 4Pi scan should come in as the front
-  end delivers it, not through a second reader.  `fourpi_beads` is what the method will call.
 - The beads' fitted positions against v1's own (`locres`), bead by bead.
