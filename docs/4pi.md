@@ -846,11 +846,39 @@ channel drift, *4Pi z* after the fit):
   rises as the pore's mean gets less noisy, towards the ~50 nm expected
   for Nup96.
 
-**What would improve it.**
-- More beads for the model: the stack has 5, and 2 were too near an edge.
-- A pupil model learned from the same scan (M5's single-phase start),
-  which regularises a few beads with physics.
-- All four movie files.
+**With uiPSF v2's pupil model of the same beads (after merging M5).**
+- **Learning.** The model was learned from the bead stack, one phase per
+  slice (M5's single-phase start), all 5 beads at 21 px, in 3.5 min on the
+  Mac's GPU.  I and Q were rendered from it at three phases and
+  demodulated by its own measured period (`uipsf.workflows.fourpi`).
+  - Its channel offsets: 0, −2.06, 3.02, 1.20 rad.
+  - Coherence 0.44–0.47; a modulation of 0.44, constant through z.
+  - Its learned maps agree with the bead registration to 0.06 px and
+    0.6 mrad.
+- **On the beads:** likelihood per pixel −1.03 (the real-space model −2.66).
+  The envelope z follows the stage at a slope of 0.89–0.98 and scatters
+  12–24 nm, near its CRLB of 7–16 nm.  The real-space model scattered
+  60–96 nm.
+- **Photons.** The pupil model fits a bead's 7,477 photons where its four
+  channels hold 7,882 above background in 21 × 21 px.  The real-space model
+  fitted six times too many.  The cause was `normalise`'s pedestal: it
+  raised I to cover a noisy |A, B| > I, as v1 does.  `normalise` now shrinks
+  A and B there instead, and takes off only a positive pedestal.
+- **On the movie** (same settings as above):
+  - 78,984 localizations at 27 frames/s;
+  - the envelope scatters 1.93 times its error, against 6.7 times before;
+  - median z error 5.1 nm, where the real-space model's overestimated
+    modulation claimed 3.7;
+  - 14 % expected wrong fringes over all localizations.
+- **The rings:** 41.7, 43.1 and 44.7 nm (± 1.1–1.8) for pores of at least
+  8, 20 and 35 localizations.  That is the real-space model's answer within
+  2 nm, so the spacing is set by the pores' centring and tilt, not by the
+  model.
+
+**What would improve the ring check.**
+- All four movie files, which gives more localizations per pore.
+- Centring each pore by a fit of two rings, rather than on its mean.
+- Ghost removal before the pores are found.
 
 ## 11. What M5 found (2026-10-27)
 

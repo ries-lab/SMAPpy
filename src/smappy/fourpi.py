@@ -131,14 +131,26 @@ def normalise(I, A, B, focal_plane: int):
     """Offset and scale the channels' volumes together, as the fitter needs.
 
     ``I``, ``A`` and ``B`` are (C, nz, ny, nx).  A learned model can sit on a
-    small pedestal (its background was not quite zero): the largest constant
-    that keeps every channel's PSF non-negative at every phase,
-    min(I - sqrt(A^2 + B^2)), is taken off I -- uiPSF v1 does the same.  Then
-    everything is divided by the sum of I over the focal plane, so that N is
-    the photons of all channels together.
+    small pedestal, its background not quite zero: the smallest of
+    I - sqrt(A^2 + B^2), where positive, is taken off I, as uiPSF v1 does.
+    Where it is negative the model is not a PSF there -- its interference
+    exceeds its light, which noise in a model made from a few beads does --
+    and raising I everywhere to cover it, as v1 would, spreads a pedestal
+    over the whole box: on the 4Pi-SMS beads it left the spot a sixth of
+    "one photon" and the fitted photons six times too many.  So there A and
+    B are shrunk to I instead, pixel by pixel.  Then everything is divided by
+    the sum of I over the focal plane, so that N is the photons of all
+    channels together.
     """
     I, A, B = (np.asarray(v, float) for v in (I, A, B))
-    I = I - float(np.min(I - np.hypot(A, B)))
+    pedestal = float(np.min(I - np.hypot(A, B)))
+    if pedestal > 0:
+        I = I - pedestal
+    else:
+        I = np.clip(I, 0, None)
+        modulus = np.hypot(A, B)
+        shrink = np.where(modulus > I, I / np.maximum(modulus, 1e-300), 1.0)
+        A, B = A * shrink, B * shrink
     scale = float(I[:, focal_plane].sum())
     if not scale > 0:
         raise ValueError("the model has no light in its focal plane")

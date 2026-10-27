@@ -394,3 +394,17 @@ def test_smaps_4pi_calibration_reads_with_its_layout_and_channel_offsets():
     assert cal.n_channels == 4 and cal.layout["regions"][2][:3] == [1409, 0, 168]
     assert cal.layout["flips"][3] == [True, False]
     assert cal.period_nm == pytest.approx(278.05, abs=0.1)
+
+
+def test_a_model_whose_interference_exceeds_its_light_is_not_raised_onto_a_pedestal():
+    """Where |A, B| > I (a noisy model of a few beads) A and B are shrunk to
+    I; raising I everywhere instead put most of "one photon" in a pedestal."""
+    y, x = np.mgrid[:15, :15]
+    I = np.repeat(np.exp(-((x - 7) ** 2 + (y - 7) ** 2) / 4.0)[None], 5, axis=0)    # (z, y, x)
+    A = 0.8 * I
+    A[2, 0, 0] = 0.05                                      # one noisy voxel where I is ~0
+    In, An, Bn = fourpi.normalise(I[None], A[None], np.zeros_like(A)[None], focal_plane=2)
+    assert np.isclose(In[:, 2].sum(), 1.0)
+    assert In[0, 2, 0, 0] < 1e-6                           # no pedestal
+    assert np.all(np.hypot(An, Bn) <= In + 1e-12)
+    assert np.allclose(An[0, 2, 7, 7] / In[0, 2, 7, 7], 0.8)
