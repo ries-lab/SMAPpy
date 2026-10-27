@@ -531,6 +531,39 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
     assert "Ask your question here." in out.stdout and "CLAUDE --mcp-config" in out.stdout
 
 
+def test_the_windows_script_is_read_in_utf8_keeps_its_percent_signs_and_returns_from_npm(
+        tmp_path, monkeypatch):
+    from smappy.assistant import launch
+    monkeypatch.setattr(sys, "platform", "win32")
+    folder = tmp_path / "Jürgen 100%"
+    ran = []
+    launch.start("codex", folder, tmp_path / "settings", 4242, run=ran.append)
+    written = (tmp_path / "settings" / "start-codex.cmd").read_bytes()
+    # cmd reads a batch file in the OEM code page until told otherwise
+    lines = written.decode("utf-8").split("\r\n")
+    assert lines[:3] == ["@echo off", "chcp 65001 >nul",
+                         'cd /d "' + str(folder)[:-1] + '%%"']
+    assert b"\r\r\n" not in written
+    # npm is npm.cmd: without call the script ends inside it
+    assert "call npm install -g @openai/codex" in lines
+    assert lines[-2].startswith("codex -c ")
+    assert ran[0][:2] == ["cmd", "/c"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="cmd.exe runs it")
+def test_cmd_runs_the_start_script_in_a_folder_named_with_an_umlaut_and_a_percent_sign(tmp_path):
+    from smappy.assistant import launch
+    folder = tmp_path / "Jürgen 100%"
+    folder.mkdir()
+    # a command of the user's own, `cd`, prints where the script went
+    launch.start("command", folder, tmp_path / "settings", 4242, own="cd",
+                 run=lambda command: None)
+    out = subprocess.run(["cmd", "/c", str(tmp_path / "settings" / "start-command.cmd")],
+                         capture_output=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert str(folder) in out.stdout.decode("utf-8").splitlines()
+
+
 def test_for_the_claude_app_the_server_goes_into_the_folders_mcp_json(tmp_path):
     from smappy.assistant import launch
     (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}))

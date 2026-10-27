@@ -135,7 +135,9 @@ def write(found: Sequence[Dict], path) -> Path:
     else:
         text = as_text(found)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    # newline="": csv ends its rows in \r\n, which text mode on Windows wrote
+    # as \r\r\n -- an empty row after every entry in Excel
+    path.write_text(text, encoding="utf-8", newline="")
     return path
 
 

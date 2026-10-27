@@ -39,7 +39,7 @@ def test_the_window_offers_the_install_only_for_the_pupil_model_and_only_while_t
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
-    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from smappy.calibrate.psf_window import PSFCalibrationWindow, shell_line
     QApplication.instance() or QApplication([])
     monkeypatch.setattr(torch_install, "problem", lambda: "PyTorch is not installed")
     window = PSFCalibrationWindow()
@@ -47,7 +47,7 @@ def test_the_window_offers_the_install_only_for_the_pupil_model_and_only_while_t
     assert not window.install_button.isVisibleTo(window) and window.run_button.isEnabled()
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert window.install_button.isVisibleTo(window) and not window.run_button.isEnabled()
-    assert " ".join(torch_install.command()) in window.notice.text()
+    assert shell_line(torch_install.command()) in window.notice.text()
     monkeypatch.setattr(torch_install, "problem", lambda: None)
     window._show_method()
     assert not window.install_button.isVisibleTo(window) and window.run_button.isEnabled()

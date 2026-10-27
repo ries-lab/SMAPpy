@@ -278,7 +278,7 @@ def show(data, *, name: str = "", wait: bool = False):
 
     if isinstance(data, (str, Path)):
         command = [sys.executable, "-m", "smappy.cli.gui", str(data)]
-        return subprocess.Popen(command, start_new_session=(sys.platform != "win32"))
+        return subprocess.Popen(command, **handoff.own_session())
 
     from .session import Session
     if isinstance(data, Session):

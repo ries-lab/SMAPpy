@@ -185,8 +185,22 @@ def script(command, folder: Path, client: Client) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _percent(text: str) -> str:
+    """``text`` as a batch file reads it literally: there ``%`` starts a
+    variable, and a folder called ``100%`` lost its sign."""
+    return text.replace("%", "%%")
+
+
 def windows_script(command, folder: Path, client: Client) -> str:
-    lines = ["@echo off", f'cd /d "{folder}"',
+    """A batch file that starts ``command`` in ``folder``.
+
+    cmd.exe reads a batch file in the console's OEM code page, not in UTF-8,
+    so ``cd /d "C:\\Users\\Jürgen\\..."`` went to a folder that did not
+    exist; ``chcp 65001`` has it read the lines after it in UTF-8, as the
+    file is written.  A command of the user's own is left as they wrote it,
+    ``%VAR%`` and all.
+    """
+    lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{_percent(str(folder))}"',
              r'set "PATH=%PATH%;%USERPROFILE%\.local\bin"']
     if client.program:
         lines += [f"where {client.program} >nul 2>nul && goto start",
@@ -196,7 +210,9 @@ def windows_script(command, folder: Path, client: Client) -> str:
                   "  echo Not installed.  To install it later, run:",
                   f"  echo     {client.installer_windows}",
                   "  exit /b 1)",
-                  client.installer_windows,
+                  # call: npm is npm.cmd, and a batch file run without it
+                  # never returns, so the client was never started
+                  f"call {client.installer_windows}",
                   f"where {client.program} >nul 2>nul || (",
                   f"  echo {client.name} was installed but is not found: open a new "
                   "window and choose Start assistant in SMAPpy again.",
@@ -204,7 +220,7 @@ def windows_script(command, folder: Path, client: Client) -> str:
                   ":start"]
     lines += ["echo."] + [f"echo {line}" for line in welcome(client)] + ["echo."]
     lines.append(command if isinstance(command, str)
-                 else subprocess.list2cmdline(list(command)))
+                 else _percent(subprocess.list2cmdline(list(command))))
     return "\r\n".join(lines) + "\r\n"
 
 
@@ -308,7 +324,10 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
     command = client_command(key, config, own, pre_allow)
     if sys.platform.startswith("win"):
         file = settings_folder / f"start-{key}.cmd"
-        file.write_text(windows_script(command, folder, client), encoding="utf-8")
+        # newline="": the lines end in \r\n already, which text mode on
+        # Windows wrote as \r\r\n
+        file.write_text(windows_script(command, folder, client), encoding="utf-8",
+                        newline="")
     else:
         file = settings_folder / f"start-{key}.sh"
         file.write_text(script(command, folder, client), encoding="utf-8")

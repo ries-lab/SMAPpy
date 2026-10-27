@@ -23,6 +23,20 @@ import os
 import sys
 
 
+def utf8_protocol(reader, writer, log=None) -> None:
+    """The protocol's streams in UTF-8, as MCP has it, and one ``\\n`` a line.
+
+    On Windows ``sys.stdin`` and ``sys.stdout`` are in the ANSI code page, so
+    a client's path with an ``ü`` arrived as two other letters, and an answer
+    with a character outside cp1252 (the answers keep non-ASCII as it is)
+    raised UnicodeEncodeError instead of being sent.  The log, stderr, the
+    same, for the paths it names.  ``--attach`` forwards bytes and needs none.
+    """
+    for stream, newline in ((reader, None), (writer, "\n"), (log or sys.stderr, None)):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", **({"newline": newline} if newline else {}))
+
+
 def main(argv=None) -> int:
     # the help is for the person setting a client up, not the module's notes
     p = argparse.ArgumentParser(
@@ -60,6 +74,7 @@ def main(argv=None) -> int:
         sys.stderr.flush()
         os._exit(code)
 
+    utf8_protocol(sys.stdin, sys.stdout, sys.stderr)
     protocol_out = sys.stdout
     sys.stdout = sys.stderr
     import matplotlib
