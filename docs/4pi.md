@@ -1359,9 +1359,29 @@ What this shows:
   likely right.
 - **The scalar model still fits these beads better**, by 7,400 in about
   890,000 pixels.
-- **The coherence the vectorial model needs is no lower.**  The optics do
-  not explain the missing modulation here.
-- **The likeliest reason** is the predicted dip of the modulation at focus,
+- **Its coherence is higher**, as it should be: in the vectorial model α is
+  only what the optics do not explain, the modulation being α times the
+  geometric visibility.
+- **The likeliest reason it fits worse** is the predicted dip of the modulation at focus,
   which the bead average of these beads does not show (0.59 at focus, flat
   within ±0.05).  Five beads without mirror steps pin the modulation poorly,
   so the mirror-step beads of uiPSF's example are the test that decides.
+
+**Learnt on uiPSF's example beads** (6 scans, 29 beads, 3 mirror steps per
+slice, 50 nm slices; NA 1.35, 600 nm, n ≤ 6; on Apple's GPU):
+
+| model | objective | coherence | mirror steps | time |
+|---|---|---|---|---|
+| scalar | 7,091,872 | 0.71–0.77 | −2.06, −4.17 | 10.6 min |
+| vector, aligned plates | 6,815,737 | 0.75–0.81 | −2.05, −4.17 | 9.8 min |
+
+What this shows:
+- **Here the vectorial model fits clearly better**: 3.9 % less deviance
+  (276,000).  Mirror steps measure every slice's modulation, so the
+  z dependence the optics predict can show, and it does.
+- **It explains part of the lost modulation as geometry**, and needs more
+  coherence for the rest.
+- **It costs no more time to learn.**  Six fields instead of one: the
+  matrix DFTs are batched, and the solver's other costs dominate.
+- **The 4Pi-SMS beads disagree**, but they are five, without steps.  The
+  vectorial model is the better description where the data can tell.
