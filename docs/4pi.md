@@ -842,9 +842,12 @@ channel drift, *4Pi z* after the fit):
 - The pooled profile is bimodal, the two rings about equally occupied
   (0.83–0.86) and each ~17 nm wide.
 - Their separation by a two-Gaussian fit is 42.7, 44.2 and 46.6 nm
-  (± 0.7–1.1) for pores of at least 8, 20 and 35 localizations.  It
-  rises as the pore's mean gets less noisy, towards the ~50 nm expected
-  for Nup96.
+  (± 0.7–1.1) for pores of at least 8, 20 and 35 localizations, rising as
+  each pore's mean gets less noisy.
+- This is a consistency check, not a calibration.  The rings' spacing in a
+  given cell is not a known standard, and nothing is tuned towards a value.
+  What it shows is two clearly separated, equally occupied rings, the same
+  with two different models.
 
 **With uiPSF v2's pupil model of the same beads (after merging M5).**
 - **Learning.** The model was learned from the bead stack, one phase per
