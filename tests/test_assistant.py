@@ -311,7 +311,11 @@ def test_a_real_mcp_client_lists_the_tools_and_gets_a_picture(tmp_path):
                 return {t.name for t in tools.tools}, picture
 
     names, picture = anyio.run(session)
-    assert names == set(Assistant.specs())
+    # every tool but those that need the running GUI, which a model would
+    # only keep trying (`tool`'s ``needs``)
+    gui_only = {n for n, s in Assistant.specs().items() if s.function._needs}
+    assert gui_only >= {"show", "open_plugin", "open_window"}
+    assert names == set(Assistant.specs()) - gui_only
     assert not picture.is_error and picture.content[0].type == "image"
 
 
