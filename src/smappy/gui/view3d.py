@@ -990,6 +990,17 @@ class OptionsPanel(QWidget):
 
     def _on_gpu(self, name: str) -> None:
         self._gpu = name
+        if not name:
+            # why, in a word on the note and in full on hover: "no GPU" alone
+            # sent a Mac user looking for a fault in a GPU that was fine,
+            # when the package that drives it had not been installed
+            error = self.view3d._renderer.gpu_error
+            missing = error == "wgpu is not installed"
+            self.gpu_note.setText("wgpu is not installed: drawn as a sum" if missing
+                                  else "no GPU here: drawn as a sum")
+            self.gpu_note.setToolTip(
+                "the points and spheres looks need wgpu: pip install wgpu" if missing
+                else f"the GPU engine could not start: {error}" if error else "")
         self._show_rows()
 
     def _default_focal_um(self) -> float:
