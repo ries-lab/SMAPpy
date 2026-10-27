@@ -41,7 +41,7 @@ def read_z_positions(folder) -> np.ndarray:
     path = Path(folder) / "Z Positions.txt"
     if not path.exists():
         return None
-    values = [float(w) for w in path.read_text().replace(",", " ").split()
+    values = [float(w) for w in path.read_text(encoding="utf-8").replace(",", " ").split()
               if _is_number(w)]
     return np.asarray(values, float)
 

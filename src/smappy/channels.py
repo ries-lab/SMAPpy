@@ -497,14 +497,14 @@ def save_registration(path, layout: ChannelLayout, registration: Optional[Regist
         record["pairs"] = list(registration.pairs)
         record["rms_px"] = list(registration.rms_px)
         record["kind"] = list(registration.kind)
-    Path(path).write_text(json.dumps(record, indent=1))
+    Path(path).write_text(json.dumps(record, indent=1), encoding="utf-8")
 
 
 def load_registration(path) -> ChannelLayout:
     """The layout and maps a registration file holds."""
     import json
     from pathlib import Path
-    record = json.loads(Path(path).read_text())
+    record = json.loads(Path(path).read_text(encoding="utf-8"))
     if record.get("format") != REGISTRATION_FORMAT:
         raise ValueError(f"{Path(path).name} is not a channel registration")
     return ChannelLayout.from_dict(record["layout"])
