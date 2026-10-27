@@ -535,7 +535,7 @@ def math_image(tex: str, display: bool, color: str = "black",
         try:
             import base64
             import json
-            saved = json.loads(cached.read_text())
+            saved = json.loads(cached.read_text(encoding="utf-8"))
             saved["data"] = base64.b64decode(saved["data"])
             _MATH_CACHE[key] = MathImage(**saved)
             return _MATH_CACHE[key]
@@ -557,7 +557,8 @@ def math_image(tex: str, display: bool, color: str = "black",
             import json
             cached.parent.mkdir(parents=True, exist_ok=True)
             cached.write_text(json.dumps({**dataclasses.asdict(image),
-                                          "data": base64.b64encode(image.data).decode()}))
+                                          "data": base64.b64encode(image.data).decode()}),
+                              encoding="utf-8")
         except OSError:
             pass
     return image

@@ -171,7 +171,8 @@ def acquisition_date(path):
     for candidate in (folder / 'metadata.txt', path):
         try:
             if candidate.name == 'metadata.txt' and candidate.is_file():
-                with open(candidate, 'r', errors='replace') as handle:
+                # Micro-Manager writes it in UTF-8; only the date is wanted
+                with open(candidate, 'r', encoding='utf-8', errors='replace') as handle:
                     text = handle.read(20000)
                 found = re.search(r'"Date"\s*:\s*"(\d{4})-(\d{2})-(\d{2})', text)
                 if found:

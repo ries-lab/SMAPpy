@@ -70,7 +70,10 @@ def read_info(path: Path) -> List[Dict]:
     if sidecar.exists():
         import yaml
         try:
-            return [d for d in yaml.safe_load_all(sidecar.read_text()) if isinstance(d, dict)]
+            # Picasso writes its YAML in the locale's encoding, cp1252 on
+            # Windows: a non-ASCII path in it is replaced, the numbers survive
+            text = sidecar.read_text(encoding="utf-8", errors="replace")
+            return [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
         except yaml.YAMLError:
             pass
     return []
@@ -202,7 +205,7 @@ def save(locs: Localizations, path: Path, metadata=None, group: Optional[str] = 
     with h5py.File(path, "w") as f:
         f.create_dataset("locs", data=rows)
         f.create_dataset("metadata", data=json.dumps([info]))
-    path.with_suffix(".yaml").write_text(yaml.safe_dump(info, sort_keys=False))
+    path.with_suffix(".yaml").write_text(yaml.safe_dump(info, sort_keys=False), encoding="utf-8")
     if report is not None:
         if dropped:
             report(f"{dropped} localizations left out: Picasso refuses a NaN, a "

@@ -235,7 +235,7 @@ def last_update() -> Optional[dict]:
     the file is removed as it is read, so the next start says nothing."""
     path = result_file()
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     try:
@@ -247,7 +247,7 @@ def last_update() -> Optional[dict]:
 
 def log_tail(lines: int = 15) -> str:
     try:
-        text = log_file().read_text(errors="replace")
+        text = log_file().read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
     return "\n".join(text.strip().splitlines()[-lines:])

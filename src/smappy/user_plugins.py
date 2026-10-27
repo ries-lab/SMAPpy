@@ -58,7 +58,7 @@ def folder() -> Path:
 
 
 def _shipped(name: str) -> str:
-    text = resources.files("smappy").joinpath("data", "user_plugins", name).read_text("utf-8")
+    text = resources.files("smappy").joinpath("data", "user_plugins", name).read_text(encoding="utf-8")
     from . import __version__
     package = Path(__file__).resolve().parent
     return text.replace("@@VERSION@@", str(__version__)).replace("@@PACKAGE@@", str(package))

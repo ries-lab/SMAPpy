@@ -194,7 +194,8 @@ def make(d) -> None:
            zoom=d.around(window.run_button, 700))
     with answering(save=str(job)):
         _run_batch(d, window)
-    rows = list(csv.DictReader(open(output / "summary.csv")))
+    with open(output / "summary.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
     assert [r["status"] for r in rows] == ["done"] * 4, rows
     for i in range(4):
         figures = list((output / f"cell_{i + 1}" / "figures").glob("*.png"))

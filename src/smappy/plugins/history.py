@@ -135,7 +135,7 @@ def write(found: Sequence[Dict], path) -> Path:
     else:
         text = as_text(found)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return path
 
 

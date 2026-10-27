@@ -63,7 +63,7 @@ def _environment(config: Path, size: Tuple[int, int]) -> None:
     screen.write_text(json.dumps({"screens": [{
         "name": "tutorial", "x": 0, "y": 0,
         "width": size[0] * SCALE, "height": size[1] * SCALE,
-        "logicalDpi": 96, "logicalBaseDpi": 96}]}))
+        "logicalDpi": 96, "logicalBaseDpi": 96}]}), encoding="utf-8")
     os.environ["QT_QPA_PLATFORM"] = f"offscreen:configfile={screen}"
     os.environ["QT_SCALE_FACTOR"] = str(SCALE)
     os.environ["SMAPPY_CONFIG_DIR"] = str(config / "smappy")

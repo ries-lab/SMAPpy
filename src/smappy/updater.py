@@ -73,7 +73,7 @@ def write_plan(folder: Path, install: List[List[str]], relaunch: List[str],
     plan = {"wait_for": pids_to_wait_for(), "commands": install, "relaunch": relaunch,
             "result": str(result), "log": str(log), "from_version": version}
     path = Path(folder) / "plan.json"
-    path.write_text(json.dumps(plan, indent=1))
+    path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     return path
 
 
@@ -146,7 +146,7 @@ def _zombie(pid: int) -> bool:
     parent waits for it.  Linux says so in ``/proc``; macOS, which has no
     ``/proc``, in ``ps``'s state column (``Z``)."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
         stat = None
     if stat is not None:
@@ -193,13 +193,13 @@ def run_plan(plan: Dict, retry_pause_s: float = RETRY_PAUSE_S) -> Dict:
         log.write("\nupdated\n" if result["ok"] else "\nthe update failed\n")
     result_path = Path(plan["result"])
     result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps(result, indent=1))
+    result_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     return result
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    plan = json.loads(Path(argv[0]).read_text())
+    plan = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
     result = run_plan(plan)
     if plan.get("relaunch"):
         try:

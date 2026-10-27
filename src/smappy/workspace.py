@@ -186,7 +186,7 @@ class Workspace:
         if path is None:
             raise ValueError("the shipped default has no file: give a path")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False))
+        path.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False), encoding="utf-8")
         self.path = path
         return path
 
@@ -251,7 +251,7 @@ def load(path=None) -> Workspace:
     if not path.exists():
         return Workspace.default()
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return Workspace.default()
     if not isinstance(data, dict) or not data.get("tabs"):

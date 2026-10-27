@@ -84,7 +84,7 @@ def log_file() -> Path:
 def _claim(folder: Path):
     """The lock that makes this process the one writing ``smappy.log``, held
     for as long as the returned file is open; None if another process has it."""
-    handle = open(folder / LOCK_NAME, "a+")
+    handle = open(folder / LOCK_NAME, "a+", encoding="utf-8")
     try:
         if os.name == "nt":
             import msvcrt

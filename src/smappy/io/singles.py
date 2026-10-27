@@ -95,7 +95,7 @@ def read_metadata_txt(folder) -> Tuple[Dict[str, object], Dict[str, object]]:
     if not path.is_file():
         return {}, {}
     try:
-        text = path.read_text(errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}, {}
     try:
