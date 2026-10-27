@@ -397,12 +397,21 @@ def turn_keys(start: Viewpoint, axis: str = "z", degrees: float = 360.0,
     return keys
 
 
-def motion_axis(rotation: np.ndarray) -> str:
+#: the ⟳'s axis left to `motion_axis`, beside the fixed ones of `AXES`
+FROM_VIEW = "from the view"
+
+
+def motion_axis(rotation: np.ndarray, axis: str = FROM_VIEW) -> str:
     """What the 3D window's ⟳ turns about: the data's z where z stands
     within 45 degrees of upright on the screen -- a turntable, the horizon
     level -- else the screen's vertical.  Depth is seen from a turn about an
     axis in the plane of the screen; about z seen from the top, the picture
-    would only turn flat."""
+    would only turn flat.  An ``axis`` of `AXES` is taken as it is: a rock
+    about x, say, from whatever view."""
+    if axis != FROM_VIEW:
+        if axis not in AXES:
+            raise ValueError(f"no axis {axis!r}: one of {', '.join((FROM_VIEW,) + AXES)}")
+        return axis
     upright = abs(float(np.asarray(rotation)[1, 2]))       # data z along screen y
     return "z" if upright >= math.cos(math.radians(45.0)) else "screen vertical"
 
@@ -419,13 +428,13 @@ def motion_angle(t: float, motion: str, amplitude: float, period: float,
 
 
 def motion_path(start: Viewpoint, motion: str, amplitude: float, period: float,
-                speed: float) -> "ViewPath":
+                speed: float, axis: str = FROM_VIEW) -> "ViewPath":
     """The ⟳'s motion from ``start`` as a path for the player, which records
     it: one rock (to one side, back, to the other, back) or one whole turn,
     without *ease*, so that played in a loop it does not stop at the seam.
     The rock's keys at the far sides have no turn on either side of them,
     so the path slows into each turnaround as the window's sine does."""
-    axis = motion_axis(start.rotation)
+    axis = motion_axis(start.rotation, axis)
     if motion == "rock":
         if not 0 < abs(amplitude) < 180:
             raise ValueError("a rock turns less than 180 degrees either way")

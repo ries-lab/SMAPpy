@@ -115,6 +115,7 @@ class Motion(QObject):
         self.amplitude = 15.0           # degrees either way: enough to see depth, not lose the view
         self.period = 3.0               # seconds for a rock there and back
         self.speed = 30.0               # degrees a second for a spin
+        self.axis = vp.FROM_VIEW        # or one of `view_path.AXES`
         self._start: Optional[np.ndarray] = None    # the rotation it started from
         self._axis = "z"
         self._angle = 0.0
@@ -143,7 +144,7 @@ class Motion(QObject):
         if proj.rotate_at_centre:
             proj.pivot_at_centre()
         self._start = proj.matrix.copy()
-        self._axis = vp.motion_axis(self._start)
+        self._axis = vp.motion_axis(self._start, self.axis)
         self._angle = 0.0
         self._relax_from = None
         self._clock.start()
@@ -1142,9 +1143,24 @@ class View3DToolBar(QToolBar):
             action = menu.addAction(name)
             action.setCheckable(True)
             action.setChecked(kind == motion.kind)
-            action.triggered.connect(lambda _=False, k=kind: self._set_kind(motion, k))
+            action.triggered.connect(lambda _=False, k=kind: self._restart(motion, "kind", k))
             kinds.addAction(action)
             self.motion_kinds[kind] = action
+        # the axis: from the view (z standing up, else the screen's
+        # vertical), or one chosen -- a rock about x seen from the front
+        about = menu.addMenu("turn about")
+        axes = QActionGroup(about)
+        self.motion_axes = {}
+        for axis in (vp.FROM_VIEW,) + vp.AXES:
+            action = about.addAction(axis)
+            action.setCheckable(True)
+            action.setChecked(axis == motion.axis)
+            action.triggered.connect(lambda _=False, a=axis: self._restart(motion, "axis", a))
+            axes.addAction(action)
+            self.motion_axes[axis] = action
+        self.motion_axes[vp.FROM_VIEW].setToolTip("z when z stands up on the screen, "
+                                                  "else the screen's vertical")
+        about.setToolTipsVisible(True)
         menu.addSeparator()
         form = QWidget()
         grid = QFormLayout(form)
@@ -1175,13 +1191,14 @@ class View3DToolBar(QToolBar):
         menu.setToolTipsVisible(True)
         return menu
 
-    def _set_kind(self, motion: Motion, kind: str) -> None:
-        """Rock or spin; a motion under way starts again as the new one."""
-        if kind == motion.kind:
+    def _restart(self, motion: Motion, name: str, value: str) -> None:
+        """Rock or spin, or the axis; a motion under way starts again as the
+        new one, from where the old one began."""
+        if getattr(motion, name) == value:
             return
         moving = motion.active
         motion.reset()
-        motion.kind = kind
+        setattr(motion, name, value)
         if moving:
             motion.start()
 
@@ -1265,7 +1282,8 @@ class View3DWindow(QMainWindow):
         motion.reset()
         try:
             path = vp.motion_path(vp.Viewpoint.of(projection, view.session.slab),
-                                  motion.kind, motion.amplitude, motion.period, motion.speed)
+                                  motion.kind, motion.amplitude, motion.period, motion.speed,
+                                  motion.axis)
         except ValueError as error:
             QMessageBox.information(self, "Make a movie", str(error))
             return

@@ -208,7 +208,9 @@ on, until it is stopped; stopped, it eases back to the view it started from.
 It can also *spin* the view round and round.  Both turn about the data's z
 when z stands upright on the screen (the front and side views), so the
 horizon stays level, and about the screen's vertical when one looks from
-the top, where a turn about z would only turn the picture flat.
+the top, where a turn about z would only turn the picture flat.  Another
+axis can be chosen under *turn about*: x, say, to tip a structure seen from
+the front towards you and back.
 
 **7. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
 filter and the 2D ROI.  This holds only while the 3D window is open, so that
@@ -324,8 +326,9 @@ $A \sin(2\pi t / T)$ for a rock, with $A$ *rock by* and $T$ the *period*, so
 it slows into each turnaround, and $\omega t$ for a spin, $\omega$ *spin
 at*.  It is taken from the clock, not counted per frame, so the speed is the
 one set however long a frame takes, and each frame is a preview, as while
-dragging.  The axis is the data's z when z is within 45 degrees of upright
-on the screen, else the screen's vertical, and goes through the middle of
+dragging.  With *turn about* on *from the view*, the axis is the data's z
+when z is within 45 degrees of upright on the screen, else the screen's
+vertical; a chosen axis is used as it is.  Either goes through the middle of
 the screen (or the slab's centre, with *turn about screen centre* off).  A
 rock stopped by its button or Space eases back to its start over half a
 second, with a smoothstep; a press in the picture, an arrow key or a view
@@ -401,6 +404,14 @@ to see depth: what moves against the rest is nearer or farther.
 ### spin
 The view turns round and round, at *spin at*: a structure shown from every
 side, as for a talk.
+
+### turn about
+*from the view* is right most of the time: the data's z seen from the
+front or the side, the screen's vertical from the top.  The data's *x* or
+*y* rock the structure about one of its own axes -- x seen from the front
+tips the top of the box towards you and away.  *screen vertical* and
+*screen horizontal* turn about the screen's own axes, whatever the data's
+orientation.  A motion under way starts again about the new axis.
 
 ### rock by
 How far a rock turns either way.  10 to 20 degrees shows depth without
