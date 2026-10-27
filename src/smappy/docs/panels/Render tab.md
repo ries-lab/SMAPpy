@@ -35,8 +35,8 @@ what one screen pixel is -- the zoom, as a number.  Type a size to zoom to
 it, or right-click it to go to 10 nm.  Right-click the picture to move that
 place to the middle (on the ROI, to delete it); double-click it to show everything.  At the right edge
 are the [assistant](plugin:Panels/Assistant)'s button and ⋯ (*more*): saving
-the picture, the colour bar, and what the mouse and the keys do in the
-picture, the keys that turn a line ROI among them.  Under the picture is how
+the picture, the colour bar, what the mouse and the keys do in the
+picture, the keys that turn a line ROI among them, and *Help*, this page.  Under the picture is how
 many localizations each layer draws in the view -- counted again after every
 zoom -- or in the ROI when one is drawn.  Every control below the layer strip edits one layer,
 the one selected in the strip.
@@ -330,7 +330,9 @@ whole depth, then one with the front face pushed back, moves that face
 through the sample and shows the structure layer by layer.  The path runs
 on the player's time line: over the scan, so a structure turns
 while it builds up, or by itself with *scan* on *none*, at the keys' own
-times.  *Record...* of the 3D view writes the path as a movie.
+times.  *Record...* of the 3D view writes the path as a movie.  The 3D
+window's rock or spin (its ⟳) is made such a path by its *Make a movie of
+this...*, which opens the player on it.
 
 ## In detail
 

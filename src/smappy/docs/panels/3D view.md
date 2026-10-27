@@ -2,7 +2,7 @@
 title: 3D view
 summary: A box of the data, the slab, shown from any angle, with the Render tab's layers, filters and colours.
 widget: smappy.gui.view3d.View3DWindow
-covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.render_tracks_3d, smappy.view3d.render_image_3d, smappy.view3d.image_plane_points, smappy.view3d.render_volume_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
+covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.render_tracks_3d, smappy.view3d.render_image_3d, smappy.view3d.image_plane_points, smappy.view3d.render_volume_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab, smappy.view_path.motion_axis, smappy.view_path.motion_angle, smappy.view_path.motion_path]
 ---
 
 ## What it does
@@ -200,6 +200,16 @@ keeps up with the mouse on the machine it runs on.  When the mouse stops,
 the full image is drawn from every localization in the slab.  An image that
 is saved is always the full one.
 
+**8. Rocking it.**  A still projection hides depth: two structures one
+above the other look like one.  Turned a little, the near one moves against
+the far one, and the eye reads the difference as depth.  The circling arrow
+(*rock*, or Space) turns the view back and forth by a few degrees, on and
+on, until it is stopped; stopped, it eases back to the view it started from.
+It can also *spin* the view round and round.  Both turn about the data's z
+when z stands upright on the screen (the front and side views), so the
+horizon stays level, and about the screen's vertical when one looks from
+the top, where a turn about z would only turn the picture flat.
+
 **7. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
 filter and the 2D ROI.  This holds only while the 3D window is open, so that
 nobody measures a box they can no longer see.
@@ -309,6 +319,22 @@ sampled.  A volume is drawn on the processor, about 1.3 s for a frame of
 700 x 530 pixels and 0.1 s while dragging, whichever engine draws the
 localizations.
 
+**The rock and the spin.**  The turn $t$ seconds after the start is
+$A \sin(2\pi t / T)$ for a rock, with $A$ *rock by* and $T$ the *period*, so
+it slows into each turnaround, and $\omega t$ for a spin, $\omega$ *spin
+at*.  It is taken from the clock, not counted per frame, so the speed is the
+one set however long a frame takes, and each frame is a preview, as while
+dragging.  The axis is the data's z when z is within 45 degrees of upright
+on the screen, else the screen's vertical, and goes through the middle of
+the screen (or the slab's centre, with *turn about screen centre* off).  A
+rock stopped by its button or Space eases back to its start over half a
+second, with a smoothstep; a press in the picture, an arrow key or a view
+button stops it where it is and takes the view from there.  *Make a movie of
+this...* writes the same motion as a [player](plugin:Panels/Render tab)
+view path: a rock as keys at $+A$, $0$, $-A$ and $0$, a quarter period
+apart, a spin as a whole turn, both without *ease in and out*, played in a
+loop.
+
 **The preview.**  While dragging, the grid is two times coarser and at most
 about 13 localizations per pixel are drawn, fewer if the last frames took
 longer than 1/27 s.  The sample is evenly spaced through the table, which is
@@ -332,8 +358,11 @@ units.
 
 ## Controls
 
-The window is the picture and a row of buttons above it.  The settings drop
-down from *options*; the mouse and the keys are listed under *keys*.
+The window is the picture and a row of buttons above it: the three views,
+pictured as a cube with the face looked at filled, then ⤢ (*fit*) and ⟳
+(*rock*), and at the right edge ⚙ (*options*), from which the settings drop
+down, and ⋯, which holds saving, the mouse and the keys, and the help.  A
+button's name is in its tooltip.
 
 In the image: drag to turn, shift-drag (or the middle button) to pan, the
 wheel to zoom.  Alt-wheel or page up / page down moves the eye and the
@@ -347,16 +376,6 @@ The *3D* button on the 2D picture's title bar (or View > 3D view, Ctrl+3)
 shows and hides this window.  Hidden, it keeps its turn, zoom and slab for
 the next time.
 
-### Save
-*PNG as displayed...* saves the picture as it is on screen, whichever
-engine drew it.  *Save image...* opens
-[Save image](plugin:File/Export/Image) set to this window: the projection
-rendered again at a pixel size of your choice -- over the canvas, or the
-slab's box -- in colour or as the summed intensity in floating point for
-measuring, with a scale bar and colour bars, and the projection and the
-slab written into the file.  It is drawn on the processor, the summed look
-of the *auto*, *cpu* and *gpu* engines.
-
 ### top
 The slab from above.
 
@@ -367,14 +386,61 @@ The slab along its width: its length across the screen, z vertical.
 The slab along its length: its width across the screen, z vertical.
 
 ### fit
-Centres the slab and zooms so that it fills the window.
+⤢.  Centres the slab and zooms so that it fills the window.
+
+### rock
+⟳.  Starts and stops the motion; Space does the same from anywhere in the
+window.  The small arrow beside it opens the choices below.  Stopped, a rock
+eases back to where it began; a spin stays where it got to.  Dragging, an
+arrow key or a view button stops it at once.
+
+### rock back and forth
+The view turns a little to one side and the other, and back.  The best way
+to see depth: what moves against the rest is nearer or farther.
+
+### spin
+The view turns round and round, at *spin at*: a structure shown from every
+side, as for a talk.
+
+### rock by
+How far a rock turns either way.  10 to 20 degrees shows depth without
+losing one's bearings; more than about 30 starts to show the structure from
+another side rather than in depth.
+
+### period
+How long one rock there and back takes.  2 to 4 s is easy to follow; under
+1 s, a large slab drawn on a slow machine shows only a few frames per rock.
+
+### spin at
+Degrees per second; negative turns the other way.  30 takes 12 s for a whole
+turn.
+
+### Make a movie of this...
+Opens the Render tab's player with the same motion as its view path -- one
+rock or one whole turn, looped, recorded from the 3D view -- so that ▶ plays
+it and *Record...* writes it to a file.  It replaces the path that was
+there.
 
 ### options
-Drops down the settings below.  A click outside closes it; what was set
+⚙.  Drops down the settings below.  A click outside closes it; what was set
 stays.
 
-### keys
-Lists what the mouse and the keys do in the picture.
+### Save image...
+Under ⋯.  Opens [Save image](plugin:File/Export/Image) set to this window:
+the projection rendered again at a pixel size of your choice -- over the
+canvas, or the slab's box -- in colour or as the summed intensity in
+floating point for measuring, with a scale bar and colour bars, and the
+projection and the slab written into the file.  It is drawn on the
+processor, the summed look of the *auto*, *cpu* and *gpu* engines.
+
+### PNG as displayed...
+Under ⋯.  Saves the picture as it is on screen, whichever engine drew it.
+
+### Mouse and keys...
+Under ⋯.  Lists what the mouse and the keys do in the picture.
+
+### Help
+Under ⋯.  This page; F1 opens it too.
 
 ### look
 How each localization is drawn.  *sum* is the 2D renderer's blur, added
