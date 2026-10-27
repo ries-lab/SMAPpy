@@ -205,7 +205,7 @@ def test_the_window_offers_in_situ_with_its_own_section_and_finds_molecules_in_a
     window.method_box.setCurrentText("in situ (blinking molecules)")
     shown = {k: v.isVisibleTo(window) for k, v in window.sections.items()}
     assert shown["in situ"] and not shown["beads"] and window.detect_button.text() == "Detect molecules"
-    assert window.files_section.button.text() == "movies" and not window.mode_box.isEnabled()
+    assert window.files_section.button.text() == "movies" and window.mode_box.currentText() == "Single channel"
     window.optics_form.set_values(dict(NA=1.43, wavelength_nm=680.0, n_immersion=1.516, n_medium=1.335))
     window.insitu_detection_form.set_values(dict(molecules=63))
     window.detect()

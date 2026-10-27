@@ -61,21 +61,42 @@ def test_beads_fitted_back_with_their_own_model_follow_the_stage(tmp_path):
     assert all(abs(s - 1) < 0.02 for s in fits["phase_slope"].values())
 
 
-def test_the_window_gives_4pi_beads_its_own_section_and_one_channel_mode():
+def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     from smappy.calibrate.psf_window import PSFCalibrationWindow
     QApplication.instance() or QApplication([])
     window = PSFCalibrationWindow([])
-    window.method_box.setCurrentText("4Pi beads")
-    assert not window.sections["4Pi"].isHidden() and window.sections["beads"].isHidden()
-    assert not window.mode_box.isEnabled()
-    assert window.use_button.text() == "Use in Spline 4Pi"
     window.show()
+    window.mode_box.setCurrentText("4Pi")
+    assert window.method.key == "fourpi_average"                      # the bead average, in 4Pi
+    assert not window.sections["4Pi"].isHidden() and window.sections["beads"].isHidden()
+    assert window.use_button.text() == "Use in Spline 4Pi"
+    window.method_box.setCurrentText("pupil model (uiPSF)")
+    assert window.method.key == "fourpi_pupil"
     assert not window.fourpi_form.fields["x_corners"].isVisibleTo(window)
     window.fourpi_form.set(FourPiBeadSettings(layout="typed"))
     window._show_fourpi()
     assert window.fourpi_form.fields["x_corners"].isVisibleTo(window)
-    window.method_box.setCurrentText("bead average")
-    assert window.sections["4Pi"].isHidden()
+    # in situ has no 4Pi mode yet: choosing it goes back to one channel
+    window.method_box.setCurrentText("in situ (blinking molecules)")
+    assert window.mode_box.currentText() == "Single channel" and window.sections["4Pi"].isHidden()
+    # and the 4Pi mode, chosen with in situ, takes the pupil model
+    window.mode_box.setCurrentText("4Pi")
+    assert window.method.key == "fourpi_pupil"
+    assert window.method_box.currentText() == "pupil model (uiPSF)"
     window.close()
+
+
+def test_the_4pi_bead_average_gives_a_model_that_fits_its_beads(tmp_path):
+    """The model-free 4Pi model from a DCIMG scan of one phase per slice, fitted back to the beads."""
+    from smappy.calibrate.fourpi_beads import average_model
+    cal = fourpi.model_calibration()
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    xy = np.array([[12.3, 12.6], [31.4, 14.2], [14.7, 31.1], [30.2, 29.8]])
+    path, _ = _dcimg_scan(tmp_path / "beads", cal, layout, xy, n=41)
+    beads, found, registration = scan_beads([path], _settings(), CAMERA)
+    model = average_model({"beads": beads, "layout": found, "registration": registration})
+    assert model.period_nm == pytest.approx(cal.period_nm, rel=0.02)
+    fits = bead_fits(beads, model, box=13)
+    assert all(abs(s - 1) < 0.1 for s in fits["slope"].values())

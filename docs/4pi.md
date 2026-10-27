@@ -1096,3 +1096,37 @@ dropped:
 **Decision.**  *Spline 4Pi* has *phase starts* under *more*, 1 by default:
 the speed of exploration.  2 is for the final localizations of a
 measurement.
+
+## 14. 4Pi as a mode of the PSF calibration window (2026-10-27)
+
+**The structure.**  The window's *mode* is the channel geometry: single
+channel, dual colour, or 4Pi.  The *method* is how the PSF is made.
+- In the 4Pi mode, the pupil model is uiPSF's 4Pi pupil model
+  (`psf_methods.FourPiPupil`).
+- The bead average there is the model-free `fourpi.iab_from_beads`
+  (`FourPiAverage`, `fourpi_beads.average_model`): sub-pixel-centred boxes,
+  backgrounds off.
+- In situ (M6) will be the third.
+- `psf_methods.for_mode` resolves a method in a mode.  A combination that
+  does not exist switches the other box.
+
+**The two 4Pi models compared on the 4Pi-SMS example** (5 beads; the Nup96
+movie, 3000 frames, *4Pi z* windows of 500):
+
+| | bead average | pupil model |
+|---|---|---|
+| Time to build | 5 s | 3.6 min |
+| Its own beads, fitted back: z slope | 1.00–1.01 | 0.90–0.99 |
+| Its own beads, fitted back: scatter | 2–4 nm | 9–22 nm |
+| Movie: likelihood per pixel | −0.668 | −0.750 |
+| Movie: envelope scatter / its CRLB | 4.9 | 1.09 |
+| Movie: median z error (phase) | 3.6 nm | 5.1 nm |
+
+- The bead average is built from its own beads, so it describes them
+  closely.
+- On new data it fits the pixels better, but claims too much precision:
+  a model of five beads carries their noise in its slopes.
+- The pupil model's errors are honest.
+- The expected wrong-fringe rates differ for the same reason (calibrated
+  envelope errors), and need a ring or simulation check before they can
+  be compared.

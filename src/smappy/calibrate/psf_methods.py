@@ -783,20 +783,15 @@ class EllipticalGaussian:
                 f"{cal.residual_nm[0]:.1f} / {cal.residual_nm[1]:.1f} nm in x / y")
 
 
-class FourPiBeads:
-    """4Pi beads: uiPSF's 4Pi pupil model learnt from bead scans and saved as a 4Pi model for *Spline 4Pi*
-    (`fourpi_beads`).  The scans come in through the channel layer -- quadrant files, or a DCIMG z stack of
-    the four images on one chip -- and their layout is the method's own section (*4Pi beads*); the camera
-    and the optics are the microscope's.  Each bead is found on channel 0, every channel's box cut where the
-    registration from the same scans puts it, and the model learnt from all of them.  After it, the beads
-    are fitted back with the saved model, z and the phase against the stage."""
-    key, label = "fourpi", "4Pi beads"
-    sections = {"start from": False, "microscope": True, "model": False, "spline": False, "averaging": False,
-                "4Pi": True}
+class _FourPi:
+    """What the 4Pi mode's methods share: bead scans read through the channel layer -- quadrant files, or
+    a DCIMG z stack of the four images on one chip -- their layout the mode's own section (*4Pi*), each bead
+    found on channel 0 and every channel's box cut where the registration from the same scans puts it
+    (`fourpi_beads.scan_beads`); the model saved as a 4Pi model for *Spline 4Pi* with its layout; and after
+    it the beads fitted back with the saved model, z and the phase against the stage."""
     columns = ("bead", "stack", "x, y (px)", "brightness", "z slope", "z scatter (nm)", "state")
     marks_include = False
     has_stack = False
-    needs_torch = True
     files = "bead scans"
     use_label = "Use in Spline 4Pi"
     listed = False                     # a 4Pi model: never one for Spline 3D's *auto*
@@ -821,34 +816,6 @@ class FourPiBeads:
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found["beads"].records, marks,
                               lambda r: f"{r.get('brightness', float('nan')):.4g}")
-
-    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
-            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
-        from .fourpi_beads import FourPiBeads as Beads, learn, save, steps_of
-        from .pupil import default_save_path
-        found = detected.found if detected is not None else self.detect(paths, dual, inputs, progress).found
-        beads = found["beads"]
-        excluded = sorted(b for b, wish in (marks or {}).items() if wish == "exclude")
-        keep = [i for i in range(len(beads.records)) if i not in excluded]
-        if not keep:
-            raise ValueError("every bead is excluded")
-        used = Beads(beads.data[keep], beads.roi_xy[keep], beads.z_nm, [beads.records[i] for i in keep])
-        optics = inputs["optics"].resolved(inputs.get("camera"))
-        if optics["pixel"] is None:
-            raise ValueError("4Pi beads need the camera's pixel size")
-        settings = inputs["fourpi"]
-        fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
-                    pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
-                    n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
-                    progress=progress, cancel=cancel)
-        run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
-        if inputs["run"].save_model:
-            path = previous.saved if previous is not None and previous.saved is not None else \
-                default_save_path(paths, False).with_name(default_save_path(paths, False).stem + "_4pi.h5")
-            run.saved = Path(path)
-            run.result["calibration"] = save(fit, path, settings.model_z_range_nm, settings.model_dz_nm,
-                                             overwrite=True, layout=found["layout"])
-        return run
 
     def finish(self, run: Run, progress=None) -> Run:
         """The beads fitted back with the model as saved: z and the phase of every bead against the stage."""
@@ -918,4 +885,97 @@ class FourPiBeads:
                 f"{n} beads learnt")
 
 
-METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian(), FourPiBeads())
+class FourPiPupil(_FourPi):
+    """The pupil model in the 4Pi mode: uiPSF's 4Pi pupil model learnt from the beads (`fourpi_beads.learn`),
+    rendered at three phases and saved as I, A and B with the period it shows."""
+    key, label = "fourpi_pupil", "pupil model (uiPSF), 4Pi"
+    sections = {"start from": False, "microscope": True, "model": False, "spline": False, "averaging": False,
+                "4Pi": True}
+    needs_torch = True
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .fourpi_beads import FourPiBeads as Beads, learn, save, steps_of
+        from .pupil import default_save_path
+        found = detected.found if detected is not None else self.detect(paths, dual, inputs, progress).found
+        beads = found["beads"]
+        excluded = sorted(b for b, wish in (marks or {}).items() if wish == "exclude")
+        keep = [i for i in range(len(beads.records)) if i not in excluded]
+        if not keep:
+            raise ValueError("every bead is excluded")
+        used = Beads(beads.data[keep], beads.roi_xy[keep], beads.z_nm, [beads.records[i] for i in keep])
+        optics = inputs["optics"].resolved(inputs.get("camera"))
+        if optics["pixel"] is None:
+            raise ValueError("4Pi beads need the camera's pixel size")
+        settings = inputs["fourpi"]
+        fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
+                    pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
+                    n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
+                    progress=progress, cancel=cancel)
+        run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
+        if inputs["run"].save_model:
+            path = previous.saved if previous is not None and previous.saved is not None else \
+                default_save_path(paths, False).with_name(default_save_path(paths, False).stem + "_4pi.h5")
+            run.saved = Path(path)
+            run.result["calibration"] = save(fit, path, settings.model_z_range_nm, settings.model_dz_nm,
+                                             overwrite=True, layout=found["layout"])
+        return run
+
+
+
+class FourPiAverage(_FourPi):
+    """The bead average in the 4Pi mode: I, A and B solved from the beads themselves, a least squares per
+    voxel over beads and channels (`fourpi.iab_from_beads`), no physical model.  A scan of one phase per
+    slice; a model-independent check of the pupil model, and one with no PyTorch."""
+    key, label = "fourpi_average", "bead average, 4Pi"
+    sections = {"start from": False, "microscope": False, "model": False, "spline": False, "averaging": False,
+                "4Pi": True}
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from ..fourpi import save_fourpi_calibration
+        from .fourpi_beads import average_model
+        from .pupil import default_save_path
+        found = detected.found if detected is not None else self.detect(paths, dual, inputs, progress).found
+        excluded = sorted(b for b, wish in (marks or {}).items() if wish == "exclude")
+        settings = inputs["fourpi"]
+        cal = average_model(found, excluded, settings)
+        run = Run({"fit": None, "found": found, "excluded": excluded, "settings": settings,
+                   "calibration": cal}, False)
+        if inputs["run"].save_model:
+            path = previous.saved if previous is not None and previous.saved is not None else \
+                default_save_path(paths, False).with_name(default_save_path(paths, False).stem + "_4pi.h5")
+            save_fourpi_calibration(path, cal, overwrite=True)
+            run.saved = Path(path)
+        return run
+
+    def save_as(self, run: Run, path) -> Path:
+        from ..fourpi import save_fourpi_calibration
+        save_fourpi_calibration(path, run.result["calibration"], overwrite=True)
+        run.saved = Path(path)
+        return run.saved
+
+
+#: what the window's *mode* box offers: the channel geometry, beside the method that makes the PSF
+MODES = ("Single channel", "Dual colour", "4Pi")
+
+METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian())
+
+#: the methods in the 4Pi mode, by the key of the method they are in the others
+FOURPI = {"average": FourPiAverage(), "pupil": FourPiPupil()}
+
+
+def modes_of(method) -> tuple:
+    """The modes a method (as the method box names it) can run in."""
+    return tuple(m for m in MODES if for_mode(method, m) is not None)
+
+
+def for_mode(method, mode: str):
+    """The entry that runs ``method`` in ``mode``, or None where there is none: the 4Pi variant in the 4Pi
+    mode, the method itself in the others -- except in situ (one channel, for now) and the elliptical
+    Gaussian (one channel)."""
+    if mode == "4Pi":
+        return FOURPI.get(method.key)
+    if mode == "Dual colour" and method.key in ("insitu", "elliptical"):
+        return None
+    return method

@@ -291,7 +291,8 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
         if M != steps:
             raise ValueError("the scans' mirror steps differ")
         for p0 in bead_positions(projections[k][0]):
-            centres = [np.rint(p0 if c == 0 else layout.to_channel(c, [p0])[0]).astype(int) for c in range(C)]
+            exact = [np.asarray(p0, float) if c == 0 else layout.to_channel(c, [p0])[0] for c in range(C)]
+            centres = [np.rint(e).astype(int) for e in exact]
             if any(not (half <= cx < W - half and half <= cy < H - half) for cx, cy in centres):
                 continue
             data.append(np.stack([stack[c, :, :, cy - half:cy + half + 1, cx - half:cx + half + 1]
@@ -299,7 +300,7 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
             roi_xy.append([(cx, cy) for cx, cy in centres])
             x_frame, y_frame = own.on_frame(0, [p0])[0]
             records.append({"stack": k, "path": str(path), "x_px": int(round(x_frame)),
-                            "y_px": int(round(y_frame)),
+                            "y_px": int(round(y_frame)), "exact_xy": [e.tolist() for e in exact],
                             "brightness": float(stack[0, :, :, centres[0][1], centres[0][0]].max())})
     if not data:
         raise ValueError("no bead lies far enough from every channel's edge for its box")
@@ -412,3 +413,34 @@ def draw_against_stage(figure, fits: dict, selected=(), excluded=()) -> str:
     return (f"the envelope's z scatters {np.median(scatter):.1f} nm about the stage (median); z from the "
             f"phase runs at {np.median(slopes):.3f} nm per nm of stage -- far from 1, check the emission "
             "wavelength")
+
+
+def average_model(found: dict, excluded=(), settings: Optional[FourPiBeadSettings] = None):
+    """The 4Pi bead average: I, A and B from the beads themselves (`fourpi.iab_from_beads`), each bead's
+    box in every channel moved onto the bead to a fraction of a pixel and its background taken off, the
+    model kept with the layout and the registration the boxes were cut by.  A scan of one phase per
+    slice: that is what `iab_from_beads` solves."""
+    from scipy.ndimage import shift
+
+    from ..fourpi import iab_from_beads
+    beads, layout = found["beads"], found["layout"]
+    E, C, J, M, H, W = beads.data.shape
+    if M != 1:
+        raise ValueError("the bead average in 4Pi takes a scan of one phase per slice; a scan with mirror "
+                         "steps is learnt by the pupil model")
+    keep = [i for i in range(E) if i not in set(excluded)]
+    if len(keep) < 2:
+        raise ValueError("the 4Pi bead average needs at least two beads")
+    stacks = []
+    for i in keep:
+        per = []
+        for c in range(C):
+            part = np.asarray(beads.data[i, c, :, 0], float)                     # (J, H, W)
+            border = np.concatenate([part[:, 0], part[:, -1], part[:, :, 0], part[:, :, -1]], axis=1)
+            part = part - np.median(border, axis=1)[:, None, None]
+            (ex, ey), (cx, cy) = beads.records[i]["exact_xy"][c], beads.roi_xy[i, c]
+            per.append(shift(part, (0, cy - ey, cx - ex), order=3, mode="nearest"))
+        stacks.append(per)
+    step = float(abs(beads.z_nm[1] - beads.z_nm[0]))
+    return iab_from_beads(np.asarray(stacks), dz=step, layout=layout.to_dict(),
+                          transforms=np.asarray(layout.maps))

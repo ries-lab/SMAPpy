@@ -31,7 +31,7 @@ together.  It follows the slow drift of the cavity, and writes z from the
 phase on the fringe the envelope's z points to.
 
 It needs a 4Pi model of the microscope, made from beads: with the
-[PSF calibration](plugin:Panels/PSF calibration) window's *4Pi beads*, or
+[PSF calibration](plugin:Panels/PSF calibration) window's *4Pi* mode, or
 uiPSF v1's `psfmodel_*_4pi.h5`.  The model carries each channel's PSF and
 how the channels map onto each other.  It also needs to know where the
 channels are on the camera frame (*channels*).

@@ -45,7 +45,7 @@ from .core import CalibrationSettings
 from .dual import DualColorSettings
 from .elliptical import EllipticalCalibrationSettings
 from .input import acquisition_kind, discover_acquisitions
-from .psf_methods import AVERAGE_ONLY, METHODS, LearningProgress, duration
+from .psf_methods import AVERAGE_ONLY, METHODS, MODES, LearningProgress, duration, for_mode
 from .insitu import InSituSettings
 from .insitu_run import InSituModelSettings
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
@@ -118,7 +118,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.setWindowTitle("SMAPpy - PSF calibration")
         self.setAcceptDrops(True)           # stacks dropped on it are added (`add_dropped`)
         self.paths: List[str] = [str(p) for p in paths]
-        self.method = METHODS[0]
+        self.chosen = METHODS[0]           # as the method box names it
+        self.method = METHODS[0]           # what runs: the chosen method in the chosen mode (`for_mode`)
         self.run_result = None
         self.detected = None                # what Detect beads found, until a setting it read changes
         self.marks: dict = {}
@@ -233,7 +234,7 @@ class PSFCalibrationWindow(QMainWindow):
             layout.addLayout(line)
             return box
         self.method_box = choice("method", [m.label for m in METHODS], self.method_changed)
-        self.mode_box = choice("mode", ["Single channel", "Dual colour"], self.mode_changed)
+        self.mode_box = choice("mode", list(MODES), self.mode_changed)
 
         # one RunSettings, two forms: *start from* is a choice of the model, *save model* of the run
         self.run_form = SettingsForm(RunSettings)
@@ -284,7 +285,7 @@ class PSFCalibrationWindow(QMainWindow):
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
                          "elliptical": CollapsibleSection("elliptical Gaussian", self.elliptical_form,
                                                           expanded=True),
-                         "4Pi": CollapsibleSection("4Pi beads", self.fourpi_form, expanded=True),
+                         "4Pi": CollapsibleSection("4Pi", self.fourpi_form, expanded=True),
                          "beads": CollapsibleSection("beads", holder, expanded=True),
                          "spline": CollapsibleSection("spline", self.spline_form, expanded=False)}
         for section in self.sections.values():
@@ -371,9 +372,6 @@ class PSFCalibrationWindow(QMainWindow):
         self.model_form.set_shown({"magnitude": not insitu})
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
-        if (insitu or fourpi) and self.is_dual:
-            self.mode_box.setCurrentText("Single channel")          # one channel only, for now
-        self.mode_box.setEnabled(not insitu and not fourpi)
         self.stack_browser.set_movie(getattr(self.method, "files", "") == "movies")
         self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
@@ -432,11 +430,30 @@ class PSFCalibrationWindow(QMainWindow):
             self.stack_browser.set_marks([])
             self.refresh_table()
             self._update_buttons()
+    @property
+    def is_fourpi(self) -> bool:
+        return self.mode_box.currentText() == "4Pi"
+
     def method_changed(self, label: str) -> None:
-        self.method = next(m for m in METHODS if m.label == label)
+        """A method chosen: in this mode if it runs in it, else in the first mode it does (in situ and the
+        elliptical Gaussian are one channel)."""
+        self.chosen = next(m for m in METHODS if m.label == label)
+        if for_mode(self.chosen, self.mode_box.currentText()) is None:
+            from .psf_methods import modes_of
+            self.mode_box.blockSignals(True)
+            self.mode_box.setCurrentText(modes_of(self.chosen)[0])
+            self.mode_box.blockSignals(False)
+        self.method = for_mode(self.chosen, self.mode_box.currentText())
         self._forget("method changed; files and settings kept - calibrate again")
 
-    def mode_changed(self, _text: str) -> None:
+    def mode_changed(self, mode: str) -> None:
+        """A mode chosen: the method in it, or the pupil model where the chosen one has no such mode."""
+        if for_mode(self.chosen, mode) is None:
+            self.chosen = next(m for m in METHODS if m.key == "pupil")
+            self.method_box.blockSignals(True)
+            self.method_box.setCurrentText(self.chosen.label)
+            self.method_box.blockSignals(False)
+        self.method = for_mode(self.chosen, mode)
         self._forget("mode changed; files and settings kept - calibrate again")
         self._show_optics()
 
