@@ -355,25 +355,32 @@ where the registration puts the bead.
   period the model itself shows.
 - **bead average:** I, A and B solved from the beads themselves, with no
   physical model.
-  - The four channels are taken to share one PSF, differing only in
-    brightness and phase offset.  These, the fringe's rate and each bead's
-    phase come from the beads' brightness at their centre.
-  - Then, at every pixel and height, a least squares over all beads and
-    channels gives I, A and B.
-  - Each bead's box is first moved onto the bead to a fraction of a pixel,
-    and its background taken off.
-  - A scan of one phase per slice only.  Seconds, no PyTorch.
+  - Each bead's box is moved onto the bead to a fraction of a pixel, its
+    background taken off, and its brightness scaled to the beads' mean.
+  - The phase of every bead at every slice comes first, from the beads'
+    brightness at their centre: the stage moves the phase along the scan,
+    each bead sits at its own phase, and the mirror steps add theirs.
+  - At every pixel and height, a least squares over the beads and steps
+    then gives each channel's own I, A and B.  That needs the phases spread
+    round the circle.  Mirror steps always spread them; without steps it
+    takes beads at different phases.  Where they are not spread enough, the
+    four channels are taken to share one PSF, differing only in brightness
+    and phase offset, and solved together.
+  - The model is smoothed along z by 60 nm.  A model of a few beads carries
+    their noise, and a noisy model claims precisions it does not have.
+  - Seconds to a couple of minutes, no PyTorch.
 
 The model is saved with the channel layout its maps belong to, as
 `<name>_4pi.h5` beside the scans.
 
-**Which to use.**  On the 4Pi-SMS example's five beads, both models fit the
+**Which to use.**  On the 4Pi-SMS example's five beads (a scan without
+steps, their phases too close for a model per channel), both models fit the
 example's Nup96 movie.  The bead average fits its pixels better (a
-likelihood per pixel of −0.67 against −0.75).  But its precisions are too
-small: its envelope's z scattered 4.9 times its error, the pupil model's 1.1
-times.  A model of a few beads carries their noise in its slopes.  The
-pupil model's errors can be taken at their word; the bead average is a check
-of it that assumes no optics.
+likelihood per pixel of −0.66 against −0.75).  But its precisions are too
+small: its envelope's z scattered 2.5 times its error, the pupil model's 1.1
+times.  The pupil model's errors can be taken at their word; the bead
+average is a check of it that assumes no optics, and the better choice the
+more beads, and the more phases, the scan has.
 
 The pages are *Model* -- each channel's I through focus, and its modulation
 |A, B| / I at the centre -- and *z against the stage*: every bead fitted back

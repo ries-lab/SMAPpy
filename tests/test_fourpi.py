@@ -342,45 +342,102 @@ def test_without_the_slope_the_plugin_asks_for_the_model(cal, drifting, tmp_path
 
 # ---------------------------------------------------------------- models from beads
 
-@pytest.mark.slow
-def test_a_bead_scan_without_phase_steps_gives_back_the_model(cal):
-    """Beads scanned through z, their phase moving with z: the channels'
-    gains and phase offsets, the period, and I, A, B -- I free of the fringe
-    -- come back from a least squares per voxel over beads and channels."""
-    truth = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
-    gains = np.array([1.0, 0.85, 0.95, 0.9])
+def _bead_scan(truth, gains=(1.0, 0.85, 0.95, 0.9), steps=(0.0,), beads=5, seed=11):
+    """Beads scanned through z with ``truth``, their phase moving with z, each at its own phase and a
+    little off the grid's focus, at the mirror ``steps``: (beads, C, Z, M, y, x) in photons."""
     nz, size = truth.volumes.shape[2], 25
     centre = (size - 1) / 2
-    rng = np.random.default_rng(11)
+    rng = np.random.default_rng(seed)
     stacks = []
-    for b in range(5):
+    for b in range(beads):
         phi_b, shift = rng.uniform(-np.pi, np.pi), rng.uniform(-2, 2)
-        zi = np.arange(nz - 1, dtype=float) + shift            # the bead a little off the grid's focus
+        zi = np.arange(nz - 1, dtype=float) + shift
         z_nm = truth.z_index_to_nm(zi)
-        phase = truth.phase_per_nm * z_nm + phi_b
-        spots = fourpi.spots(truth, np.full(len(zi), centre), np.full(len(zi), centre),
-                             zi, phase, size)                    # (z, C, y, x)
-        stacks.append(rng.poisson(40000 * np.clip(spots, 0, None) * gains[None, :, None, None])
-                      .transpose(1, 0, 2, 3))
-    found = fourpi.iab_from_beads(np.asarray(stacks, float), dz=truth.dz, smooth_z=0.5)
+        per_step = []
+        for s in steps:
+            phase = truth.phase_per_nm * z_nm + phi_b + s
+            spots = fourpi.spots(truth, np.full(len(zi), centre), np.full(len(zi), centre),
+                                 zi, phase, size)                # (z, C, y, x)
+            per_step.append(rng.poisson(40000 * np.clip(spots, 0, None)
+                                        * np.asarray(gains)[None, :, None, None]).transpose(1, 0, 2, 3))
+        stacks.append(np.stack(per_step, axis=2))
+    return np.asarray(stacks, float)
+
+
+def _z_back(found, truth):
+    """Simulated molecules of ``truth`` fitted with ``found``: the median and spread of z less the truth,
+    and the median z precision."""
+    from smappy.psf import Global4PiPSF
+    rois, t = fourpi.simulate_rois(truth, 300, photons=4000, background=10, z_nm=(-300, 300), seed=12)
+    values = Global4PiPSF(found).unpack(Global4PiPSF(found).fit(rois))
+    dz = values["z_nm"] - t["z_nm"]
+    return float(np.median(dz)), float(np.std(dz)), float(np.median(values["z_err_nm"]))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("channels", ["each", "shared"])
+def test_a_bead_scan_without_phase_steps_gives_back_the_model(cal, channels):
+    """Beads scanned through z, their phase moving with z: the channels'
+    gains and phase offsets, the period, and I, A, B -- I free of the fringe
+    -- come back from a least squares per voxel, per channel or over the
+    channels with one PSF, and molecules fitted with it come back on their
+    z at the precision it claims."""
+    truth = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
+    gains = np.array([1.0, 0.85, 0.95, 0.9])
+    found = fourpi.iab_from_beads(_bead_scan(truth, gains)[:, :, :, 0], dz=truth.dz,
+                                  channels=channels)
     p = found.parameters
+    assert p["channels"] == channels
     assert found.period_nm == pytest.approx(truth.period_nm, rel=0.01)
     assert np.allclose(np.array(p["gains"]) / p["gains"][0], gains, atol=0.03)
     offsets = np.angle(np.exp(1j * (np.array(p["offsets_rad"]) - [0.0, -2.1, 3.0, 1.1])))
     assert np.abs(offsets).max() < 0.1
     # the incoherent part has no fringe left in it: its component at the
     # fringe's frequency, at the centre, is small against the interference
+    size = found.volumes.shape[-1]
     v = found.volumes[0, :, :, size // 2, size // 2]
     z = np.arange(v.shape[1])
     fringe = 2 * np.abs(np.mean(v[0] * np.exp(-1j * p["w_per_slice"] * z)))
     assert fringe < 0.05 * np.mean(np.hypot(v[1], v[2]))
-    # and it fits: simulated molecules come back on the stage's z
-    rois, t = fourpi.simulate_rois(truth, 300, photons=4000, background=10, z_nm=(-300, 300), seed=12)
-    from smappy.psf import Global4PiPSF
-    values = Global4PiPSF(found).unpack(Global4PiPSF(found).fit(rois))
-    dz = values["z_nm"] - t["z_nm"]
-    assert abs(np.median(dz)) < 15
-    assert np.std(dz) < 2 * np.median(values["z_err_nm"])
+    bias, spread, error = _z_back(found, truth)
+    assert abs(bias) < 5 and spread < 1.2 * error
+
+
+@pytest.mark.slow
+def test_channels_of_their_own_shape_are_learnt_per_channel_and_lost_in_one_shared_psf():
+    """Two channels with half the astigmatism of the others (the arms
+    unmatched), five beads: five at random phases determine each channel's
+    solve, which *auto* takes, and its molecules come back on their z at the
+    precision it claims; one PSF shared by the channels averages the two
+    shapes and scatters them wider."""
+    a = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
+    b = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1], astigmatism_nm=150.0)
+    v = np.concatenate([a.volumes[:2], b.volumes[2:]])
+    truth = fourpi.from_volumes(v[:, 0], v[:, 1], v[:, 2], dz=a.dz, z0=a.z0, period_nm=a.period_nm,
+                                phase_per_nm=a.phase_per_nm)
+    stacks = _bead_scan(truth)[:, :, :, 0]
+    each = fourpi.iab_from_beads(stacks, dz=truth.dz)
+    shared = fourpi.iab_from_beads(stacks, dz=truth.dz, channels="shared")
+    assert each.parameters["channels"] == "each" and each.parameters["condition"] < 10
+    bias, spread, error = _z_back(each, truth)
+    assert abs(bias) < 5 and spread < 1.2 * error
+    assert _z_back(shared, truth)[1] > 1.15 * spread
+
+
+@pytest.mark.slow
+def test_mirror_steps_set_the_wrong_way_round_are_turned_and_determine_one_bead():
+    """A scan with three mirror steps per slice, given with the opposite
+    sign to how they act: the solve finds the steps' direction, and the
+    steps alone determine every channel's I, A and B per slice, whatever
+    the beads' phases."""
+    truth = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
+    stacks = _bead_scan(truth, steps=(2.0, 0.0, -2.0), beads=2)
+    found = fourpi.iab_from_beads(stacks, dz=truth.dz, steps=(-2.0, 0.0, 2.0))
+    assert found.parameters["steps_rad"] == [2.0, 0.0, -2.0]
+    one = fourpi.iab_from_beads(stacks[:1], dz=truth.dz, steps=(2.0, 0.0, -2.0), channels="each")
+    assert one.parameters["condition"] < 3
+    bias, spread, error = _z_back(found, truth)
+    assert abs(bias) < 15 and spread < 2 * error
 
 
 def test_smaps_4pi_calibration_reads_with_its_layout_and_channel_offsets():

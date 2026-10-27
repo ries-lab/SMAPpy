@@ -788,22 +788,39 @@ def load_smap_4pi(path, dz_sign: float = 1.0) -> FourPiCalibration:
 
 # ---------------------------------------------------------------- from a bead scan
 #
-# A 4Pi bead scan without phase steps -- the stage moves the bead through
-# focus, and the interference phase moves with it, w per slice -- gives at
-# each slice one image per channel.  Per channel that is one equation for
-# three unknowns, I, A and B; but the channels share one PSF up to their
-# brightness n_c and phase offset phi_c (SMAP's assumption, and the optics'
-# to the extent the arms are matched), so with every bead b and channel c
+# A 4Pi bead scan: the stage moves the bead through focus, and the
+# interference phase moves with it, w per slice; a scan may add phase steps
+# of the deformable mirrors at every slice.  With bead b at its own phase
+# phi_b, the light of channel c at slice z and step s_m is
 #
-#     data_bc(z) = n_c (I(z) + A(z) cos(w z + phi_b + phi_c) + B(z) sin(...))
+#     data_bcm(z) = I_c(z) + A_c(z) cos(w z_b + phi_b + s_m) + B_c(z) sin(...)
 #
-# is linear in I, A and B: a least squares per voxel over all beads and
-# channels.  w, n_c, phi_c and each bead's phi_b come first, from the
-# beads' brightness at their centre (`scan_phases`); each bead's focus from
-# where its spot is round (`_focus`).  SMAP's own construction (make4Pimodel,
-# pairs of channels solved two at a time) left the fringe in I on the
-# 4Pi-SMS example: I oscillated with the fringe period at its centre, and a
-# fit with that model traded z for phase.
+# -- each channel's own volumes, its brightness and phase offset inside
+# them, as the fitter takes them.  Per voxel and channel that is linear in
+# I_c, A_c and B_c, one equation per bead and step: determined when the
+# angles are spread round the circle, by the steps or by the beads' own
+# phases.  A few beads give a model as noisy as they are, and a noisy model
+# is an over-confident one: its sharp noise reads as information, and the
+# fitter's errors shrink while its scatter grows.  Five simulated beads
+# solved per channel scattered z by 25 nm and claimed 7, where the true
+# model gives 16 and claims 15 (docs/4pi.md §15).  Smoothing along z by
+# 60 nm (a Gaussian's sigma) removes that: 16 and 16, and for channels of
+# different astigmatism 17 and 17, where one PSF shared by the channels
+# scatters 21.  So the solve is per channel, smoothed, wherever it is
+# determined; where it is not (two beads at one phase, no steps), the
+# channels are taken to share one PSF up to their brightness n_c and phase
+# offset phi_c (SMAP's assumption, and the optics' only to the extent the
+# arms are matched), four times the equations:
+#
+#     data_bcm(z) = n_c (I(z) + A(z) cos(w z_b + phi_b + phi_c + s_m) + ...)
+#
+# a least squares per voxel over all beads, channels and steps.  w, n_c,
+# phi_c and each bead's phi_b come first, from the beads' brightness at
+# their centre (`scan_phases`); each bead's focus from where its spot is
+# round (`_focus`).  SMAP's own construction (make4Pimodel, pairs of
+# channels solved two at a time) left the fringe in I on the 4Pi-SMS
+# example: I oscillated with the fringe period at its centre, and a fit with
+# that model traded z for phase.
 
 @dataclass
 class ScanPhases:
@@ -846,7 +863,7 @@ def scan_phases(centre: np.ndarray, window=None) -> ScanPhases:
             return np.concatenate(out) / max(data.mean(), 1.0)
 
         best = None
-        for w0 in (0.35, 0.42, 0.5, 0.58):
+        for w0 in _fringe_rates(data, z):
             for phi0 in np.linspace(-np.pi, np.pi, 4, endpoint=False):
                 for step in (np.pi / 2, -np.pi / 2):
                     p0 = [w0, phi0, data[0].mean(), 0, 0, 0.5]
@@ -871,6 +888,18 @@ def scan_phases(centre: np.ndarray, window=None) -> ScanPhases:
                       np.angle(np.exp(1j * np.asarray(phases))), np.asarray(mods))
 
 
+def _fringe_rates(data: np.ndarray, z: np.ndarray) -> tuple:
+    """Starting phases per slice for one bead's centre brightness (C, Z): the
+    strongest fringe of the channels less their mean, over 0.05 to 2 rad per
+    slice (a fringe of 280 nm is 0.45 rad at slices of 20 nm, 1.1 at 50),
+    and 10 % either side of it."""
+    r = data - data.mean(axis=0, keepdims=True)
+    grid = np.linspace(0.05, 2.0, 400)
+    power = [float((np.abs((r * np.exp(1j * w * z)).sum(axis=1)) ** 2).sum()) for w in grid]
+    w0 = grid[int(np.argmax(power))]
+    return (0.9 * w0, w0, 1.1 * w0)
+
+
 def _focus(stack: np.ndarray) -> float:
     """Where a bead's spot is round, in slices: the zero of the difference
     of its widths, from the summed channels (n_z, h, w) -- the envelope's
@@ -891,62 +920,117 @@ def _focus(stack: np.ndarray) -> float:
     return float(-intercept / slope)
 
 
-def iab_from_beads(stacks: np.ndarray, dz: float, smooth_z: float = 1.0,
-                   phases: Optional[ScanPhases] = None, **kwargs) -> FourPiCalibration:
-    """A 4Pi model from bead scans without phase steps.
+def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
+                   phases: Optional[ScanPhases] = None, steps=None, channels: str = "auto",
+                   max_condition: float = 10.0, **kwargs) -> FourPiCalibration:
+    """A 4Pi model from bead scans.
 
-    ``stacks`` is (beads, C, Z, h, w): each bead's ROI in every channel
-    through the scan, background removed, centred on the bead to a fraction
-    of a pixel in every channel (the registration's job), in photons.  The
-    beads are put on one z grid by their foci (`_focus`), and I, A and B
-    solved per voxel (the comment above).  ``smooth_z`` (slices) smooths the
-    result along z, where a scan of a few beads is noisiest.
+    ``stacks`` is (beads, C, Z, h, w), or (beads, C, Z, M, h, w) with the
+    mirror ``steps`` (M, rad, as set; which way round they act is found
+    from the data): each bead's ROI in every channel through the scan,
+    background removed, centred on the bead to a fraction of a pixel in
+    every channel (the registration's job), in photons; each bead is scaled
+    to the beads' mean brightness.  The beads are put
+    on one z grid by their foci (`_focus`), and I, A and B solved per voxel
+    (the comment above): per channel (``channels="each"``), over the
+    channels with one shared PSF (``"shared"``), or per channel where the
+    angles are spread enough that every slice's least squares has a
+    condition number below ``max_condition`` (``"auto"``; evenly spread
+    angles give 1.4).  ``smooth_nm`` is the sigma of a Gaussian along z
+    that takes the beads' noise out of the model.
     """
     from scipy.ndimage import gaussian_filter1d, shift
     stacks = np.asarray(stacks, float)
-    nb, C, Z, h, w = stacks.shape
-    centre = stacks[:, :, :, h // 2 - 2:h // 2 + 3, w // 2 - 2:w // 2 + 3].sum(axis=(3, 4))
+    if stacks.ndim == 5:
+        stacks = stacks[:, :, :, None]
+    nb, C, Z, M, h, w = stacks.shape
+    steps = np.zeros(1) if steps is None else np.asarray(steps, float)
+    if len(steps) != M:
+        raise ValueError(f"{M} mirror steps in the stacks, {len(steps)} given")
+    # one brightness: a bright bead would otherwise weigh as a large I, and
+    # with the beads at their own phases, leak into A and B
+    total = stacks.sum(axis=(1, 2, 3, 4, 5))
+    stacks = stacks * (total.mean() / np.clip(total, 1e-12, None))[:, None, None, None, None, None]
+    foci = np.array([_focus(stacks[b].sum(axis=(0, 2))) for b in range(nb)])
+    # a bead whose spot is never round in the scan's middle (a neighbour in
+    # its box, a bead off the coverslip) would shorten every bead's common z
+    # range to nothing: one of 29 in uiPSF's 4Pi example put its focus 15
+    # slices from the others' of a 21-slice scan
+    used = np.abs(foci - np.median(foci)) <= Z / 4
+    if not used.any():
+        raise ValueError("no bead has its focus within the scan")
+    dropped = np.flatnonzero(~used).tolist()
+    stacks, foci = stacks[used], foci[used]
+    nb = len(foci)
+    first = stacks[:, :, :, 0]
+    centre = first[..., h // 2 - 2:h // 2 + 3, w // 2 - 2:w // 2 + 3].sum(axis=(3, 4))
     ph = phases or scan_phases(centre)
-    foci = np.array([_focus(stacks[b].sum(axis=0)) for b in range(nb)])
     target = float(np.median(foci))
     # every bead moved onto the grid where its focus is the median's
     aligned = np.empty_like(stacks)
     for b in range(nb):
-        aligned[b] = shift(stacks[b], (0, target - foci[b], 0, 0), order=3, mode="nearest")
+        aligned[b] = shift(stacks[b], (0, target - foci[b], 0, 0, 0), order=3, mode="nearest")
     margin = int(np.ceil(np.abs(target - foci).max())) + 1
     zs = np.arange(margin, Z - margin)
-    I = np.empty((len(zs), h, w))
-    A = np.empty_like(I)
-    B = np.empty_like(I)
-    for k, z in enumerate(zs):
-        rows, values = [], []
-        for b in range(nb):
-            # the bead's own slice, where its phase was w z_b + phi_b
-            z_b = z - (target - foci[b])
+
+    def angles(z, sign):
+        """(beads, M): each bead's own phase at its own slice, which is what
+        the fitter's phase is for a molecule: A and B multiply it, and come
+        out demodulated."""
+        z_b = z - (target - foci)
+        return (ph.w * z_b + ph.bead_phases)[:, None] + sign * steps[None, :]
+
+    def design(theta):
+        theta = theta.ravel()
+        return np.stack([np.ones_like(theta), np.cos(theta), np.sin(theta)], axis=1)
+
+    condition = max(np.linalg.cond(design(angles(z, 1.0))) for z in zs)
+    if channels == "auto":
+        channels = "each" if condition < max_condition else "shared"
+    if channels not in ("each", "shared"):
+        raise ValueError(f"channels is 'auto', 'each' or 'shared', not {channels!r}")
+
+    def solve(sign):
+        V = np.empty((3, C, len(zs), h, w))
+        residual = 0.0
+        for k, z in enumerate(zs):
+            theta = angles(z, sign)
+            if channels == "each":
+                X = design(theta)
+                for c in range(C):
+                    y = aligned[:, c, z].reshape(nb * M, h * w)
+                    sol, res = np.linalg.lstsq(X, y, rcond=None)[:2]
+                    V[:, c, k] = sol.reshape(3, h, w)
+                    residual += float(res.sum()) if res.size else 0.0
+                continue
+            X = np.concatenate([ph.gains[c] * design(theta + ph.offsets[c]) for c in range(C)])
+            y = aligned[:, :, z].transpose(1, 0, 2, 3, 4).reshape(C * nb * M, h * w)
+            sol, res = np.linalg.lstsq(X, y, rcond=None)[:2]
+            residual += float(res.sum()) if res.size else 0.0
+            I, A, B = (sol[j].reshape(h, w) for j in range(3))
+            # each channel's own volumes: its gain and phase offset inside them
             for c in range(C):
-                # the bead's own phase at its own slice, which is what the
-                # fitter's phase is for a molecule: A and B multiply it, and
-                # come out demodulated
-                angle = ph.w * z_b + ph.bead_phases[b] + ph.offsets[c]
-                rows.append(ph.gains[c] * np.array([1.0, np.cos(angle), np.sin(angle)]))
-                values.append(aligned[b, c, z].ravel())
-        solution = np.linalg.lstsq(np.asarray(rows), np.asarray(values), rcond=None)[0]
-        I[k], A[k], B[k] = (solution[j].reshape(h, w) for j in range(3))
-    if smooth_z > 0:
-        I, A, B = (gaussian_filter1d(v, smooth_z, axis=0, mode="nearest") for v in (I, A, B))
-    # each channel's own volumes: its gain and phase offset inside them
-    Ic, Ac, Bc = [], [], []
-    for c in range(C):
-        cos, sin = np.cos(ph.offsets[c]), np.sin(ph.offsets[c])
-        Ic.append(ph.gains[c] * I)
-        Ac.append(ph.gains[c] * (A * cos + B * sin))
-        Bc.append(ph.gains[c] * (B * cos - A * sin))
+                cos, sin = np.cos(ph.offsets[c]), np.sin(ph.offsets[c])
+                V[:, c, k] = ph.gains[c] * np.stack([I, A * cos + B * sin, B * cos - A * sin])
+        return V, residual
+
+    V, residual = solve(1.0)
+    sign = 1.0
+    if M > 1:
+        turned, other = solve(-1.0)
+        if other < residual:
+            V, sign = turned, -1.0
+    if smooth_nm > 0:
+        V = gaussian_filter1d(V, smooth_nm / dz, axis=2, mode="nearest")
     period = 2 * np.pi / ph.w * dz
-    parameters = {"method": "IAB from a bead scan", "w_per_slice": ph.w,
-                  "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
-                  "beads": int(nb), "foci_slices": foci.tolist()}
+    parameters = {"method": "IAB from a bead scan", "channels": channels, "condition": float(condition),
+                  "smooth_nm": float(smooth_nm),
+                  "w_per_slice": ph.w, "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
+                  "steps_rad": (sign * steps).tolist(), "beads": int(nb), "foci_slices": foci.tolist(),
+                  "dropped_beads": dropped}
     parameters.update(kwargs.pop("parameters", {}))
     # the phase grows with the slice, so it falls with z_nm
-    return from_volumes(np.stack(Ic), np.stack(Ac), np.stack(Bc), dz=dz,
-                        z0=target - margin, period_nm=period, phase_per_nm=-ph.w / dz,
-                        parameters=parameters, **kwargs)
+    return from_volumes(V[0], V[1], V[2], dz=dz, z0=target - margin, period_nm=period,
+                        phase_per_nm=-ph.w / dz, parameters=parameters, **kwargs)
+
+

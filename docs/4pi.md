@@ -1130,3 +1130,67 @@ movie, 3000 frames, *4Pi z* windows of 500):
 - The expected wrong-fringe rates differ for the same reason (calibrated
   envelope errors), and need a ring or simulation check before they can
   be compared.
+
+## 15. The bead average per channel (2026-10-27)
+
+**The question.**  The 4Pi bead average (§14) took the four channels to
+share one PSF, differing only in brightness and phase offset.  That hides
+any difference between the arms, which the fitter's per-channel models are
+there to keep.  Was it the cause of the over-confidence on the movie?
+
+**Per channel without mirror steps.**  Per voxel and channel the light is
+linear in I_c, A_c, B_c.  There is one equation per bead (and per mirror
+step), at the bead's own phase at that slice.  Beads at different phases
+determine it; `iab_from_beads(channels="each")`.
+
+**Simulated scans** (`model_calibration`, 5 beads at 40,000 photons, 20 nm
+slices; z of 300 simulated molecules of 4000 photons fitted back):
+
+| channels | model | smoothing | z spread | claimed error |
+|---|---|---|---|---|
+| matched | truth | | 15.8 | 15.3 |
+| matched | per channel | 10 nm | 24.9 | 7.1 |
+| matched | shared | 10 nm | 19.3 | 11.3 |
+| matched | per channel | 60 nm | 15.9 | 15.9 |
+| matched | shared | 60 nm | 15.9 | 16.0 |
+| 2 of 4 at half the astigmatism | truth | | 16.4 | 16.3 |
+| 2 of 4 at half the astigmatism | per channel | 10 nm | 32.0 | 6.6 |
+| 2 of 4 at half the astigmatism | shared | 10 nm | 28.4 | 11.3 |
+| 2 of 4 at half the astigmatism | per channel | 60 nm | 16.8 | 17.0 |
+| 2 of 4 at half the astigmatism | shared | 60 nm | 20.9 | 17.6 |
+
+What this shows:
+- **The over-confidence was noise.**  A model of a few beads is noisy, and
+  its noise reads as information: the claimed error shrinks while the
+  scatter grows.  This held for both solves, and twenty beads only halved
+  it.
+- **Smoothing along z by 60 nm takes it out.**  Both solves then match the
+  truth.
+- **Per channel then wins where the arms differ.**  So `iab_from_beads`
+  smooths by 60 nm (`smooth_nm`) and solves per channel where every
+  slice's least squares has a condition number below 10 (*auto*).
+  Otherwise it solves shared.
+- **Each bead is scaled to the beads' mean brightness** first.
+- **A bead whose focus lies more than a quarter of the scan from the
+  median is dropped.**
+
+**Mirror steps** (`steps`) enter the angle.  Which way round they act is
+found as for the pupil model, by trying both: the smaller residual wins.
+They make every slice determined from one bead.
+
+**On real data:**
+- **4Pi-SMS beads** (5, no steps): the worst slice's condition number is
+  23, so *auto* solves shared.  Forced per channel, the movie's likelihood
+  per pixel fell from −0.66 to −1.11.
+- **Shared with 60 nm smoothing** on the movie:
+  - envelope scatter / error 2.5, from 4.9 with 20 nm smoothing (the pupil
+    model: 1.1);
+  - median z error 3.4 nm;
+  - expected wrong fringes 7.2 %.
+  - It is still over-confident: five beads are few.
+- **uiPSF's 4Pi example beads** (29 found in 6 scans, 3 mirror steps, 50 nm
+  slices):
+  - condition 1.45, so per channel; 106 s;
+  - fringe period 250 nm (uiPSF v1's model: 260 nm);
+  - fitted back to their own beads: z slope median 1.01 (0.85–1.11),
+    scatter 2–7 nm, phase slope 0.99–1.02.

@@ -418,16 +418,15 @@ def draw_against_stage(figure, fits: dict, selected=(), excluded=()) -> str:
 def average_model(found: dict, excluded=(), settings: Optional[FourPiBeadSettings] = None):
     """The 4Pi bead average: I, A and B from the beads themselves (`fourpi.iab_from_beads`), each bead's
     box in every channel moved onto the bead to a fraction of a pixel and its background taken off, the
-    model kept with the layout and the registration the boxes were cut by.  A scan of one phase per
-    slice: that is what `iab_from_beads` solves."""
+    model kept with the layout and the registration the boxes were cut by.  Each channel its own PSF where
+    the beads' phases and the mirror steps determine it, else one shared by the channels; smoothed along z,
+    which a scan of a few beads needs (`iab_from_beads`)."""
     from scipy.ndimage import shift
 
     from ..fourpi import iab_from_beads
+    settings = settings or FourPiBeadSettings()
     beads, layout = found["beads"], found["layout"]
     E, C, J, M, H, W = beads.data.shape
-    if M != 1:
-        raise ValueError("the bead average in 4Pi takes a scan of one phase per slice; a scan with mirror "
-                         "steps is learnt by the pupil model")
     keep = [i for i in range(E) if i not in set(excluded)]
     if len(keep) < 2:
         raise ValueError("the 4Pi bead average needs at least two beads")
@@ -435,12 +434,12 @@ def average_model(found: dict, excluded=(), settings: Optional[FourPiBeadSetting
     for i in keep:
         per = []
         for c in range(C):
-            part = np.asarray(beads.data[i, c, :, 0], float)                     # (J, H, W)
-            border = np.concatenate([part[:, 0], part[:, -1], part[:, :, 0], part[:, :, -1]], axis=1)
-            part = part - np.median(border, axis=1)[:, None, None]
+            part = np.asarray(beads.data[i, c], float)                           # (J, M, H, W)
+            border = np.concatenate([part[..., 0, :], part[..., -1, :], part[..., 0], part[..., -1]], axis=-1)
+            part = part - np.median(border, axis=-1)[..., None, None]
             (ex, ey), (cx, cy) = beads.records[i]["exact_xy"][c], beads.roi_xy[i, c]
-            per.append(shift(part, (0, cy - ey, cx - ex), order=3, mode="nearest"))
+            per.append(shift(part, (0, 0, cy - ey, cx - ex), order=3, mode="nearest"))
         stacks.append(per)
     step = float(abs(beads.z_nm[1] - beads.z_nm[0]))
-    return iab_from_beads(np.asarray(stacks), dz=step, layout=layout.to_dict(),
+    return iab_from_beads(np.asarray(stacks), dz=step, steps=steps_of(settings, M), layout=layout.to_dict(),
                           transforms=np.asarray(layout.maps))
