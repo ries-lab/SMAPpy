@@ -171,7 +171,8 @@ def acquisition_date(path):
     for candidate in (folder / 'metadata.txt', path):
         try:
             if candidate.name == 'metadata.txt' and candidate.is_file():
-                with open(candidate, 'r', errors='replace') as handle:
+                # Micro-Manager writes it in UTF-8; only the date is wanted
+                with open(candidate, 'r', encoding='utf-8', errors='replace') as handle:
                     text = handle.read(20000)
                 found = re.search(r'"Date"\s*:\s*"(\d{4})-(\d{2})-(\d{2})', text)
                 if found:
@@ -215,7 +216,7 @@ def calibration_save_defaults(paths, dual=False):
     if date and not DATE_IN_NAME.search(dataset):
         parts.insert(0, date)
     if not MICROSCOPE.search(dataset):
-        found = MICROSCOPE.search(str(first))
+        found = MICROSCOPE.search(first.as_posix())     # '/' between folders on Windows too
         if found:
             parts.append(found.group(1))
     parts.append(modality)

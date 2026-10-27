@@ -193,7 +193,7 @@ class CameraMetadata:
     @classmethod
     def from_yaml(cls, path) -> "CameraMetadata":
         import yaml
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
         if "camera" in data:  # allow a nested section in a larger config
             data = data["camera"]
@@ -201,7 +201,7 @@ class CameraMetadata:
 
     def to_yaml(self, path) -> None:
         import yaml
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             yaml.safe_dump(self.to_dict(), fh, sort_keys=False)
 
     def __str__(self) -> str:

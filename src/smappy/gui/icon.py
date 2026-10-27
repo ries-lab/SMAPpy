@@ -21,5 +21,15 @@ def app_icon():
 
 
 def install_icon(app) -> None:
-    """Give ``app`` the icon: its windows and, on macOS, the dock tile."""
+    """Give ``app`` the icon: its windows and, on macOS, the dock tile.
+
+    On Windows the taskbar groups a process under its program, python.exe, and
+    shows python's icon, unless the process names an application of its own."""
     app.setWindowIcon(app_icon())
+    import sys
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RiesLab.SMAPpy")
+        except (AttributeError, OSError):
+            pass

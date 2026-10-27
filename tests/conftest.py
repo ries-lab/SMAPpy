@@ -18,6 +18,17 @@ import pytest
 # yourself to watch the windows.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
+# The app is Fusion on every platform (`gui/theme.py`), but a test that makes
+# its own QApplication gets the platform's style, and Windows 11's widgets are
+# far wider: the Spline 3D panel measured 482 px there against 279 under
+# Fusion, and 29 tests of widths, wrapping and the tutorials failed on Windows
+# for a look the app never shows (October 2026).
+os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
+# and Qt's offscreen platform on Windows finds no fonts unless told where they
+# are: every text drew 2.3 times as wide as in a window, so every panel failed
+# its width
+if os.name == "nt":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
 # Under pytest-xdist (`-n auto`) every worker is a process of its own, and
 # OpenBLAS would start a thread per core in each: four workers on four cores

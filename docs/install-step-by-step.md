@@ -184,10 +184,11 @@ To start SMAPpy with a double-click instead, paste this into PowerShell and
 press **Enter**:
 
 ```powershell
-$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\SMAPpy.lnk"); $s.TargetPath = (Get-Command smappy-gui).Source; $s.Save()
+smappy-gui --desktop-icon
 ```
 
-A shortcut `SMAPpy` appears on your desktop. Double-clicking it opens a black
+A shortcut `SMAPpy`, with SMAPpy's icon, appears on your desktop (an older
+one of the same name is replaced). Double-clicking it opens a black
 window and SMAPpy beside it; as before, keep the black window open while you
 work. Right-click the shortcut and choose *Pin to Start* or *Pin to taskbar*
 to have it there too (on Windows 11, under *Show more options*).
@@ -200,6 +201,10 @@ SMAPpy:
 ```bash
 uv tool upgrade smappy-smlm
 ```
+
+uv remembers the list of versions for ten minutes, so if a version released
+only just now is not found, add `--refresh-package smappy-smlm` before the
+last word. *Help > Check for updates...* in SMAPpy does this for you.
 
 To remove SMAPpy from your computer:
 
@@ -280,7 +285,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv tool install --python 3.13 smappy-smlm
 uv tool update-shell
 & "$(uv tool dir)\smappy-smlm\Scripts\python.exe" -c "import smappy, PySide6.QtWidgets; print('ok')"
-$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\SMAPpy.lnk"); $s.TargetPath = "$(uv tool dir --bin)\smappy-gui.exe"; $s.Save()
+& "$(uv tool dir --bin)\smappy-gui.exe" --desktop-icon
 ```
 
 The check prints `ok`. If it fails on Windows with `DLL load failed`, the

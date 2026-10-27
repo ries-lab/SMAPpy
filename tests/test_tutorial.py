@@ -71,7 +71,7 @@ def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
         pytest.skip("Qt's libraries are not installed")
     assert done.returncode == 0, done.stderr[-3000:]
     out = tmp_path / topic
-    steps = json.loads((out / "steps.json").read_text())
+    steps = json.loads((out / "steps.json").read_text(encoding="utf-8"))
     assert len(steps) > 10
     assert steps[0]["card"] and steps[-1]["card"]
     width, height = 1600, 900

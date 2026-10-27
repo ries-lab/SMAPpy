@@ -437,7 +437,7 @@ class CameraDatabase:
     @classmethod
     def load(cls, path) -> "CameraDatabase":
         path = Path(path)
-        return cls.from_dict(json.loads(path.read_text()), path)
+        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")), path)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"version": 1, "cameras": [c.to_dict() for c in self.cameras]}
@@ -526,7 +526,7 @@ def legacy_user_file() -> Path:
 def read_file(path) -> Dict[str, Any]:
     """A lab's file as a dict, or an empty one if there is none."""
     path = Path(path)
-    return json.loads(path.read_text()) if path.exists() else {}
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def write_section(path, key: str, entries: List[Dict[str, Any]]) -> Path:
@@ -540,7 +540,7 @@ def write_section(path, key: str, entries: List[Dict[str, Any]]) -> Path:
     data = read_file(path)
     data["version"] = 1
     data[key] = entries
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
 
 

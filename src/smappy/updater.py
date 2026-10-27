@@ -42,10 +42,14 @@ def commands(kind: str, python: str, uv: Optional[str] = None) -> Optional[List[
     uv = uv if uv is not None else shutil.which("uv")
     if kind == "pip":
         return [[python, "-m", "pip", "install", "--upgrade", DISTRIBUTION]]
+    # uv keeps PyPI's list of releases for the ten minutes PyPI allows, so
+    # an update just after a release found nothing new (0.5.7, October
+    # 2026); pip asks again for every list on its own
     if kind == "uv tool" and uv:
-        return [[uv, "tool", "upgrade", DISTRIBUTION]]
+        return [[uv, "tool", "upgrade", "--refresh-package", DISTRIBUTION, DISTRIBUTION]]
     if kind == "uv" and uv:
-        return [[uv, "pip", "install", "--upgrade", "--python", python, DISTRIBUTION]]
+        return [[uv, "pip", "install", "--upgrade", "--refresh-package", DISTRIBUTION,
+                 "--python", python, DISTRIBUTION]]
     return None
 
 
@@ -73,7 +77,7 @@ def write_plan(folder: Path, install: List[List[str]], relaunch: List[str],
     plan = {"wait_for": pids_to_wait_for(), "commands": install, "relaunch": relaunch,
             "result": str(result), "log": str(log), "from_version": version}
     path = Path(folder) / "plan.json"
-    path.write_text(json.dumps(plan, indent=1))
+    path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     return path
 
 
@@ -146,7 +150,7 @@ def _zombie(pid: int) -> bool:
     parent waits for it.  Linux says so in ``/proc``; macOS, which has no
     ``/proc``, in ``ps``'s state column (``Z``)."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
         stat = None
     if stat is not None:
@@ -193,13 +197,13 @@ def run_plan(plan: Dict, retry_pause_s: float = RETRY_PAUSE_S) -> Dict:
         log.write("\nupdated\n" if result["ok"] else "\nthe update failed\n")
     result_path = Path(plan["result"])
     result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps(result, indent=1))
+    result_path.write_text(json.dumps(result, indent=1), encoding="utf-8")
     return result
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    plan = json.loads(Path(argv[0]).read_text())
+    plan = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
     result = run_plan(plan)
     if plan.get("relaunch"):
         try:

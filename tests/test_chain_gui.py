@@ -164,6 +164,9 @@ def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
         def setProcessChannelMode(self, *a):
             pass
 
+        def setProcessEnvironment(self, *a):
+            pass
+
         def start(self, *a):
             pass
 

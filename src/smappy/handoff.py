@@ -258,13 +258,24 @@ def offer(session, *, name: str = "", colour: str = "", gui_state=None,
     return Offer(Path(where), block)
 
 
+def own_session(windows: Optional[bool] = None) -> Dict[str, Any]:
+    """Popen's arguments for a window that is not ended with this one's terminal.
+
+    On POSIX a session of its own.  On Windows the copy otherwise shared the
+    original's console, so Ctrl+C there or closing it ended both: a group of
+    its own takes it out of Ctrl+C, and a console of its own (hidden, so
+    that what it prints still goes somewhere) out of the close.  The same
+    two flags as `updater._detached`.
+    """
+    if sys.platform.startswith("win") if windows is None else windows:
+        return {"creationflags": 0x00000200 | 0x08000000}   # NEW_PROCESS_GROUP | NO_WINDOW
+    return {"start_new_session": True}
+
+
 def launch(path) -> subprocess.Popen:
     """Start ``smappy-gui --handoff path`` in a process of its own."""
     command = [sys.executable, "-m", "smappy.cli.gui", "--handoff", str(path)]
-    kwargs: Dict[str, Any] = {}
-    if os.name == "posix":
-        kwargs["start_new_session"] = True   # not ended with this one's terminal
-    return subprocess.Popen(command, **kwargs)
+    return subprocess.Popen(command, **own_session())
 
 
 # ------------------------------------------------------------- taking

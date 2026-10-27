@@ -22,7 +22,22 @@ def _is_chain(path: str) -> bool:
     return path.endswith((".chain.yaml", ".chain.yml"))
 
 
+def utf8_streams(*streams) -> None:
+    """Write ``streams`` in UTF-8, whatever the console's code page.
+
+    The batch window reads this program's paths back to find their rows; on
+    Windows stdout is otherwise in the ANSI code page, so a path with an
+    ``ü`` matched nothing and one outside cp1252 raised UnicodeEncodeError
+    here.  The window also sets ``PYTHONUTF8``; this covers a runner started
+    by a script or a scheduler.
+    """
+    for stream in streams:
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv=None) -> int:
+    utf8_streams(sys.stdout, sys.stderr)
     import matplotlib
     matplotlib.use("Agg")          # no window, ever: this runs as a subprocess
     p = argparse.ArgumentParser(prog="smappy-batch", description=__doc__,

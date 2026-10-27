@@ -218,7 +218,8 @@ def test_the_slow_run_dialogue_offers_rcc_first():
                           "frame": np.sort(rng.integers(0, 20_000, n)).astype(np.int64),
                           "xy_err_nm": np.full(n, 12.0)}, {})
     plugin = CometDrift()
-    asked = DriftSettings(max_drift_nm=1500.0)
+    # 2000 nm, not 1500: that estimated 299.3 s on Windows, against 300 for "slow"
+    asked = DriftSettings(max_drift_nm=2000.0)
     question = plugin.preflight(Context(locs=locs), asked)
     assert isinstance(question, PreflightQuestion) and len(question.choices) == 1
     cheap = question.choices[0].settings

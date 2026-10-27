@@ -63,8 +63,20 @@ def _environment(config: Path, size: Tuple[int, int]) -> None:
     screen.write_text(json.dumps({"screens": [{
         "name": "tutorial", "x": 0, "y": 0,
         "width": size[0] * SCALE, "height": size[1] * SCALE,
-        "logicalDpi": 96, "logicalBaseDpi": 96}]}))
-    os.environ["QT_QPA_PLATFORM"] = f"offscreen:configfile={screen}"
+        "logicalDpi": 96, "logicalBaseDpi": 96}]}), encoding="utf-8")
+    where = str(screen)
+    if os.name == "nt":
+        # Qt splits the platform's arguments at every colon, a drive letter's
+        # too: "C:\..." stopped Qt at start-up with "Could not find platform
+        # config file C".  So a path relative to here, which has none; and
+        # offscreen Qt on Windows finds no fonts unless told where they are.
+        try:
+            where = os.path.relpath(screen).replace("\\", "/")
+        except ValueError:                  # another drive: no relative path
+            os.chdir(config)
+            where = screen.name
+        os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+    os.environ["QT_QPA_PLATFORM"] = f"offscreen:configfile={where}"
     os.environ["QT_SCALE_FACTOR"] = str(SCALE)
     os.environ["SMAPPY_CONFIG_DIR"] = str(config / "smappy")
 

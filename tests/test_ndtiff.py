@@ -22,6 +22,16 @@ IMAGE_METADATA = {"Core-Camera": "Camera", "Camera-Offset": "100",
                   "ROI": "16-32-5-6", "Exposure-ms": 20.0, "ElapsedTime-ms": 0}
 
 
+def _grow(path, data):
+    """Write ``data`` over what is there without truncating first, as an
+    acquisition appends: Windows refuses to truncate a file the reader has
+    memory-mapped ("Invalid argument"), so writing it afresh each time left a
+    watch on Windows with the first two frames only."""
+    with open(path, "r+b" if path.exists() else "wb") as out:
+        out.write(data)
+        out.truncate()          # only shorter when a test writes less, never while watched
+
+
 def write_ndtiff(folder, frames, *, pixel_type=1, pad=True, extra_records=0,
                  name="Stack_NDTiffStack.tif"):
     """A minimal NDTiff dataset: a stack file and the index that points into it.
@@ -59,8 +69,8 @@ def write_ndtiff(folder, frames, *, pixel_type=1, pad=True, extra_records=0,
     if pad:
         index += b"\0" * 64            # NDTiffStorage zero-pads the table
 
-    (folder / name).write_bytes(bytes(blob))
-    (folder / INDEX_NAME).write_bytes(bytes(index))
+    _grow(folder / name, bytes(blob))
+    _grow(folder / INDEX_NAME, bytes(index))
     return folder
 
 

@@ -166,7 +166,8 @@ def records(path: Path) -> np.ndarray:
                 return from_json(json.loads(z.read(js[0])))
         raise ValueError(f"{path.name}: no .npy or .json inside")
     if path.suffix.lower() == ".json":
-        return from_json(json.loads(path.read_text()))
+        # utf-8-sig: a JSON file saved by a Windows program may start with a BOM
+        return from_json(json.loads(path.read_text(encoding="utf-8-sig")))
     raise ValueError(f"not a MINFLUX export: {path.name}")
 
 

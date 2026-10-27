@@ -26,10 +26,11 @@ the pupil model says how to install it, and the bead average works as ever.
 """
 from __future__ import annotations
 
+import sys
 import threading
 from dataclasses import fields
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from PySide6.QtCore import QObject, QProcess, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -58,7 +59,29 @@ def torch_missing():
     if problem is None:
         return None
     return (f"The pupil model needs PyTorch: {problem}.  Install PyTorch puts {torch_install.described()} "
-            f"into this Python; or, in a terminal:\n{' '.join(torch_install.command())}")
+            f"into this Python; or, in a terminal:\n{shell_line(torch_install.command())}")
+
+
+def shell_line(parts, windows: Optional[bool] = None) -> str:
+    """``parts`` as a line to paste into a terminal.
+
+    Joined with spaces, a Python under ``C:\\Program Files`` was cut at the
+    space and the command found no ``C:\\Program``: cmd's quoting on Windows,
+    the shell's elsewhere.  On Windows a part with ``>`` is quoted as well,
+    which `subprocess.list2cmdline` leaves bare: ``torch>=2.4`` is a
+    redirection in cmd and in PowerShell alike.
+    """
+    import shlex
+    import subprocess
+    if not (sys.platform.startswith("win") if windows is None else windows):
+        return shlex.join(parts)
+    quoted = []
+    for part in parts:
+        text = subprocess.list2cmdline([part])
+        if not text.startswith('"') and any(c in text for c in "<>|&^"):
+            text = f'"{text}"'
+        quoted.append(text)
+    return " ".join(quoted)
 
 
 def _chosen(box):
@@ -1234,7 +1257,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.install_button.setText("Install PyTorch")
         missing = torch_missing()
         self.status_bar.showMessage("PyTorch is installed: the pupil model is ready" if missing is None
-                                    else f"pip stopped (exit code {code}); {missing.splitlines()[0]}")
+                                    else f"the install stopped (exit code {code}); {missing.splitlines()[0]}")
         self._show_method()
 
     # ------------------------------------------------------------- saving

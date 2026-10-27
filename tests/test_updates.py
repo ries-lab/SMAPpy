@@ -1,6 +1,7 @@
 """Checking for a newer SMAPpy: the comparison, the command for each kind of
 installation, the once-a-day schedule, and the GUI's request and button."""
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -65,14 +66,17 @@ def test_the_command_runs_pip_through_this_python_in_each_shell():
     assert spaced == r'& "C:\Users\J R\python.exe" -m pip install --upgrade smappy-smlm'
     plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe", dist=Dist())
     assert plain == r"C:\py\python.exe -m pip install --upgrade smappy-smlm"
-    assert updates.update_command("uv tool", dist=Dist()) == "uv tool upgrade smappy-smlm"
+    assert updates.update_command("uv tool", dist=Dist()) == (
+        "uv tool upgrade --refresh-package smappy-smlm smappy-smlm")
 
 
 def test_a_checkout_is_pulled_where_it_is_and_installed_again():
     dist = Dist(**{"direct_url.json": json.dumps(
         {"url": "file:///home/me/SMAPpy", "dir_info": {"editable": True}})})
     command = updates.update_command(windows=False, python="/v/bin/python", dist=dist)
-    assert command == "cd /home/me/SMAPpy && git pull && /v/bin/python -m pip install -e ."
+    if sys.platform != "win32":             # there the file URL is a Windows path, \home\me
+        assert command == "cd /home/me/SMAPpy && git pull && /v/bin/python -m pip install -e ."
+    assert command.endswith(" && git pull && /v/bin/python -m pip install -e .")
     # Windows PowerShell 5.1 has no &&
     assert "; git pull; " in updates.update_command(windows=True, python="py.exe", dist=dist)
 
@@ -205,7 +209,7 @@ def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it():
     from smappy import updater
     py = "/env/bin/python"
     assert updater.commands("pip", py) == [[py, "-m", "pip", "install", "--upgrade", "smappy-smlm"]]
-    assert updater.commands("uv tool", py, uv="/bin/uv") == [["/bin/uv", "tool", "upgrade", "smappy-smlm"]]
+    assert updater.commands("uv tool", py, uv="/bin/uv") == [["/bin/uv", "tool", "upgrade", "--refresh-package", "smappy-smlm", "smappy-smlm"]]
     assert updater.commands("uv", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "pip", "install"]
     assert updater.commands("uv tool", py, uv="") is None          # no uv on the PATH
     assert updater.commands("checkout", py) is None                # git pull is the user's

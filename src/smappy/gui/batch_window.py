@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -37,6 +37,29 @@ from .chain_panel import ChainPanel
 
 COLUMNS = ("use", "input", "pattern", "overrides", "status")
 
+# The runner's pipe in UTF-8.  It prints paths, and this window finds a
+# file's row by the path it prints back (`_row_for`).  On Windows a pipe is
+# written in the ANSI code page, so a folder called ``Jürgen`` came back as
+# bytes that are not UTF-8 and matched no row, and a name outside cp1252
+# (Greek, Chinese) raised UnicodeEncodeError in the runner.  ``cli.batch``
+# reconfigures its streams too, for a runner started from anywhere else.
+UTF8_ENVIRONMENT = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+
+
+def stop_process(process, windows: Optional[bool] = None) -> None:
+    """End the runner.
+
+    On POSIX ``terminate`` is SIGTERM, which ends it.  On Windows it only
+    posts WM_CLOSE, which a console program such as ``python -m
+    smappy.cli.batch`` never reads, so Stop did nothing; there it is
+    ``kill``.  Either way the file being processed is left unfinished, and
+    the next run does it again.
+    """
+    if sys.platform.startswith("win") if windows is None else windows:
+        process.kill()
+    else:
+        process.terminate()
+
 
 class BatchWindow(QMainWindow):
     """Files, a chain, output options, and a subprocess that runs them."""
@@ -53,7 +76,7 @@ class BatchWindow(QMainWindow):
         self.open_result = open_result
         self.job_path: Optional[Path] = None
         self.process: Optional[QProcess] = None
-        self._buffer = ""
+        self._buffer = b""
         self._running: Dict[str, int] = {}
         self.report_path: Optional[Path] = None
 
@@ -425,6 +448,10 @@ class BatchWindow(QMainWindow):
         self.process.setProcessChannelMode(QProcess.MergedChannels)
         self.process.readyReadStandardOutput.connect(self._read)
         self.process.finished.connect(self._finished)
+        environment = QProcessEnvironment.systemEnvironment()
+        for key, value in UTF8_ENVIRONMENT.items():
+            environment.insert(key, value)
+        self.process.setProcessEnvironment(environment)
         args = ["-m", "smappy.cli.batch", "run", str(path)]
         if self.try_one.isChecked():
             args += ["--limit", "1"]
@@ -435,13 +462,15 @@ class BatchWindow(QMainWindow):
 
     def stop(self) -> None:
         if self.process is not None:
-            self.process.terminate()
+            stop_process(self.process)
 
     def _read(self) -> None:
-        self._buffer += bytes(self.process.readAllStandardOutput()).decode(errors="replace")
-        *lines, self._buffer = self._buffer.split("\n")
+        # split as bytes and decode whole lines: a read can end inside a
+        # character, and decoding each read on its own replaced both halves
+        self._buffer += bytes(self.process.readAllStandardOutput())
+        *lines, self._buffer = self._buffer.split(b"\n")
         for line in lines:
-            self.handle_line(line)
+            self.handle_line(line.decode("utf-8", errors="replace"))
 
     def handle_line(self, line: str) -> None:
         """One line of the runner's output: shown, and read if it is an event."""
@@ -497,8 +526,8 @@ class BatchWindow(QMainWindow):
 
     def _finished(self, code: int, _status) -> None:
         if self._buffer:
-            self.handle_line(self._buffer)
-            self._buffer = ""
+            self.handle_line(self._buffer.decode("utf-8", errors="replace"))
+            self._buffer = b""
         self.process = None
         self._running = {}
         self.run_button.setEnabled(True)
