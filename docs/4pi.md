@@ -2,8 +2,9 @@
 
 Status, 2026-10-27: M0 (data and formats), M1 (the fitter) and M3 (phase to
 z) are done.  M2 is done for simulated ROIs; its frames and the *Simulate*
-preset move to M4.  The rest is still a proposal.  §6 says
-what the first milestones found.
+preset move to M4.  M5 (learning from beads) is done but for its window
+method, which waits for M4's front end.  The rest is still a proposal.  §6–§8
+say what the milestones found.
 
 This page is written from four sources:
 - a read of SMAP's 4Pi code (`../SMAP`);
@@ -477,8 +478,9 @@ models, and the risky refactor happens behind tests.
 - First real result: Nup96 4Pi with v1's model.  The two rings, about 50 nm
   apart, are the test of z.
 
-**M5. uiPSF v2 4Pi from beads**
-- `FourPiPSF`, the phase axis, the gauges, and the export with a measured z_T.
+**M5. uiPSF v2 4Pi from beads** (done but for the window method: §8)
+- `FourPiPSF` (built as `uipsf.model.fourpi.FourPiModel`), the phase axis, the gauges, and the export
+  with a measured z_T.
 - Comparison with v1's model on `4pi_40nm_bead`:
   - the fitted bead positions;
   - the CRLB;
@@ -649,3 +651,116 @@ the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
 - The 4Pi fit has to keep `phase_per_nm` in the table's metadata
   (`metadata["fourpi"]`), which *4Pi z* reads by default.
 - The fitter plugin's *after the fit* gets a *4Pi z* step.
+
+## 8. What M5 found (2026-10-27)
+
+**What exists now.**
+- `uipsf.model.fourpi.FourPiModel`: the coherent two-objective model of D7, scalar.  One Zernike pupil per
+  objective, shared by the channels; the two arms' image fields summed with a per-bead phase, the mirror
+  steps and a phase offset per channel; a coherence and an arm balance per channel; one shared
+  misalignment of the objectives, (Δx, Δy, Δz).  v2's blur and bead kernel act on the four images
+  |h_up|², |h_lo|², Re and Im of h_up* h_lo, of which every channel and step is a weighted sum.
+- `uipsf.model.fourpi_start`: the start from the data alone.
+- `uipsf.workflows.fourpi`: `learn_fourpi` (the start, each bead's phase from a circle of twelve, Zernikes
+  up to n = 4, then all of them) and `calibration`, the export to `FourPiCalibration` with the period
+  measured.
+- `smappy.calibrate.fourpi_beads`: the quadrant `.mat` scans read, the beads found on all channels summed,
+  each channel cut on its own centroid, learnt and saved.  No window method yet (below).
+- `benchmarks/uipsf/real/zenodo_4pi_beads.py`; tests in `tests/uipsf_tests/test_fourpi.py`.
+
+**The gauges, and one that was not foreseen.**
+- δ_0 = 0 and the first mirror step 0, as planned.  A relative piston is the beads' phases, so it is no
+  parameter; Δz moves the arms' foci apart but cancels from the interference's phase.
+- **Which objective is "upper" cannot be told from the data.**  The lower pupil's twin A*(−k) as the
+  upper one and the other way round, with Δ → −Δ and each channel's balance r → 1 − r, gives the same
+  images exactly: the twin's field is the conjugate of the other arm's, and h_up* h_lo is unchanged.
+  The first simulated fit landed on the swapped labelling.  `fourpi.swapped` gives the other one; the
+  export does not depend on it.
+- **The z direction is not fixed by the 4Pi model either**: z → −z with the arms swapped (without twins)
+  and every phase reversed is the same model.  What fixes it is the mirror steps' sign.  The steps are
+  known as set ([2, 0, −2]), not which way round they enter the phase, so the start measures the fringe's
+  direction in the data and turns them round if needed.  On the example beads it did, with z taken in
+  v1's direction.
+
+**Simulated beads** (`test_fourpi.py`: 6 beads, 9 slices × 3 steps, four channels, astigmatism of
+opposite sign in the two objectives, coma, spherical, misaligned arms, unequal channels, 8000 photons):
+both pupils, Δ, the steps, the offsets, the shares, the balances, the coherences, every bead's phase and
+position come back within 4 CRLB, in 12 s on the CPU.  The start finds the channels' offsets to 0.15 rad
+and turns reversed steps round.
+
+**The export is exact and its period is the model's own.**
+- I and Q from three phases reproduce the model at any phase to 10⁻⁶.
+- Spots drawn from a model and fitted by `Global4PiPSF` with its export: z to 0.5 nm over ±300 nm, z
+  slope 1.0005, and the phase moves with z by the exported `phase_per_nm` to 1 %.
+- On the learnt real model, noise-free spots at random sub-pixel positions: 0.76 nm rms of z bias (2.5
+  at worst) against a CRLB of 3 nm at 30 000 photons, 0.46 nm in x.  The knots one pixel apart are the
+  limit, as for plain splines (`docs/uipsf/architecture.md`).
+
+**The period is a convention of the IAB model, not an observable.**  The fitter's phase Φ and the
+demodulated A, B can turn against each other along z: Φ → Φ + δk z with A + iB turned by −δk z is the
+same model.  So the phase a model's fit gives against the stage follows that model's own k: v1's
+beads give a slope of 258 nm with v1's model (it was told 260) and 265.5 nm with v2's (it measured
+267.4).  The observable is z from the phase, Φ/k: 1.007 nm per nm of stage with both models.  The
+export therefore measures k where the interference is strong (the energy-weighted turn of Q between
+planes), which keeps A and B as slow as the envelope; a typed k only makes them turn.  The start's own
+estimate from the ROIs' summed light, 253 nm, weighs the pupil differently and is only a start.
+`test_fourpi.py::test_v1s_beads_measure_the_fringe_period_and_the_mirror_steps` (258.5 nm) measures v1's
+convention.
+
+**v1's 18 beads, learnt by v2 and fitted back** (`zenodo_4pi_beads.py`: v1's own ROIs, so both models see
+the same pixels; v1's optics; each bead, mirror step and slice fitted alone by `Global4PiPSF`, 15 × 15;
+scatter about a line through the stage over the middle 15 slices, median over beads and steps; Mac GPU):
+
+| model | photons | time | mean deviance | phase scatter (rad) | z scatter (nm) |
+|---|---|---|---|---|---|
+| v1 | per observation | | | 0.0506 | 6.76 |
+| v2, n ≤ 6 | bleaching curve | 2.7 min | 1.162 | 0.0507 | 7.74 |
+| v2, n ≤ 8 | bleaching curve | 14 min | 1.158 | 0.0542 | 6.94 |
+| v2, n ≤ 6 | per observation | 6.4 min | 1.060 | 0.0543 | 7.12 |
+| v2, n ≤ 6, 20 nm bead | bleaching curve | 3.6 min | 1.163 | 0.0749 | 8.18 |
+| v2, n ≤ 8 | per observation | 5.3 min | 1.046 | 0.0505 | 8.23 |
+
+The z scatter taken apart into the pattern all beads share against the stage (a bias of the model along
+z) and each bead's scatter about that pattern:
+
+| model | shared pattern (nm rms) | about the pattern (nm) |
+|---|---|---|
+| v1 | 2.96 | 6.39 |
+| v2, n ≤ 6, bleaching | 5.08 | 6.12 |
+| v2, n ≤ 8, bleaching | 2.78 | 6.72 |
+| v2, n ≤ 6, per observation | 2.93 | 6.45 |
+| v2, n ≤ 8, per observation | 5.84 | 6.06 |
+
+- **The default is n ≤ 6 with a free photon count per observation** (`fourpi_beads.learn`, and the long
+  test that holds it to v1's straightness within 10 %): v1's choices, within 1 % of v1 on both parts of
+  the z scatter, 7 % more phase scatter, 6.4 min.  n ≤ 8 with free photons fits best (deviance 1.046) and
+  matches v1's phase, but bends z more: a better likelihood does not by itself give a straighter z.
+  Why the shared pattern changes between variants is open; it is the one place v2 is not yet ahead.
+- **Both models measure the mirror steps alike:** +2.06 and −2.12 rad.
+- **The CRLBs are the same:** median 0.0170 rad and 2.60 nm with v2 (n ≤ 6, per observation), 0.0169 rad
+  and 2.50 nm with v1, at 34 000 photons.
+- **The beads' light varies per frame:** a free photon count per observation (v1's choice) lowers the
+  deviance from 1.16 to 1.06, the largest single term found.
+- **Most of the z scatter is not the model's export.**  The phase is straight to 2 nm, so the stage is
+  linear.  Each bead's scatter about the shared pattern is about 6 nm with every model; noise-free spots
+  from the learnt model, fitted with its export, are off by 0.8 nm rms.  Localised by the uiPSF model
+  itself, each slice's three steps together, the same beads give 5.1 nm: one step at a time the
+  envelope's z is what the fitter has, and the phase does not help it.
+- **What the model measures:** the arms are misaligned by about 100 nm in x (Δx −101 to −117 nm in every
+  variant; Δy −7 to −58 nm, less stable; Δz 13–33 nm); each channel's light is split about evenly
+  between the arms (r 0.47–0.54); coherence 0.71–0.77; blur (60, 68) nm; channel offsets 0, 1.82,
+  −3.05, −1.42 rad, not quarter turns.  v1 learnt a misalignment (`pos_d`) but never used it, and its
+  per-channel tip, tilt and defocus took it up channel by channel.
+- **Open: the bead kernel and the coherence trade.**  With a 20 nm bead the coherences rise to
+  0.89–0.95 at the same deviance, although a 20 nm sphere averages a 265 nm fringe by only 2 %.  So
+  the bead kernel is off by default, as in v1, until that is understood.  It also leaves the export a
+  point emitter's, which the beads then fit worse.
+- **Speed:** every shared column is a JVP (the 4Pi model has no linearisation yet, `Problem` falls back),
+  so n ≤ 8 takes 14 min on the Mac's GPU.  Linearising the pupils' columns as `VectorPSF` does is the
+  next step for speed.
+
+**Still to do for M5.**
+- *4Pi beads* in the PSF calibration window.  It waits for M4's multi-channel source (D5): the window
+  reads TIFF stacks and takes the camera from their tags, and a 4Pi scan should come in as the front
+  end delivers it, not through a second reader.  `fourpi_beads` is what the method will call.
+- The beads' fitted positions against v1's own (`locres`), bead by bead.

@@ -141,7 +141,10 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
 
 ### Other modalities
 
-- **4Pi:** a phase axis inside the channels (Zenodo `4pi_40nm_bead`, `4pi_smlm_nup96`).
+- **4Pi:** from beads, done (October 2026): `model/fourpi.py`, `workflows/fourpi.py`, exported as SMAPpy's
+  IAB calibration with the fringe period measured from the model (`docs/4pi.md` §8, its M5; architecture.md,
+  "4Pi from beads").  Next: linearised Jacobian columns (n ≤ 8 takes 14 min), the vectorial model with the
+  s and p channels, in situ on `4pi_smlm_nup96` (`docs/4pi.md`, M6, M7).
 - **Lattice light-sheet:** a voxel model as the baseline (Zenodo `1ch_LLS_bead`).
 - **Polarisation:** a Jones pupil (2 × 2) for birefringence and a dichroic's s/p transmission.
 
