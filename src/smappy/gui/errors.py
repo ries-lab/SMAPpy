@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-ERROR_STYLE = "color: #c00000;"
+ERROR_STYLE = "color: #e0453a;"
 
 
 def message_of(error: BaseException) -> str:

@@ -174,7 +174,7 @@ class PluginChooser(QDialog):
         if trouble:
             note = QLabel(f"{len(trouble)} plugin file(s) could not be read")
             note.setToolTip("\n".join(str(d) for d in trouble))
-            note.setStyleSheet("color: #a05000")
+            note.setStyleSheet("color: #c06000")
             layout.addWidget(note)
 
         self.search.textChanged.connect(self._search)

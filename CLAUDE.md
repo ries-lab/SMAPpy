@@ -106,9 +106,11 @@ Running the tests -- three tiers:
   the GUI's entry points install `gui/collector.collect_on_gui_thread`, a
   timer on the GUI thread.  A test that needs an object gone calls
   `gc.collect()` itself; a new entry point gets its QApplication from
-  `gui.make_app()`, which installs the collector, the icon and the fields'
-  style, and one that makes a session installs its identity too
-  (`gui/identity.install_identity`: its name and colour in every window title).
+  `gui.make_app()`, which installs the collector, the icon, the fields'
+  style and the look (`gui/theme.py`: Fusion, light, dark or as the system,
+  from Preferences > General), and one that makes a session installs its
+  identity too (`gui/identity.install_identity`: its name and colour in
+  every window title).
 * **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
   exception pending inside `processEvents`, and the next Python override Qt
   calls segfaults (6.10) or hangs.  Catch and print inside it, or connect a

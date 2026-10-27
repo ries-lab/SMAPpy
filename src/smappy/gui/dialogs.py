@@ -242,7 +242,7 @@ class StackAxesDialog(QDialog):
         self.step = QDoubleSpinBox(minimum=0.0, maximum=1e9, decimals=3)
         self.step_label = QLabel()
         self.error = QLabel("")
-        self.error.setStyleSheet("color: #b00020")
+        self.error.setStyleSheet("color: #e0453a")
         form.addRow("channels", self.channels)
         form.addRow("channel order", self.order)
         form.addRow("planes are", self.axis)

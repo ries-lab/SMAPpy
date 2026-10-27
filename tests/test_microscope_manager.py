@@ -217,7 +217,7 @@ def test_the_microscope_control_locks_its_values_and_colours_an_edit(app, tmp_pa
     conversion.widget.setText("12")
     conversion.widget.textEdited.emit("12")
     conversion.widget.editingFinished.emit()
-    assert control.labels["conversion"].styleSheet().startswith("color: #1d5fb4")
+    assert control.labels["conversion"].styleSheet().startswith("color: #2f7fe0")
     assert panel.form.values()["camera.conversion"] == 12.0              # stored as before
     assert conversion.reset_button.isVisibleTo(conversion)
     # and ↺ gives it back to the file

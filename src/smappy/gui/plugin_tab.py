@@ -69,7 +69,7 @@ class _Slot(QWidget):
             trouble = QLabel(f"{self.instance.plugin} could not be loaded:\n"
                              + traceback.format_exc().strip().splitlines()[-1])
             trouble.setWordWrap(True)
-            trouble.setStyleSheet("color: #a05000")
+            trouble.setStyleSheet("color: #c06000")
             self._layout.addWidget(trouble)
             return None
         self._layout.addWidget(self.panel)

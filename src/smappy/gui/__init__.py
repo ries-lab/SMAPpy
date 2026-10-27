@@ -5,8 +5,8 @@ import sys
 def make_app(argv=None):
     """The QApplication, made if there is none, set up as every window wants.
 
-    One place for what each entry point used to repeat: the style of the
-    editable fields, garbage collection on the GUI thread (`collector`: off
+    One place for what each entry point used to repeat: the look (Fusion,
+    light or dark, `theme`), the style of the editable fields, garbage collection on the GUI thread (`collector`: off
     everywhere else, or a widget can be destroyed on a worker), the icon, and
     every window kept to its screen (`screen`).
     The session's identity is not here, because it needs the session:
@@ -17,6 +17,7 @@ def make_app(argv=None):
     from .collector import collect_on_gui_thread
     from .icon import install_icon
     from .screen import install_screen_fit
+    from .theme import install_theme
     from .widgets import apply_style
     if QApplication.instance() is None:
         name_the_mac_app()
@@ -24,6 +25,7 @@ def make_app(argv=None):
         list(argv) if argv is not None else [sys.argv[0]])
     app.setApplicationName("SMAPpy")
     apply_style(app)
+    install_theme(app)
     collect_on_gui_thread(app)
     install_icon(app)
     install_screen_fit(app)

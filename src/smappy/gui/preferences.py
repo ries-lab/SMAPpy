@@ -1,5 +1,6 @@
-"""Preferences: the folders scanned for plugins, the tabs, whether
-quitting asks about unsaved changes and whether startup looks for updates.
+"""Preferences: the folders scanned for plugins, the tabs, light or dark,
+whether quitting asks about unsaved changes and whether startup looks for
+updates.
 
 Both are things the user names on purpose.  One plugin folder is scanned
 without being named, the user's own (`config.user_plugin_dir`), and no tab
@@ -12,13 +13,15 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox,
-                               QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-                               QListWidget, QListWidgetItem, QMessageBox,
-                               QPushButton, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
+                               QDialogButtonBox, QFileDialog, QHBoxLayout,
+                               QInputDialog, QLabel, QListWidget, QListWidgetItem,
+                               QMessageBox, QPushButton, QTabWidget, QVBoxLayout,
+                               QWidget)
 
 from .. import config, plugins, updates
 from ..workspace import Tab, Workspace
+from . import theme
 
 BESPOKE = {"render": "the render view"}
 
@@ -89,16 +92,31 @@ class RootsPage(QWidget):
             text += f"; {len(trouble)} file(s) could not be read"
             self.status.setToolTip("\n".join(str(d) for d in trouble))
         self.status.setText(text)
-        self.status.setStyleSheet("color: #a05000" if trouble else "color: gray")
+        self.status.setStyleSheet("color: #c06000" if trouble else "color: gray")
 
 
 class GeneralPage(QWidget):
-    """What the program does on its own: whether quitting asks, and whether
-    it looks for a newer version."""
+    """Light or dark, and what the program does on its own: whether quitting
+    asks, and whether it looks for a newer version."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("appearance"))
+        self.appearance = QComboBox()
+        for name, text in (("system", "as the system"), ("light", "light"),
+                           ("dark", "dark")):
+            self.appearance.addItem(text, name)
+        self.appearance.setCurrentIndex(max(0, self.appearance.findData(theme.theme())))
+        self.appearance.setToolTip("light or dark windows; as the system follows "
+                                   "the operating system's setting as it changes")
+        # at once, in every open window: the choice is seen, not imagined
+        self.appearance.currentIndexChanged.connect(
+            lambda _: theme.set_theme(self.appearance.currentData()))
+        row.addWidget(self.appearance)
+        row.addStretch(1)
+        layout.addLayout(row)
         self.ask_quit = QCheckBox("ask before quitting with unsaved changes")
         self.ask_quit.setToolTip("closing the control window or quitting with a "
                                  "table changed since it was saved or opened "

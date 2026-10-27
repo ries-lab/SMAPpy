@@ -29,7 +29,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton
 from .params import SettingsForm
 
 #: an edited value's label: the user's word over the file's
-EDITED = "color: #1d5fb4; font-weight: 600"
+EDITED = "color: #2f7fe0; font-weight: 600"
 #: the line, by status: all known, something the function uses missing, nothing recognised
 STATUS = {"ok": "", "missing": "color: #c07000", "unrecognised": "color: #c07000",
           "fallback": "color: #c07000"}
