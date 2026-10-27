@@ -258,3 +258,16 @@ def test_show_hands_a_table_to_a_gui_of_its_own_and_frees_it_once_taken(monkeypa
     assert taken["state"]["identity"]["name"] == "from a script"
     with pytest.raises(FileNotFoundError):         # released: unlinked
         shared_memory.SharedMemory(name=made[0].name)
+
+
+def test_a_new_window_has_a_console_and_a_session_of_its_own_on_every_platform():
+    # on Windows it shared the original's console: Ctrl+C there, or closing
+    # it, ended the copy too
+    flags = handoff.own_session(windows=True)
+    assert "start_new_session" not in flags
+    assert flags["creationflags"] & 0x00000200          # CREATE_NEW_PROCESS_GROUP
+    assert flags["creationflags"] & 0x08000000          # CREATE_NO_WINDOW
+    if sys.platform.startswith("win"):
+        assert flags["creationflags"] == (subprocess.CREATE_NEW_PROCESS_GROUP
+                                          | subprocess.CREATE_NO_WINDOW)
+    assert handoff.own_session(windows=False) == {"start_new_session": True}

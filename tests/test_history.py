@@ -161,3 +161,15 @@ def test_writing_a_file_is_logged_although_the_table_did_not_change(tmp_path):
     entry = session.history[-1]
     assert entry["what"] == "File/Save/smappy HDF5" and not entry["changed"]
     assert entry["settings"]["path"].endswith("out.h5")
+
+
+def test_the_csv_export_ends_each_row_once_so_excel_shows_no_empty_rows(tmp_path, config_dir):
+    import csv
+    session = session_with_a_run(config_dir)
+    session.run(MathParser(), MathSettings(field="triple", expression="photons * 3"))
+    found = entries(session)
+    written = write(found, tmp_path / "log.csv").read_bytes()
+    assert b"\r\r\n" not in written
+    with open(tmp_path / "log.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert len(rows) == len(found) + 1 and all(rows)
