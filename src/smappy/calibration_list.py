@@ -76,7 +76,7 @@ def entries() -> List[Entry]:
     """The list as saved; an unreadable one reads as empty (it is links, made again by use)."""
     path = list_path()
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     out = []
@@ -91,7 +91,8 @@ def entries() -> List[Entry]:
 def _write(items: List[Entry]) -> None:
     path = list_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "calibrations": [asdict(e) for e in items]}, indent=1))
+    path.write_text(json.dumps({"version": 1, "calibrations": [asdict(e) for e in items]},
+                               indent=1), encoding="utf-8")
 
 
 def add(path, microscope: Optional[Dict[str, Any]] = None, em_on: Optional[bool] = None,

@@ -49,7 +49,7 @@ def load(reload: bool = False) -> Dict[str, Any]:
     data: Dict[str, Any] = {}
     if path.exists():
         try:
-            data = yaml.safe_load(path.read_text()) or {}
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError):
             # a corrupt config must not stop the program from starting; the
             # user sees the defaults and can fix or delete the file
@@ -64,7 +64,7 @@ def save(data: Dict[str, Any]) -> Path:
     global _cache
     path = config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     _cache = data
     return path
 

@@ -85,7 +85,7 @@ def history() -> List[Dict[str, str]]:
     import yaml
     path = history_file()
     try:
-        entries = yaml.safe_load(path.read_text()) or []
+        entries = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     except (OSError, yaml.YAMLError):
         return []
     if not isinstance(entries, list):
@@ -112,7 +112,7 @@ def remember_expression(field: str, expression: str,
     try:
         path = history_file()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(entries, sort_keys=False))
+        path.write_text(yaml.safe_dump(entries, sort_keys=False), encoding="utf-8")
     except OSError:
         pass                    # a history that cannot be written is not a failure
     return entries
