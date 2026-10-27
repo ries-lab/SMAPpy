@@ -488,7 +488,7 @@ def test_claude_code_starts_with_the_server_on_its_command_line(tmp_path, monkey
         "--allowedTools", "mcp__smappy-gui"]
     assert "--allowedTools" not in launch.client_command("claude", config, pre_allow=False)
     codex = launch.client_command("codex", config)
-    assert codex[0] == "codex" and f'mcp_servers.smappy_gui.command="{sys.executable}"' in codex
+    assert codex[0] == "codex" and f'mcp_servers.smappy_gui.command={json.dumps(sys.executable)}' in codex
     own = launch.client_command("command", config, own="agent --mcp {config} -- {server}")
     assert own.startswith("agent --mcp ") and own.endswith("--attach 4242")
     with pytest.raises(ValueError, match="braces"):

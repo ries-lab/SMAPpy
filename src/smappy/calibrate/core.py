@@ -215,7 +215,7 @@ def calibration_save_defaults(paths, dual=False):
     if date and not DATE_IN_NAME.search(dataset):
         parts.insert(0, date)
     if not MICROSCOPE.search(dataset):
-        found = MICROSCOPE.search(str(first))
+        found = MICROSCOPE.search(first.as_posix())     # '/' between folders on Windows too
         if found:
             parts.append(found.group(1))
     parts.append(modality)

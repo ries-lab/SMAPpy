@@ -911,6 +911,24 @@ def _sigma_levels(settings: DriftSettings) -> int:
 
 
 def _machine_memory() -> Optional[int]:
+    if os.name == "nt":
+        # no sysconf on Windows, and without this the memory warning never came there
+        import ctypes
+
+        class _Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                        ("total", ctypes.c_ulonglong), ("available", ctypes.c_ulonglong),
+                        ("total_page", ctypes.c_ulonglong), ("available_page", ctypes.c_ulonglong),
+                        ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                        ("available_extended", ctypes.c_ulonglong)]
+        status = _Status()
+        status.length = ctypes.sizeof(_Status)
+        try:
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.total)
+        except (AttributeError, OSError):
+            pass
+        return None
     try:
         return int(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
     except (AttributeError, ValueError, OSError):

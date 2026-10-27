@@ -1,6 +1,7 @@
 """Checking for a newer SMAPpy: the comparison, the command for each kind of
 installation, the once-a-day schedule, and the GUI's request and button."""
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -72,7 +73,9 @@ def test_a_checkout_is_pulled_where_it_is_and_installed_again():
     dist = Dist(**{"direct_url.json": json.dumps(
         {"url": "file:///home/me/SMAPpy", "dir_info": {"editable": True}})})
     command = updates.update_command(windows=False, python="/v/bin/python", dist=dist)
-    assert command == "cd /home/me/SMAPpy && git pull && /v/bin/python -m pip install -e ."
+    if sys.platform != "win32":             # there the file URL is a Windows path, \home\me
+        assert command == "cd /home/me/SMAPpy && git pull && /v/bin/python -m pip install -e ."
+    assert command.endswith(" && git pull && /v/bin/python -m pip install -e .")
     # Windows PowerShell 5.1 has no &&
     assert "; git pull; " in updates.update_command(windows=True, python="py.exe", dist=dist)
 

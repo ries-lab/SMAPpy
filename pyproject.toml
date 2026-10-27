@@ -155,7 +155,7 @@ where = ["src"]
 "smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml",
             "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
             "data/simulation_presets/*.yaml", "data/simulation_components/*.yaml",
-            "data/icons/*.svg", "data/icons/*.png", "data/user_plugins/*.in"]
+            "data/icons/*.svg", "data/icons/*.png", "data/icons/*.ico", "data/user_plugins/*.in"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
 "smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]

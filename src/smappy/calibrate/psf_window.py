@@ -1234,7 +1234,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.install_button.setText("Install PyTorch")
         missing = torch_missing()
         self.status_bar.showMessage("PyTorch is installed: the pupil model is ready" if missing is None
-                                    else f"pip stopped (exit code {code}); {missing.splitlines()[0]}")
+                                    else f"the install stopped (exit code {code}); {missing.splitlines()[0]}")
         self._show_method()
 
     # ------------------------------------------------------------- saving

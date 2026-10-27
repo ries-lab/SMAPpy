@@ -1,4 +1,6 @@
 """Tabs as curated lists over one tree, and the GUI files that keep them."""
+from pathlib import Path
+
 import pytest
 
 from smappy import plugins
@@ -603,7 +605,7 @@ def test_new_plugin_puts_a_working_one_under_user_in_the_menu(window, monkeypatc
         new = [a for a in window.plugins_menu.actions() if a.text() == "New plugin..."]
         new[0].trigger()
         assert (config.user_plugin_dir() / "pair_distances.py").is_file()
-        assert shown and shown[0].toLocalFile() == str(config.user_plugin_dir())
+        assert shown and Path(shown[0].toLocalFile()) == config.user_plugin_dir()
         window._fill_plugins_menu()
         user = [a.menu() for a in window.plugins_menu.actions()
                 if a.menu() and a.text() == "User"]

@@ -5,13 +5,20 @@ from smappy import torch_install
 
 
 def test_each_machine_gets_its_own_build_into_this_python():
-    mac = torch_install.command("Darwin", nvidia=False)
+    mac = torch_install.command("Darwin", nvidia=False, start=torch_install.installer(has_pip=True))
     assert mac[:4] == [sys.executable, "-m", "pip", "install"] and "--index-url" not in mac
     assert "--index-url" not in torch_install.command("Linux", nvidia=True)          # PyPI's wheel is CUDA's
     assert torch_install.command("Linux", nvidia=False)[-1] == torch_install.CPU_INDEX
     assert torch_install.command("Windows", nvidia=True)[-1] == torch_install.CUDA_INDEX
     assert "--index-url" not in torch_install.command("Windows", nvidia=False)
     assert "torch>=2.4" in mac
+
+
+def test_a_python_without_pip_installs_through_uvs_pip_aimed_at_itself():
+    start = torch_install.installer(has_pip=False, uv="C:/uv/uv.exe")
+    assert start == ["C:/uv/uv.exe", "pip", "install", "--python", sys.executable]
+    windows = torch_install.command("Windows", nvidia=True, start=start)
+    assert windows[:5] == start and windows[-2:] == ["--index-url", torch_install.CUDA_INDEX]
 
 
 def test_an_old_or_missing_torch_is_a_problem_and_a_current_one_is_not(monkeypatch):

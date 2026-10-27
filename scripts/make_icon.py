@@ -147,10 +147,31 @@ def render_pngs(svg_path):
         image.save(str(OUT / f"smappy_{n}.png"))
 
 
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)   # an ICO entry is at most 256 pixels
+
+
+def write_ico():
+    """``smappy.ico`` from the PNGs, for a Windows shortcut (`smappy.shortcut`), which takes no PNG.
+
+    Each entry is the PNG itself, which Windows reads since Vista: no
+    resampling and no dependency, the same pixels as the window's icon."""
+    import struct
+    images = [(n, (OUT / f"smappy_{n}.png").read_bytes()) for n in ICO_SIZES]
+    head = struct.pack("<HHH", 0, 1, len(images))
+    offset = len(head) + 16 * len(images)
+    entries, data = b"", b""
+    for n, png in images:
+        side = n % 256          # 256 is written as 0
+        entries += struct.pack("<BBBBHHII", side, side, 0, 0, 1, 32, len(png), offset + len(data))
+        data += png
+    (OUT / "smappy.ico").write_bytes(head + entries + data)
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / "smappy.svg"
     path.write_text(svg())
     if "--svg-only" not in sys.argv:
         render_pngs(path)
-    print(f"wrote {path}" + ("" if "--svg-only" in sys.argv else f" and {len(SIZES)} PNGs"))
+        write_ico()
+    print(f"wrote {path}" + ("" if "--svg-only" in sys.argv else f", {len(SIZES)} PNGs and smappy.ico"))

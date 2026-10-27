@@ -102,7 +102,7 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
                  .replace("__DATA__", data.replace("</", "<\\/")))
     (out / "index.html").write_text(page, encoding="utf-8")
     (out / "subtitles.vtt").write_text(vtt(steps), encoding="utf-8")
-    (out / "steps.json").write_text(json.dumps(steps, indent=1, ensure_ascii=False))
+    (out / "steps.json").write_text(json.dumps(steps, indent=1, ensure_ascii=False), encoding="utf-8")
     text = script(steps, title)
     (out / "script.md").write_text(text, encoding="utf-8")
     (out / "script.html").write_text(_script_page(text, title), encoding="utf-8")
@@ -111,7 +111,7 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
         "seconds": round(sum(s["duration"] for s in steps)),
         "steps": len(steps), "voice": any(s.get("audio") for s in steps),
         "chapters": [s["chapter"] for s in steps if s.get("chapter")],
-    }, indent=1, ensure_ascii=False))
+    }, indent=1, ensure_ascii=False), encoding="utf-8")
     return out / "index.html"
 
 
@@ -190,7 +190,7 @@ def write_index(root: Path, series=()) -> Path:
     section is listed at the end rather than lost.
     """
     root = Path(root)
-    built = {p.parent.name: json.loads(p.read_text())
+    built = {p.parent.name: json.loads(p.read_text(encoding="utf-8"))
              for p in root.glob("*/tutorial.json")}
 
     def card(name: str) -> str:
@@ -230,7 +230,7 @@ def record(out: Path, size=(1600, 900), browser: Optional[str] = None) -> Path:
     import os
     from playwright.sync_api import sync_playwright
     out = Path(out).resolve()
-    steps = json.loads((out / "steps.json").read_text())
+    steps = json.loads((out / "steps.json").read_text(encoding="utf-8"))
     total = sum(s["duration"] for s in steps)
     raw = out / "_video"
     shutil.rmtree(raw, ignore_errors=True)
