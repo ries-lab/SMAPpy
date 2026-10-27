@@ -81,7 +81,7 @@ def test_the_start_finds_the_channels_offsets_and_turns_reversed_steps_round(bea
     assert 230 < start["period_nm"] < 320
 
 
-@pytest.mark.slow
+@pytest.mark.long
 def test_a_4pi_bead_fit_recovers_both_pupils_the_misalignment_the_phases_and_the_steps(beads):
     from uipsf.workflows.fourpi import learn_fourpi
     model, batch, truth = beads

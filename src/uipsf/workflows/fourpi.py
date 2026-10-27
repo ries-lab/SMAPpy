@@ -3,7 +3,8 @@
 **The fit** (`learn_fourpi`) follows `beads.fit_beads`: the data's start (`model.fourpi_start`), then
 each bead's phase from a circle of twelve on the starting model -- the fringe's phase at the focus is
 the pupils', which the data alone do not give, and a bead started half a turn off can stop there --
-then the Zernikes up to n = 4 of both objectives with everything else, then all of them.
+then the Zernikes up to n = 4 of both objectives with everything else but the arms' misalignment and
+balance (`SYMMETRIC`), then all of them.
 
 **The export** (`calibration`) samples the model as SMAPpy's fitter will evaluate it: each channel's
 image of one photon on the centre of its ROI, at three phases 2π/3 apart.  The model is
@@ -29,6 +30,11 @@ from ..solve import FitResult, GaussNewtonLBFGS, Problem
 from .beads import _like, _loosened, _tagged
 
 PHASE_TRIALS = 12
+#: held at their start in stage 1: at the start the two pupils are alike, the balance even and the arms
+#: aligned, the symmetric point of the arms' gauge (`model.fourpi.swapped`), where these have no curvature.
+#: With one phase per stack (no mirror steps) both solvers' steps there were all rejected: 2 iterations,
+#: 116 393 nats against the truth's 42 886 on simulated beads; held for stage 1, the fit reached 43 086.
+SYMMETRIC = ("fourpi.offset", "fourpi.balance")
 
 
 @dataclass
@@ -96,21 +102,17 @@ def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None 
     start = start if start is not None else rough_start(batch, model)
     params = Params(model.specs(batch, start), batch.n_emitters, dtype=dtype, device=device)
     params = best_phases(model, batch, params, noise)
-    first = None
-    if first_order is not None:
-        low = model.with_pupils([pu.truncated(first_order) for pu in model.pupils])
-        values = _pupil_values(params.physical(), model, low, embed=False)
-        specs = [_like(s, params.specs[s.name]) for s in low.specs(batch, start)]
-        p1 = Params(specs, batch.n_emitters, dtype=dtype, device=device, values=values)
-        first = _loosened(solver).solve(Problem(low, noise, batch), p1, progress=_tagged(progress, 1),
-                                        cancel=cancel)
-        if first.stop_reason == "cancelled":
-            return FourPiFit(model, first, start, first)
-        values = _pupil_values(first.params.physical(), model, low, embed=True)
-        params = Params(list(params.specs.values()), batch.n_emitters, dtype=dtype, device=device, values=values)
+    low = model if first_order is None else model.with_pupils([pu.truncated(first_order) for pu in model.pupils])
+    values = _pupil_values(params.physical(), model, low, embed=False)
+    specs = [_like(s, params.specs[s.name]) for s in low.specs(batch, start)]
+    p1 = Params(specs, batch.n_emitters, dtype=dtype, device=device, values=values).fix(*SYMMETRIC)
+    first = _loosened(solver).solve(Problem(low, noise, batch), p1, progress=_tagged(progress, 1), cancel=cancel)
+    if first.stop_reason == "cancelled":
+        return FourPiFit(model, first, start, first)
+    values = _pupil_values(first.params.physical(), model, low, embed=True)
+    params = Params(list(params.specs.values()), batch.n_emitters, dtype=dtype, device=device, values=values)
     result = solver.solve(Problem(model, noise, batch), params, progress=_tagged(progress, 2), cancel=cancel)
-    if first is not None:
-        result.history = [dict(h, stage=1) for h in first.history] + [dict(h, stage=2) for h in result.history]
+    result.history = [dict(h, stage=1) for h in first.history] + [dict(h, stage=2) for h in result.history]
     return FourPiFit(model, result, start, first)
 
 
