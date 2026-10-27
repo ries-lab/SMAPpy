@@ -34,12 +34,15 @@ hand give the same numbers:
 1. ***astigmatic z*** -- z from the widths of an elliptical Gaussian
    ([Astigmatic z](plugin:Analysis/After fit/Astigmatic z)).  It comes
    first, so that a drift correction after it can correct z too.
-2. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
+2. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
+   its envelope z ([4Pi z](plugin:Analysis/After fit/4Pi z)).  Also before
+   the drift correction, for the same reason.
+3. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
    [COMET](plugin:Analysis/Drift/COMET).
-3. ***assign colours*** -- a colour per localization from how its photons
+4. ***assign colours*** -- a colour per localization from how its photons
    split between the two channels
    ([Assign colours](plugin:Analysis/After fit/Assign colours)).
-4. ***then chain*** -- a saved chain: plugins in order, with their
+5. ***then chain*** -- a saved chain: plugins in order, with their
    settings, that run as one.  It is for whatever else your lab does to
    every fit.  A chain is made with the + of the Analysis tab and its *Save
    chain*, and is what the [batch window](plugin:Panels/Batch window) runs
@@ -50,14 +53,16 @@ give it what it needs.  *Assign colours* appears only in the two-colour
 fitters ([Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C),
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C)).  *Astigmatic z* appears only
 in [Gaussian 2D](plugin:Localize/Gaussian 2D), and only while its
-*elliptical* is ticked.  A step's settings appear below it only while the
+*elliptical* is ticked.  *4Pi z* appears only in
+[Spline 4Pi](plugin:Localize/Spline 4Pi).  A step's settings appear below it only while the
 step is on: tick *assign colours* and *colour assignment* appears; choose
 COMET and only *COMET drift* is shown.
 
 **What the table cannot take is passed over.**  When this plugin runs on
 the open localizations, it looks at the table rather than at a fitter.
 Colours need two channels' photons (`photons_ch0` and `photons_ch1`, or
-MINFLUX's `dcr`).  Astigmatic z needs `sigma_x_nm` and `sigma_y_nm`.  A step
+MINFLUX's `dcr`).  Astigmatic z needs `sigma_x_nm` and `sigma_y_nm`.  4Pi z
+needs `phase_rad` and `phase_err_rad`.  A step
 whose columns are missing is skipped without a word, so the default
 *assign colours* does nothing to a one-colour table.
 
@@ -94,6 +99,12 @@ from the [PSF calibration](plugin:Panels/PSF calibration) window, method
 that window puts it here, in Gaussian 2D, with *elliptical* and *astigmatic
 z* ticked.
 
+### fourpi_z
+On by default, and shown only after a 4Pi fit, where it is the step that
+gives z its precision.  Its settings, under *4Pi phase*, are those of
+[4Pi z](plugin:Analysis/After fit/4Pi z); the fit keeps the phase's slope
+with the table, so *as fitted* needs no file.
+
 ### drift
 Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 [COMET](plugin:Analysis/Drift/COMET), say which to choose.  The settings
@@ -112,7 +123,8 @@ and saved to its file.
 
 ## Output
 
-The table with what the steps wrote: `z_nm` and `z_err_nm` from Astigmatic z,
+The table with what the steps wrote: `z_nm` and `z_err_nm` from Astigmatic z
+or 4Pi z (with `fringe_probability`),
 positions moved by the drift correction, `channel` from Assign colours, and
 whatever the chain added.  The output lists one line per step: what it found,
 that it failed and why, or nothing for a step that was not run.  Each step's

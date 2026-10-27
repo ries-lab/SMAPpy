@@ -23,10 +23,13 @@ it together from earlier readers; nothing here imports it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+
+from .tiff import ImageSource
 
 OLD, NEW = 0x7, 0x1000000
 
@@ -163,3 +166,62 @@ def read_dcimg(paths: Sequence) -> np.ndarray:
     if isinstance(paths, (str, Path)):
         paths = [paths]
     return np.concatenate([DcimgFile(p).frames() for p in paths])
+
+
+def is_dcimg(path) -> bool:
+    path = Path(path)
+    if path.is_dir():
+        return any(path.glob("*.dcimg"))
+    return path.suffix.lower() == ".dcimg"
+
+
+def open_dcimg(path) -> "DcimgSource":
+    """A DCIMG acquisition: one file of many frames, or a z stack written one
+    file per step -- a folder, or any file of the series, stands for it all
+    (`smappy.io.quadrants.numbered_series`)."""
+    from .quadrants import numbered_series
+    path = Path(path)
+    if path.is_dir():
+        path = sorted(path.glob("*.dcimg"))[0]
+    files = numbered_series(path)
+    counts, shape, dtype = [], None, None
+    for f in files:
+        d = DcimgFile(f)
+        counts.append(len(d))
+        if shape is None:
+            shape, dtype = (d.height, d.width), d.dtype
+        elif (d.height, d.width) != shape:
+            raise ValueError(f"{f.name} has frames of {d.width} x {d.height}, the series "
+                             f"{shape[1]} x {shape[0]}")
+    return DcimgSource(files=files, shape=shape, dtype=dtype, n_frames=int(sum(counts)),
+                       n_frames_declared=None, mm_metadata={}, summary={}, counts=counts)
+
+
+@dataclass
+class DcimgSource(ImageSource):
+    """One acquisition in DCIMG files, read as frames."""
+
+    counts: list = field(default_factory=list)
+
+    def frames(self, chunk: int = 100, start: int = 0, stop: int = None):
+        stop = self.n_frames if stop is None else min(stop, self.n_frames)
+        first, at, pending = 0, start, []
+        for path, count in zip(self.files, self.counts):
+            last = first + count
+            if last > start and first < stop:
+                d = DcimgFile(path)
+                a, b = max(start, first) - first, min(stop, last) - first
+                for s in range(a, b, chunk):
+                    pending.append(d.frames(s, min(s + chunk, b)))
+                    while sum(len(p) for p in pending) >= chunk:
+                        joined = np.concatenate(pending)
+                        yield at, joined[:chunk]
+                        at += chunk
+                        pending = [joined[chunk:]] if len(joined) > chunk else []
+                d.close()
+            first = last
+        if pending:
+            yield at, np.concatenate(pending)
+
+    def watch(self, chunk: int = 100, **kwargs):
+        raise NotImplementedError("following a DCIMG file as it is written is not supported yet")

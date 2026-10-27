@@ -133,6 +133,12 @@ def open_stack(path) -> ImageSource:
 
     if is_simulation(path):          # a recipe: frames made as they are read
         return open_simulation(path)
+    from .dcimg import is_dcimg, open_dcimg
+    from .quadrants import is_quadrant_mat, open_quadrant_frames
+    if is_dcimg(path):               # Hamamatsu's own format: 4Pi microscopes
+        return open_dcimg(path)
+    if is_quadrant_mat(path):        # 4Pi quadrants, already cut, side by side
+        return open_quadrant_frames(path)
     if is_ndtiff(path):
         return open_ndtiff(path)
     if is_single_image_set(path):

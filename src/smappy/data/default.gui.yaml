@@ -19,6 +19,7 @@ tabs:
   - plugin: Localize/Gaussian 2D 2C
   - plugin: Localize/Spline 3D
   - plugin: Localize/Spline 3D 2C
+  - plugin: Localize/Spline 4Pi
 - name: Render
   kind: render
 - name: Analysis

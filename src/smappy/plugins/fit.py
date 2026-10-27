@@ -453,6 +453,8 @@ class _FitPlugin(Plugin):
     calibration_kind: Optional[str] = None
     #: two channels' photons in the table: what *after the fit*'s colours need
     two_channel = False
+    #: a 4Pi interference phase in the table: what *after the fit*'s 4Pi z needs
+    phase = False
     # *after the fit*'s button: its steps on the open table, without fitting again
     part_runs = (("finish", "Run these now", "Analysis/After fit/After the fit"),)
 
@@ -662,7 +664,8 @@ class _FitPlugin(Plugin):
             from .after_fit import shown
             model = getattr(settings, "model", None)
             can = {"two_channel": self.two_channel,
-                   "widths": bool(getattr(model, "elliptical", False))}
+                   "widths": bool(getattr(model, "elliptical", False)),
+                   "phase": self.phase}
             state.shown.update({f"finish.{name}": on
                                 for name, on in shown(finish, **can).items()})
             state.titles["finish"] = finish.summary(**can)

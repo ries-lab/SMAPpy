@@ -475,6 +475,18 @@ class Global4PiPSF(_GlobalPSF):
             # and the shares sum to one, not the channel count
             out["photons"] = result.theta[:, self.slot(2)]
             out["photons_err"] = np.sqrt(np.clip(result.crlb[:, self.slot(2)], 0, None))
+        # A fit that ended on an end of the model's z grid was clamped there:
+        # its true z could be anywhere beyond, and its CRLB, taken at the
+        # clamp, says nothing.  On the Nup96 example a few per cent piled up
+        # at the top of the grid, every one with a small error.  As in
+        # Astigmatic z, such a fit gets the grid's whole range as its error,
+        # which 4Pi z then weighs at nothing.
+        nz = self.calibration.shape[0]
+        z_index = result.theta[:, self.slot(4)]
+        edge = (z_index < 0.5) | (z_index > nz - 0.5)
+        span = nz * self.calibration.dz
+        for name in [n for n in out if n.startswith("z_err_nm")]:
+            out[name] = np.where(edge, span, out[name])
         out["z_env_nm"], out["z_env_err_nm"] = out["z_nm"], out["z_err_nm"]
         return out
 

@@ -1,8 +1,9 @@
 # 4Pi in SMAPpy: what exists, what is wrong with it, and a plan
 
-Status, 2026-10-27: M0 (data and formats), M1 (the fitter) and M3 (phase to
-z) are done.  M2 is done for simulated ROIs; its frames and the *Simulate*
-preset move to M4.  The rest is still a proposal.  §6 says
+Status, 2026-10-27: M0-M3 are done.  M4 is done for the Ries-lab layout
+(quadrant files) and typed or Yale DCIMG layouts, without the port of dual
+colour onto the new engine.  §8 has the details and what is left.  M5 runs in
+a session of its own.  §6 says
 what the first milestones found.
 
 This page is written from four sources:
@@ -649,3 +650,66 @@ the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
 - The 4Pi fit has to keep `phase_per_nm` in the table's metadata
   (`metadata["fourpi"]`), which *4Pi z* reads by default.
 - The fitter plugin's *after the fit* gets a *4Pi z* step.
+
+## 8. What M4 found (2026-10-27)
+
+**What exists now.**
+- **The front end.** Every 4Pi input is an ordinary `ImageSource` of 2D
+  frames, so the camera, the frame view and the raw-frame keeper keep
+  working:
+  - `io/dcimg.py`'s `DcimgSource` reads one file of many frames, or a z stack
+    written one file per step;
+  - `io/quadrants.py`'s `QuadrantSource` reads a series of `qd1..qd4` `.mat`
+    files with the channels side by side, and gives its own layout;
+  - both are reached through `open_stack`.
+- **`channels.ChannelLayout`:** each channel's rectangle, its mirror, and a
+  projective map onto channel 0.  `maps_from_uipsf_v1` converts v1's
+  affines, and `YALE_4PI` is the Bewersdorf-design strip.
+- **`multichannel.MultiChannelEngine`:**
+  - it finds molecules on the channels' sum, resampled onto channel 0 for
+    detection only;
+  - it cuts every channel's ROI at its own pixels, with the remainder of the
+    map in the link;
+  - it fits with `Global4PiPSF`;
+  - it keeps `metadata["fourpi"]` and the layout with the table.
+- **The plugin** *Localize/Spline 4Pi* (`plugins/fit_4pi.py`), with its
+  page and a line in `default.gui.yaml`.
+- **After the fit:** a *4Pi z* step, on by default, shown only for a phase.
+- **Fits clamped at the end of the z grid** get the grid's range as their
+  error.
+- **`fourpi.render_frames`:** simulated 4Pi camera frames, the frame part of
+  M2.
+
+**Checked on real data, the Nup96 example with v1's in-situ model.**
+- **Registration.** Fitting each channel's x and y freely gave back v1's
+  affines to within 0.06 px.  So the converted maps, and the transpose of
+  v1's `.mat` frame, are right.
+- **v1's own in-situ ROIs.** The fitter agrees with v1's per molecule: a
+  median of 0.11 z slices and 0.014 rad.
+- **Speed.** 4000 frames of 4 × 200 × 200 take about 25 s.  Half of that is
+  resampling for detection, which can be made faster.
+- **The sign of the in-situ model.** v1 builds its in-situ 4Pi models with
+  the opposite phase sign to its bead models.  Read with the beads' sign, z
+  from the phase came out as −z_env.  The loader now takes the sign from the
+  model's `datatype`, and a test guards it.  With the right sign, z from the
+  phase follows the envelope's at a slope of +1.09, with 3.3 % expected wrong
+  fringes for molecules above 800 photons.
+- **What is left is the model.**
+  - The envelope z of v1's in-situ model bends by up to ~40 nm against the
+    phase's, and scatters 3.3 times its CRLB.
+  - mMaple is dim: a median of 530 photons over all four channels.
+  - A better in-situ model (M6) is what would improve this.
+
+**Not done yet in M4.**
+- **Dual colour** still runs on `dualfit`.  Porting it onto
+  `MultiChannelEngine`, as the case of two channels found per channel and
+  paired, is a step of its own, held to identical numbers.
+- **Registration from beads** for a layout without a model's maps: the
+  existing projective fit, run per channel.
+- **Channel drift** over time: unlinked fits in frame blocks.
+- **Grouping** still averages `phase_rad` linearly.
+- **A *Simulate* preset** for 4Pi.
+- **The Nup96 ring-spacing check** on z, which needs the ROI segmentation of
+  the pores.
+- **A drawn fit region** is not offered by *Spline 4Pi*.  Molecules are found
+  in channel 0's pixels, not on the frame a region is drawn on.

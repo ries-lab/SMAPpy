@@ -84,6 +84,23 @@ class FourPiCalibration:
     def n_channels(self) -> int:
         return self.coeff.shape[0]
 
+    #: what a fit's provenance records of a spline calibration; a 4Pi model
+    #: says nothing about EM gain
+    em_on = None
+
+    def maps(self) -> Optional[list]:
+        """The channels' registration kept with the model, as
+        `ChannelLayout` maps (channel c -> 0), or None: the native file's
+        ``transforms``, or a uiPSF v1 model's affines (`maps_from_uipsf_v1`)."""
+        if self.transforms is not None:
+            return [np.asarray(t, float) for t in self.transforms]
+        v1 = self.parameters.get("uipsf_v1_T")
+        centre = (self.parameters.get("uipsf_v1") or {}).get("imgcenter")
+        if v1 is not None and centre is not None:
+            from .channels import maps_from_uipsf_v1
+            return maps_from_uipsf_v1(v1, centre, bool(self.parameters.get("transposed_from_v1")))
+        return None
+
     @property
     def shape(self) -> tuple:
         """The spline grid, (nz, ny, nx)."""
@@ -384,7 +401,12 @@ def load_uipsf_v1(path, transpose: bool = None) -> FourPiCalibration:
     the bead phase theta was ``I + 2 Re(A e^{i(2 pi s / z_T - theta)})``, s the
     slice from the stack's centre, so A = 2 Re(A_model) and B = -2 Im(A_model)
     with the fitter's phase 2 pi s / z_T - theta: the phase grows with the
-    slice, so it falls with z_nm.  The splines are made again from those
+    slice, so it falls with z_nm.  That holds for a model of beads; v1's
+    in-situ model (``datatype`` ``smlm``) builds the two arms' waves and
+    demodulates with the opposite sign (``Zphase / zT``, not ``-Zphase /
+    zT``), so its phase grows with z_nm -- read with the beads' sign, the
+    Nup96 data of uiPSF's examples put z from the phase at minus the
+    envelope's over the whole range.  The splines are made again from those
     volumes rather than read from ``locres/coeff``, which v1 normalised to two
     photons and wrote in its own coefficient order; z_T is the period v1 was
     given (``fpi.modulation_period``), which it did not measure.
@@ -419,8 +441,9 @@ def load_uipsf_v1(path, transpose: bool = None) -> FourPiCalibration:
     if pixelsize and transpose:
         pixelsize = pixelsize[::-1]
     nz = I.shape[1]
+    sign = 1.0 if params.get("datatype") == "smlm" else -1.0
     cal = from_volumes(I, 2 * np.real(Ac), -2 * np.imag(Ac), dz=dz, z0=(nz - 1) / 2,
-                       period_nm=period_nm, phase_per_nm=-2 * np.pi / period_nm,
+                       period_nm=period_nm, phase_per_nm=sign * 2 * np.pi / period_nm,
                        source=path,
                        pixelsize_nm=pixelsize,
                        parameters={"method": "uiPSF v1 4Pi model", "uipsf_v1": extra,
@@ -638,3 +661,52 @@ def refine_period(phase, phase_err, z_env_nm, z_env_err_nm, frame, phase_per_nm:
         shift = 0.5 * (a - c) / (a - 2 * b + c) if (a - 2 * b + c) != 0 else 0.0
         return float(trials[best] + shift * (trials[1] - trials[0]))
     return float(trials[best])
+
+
+def render_frames(cal: FourPiCalibration, layout, frame, x, y, z_nm, photons, phase0,
+                  n_frames: int, background: float = 10.0, seed: int = 0,
+                  frame_shape=None, roisize: int = None):
+    """Camera frames of a 4Pi acquisition, in photons with Poisson noise.
+
+    Emitter k is in ``frame[k]`` at channel-0 pixel ``(x[k], y[k])`` (of the
+    cut, unflipped channel), at ``z_nm[k]``, with the cavity's ``phase0[k]``.
+    Each channel draws it where the layout's map puts it, and the channels
+    are put on the frame in their rectangles with their flips -- what a
+    camera behind the microscope would record, for the engine to take apart
+    again.  Returns (n_frames, H, W) float32; the frame is the layout's
+    bounding box unless ``frame_shape`` is given.
+    """
+    rng = np.random.default_rng(seed)
+    w, h = layout.size
+    C = layout.n_channels
+    if frame_shape is None:
+        frame_shape = (max(r[1] + r[3] for r in layout.regions),
+                       max(r[0] + r[2] for r in layout.regions))
+    roisize = roisize or min(cal.shape[1], cal.shape[2]) - 3
+    half = roisize // 2
+    frame, x, y = np.asarray(frame, int), np.asarray(x, float), np.asarray(y, float)
+    z = np.asarray(z_nm, float)
+    phase = cal.phase_per_nm * z + np.asarray(phase0, float)
+    photons = np.broadcast_to(np.asarray(photons, float), x.shape)
+    channels = np.zeros((n_frames, C, h, w), np.float32)
+    zi = cal.z_nm_to_index(z)
+    for c in range(C):
+        at = np.c_[x, y] if c == 0 else layout.to_channel(c, np.c_[x, y])
+        corner = np.rint(at).astype(int) - half
+        local = at - corner
+        model = spots(cal, local[:, 0], local[:, 1], zi, phase, roisize)[:, c]
+        for k in range(len(x)):
+            cx, cy = corner[k]
+            x0, y0, x1, y1 = max(cx, 0), max(cy, 0), min(cx + roisize, w), min(cy + roisize, h)
+            if x1 > x0 and y1 > y0:
+                channels[frame[k], c, y0:y1, x0:x1] += photons[k] * np.clip(
+                    model[k, y0 - cy:y1 - cy, x0 - cx:x1 - cx], 0, None)
+    frames = np.zeros((n_frames,) + tuple(frame_shape), np.float32)
+    for c, ((rx, ry, rw, rh), (fx, fy)) in enumerate(zip(layout.regions, layout.flips)):
+        part = channels[:, c] + background
+        if fx:
+            part = part[:, :, ::-1]
+        if fy:
+            part = part[:, ::-1, :]
+        frames[:, ry:ry + rh, rx:rx + rw] = part
+    return rng.poisson(frames).astype(np.float32)
