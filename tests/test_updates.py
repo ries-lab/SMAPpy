@@ -66,7 +66,8 @@ def test_the_command_runs_pip_through_this_python_in_each_shell():
     assert spaced == r'& "C:\Users\J R\python.exe" -m pip install --upgrade smappy-smlm'
     plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe", dist=Dist())
     assert plain == r"C:\py\python.exe -m pip install --upgrade smappy-smlm"
-    assert updates.update_command("uv tool", dist=Dist()) == "uv tool upgrade smappy-smlm"
+    assert updates.update_command("uv tool", dist=Dist()) == (
+        "uv tool upgrade --refresh-package smappy-smlm smappy-smlm")
 
 
 def test_a_checkout_is_pulled_where_it_is_and_installed_again():
@@ -208,7 +209,7 @@ def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it():
     from smappy import updater
     py = "/env/bin/python"
     assert updater.commands("pip", py) == [[py, "-m", "pip", "install", "--upgrade", "smappy-smlm"]]
-    assert updater.commands("uv tool", py, uv="/bin/uv") == [["/bin/uv", "tool", "upgrade", "smappy-smlm"]]
+    assert updater.commands("uv tool", py, uv="/bin/uv") == [["/bin/uv", "tool", "upgrade", "--refresh-package", "smappy-smlm", "smappy-smlm"]]
     assert updater.commands("uv", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "pip", "install"]
     assert updater.commands("uv tool", py, uv="") is None          # no uv on the PATH
     assert updater.commands("checkout", py) is None                # git pull is the user's

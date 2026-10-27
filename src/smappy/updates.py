@@ -165,11 +165,14 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
             "git pull", f"{run} -m pip install -e ."]
         return ("; " if windows else " && ").join(steps)
     if kind == "uv tool":
-        return f"uv tool upgrade {DISTRIBUTION}"
+        # --refresh-package: uv's copy of PyPI's list may predate the release
+        # (`smappy.updater.commands`)
+        return f"uv tool upgrade --refresh-package {DISTRIBUTION} {DISTRIBUTION}"
     if kind == "uvx":
         return f"uvx --from {DISTRIBUTION}@latest smappy-gui"
     if kind == "uv":
-        return f"uv pip install --upgrade --python {_quote(python, windows)} {DISTRIBUTION}"
+        return (f"uv pip install --upgrade --refresh-package {DISTRIBUTION} "
+                f"--python {_quote(python, windows)} {DISTRIBUTION}")
     return f"{run} -m pip install --upgrade {DISTRIBUTION}"
 
 

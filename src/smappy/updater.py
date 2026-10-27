@@ -42,10 +42,14 @@ def commands(kind: str, python: str, uv: Optional[str] = None) -> Optional[List[
     uv = uv if uv is not None else shutil.which("uv")
     if kind == "pip":
         return [[python, "-m", "pip", "install", "--upgrade", DISTRIBUTION]]
+    # uv keeps PyPI's list of releases for the ten minutes PyPI allows, so
+    # an update just after a release found nothing new (0.5.7, October
+    # 2026); pip asks again for every list on its own
     if kind == "uv tool" and uv:
-        return [[uv, "tool", "upgrade", DISTRIBUTION]]
+        return [[uv, "tool", "upgrade", "--refresh-package", DISTRIBUTION, DISTRIBUTION]]
     if kind == "uv" and uv:
-        return [[uv, "pip", "install", "--upgrade", "--python", python, DISTRIBUTION]]
+        return [[uv, "pip", "install", "--upgrade", "--refresh-package", DISTRIBUTION,
+                 "--python", python, DISTRIBUTION]]
     return None
 
 
