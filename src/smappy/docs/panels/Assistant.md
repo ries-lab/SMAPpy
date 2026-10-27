@@ -19,6 +19,22 @@ Connected to the open session, it looks at and changes what you see.
 Nothing can connect until connections are allowed, and only programs
 running as your user on this computer can.
 
+### What to ask it for
+
+Most often you know what you want to find out, not which plugin does it.
+Tell the assistant that, in plain words, and it helps in one of three ways,
+as you ask:
+
+* **It explains** how to do it in SMAPpy: which plugin, which settings and
+  why, and what the numbers that come out mean.  Nothing changes; you do it
+  yourself and learn where it is.
+* **It suggests**: it tries the plugin on a copy of the data, moves the view
+  to show you where in the picture it means, and leaves the plugin with its
+  settings as a proposal under the *Assistant* button.  *Open* fills the
+  plugin's window; your Run carries it out.
+* **It does it** for you, in *act* mode: each change applied at once, and
+  undone with *Edit > Undo*.  Only you switch to *act*.
+
 The tutorial [An AI assistant](https://ries-lab.github.io/SMAPpy/assistant/)
 shows it on simulated nuclear pores: starting it, its proposals, suggest and
 act; a whole analysis of a file without the window, kept as a chain; and

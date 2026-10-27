@@ -506,7 +506,7 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
     script = file.read_text()
     assert "cd '" + str(tmp_path / "work dir") + "'" in script
     assert "Install it now? [Y/n]" in script and "claude.ai/install.sh | bash" in script
-    assert "Ask your question here." in script
+    assert "Ask here what you need:" in script
     assert script.rstrip().split("\n")[-1].startswith("exec claude --mcp-config ")
     if sys.platform == "darwin":
         assert ran[0][0] == "osascript" and "{10, 20, 500, 800}" in ran[0][2]
@@ -528,7 +528,7 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
     out = subprocess.run(["/bin/sh", str(file)], capture_output=True, text=True,
                          env={"PATH": f"{empty}:/bin:/usr/bin", "HOME": str(tmp_path)})
     assert out.returncode == 0, out.stderr
-    assert "Ask your question here." in out.stdout and "CLAUDE --mcp-config" in out.stdout
+    assert "Ask here what you need:" in out.stdout and "CLAUDE --mcp-config" in out.stdout
 
 
 def test_the_windows_script_is_read_in_utf8_keeps_its_percent_signs_and_returns_from_npm(

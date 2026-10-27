@@ -601,6 +601,19 @@ class FirstStart(QWidget):
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("Start assistant")
         column = QVBoxLayout(self)
+        # what it is for, said once where it is first met: most will ask it
+        # how to do something, and not know it can do more than chat
+        helps = QLabel("Tell it what you need, in plain words.  It can help in "
+                       "three ways:<ul style='margin-left:-20px'>"
+                       "<li><b>explain</b> how to do it in SMAPpy, and what the "
+                       "numbers mean;</li>"
+                       "<li><b>suggest</b> the plugin and its settings, and show "
+                       "you where in the picture, for you to open and run;</li>"
+                       "<li><b>do</b> it for you, in <i>act</i> mode, each step "
+                       "undone with Edit, Undo.</li></ul>")
+        helps.setWordWrap(True)
+        column.addWidget(helps)
+        column.addSpacing(6)
         column.addWidget(QLabel("Which assistant should SMAPpy start?"))
         self.group = QButtonGroup(self)
         self.buttons: Dict[str, QRadioButton] = {}
