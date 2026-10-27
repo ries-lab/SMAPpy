@@ -78,7 +78,7 @@ def test_the_engine_finds_and_fits_molecules_across_mirrored_shifted_channels(ca
     camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
     engine = MultiChannelEngine(camera, DetectionSettings().finder(), Global4PiPSF(cal),
                                 layout, FitSettings(roisize=13))
-    engine.push(frames, 0)
+    engine.push(layout.cut(frames), 0)
     locs = engine.flush()
     assert locs.metadata["fourpi"]["phase_per_nm"] == cal.phase_per_nm
     lx, ly = np.asarray(locs["x_nm"]) / 100, np.asarray(locs["y_nm"]) / 100
@@ -339,7 +339,7 @@ def test_a_drift_of_one_channel_is_measured_and_followed(cal):
 
     def fit(model, drift=None):
         engine = MultiChannelEngine(camera, finder, model, layout, FitSettings(roisize=13), drift)
-        engine.push(frames, 0)
+        engine.push(layout.cut(frames), 0)
         return engine.flush()
 
     free = fit(Global4PiPSF(cal, shared=(False, False, True, False, True, True)))
@@ -374,3 +374,164 @@ def test_grouping_averages_the_phase_as_an_angle():
     assert abs(abs(grouped["phase_rad"][0]) - np.pi) < 1e-5     # not 0, the linear mean
     assert grouped["phase_rad"][1] == pytest.approx((0.1 * 100 + 0.3 * 400) / 500, abs=1e-3)
     assert grouped["phase_err_rad"][1] == pytest.approx(1 / np.sqrt(100 + 400), rel=1e-5)
+
+
+# ---------------------------------------------------------------- the channel layer
+
+def test_a_channel_source_reads_any_acquisition_as_its_channels(tmp_path):
+    from smappy.channels import ChannelSource
+    from smappy.io.tiff import open_stack
+    rng = np.random.default_rng(7)
+    stacks = [rng.integers(100, 200, (12, 16, 20)).astype(np.uint16) for _ in range(4)]
+    paths = _write_quadrant_series(tmp_path, stacks, files=2)
+    base = open_stack(paths[0])
+    source = ChannelSource.wrap(base, base.layout)
+    assert source.shape == (16, 20) and source.n_frames == 12 and source.n_channels == 4
+    blocks = list(source.frames(chunk=5))
+    assert blocks[0][1].shape == (5, 4, 16, 20)
+    assert np.array_equal(np.concatenate([b for _, b in blocks])[:, 1], stacks[1])
+    assert np.array_equal(source.frame(7)[3], stacks[3][7])
+
+
+def test_a_layout_on_the_chip_is_put_on_a_camera_roi():
+    layout = from_corners([100, 300], [50, 50], 64, 64, flip_x=[False, True])
+    on = layout.on_camera((90, 40))
+    assert on.regions == [(10, 10, 64, 64), (210, 10, 64, 64)]
+    assert on.flips == layout.flips
+    with pytest.raises(ValueError, match="cuts off"):
+        layout.on_camera((120, 0))
+
+
+def test_a_map_is_described_about_its_channels_centre():
+    from smappy.channels import describe_map
+    m = np.eye(3)
+    angle = 0.004
+    m[:2, :2] = 1.002 * np.array([[np.cos(angle), -np.sin(angle)],
+                                  [np.sin(angle), np.cos(angle)]])
+    centre = np.array([99.5, 99.5])
+    m[:2, 2] = centre + [0.3, -0.2] - m[:2, :2] @ centre       # 0.3, -0.2 px at the centre
+    d = describe_map(m, (200, 200))
+    assert np.allclose(d["shift_px"], [0.3, -0.2], atol=1e-6)
+    assert np.allclose(d["scale"], 1.002, atol=1e-6)
+    assert d["rotation_mrad"] == pytest.approx(4.0, abs=1e-3)
+    assert d["projective_px"] < 1e-6
+
+
+def test_the_microscope_database_places_the_channels_on_the_chip():
+    from types import SimpleNamespace
+    from smappy.microscope_db import Microscope
+    from smappy.plugins.fit_4pi import FourPiFitSettings, layout_of
+    scope = Microscope.from_dict({
+        "name": "4Pi", "camera": "orca",
+        "channels": {"p1": {"region": [151, 0, 168, 168]},
+                     "s1": {"region": [389, 0, 168, 168]},
+                     "p2": {"region": {"orca": [1474, 0, 168, 168]}, "mirror": "x"},
+                     "s2": {"region": {"orca": [1713, 0, 168, 168]}, "mirror": "x"}}})
+    chip = scope.channel_layout("orca")
+    assert chip.regions[2] == (1474, 0, 168, 168) and chip.flips[3] == (True, False)
+    assert scope.channel_layout("another").n_channels == 2     # only the two for every camera
+    resolution = SimpleNamespace(microscope=SimpleNamespace(microscope=scope, metadata={},
+                                                            camera="orca"))
+    settings = FourPiFitSettings()
+    settings.model.channels.layout = "microscope"
+    settings.model.channels.registration = "none"
+    camera = SimpleNamespace(roi_offset=(100, 0))
+    layout = layout_of(settings, None, None, camera, resolution)
+    assert layout.regions[0] == (51, 0, 168, 168)
+    assert Microscope.from_dict(scope.to_dict()).channel_layout("orca").regions == chip.regions
+
+
+def test_a_bead_registration_is_measured_once_and_kept_beside_the_beads(cal, tmp_path,
+                                                                       monkeypatch):
+    import smappy.channels as channels
+    from smappy.plugins import fit_4pi
+    truth = np.eye(3)
+    truth[:2, 2] = [0.7, -0.4]
+    layout = side_by_side(4, 64, 64).with_maps([np.eye(3), truth, truth, np.eye(3)])
+    rng = np.random.default_rng(8)
+    xy = rng.uniform(10, 54, (6, 2))
+    z = np.linspace(-300, 300, 9)
+    frame = np.repeat(np.arange(len(z)), len(xy))
+    frames = fourpi.render_frames(cal, layout, frame, np.tile(xy[:, 0], len(z)),
+                                  np.tile(xy[:, 1], len(z)), np.repeat(z, len(xy)), 20000,
+                                  phase0=0.0, n_frames=len(z), background=5)
+    beads = tmp_path / "beads"
+    beads.mkdir()
+    _write_quadrant_series(beads, [layout.cut(frames)[:, c].astype(np.uint16)
+                                   for c in range(4)], files=1)
+    plain = side_by_side(4, 64, 64)
+    fit_4pi._REGISTERED.clear()
+    maps = fit_4pi.registration_from_beads(str(beads), plain)
+    assert np.allclose(maps[1][:2, 2], [0.7, -0.4], atol=0.05)
+    kept = channels.registration_path(beads)
+    assert kept.exists()
+    assert np.allclose(channels.load_registration(kept).maps[1], maps[1])
+    # the second time it is read, not measured
+    fit_4pi._REGISTERED.clear()
+    monkeypatch.setattr(channels, "register_channels", lambda *a, **k: 1 / 0)
+    again = fit_4pi.registration_from_beads(str(beads), plain)
+    assert np.allclose(again[1], maps[1])
+
+
+def test_a_fit_region_is_drawn_in_channel_0s_pixels(cal, tmp_path):
+    from smappy.plugins import Context
+    from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    model_path = tmp_path / "model_4pi.h5"
+    fourpi.save_fourpi_calibration(model_path, cal)
+    layout = side_by_side(4, 48, 48)
+    rng = np.random.default_rng(9)
+    n = 120
+    x, y = rng.uniform(10, 38, (2, n))
+    frames = fourpi.render_frames(cal, layout, np.arange(n), x, y, rng.uniform(-300, 300, n),
+                                  4000, phase0=0.5, n_frames=n, background=8)
+    adu = (frames / 0.5 + 100).astype(np.uint16)
+    paths = _write_quadrant_series(tmp_path, [layout.cut(adu)[:, c] for c in range(4)], 1)
+    settings = FourPiFitSettings(
+        source=SourceSettings(path=str(paths[0])),
+        camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+        model=FourPiModelSettings(calibration=str(model_path)),
+        output=OutputSettings(path=str(tmp_path / "out_locs.hdf5")))
+    settings.finish.fourpi_z = False
+    settings.region.shapes = [{"kind": "include",
+                               "points": [[0, 0], [24, 0], [24, 48], [0, 48]]}]
+    locs = FourPiFit().run(Context(), settings).locs
+    assert len(locs) > 0.3 * n
+    assert np.all(np.asarray(locs["x_nm"]) / 100 < 25)
+
+
+def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
+    """Four channels typed on a DCIMG chip, the last two mirrored: the layer
+    takes them apart, and the molecules come back where they were drawn in
+    channel 0's pixels."""
+    from tests.test_fourpi import _write_new_dcimg
+    from smappy.plugins import Context
+    from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
+    from smappy.plugins.fit_4pi import FourPiFit, FourPiFitSettings, FourPiModelSettings
+    model_path = tmp_path / "model_4pi.h5"
+    fourpi.save_fourpi_calibration(model_path, cal)
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    rng = np.random.default_rng(10)
+    n = 80
+    x, y = rng.uniform(10, 34, (2, n))
+    frames = fourpi.render_frames(cal, layout, np.arange(n), x, y, rng.uniform(-300, 300, n),
+                                  4000, phase0=0.2, n_frames=n, background=8,
+                                  frame_shape=(48, 200))
+    adu = (frames / 0.5 + 100).astype(np.uint16)
+    _write_new_dcimg(tmp_path / "movie.dcimg", adu, adu[:, 1023 - (1024 - 24), :4])
+    settings = FourPiFitSettings(
+        source=SourceSettings(path=str(tmp_path / "movie.dcimg")),
+        camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+        model=FourPiModelSettings(calibration=str(model_path)),
+        output=OutputSettings(path=str(tmp_path / "out_locs.hdf5")))
+    part = settings.model.channels
+    part.layout, part.registration = "typed", "none"
+    part.x_corners, part.y_corners, part.width, part.height = "4, 54, 104, 154", "2,2,2,2", 44, 44
+    part.mirrored = "3, 4"
+    settings.finish.fourpi_z = False
+    locs = FourPiFit().run(Context(), settings).locs
+    from scipy.spatial import cKDTree
+    d, i = cKDTree(np.c_[x, y]).query(np.c_[locs["x_nm"], locs["y_nm"]] / 100)
+    same = (d < 1) & (np.asarray(locs["frame"]) == i)
+    assert same.sum() > 0.8 * n
+    assert abs(np.median(np.asarray(locs["x_nm"])[same] / 100 - x[i[same]])) < 0.02

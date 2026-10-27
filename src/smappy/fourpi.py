@@ -67,6 +67,10 @@ class FourPiCalibration:
     phase_per_nm: float                # d(phase) / d(z_nm), +-2 pi / period
     volumes: Optional[np.ndarray] = None
     transforms: Optional[np.ndarray] = None   # (C, 3, 3) channel c -> channel 0, pixels
+    #: the channel layout the transforms were measured on (`ChannelLayout.to_dict`): the
+    #: transforms are between its channel images, and hold for another layout only if
+    #: its channels have the same size
+    layout: Optional[dict] = None
     pixelsize_nm: Optional[tuple] = None      # (x, y)
     source: Optional[Path] = None
     parameters: dict = field(default_factory=dict)
@@ -353,6 +357,8 @@ def save_fourpi_calibration(path, cal: FourPiCalibration, overwrite: bool = Fals
             f.create_dataset("volumes", data=cal.volumes, compression="gzip")
             if cal.transforms is not None:
                 f.create_dataset("transforms", data=np.asarray(cal.transforms, float))
+            if cal.layout is not None:
+                f.create_dataset("layout_json", data=json.dumps(cal.layout))
             f.create_dataset("parameters_json", data=json.dumps(cal.parameters,
                                                                 default=_jsonable))
         os.replace(tmp, path)
@@ -379,6 +385,7 @@ def load_fourpi_calibration(path) -> FourPiCalibration:
             period_nm=float(f.attrs["period_nm"]),
             phase_per_nm=float(f.attrs["phase_per_nm"]),
             transforms=f["transforms"][...] if "transforms" in f else None,
+            layout=json.loads(f["layout_json"][()]) if "layout_json" in f else None,
             pixelsize_nm=tuple(f.attrs["pixelsize_nm"]) if "pixelsize_nm" in f.attrs else None,
             source=path, parameters=json.loads(f["parameters_json"][()]))
 

@@ -168,11 +168,15 @@ def measure_channel_drift(locs, channels: int, pixelsize_nm, block_of=None,
 
 @dataclass
 class MultiChannelEngine:
-    """`LocalizationEngine` for a frame of several channels: one ROI per
-    channel and candidate, one fit.
+    """`LocalizationEngine` for several channels: one ROI per channel and
+    candidate, one fit.
 
-    Positions come out in channel 0's pixels on the frame -- its rectangle's
-    corner added -- so the localizations sit over channel 0 in the raw frame.
+    It takes blocks of channels, (n, C, h, w), as `channels.ChannelSource`
+    reads them -- the geometry is that layer's -- and needs of the layout
+    only its maps and its channels' size.  Positions come out in channel 0's
+    own pixels: the sample's coordinates, whatever rectangle of whichever
+    camera channel 0 was cut from.  The table keeps the layout, to draw them
+    back on the raw frame.
     """
 
     camera: "CameraMetadata"
@@ -204,11 +208,11 @@ class MultiChannelEngine:
 
         started = time.perf_counter()
         frames = np.asarray(frames)
-        if not self.layout.fits(frames.shape[-2:]):
-            raise ValueError(f"the channel layout ({self.layout.regions}) does not fit the "
-                             f"{frames.shape[-1]} x {frames.shape[-2]} frames")
-        photons = to_photons(frames, self.camera) / self.camera.excess_noise
-        channels = self.layout.cut(photons)
+        w, h = self.layout.size
+        if frames.ndim != 4 or frames.shape[1:] != (self.layout.n_channels, h, w):
+            raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
+                             f"(a ChannelSource's), got {frames.shape}")
+        channels = to_photons(frames, self.camera) / self.camera.excess_noise
         if self._grids is None:
             h, w = channels.shape[-2:]
             self._grids = [None] + [channel_grid(self.layout, c, (h, w))
@@ -253,17 +257,12 @@ class MultiChannelEngine:
         self.stats["pairs"] += len(pairs)
 
         locs = paired_to_localizations(result, pairs, self.model, self.camera)
-        # channel 0's rectangle on the frame (its flip, if any, is undone too)
-        x0, y0, w, h = self.layout.regions[0]
-        fx, fy = self.layout.flips[0]
+        # in channel 0's own pixels: the camera ROI, which the table writer
+        # adds for a chip, is the channel layer's business here
         roi_x, roi_y = self.camera.roi_offset
-        for name, origin, size, flipped, roi in (("x_pix", x0, w, fx, roi_x),
-                                                 ("y_pix", y0, h, fy, roi_y),
-                                                 ("peak_x_pix", x0, w, fx, roi_x),
-                                                 ("peak_y_pix", y0, h, fy, roi_y)):
-            local = np.asarray(locs[name], float) - roi
-            locs.columns[name] = (origin + (size - 1 - local if flipped else local)
-                                  + roi).astype(np.float64)
+        for name, roi in (("x_pix", roi_x), ("y_pix", roi_y),
+                          ("peak_x_pix", roi_x), ("peak_y_pix", roi_y)):
+            locs.columns[name] = (np.asarray(locs[name], float) - roi).astype(np.float64)
         keep = valid(locs, self.settings.max_fit_distance)
         self.stats["rejected"] += int((~keep).sum())
         locs = locs[keep]

@@ -1,5 +1,28 @@
 """Several channels on one frame: where each is, and how it maps onto the first.
 
+This is the one layer that knows the geometry: it sits right after the
+loader (`ChannelSource`), and everything after it -- detection, the fit,
+registration, drift -- sees only the channels, (n, C, h, w), and maps
+between them.  Three parameters, each with its own owner and lifetime:
+
+* **the geometry** -- each channel's rectangle *on the camera chip*, in whole
+  pixels, and its mirror -- belongs to the microscope (`microscope_db`) and
+  is coarse.  On the chip rather than on the frame, it holds for any camera
+  ROI: the layer takes the ROI's corner off (`ChannelLayout.on_camera`);
+* **the registration** -- a projective map of each channel's pixels onto
+  channel 0's, after the cut and the flip -- belongs to a calibration (the
+  model, or beads, `register_channels`) and is fine.  After the flip it is
+  close to the identity: a shift of a pixel or two, a scale and a rotation a
+  few per mille from 1 and 0 (`describe_map`, which reads it about the
+  channel's centre, where the shift does not mix with the rest).  A
+  rectangle placed a pixel off costs nothing: the registration's shift takes
+  it up, which is what lets the geometry be coarse and stable;
+* **the drift** -- a shift of each channel over time -- belongs to the
+  acquisition (`multichannel.ChannelDrift`).
+
+A dual-colour splitter is the same three: two rectangles, one flipped, a map
+near the identity (`docs/4pi.md`, M8).
+
 A 4Pi microscope records four phase images of every molecule, a two-colour
 splitter two: the same field of view seen more than once, in rectangles of
 the camera frame -- or in separate files, which the readers put side by side
@@ -120,6 +143,42 @@ class ChannelLayout:
 
     def with_maps(self, maps: Sequence[np.ndarray]) -> "ChannelLayout":
         return ChannelLayout(self.regions, self.flips, list(maps), self.name)
+
+    def on_camera(self, roi_offset=(0, 0)) -> "ChannelLayout":
+        """The layout on the frames of a camera ROI whose corner is at
+        ``roi_offset`` on the chip: every rectangle moved by it.  The maps
+        are between channel images and do not change."""
+        ox, oy = (int(round(v)) for v in roi_offset)
+        if not (ox or oy):
+            return self
+        regions = [(x - ox, y - oy, w, h) for x, y, w, h in self.regions]
+        if any(x < 0 or y < 0 for x, y, _, _ in regions):
+            raise ValueError(f"the camera ROI, at ({ox}, {oy}) on the chip, cuts off a channel "
+                             f"of {self.name or 'the layout'}")
+        return ChannelLayout(regions, self.flips, self.maps, self.name)
+
+
+def describe_map(matrix, size: Tuple[int, int]) -> dict:
+    """A channel's map read about its centre: the shift there (px), the
+    scale along x and y, the rotation (mrad) and the projective part's
+    largest effect at a corner (px).  What a registration is worth looking
+    at, in the units it is near: a map read about the corner would mix a
+    rotation of a few mrad into a shift of a pixel."""
+    w, h = size
+    c = np.array([(w - 1) / 2, (h - 1) / 2])
+    m = np.asarray(matrix, float) / matrix[2, 2]
+    centre = _apply(m, c[None])[0]
+    step = 1.0
+    jx = (_apply(m, (c + [step, 0])[None])[0] - centre) / step
+    jy = (_apply(m, (c + [0, step])[None])[0] - centre) / step
+    affine = np.eye(3)
+    affine[:2, :2] = np.c_[jx, jy]
+    affine[:2, 2] = centre - affine[:2, :2] @ c
+    corners = np.array([[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]], float)
+    projective = np.abs(_apply(m, corners) - _apply(affine, corners)).max()
+    return {"shift_px": (centre - c).tolist(), "scale": [float(np.hypot(*jx)), float(np.hypot(*jy))],
+            "rotation_mrad": float(1000 * np.arctan2(jx[1], jx[0])),
+            "projective_px": float(projective)}
 
 
 def _apply(matrix: np.ndarray, xy) -> np.ndarray:
@@ -359,3 +418,93 @@ def bead_projections(paths, layout: ChannelLayout) -> list:
     if not out:
         raise ValueError(f"no bead acquisitions at {paths}")
     return out
+
+
+
+# ---------------------------------------------------------------- the layer
+
+from .io.tiff import ImageSource  # noqa: E402  (tiff imports this module only in functions)
+
+
+@dataclass
+class ChannelSource(ImageSource):
+    """An acquisition read as its channels: blocks of (n, C, h, w).
+
+    Wraps any `ImageSource` -- a DCIMG file, quadrant files, a TIFF -- with
+    the layout on its frames (`ChannelLayout.on_camera`, the camera ROI taken
+    off).  ``shape`` is one channel's, the space every position is reported
+    in.  ``base`` is the source as the camera wrote it.
+    """
+    base: ImageSource = None
+    layout: ChannelLayout = None
+
+    @classmethod
+    def wrap(cls, base: ImageSource, layout: ChannelLayout) -> "ChannelSource":
+        if not layout.fits(base.shape):
+            raise ValueError(f"the channels ({layout.regions}) do not fit the "
+                             f"{base.shape[1]} x {base.shape[0]} frames")
+        w, h = layout.size
+        return cls(files=list(base.files), shape=(h, w), dtype=base.dtype,
+                   n_frames=base.n_frames, n_frames_declared=base.n_frames_declared,
+                   mm_metadata=base.mm_metadata, summary=base.summary, base=base,
+                   layout=layout)
+
+    @property
+    def n_channels(self) -> int:
+        return self.layout.n_channels
+
+    def frames(self, chunk: int = 100, start: int = 0, stop: Optional[int] = None):
+        self.base.tags = self.tags
+        for first, block in self.base.frames(chunk=chunk, start=start, stop=stop):
+            yield first, self.layout.cut(block)
+
+    def frame(self, index: int) -> np.ndarray:
+        """One frame's channels, (C, h, w)."""
+        return self.layout.cut(self.base.frame(index)[None])[0]
+
+    def watch(self, chunk: int = 100, **kwargs):
+        for first, block in self.base.watch(chunk=chunk, **kwargs):
+            yield first, self.layout.cut(block)
+
+
+# ---------------------------------------------------------------- the file
+
+REGISTRATION_FORMAT = "smappy-channel-registration"
+
+
+def save_registration(path, layout: ChannelLayout, registration: Optional[Registration] = None,
+                      source: str = "") -> None:
+    """A registration as JSON: the geometry it was measured on, each
+    channel's map onto channel 0, and -- for reading by eye -- each map
+    about its channel's centre (`describe_map`) and the beads' agreement."""
+    import datetime
+    import json
+    from pathlib import Path
+    record = {"format": REGISTRATION_FORMAT, "version": 1,
+              "date": datetime.date.today().isoformat(), "source": str(source),
+              "layout": layout.to_dict(),
+              "maps_about_centre": [describe_map(m, layout.size) for m in layout.maps]}
+    if registration is not None:
+        record["pairs"] = list(registration.pairs)
+        record["rms_px"] = list(registration.rms_px)
+        record["kind"] = list(registration.kind)
+    Path(path).write_text(json.dumps(record, indent=1))
+
+
+def load_registration(path) -> ChannelLayout:
+    """The layout and maps a registration file holds."""
+    import json
+    from pathlib import Path
+    record = json.loads(Path(path).read_text())
+    if record.get("format") != REGISTRATION_FORMAT:
+        raise ValueError(f"{Path(path).name} is not a channel registration")
+    return ChannelLayout.from_dict(record["layout"])
+
+
+def registration_path(beads) -> "Path":
+    """Where a registration measured on ``beads`` is kept: beside the bead
+    file, or in the bead folder."""
+    from pathlib import Path
+    beads = Path(beads)
+    return (beads / "channel_registration.json" if beads.is_dir()
+            else beads.with_name(beads.stem + "_channels.json"))

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine]
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.microscope_db.Microscope.channel_layout]
 ---
 
 ## What it does
@@ -61,7 +61,7 @@ frames = fourpi.render_frames(cal, layout, frame, x, y, z, 3000, phase0=0.7,
 camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
 engine = MultiChannelEngine(camera, DetectionSettings().finder(), Global4PiPSF(cal),
                             layout, FitSettings(roisize=13))
-engine.push(frames, 0)
+engine.push(layout.cut(frames), 0)
 locs = engine.flush()
 lx, ly = np.asarray(locs["x_nm"]) / 100, np.asarray(locs["y_nm"]) / 100
 pairs = []
@@ -73,10 +73,25 @@ for f in range(n_frames):
 loc, true = map(np.array, zip(*pairs))
 ```
 
-**1. The channels.**  The frame is cut into its channels.  The rectangles
-come from *channels*.  A channel mirrored on the camera is flipped back,
-which moves pixels and changes no value.  How each channel maps onto the
-first comes with the model: the learning found the PSF and the map together.
+**1. The channels.**  Right after the file is read, the frame is cut into
+its channels, and from then on nothing sees the camera's frame.  Detection,
+the fit, the registration and the drift see only the channels and the maps
+between them.  Three things describe the channels, each kept where it
+belongs:
+
+- **Where each channel is on the camera chip**, in whole pixels, and whether
+  it is mirrored.  This is part of the microscope, kept in its entry in the
+  microscope database.  It is measured on the chip, not on the frame, so it
+  holds for any camera ROI.  A mirrored channel is flipped back when it is
+  cut, which moves pixels and changes no value.
+- **How each channel maps onto the first**, to a fraction of a pixel: the
+  registration.  It belongs to a calibration, the model or a bead
+  measurement.  After the flip it is close to doing nothing: a shift of a
+  pixel or two, and a scale and a rotation a few parts in a thousand from
+  none.  A rectangle placed a pixel off costs nothing, because the
+  registration's shift takes it up.
+- **How the channels move against each other over time**: the channel drift
+  (*In detail*).
 
 **2. Finding the molecules on the sum.**  A molecule can be bright in one
 channel and nearly dark in the next: the interference moves its light
@@ -221,11 +236,15 @@ uiPSF v1's bead model (`psfmodel_zernike_4pi.h5`) and in-situ model
 (`psfmodel_iter*_insitu_zernike_4pi.h5`) both work.
 
 ### model.channels.layout
-*as the file lays them out* for MATLAB quadrant files, which put the
-channels side by side.  For a DCIMG file, type the corners: SMAP's 4Pi
-settings file gives them as `x4pi`, `y4pi`, `width4pi`, `height4pi` and
-`mirror4pi`.  *4Pi-SMS* is the Bewersdorf-lab design: four 168-pixel images
-on a 2048 x 168 strip, the last two mirrored.
+*auto* takes the file's own layout where it has one: MATLAB quadrant files
+put the channels side by side.  Otherwise it takes the microscope's: in its
+entry of the microscope database, each channel can have a `region`
+(`[x, y, width, height]` on the chip, or one per camera) and a `mirror`
+(`"x"`, `"y"` or `"xy"`).  Set it there once and every acquisition finds
+it, whatever its camera ROI.  To try a layout first, type the corners, on
+the chip: SMAP's 4Pi settings file gives them as `x4pi`, `y4pi`,
+`width4pi`, `height4pi` and `mirror4pi`.  *4Pi-SMS* is the Bewersdorf-lab
+design: four 168-pixel images on a 2048 x 168 strip, the last two mirrored.
 
 ### model.channels.registration
 Use the model's: the PSF of each channel was learned centred where its map
@@ -237,7 +256,15 @@ which also corrects the part of the registration that beads cannot see.
 ### model.channels.beads
 A bead z stack taken in the same layout: a DCIMG file or series, a quadrant
 `.mat` file, or a folder of either.  Beads all over the field make a
-projective map.  A few beads make only a shift.
+projective map.  A few beads make only a shift.  It is measured once and
+kept beside the beads (`<name>_channels.json`, or
+`channel_registration.json` in a folder).  It is measured again when a bead
+file is newer, or the rectangles differ.
+
+### model.channels.path
+A registration that beads left, used for another acquisition.  It is
+readable as text: each channel's map is also given as its shift at the
+channel's centre, its scale and its rotation.
 
 ### model.channel_drift
 It costs a second fit of *drift blocks* × *frames per block* frames,
@@ -251,8 +278,11 @@ channel, how far its position is from where the map puts it
 
 ## Output
 
-The localizations, in the first channel's pixels on the frame.  Besides the
-usual columns:
+The localizations, in the first channel's own pixels: the sample's
+coordinates, whatever rectangle of which camera the channel was cut from.
+The raw frames kept with the table are the first channel's.  A fit region is
+drawn on the Preview's *sum* panel, in the same pixels.  Besides the usual
+columns:
 
 - `z_nm`, `z_err_nm`: the envelope's z.  After *4Pi z*, z from the phase.
 - `z_env_nm`, `z_env_err_nm`: the envelope's z, kept.

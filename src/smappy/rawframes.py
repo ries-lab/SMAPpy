@@ -79,6 +79,10 @@ class RawFrameKeeper:
         block = np.asarray(block)
         if block.ndim == 2:
             block = block[None]
+        if block.ndim == 4:
+            # channels (n, C, h, w), from a channel layer: the reference
+            # channel's, whose pixels the positions are in
+            block = block[:, 0]
         if not len(block):
             return
         summed = block.sum(axis=0, dtype=np.float64)

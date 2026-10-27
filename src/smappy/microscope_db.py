@@ -202,24 +202,42 @@ class Channel:
     mounted turned puts the same arm on another side.  The first channel is
     the one that applies alone -- with the splitting dichroic out the light
     goes the transmitted way, over the whole chip.
+
+    `region` is where it lands exactly, for a split into more than two --
+    the four phase images of a 4Pi microscope: ``[x, y, width, height]`` on
+    the chip, in whole pixels, or a table from camera to that; `mirror` is
+    ``"x"``, ``"y"`` or ``"xy"`` for an arm the optics flip.  That is the
+    geometry, coarse and stable; the sub-pixel registration between the
+    channels belongs to a calibration (`smappy.channels`).
     """
     name: str
     filter: str = ""
     side: Any = ""
+    region: Any = None
+    mirror: str = ""
 
     def side_for(self, camera: str) -> str:
         if isinstance(self.side, dict):
             return str(self.side.get(camera, ""))
         return str(self.side or "")
 
+    def region_for(self, camera: str) -> Optional[List[int]]:
+        region = self.region.get(camera) if isinstance(self.region, dict) else self.region
+        return [int(v) for v in region] if region else None
+
     @classmethod
     def from_dict(cls, name: str, raw: Dict[str, Any]) -> "Channel":
-        return cls(name=name, filter=str(raw.get("filter", "")), side=raw.get("side", ""))
+        return cls(name=name, filter=str(raw.get("filter", "")), side=raw.get("side", ""),
+                   region=raw.get("region"), mirror=str(raw.get("mirror", "")))
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"filter": self.filter}
         if self.side:
             out["side"] = self.side
+        if self.region:
+            out["region"] = copy.deepcopy(self.region)
+        if self.mirror:
+            out["mirror"] = self.mirror
         return out
 
 
@@ -413,6 +431,21 @@ class Microscope:
                                          side=channel.side_for(camera) if count > 1 else "",
                                          wavelength_nm=value, source=source))
         return out
+
+    def channel_layout(self, camera: str = "", name: str = ""):
+        """The channels' rectangles on the chip as a `channels.ChannelLayout`,
+        for every channel that has a `region` -- None when none has one.
+        Chip coordinates: `ChannelLayout.on_camera` puts it on a ROI's
+        frames."""
+        from .channels import ChannelLayout
+        used = camera or self.camera
+        placed = [(c, c.region_for(used)) for c in self.channels]
+        placed = [(c, r) for c, r in placed if r]
+        if not placed:
+            return None
+        return ChannelLayout([tuple(r) for _, r in placed],
+                             [("x" in c.mirror, "y" in c.mirror) for c, _ in placed],
+                             name=name or self.name)
 
     # ------------------------------------------------------------- as a file
     @classmethod

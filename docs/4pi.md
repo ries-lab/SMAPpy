@@ -759,6 +759,26 @@ channel images, and every transformation is defined on those.
 Its existing calibration files load as a layout plus their transformation
 re-expressed in channel coordinates.
 
+**4Pi already runs on the layer (2026-10-27).**
+- **The source.** `channels.ChannelSource` wraps any source.  `_FitPlugin`
+  has two hooks: `open_source`, and `view_camera`, which takes the camera ROI
+  off.
+- **The engine** takes channel blocks only, and reports positions in
+  channel 0's own pixels.
+- **The geometry** comes from the microscope database
+  (`Channel.region` / `mirror`, `Microscope.channel_layout`), from the
+  file, or typed, on the chip.  It is put on the camera ROI by
+  `ChannelLayout.on_camera`.
+- **The registration** comes from the model, from beads (measured once,
+  kept beside them as JSON, `channels.save_registration`) or from a file.
+  `describe_map` reads a map about its channel's centre.
+- **The model file** records the layout its maps were measured on.
+- **The fit region** is drawn on the preview's sum, in channel 0's pixels,
+  so `RegionFinder` works unchanged.
+
+So 4Pi is the layer's first user and its test, and M8 is what is left: dual
+colour on the same layer.
+
 **The bar.**  Dual colour's numbers stay identical on the existing
 two-channel tests and on a saved run.  The bead calibration and the
 movie registration give the same maps.  It is worth doing when the next

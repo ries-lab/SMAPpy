@@ -31,19 +31,23 @@ from . import Context, FormState, Notice, Plot, Result, param, register
 from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata)
 
 MODEL_FILTER = "4Pi models (*.h5)"
-LAYOUTS = (("file", "as the file lays them out"), ("typed", "typed corners"),
+REGISTRATION_FILTER = "Channel registrations (*.json)"
+LAYOUTS = (("auto", "the file's, else the microscope's"), ("microscope", "the microscope's"),
+           ("file", "as the file lays them out"), ("typed", "typed corners"),
            ("yale", "4Pi-SMS (Bewersdorf lab)"))
-REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"), ("none", "none"))
+REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"),
+                 ("file", "from a registration file"), ("none", "none"))
 
 
 @dataclass
 class ChannelLayoutSettings:
-    layout: str = param("file", label="channels", choices=LAYOUTS,
-                        help="where the phase channels are on the frame")
+    layout: str = param("auto", label="channels", choices=LAYOUTS,
+                        help="where the phase channels are: the file's own layout, the "
+                             "microscope's (the database), or typed")
     x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
-                           help="each channel's left edge on the frame, comma-separated")
+                           help="each channel's left edge on the chip, comma-separated")
     y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
-                           help="each channel's top edge on the frame")
+                           help="each channel's top edge on the chip")
     width: int = param(200, label="width", unit="px", min=8,
                        help="one channel's width")
     height: int = param(200, label="height", unit="px", min=8, beside=True,
@@ -53,10 +57,14 @@ class ChannelLayoutSettings:
                                "comma-separated; empty: none")
     registration: str = param("model", label="registration", choices=REGISTRATIONS,
                               help="how the channels map onto the first: the maps kept "
-                                   "with the model, measured on beads, or none")
+                                   "with the model, measured on beads, a saved registration, "
+                                   "or none")
     beads: str = param("", label="beads", kind="open_file",
                        help="a bead acquisition in this layout (a z stack), or a folder "
-                            "of them; read summed over every frame")
+                            "of them; measured once, kept beside them")
+    path: str = param("", label="registration file", kind="open_file",
+                      file_filter=REGISTRATION_FILTER,
+                      help="a channel registration (.json), as beads leave beside them")
 
 
 @dataclass
@@ -90,52 +98,117 @@ def _numbers(text: str) -> list:
     return [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
 
 
-_REGISTERED = {}       # (bead paths, layout) -> Registration: beads are read once
+_REGISTERED = {}       # (bead paths, layout) -> Registration: beads are read once a session
 
 
 def registration_from_beads(path: str, layout):
-    """The beads' registration for ``layout`` (`channels.register_channels`),
-    measured once per bead path and layout."""
-    from ..channels import bead_projections, register_channels
+    """The beads' registration for ``layout`` (`channels.register_channels`).
+
+    Measured once: kept beside the beads (`channels.registration_path`) and
+    read from there while it is newer than every bead file and was measured
+    on the same rectangles.
+    """
+    from pathlib import Path
+    from ..channels import (ChannelLayout, bead_projections, load_registration,
+                            register_channels, registration_path, save_registration)
     if not path:
         raise ValueError("registration from beads: choose a bead acquisition")
     key = (str(path), tuple(layout.regions), tuple(layout.flips))
-    if key not in _REGISTERED:
-        _REGISTERED[key] = register_channels(bead_projections(path, layout))
-    return _REGISTERED[key]
+    if key in _REGISTERED:
+        return _REGISTERED[key]
+    kept = registration_path(path)
+    beads = Path(path)
+    newest = max((p.stat().st_mtime for p in ([beads] if beads.is_file() else beads.rglob("*"))
+                  if p.is_file() and p != kept), default=0.0)
+    if kept.exists() and kept.stat().st_mtime >= newest:
+        saved = load_registration(kept)
+        if saved.regions == layout.regions and saved.flips == layout.flips:
+            _REGISTERED[key] = saved.maps
+            return saved.maps
+    reg = register_channels(bead_projections(path, layout))
+    try:
+        save_registration(kept, layout.with_maps(reg.maps), reg, source=str(path))
+    except OSError:
+        pass                         # a read-only bead folder: measured again next time
+    _REGISTERED[key] = reg.maps
+    return reg.maps
 
 
-def layout_of(settings: FourPiFitSettings, source=None, calibration=None):
-    """The channel layout the settings describe, with its maps: the model's,
-    the beads', or none."""
-    from ..channels import YALE_4PI, from_corners
+def microscope_layout(resolution):
+    """The channels' rectangles the microscope database gives for this file's
+    microscope, its setup on the file's day and its camera, or None."""
+    from ..microscope_db import acquisition_date
+    scope = getattr(resolution, "microscope", None)
+    entry = getattr(scope, "microscope", None)
+    if entry is None:
+        return None
+    entry = entry.as_of(acquisition_date(scope.metadata or {}))
+    return entry.channel_layout(scope.camera)
+
+
+def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=None,
+              resolution=None):
+    """The channel layout on this acquisition's frames, with its maps.
+
+    The geometry: the file's own (quadrant files), the microscope's
+    (`microscope_db.Microscope.channel_layout`), typed, or 4Pi-SMS -- the
+    last three on the chip, put on the camera ROI's frames.  The maps: the
+    model's, the beads', a registration file's, or none.
+    """
+    from ..channels import YALE_4PI, from_corners, load_registration
     part = settings.model.channels
-    if part.layout == "file":
-        if source is None:
-            from .fit import _open
-            source = _open(settings.source, watch=False)
-        layout = getattr(source, "layout", None)
-        if layout is None:
+    own = getattr(base, "layout", None)
+    roi = camera.roi_offset if camera is not None else (0, 0)
+    choice = part.layout
+    if choice == "auto":
+        choice = "file" if own is not None else "microscope"
+    if choice == "file":
+        if own is None:
             raise ValueError("this file does not lay out its channels itself (only the "
-                             "quadrant .mat files do): type the corners, or choose 4Pi-SMS")
-    elif part.layout == "yale":
-        layout = YALE_4PI
+                             "quadrant .mat files do): use the microscope's, or type them")
+        layout = own
+    elif choice == "microscope":
+        chip = microscope_layout(resolution)
+        if chip is None:
+            raise ValueError("the microscope database gives no channel rectangles for this "
+                             "file's microscope and camera: add them to its entry (a region "
+                             "per channel), or type the corners")
+        layout = chip.on_camera(roi)
+    elif choice == "yale":
+        layout = YALE_4PI.on_camera(roi)
     else:
         x, y = _numbers(part.x_corners), _numbers(part.y_corners)
         if len(x) != len(y) or not 1 <= len(x) <= 4:
             raise ValueError("give one x and one y corner per channel, one to four of them")
         mirrored = set(_numbers(part.mirrored))
         layout = from_corners(x, y, part.width, part.height,
-                              flip_x=[c + 1 in mirrored for c in range(len(x))])
+                              flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
+    maps = None
     if part.registration == "beads":
-        return layout.with_maps(registration_from_beads(part.beads, layout).maps)
-    if part.registration == "model" and calibration is not None:
+        maps = registration_from_beads(part.beads, layout)
+    elif part.registration == "file":
+        if not part.path:
+            raise ValueError("choose a channel registration file")
+        saved = load_registration(part.path)
+        if saved.size != layout.size or saved.n_channels != layout.n_channels:
+            raise ValueError(f"the registration was measured on {saved.n_channels} channels "
+                             f"of {saved.size}, this layout has {layout.n_channels} of "
+                             f"{layout.size}")
+        maps = saved.maps
+    elif part.registration == "model" and calibration is not None:
         maps = calibration.maps()
-        if maps is not None:
-            if len(maps) != layout.n_channels:
-                raise ValueError(f"the model registers {len(maps)} channels, the layout has "
-                                 f"{layout.n_channels}")
-            layout = layout.with_maps(maps)
+        measured = getattr(calibration, "layout", None)
+        if maps is not None and measured:
+            w, h = measured["regions"][0][2:]
+            if (w, h) != tuple(layout.size):
+                raise ValueError(f"the model's registration is between channels of {w} x {h}, "
+                                 f"this layout's are {layout.size[0]} x {layout.size[1]}: "
+                                 "register from beads instead")
+    if maps is not None:
+        if len(maps) != layout.n_channels:
+            raise ValueError(f"the registration has {len(maps)} channels, the layout "
+                             f"{layout.n_channels}")
+        layout = layout.with_maps(maps)
     return layout
 
 
@@ -167,14 +240,43 @@ class FourPiFit(_FitPlugin):
                             shared=(xy, xy, True, False, True, True),
                             n_starts=int(settings.model.starts))
 
+    # ----------------------------------------------------------- the channel layer
+    def channel_layout(self, settings, base=None):
+        """The layout on this acquisition's frames, with its maps (`layout_of`)."""
+        from .fit import _open
+        base = base if base is not None else _open(settings.source, watch=False)
+        try:
+            calibration = self._calibration(settings)
+        except Exception:
+            calibration = None             # a preview without a model still shows the channels
+        resolution = self.resolution(settings)
+        camera = resolution.camera_metadata() if resolution is not None else None
+        return layout_of(settings, base, calibration, camera, resolution)
+
+    def open_source(self, settings, watch: bool = False, stop_event=None):
+        """The acquisition read as channels (`channels.ChannelSource`): from
+        here on nothing sees the camera's frames."""
+        from ..channels import ChannelSource
+        from .fit import _open
+        if watch:
+            raise ValueError("Spline 4Pi does not follow a growing file yet")
+        base = _open(settings.source, watch=False, stop_event=stop_event)
+        return ChannelSource.wrap(base, self.channel_layout(settings, base))
+
+    def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
+        # positions are in channel 0's own pixels, where the camera ROI is
+        # already behind the channel layer
+        from dataclasses import replace
+        return replace(camera, roi=None)
+
     def engine(self, settings, camera: CameraMetadata, finder, model):
         from ..multichannel import MultiChannelEngine
-        layout = layout_of(settings, calibration=model.calibration)
-        drift = (self.channel_drift(settings, camera, finder, layout)
+        source = self.open_source(settings)
+        drift = (self.channel_drift(settings, camera, finder, source)
                  if settings.model.channel_drift else None)
-        return MultiChannelEngine(camera, finder, model, layout, settings.fit, drift)
+        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift)
 
-    def channel_drift(self, settings, camera, finder, layout):
+    def channel_drift(self, settings, camera, finder, source):
         """The channels' drift, from blocks of frames spread over the
         acquisition fitted with x and y free in every channel
         (`multichannel.measure_channel_drift`)."""
@@ -182,9 +284,7 @@ class FourPiFit(_FitPlugin):
         from ..multichannel import MultiChannelEngine, measure_channel_drift
         from ..pipeline import drive
         from ..psf import Global4PiPSF
-        from .fit import _open
         src = settings.source
-        source = _open(src, watch=False)
         stop = min(src.stop, source.n_frames) if src.stop else source.n_frames
         blocks = max(int(settings.model.drift_blocks), 1)
         length = max(int(settings.model.drift_frames), 1)
@@ -192,7 +292,7 @@ class FourPiFit(_FitPlugin):
         free = Global4PiPSF(self._calibration(settings), shared=(False, False, True, False,
                                                                  True, True),
                             n_starts=int(settings.model.starts))
-        engine = MultiChannelEngine(camera, finder, free, layout, settings.fit)
+        engine = MultiChannelEngine(camera, finder, free, source.layout, settings.fit)
         parts = []
         for first in starts:
             drive(engine, source.frames(chunk=src.chunk, start=int(first),
@@ -203,21 +303,16 @@ class FourPiFit(_FitPlugin):
             raise ValueError("channel drift: nothing was fitted in the drift blocks")
         locs = concat(parts)
         edges = np.r_[starts, np.inf]
-        return measure_channel_drift(locs, layout.n_channels,
+        return measure_channel_drift(locs, source.n_channels,
                                      camera.pixelsize_nm_or_default[0],
                                      lambda f: np.searchsorted(edges, f, side="right") - 1)
-
-    def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
-        # the molecules are found on the channels' sum, in channel 0's pixels,
-        # not on the frame a region would be drawn on
-        return self.finder(settings, camera)
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
         part = settings.model.channels
         typed = part.layout == "typed"
-        state.shown.update({"region": False,
-                            "model.channels.beads": part.registration == "beads",
+        state.shown.update({"model.channels.beads": part.registration == "beads",
+                            "model.channels.path": part.registration == "file",
                             **{f"model.channels.{n}": typed
                                for n in ("x_corners", "y_corners", "width", "height",
                                          "mirrored")}})
@@ -230,60 +325,61 @@ class FourPiFit(_FitPlugin):
         return state
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
-        """One frame: the channels' sum with the molecules found in it, and
-        each channel with the positions fitted there."""
+        """One frame: the channels' sum with the molecules found in it -- the
+        panel a fit region is drawn on, in channel 0's pixels as the
+        molecules are -- and each channel with the positions fitted there."""
         from ..camera import to_photons
-        from ..multichannel import detection_image
-        from .fit import _open
+        from ..multichannel import MultiChannelEngine, detection_image
+        from . import ShapeEdit
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
-        source = _open(src, watch=False)
+        source = self.open_source(settings)
+        layout = source.layout
         index = int(np.clip(frame, 0, max(source.n_frames - 1, 0)))
         camera = self._camera(settings)
         if camera is None:
             raise ValueError(f"could not read the camera from {src.path}")
         camera.require("conversion", "offset")
-        try:
-            cal = self._calibration(settings)
-        except Exception:
-            cal = None
-        layout = layout_of(settings, source, cal)
         raw = source.frame(index)
-        channels = layout.cut(to_photons(raw, camera)[None] / camera.excess_noise)
+        channels = to_photons(raw[None], camera) / camera.excess_noise
         summed = detection_image(channels, layout)
-        finder = self.finder(settings, camera)
+        finder = self.region_finder(settings, camera)
         candidates, _ = finder(summed, first_frame=index)
-        text = f"frame {index}: {len(candidates)} molecules found on the sum of " \
-               f"{layout.n_channels} channels"
+        text = (f"frame {index}: {len(candidates)} molecules found on the sum of "
+                f"{layout.n_channels} channels")
         fitted = None
-        if cal is not None:
+        try:
             model = self.model(settings, camera)
-            engine = self.engine(settings, camera, finder, model)
+        except Exception as error:
+            text += f"; not fitted -- {error}"
+        else:
+            engine = MultiChannelEngine(camera, finder, model, layout, settings.fit)
             engine.push(raw[None], index)
             fitted = engine.flush()
-            if fitted is not None:
-                text += f", {len(fitted)} fitted"
-        px, py = camera.pixelsize_nm_or_default[0]
+            text += f", {0 if fitted is None else len(fitted)} fitted"
+        (px, py), _ = camera.pixelsize_nm_or_default
+        shapes = list(settings.region.shapes)
 
         def draw(figure):
+            from .fit import draw_region
             panels = figure.subplots(1, layout.n_channels + 1)
             panels[0].imshow(summed[0], cmap="gray")
             panels[0].plot(candidates.x, candidates.y, "o", mfc="none", color="C1", ms=8)
             panels[0].set_title("sum")
+            draw_region(panels[0], shapes)
             for c in range(layout.n_channels):
                 ax = panels[c + 1]
                 ax.imshow(channels[0, c], cmap="gray")
                 ax.set_title(f"channel {c + 1}")
                 if fitted is not None and len(fitted):
-                    x0, y0 = layout.regions[0][:2]
-                    xy = np.c_[np.asarray(fitted["x_nm"]) / px - x0,
-                               np.asarray(fitted["y_nm"]) / py - y0]
+                    xy = np.c_[np.asarray(fitted["x_nm"]) / px, np.asarray(fitted["y_nm"]) / py]
                     there = xy if c == 0 else layout.to_channel(c, xy)
                     ax.plot(there[:, 0], there[:, 1], "+", color="C3", ms=8)
             for ax in panels:
                 ax.set_xticks([])
                 ax.set_yticks([])
-        return Result(text=text, plot=Plot(draw, panels=layout.n_channels + 1,
-                                           size=(3 * (layout.n_channels + 1), 3.2)),
-                      settings=settings)
+        return Result(text=text, settings=settings,
+                      plot=Plot(draw, panels=layout.n_channels + 1,
+                                size=(3 * (layout.n_channels + 1), 3.2),
+                                edit=ShapeEdit("region.shapes", panel=0, shapes=shapes)))

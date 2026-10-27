@@ -553,6 +553,19 @@ class _FitPlugin(Plugin):
                                    warning.filename, warning.lineno)
         return model
 
+    def open_source(self, settings, watch: bool = False, stop_event=None):
+        """What the frames are read from: the file as the camera wrote it.  A
+        fitter of several channels reads them through the channel layer
+        instead (`channels.ChannelSource`), and everything after sees
+        channels."""
+        return _open(settings.source, watch=watch, stop_event=stop_event)
+
+    def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
+        """The camera of the space positions are reported in: the chip's,
+        its ROI included.  A channel layer reports them in channel 0's own
+        pixels, where the ROI has already been taken off."""
+        return camera
+
     def engine(self, settings, camera: CameraMetadata, finder, model):
         """What consumes the frames.  One ROI per candidate by default; the
         two-channel fitter overrides this with one pair per candidate."""
@@ -1076,7 +1089,7 @@ class _FitPlugin(Plugin):
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
-        source = _open(src, watch=src.live, stop_event=ctx.stop)
+        source = self.open_source(settings, watch=src.live, stop_event=ctx.stop)
         camera = settings.camera.resolve(source)
         fit = settings.fit
         finder = self.region_finder(settings, camera)
@@ -1118,7 +1131,7 @@ class _FitPlugin(Plugin):
             ctx.warn(f"no pixel size: x_nm and y_nm use an assumed "
                      f"{DEFAULT_PIXELSIZE_NM:g} nm per pixel, which the table "
                      f"records, so they divide back into camera pixels exactly")
-        ctx.emit("start", {"extent": camera_extent(camera, source.shape),
+        ctx.emit("start", {"extent": camera_extent(self.view_camera(camera), source.shape),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
         if self.calibration_kind is not None and "calibration" not in record:
@@ -1231,7 +1244,7 @@ class _FitPlugin(Plugin):
             record["history"] = finished.locs.metadata.get("history") or []
             from ..io.hdf5 import save_localizations
             save_localizations(out, finished.locs, record)
-        raw = keeper.image(camera, source=str(src.path),
+        raw = keeper.image(self.view_camera(camera), source=str(src.path),
                            name=f"{Path(str(src.path)).name}: raw frames")
         if raw is not None and out is not None:
             # last, after any rewrite above: that one starts the file again
