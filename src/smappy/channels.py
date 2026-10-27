@@ -286,9 +286,9 @@ def channel_grid(layout: ChannelLayout, channel: int, shape: Tuple[int, int]) ->
 # channels are put roughly on top of each other by the projections' cross-
 # correlation, paired, and the map of each channel onto channel 0 is the
 # robust projective fit the dual-colour calibration uses
-# (`calibrate.dual.fit_dual_transform`).  With fewer pairs than that needs --
-# the Ries-lab bead scans have one bead per file -- the map is a translation,
-# their mean offset.  What a centroid of the envelope cannot see -- where the
+# (`calibrate.dual.fit_dual_transform`).  With fewer pairs than that needs,
+# an affine map by least squares from three pairs, and below three a
+# translation, their mean offset.  What a centroid of the envelope cannot see -- where the
 # model's PSF of each channel is centred -- the fit's own measurement of the
 # channels' offsets takes up (`multichannel.measure_channel_drift`).
 
@@ -376,6 +376,15 @@ def register_channels(projections, settings=None, match_px: float = 3.0) -> Regi
         if len(source) >= settings.min_pairs:
             matrix = fit_dual_transform(source, target, settings).transformation
             kind = "projective"
+        elif len(source) >= 3:
+            # too few for the robust projective fit, enough for an affine
+            # map: on the 4Pi-SMS example's 5 beads, a shift alone left
+            # 0.6 px, the channels' rotation of a few mrad
+            coefficients = np.linalg.lstsq(np.c_[source, np.ones(len(source))], target,
+                                           rcond=None)[0]
+            matrix = np.eye(3)
+            matrix[:2, :] = coefficients.T
+            kind = "affine"
         else:
             matrix = np.eye(3)
             matrix[:2, 2] = np.mean(target - source, axis=0)

@@ -338,3 +338,59 @@ def test_without_the_slope_the_plugin_asks_for_the_model(cal, drifting, tmp_path
     out = FourPiZ().run(Context(locs=bare), FourPiZSettings(slope="file", path=str(path),
                                                             window_frames=500)).locs
     assert np.isfinite(out["z_nm"]).mean() > 0.99
+
+
+# ---------------------------------------------------------------- models from beads
+
+@pytest.mark.slow
+def test_a_bead_scan_without_phase_steps_gives_back_the_model(cal):
+    """Beads scanned through z, their phase moving with z: the channels'
+    gains and phase offsets, the period, and I, A, B -- I free of the fringe
+    -- come back from a least squares per voxel over beads and channels."""
+    truth = fourpi.model_calibration(offsets=[0.0, -2.1, 3.0, 1.1])
+    gains = np.array([1.0, 0.85, 0.95, 0.9])
+    nz, size = truth.volumes.shape[2], 25
+    centre = (size - 1) / 2
+    rng = np.random.default_rng(11)
+    stacks = []
+    for b in range(5):
+        phi_b, shift = rng.uniform(-np.pi, np.pi), rng.uniform(-2, 2)
+        zi = np.arange(nz - 1, dtype=float) + shift            # the bead a little off the grid's focus
+        z_nm = truth.z_index_to_nm(zi)
+        phase = truth.phase_per_nm * z_nm + phi_b
+        spots = fourpi.spots(truth, np.full(len(zi), centre), np.full(len(zi), centre),
+                             zi, phase, size)                    # (z, C, y, x)
+        stacks.append(rng.poisson(40000 * np.clip(spots, 0, None) * gains[None, :, None, None])
+                      .transpose(1, 0, 2, 3))
+    found = fourpi.iab_from_beads(np.asarray(stacks, float), dz=truth.dz, smooth_z=0.5)
+    p = found.parameters
+    assert found.period_nm == pytest.approx(truth.period_nm, rel=0.01)
+    assert np.allclose(np.array(p["gains"]) / p["gains"][0], gains, atol=0.03)
+    offsets = np.angle(np.exp(1j * (np.array(p["offsets_rad"]) - [0.0, -2.1, 3.0, 1.1])))
+    assert np.abs(offsets).max() < 0.1
+    # the incoherent part has no fringe left in it: its component at the
+    # fringe's frequency, at the centre, is small against the interference
+    v = found.volumes[0, :, :, size // 2, size // 2]
+    z = np.arange(v.shape[1])
+    fringe = 2 * np.abs(np.mean(v[0] * np.exp(-1j * p["w_per_slice"] * z)))
+    assert fringe < 0.05 * np.mean(np.hypot(v[1], v[2]))
+    # and it fits: simulated molecules come back on the stage's z
+    rois, t = fourpi.simulate_rois(truth, 300, photons=4000, background=10, z_nm=(-300, 300), seed=12)
+    from smappy.psf import Global4PiPSF
+    values = Global4PiPSF(found).unpack(Global4PiPSF(found).fit(rois))
+    dz = values["z_nm"] - t["z_nm"]
+    assert abs(np.median(dz)) < 15
+    assert np.std(dz) < 2 * np.median(values["z_err_nm"])
+
+
+def test_smaps_4pi_calibration_reads_with_its_layout_and_channel_offsets():
+    import os
+    from pathlib import Path
+    root = Path(os.environ.get("UIPSF_DATA", Path.home() / ".cache/uipsf/zenodo"))
+    path = root / "4pi_sms_nup96/Cell01_642_000_000_3dcal.mat"
+    if not path.exists():
+        pytest.skip("the 4Pi-SMS example data (zenodo 4022827) are not downloaded")
+    cal = fourpi.load_smap_4pi(path)
+    assert cal.n_channels == 4 and cal.layout["regions"][2][:3] == [1409, 0, 168]
+    assert cal.layout["flips"][3] == [True, False]
+    assert cal.period_nm == pytest.approx(278.05, abs=0.1)

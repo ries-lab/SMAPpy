@@ -72,11 +72,16 @@ def main():
     ap.add_argument("prefixes", nargs="*", help="paths inside the archive, e.g. 1ch_40nm_bead/")
     ap.add_argument("--list", action="store_true", help="list the archive's files and sizes")
     ap.add_argument("--out", default=os.environ.get("UIPSF_DATA", os.path.expanduser("~/.cache/uipsf/zenodo")))
+    ap.add_argument("--url", default=URL,
+                    help="another Zenodo zip's content URL, e.g. the 4Pi-SMS example data's")
+    ap.add_argument("--top", default=None,
+                    help="the folder inside the zip to strip (default: uiPSF's for its zip)")
     args = ap.parse_args()
 
-    archive = zipfile.ZipFile(RemoteFile(URL))
+    top = args.top if args.top is not None else (TOP if args.url == URL else "")
+    archive = zipfile.ZipFile(RemoteFile(args.url))
     for info in archive.infolist():
-        name = info.filename.removeprefix(TOP)
+        name = info.filename.removeprefix(top)
         if info.is_dir() or not name:
             continue
         if args.list:

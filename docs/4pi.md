@@ -784,3 +784,70 @@ two-channel tests and on a saved run.  The bead calibration and the
 movie registration give the same maps.  It is worth doing when the next
 multi-channel need comes: more than two colours, channel drift for dual
 colour, biplane plus colour.  It is not required for 4Pi.
+
+## 10. Real data: 4Pi-SMS Nup96 in DCIMG (2026-10-27)
+
+**The data.**  The 4Pi-SMS consortium's Example Data II, zenodo 4022827.
+- Nup96-SNAP with Alexa 647, in the lower nuclear envelope of a U2OS cell,
+  on a Bewersdorf-design astigmatic 4Pi.  It was taken on 22 October 2018.
+- The zip also holds a bead z stack (101 one-frame DCIMG files, 20 nm
+  steps, no phase steps), a SMAP 4Pi calibration (`cal4pi`), and the
+  authors' alignment and phase calibrations.
+- Fetched with `scripts/uipsf/fetch_zenodo.py --url` into
+  `~/.cache/uipsf/zenodo/4pi_sms_nup96`: the beads, the calibrations and the
+  first of the four 2 GB movie files (3000 frames).
+
+**SMAP's model of these beads is not usable as it was.**  Read by
+`fourpi.load_smap_4pi`, it had three problems:
+- `normf` makes channels 2 and 3 twice as bright as 1 and 4.  On the beads,
+  the four channels are nearly equal (1 : 0.88 : 0.92 : 0.96).
+- Its incoherent part I oscillates with the fringe at its centre.  The
+  pairwise construction (`make4Pimodel`) left the fringe in it.
+- So a fit with it traded z for phase: the envelope z swung ±150 nm with the
+  phase, and followed the stage at a slope of only 0.3.
+- Its phase offsets, on the other hand, agree with what the beads show to
+  0.1 rad.
+
+**A model from the bead scan itself** (`fourpi.iab_from_beads`):
+- The beads' centre brightness gives the phase per slice, each channel's
+  gain and offset, and each bead's phase (`scan_phases`).
+- Then I, A and B are solved by least squares per voxel over beads and
+  channels.  That is linear because the channels share one shape up to
+  gain and offset.
+- On 3 usable beads it gives a period of 273.6 nm (SMAP: 278), and an I
+  free of the fringe.
+- The beads then fit with z following the stage at a slope of 0.83–0.92,
+  within ~40 nm, and the phase's z following it to 5–26 nm.
+
+**The registration** from the stack's 5 beads is an affine map
+(`register_channels` now fits one from 3 to 7 pairs).
+- Residuals 0.06–0.10 px, with rotations of −10, −4 and +7 mrad, as the
+  authors' own alignment found.
+- The movie's channel drift against it was 0.10–0.17 px, steady over the
+  file.
+
+**The movie** (*Spline 4Pi*: typed SMAP corners, the model's registration,
+channel drift, *4Pi z* after the fit):
+- 77,818 localizations from 3000 frames, at 13 frames/s.
+- Median 18,900 photons; for the sure, precise ones a z error of 2.9 nm
+  from the phase, xy 4.5 nm.
+- *4Pi z* expects 11 % wrong fringes over all localizations.  The envelope
+  scatters 6.7 times its CRLB, the 3-bead model's limit.
+
+**The ring check.**
+- Pores were found by DBSCAN on the localizations with fringe probability
+  above 0.95, a z error under 8 nm and more than 1500 photons.
+- z was taken relative to each pore's mean, with the envelope's local tilt
+  (from the 12 nearest pores) removed.
+- The pooled profile is bimodal, the two rings about equally occupied
+  (0.83–0.86) and each ~17 nm wide.
+- Their separation by a two-Gaussian fit is 42.7, 44.2 and 46.6 nm
+  (± 0.7–1.1) for pores of at least 8, 20 and 35 localizations.  It
+  rises as the pore's mean gets less noisy, towards the ~50 nm expected
+  for Nup96.
+
+**What would improve it.**
+- More beads for the model: the stack has 5, and 2 were too near an edge.
+- A pupil model learned from the same scan (M5's single-phase start),
+  which regularises a few beads with physics.
+- All four movie files.

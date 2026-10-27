@@ -717,3 +717,224 @@ def render_frames(cal: FourPiCalibration, layout, frame, x, y, z_nm, photons, ph
             part = part[:, ::-1, :]
         frames[:, ry:ry + rh, rx:rx + rw] = part
     return rng.poisson(frames).astype(np.float32)
+
+
+def load_smap_4pi(path, dz_sign: float = 1.0) -> FourPiCalibration:
+    """SMAP's 4Pi calibration (``*_3dcal.mat`` with ``cal4pi``), as this
+    package's model.
+
+    SMAP keeps one I, A and B for all channels and, per channel, a brightness
+    (``normf``: SMAP divided channel c's data by it before fitting), a phase
+    offset (``phaseshifts``) and a focus offset in slices (``dz``); its fitter
+    modelled channel c as ``normf_c (I + A cos(phi + phi_c) + B sin(phi +
+    phi_c))``.  Here each channel's own volumes carry all three:
+    ``A cos(phi + phi_c) + B sin(phi + phi_c) = (A cos phi_c + B sin phi_c)
+    cos phi + (B cos phi_c - A sin phi_c) sin phi``, and the volumes are moved
+    by ``dz_sign * dz_c`` slices.  Its ``dx``, ``dy`` are the calibration's
+    own registration residuals and are left to this package's registration.
+    The phase advances by ``2 * frequency`` per slice (``make4Pimodel``), so
+    the period is pi / frequency slices; it grows with the slice index and so
+    falls with z_nm.  ``layout`` is the channel geometry SMAP's 4Pi settings
+    gave (``x4pi``, ``y4pi``, ``width4pi``, ``height4pi``, ``mirror4pi``).
+    """
+    import scipy.io
+    from scipy.ndimage import shift
+    from .channels import from_corners
+    m = scipy.io.loadmat(path, struct_as_record=False, squeeze_me=True)
+    if "cal4pi" not in m:
+        raise ValueError(f"{Path(path).name} is not a SMAP 4Pi calibration (no cal4pi)")
+    cal = m["cal4pi"]
+    k = cal.coeff
+    # MATLAB (y, x, z) -> (z, y, x)
+    I, A, B = (np.transpose(np.asarray(getattr(k, n), float), (2, 0, 1)) for n in "IAB")
+    normf = np.atleast_1d(np.asarray(k.normf, float))
+    phases = np.atleast_1d(np.asarray(k.phaseshifts, float))
+    dz = np.atleast_1d(np.asarray(getattr(k, "dz", np.zeros(len(phases))), float))
+    channels_I, channels_A, channels_B = [], [], []
+    for c in range(len(phases)):
+        move = (dz_sign * dz[c], 0, 0)
+        i, a, b = (shift(v, move, order=3, mode="nearest") for v in (I, A, B))
+        cos, sin = np.cos(phases[c]), np.sin(phases[c])
+        channels_I.append(normf[c] * i)
+        channels_A.append(normf[c] * (a * cos + b * sin))
+        channels_B.append(normf[c] * (b * cos - a * sin))
+    dz_nm = float(cal.dz)
+    period_nm = np.pi / float(k.frequency) * dz_nm
+    s = cal.settings3D
+    flips = [bool(v) for v in np.atleast_1d(s.mirror4pi)]
+    layout = from_corners(list(np.atleast_1d(s.x4pi)), list(np.atleast_1d(s.y4pi)),
+                          int(s.width4pi), int(s.height4pi), flip_x=flips)
+    nz = I.shape[0]
+    return from_volumes(np.stack(channels_I), np.stack(channels_A), np.stack(channels_B),
+                        dz=dz_nm, z0=(nz - 1) / 2, period_nm=period_nm,
+                        phase_per_nm=-2 * np.pi / period_nm, source=Path(path),
+                        pixelsize_nm=(float(s.pixelsize_nm),) * 2, layout=layout.to_dict(),
+                        parameters={"method": "SMAP cal4pi", "normf": normf.tolist(),
+                                    "phaseshifts": phases.tolist(), "dz_slices": dz.tolist(),
+                                    "dz_sign": dz_sign})
+
+
+# ---------------------------------------------------------------- from a bead scan
+#
+# A 4Pi bead scan without phase steps -- the stage moves the bead through
+# focus, and the interference phase moves with it, w per slice -- gives at
+# each slice one image per channel.  Per channel that is one equation for
+# three unknowns, I, A and B; but the channels share one PSF up to their
+# brightness n_c and phase offset phi_c (SMAP's assumption, and the optics'
+# to the extent the arms are matched), so with every bead b and channel c
+#
+#     data_bc(z) = n_c (I(z) + A(z) cos(w z + phi_b + phi_c) + B(z) sin(...))
+#
+# is linear in I, A and B: a least squares per voxel over all beads and
+# channels.  w, n_c, phi_c and each bead's phi_b come first, from the
+# beads' brightness at their centre (`scan_phases`); each bead's focus from
+# where its spot is round (`_focus`).  SMAP's own construction (make4Pimodel,
+# pairs of channels solved two at a time) left the fringe in I on the
+# 4Pi-SMS example: I oscillated with the fringe period at its centre, and a
+# fit with that model traded z for phase.
+
+@dataclass
+class ScanPhases:
+    """What the beads' centre brightness says about the channels."""
+    w: float                    # phase per slice, rad
+    gains: np.ndarray           # n_c, relative to channel 0
+    offsets: np.ndarray         # phi_c, rad, channel 0 = 0
+    bead_phases: np.ndarray     # phi_b, rad
+    modulation: np.ndarray      # (beads, C)
+
+
+def scan_phases(centre: np.ndarray, window=None) -> ScanPhases:
+    """The phase per slice, each channel's brightness and phase offset, and
+    each bead's phase, from ``centre`` (beads, C, Z): each bead's brightness
+    at its centre in every channel through the scan.
+
+    Per bead, ``env(z) n_c (1 + m_c cos(w z + phi_b + phi_c))`` with a
+    quadratic envelope, fitted over ``window`` (default the middle half);
+    the modulations are kept positive, so a phase is never pi off.  The
+    channels' gains and offsets are the beads' medians (circular for the
+    offsets), w their median.
+    """
+    from scipy.optimize import least_squares
+    centre = np.asarray(centre, float)
+    nb, C, Z = centre.shape
+    window = window or (Z // 4, 3 * Z // 4)
+    z = np.arange(*window, dtype=float)
+    zc = z - z.mean()
+    ws, gains, offsets, phases, mods = [], [], [], [], []
+    for b in range(nb):
+        data = centre[b, :, window[0]:window[1]]
+
+        def residual(p):
+            w, phi_b = p[0], p[1]
+            env = p[2] + p[3] * zc + p[4] * zc ** 2
+            out = []
+            for c in range(C):
+                n, phi_c, m = (1.0, 0.0, p[5]) if c == 0 else p[6 + 3 * (c - 1): 9 + 3 * (c - 1)]
+                out.append(data[c] - env * n * (1 + m * np.cos(w * z + phi_b + phi_c)))
+            return np.concatenate(out) / max(data.mean(), 1.0)
+
+        best = None
+        for w0 in (0.35, 0.42, 0.5, 0.58):
+            for phi0 in np.linspace(-np.pi, np.pi, 4, endpoint=False):
+                for step in (np.pi / 2, -np.pi / 2):
+                    p0 = [w0, phi0, data[0].mean(), 0, 0, 0.5]
+                    lo = [0.05, -np.inf, 0, -np.inf, -np.inf, 0]
+                    hi = [2.0, np.inf, np.inf, np.inf, np.inf, 1]
+                    for c in range(1, C):
+                        p0 += [data[c].mean() / max(data[0].mean(), 1e-9), step * c, 0.5]
+                        lo += [0, -np.inf, 0]
+                        hi += [np.inf, np.inf, 1]
+                    r = least_squares(residual, p0, bounds=(lo, hi))
+                    if best is None or r.cost < best.cost:
+                        best = r
+        p = best.x
+        ws.append(p[0])
+        phases.append(p[1])
+        gains.append([1.0] + [p[6 + 3 * k] for k in range(C - 1)])
+        offsets.append([0.0] + [p[7 + 3 * k] for k in range(C - 1)])
+        mods.append([p[5]] + [p[8 + 3 * k] for k in range(C - 1)])
+    offsets = np.asarray(offsets)
+    return ScanPhases(float(np.median(ws)), np.median(gains, axis=0),
+                      np.angle(np.exp(1j * offsets).mean(axis=0)),
+                      np.angle(np.exp(1j * np.asarray(phases))), np.asarray(mods))
+
+
+def _focus(stack: np.ndarray) -> float:
+    """Where a bead's spot is round, in slices: the zero of the difference
+    of its widths, from the summed channels (n_z, h, w) -- the envelope's
+    focus, as an astigmatic model's z = 0 is."""
+    z = np.arange(len(stack))
+    h, w = stack.shape[1:]
+    yy, xx = np.mgrid[:h, :w]
+    diff = []
+    for img in stack:
+        img = np.clip(img - np.percentile(img, 20), 0, None)
+        s = img.sum() or 1.0
+        cx, cy = (img * xx).sum() / s, (img * yy).sum() / s
+        diff.append(np.sqrt((img * (xx - cx) ** 2).sum() / s)
+                    - np.sqrt((img * (yy - cy) ** 2).sum() / s))
+    diff = np.asarray(diff)
+    middle = slice(len(z) // 4, 3 * len(z) // 4)
+    slope, intercept = np.polyfit(z[middle], diff[middle], 1)
+    return float(-intercept / slope)
+
+
+def iab_from_beads(stacks: np.ndarray, dz: float, smooth_z: float = 1.0,
+                   phases: Optional[ScanPhases] = None, **kwargs) -> FourPiCalibration:
+    """A 4Pi model from bead scans without phase steps.
+
+    ``stacks`` is (beads, C, Z, h, w): each bead's ROI in every channel
+    through the scan, background removed, centred on the bead to a fraction
+    of a pixel in every channel (the registration's job), in photons.  The
+    beads are put on one z grid by their foci (`_focus`), and I, A and B
+    solved per voxel (the comment above).  ``smooth_z`` (slices) smooths the
+    result along z, where a scan of a few beads is noisiest.
+    """
+    from scipy.ndimage import gaussian_filter1d, shift
+    stacks = np.asarray(stacks, float)
+    nb, C, Z, h, w = stacks.shape
+    centre = stacks[:, :, :, h // 2 - 2:h // 2 + 3, w // 2 - 2:w // 2 + 3].sum(axis=(3, 4))
+    ph = phases or scan_phases(centre)
+    foci = np.array([_focus(stacks[b].sum(axis=0)) for b in range(nb)])
+    target = float(np.median(foci))
+    # every bead moved onto the grid where its focus is the median's
+    aligned = np.empty_like(stacks)
+    for b in range(nb):
+        aligned[b] = shift(stacks[b], (0, target - foci[b], 0, 0), order=3, mode="nearest")
+    margin = int(np.ceil(np.abs(target - foci).max())) + 1
+    zs = np.arange(margin, Z - margin)
+    I = np.empty((len(zs), h, w))
+    A = np.empty_like(I)
+    B = np.empty_like(I)
+    for k, z in enumerate(zs):
+        rows, values = [], []
+        for b in range(nb):
+            # the bead's own slice, where its phase was w z_b + phi_b
+            z_b = z - (target - foci[b])
+            for c in range(C):
+                # the bead's own phase at its own slice, which is what the
+                # fitter's phase is for a molecule: A and B multiply it, and
+                # come out demodulated
+                angle = ph.w * z_b + ph.bead_phases[b] + ph.offsets[c]
+                rows.append(ph.gains[c] * np.array([1.0, np.cos(angle), np.sin(angle)]))
+                values.append(aligned[b, c, z].ravel())
+        solution = np.linalg.lstsq(np.asarray(rows), np.asarray(values), rcond=None)[0]
+        I[k], A[k], B[k] = (solution[j].reshape(h, w) for j in range(3))
+    if smooth_z > 0:
+        I, A, B = (gaussian_filter1d(v, smooth_z, axis=0, mode="nearest") for v in (I, A, B))
+    # each channel's own volumes: its gain and phase offset inside them
+    Ic, Ac, Bc = [], [], []
+    for c in range(C):
+        cos, sin = np.cos(ph.offsets[c]), np.sin(ph.offsets[c])
+        Ic.append(ph.gains[c] * I)
+        Ac.append(ph.gains[c] * (A * cos + B * sin))
+        Bc.append(ph.gains[c] * (B * cos - A * sin))
+    period = 2 * np.pi / ph.w * dz
+    parameters = {"method": "IAB from a bead scan", "w_per_slice": ph.w,
+                  "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
+                  "beads": int(nb), "foci_slices": foci.tolist()}
+    parameters.update(kwargs.pop("parameters", {}))
+    # the phase grows with the slice, so it falls with z_nm
+    return from_volumes(np.stack(Ic), np.stack(Ac), np.stack(Bc), dz=dz,
+                        z0=target - margin, period_nm=period, phase_per_nm=-ph.w / dz,
+                        parameters=parameters, **kwargs)
