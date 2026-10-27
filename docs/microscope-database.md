@@ -238,6 +238,13 @@ per state of the filter wheel.  A parameter that follows nothing is fixed.  This
   -- and otherwise the day it is saved; either is editable.  Midpoint splitting absorbs a small re-trim without any of this; a version is for
   the change it does not absorb.  A version may hold the camera too: the example's is M2
   with the Evolve, until the iXon came (between 2026-07-09 and 07-23).
+  A channel can also say exactly where it lands, for a split into more than two halves --
+  the four phase images of a 4Pi microscope: `region` is `[x, y, width, height]` on the
+  chip, in whole pixels, or a table from camera to that, and `mirror` is `"x"`, `"y"` or
+  `"xy"` for an arm the optics flip (`Microscope.channel_layout`).  That is the coarse
+  geometry, stable as long as the optics are; the sub-pixel registration between the
+  channels belongs to a calibration, and their drift to the acquisition
+  (`smappy.channels`, `docs/4pi.md` §9).
 
 **What is resolved**: the NA, the immersion, sample and coverslip indices, the wavelength
 (per channel), the pixel per axis, the modality (2D, astigmatic, later a phase mask), the

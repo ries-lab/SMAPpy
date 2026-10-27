@@ -1453,6 +1453,28 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   on Zenodo showed the dim channel wandering by 32 nm rms where the pair's
   fit is within 1 nm of the bright channel's.
 
+## 4Pi: the IAB model
+
+The design and the plan are `docs/4pi.md`.  These are the decisions in the
+code (`smappy/fourpi.py`, `CSpline4Pi`), and where each one comes from.
+
+* **The channels share one phase, with no offsets.**  Each channel's phase
+  offset and its share of the light are in its own I, A and B, as in uiPSF
+  v1's export.  An offset that is not exactly pi/2, or an s channel with less
+  modulation, is then just another spline, not a bias.
+* **Photons are linked.**  The phase is the photons' split between the
+  channels, so free photons per channel leave it undetermined (exactly so for
+  `model_calibration`).
+* **The start is linear.**  At a fixed z the model is linear in N, N cos and
+  N sin, so a 3×3 solve per z plane gives the phase over the whole circle
+  (`phasor_starts` in `csrc/fit.cpp`).  The best two local minima in z are
+  fitted, and the best likelihood is kept.  SMAP started from a third of the
+  circle; v1 started from {0, pi} × {±150 nm}.
+* **N is the photons of all channels.**  The channels' I are normalised
+  together, so they sum to one over the focal plane.  v1 normalised to two.
+* **The file keeps the knots, not the coefficients,** and splines them on
+  load.  This was measured: 2 MB against 125 MB, and 0.2 s to load.
+
 ## Astigmatic z from elliptical widths
 
 3D without a spline: Gaussian 2D's *elliptical* fit measures a width per

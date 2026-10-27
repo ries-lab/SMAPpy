@@ -131,8 +131,8 @@ def test_astigmatic_z_turns_the_widths_into_the_z_they_were_drawn_at():
 def test_z_comes_before_the_drift_so_that_the_drift_can_correct_it():
     settings = FinishSettings(astigmatic_z=True, drift="comet", assign_colors=True)
     assert [plugin.path for plugin, _ in settings.steps()] == [
-        "Analysis/After fit/Astigmatic z", "Analysis/Drift/COMET",
-        "Analysis/After fit/Assign colours"]
+        "Analysis/After fit/Astigmatic z", "Analysis/After fit/4Pi z",
+        "Analysis/Drift/COMET", "Analysis/After fit/Assign colours"]
 
 
 def test_a_chain_runs_last_on_the_finished_table(tmp_path):

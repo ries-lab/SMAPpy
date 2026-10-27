@@ -141,6 +141,14 @@ COMBINE_MODES: Dict[str, str] = {
     # Link tracks gives the recipes it writes them as (`link_tracks.py`), so
     # a track_id read from a file merges as one linked here does
     "track_id": "max", "track_length": "max",
+    # A 4Pi fit's interference phase is an angle: the mean of 3.1 and -3.1
+    # rad is pi, not 0.  Combined as the weighted mean of its unit vectors,
+    # by its own error (`WEIGHT_FOR`); so is the cavity's phase 4Pi z writes.
+    # The envelope's z is a z like any other, weighted by its own error, and
+    # the probability that a fringe is right is the least sure blink's.
+    "phase_rad": "circular", "cavity_phase_rad": "circular",
+    "phase_err_rad": "precision", "z_env_err_nm": "precision",
+    "z_env_nm": "mean", "fringe_probability": "min",
 }
 
 # Ids: integers after merging too, so they compare and draw as ids
@@ -225,6 +233,7 @@ WEIGHT_FIELDS = ("xy_err_nm", "x_err_nm")
 WEIGHT_FOR: Dict[str, Tuple[str, ...]] = {
     "x_nm": ("x_err_nm",), "y_nm": ("y_err_nm",), "z_nm": ("z_err_nm",),
     "x_pix": ("x_err_pix",), "y_pix": ("y_err_pix",),
+    "z_env_nm": ("z_env_err_nm",), "phase_rad": ("phase_err_rad",),
 }
 
 
@@ -605,6 +614,10 @@ def combine(locs: Localizations, group_index: np.ndarray,
         if mode == "mean":
             w, sum_w = weighting(name)
             return accumulate(values, 1, w) / sum_w
+        if mode == "circular":
+            w = weighting(name)[0]
+            v = np.asarray(values, np.float64)
+            return np.arctan2(accumulate(np.sin(v), 1, w), accumulate(np.cos(v), 1, w))
         if mode == "precision":
             return 1.0 / np.sqrt(accumulate(values, 2))
         if mode == "quad":     # the error of a sum, not of a mean
@@ -627,6 +640,10 @@ def combine(locs: Localizations, group_index: np.ndarray,
             if mode == "mean":
                 w = weighting(name)[0] * finite
                 out = accumulate(np.where(finite, values, 0.0), 1, w) / accumulate(w, 0)
+            elif mode == "circular":
+                w = weighting(name)[0] * finite
+                v = np.where(finite, values, 0.0)
+                out = np.arctan2(accumulate(np.sin(v), 1, w), accumulate(np.cos(v), 1, w))
             elif mode == "precision":
                 out = 1.0 / np.sqrt(accumulate(np.where(finite, values, np.inf), 2))
             elif mode == "quad":

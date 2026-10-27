@@ -226,6 +226,188 @@ py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array&
     return as_tuple(run_global(models, rois, link, shared, iterations, n_threads));
 }
 
+// The 4Pi start.  For a fixed z the IAB model is linear in N, N cos(phase)
+// and N sin(phase), so a weighted linear least squares over every pixel of
+// every channel gives the phase directly -- over the whole circle, with no
+// grid of phase starts -- and N with it; its residual says which z planes are
+// worth starting from.  The emitter is put at the ROI's centre, where the
+// spline needs no interpolation (`CSpline4Pi::at_node`), and each channel's
+// background at its border mean; both are only starts.  SMAP started from a
+// phase grid of [0, 1/3, 2/3] pi -- a third of the circle -- and uiPSF v1
+// from {0, pi} x {-150, +150} nm; this costs nz/step 3x3 solves per ROI.
+struct Start4Pi {
+    float z, phase, n, residual;
+};
+
+int phasor_starts(const std::vector<smappy::CSpline4Pi>& models,
+                  const float* const* data, int sz, int step, int wanted,
+                  Start4Pi* found) {
+    const int C = static_cast<int>(models.size());
+    const int nz = models[0].nz;
+    float bg[smappy::MAX_CHANNELS];
+    for (int c = 0; c < C; ++c) bg[c] = smappy::border_background(data[c], sz);
+
+    std::vector<Start4Pi> planes;
+    for (int iz = 0; iz < nz; iz += step) {
+        double M[3][3] = {{0}}, r[3] = {0}, dd = 0.0;
+        float iab[3];
+        for (int c = 0; c < C; ++c)
+            for (int iy = 0; iy < sz; ++iy)
+                for (int ix = 0; ix < sz; ++ix) {
+                    const float d = data[c][iy * sz + ix];
+                    const double w = 1.0 / std::max(d, 1.0f);   // Poisson weights
+                    const double y = d - bg[c];
+                    models[c].at_node(ix, iy, iz, sz, iab);
+                    for (int j = 0; j < 3; ++j) {
+                        r[j] += w * iab[j] * y;
+                        for (int k = j; k < 3; ++k) M[j][k] += w * iab[j] * iab[k];
+                    }
+                    dd += w * y * y;
+                }
+        M[1][0] = M[0][1]; M[2][0] = M[0][2]; M[2][1] = M[1][2];
+        // Cramer's rule: three unknowns
+        const double det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1])
+                         - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+                         + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+        if (!(std::fabs(det) > 0.0)) continue;
+        double sol[3];
+        for (int j = 0; j < 3; ++j) {
+            double A[3][3];
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b) A[a][b] = (b == j) ? r[a] : M[a][b];
+            sol[j] = (A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
+                    - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
+                    + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0])) / det;
+        }
+        if (!(sol[0] > 0.0)) continue;     // no light at this plane
+        const double residual = dd - (sol[0] * r[0] + sol[1] * r[1] + sol[2] * r[2]);
+        planes.push_back({static_cast<float>(iz),
+                          static_cast<float>(std::atan2(sol[2], sol[1])),
+                          static_cast<float>(sol[0]), static_cast<float>(residual)});
+    }
+
+    // the planes that are local minima of the residual, best first: two
+    // starts on one valley would be one start twice
+    std::vector<Start4Pi> minima;
+    for (size_t i = 0; i < planes.size(); ++i) {
+        const bool left = i == 0 || planes[i].residual <= planes[i - 1].residual;
+        const bool right = i + 1 == planes.size() || planes[i].residual <= planes[i + 1].residual;
+        if (left && right) minima.push_back(planes[i]);
+    }
+    std::sort(minima.begin(), minima.end(),
+              [](const Start4Pi& a, const Start4Pi& b) { return a.residual < b.residual; });
+    const int n = std::min<int>(wanted, static_cast<int>(minima.size()));
+    for (int i = 0; i < n; ++i) found[i] = minima[i];
+    return n;
+}
+
+// 4Pi: one emitter in every phase channel, fitted with the IAB model.
+//
+// rois   (n, C, sz, sz)
+// coeff  (C, 3, 64, nz, ny, nx)   each channel's I, A and B splines
+// link   (n, 2, C, 6)             as for `fit_cspline_global`, over
+//                                 (x, y, N, bg, z, phase)
+// shared (6,)
+//
+// Each ROI is fitted from the `n_starts` best z planes of the phasor start,
+// each with `phase_starts` phases spread over the circle from the phasor's
+// (one is enough when the phasor is right; more are a check), and the fit
+// with the highest likelihood is kept.  Returns theta, crlb, logl, iterations
+// as the other global fits, iterations summed over the starts.
+py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Array& link,
+                                const IntArray& shared, int n_starts, int phase_starts,
+                                int z_step, int iterations, int n_threads) {
+    using smappy::CSpline4Pi;
+    constexpr int P = CSpline4Pi::NV;
+    const GlobalDims dims = check_global_rois(rois);
+    const py::ssize_t n = dims.n;
+    const int channels = dims.channels, sz = dims.sz;
+    if (coeff.ndim() != 6 || coeff.shape(0) != channels || coeff.shape(1) != 3 ||
+        coeff.shape(2) != 64)
+        throw std::invalid_argument(
+            "4Pi spline coefficients must have shape (channels, 3, 64, nz, ny, nx)");
+    if (link.ndim() != 4 || link.shape(0) != n || link.shape(1) != 2 ||
+        link.shape(2) != channels || link.shape(3) != P)
+        throw std::invalid_argument("link must have shape (n, 2, channels, 6)");
+    if (shared.ndim() != 1 || shared.shape(0) != P)
+        throw std::invalid_argument("shared must have 6 flags");
+    n_starts = std::max(n_starts, 1);
+    phase_starts = std::max(phase_starts, 1);
+    z_step = std::max(z_step, 1);
+
+    const int nz = static_cast<int>(coeff.shape(3));
+    const int ny = static_cast<int>(coeff.shape(4));
+    const int nx = static_cast<int>(coeff.shape(5));
+    const py::ssize_t plane = py::ssize_t(3) * 64 * nz * ny * nx;
+    std::vector<CSpline4Pi> models;
+    for (int c = 0; c < channels; ++c)
+        models.emplace_back(coeff.data() + c * plane, nx, ny, nz, nz / 2.0f);
+
+    smappy::Link plan{};
+    plan.shared = shared.data();
+    plan.n_channels = channels;
+    plan.plan(P);
+    const int nv = plan.nv;
+
+    Output out{Array({n, py::ssize_t(nv)}), Array({n, py::ssize_t(nv)}),
+               Array(n), py::array_t<int>(n)};
+    const float* data = rois.data();
+    const float* links = link.data();
+    float* theta = out.theta.mutable_data();
+    float* crlb = out.crlb.mutable_data();
+    float* logl = out.logl.mutable_data();
+    int* iters = out.iterations.mutable_data();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    {
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
+            std::vector<CSpline4Pi> local(models);
+            std::vector<const float*> planes(channels);
+            std::vector<Start4Pi> starts(n_starts);
+            std::vector<float> g(nv), e(nv);
+            smappy::Link mine = plan;
+            for (long long i = begin; i < end; ++i) {
+                for (int c = 0; c < channels; ++c)
+                    planes[c] = data + ((i * channels + c) * sz) * sz;
+                mine.offset = links + i * 2 * channels * P;
+                mine.factor = mine.offset + channels * P;
+
+                float* best = theta + i * nv;
+                float* best_crlb = crlb + i * nv;
+                float best_logl = -std::numeric_limits<float>::infinity();
+                int total = 0;
+                for (int k = 0; k < nv; ++k) best[k] = best_crlb[k] = nan;
+                logl[i] = nan;
+
+                const int found = phasor_starts(local, planes.data(), sz, z_step,
+                                                n_starts, starts.data());
+                for (int s = 0; s < found; ++s)
+                    for (int q = 0; q < phase_starts; ++q) {
+                        for (auto& m : local) {
+                            m.z_start = starts[s].z;
+                            m.phase_start = starts[s].phase + 2.0f * smappy::PI_F * q / phase_starts;
+                            m.n_start = starts[s].n;
+                        }
+                        float ll;
+                        int used;
+                        smappy::global_fit(local.data(), planes.data(), sz, mine,
+                                           iterations, g.data(), e.data(), &ll, &used);
+                        total += used;
+                        if (ll > best_logl) {
+                            best_logl = ll;
+                            std::copy(g.begin(), g.end(), best);
+                            std::copy(e.begin(), e.end(), best_crlb);
+                            logl[i] = ll;
+                        }
+                    }
+                iters[i] = total;
+            }
+        });
+    }
+    return as_tuple(std::move(out));
+}
+
 // The same, with a free-width Gaussian in place of the spline: the 2D
 // two-colour fit.  `GaussFree`'s fifth parameter is sigma rather than z, so
 // the link keeps its shape and `smappy.dualfit` builds it unchanged -- x and y
@@ -401,6 +583,13 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
           "Fit one emitter across several channels with a spline PSF each, "
           "sharing the parameters marked in `shared`.");
+
+    m.def("fit_cspline4pi_global", &fit_cspline4pi_global, py::arg("rois"),
+          py::arg("coeff"), py::arg("link"), py::arg("shared"),
+          py::arg("n_starts") = 2, py::arg("phase_starts") = 1, py::arg("z_step") = 1,
+          py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          "Fit one emitter in every 4Pi phase channel with the IAB spline model "
+          "-- (x, y, photons, background, z, phase) -- from the phasor start.");
 
     m.def("fit_gauss_global", &fit_gauss_global, py::arg("rois"), py::arg("sigma"),
           py::arg("link"), py::arg("shared"), py::arg("iterations") = 50,

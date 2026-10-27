@@ -783,4 +783,139 @@ class EllipticalGaussian:
                 f"{cal.residual_nm[0]:.1f} / {cal.residual_nm[1]:.1f} nm in x / y")
 
 
-METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian())
+class FourPiBeads:
+    """4Pi beads: uiPSF's 4Pi pupil model learnt from bead scans and saved as a 4Pi model for *Spline 4Pi*
+    (`fourpi_beads`).  The scans come in through the channel layer -- quadrant files, or a DCIMG z stack of
+    the four images on one chip -- and their layout is the method's own section (*4Pi beads*); the camera
+    and the optics are the microscope's.  Each bead is found on channel 0, every channel's box cut where the
+    registration from the same scans puts it, and the model learnt from all of them.  After it, the beads
+    are fitted back with the saved model, z and the phase against the stage."""
+    key, label = "fourpi", "4Pi beads"
+    sections = {"start from": False, "microscope": True, "model": False, "spline": False, "averaging": False,
+                "4Pi": True}
+    columns = ("bead", "stack", "x, y (px)", "brightness", "z slope", "z scatter (nm)", "state")
+    marks_include = False
+    has_stack = False
+    needs_torch = True
+    files = "bead scans"
+    use_label = "Use in Spline 4Pi"
+    listed = False                     # a 4Pi model: never one for Spline 3D's *auto*
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .fourpi_beads import scan_beads
+        camera = inputs.get("camera")
+        if camera is None:
+            raise ValueError("4Pi beads need the camera's conversion and offset: give them under microscope")
+        tell = _counted(progress, 0.0, 1.0) or (lambda text: None)
+        beads, layout, registration = scan_beads(paths, inputs["fourpi"], camera, tell)
+        E, C, J, M = beads.data.shape[:4]
+        # measured: 3.5 min for 5 beads of 101 slices on a Mac's GPU, about in proportion to the frames
+        seconds = 210.0 * E * J * M / 505
+        rms = ", ".join(f"{r:.2f}" for r in registration.rms_px[1:])
+        return Detected({"beads": beads, "layout": layout, "registration": registration},
+                        f"{E} beads in {C} channels, {J} slices x {M} phase step{'s' if M > 1 else ''}; the "
+                        f"channels registered from {min(registration.pairs[1:])} pairs ({rms} px); learning takes "
+                        f"about {duration(seconds)}",
+                        [(r["stack"], r["x_px"], r["y_px"], i) for i, r in enumerate(beads.records)], seconds)
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _detected_rows(self.columns, detected.found["beads"].records, marks,
+                              lambda r: f"{r.get('brightness', float('nan')):.4g}")
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .fourpi_beads import FourPiBeads as Beads, learn, save, steps_of
+        from .pupil import default_save_path
+        found = detected.found if detected is not None else self.detect(paths, dual, inputs, progress).found
+        beads = found["beads"]
+        excluded = sorted(b for b, wish in (marks or {}).items() if wish == "exclude")
+        keep = [i for i in range(len(beads.records)) if i not in excluded]
+        if not keep:
+            raise ValueError("every bead is excluded")
+        used = Beads(beads.data[keep], beads.roi_xy[keep], beads.z_nm, [beads.records[i] for i in keep])
+        optics = inputs["optics"].resolved(inputs.get("camera"))
+        if optics["pixel"] is None:
+            raise ValueError("4Pi beads need the camera's pixel size")
+        settings = inputs["fourpi"]
+        fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
+                    pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
+                    n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
+                    progress=progress, cancel=cancel)
+        run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
+        if inputs["run"].save_model:
+            path = previous.saved if previous is not None and previous.saved is not None else \
+                default_save_path(paths, False).with_name(default_save_path(paths, False).stem + "_4pi.h5")
+            run.saved = Path(path)
+            run.result["calibration"] = save(fit, path, settings.model_z_range_nm, settings.model_dz_nm,
+                                             overwrite=True, layout=found["layout"])
+        return run
+
+    def finish(self, run: Run, progress=None) -> Run:
+        """The beads fitted back with the model as saved: z and the phase of every bead against the stage."""
+        from .fourpi_beads import bead_fits
+        cal = run.result.get("calibration")
+        if cal is None:
+            return run
+        (progress or (lambda entry: None))({"message": "fitting the beads back with the 4Pi model",
+                                             "fraction": 0.95})
+        run.extra["fits"] = bead_fits(run.result["found"]["beads"], cal)
+        return run
+
+    def save_as(self, run: Run, path) -> Path:
+        from .fourpi_beads import save
+        s = run.result["settings"]
+        run.result["calibration"] = save(run.result["fit"], path, s.model_z_range_nm, s.model_dz_nm,
+                                         overwrite=True, layout=run.result["found"]["layout"])
+        run.saved = Path(path)
+        return run.saved
+
+    def pages(self, run: Run) -> list:
+        from .fourpi_beads import draw_against_stage, draw_model
+        cal = run.result.get("calibration")
+        if cal is None:
+            from .fourpi_beads import save
+            import tempfile
+            s = run.result["settings"]
+            cal = run.result["calibration"] = save(run.result["fit"], Path(tempfile.mkdtemp()) / "model_4pi.h5",
+                                                   s.model_z_range_nm, s.model_dz_nm,
+                                                   layout=run.result["found"]["layout"])
+        fits = run.extra.get("fits")
+        return [Page("Model", lambda f, s, e: draw_model(f, cal), follows_selection=False),
+                Page("z against the stage",
+                     lambda f, s, e: (draw_against_stage(f, fits, s, run.result["excluded"]) if fits is not None
+                                      else _not_yet(f, "the beads are fitted back after calibrating")))]
+
+    def rows(self, run: Run, marks: dict) -> list:
+        beads = run.result["found"]["beads"]
+        fits = run.extra.get("fits") or {}
+        out = []
+        for i, record in enumerate(beads.records):
+            state = "excluded" if i in run.result["excluded"] else "used"
+            wish = marks.get(i)
+            if wish is not None and state == "used":
+                state = f"used -> {wish} on Calibrate"
+            elif wish is None and state == "excluded":
+                state = "excluded -> include on Calibrate"
+            slope, scatter = fits.get("slope", {}).get(i, np.nan), fits.get("scatter", {}).get(i, np.nan)
+            out.append(((i, record["stack"] + 1, f"{record['x_px']}, {record['y_px']}",
+                         f"{record['brightness']:.4g}", f"{slope:.2f}", f"{scatter:.1f}", state),
+                        state != "used"))
+        return out
+
+    def initial_marks(self, run: Run) -> dict:
+        return {i: "exclude" for i in run.result["excluded"]}
+
+    def mark(self, run: Run, bead: int) -> str:
+        return "exclude"
+
+    def stacks(self, run: Run):
+        return None, None
+
+    def summary(self, run: Run) -> str:
+        cal = run.result.get("calibration")
+        n = len(run.result["found"]["beads"].records) - len(run.result["excluded"])
+        return (f"{n} beads learnt; fringe period {cal.period_nm:.1f} nm" if cal is not None else
+                f"{n} beads learnt")
+
+
+METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian(), FourPiBeads())

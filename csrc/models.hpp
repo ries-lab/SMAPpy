@@ -7,7 +7,8 @@
 //   value(ix, iy, theta, dudt, &model)  model value and its derivatives
 //   clamp(theta, sz)                    keep parameters in a sane range
 //
-// Parameter order is (x, y, photons, background, [z | sigma | sigma_x, sigma_y]).
+// Parameter order is (x, y, photons, background, [z | sigma | sigma_x, sigma_y]),
+// and (x, y, photons, background, z, phase) for the 4Pi spline.
 // `ix` is the ROI column and `iy` the row: the data of one ROI is row-major,
 // element (iy, ix) at data[iy*sz + ix], and theta[0] is the x coordinate.
 //
@@ -273,6 +274,116 @@ struct CSpline {
         theta[3] = std::max(theta[3], 0.01f);
         theta[4] = std::max(theta[4], 0.0f);
         theta[4] = std::min(theta[4], static_cast<float>(nz));
+    }
+};
+
+// 4Pi interference PSF, one channel of it.  theta = (x, y, N, bg, z, phase)
+//
+//     mu = bg + N * (I + A cos(phase) + B sin(phase))
+//
+// with I, A and B cubic splines on one grid (the IAB model, Li et al., Opt.
+// Lett. 45, 3765 (2020)): I the incoherent part, A and B the interference
+// demodulated by the fringe, so that they vary slowly in z and can be
+// splined.  The channel's phase offset and its share of the light are inside
+// its own splines, which is why the channels share one phase with no offset;
+// see `smappy.fourpi`.  The phase is left unwrapped here -- a wrap inside the
+// LM loop would make a step look like a jump of 2 pi -- and wrapped on output.
+//
+// The starts of z, the phase and N are set per ROI by the caller
+// (`fit_cspline4pi_global`'s phasor start) before `init` runs.
+struct CSpline4Pi {
+    static constexpr int NV = 6;
+
+    const float* coeff;     // (3, 64, nz, ny, nx): I, A, B
+    int nx, ny, nz;
+    float z_start, phase_start = 0.0f, n_start = 0.0f;
+
+    mutable float delta_f[64], delta_dx[64], delta_dy[64], delta_dz[64];
+    mutable float cos_p, sin_p;
+    mutable int xstart, ystart, zstart, off_x, off_y;
+
+    CSpline4Pi(const float* c, int nx_, int ny_, int nz_, float z0)
+        : coeff(c), nx(nx_), ny(ny_), nz(nz_), z_start(z0) {}
+
+    void init(const float* data, int sz, float* theta, float* maxjump) const {
+        center_of_mass(data, sz, &theta[0], &theta[1]);
+        theta[3] = border_background(data, sz);
+        theta[2] = n_start > 0.0f ? n_start : 1000.0f;
+        theta[4] = z_start;
+        theta[5] = phase_start;
+
+        maxjump[0] = 1.0f; maxjump[1] = 1.0f;
+        maxjump[2] = std::max(theta[2], 100.0f);
+        maxjump[3] = std::max(theta[3], 20.0f);
+        // the phasor start puts z near its envelope's answer: a jump of a
+        // third of the grid, as the spline allows, would leave it
+        maxjump[4] = std::max(nz / 6.0f, 2.0f);
+        maxjump[5] = 1.0f;
+    }
+
+    void prepare(const float* theta, int sz) const {
+        float xc = -1.0f * ((theta[0] - sz / 2.0f) + 0.5f);
+        float yc = -1.0f * ((theta[1] - sz / 2.0f) + 0.5f);
+        off_x = static_cast<int>(std::floor((nx + 1.0f - sz) / 2.0f));
+        off_y = static_cast<int>(std::floor((ny + 1.0f - sz) / 2.0f));
+        xstart = static_cast<int>(std::floor(xc));
+        ystart = static_cast<int>(std::floor(yc));
+        zstart = static_cast<int>(std::floor(theta[4]));
+        compute_delta3d(xc - xstart, yc - ystart, theta[4] - zstart, delta_f,
+                        delta_dx, delta_dy, delta_dz);
+        cos_p = std::cos(theta[5]);
+        sin_p = std::sin(theta[5]);
+    }
+
+    void value(int ix, int iy, const float* theta, float* dudt, float* model) const {
+        int xc = std::min(std::max(ix + xstart + off_x, 0), nx - 1);
+        int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
+        int zc = std::min(std::max(zstart, 0), nz - 1);
+
+        const int base = (zc * ny + yc) * nx + xc;
+        const int stride = nx * ny * nz;
+        float v[3] = {0, 0, 0}, dx[3] = {0, 0, 0}, dy[3] = {0, 0, 0}, dz[3] = {0, 0, 0};
+        for (int k = 0; k < 3; ++k) {
+            const float* plane = coeff + k * 64 * stride + base;
+            for (int i = 0; i < 64; ++i) {
+                const float c = plane[i * stride];
+                v[k] += delta_f[i] * c;
+                dx[k] += delta_dx[i] * c;
+                dy[k] += delta_dy[i] * c;
+                dz[k] += delta_dz[i] * c;
+            }
+        }
+        const float N = theta[2];
+        const float psf = v[0] + v[1] * cos_p + v[2] * sin_p;
+        dudt[0] = -N * (dx[0] + dx[1] * cos_p + dx[2] * sin_p);
+        dudt[1] = -N * (dy[0] + dy[1] * cos_p + dy[2] * sin_p);
+        dudt[2] = psf;
+        dudt[3] = 1.0f;
+        dudt[4] = N * (dz[0] + dz[1] * cos_p + dz[2] * sin_p);
+        dudt[5] = N * (v[2] * cos_p - v[1] * sin_p);
+        *model = theta[3] + N * psf;
+    }
+
+    void clamp(float* theta, int) const {
+        theta[2] = std::max(theta[2], 1.0f);
+        theta[3] = std::max(theta[3], 0.01f);
+        theta[4] = std::max(theta[4], 0.0f);
+        theta[4] = std::min(theta[4], static_cast<float>(nz));
+    }
+
+    // I, A and B of pixel (ix, iy) for an emitter at x = y = (sz - 1) / 2 and
+    // on grid plane iz, for the phasor start.  There `prepare`'s offsets are
+    // whole (xc = yc = 0) and the spline's value is its constant coefficient,
+    // so no interpolation is needed.
+    void at_node(int ix, int iy, int iz, int sz, float* iab) const {
+        const int ox = static_cast<int>(std::floor((nx + 1.0f - sz) / 2.0f));
+        const int oy = static_cast<int>(std::floor((ny + 1.0f - sz) / 2.0f));
+        const int xc = std::min(std::max(ix + ox, 0), nx - 1);
+        const int yc = std::min(std::max(iy + oy, 0), ny - 1);
+        const int zc = std::min(std::max(iz, 0), nz - 1);
+        const int stride = nx * ny * nz;
+        const int base = (zc * ny + yc) * nx + xc;
+        for (int k = 0; k < 3; ++k) iab[k] = coeff[k * 64 * stride + base];
     }
 };
 

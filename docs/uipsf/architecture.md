@@ -2185,3 +2185,30 @@ nats and a z bent by up to 9 nm.  The m ≠ 0 magnitude takes part of it (the co
 with it, its rms grows to 0.06–0.11), not all.  NA_eff, γ and the order of the magnitude models do not change.
 So the elliptical σ stays, as the camera's term rather than the optics' (an EMCCD's transfer along one axis, the
 open question of roadmap item 6), and the magnitude findings above do not depend on it.
+
+## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
+
+```
+src/uipsf/
+├── model/fourpi.py        FourPiModel(grid, roi, n_channels=4, n_phases=3, n_max, steps_rad, deltas_rad, transforms,
+│                          intensity, background, bead_radius_nm) -> μ [E, C, J·M, Y, X]; .images(p, xyz) the four
+│                          blurred images |h_up|², |h_lo|², Re and Im of h_up* h_lo; .channel_images(p, xyz, phase);
+│                          swapped(model, shared): the arms' labels exchanged, the same images
+├── model/fourpi_start.py  rough_start(batch, model): envelope from the summed channels, channel offsets and the
+│                          mirror steps' direction from each bead's light per step
+└── workflows/fourpi.py    learn_fourpi(model, batch) -> FourPiFit; sample_iab, fringe_slope, calibration(fit) ->
+                           smappy's FourPiCalibration with phase_per_nm measured from the model
+src/smappy/calibrate/fourpi_beads.py   find_beads(paths, conversion, offset) -> FourPiBeads; learn; save
+benchmarks/uipsf/real/zenodo_4pi_beads.py   v1's 18 beads learnt and fitted back with both models
+```
+
+**The model.**  Two scalar `VectorPSF`s, one per objective, each with its own `ZernikePupil` (``pupil.*`` and
+``lo.pupil.*``) and one blur.  The lower arm sees the emitter at −z.  Each channel mixes the arms' light
+(a share f_c, a balance r_c), their interference (a coherence α_c) and a phase φ_e + s_m + δ_c.  Δ, the
+objectives' misalignment, is shared by the channels.  Observations are z-major (slice, then mirror step),
+so `Bleaching` runs along the acquisition.  Each channel c ≥ 1 has a projective map onto channel 0, as
+`Channel`'s.  The arms' labels are an exact gauge (`swapped`): the twin of one pupil acts as the other.
+
+**No linearisation yet:** `Problem` builds every column by JVP.  v1's 18 beads (4 channels, 63 observations
+of 21², n ≤ 6) learn in 2.7 min on an M1 Pro's GPU, n ≤ 8 in 14 min, a free photon count per observation
+in 6.4 min.  The results, against v1's model, are in `docs/4pi.md` §8.

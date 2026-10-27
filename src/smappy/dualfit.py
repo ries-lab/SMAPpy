@@ -421,6 +421,11 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
     }
     if model.is_3d:
         cols["z_nm"], cols["z_err_nm"] = p["z_nm"], p["z_err_nm"]
+        # a 4Pi model's envelope z and its phase (`psf.Global4PiPSF`)
+        for name in ("z_env_nm", "z_env_err_nm",
+                     *(c for pair in getattr(model, "extra", ()) for c in pair)):
+            if name in p:
+                cols[name] = p[name]
     else:
         cols["sigma_pix"], cols["sigma_err_pix"] = p["sigma_pix"], p["sigma_err_pix"]
     for channel in range(model.n_channels):
