@@ -345,7 +345,7 @@ ROI, only while the 3D window is open: closing it lifts the cut, reopening
 puts it back, since a restriction nobody can see is one nobody remembers).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
 float intensity, with projection and slab in the ImageJ metadata.
 
-Phase 3 is in (`gpu.py`, extra ``[gpu]``): the GPU engine on wgpu-py
+Phase 3 is in (`gpu.py`; wgpu a dependency since 0.5.8, the extra ``[gpu]`` before): the GPU engine on wgpu-py
 (Metal on macOS, Vulkan / DX12 elsewhere, headless).  A table is uploaded
 once (x, y, z, precision, weight, colour value); a compute shader projects,
 clips to the slab, derives the sigma as `SigmaSettings` does, and splats the

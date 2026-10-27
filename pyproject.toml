@@ -70,6 +70,12 @@ dependencies = [
     # whole story.  ffmpeg runs as a separate program, so the licence of
     # its build does not reach smappy's.
     "imageio-ffmpeg>=0.4",
+    # The 3D view's GPU engine (`smappy.gpu`): wgpu-py, Metal on macOS,
+    # Vulkan / DX12 elsewhere, a 3 MB wheel for every platform.  A default
+    # since 0.5.8: as an extra, the installs the guide makes (`uv tool
+    # install smappy-smlm`) never had it, and the 3D view's *points* and
+    # *spheres* looks said "no GPU" on a Mac whose GPU was fine.
+    "wgpu>=0.19",
 ]
 
 [project.urls]
@@ -94,8 +100,9 @@ cuda = ["numba>=0.59"]
 # Empty: the GUI is in `dependencies` above.  `smappy-smlm[gui]` is kept
 # working for anyone who wrote it down while it was an extra.
 gui = []
-# The GPU engine of the 3D viewer: wgpu-py (Metal / Vulkan / DX12, headless).
-gpu = ["wgpu>=0.19"]
+# Empty: wgpu, the 3D viewer's GPU engine, is in `dependencies` above; kept
+# so that `smappy-smlm[gpu]` still installs.
+gpu = []
 # `python -m smappy.tutorial TOPIC --video`: the tutorial page played by
 # headless Chromium and encoded by ffmpeg (which is not a pip package).  The
 # page itself needs nothing beyond the GUI.

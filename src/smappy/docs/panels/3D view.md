@@ -351,7 +351,11 @@ Only the speed differs: the GPU pays a fixed few milliseconds a frame to hand
 the image back, which a small slab does not earn back.  Measured, a 300 nm
 crop turned at 246 frames per second on the CPU and 117 on the GPU, and a
 10 µm crop of a 46 million localization file at 3.3 and 34.  *Points* and
-*spheres* are drawn only on the GPU; without one they fall back to the sum.
+*spheres* are drawn only on the GPU; without one they fall back to the sum,
+and the line under *look* says why: *wgpu is not installed* (the package
+that drives the GPU -- Metal on a Mac, Vulkan or DirectX elsewhere --
+installed with SMAPpy since 0.5.8; for an older install, `pip install
+wgpu`), or *no GPU here*, with the reason on hover.
 
 **Other axes.**  When the Render tab draws one column against another (its
 *axes* section), the slab is a box in those units and is rebuilt over the
