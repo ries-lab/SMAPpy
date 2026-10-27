@@ -78,8 +78,9 @@ class ToolSpec:
 def tool(description: str, needs: str = "", **params: Dict[str, Any]):
     """Mark a method as a tool.  Each keyword is an argument's JSON schema;
     one with a ``default`` in the method's signature is optional.
-    ``needs="viewer"`` (or ``"panels"``) lists the tool only where the
-    assistant has that -- the running GUI's view, its plugin windows: a
+    ``needs="viewer"`` (or ``"panels"``, ``"windows"``) lists the tool only
+    where the assistant has that -- the running GUI's view, its plugin
+    windows, its other windows: a
     model shown a tool that always refuses would keep trying it."""
     def mark(function):
         function._tool = (description, params)
