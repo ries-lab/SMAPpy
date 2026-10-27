@@ -394,10 +394,14 @@ def test_a_bead_scan_without_phase_steps_gives_back_the_model(cal, channels):
     assert np.abs(offsets).max() < 0.1
     # the incoherent part has no fringe left in it: its component at the
     # fringe's frequency, at the centre, is small against the interference
+    # (the envelope taken out first, smoothed over a period, or its slope
+    # over a range of a fractional number of periods reads as fringe)
+    from scipy.ndimage import gaussian_filter1d
     size = found.volumes.shape[-1]
     v = found.volumes[0, :, :, size // 2, size // 2]
     z = np.arange(v.shape[1])
-    fringe = 2 * np.abs(np.mean(v[0] * np.exp(-1j * p["w_per_slice"] * z)))
+    ripple = v[0] - gaussian_filter1d(v[0], 2 * np.pi / p["w_per_slice"], mode="nearest")
+    fringe = 2 * np.abs(np.mean(ripple * np.exp(-1j * p["w_per_slice"] * z)))
     assert fringe < 0.05 * np.mean(np.hypot(v[1], v[2]))
     bias, spread, error = _z_back(found, truth)
     assert abs(bias) < 5 and spread < 1.2 * error
@@ -418,7 +422,7 @@ def test_channels_of_their_own_shape_are_learnt_per_channel_and_lost_in_one_shar
     stacks = _bead_scan(truth)[:, :, :, 0]
     each = fourpi.iab_from_beads(stacks, dz=truth.dz)
     shared = fourpi.iab_from_beads(stacks, dz=truth.dz, channels="shared")
-    assert each.parameters["channels"] == "each" and each.parameters["condition"] < 10
+    assert each.parameters["channels"].startswith("each") and each.parameters["condition"] < 10
     bias, spread, error = _z_back(each, truth)
     assert abs(bias) < 5 and spread < 1.2 * error
     assert _z_back(shared, truth)[1] > 1.15 * spread

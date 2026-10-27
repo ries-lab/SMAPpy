@@ -379,7 +379,7 @@ bead OTF and the blur v2 already has.
 - **Per channel:** the arm transmissions t_c, the phase offset δ_c (free,
   with δ_0 = 0 as the gauge) and the coherence α_c.
 - **Polarisation:** the first version is scalar, as v1 is.  Making it
-  vectorial is a later step (M7).  v2's `VectorPSF` already has the six dipole
+  vectorial is a later step (M7; the forward model is in, §17).  v2's `VectorPSF` already has the six dipole
   fields and an analyser per channel, so the s and p images could be modelled
   as what they are: different polarisations, with their own PSFs and
   modulation.  With the vector model, part of what α_c and δ_c now absorb
@@ -492,7 +492,8 @@ work in progress elsewhere, which it builds on.
 
 **M7. Later, as needed**
 - The uiPSF 4Pi model made vectorial: dipole fields and the s and p
-  polarisations of the channels (D7).
+  polarisations of the channels (D7).  The forward model is in (§17);
+  learning with it, and whether it earns its cost, is being measured.
 - The locked refit (D4).
 - A model-free bead average of I, A and B in SMAPpy.  For each voxel this is
   a linear least-squares fit over beads × phases, with the bead phases taken
@@ -1195,6 +1196,31 @@ They make every slice determined from one bead.
   - fitted back to their own beads: z slope median 1.01 (0.85–1.11),
     scatter 2–7 nm, phase slope 0.99–1.02.
 
+**The z range: the union of the beads, not their overlap** (2026-10-28).
+The models were compared on uiPSF's example movie (`4pi_smlm_nup96`,
+4000 frames; the scratchpad comparison, `uipsf_cmp/`).
+- **The problem.**  The first version kept only the slices every bead
+  covers once their foci are lined up.  With 110 beads whose foci spread
+  over 7 slices, that left −267 to +232 nm, against a cell of about
+  −500 to +450 nm.  Its fits piled up at the model's ends: 36.8 % expected
+  wrong fringes, against 11–12 % with the pupil models.
+- **The fix.**  Each slice is now solved with the beads scanned through it,
+  as far as a quarter of them reach.  *auto* decides per slice.  The
+  brightness is measured over the slices all beads share.
+- **The result** (26 scans): −416 to +432 nm, 21.3 % expected wrong
+  fringes, likelihood per pixel −0.5590 (pupil models −0.5567).
+- **What is left is the scan's own length.**  21 slices of 50 nm reach
+  ±500 nm, and a model-free average cannot reach past what was scanned; a
+  pupil model extrapolates to ±600 nm, where the cell still has molecules.
+  So for whole cells the pupil model is the one to use, and the bead
+  average wants scans longer than the sample is deep.
+- **Within ±200 nm, where every model is defined,** the averages match the
+  pupil models: 10.2–11.5 % wrong fringes against 10.3 % (v2 pupil) and
+  10.25 % (v1 bead), and the same likelihood.
+- **Also seen:** uiPSF v1's bead and in-situ models put z the opposite way
+  round (their envelope z anticorrelates at −0.96; the bead model's
+  parameters say `stage_mov_dir: reverse`), while their phases agree.
+
 ## 16. Simulated 4Pi cameras and live DCIMG (2026-10-27)
 
 **Simulate's 4Pi camera** (*camera frames* > *4Pi*; the preset *4Pi nuclear
@@ -1235,3 +1261,107 @@ pores (Nup96)*):
 - **Assumed, not checked on a camera:** that DCAM writes a frame's footer
   after its pixels and leaves the header's count until the end.  The test
   writes a file that way (`_growing_dcimg`).
+
+## 17. The vectorial forward model (M7, 2026-10-27)
+
+**The light path** (Wang et al. 2021, Nat Protoc 16:677, "Optical
+overview" and "QWP setup"):
+1. A quarter-wave plate right after each objective, its axes at 45° to the
+   setup plane, both plates aligned with each other.
+2. The deformable mirror, then a wedge pair.  In one arm it is quartz with
+   its axes along s and p, a variable retarder between s and p tuned to
+   about π/2; in the other it is BK7, for dispersion.
+3. The non-polarising 50:50 cube: s interferes with s, p with p, and its two
+   outputs are π apart.
+4. A polarising cube: four images, s and p of each output.
+
+**The model** (`uipsf.model.fourpi`, `kind="vector"`):
+- Each arm's six dipole fields (`VectorPSF`, x and y components of the x, y
+  and z dipoles) are turned into the channel's polarisation by the plates'
+  Jones rows.  Aligned plates give (E_x ∓ i E_y)/√2 in both arms: the
+  circular components.  `"crossed"` gives the other handedness in the lower
+  arm; `"none"` gives E_x and E_y.
+- In the sample's frame the lower objective sees the axial dipole's field
+  reversed, besides z → −z: the wave travels down, and its field's
+  projection of μ_z changes sign.
+- A freely rotating emitter is the incoherent sum over the three dipoles,
+  so the cross term is Σ_d u_d* l_d.
+- One polarisation's image is taken as the whole of a channel's light (×2),
+  so the shares f_c mean what they mean in the scalar model.
+- The retarder and the cube's π stay inside the free δ_c; the coherence α_c
+  is now only what the optics do not explain.
+- `fourpi_beads.learn(kind="vector", plates=...)`.
+
+**What the optics do to the modulation.**  The figure below is the
+photon-weighted per-pixel visibility, Σ|cross| / Σ ½(|h_up|² + |h_lo|²),
+for an aberration-free emitter on the axis (NA 1.35, n_imm 1.406, 670 nm,
+100 nm pixels).  The z values are in nm:
+
+| model | −600 | −300 | −150 | 0 | 150 | 300 | 600 |
+|---|---|---|---|---|---|---|---|
+| scalar | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| vector, no plates (n_med 1.406) | 0.97 | 0.89 | 0.76 | 0.65 | 0.76 | 0.89 | 0.97 |
+| vector, aligned plates (n_med 1.406) | 0.97 | 0.88 | 0.74 | 0.61 | 0.74 | 0.88 | 0.97 |
+| vector, crossed plates (n_med 1.406) | 0.16 | 0.21 | 0.22 | 0.23 | 0.22 | 0.21 | 0.16 |
+| vector, aligned plates (n_med 1.33) | 0.95 | 0.85 | 0.69 | 0.53 | 0.69 | 0.85 | 0.95 |
+
+What this shows:
+- **On the axis every model interferes fully.**  The loss is off the
+  axis: at focus, 200–400 nm out, the axial dipole's ring overlaps the
+  in-plane dipoles' spot, and its interference has the opposite sign.  So
+  the modulation is lowest at focus and recovers with defocus, where the
+  spot spreads.
+- **The plates do not set the contrast.**  Aligned plates and no plates
+  modulate alike.  The plates are there for equal s and p light whatever the
+  dipole's orientation.  Behind aligned plates, s and p of a freely rotating
+  emitter give the same image (to 0.14 % of the peak, the pupil grid's
+  sampling).
+- **Crossed plates would kill the interference on the axis.**  The data
+  interfere strongly, so the plates are aligned, as the protocol says.
+- **A sample of lower index lowers the modulation further** (0.53 at
+  focus in water): the supercritical angles are lost.
+
+**Against the bead averages** (model-free I, A, B, the same weighted
+visibility within 4 px):
+- **uiPSF's example, 26 scans, per channel:**
+  - z = −300: 0.45–0.48
+  - focus: 0.42–0.45
+  - z = +150: 0.42–0.47
+- **4Pi-SMS, shared solve:** 0.59 at focus; 0.53–0.64 elsewhere, with no
+  clear minimum at focus.
+
+Reading these:
+- The direction is the predicted one on uiPSF's example, but the dip is far
+  shallower.
+- The aberration-free prediction is not the right comparison.  The
+  deformable mirrors add astigmatism, of opposite sign in the two
+  objectives (as v1 found).  Away from focus the two arms' images then
+  differ in shape, which lowers the modulation there in every model and can
+  cancel the vectorial rise.
+- The test is to learn both models on the same beads, each with a free
+  coherence, and compare the objective, the coherence each needs, and the
+  fits of a movie.
+
+**Learnt on the 4Pi-SMS beads** (5 beads, no mirror steps, n ≤ 6, 680 nm;
+the objective is the deviance, lower is better):
+
+| model | objective | coherence | movie: likelihood per pixel | wrong fringes |
+|---|---|---|---|---|
+| scalar | 789,394 | 0.44–0.47 | −0.750 | 26.2 % |
+| vector, aligned plates, axial reversed | 796,771 | 0.47–0.49 | −0.763 | 30.8 % |
+| vector, channels s, s, p, p | 797,143 | 0.47–0.50 | | |
+| vector, axial not reversed | 798,318 | 0.49–0.51 | | |
+| vector, no plates | 804,634 | 0.49–0.52 | | |
+
+What this shows:
+- **Among the vectorial models the physical one wins**: aligned plates,
+  the axial field reversed, s and p alternating.  So the Jones calculus is
+  likely right.
+- **The scalar model still fits these beads better**, by 7,400 in about
+  890,000 pixels.
+- **The coherence the vectorial model needs is no lower.**  The optics do
+  not explain the missing modulation here.
+- **The likeliest reason** is the predicted dip of the modulation at focus,
+  which the bead average of these beads does not show (0.59 at focus, flat
+  within ±0.05).  Five beads without mirror steps pin the modulation poorly,
+  so the mirror-step beads of uiPSF's example are the test that decides.

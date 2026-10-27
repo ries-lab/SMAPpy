@@ -113,11 +113,13 @@ def _centroid(image, y0, x0, half):
 
 def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pixel_size_nm,
           steps_rad=(2.0, 0.0, -2.0), n_max: int = 6, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
-          photons_per_observation: bool = True, device=None, progress=None, cancel=None):
+          photons_per_observation: bool = True, device=None, progress=None, cancel=None,
+          kind: str = "scalar", plates: str = "aligned"):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     A free photon count per observation by default: on the example beads it took the mean deviance from
-    1.16 to 1.06, the largest term found (docs/4pi.md §8)."""
+    1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" follows each arm's field
+    through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17)."""
     import uipsf
     from uipsf.model import PerObservation
     from uipsf.model.fourpi import FourPiModel
@@ -128,7 +130,8 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     batch = beads.batch(read_noise_var)
     C, M = beads.data.shape[1], beads.data.shape[3]
     model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=n_max, steps_rad=steps_rad,
-                        bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None)
+                        bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None,
+                        kind=kind, plates=plates)
     return learn_fourpi(model, batch, progress=progress, cancel=cancel)
 
 

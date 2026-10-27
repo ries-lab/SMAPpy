@@ -230,3 +230,73 @@ def test_the_learned_model_measures_v1s_beads_as_straight_as_v1s_model():
     assert phase <= 1.1 * phase_v1
     assert z_rms <= 1.1 * z_rms_v1
     assert np.allclose(steps, steps_v1, atol=0.03)
+
+
+# ---------------------------------------------------------------------------------------------- vectorial (M7)
+
+def _parts(grid, plates, polarisation="s", z=(0.0, 400.0), kind="vector"):
+    """[4, K, Y, X] of an aberration-free emitter on the axis at heights ``z``: |h_up|², |h_lo|², Re and Im
+    of the cross term, in one polarisation."""
+    model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, kind=kind, plates=plates)
+    up, lo = model.pupils
+    p = {"pupil.phase": torch.zeros(len(up.phase_modes)), "lo.pupil.phase": torch.zeros(len(lo.phase_modes)),
+         "pupil.magnitude": torch.zeros(len(up.magnitude_modes)),
+         "lo.pupil.magnitude": torch.zeros(len(lo.magnitude_modes)),
+         "psf.sigma": torch.tensor([1e-3, 1e-3]), "fourpi.offset": torch.zeros(3)}
+    zz = torch.tensor(z)
+    xyz = torch.stack([torch.zeros_like(zz), torch.zeros_like(zz), zz], -1)[None]
+    with torch.no_grad():
+        return model.images(p, xyz, polarisation=polarisation)[0]
+
+
+def _visibility(parts):
+    """Per height: the photon-weighted mean of each pixel's |cross| / mean of the arms' light."""
+    incoherent = 0.5 * (parts[0] + parts[1])
+    return (torch.complex(parts[2], parts[3]).abs().sum((-2, -1)) / incoherent.sum((-2, -1))).numpy()
+
+
+def test_plates_crossed_leave_a_freely_rotating_emitter_almost_no_interference(grid):
+    """Behind plates at +45° and −45° each arm sends the other circular component into a channel: on the
+    axis the in-plane dipoles' fields no longer meet, and only the rings interfere."""
+    parts = _parts(grid, "crossed")
+    c = R // 2
+    assert float(torch.complex(parts[2], parts[3])[0, c, c].abs()) < 1e-3 * float(parts[0][0, c, c])
+    assert _visibility(parts).max() < 0.35
+
+
+def test_aligned_plates_interfere_fully_on_the_axis_and_least_at_focus(grid):
+    """The axial dipole's field is reversed in the lower arm: where its ring overlaps the in-plane
+    dipoles' spot, at focus, the cross terms cancel, and the modulation is lowest; the scalar model
+    interferes fully everywhere."""
+    parts = _parts(grid, "aligned")
+    c = R // 2
+    on_axis = torch.complex(parts[2], parts[3])[:, c, c].abs() / (0.5 * (parts[0] + parts[1]))[:, c, c]
+    assert np.allclose(on_axis.numpy(), 1.0, atol=1e-3)
+    focus, away = _visibility(parts)
+    assert 0.5 < focus < 0.7 and away > focus + 0.15
+    assert np.allclose(_visibility(_parts(grid, "aligned", kind="scalar")), 1.0, atol=1e-3)
+
+
+def test_s_and_p_see_one_image_and_each_carries_the_emitters_light(grid):
+    """The plates turn s and p into the two circular components, which for a freely rotating emitter
+    give the same image; each counts as the whole of a channel's light, as the scalar model's does."""
+    s, p = _parts(grid, "aligned", "s"), _parts(grid, "aligned", "p")
+    # each is the other mirrored, and a round image is its own mirror: up to the pupil grid's sampling,
+    # 0.14 % of the peak at 400 nm
+    for k in (0, 2):
+        assert float((s[k] - p[k]).abs().max()) < 0.005 * float(s[0].max())
+    scalar = _parts(grid, "aligned", kind="scalar")
+    assert float(s[0].sum()) == pytest.approx(float(scalar[0].sum()), rel=0.02)
+
+
+def test_the_vectorial_model_is_differentiable_in_its_pupils(beads):
+    """The vectorial model through a forward pass on the beads' batch: finite images, and a gradient for
+    both objectives' pupils."""
+    model, batch, truth = beads
+    vector = FourPiModel(model.grid, (R, R), n_max=4, magnitude_n_max=0, kind="vector")
+    p = {k: torch.as_tensor(v).clone().requires_grad_(k in ("pupil.phase", "lo.pupil.phase"))
+         for k, v in truth.items()}
+    mu = vector(p, batch)
+    assert mu.shape == batch.data.shape and torch.isfinite(mu).all()
+    mu.sum().backward()
+    assert p["pupil.phase"].grad.abs().sum() > 0 and p["lo.pupil.phase"].grad.abs().sum() > 0

@@ -36,8 +36,23 @@ mirror step.
 
 **The observations** of a bead are its z slices × mirror steps, z-major (k = j·M + m), the order the
 microscope acquires them in, so that the bleaching curve runs along time: ``Batch.z_nm`` is [K] with
-each slice's z repeated M times.  The model is scalar, as v1's was; the vectorial model with the s and
-p channels' polarisations is M7 (docs/4pi.md).
+each slice's z repeated M times.
+
+**Scalar or vectorial** (``kind``).  The scalar model is v1's: one field per arm.  The vectorial one
+(M7, docs/4pi.md §17) follows each arm's field through the 4Pi-SMS's polarisation optics (Wang et al.
+2021, Nat Protoc 16:677): a quarter-wave plate right after each objective, its axes at 45° to the setup
+plane; a retarder with its axes along s and p in one arm (the quartz wedges, part of δ_c); the 50:50
+cube; and a polarising cube that sends s and p to their own images.  So each channel sees one
+polarisation (``polarisations``, s or p), and in it the component the plates turn s or p into: behind
+plates aligned with each other (``plates="aligned"``, the protocol's) the circular components
+(E_x ∓ i E_y)/√2, the same in both arms; ``"crossed"``, the lower plate at −45°, the other handedness in
+the lower arm; ``"none"``, E_x and E_y themselves.  In the sample's frame the lower objective sees a
+dipole's field with its axial part reversed -- the wave travels down, and the field's projection of μ_z
+changes sign -- so its z dipole's field is negated, beside z → −z.  A freely rotating emitter is the
+incoherent sum of three orthogonal dipoles, so the cross term is the sum over dipoles of
+u_d* l_d, u and l the two arms' fields in the channel's polarisation: where the dipoles' fields differ
+between the arms -- the axial one's sign, and the circular components' winding with the pupil's azimuth
+-- they interfere less, and the modulation is set by the optics, not only by the coherence α_c.
 
 **The arms' labels are a gauge.**  Swapping the objectives' roles -- the upper pupil the twin of the
 lower one, A'(k) = A*(−k), and the other way round, Δ → −Δ and r_c → 1 − r_c -- gives the same images
@@ -76,19 +91,33 @@ class FourPiModel:
                  magnitude_n_max: int | None = None, upsample: int = 1, bead_radius_nm: float = 0.0,
                  sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None, coherence: float = 0.8,
                  transforms=None, fit_transform: bool = True, intensity=None, background=None,
-                 pupils=None):
+                 pupils=None, kind: str = "scalar", plates: str = "aligned", polarisations=None):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
         3π/2); ``transforms`` each channel c ≥ 1's 3×3 map onto channel 0's chip pixels, the identity by
-        default.  ``pupils`` (upper, lower) replaces the two `ZernikePupil`s, for a first stage."""
+        default.  ``pupils`` (upper, lower) replaces the two `ZernikePupil`s, for a first stage.  ``kind``
+        "scalar" or "vector", and for a vectorial model the ``plates`` ("aligned", "crossed" or "none") and
+        each channel's polarisation, s or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a
+        turn apart, the pairs a quarter turn), as the module docstring says."""
+        if kind not in ("scalar", "vector"):
+            raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
+        if plates not in PLATES:
+            raise ValueError(f"plates must be one of {', '.join(PLATES)}, got {plates!r}")
         self.grid = grid
+        self.kind, self.plates = kind, plates
+        #: the lower arm's axial dipole field against the upper's: reversed, as the module docstring
+        #: derives; +1 only to test that against data
+        self.axial_sign = -1.0
         self.n_channels, self.n_phases = int(n_channels), int(n_phases)
+        self.polarisations = tuple(polarisations or ("s", "p") * ((self.n_channels + 1) // 2))[:self.n_channels]
+        if len(self.polarisations) != self.n_channels or set(self.polarisations) - {"s", "p"}:
+            raise ValueError(f"one polarisation, s or p, per channel: got {self.polarisations}")
         if pupils is None:
             pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max) for _ in range(2)]
-        self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind="scalar",
+        self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,
                                 bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm)
-        self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind="scalar",
+        self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind=kind,
                                 bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm)
         C, M = self.n_channels, self.n_phases
         steps = torch.zeros(M) if steps_rad is None else torch.as_tensor(steps_rad, dtype=torch.float32)
@@ -176,21 +205,32 @@ class FourPiModel:
         local = (inverse_map(unpack_transform(p[f"ch{c}.transform"]), main) - roi[:, None, c]) * px
         return torch.cat([local, xyz[..., 2:]], -1)
 
-    def images(self, p, xyz: torch.Tensor, z_step_nm: float | None = None) -> torch.Tensor:
+    def images(self, p, xyz: torch.Tensor, z_step_nm: float | None = None,
+               polarisation: str = "s") -> torch.Tensor:
         """[E, 4, K, Y, X]: |h_up|², |h_lo|², Re and Im of h_up* h_lo for emitters at ``xyz`` [E, K, 3]
-        (one z stack each when there is a bead kernel), blurred, convolved and binned."""
+        (one z stack each when there is a bead kernel), blurred, convolved and binned; vectorial, in the
+        ``polarisation`` a channel sees, summed over the dipoles (module docstring)."""
         up, lo = self.psf_up, self.psf_lo
         xyz, pad, dz = up._stack(xyz, z_step_nm)
         half = p["fourpi.offset"].to(xyz.dtype) / 2
         at_up = xyz + half
         at_lo = torch.cat([xyz[..., :2] - half[:2], -(xyz[..., 2:3] - half[2])], -1)
-        h_up, _, _ = up._image_field(p, at_up, None)               # [E, K, 1, uY, 2, uX], (Re, Im)
+        h_up, _, _ = up._image_field(p, at_up, None)               # [E, K, F, uY, 2, uX], (Re, Im)
         h_lo, _, _ = lo._image_field(lower_view(p), at_lo, None)
-        ur, ui = h_up[..., 0, :], h_up[..., 1, :]
-        lr, li = h_lo[..., 0, :], h_lo[..., 1, :]
-        parts = torch.stack([ur * ur + ui * ui, lr * lr + li * li, ur * lr + ui * li, ur * li - ui * lr], 1)
-        parts = parts.sum(3) * up.norm                             # [E, 4, K, uY, uX]
-        return up._image(parts, up.blur(p), pad, dz)
+        if self.kind == "scalar":
+            ur, ui = h_up[..., 0, :], h_up[..., 1, :]
+            lr, li = h_lo[..., 0, :], h_lo[..., 1, :]
+            parts = torch.stack([ur * ur + ui * ui, lr * lr + li * li, ur * lr + ui * li, ur * li - ui * lr], 1)
+            parts = parts.sum(3) * up.norm                         # [E, 4, K, uY, uX]
+            return up._image(parts, up.blur(p), pad, dz)
+        u = analysed(h_up, *PLATES[self.plates][0][polarisation])  # [E, K, 3, uY, uX] complex, per dipole
+        lo_field = analysed(h_lo, *PLATES[self.plates][1][polarisation])
+        lo_field = lo_field * lo_field.new_tensor([1.0, 1.0, self.axial_sign])[:, None, None]   # μ_z seen from below
+        cross = (u.conj() * lo_field).sum(2)
+        # ×2: one polarisation of an unpolarised emitter is half its light, and the shares f_c count a
+        # channel's light as if it had it all, as the scalar model does
+        parts = torch.stack([(u.abs() ** 2).sum(2), (lo_field.abs() ** 2).sum(2), cross.real, cross.imag], 1)
+        return up._image(parts * (2 * up.norm), up.blur(p), pad, dz)
 
     # ------------------------------------------------------------------ the model
 
@@ -211,7 +251,7 @@ class FourPiModel:
         step = batch.z_step_nm if self.psf_up.bead_radius_nm > 0 else None
         mu = []
         for c in range(C):
-            parts = self.images(p, self.positions(p, batch, xyz, c), step)          # [E, 4, J, Y, X]
+            parts = self.images(p, self.positions(p, batch, xyz, c), step, self.polarisations[c])   # [E, 4, J, Y, X]
             incoherent = a[c] * parts[:, 0] + b[c] * parts[:, 1]                    # [E, J, Y, X]
             cross = (cos[:, None, :, c, None, None] * parts[:, 2, :, None]
                      - sin[:, None, :, c, None, None] * parts[:, 3, :, None])        # [E, J, M, Y, X]
@@ -225,11 +265,30 @@ class FourPiModel:
         samples (`workflows.fourpi.calibration`)."""
         a, b, m = self.light(p)
         deltas = torch.cat([phase.new_zeros(1), p["fourpi.delta"].to(phase.dtype)])
-        parts = self.images(p, xyz[None])[0]                         # [4, N, Y, X]
+        parts = {pol: self.images(p, xyz[None], polarisation=pol)[0] for pol in set(self.polarisations)}
         psi = phase[None, :] + deltas[:, None]                       # [C, N]
-        return (a[:, None, None, None] * parts[0] + b[:, None, None, None] * parts[1]
-                + m[:, None, None, None] * (torch.cos(psi)[..., None, None] * parts[2]
-                                            - torch.sin(psi)[..., None, None] * parts[3]))
+        out = []
+        for c, pol in enumerate(self.polarisations):
+            q = parts[pol]                                           # [4, N, Y, X]
+            out.append(a[c] * q[0] + b[c] * q[1]
+                       + m[c] * (torch.cos(psi[c])[:, None, None] * q[2] - torch.sin(psi[c])[:, None, None] * q[3]))
+        return torch.stack(out)
+
+
+#: each plate setting's Jones row for s and p, (on E_x, on E_y), in the upper arm and the lower one: a
+#: quarter-wave plate at ±45° (a common phase dropped) turns s and p into the circular components
+_R = 2 ** -0.5
+_ALIGNED = {"s": (_R, -1j * _R), "p": (-1j * _R, _R)}
+_CROSSED = {"s": (_R, 1j * _R), "p": (1j * _R, _R)}
+PLATES = {"aligned": (_ALIGNED, _ALIGNED), "crossed": (_ALIGNED, _CROSSED),
+          "none": ({"s": (1.0, 0.0), "p": (0.0, 1.0)},) * 2}
+
+
+def analysed(h: torch.Tensor, on_x: complex, on_y: complex) -> torch.Tensor:
+    """One polarisation's field per dipole, [E, K, 3, uY, uX] complex, from a vectorial image field
+    [E, K, 6, uY, 2, uX] (x then y component of the x, y and z dipoles, as (Re, Im))."""
+    field = torch.complex(h[..., 0, :], h[..., 1, :])
+    return on_x * field[:, :, :3] + on_y * field[:, :, 3:]
 
 
 def swapped(model: FourPiModel, shared: dict) -> dict:

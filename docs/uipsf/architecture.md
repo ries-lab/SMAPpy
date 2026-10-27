@@ -2209,6 +2209,12 @@ objectives' misalignment, is shared by the channels.  Observations are z-major (
 so `Bleaching` runs along the acquisition.  Each channel c ≥ 1 has a projective map onto channel 0, as
 `Channel`'s.  The arms' labels are an exact gauge (`swapped`): the twin of one pupil acts as the other.
 
+**Vectorial** (``kind="vector"``, `docs/4pi.md` §17): the two `VectorPSF`s with their six dipole fields, each
+arm's x and y components turned into the channel's polarisation by the quarter-wave plates' Jones rows
+(``plates``: "aligned", the 4Pi-SMS's, gives the circular components; "crossed"; "none"), the lower arm's
+axial dipole reversed, the cross term summed over the dipoles; ``polarisations`` names each channel's, s or
+p.  `images(p, xyz, polarisation=)`; the gauge `swapped` is the scalar model's only.
+
 **No linearisation yet:** `Problem` builds every column by JVP.  v1's 18 beads (4 channels, 63 observations
 of 21², n ≤ 6) learn in 2.7 min on an M1 Pro's GPU, n ≤ 8 in 14 min, a free photon count per observation
 in 6.4 min.  The results, against v1's model, are in `docs/4pi.md` §8.

@@ -945,10 +945,13 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     to the beads' mean brightness.  The beads are put
     on one z grid by their foci (`_focus`), and I, A and B solved per voxel
     (the comment above): per channel (``channels="each"``), over the
-    channels with one shared PSF (``"shared"``), or per channel where the
-    angles are spread enough that every slice's least squares has a
-    condition number below ``max_condition`` (``"auto"``; evenly spread
-    angles give 1.4).  ``smooth_nm`` is the sigma of a Gaussian along z
+    channels with one shared PSF (``"shared"``), or, slice by slice, per
+    channel where the angles of the beads that cover the slice are spread
+    enough that its least squares has a condition number below
+    ``max_condition`` and shared where not (``"auto"``; evenly spread angles
+    give 1.4).  A slice is solved with the beads scanned through it, and the
+    model reaches as far as a quarter of them do (and two, without mirror
+    steps).  ``smooth_nm`` is the sigma of a Gaussian along z
     that takes the beads' noise out of the model.
     """
     from scipy.ndimage import gaussian_filter1d, shift
@@ -959,10 +962,6 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     steps = np.zeros(1) if steps is None else np.asarray(steps, float)
     if len(steps) != M:
         raise ValueError(f"{M} mirror steps in the stacks, {len(steps)} given")
-    # one brightness: a bright bead would otherwise weigh as a large I, and
-    # with the beads at their own phases, leak into A and B
-    total = stacks.sum(axis=(1, 2, 3, 4, 5))
-    stacks = stacks * (total.mean() / np.clip(total, 1e-12, None))[:, None, None, None, None, None]
     foci = np.array([_focus(stacks[b].sum(axis=(0, 2))) for b in range(nb)])
     # a bead whose spot is never round in the scan's middle (a neighbour in
     # its box, a bead off the coverslip) would shorten every bead's common z
@@ -982,8 +981,26 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     aligned = np.empty_like(stacks)
     for b in range(nb):
         aligned[b] = shift(stacks[b], (0, target - foci[b], 0, 0, 0), order=3, mode="nearest")
-    margin = int(np.ceil(np.abs(target - foci).max())) + 1
-    zs = np.arange(margin, Z - margin)
+    # which beads were scanned through each slice of that grid: a slice is
+    # solved with the beads that cover it, so the model reaches as far as a
+    # quarter of them do, not only where all do -- 110 beads of uiPSF's
+    # example, their foci 7 slices apart, left the slices all covered at
+    # -267..+232 nm, half a cell
+    own = np.arange(Z)[None, :] - (target - foci)[:, None]            # (beads, Z): each bead's own slice
+    covers = (own >= 1) & (own <= Z - 2)
+    # (mirror steps determine a slice from one bead; without, it takes two)
+    enough = covers.sum(axis=0) >= max(1 if M > 1 else 2, int(np.ceil(nb / 4)))
+    if not enough.any():
+        raise ValueError("no slice is covered by enough beads")
+    zs = np.arange(np.flatnonzero(enough)[0], np.flatnonzero(enough)[-1] + 1)
+    # one brightness: a bright bead would otherwise weigh as a large I, and
+    # with the beads at their own phases, leak into A and B -- measured over
+    # the slices every bead covers, so a bead at the scan's edge is not
+    # judged by part of its light
+    common = covers.all(axis=0)
+    common = common if common.any() else enough
+    total = aligned[:, :, common].sum(axis=(1, 2, 3, 4, 5))
+    aligned *= (total.mean() / np.clip(total, 1e-12, None))[:, None, None, None, None, None]
 
     def angles(z, sign):
         """(beads, M): each bead's own phase at its own slice, which is what
@@ -996,27 +1013,29 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
         theta = theta.ravel()
         return np.stack([np.ones_like(theta), np.cos(theta), np.sin(theta)], axis=1)
 
-    condition = max(np.linalg.cond(design(angles(z, 1.0))) for z in zs)
-    if channels == "auto":
-        channels = "each" if condition < max_condition else "shared"
-    if channels not in ("each", "shared"):
+    if channels not in ("auto", "each", "shared"):
         raise ValueError(f"channels is 'auto', 'each' or 'shared', not {channels!r}")
+    conditions = np.array([np.linalg.cond(design(angles(z, 1.0)[covers[:, z]])) for z in zs])
+    # per slice: its own beads decide whether each channel is determined there
+    each = (conditions < max_condition) if channels == "auto" else np.full(len(zs), channels == "each")
 
     def solve(sign):
         V = np.empty((3, C, len(zs), h, w))
         residual = 0.0
         for k, z in enumerate(zs):
-            theta = angles(z, sign)
-            if channels == "each":
+            on = covers[:, z]
+            n_on = int(on.sum())
+            theta = angles(z, sign)[on]
+            if each[k]:
                 X = design(theta)
                 for c in range(C):
-                    y = aligned[:, c, z].reshape(nb * M, h * w)
+                    y = aligned[on, c, z].reshape(n_on * M, h * w)
                     sol, res = np.linalg.lstsq(X, y, rcond=None)[:2]
                     V[:, c, k] = sol.reshape(3, h, w)
                     residual += float(res.sum()) if res.size else 0.0
                 continue
             X = np.concatenate([ph.gains[c] * design(theta + ph.offsets[c]) for c in range(C)])
-            y = aligned[:, :, z].transpose(1, 0, 2, 3, 4).reshape(C * nb * M, h * w)
+            y = aligned[on][:, :, z].transpose(1, 0, 2, 3, 4).reshape(C * n_on * M, h * w)
             sol, res = np.linalg.lstsq(X, y, rcond=None)[:2]
             residual += float(res.sum()) if res.size else 0.0
             I, A, B = (sol[j].reshape(h, w) for j in range(3))
@@ -1035,14 +1054,17 @@ def iab_from_beads(stacks: np.ndarray, dz: float, smooth_nm: float = 60.0,
     if smooth_nm > 0:
         V = gaussian_filter1d(V, smooth_nm / dz, axis=2, mode="nearest")
     period = 2 * np.pi / ph.w * dz
-    parameters = {"method": "IAB from a bead scan", "channels": channels, "condition": float(condition),
+    solved = ("each" if each.all() else "shared" if not each.any() else
+              f"each at {int(each.sum())} of {len(each)} slices, shared at the rest")
+    parameters = {"method": "IAB from a bead scan", "channels": solved,
+                  "condition": float(conditions[each].max() if each.any() else conditions.max()),
                   "smooth_nm": float(smooth_nm),
                   "w_per_slice": ph.w, "gains": ph.gains.tolist(), "offsets_rad": ph.offsets.tolist(),
                   "steps_rad": (sign * steps).tolist(), "beads": int(nb), "foci_slices": foci.tolist(),
                   "dropped_beads": dropped}
     parameters.update(kwargs.pop("parameters", {}))
     # the phase grows with the slice, so it falls with z_nm
-    return from_volumes(V[0], V[1], V[2], dz=dz, z0=target - margin, period_nm=period,
+    return from_volumes(V[0], V[1], V[2], dz=dz, z0=target - zs[0], period_nm=period,
                         phase_per_nm=-ph.w / dz, parameters=parameters, **kwargs)
 
 
