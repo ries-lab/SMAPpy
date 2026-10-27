@@ -173,8 +173,21 @@ $N\cos\phi$ and $N\sin\phi$.  So at each z plane of the model a small
 weighted least-squares fit over every pixel of every channel gives the
 phase and the photons directly, from anywhere on the circle.  The planes
 where it fits best (*z starts*, two by default) are where the fit starts,
-and the fit with the higher likelihood is kept.  On simulations every fit
-found the true phase, with no grid of phases to try.
+and the fit with the higher likelihood is kept.  On simulations with the
+very model that fits them, every fit found the true phase: of 20,000
+molecules at the 4Pi-SMS example's photons and background, 0.01 % ended more
+than five errors off, with one start or with five.
+
+On real data a fit can stop in a worse optimum where data and model
+disagree: a bright molecule, a model of a few beads.  A second start at
+another phase (*phase starts* 2) reaches the better one.  On the 4Pi-SMS
+example 5 % of the molecules were such fits, the phase off by about 1.5 rad
+and z unchanged; on uiPSF's Nup96 example 2.5 %, mostly dim.  It doubles the
+fit's time.  Neither a cheap check of the phase a quarter turn away nor a
+second start only for poor fits caught them at less cost.  So it is a
+choice: one phase start for speed, two for the last few per cent.  More
+*z starts* than two change almost nothing: two and three differed in 0.02 %
+of the molecules.
 
 **The fit.**  A Levenberg-Marquardt maximum-likelihood fit for Poisson noise
 (with an sCMOS camera's read noise, as the other fitters).  x, y, z, the
@@ -277,6 +290,11 @@ channel's centre, its scale and its rotation.
 It costs a second fit of *drift blocks* × *frames per block* frames,
 5000 by default.  Worth it for every long acquisition, and whenever the
 registration was not measured on the same day.
+
+### model.phase_starts
+1 by default.  2 for the final localizations of a measurement, where 2-5 %
+of the molecules otherwise keep a phase about 1.5 rad off, 70 nm in z from
+the phase.
 
 ### model.link_xy
 Unlinked, each channel gets its own x and y.  The table then has, for each

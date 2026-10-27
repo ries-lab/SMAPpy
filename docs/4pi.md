@@ -1046,3 +1046,53 @@ registration (rotations of −10 to +7 mrad, scale within 0.3 %).
   - The plugin's 13–27 frames/s on the 4Pi-SMS movie went mostly into
     reading the 2 GB DCIMG, the drift pass and writing.  Those are the next
     places to look.
+
+## 13. How many starts the 4Pi fit needs (2026-10-27)
+
+**The setup.**  `benchmarks/fourpi/starts.py` (real data, molecules matched
+by their candidate) and `starts_sim.py` (simulated with the experimental
+model at the data's photons and background).
+
+**With the right model, one start converges.**
+- 20,000 molecules were simulated with the 4Pi-SMS beads' pupil model:
+  median 4,200 photons, background 29 per pixel and channel.
+- Only 0.01 % ended more than five CRLBs off, with one start or with five.
+- z and the phase decouple, as the IAB model says.
+
+**On real data a fit can stop in a worse optimum.**  These are the fits more
+than 0.5 in log-likelihood below the best of all settings.
+
+| | 4Pi-SMS (Alexa 647) | uiPSF Nup96 (mMaple) |
+|---|---|---|
+| Stuck with 1 phase start | 5.0 % | 2.5 % |
+| Their phase off by (median) | 1.5 rad | 1.8 rad |
+| Their z off by (median) | nothing | 139 nm |
+| Median photons, stuck vs all | 6,600 vs 4,700 | 650 vs 540 |
+| Stuck fits that pass a typical filter | 57 % | 13 % |
+
+- On 4Pi-SMS the stuck fits are brighter than average, and fit the model
+  worse: `logl_rel` −1.28 against −0.81.  Only about a quarter are half a
+  turn off.
+- **So it is not one second valley.**  It is a phase landscape with
+  hollows where the model misses the data.
+
+**z starts.**  The setting is a ceiling: only the local minima of the
+phasor's residual along z are fitted.  So 2 cost about 10 % more than 1.
+- 1 against 3 starts: 0.4–0.9 % of the molecules differ by more than 50 nm.
+- 2 against 3: 0.02 %.
+- So 2 stays the default.
+
+**Phase starts.**  Each one is a whole fit.  A second phase start rescues
+every stuck fit, at twice the time.  Two cheaper rules were tried and
+dropped:
+- **A phase check:** the deviance a quarter, a half and three quarters of a
+  turn away, everything else held, refitting from the best if it beats the
+  fit's.  It caught 8 % of the stuck fits for +25 % of the time.  The
+  better optimum is only reached when the other parameters adapt on the way.
+- **A second start only for poor fits** by `logl_rel`: it caught them about
+  in proportion to its cost (50 % of the stuck for +20 %), barely better
+  than chance.
+
+**Decision.**  *Spline 4Pi* has *phase starts* under *more*, 1 by default:
+the speed of exploration.  2 is for the final localizations of a
+measurement.

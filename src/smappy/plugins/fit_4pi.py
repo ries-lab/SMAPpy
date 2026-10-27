@@ -79,6 +79,9 @@ class FourPiModelSettings:
                                "channel's own, to check the registration")
     starts: int = param(2, label="z starts", min=1, max=6, advanced=True,
                         help="how many z planes of the phasor start are fitted from")
+    phase_starts: int = param(1, label="phase starts", min=1, max=4, advanced=True,
+                              help="from each z start, how many phases around the circle; 2 catches the "
+                                   "few fits that stop in a worse optimum, at half the speed")
     channel_drift: bool = param(False, label="channel drift",
                                 help="measure how the channels move against each other, "
                                      "from fits with x and y free per channel, and follow it")
@@ -238,7 +241,8 @@ class FourPiFit(_FitPlugin):
         xy = bool(settings.model.link_xy)
         return Global4PiPSF(self._calibration(settings),
                             shared=(xy, xy, True, False, True, True),
-                            n_starts=int(settings.model.starts))
+                            n_starts=int(settings.model.starts),
+                            phase_starts=int(settings.model.phase_starts))
 
     # ----------------------------------------------------------- the channel layer
     def channel_layout(self, settings, base=None):
