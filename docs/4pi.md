@@ -1011,3 +1011,38 @@ z) and each bead's scatter about that pattern:
 
 **Still to do for M5.**
 - The beads' fitted positions against v1's own (`locres`), bead by bead.
+
+## 12. Detection's resampling (2026-10-27)
+
+**The step.**  To find the molecules, each channel is put onto channel 0's
+pixels and the four are summed.  Detection only places the boxes; each
+channel's box is cut at its own pixel from the exact map.  So this
+resampling never reaches a fitted position.
+
+**The change.**  Bilinear interpolation, frame by frame, gave way to the
+nearest pixel, gathered for a whole block at once
+(`channels.detection_lookup`, `onto_reference`).  The peak finder's filter
+smooths the sum anyway.  The pixels a rounded map skips or doubles cost at
+most half a pixel of alignment in one channel of four.  *shift*, a whole-pixel
+slice by the map's offset at the centre, remains for the engine: it ignores
+rotation and scale.
+
+**Measured** with `benchmarks/fourpi/detection.py`, on the 4Pi-SMS example's
+registration (rotations of −10 to +7 mrad, scale within 0.3 %).
+
+| | bilinear | nearest | shift |
+|---|---|---|---|
+| Putting the channels together (ms/frame) | 1.75 | 0.23 | 0.07 |
+| Simulation, 1800 molecules: found | 88.7 % | 88.7 % | 88.7 % |
+| Simulation: x, robust spread | 5.75 nm | 5.73 nm | 5.71 nm |
+| Simulation: envelope z, robust spread | 24.2 nm | 24.3 nm | 24.2 nm |
+
+- **The movie's candidates.**  About 7 % of nearest's differ from
+  bilinear's, all near the threshold: bilinear smooths the noise a little,
+  which moves the dynamic cutoff.
+- **The whole engine** (detection and fit, 1500 frames):
+  - 4Pi-SMS, 68.5 → 72.0 frames/s: the fit dominates there.
+  - v1's Nup96 (4 × 200², few molecules a frame), 180 → 293 frames/s.
+  - The plugin's 13–27 frames/s on the 4Pi-SMS movie went mostly into
+    reading the 2 GB DCIMG, the drift pass and writing.  Those are the next
+    places to look.

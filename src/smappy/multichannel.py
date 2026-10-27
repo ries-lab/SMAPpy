@@ -25,18 +25,29 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from .channels import ChannelLayout, channel_grid, local_scale, warp_onto_reference
+from .channels import ChannelLayout, detection_lookup, local_scale, onto_reference
 from .detect import Candidates
 from .dualfit import PairedROIs, _concat_pairs, paired_to_localizations
 
 
-def detection_image(channels: np.ndarray, layout: ChannelLayout,
-                    grids: Optional[list] = None) -> np.ndarray:
-    """(n, C, h, w) channels -> (n, h, w): their sum on channel 0's pixels."""
+def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Optional[list] = None,
+                    resampling: str = "nearest") -> np.ndarray:
+    """(n, C, h, w) channels -> (n, h, w): their sum on channel 0's pixels.
+
+    Each channel is read onto channel 0's pixels by ``lookups`` (`channels.detection_lookup`, made here
+    with ``resampling`` when not given) and added; the peak finder's own filter smooths the sum, so the
+    pixels the nearest-pixel lookup skips or doubles -- a row or column where the scale differs from one,
+    a step where a rotation crosses a rounding boundary -- cost no more than half a pixel of alignment in
+    one channel of the four.
+    """
+    n, C, h, w = channels.shape
     total = np.array(channels[:, 0], np.float32)
-    for c in range(1, layout.n_channels):
-        total += warp_onto_reference(channels[:, c], layout, c,
-                                     None if grids is None else grids[c])
+    for c in range(1, C):
+        if np.allclose(layout.maps[c], np.eye(3)):
+            total += channels[:, c]
+            continue
+        lookup = lookups[c] if lookups is not None else detection_lookup(layout, c, (h, w), resampling)
+        total += onto_reference(channels[:, c], lookup)
     return total
 
 
@@ -188,7 +199,9 @@ class MultiChannelEngine:
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
-    _grids: Optional[list] = field(default=None, init=False)
+    #: how the channels are put onto channel 0 to find the molecules (`channels.RESAMPLING`)
+    resampling: str = "nearest"
+    _lookups: Optional[list] = field(default=None, init=False)
     stats: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
@@ -213,11 +226,11 @@ class MultiChannelEngine:
             raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
                              f"(a ChannelSource's), got {frames.shape}")
         channels = to_photons(frames, self.camera) / self.camera.excess_noise
-        if self._grids is None:
+        if self._lookups is None:
             h, w = channels.shape[-2:]
-            self._grids = [None] + [channel_grid(self.layout, c, (h, w))
-                                    for c in range(1, self.layout.n_channels)]
-        summed = detection_image(channels, self.layout, self._grids)
+            self._lookups = [None] + [detection_lookup(self.layout, c, (h, w), self.resampling)
+                                      for c in range(1, self.layout.n_channels)]
+        summed = detection_image(channels, self.layout, self._lookups)
         candidates, _ = self.finder(summed, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         roisize = self.settings.roisize

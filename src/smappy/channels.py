@@ -266,6 +266,71 @@ def warp_onto_reference(image: np.ndarray, layout: ChannelLayout, channel: int,
     return out
 
 
+#: how a channel is put onto channel 0's pixels for detection (`detection_lookup`)
+RESAMPLING = ("nearest", "shift", "bilinear")
+
+
+@dataclass
+class Lookup:
+    """One channel's way onto channel 0's pixels, prepared once per layout and frame size: a flat index
+    per pixel (nearest), a whole-pixel offset (shift), or the coordinates to interpolate at (bilinear)."""
+    mode: str
+    index: Optional[np.ndarray] = None       # (h * w,) into the channel's flattened pixels
+    inside: Optional[np.ndarray] = None      # (h * w,) bool: the pixel lies in the channel
+    offset: Tuple[int, int] = (0, 0)         # (dx, dy): channel 0's pixel (x, y) is the channel's (x + dx, y + dy)
+    grid: Optional[np.ndarray] = None        # (2, h, w) for map_coordinates
+
+
+def detection_lookup(layout: ChannelLayout, channel: int, shape: Tuple[int, int],
+                     mode: str = "nearest") -> Lookup:
+    """How channel ``channel`` is read onto channel 0's pixels, for detection.
+
+    Detection only places the boxes; each channel's box is then cut at its own pixel from the exact map
+    (`multichannel.channel_candidates`), so how this resamples never reaches a fitted position.
+    *nearest* rounds the map per pixel -- rotation and scale kept to half a pixel everywhere, a block read
+    by one gather; *shift* moves the channel by the map's offset at the centre, rounded -- a slice, which
+    leaves out the rotation and the scale; *bilinear* interpolates, per frame.  Measured on the 4Pi-SMS
+    example (docs/4pi.md): see `multichannel.detection_image`.
+    """
+    if mode not in RESAMPLING:
+        raise ValueError(f"resampling must be one of {RESAMPLING}")
+    h, w = shape
+    if mode == "bilinear":
+        return Lookup(mode, grid=channel_grid(layout, channel, shape))
+    if mode == "shift":
+        centre = np.array([[(w - 1) / 2, (h - 1) / 2]])
+        dx, dy = np.rint(layout.to_channel(channel, centre)[0] - centre[0]).astype(int)
+        return Lookup(mode, offset=(int(dx), int(dy)))
+    rows, cols = np.rint(channel_grid(layout, channel, shape)).astype(np.int64)
+    inside = (rows >= 0) & (rows < h) & (cols >= 0) & (cols < w)
+    index = np.where(inside, rows * w + cols, 0).ravel()
+    return Lookup(mode, index=index, inside=inside.ravel())
+
+
+def onto_reference(images: np.ndarray, lookup: Lookup, layout: ChannelLayout = None,
+                   channel: int = 0) -> np.ndarray:
+    """A channel's images (n, h, w) on channel 0's pixels by ``lookup``; outside the channel, zero."""
+    images = np.asarray(images, np.float32)
+    n, h, w = images.shape
+    if lookup.mode == "bilinear":
+        from scipy.ndimage import map_coordinates
+        out = np.empty_like(images)
+        for k in range(n):
+            out[k] = map_coordinates(images[k], lookup.grid, order=1, mode="constant", cval=0.0)
+        return out
+    if lookup.mode == "shift":
+        dx, dy = lookup.offset
+        out = np.zeros_like(images)
+        ys, yt = (slice(dy, h), slice(0, h - dy)) if dy >= 0 else (slice(0, h + dy), slice(-dy, h))
+        xs, xt = (slice(dx, w), slice(0, w - dx)) if dx >= 0 else (slice(0, w + dx), slice(-dx, w))
+        out[:, yt, xt] = images[:, ys, xs]
+        return out
+    out = images.reshape(n, h * w)[:, lookup.index]
+    if not lookup.inside.all():
+        out[:, ~lookup.inside] = 0.0
+    return out.reshape(n, h, w)
+
+
 def channel_grid(layout: ChannelLayout, channel: int, shape: Tuple[int, int]) -> np.ndarray:
     """Where each of channel 0's pixels lies in channel ``channel``, as
     (row, column) coordinates for `scipy.ndimage.map_coordinates`."""

@@ -535,3 +535,64 @@ def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
     same = (d < 1) & (np.asarray(locs["frame"]) == i)
     assert same.sum() > 0.8 * n
     assert abs(np.median(np.asarray(locs["x_nm"])[same] / 100 - x[i[same]])) < 0.02
+
+
+# ---------------------------------------------------------------- detection's resampling
+
+def test_the_nearest_pixel_lookup_reads_each_pixel_where_the_map_puts_it_to_half_a_pixel():
+    from smappy.channels import channel_grid, detection_lookup, onto_reference
+    m = np.eye(3)
+    angle, scale = 0.01, 1.003
+    m[:2, :2] = scale * np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    m[:2, 2] = [1.4, -2.2]
+    layout = side_by_side(2, 60, 50).with_maps([np.eye(3), m])
+    lookup = detection_lookup(layout, 1, (50, 60), "nearest")
+    rows, cols = channel_grid(layout, 1, (50, 60))
+    picked_rows, picked_cols = np.divmod(lookup.index.reshape(50, 60), 60)
+    inside = lookup.inside.reshape(50, 60)
+    assert np.abs(picked_rows - rows)[inside].max() <= 0.5 + 1e-9
+    assert np.abs(picked_cols - cols)[inside].max() <= 0.5 + 1e-9
+    image = np.arange(3 * 50 * 60, dtype=np.float32).reshape(3, 50, 60)
+    out = onto_reference(image, lookup)
+    assert np.array_equal(out[2][inside], image[2].ravel()[lookup.index][inside.ravel()])
+    assert np.all(out[:, ~inside] == 0)
+
+
+def test_a_shift_lookup_moves_a_channel_by_whole_pixels():
+    from smappy.channels import detection_lookup, onto_reference
+    m = np.eye(3)
+    m[:2, 2] = [-3.2, 1.9]                 # channel 1's (x, y) is channel 0's minus that
+    layout = side_by_side(2, 30, 20).with_maps([np.eye(3), m])
+    lookup = detection_lookup(layout, 1, (20, 30), "shift")
+    assert lookup.offset == (3, -2)
+    image = np.random.default_rng(0).random((1, 20, 30)).astype(np.float32)
+    out = onto_reference(image, lookup)
+    assert np.array_equal(out[0, 2:, :27], image[0, :18, 3:])
+
+
+def test_nearest_pixel_detection_finds_what_bilinear_does(cal):
+    """The molecules found on the channels' sum, with a registration that rotates and stretches: the same
+    with the nearest pixel as with bilinear interpolation, which costs several times more."""
+    from smappy.metadata import CameraMetadata
+    from smappy.multichannel import MultiChannelEngine
+    from smappy.pipeline import FitSettings
+    from smappy.plugins.fit import DetectionSettings
+    from smappy.psf import Global4PiPSF
+    m = np.eye(3)
+    angle = 0.01
+    m[:2, :2] = 1.003 * np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    m[:2, 2] = [0.7, -0.4]
+    layout = side_by_side(4, 64, 64).with_maps([np.eye(3), m, m, np.eye(3)])
+    rng = np.random.default_rng(13)
+    frame = np.repeat(np.arange(200), 2)
+    x, y = rng.uniform(10, 54, (2, len(frame)))
+    frames = fourpi.render_frames(cal, layout, frame, x, y, rng.uniform(-300, 300, len(frame)), 2500,
+                                  phase0=0.3, n_frames=200, background=10)
+    found = {}
+    for mode in ("bilinear", "nearest"):
+        engine = MultiChannelEngine(CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1),
+                                    DetectionSettings().finder(), Global4PiPSF(cal), layout,
+                                    FitSettings(roisize=13), resampling=mode)
+        engine.push(layout.cut(frames), 0)
+        found[mode] = len(engine.flush())
+    assert abs(found["nearest"] - found["bilinear"]) <= 0.02 * found["bilinear"]
