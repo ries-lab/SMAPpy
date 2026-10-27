@@ -716,11 +716,51 @@ the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
   weighted by their errors.
 
 **Not done yet in M4.**
-- **Dual colour** still runs on `dualfit`.  Porting it onto
-  `MultiChannelEngine`, as the case of two channels found per channel and
-  paired, is a step of its own, held to identical numbers.
+- **Dual colour** still runs on `dualfit`.  Its port is M8 (§9), as part of
+  making the channel geometry one layer for every multi-channel fit.
 - **A *Simulate* preset** for 4Pi.
 - **The Nup96 ring-spacing check** on z, which needs the ROI segmentation of
   the pores.
 - **A drawn fit region** is not offered by *Spline 4Pi*.  Molecules are found
   in channel 0's pixels, not on the frame a region is drawn on.
+
+## 9. M8, planned: one channel layer for every multi-channel fit
+
+Decided 2026-10-27.  Port dual colour later, not as a copy of `dualfit`
+onto the new engine.  Make the geometry one layer, right after the loader,
+so that everything after it is agnostic: it sees only corresponding
+channel images, and every transformation is defined on those.
+
+**The layer.**
+- **Loader:** frames as the camera wrote them.  That is a chip with
+  quadrants or halves, separate files, or a multi-D TIFF.
+- **Channel layer:** a `ChannelLayout` cuts each frame into C channel images,
+  (n, C, h, w), each mirrored channel flipped back.  It is the only code
+  that knows rectangles, mirrors, the camera ROI and chip offsets.
+- **Everything after it** sees channels:
+  - maps from channel c to channel 0 in channel pixels, nearly
+    translations once the flips are undone;
+  - calibrations (dual-colour, 4Pi, registration) that store the layout
+    with their maps;
+  - detection per channel then paired (dual colour, different dyes), or on
+    the mapped sum (4Pi), as a setting;
+  - a fit region drawn on channel 0 and mapped through the layer;
+  - a preview and frame view with the channels side by side;
+  - bead calibration, movie registration and channel drift for any C.
+
+**What it retires.**
+- `dualfit`'s split geometry (`which_channel`, `split_position`, the
+  halves, `region_counterparts`);
+- `PeakFinder.split`;
+- `DualColorCalibration`'s `main`/`secondary`;
+- the simulator's two-halves loop.
+
+**What it keeps.**  A dual-colour splitter becomes a two-rectangle layout.
+Its existing calibration files load as a layout plus their transformation
+re-expressed in channel coordinates.
+
+**The bar.**  Dual colour's numbers stay identical on the existing
+two-channel tests and on a saved run.  The bead calibration and the
+movie registration give the same maps.  It is worth doing when the next
+multi-channel need comes: more than two colours, channel drift for dual
+colour, biplane plus colour.  It is not required for 4Pi.
