@@ -270,6 +270,7 @@ __TOKENS__
           text-transform: uppercase; color: var(--muted); margin: 0; }
 h1 { font-size: 32px; line-height: 1.15; margin: 4px 0 8px; font-weight: 600; text-wrap: balance; }
 .lede { margin: 0; color: var(--muted); max-width: 62ch; font-size: 16px; }
+.lede a { color: var(--accent-ink); }
 ul { margin: 0; padding: 0; list-style: none; }
 .tuts { display: grid; gap: 12px; }
 .tut a { display: grid; gap: 4px; padding: 18px 20px; border-radius: 10px; text-decoration: none;
@@ -296,7 +297,9 @@ footer a { color: var(--accent-ink); }
     <h1>Tutorials</h1>
     <p class="lede">Short guided tours of SMAPpy, a few minutes each, with subtitles and
     a voice you can switch off. They run on simulated data, so you can follow along in
-    the program: File &rarr; Simulate.</p>
+    the program: File &rarr; Simulate. Stuck with your own data? Tell an
+    <a href="assistant/">AI assistant</a> what you need: connected to SMAPpy, it
+    explains how, suggests the plugin and its settings, or does it for you.</p>
   </header>
 __SECTIONS__
   <section><h2>Reference</h2><ul class="tuts">

@@ -36,9 +36,9 @@ from pathlib import Path
 from .common import menu, menu_item, open_section, show_tab, type_into
 
 TITLE = "An AI assistant: asking SMAPpy in plain words"
-DESCRIPTION = ("Starting an assistant beside the picture, its proposals, suggest "
-               "and act; a whole analysis without the window; and writing "
-               "plugins with it.")
+DESCRIPTION = ("Saying what you need, and an assistant beside the picture "
+               "explains how, suggests the plugin and its settings, or does it; "
+               "a whole analysis without the window; and writing plugins with it.")
 
 CLIENT = "claude-code"          # what Claude Code calls itself on connecting
 
@@ -200,6 +200,16 @@ def make(d) -> None:
            "AI of its own.</p>",
            say="An AI assistant can work with SMAPpy: you ask in plain words, and "
                "it uses SMAPpy's plugins for you.")
+    d.card("Help in three ways",
+           "<p>Tell it what you need, as you would tell a colleague. It helps "
+           "in one of three ways, as you ask:</p>"
+           "<ul><li><b>It explains</b> how to do it in SMAPpy: which plugin, "
+           "which settings, and what the numbers mean.</li>"
+           "<li><b>It suggests</b> the plugin with its settings, and shows you "
+           "where in the picture. You open it and press Run.</li>"
+           "<li><b>It does it</b> for you, step by step, when you let it.</li></ul>",
+           say="It helps in three ways: it explains how, it suggests the plugin "
+               "and its settings, or it does it for you.")
 
     # where the assistant may write: the demo's folder, as a user's own data
     # folder would be, rather than the home folder of whoever built it
@@ -249,6 +259,19 @@ def make(d) -> None:
            spot=[button], point=button, zoom=d.around(button, 760))
 
     d.chapter("Asking")
+    d.card("It explains",
+           "<p>Ask how something is done, and it answers like a colleague who "
+           "has read every help page: which plugin, which settings, and why.</p>"
+           "<p>Nothing changes. You do it yourself, and learn where it is.</p>",
+           figure=_terminal(
+               ["> How do I correct the drift in my data?", "",
+                "  Use RCC, under Analysis, Drift: it correlates images of",
+                "  time windows and takes seconds. Its default of 20 time",
+                "  windows suits most data. COMET is a little more precise,",
+                "  but takes minutes."],
+               "a drawing of a question to the assistant and its explanation"),
+           say="Ask how something is done, and it explains: which plugin, which "
+               "settings, and why.")
     d.card("Ask in plain words",
            "<p>You type a question in the assistant's window. It looks up which "
            "plugins measure that, reads their help pages and tries them on a "
@@ -260,8 +283,8 @@ def make(d) -> None:
                 "  Find clusters, tried on a copy, finds one cluster per",
                 "  pore. RCC finds little drift. Both wait in SMAPpy."],
                "a drawing of a question to the assistant and its answer"),
-           say="You ask in its window. It tries plugins on a copy of the data, "
-               "and answers there.")
+           say="Ask for an answer, and it tries plugins on a copy of the data, "
+               "and suggests what to run.")
     # what an assistant does for that question: look, try, then propose
     client.call("show", {"x_nm": 5000, "y_nm": 5000, "width_nm": 3000})
     d.settle()
@@ -479,6 +502,8 @@ def make(d) -> None:
     d.card("What to remember",
            "<ul><li><b>Assistant, Start assistant</b>: your assistant, beside "
            "the picture.</li>"
+           "<li>Tell it what you need: it <b>explains</b>, <b>suggests</b> or "
+           "<b>does</b> it.</li>"
            "<li>What it would change waits under its button: <b>Open</b>, then "
            "your Run, or the cross.</li>"
            "<li><b>suggest</b> or <b>act</b>: only you switch.</li>"

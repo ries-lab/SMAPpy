@@ -90,8 +90,10 @@ A file saved there appears under *Plugins → User*. The help page
 explains how.
 
 **An AI assistant.** Your own assistant -- Claude Code, Codex or the Claude
-app -- can use SMAPpy's plugins for you: *Assistant → Start assistant* starts
-it beside the picture, and what it would change waits for you to open or
+app -- is the help to ask when you know what you need but not how: tell it in
+plain words, and it explains how to do it in SMAPpy, suggests the plugin and
+its settings, or does it for you. *Assistant → Start assistant* starts it
+beside the picture, and what it would change waits for you to open or
 dismiss. The tutorial
 [An AI assistant](https://ries-lab.github.io/SMAPpy/assistant/) shows it, and
 the help page
