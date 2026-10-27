@@ -109,14 +109,24 @@ def open_quadrant_frames(path):
         with h5py.File(f, "r") as h:
             names = _quadrant_names(h)
             shape = h[names[0]].shape
-            if len(shape) != 3:
+            if len(shape) < 3:
                 raise ValueError(f"{f.name}: expected (frames, x, y) per quadrant, got {shape}")
-            counts.append(shape[0])
-    channels, (h, w) = len(names), (shape[2], shape[1])
+            # a bead scan's (z, phase steps, x, y): its planes in order, as frames
+            counts.append(int(np.prod(shape[:-2])))
+    channels, (h, w) = len(names), (shape[-1], shape[-2])
     return QuadrantSource(files=files, shape=(h, channels * w), dtype=np.dtype(np.uint16),
                           n_frames=int(sum(counts)), n_frames_declared=None,
                           mm_metadata={}, summary={}, counts=counts, names=names,
                           layout=side_by_side(channels, w, h, name="quadrant files"))
+
+
+def _planes(dataset, start: int, stop: int) -> np.ndarray:
+    """Planes ``start:stop`` of a quadrant, its leading axes taken as one."""
+    if dataset.ndim == 3:
+        return dataset[start:stop]
+    lead = dataset.shape[:-2]
+    index = np.unravel_index(np.arange(start, stop), lead)
+    return np.stack([dataset[tuple(int(i[k]) for i in index)] for k in range(stop - start)])
 
 
 def _quadrant_names(h5) -> list:
@@ -147,7 +157,8 @@ class QuadrantSource(ImageSource):
                     a, b = max(start, first) - first, min(stop, last) - first
                     for s in range(a, b, chunk):
                         e = min(s + chunk, b)
-                        parts = [np.swapaxes(h[n][s:e], -1, -2) for n in self.names]
+                        parts = [np.swapaxes(_planes(h[n], s, e), -1, -2)
+                                 for n in self.names]
                         pending.append(np.concatenate(parts, axis=-1))
                         # blocks of ``chunk`` frames, across the files' seams
                         while sum(len(p) for p in pending) >= chunk:

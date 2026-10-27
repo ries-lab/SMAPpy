@@ -700,14 +700,25 @@ the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
   - mMaple is dim: a median of 530 photons over all four channels.
   - A better in-situ model (M6) is what would improve this.
 
+**Done after this section was first written (2026-10-27).**
+- **Registration from beads.**  Beads are summed over the stack, so the
+  interference averages out.  The steps are Gaussian centroids, a
+  cross-correlation, pairing, and the dual calibration's robust projective
+  fit (`channels.register_channels`).
+  - On uiPSF's 26 bead scans: 111 pairs per channel, 0.03 px rms, and within
+    0.06 px of v1's learned maps where the beads are.
+- **Channel drift.**  Blocks of frames are fitted with x and y free per
+  channel, and the median offsets are interpolated in time
+  (`multichannel.ChannelDrift`).
+  - On the Nup96 data, against the bead registration from another day: up
+    to 1 px off, steady to 0.1 px.
+- **Grouping:** `phase_rad` and `cavity_phase_rad` are combined as angles,
+  weighted by their errors.
+
 **Not done yet in M4.**
 - **Dual colour** still runs on `dualfit`.  Porting it onto
   `MultiChannelEngine`, as the case of two channels found per channel and
   paired, is a step of its own, held to identical numbers.
-- **Registration from beads** for a layout without a model's maps: the
-  existing projective fit, run per channel.
-- **Channel drift** over time: unlinked fits in frame blocks.
-- **Grouping** still averages `phase_rad` linearly.
 - **A *Simulate* preset** for 4Pi.
 - **The Nup96 ring-spacing check** on z, which needs the ROI segmentation of
   the pores.

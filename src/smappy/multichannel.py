@@ -40,12 +40,15 @@ def detection_image(channels: np.ndarray, layout: ChannelLayout,
     return total
 
 
-def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: int):
+def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: int,
+                       drift: "Optional[ChannelDrift]" = None):
     """Where each candidate's ROI goes in every channel.
 
     Returns ``(positions, residual, keep)``: integer (x, y) per channel
     (n, C, 2), the sub-pixel remainder of the map (n, C, 2) -- zero for
     channel 0 -- and which candidates have every ROI inside its channel.
+    ``drift`` moves each channel's position by its offset in the
+    candidate's frame (`ChannelDrift`).
     """
     w, h = layout.size
     half = (roisize - 1) // 2
@@ -54,8 +57,11 @@ def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: i
     positions = np.zeros((n, C, 2), np.int64)
     residual = np.zeros((n, C, 2))
     keep = np.ones(n, bool)
+    shift = None if drift is None else drift.at(candidates.frame)
     for c in range(C):
         exact = ref if c == 0 else layout.to_channel(c, ref)
+        if shift is not None:
+            exact = exact + shift[:, c]
         at = np.rint(exact)
         positions[:, c] = at
         residual[:, c] = exact - at
@@ -102,6 +108,65 @@ def cut_channel_rois(channels: np.ndarray, candidates: Candidates, positions: np
 
 
 @dataclass
+class ChannelDrift:
+    """How far each channel's molecules are from where the layout's map puts
+    them, over time: (blocks, C, 2) pixel offsets at the blocks' centre
+    frames, interpolated between and held beyond.
+
+    Measured by fitting with x and y free in every channel
+    (`measure_channel_drift`).  It takes up a slow drift of the channels
+    against each other -- the 4Pi cavity's optics move -- and a constant
+    error of the registration alike, including the part a bead registration
+    cannot see: where the model's PSF of each channel is centred.  SMAP's
+    ``Channeldrift4Pi`` measured it once, on the first 3000 frames.
+    """
+    frames: np.ndarray
+    offsets: np.ndarray
+
+    def at(self, frame) -> np.ndarray:
+        frame = np.asarray(frame, float)
+        out = np.empty((len(frame),) + self.offsets.shape[1:])
+        for c in range(self.offsets.shape[1]):
+            for axis in range(2):
+                out[:, c, axis] = np.interp(frame, self.frames, self.offsets[:, c, axis])
+        return out
+
+    def to_dict(self) -> dict:
+        return {"frames": self.frames.tolist(), "offsets_px": self.offsets.tolist()}
+
+
+def measure_channel_drift(locs, channels: int, pixelsize_nm, block_of=None,
+                          min_count: int = 20) -> ChannelDrift:
+    """Each channel's offset from channel 0, per block of frames, from a fit
+    with x and y free per channel: the medians of its ``dx_nm_ch<c>`` and
+    ``dy_nm_ch<c>`` (`dualfit.paired_to_localizations`), over the better
+    half of the localizations by their lateral error.  ``block_of`` maps a
+    frame to its block (default: all one block)."""
+    frame = np.asarray(locs["frame"], float)
+    block = np.zeros(len(frame), int) if block_of is None else np.asarray(block_of(frame), int)
+    px, py = (pixelsize_nm, pixelsize_nm) if np.isscalar(pixelsize_nm) else pixelsize_nm
+    err = np.asarray(locs["x_err_nm"], float)
+    good = np.isfinite(err) & (err <= np.nanmedian(err))
+    frames, offsets = [], []
+    for b in np.unique(block):
+        rows = good & (block == b)
+        if rows.sum() < min_count:
+            continue
+        here = np.zeros((channels, 2))
+        for c in range(1, channels):
+            for axis, (name, scale) in enumerate(((f"dx_nm_ch{c}", px), (f"dy_nm_ch{c}", py))):
+                v = np.asarray(locs[name], float)[rows]
+                here[c, axis] = np.nanmedian(v) / scale
+        frames.append(float(np.median(frame[rows])))
+        offsets.append(here)
+    if not frames:
+        raise ValueError(f"fewer than {min_count} well-fitted localizations in every block: "
+                         "nothing to measure the channels' drift by")
+    order = np.argsort(frames)
+    return ChannelDrift(np.asarray(frames)[order], np.asarray(offsets)[order])
+
+
+@dataclass
 class MultiChannelEngine:
     """`LocalizationEngine` for a frame of several channels: one ROI per
     channel and candidate, one fit.
@@ -115,6 +180,7 @@ class MultiChannelEngine:
     model: "PSFModel"              # Global4PiPSF, GlobalSplinePSF
     layout: ChannelLayout
     settings: "FitSettings" = None
+    drift: Optional[ChannelDrift] = None
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
@@ -151,7 +217,8 @@ class MultiChannelEngine:
         candidates, _ = self.finder(summed, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         roisize = self.settings.roisize
-        positions, residual, keep = channel_candidates(candidates, self.layout, roisize)
+        positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
+                                                       self.drift)
         candidates, positions, residual = candidates[keep], positions[keep], residual[keep]
         images = cut_channel_rois(channels, candidates, positions, roisize, first_frame)
         link = build_link(candidates, residual, self.layout, roisize,
@@ -208,6 +275,8 @@ class MultiChannelEngine:
                                        "period_nm": float(cal.period_nm),
                                        "calibration": str(cal.source)}
         locs.metadata["channel_layout"] = self.layout.to_dict()
+        if self.drift is not None:
+            locs.metadata["channel_drift"] = self.drift.to_dict()
         return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
 
     def __str__(self) -> str:

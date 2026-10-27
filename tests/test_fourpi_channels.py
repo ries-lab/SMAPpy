@@ -235,3 +235,142 @@ def test_v1s_in_situ_model_has_its_phase_rising_with_z():
     slope = np.polyfit(fit["z_env_nm"][sure], found.z_nm[sure], 1)[0]
     assert 0.9 < slope < 1.25
     assert np.mean(1 - found.probability) < 0.05
+
+
+# ---------------------------------------------------------------- registration
+
+def _bead_projection(cal, layout, xy, seed=0):
+    """Beads at ``xy`` (channel-0 pixels) scanned through z and the phase
+    steps, summed: what `bead_projections` gives for a bead stack."""
+    z = np.linspace(-400, 400, 17)
+    n = len(xy)
+    frames = []
+    for k, phase in enumerate((-2.0, 0.0, 2.0)):
+        frame = np.repeat(np.arange(len(z)), n)
+        frames.append(fourpi.render_frames(
+            cal, layout, frame, np.tile(xy[:, 0], len(z)), np.tile(xy[:, 1], len(z)),
+            np.repeat(z, n), 20000, phase0=phase, n_frames=len(z), background=5, seed=seed + k))
+    return layout.cut(np.concatenate(frames).sum(axis=0, keepdims=True))[0]
+
+
+def test_beads_register_every_channel_onto_the_first(cal):
+    """A projective map with a shift, a stretch and a slight rotation, found
+    again from the beads' summed images to a few hundredths of a pixel."""
+    from smappy.channels import register_channels
+    truth = np.eye(3)
+    truth[:2, :2] = [[1.003, 0.004], [-0.004, 0.998]]
+    truth[:2, 2] = [1.3, -0.7]
+    layout = side_by_side(4, 96, 96).with_maps([np.eye(3), truth, np.eye(3), truth])
+    rng = np.random.default_rng(4)
+    projections = [_bead_projection(cal, layout, rng.uniform(12, 84, (5, 2)), seed=s)
+                   for s in range(3)]
+    reg = register_channels(projections)
+    assert reg.pairs[1] >= 12 and reg.kind[1] == "projective"
+    grid = np.array([[15.0, 15.0], [80.0, 20.0], [48.0, 48.0], [20.0, 80.0], [80.0, 80.0]])
+    found = side_by_side(4, 96, 96).with_maps(reg.maps)
+    for c in (1, 2, 3):
+        assert np.abs(found.to_channel(c, grid) - layout.to_channel(c, grid)).max() < 0.05
+
+
+@pytest.mark.slow
+def test_the_real_beads_register_as_uipsf_v1_learned_its_maps():
+    """uiPSF's 4Pi beads, summed, registered as here: within a tenth of a
+    pixel of the maps v1 learned with its model, where the beads are (the
+    corners, beyond them, are the two fits' extrapolations)."""
+    import os
+    from pathlib import Path
+    from smappy.channels import bead_projections, register_channels
+    root = Path(os.environ.get("UIPSF_DATA", Path.home() / ".cache/uipsf/zenodo"))
+    beads, model = root / "4pi_40nm_bead", root / "results/4pi_40nm_bead/psfmodel_zernike_4pi.h5"
+    if not beads.exists() or not model.exists():
+        pytest.skip("uiPSF's 4Pi beads and model are not downloaded")
+    reg = register_channels(bead_projections(beads, side_by_side(4, 200, 200)))
+    assert min(reg.pairs[1:]) > 50 and max(reg.rms_px) < 0.1
+    v1 = side_by_side(4, 200, 200).with_maps(fourpi.load_uipsf_v1(model).maps())
+    found = side_by_side(4, 200, 200).with_maps(reg.maps)
+    grid = np.array([[60.0, 60.0], [140.0, 60.0], [100.0, 100.0], [60.0, 140.0], [140.0, 140.0]])
+    for c in (1, 2, 3):
+        assert np.abs(found.to_channel(c, grid) - v1.to_channel(c, grid)).max() < 0.1
+
+
+def test_a_bead_scan_file_reads_its_z_and_phase_steps_as_frames(tmp_path):
+    import h5py
+    from smappy.io.tiff import open_stack
+    rng = np.random.default_rng(5)
+    stacks = [rng.integers(0, 1000, (5, 3, 8, 10)).astype(np.uint16) for _ in range(4)]
+    with h5py.File(tmp_path / "bead1.mat", "w") as f:
+        for i, a in enumerate(stacks):
+            f[f"qd{i + 1}"] = np.swapaxes(a, -1, -2)
+    source = open_stack(tmp_path / "bead1.mat")
+    assert source.n_frames == 15 and source.shape == (8, 40)
+    frames = np.concatenate([b for _, b in source.frames(chunk=4)])
+    assert np.array_equal(source.layout.cut(frames)[:, 2], stacks[2].reshape(15, 8, 10))
+
+
+# ---------------------------------------------------------------- channel drift
+
+@pytest.mark.slow
+def test_a_drift_of_one_channel_is_measured_and_followed(cal):
+    """Channel 2 moves by 0.8 pixels in x over the acquisition, against a
+    registration that does not know it.  Fitted with x and y free per
+    channel the drift comes back; followed, the fit is unbiased again."""
+    from smappy.metadata import CameraMetadata
+    from smappy.multichannel import MultiChannelEngine, measure_channel_drift
+    from smappy.pipeline import FitSettings
+    from smappy.plugins.fit import DetectionSettings
+    from smappy.psf import Global4PiPSF
+    layout = side_by_side(4, 64, 64)
+    rng = np.random.default_rng(6)
+    blocks, per_block = 4, 150
+    frames, truth = [], []
+    for b in range(blocks):
+        m = np.eye(3)
+        m[0, 2] = -0.8 * b / (blocks - 1)          # channel 2 drawn further right over time
+        moving = layout.with_maps([np.eye(3), np.eye(3), m, np.eye(3)])
+        frame = np.repeat(np.arange(per_block), 2)
+        x, y = rng.uniform(10, 54, (2, len(frame)))
+        z = rng.uniform(-300, 300, len(frame))
+        frames.append(fourpi.render_frames(cal, moving, frame, x, y, z, 4000, phase0=0.3,
+                                           n_frames=per_block, background=8, seed=b))
+        truth.append((frame + b * per_block, x, y, z))
+    frames = np.concatenate(frames)
+    camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1)
+    finder = DetectionSettings().finder()
+
+    def fit(model, drift=None):
+        engine = MultiChannelEngine(camera, finder, model, layout, FitSettings(roisize=13), drift)
+        engine.push(frames, 0)
+        return engine.flush()
+
+    free = fit(Global4PiPSF(cal, shared=(False, False, True, False, True, True)))
+    drift = measure_channel_drift(free, 4, 100.0, lambda f: f // per_block)
+    assert np.allclose(drift.offsets[:, 2, 0], 0.8 * np.arange(blocks) / (blocks - 1), atol=0.06)
+    assert np.allclose(drift.offsets[:, [1, 3], :], 0, atol=0.06)
+
+    followed = fit(Global4PiPSF(cal), drift)
+    assert followed.metadata["channel_drift"]["offsets_px"]
+    from scipy.spatial import cKDTree
+    frame, x, y, _ = map(np.concatenate, zip(*truth))
+    d, i = cKDTree(np.c_[x, y, frame * 1000.0]).query(
+        np.c_[followed["x_nm"] / 100, followed["y_nm"] / 100, followed["frame"] * 1000.0])
+    near = d < 1
+    late = frame[i] >= 3 * per_block
+    dx = followed["x_nm"][near & late] / 100 - x[i[near & late]]
+    assert abs(np.median(dx)) < 0.03
+
+
+# ---------------------------------------------------------------- grouping
+
+def test_grouping_averages_the_phase_as_an_angle():
+    from smappy.group import combine
+    from smappy.locs import Localizations
+    locs = Localizations({
+        "x_nm": np.zeros(4, np.float32), "y_nm": np.zeros(4, np.float32),
+        "frame": np.arange(4), "x_err_nm": np.ones(4, np.float32),
+        "y_err_nm": np.ones(4, np.float32),
+        "phase_rad": np.array([3.1, -3.1, 0.1, 0.3], np.float32),
+        "phase_err_rad": np.array([0.1, 0.1, 0.1, 0.05], np.float32)}, {})
+    grouped = combine(locs, np.array([1, 1, 2, 2]))
+    assert abs(abs(grouped["phase_rad"][0]) - np.pi) < 1e-5     # not 0, the linear mean
+    assert grouped["phase_rad"][1] == pytest.approx((0.1 * 100 + 0.3 * 400) / 500, abs=1e-3)
+    assert grouped["phase_err_rad"][1] == pytest.approx(1 / np.sqrt(100 + 400), rel=1e-5)

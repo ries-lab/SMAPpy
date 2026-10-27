@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile]
+covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine]
 ---
 
 ## What it does
@@ -175,6 +175,40 @@ right way round when it is read, its maps with it.  On the Nup96 example,
 fitting each channel's position freely gave back the maps' offsets to
 within 0.06 pixels.
 
+**Registration from beads.**  For a model without maps, or a camera moved
+since the model was made, *registration* can be measured on beads.  A bead
+looks different in every channel at any one z, because the interference
+moves its light between them.  So the bead acquisition is summed over all
+its frames, every z step and every phase step, which leaves each channel
+the bead's envelope.  Its centre is fitted with a Gaussian.  The channels
+are put roughly on top of each other by the cross-correlation of these
+images, the beads are paired within 3 pixels, and each channel's map onto
+the first is the robust projective fit of
+[Spline 3D 2C](plugin:Localize/Spline 3D 2C)'s registration.  With fewer than
+8 pairs it is a shift: their mean offset.  A folder of bead files is pooled.
+On uiPSF's 26 bead scans this gave 111 pairs per channel, 0.03 pixels rms
+about the maps.  Where the beads were, the maps were within 0.06 pixels of
+the ones uiPSF v1 learned with its model.
+
+**Channel drift.**  The channels can move against each other while the
+acquisition runs.  A registration measured on another day can also be off,
+and a bead's envelope cannot show where the model's PSF of each channel is
+centred.  *channel drift* measures all of these from the data before the
+fit.  It fits *drift blocks* blocks of *frames per block* frames, spread
+over the acquisition, with x and y free in every channel.  The median offset
+of each channel from where the map puts it, in each block, over the better
+half of the localizations, is that channel's drift there.  Between blocks
+it is interpolated, and beyond the first and last it is held.  The fit then
+cuts each channel's box where the map and the drift put the molecule.  On
+the Nup96 example, with the registration from another day's beads, the
+channels were off by up to 1 pixel, steady to 0.1 pixels over the two
+files.  SMAP measured this once, on the first 3000 frames.
+
+**Grouping.**  The phase is an angle: the mean of 3.1 and -3.1 rad is pi,
+not 0.  Grouping a blink's localizations averages the phase as unit
+vectors, each weighted by its error, and combines `phase_err_rad` like any
+precision.
+
 **The phase's direction.**  The phase's slope in z is part of the model and
 kept with the table, for 4Pi z.  uiPSF v1 built its bead models and its
 in-situ models with opposite signs; each is read with its own.
@@ -195,8 +229,20 @@ on a 2048 x 168 strip, the last two mirrored.
 
 ### model.channels.registration
 Use the model's: the PSF of each channel was learned centred where its map
-puts the molecule, so the two belong together.  *none* is for channels that
-were registered before they were saved.
+puts the molecule, so the two belong together.  *from beads* is for a model
+without maps, or after the camera has moved.  Tick *channel drift* with it,
+which also corrects the part of the registration that beads cannot see.
+*none* is for channels that were registered before they were saved.
+
+### model.channels.beads
+A bead z stack taken in the same layout: a DCIMG file or series, a quadrant
+`.mat` file, or a folder of either.  Beads all over the field make a
+projective map.  A few beads make only a shift.
+
+### model.channel_drift
+It costs a second fit of *drift blocks* × *frames per block* frames,
+5000 by default.  Worth it for every long acquisition, and whenever the
+registration was not measured on the same day.
 
 ### model.link_xy
 Unlinked, each channel gets its own x and y.  The table then has, for each

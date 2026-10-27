@@ -214,3 +214,148 @@ def channel_grid(layout: ChannelLayout, channel: int, shape: Tuple[int, int]) ->
     yy, xx = np.mgrid[:h, :w]
     there = layout.to_channel(channel, np.c_[xx.ravel(), yy.ravel()])
     return np.stack([there[:, 1].reshape(h, w), there[:, 0].reshape(h, w)])
+
+
+# ---------------------------------------------------------------- from beads
+#
+# A layout without a model's maps -- a model learned without them, a camera
+# moved since -- is registered from beads.  A bead looks different in every
+# phase channel at any one z: the interference moves its light between them.
+# Summed over the whole stack -- every z step, every phase step -- the
+# interference averages out and each channel shows the bead's envelope, whose
+# centre is where the bead is.  The centres are fitted with a Gaussian, the
+# channels are put roughly on top of each other by the projections' cross-
+# correlation, paired, and the map of each channel onto channel 0 is the
+# robust projective fit the dual-colour calibration uses
+# (`calibrate.dual.fit_dual_transform`).  With fewer pairs than that needs --
+# the Ries-lab bead scans have one bead per file -- the map is a translation,
+# their mean offset.  What a centroid of the envelope cannot see -- where the
+# model's PSF of each channel is centred -- the fit's own measurement of the
+# channels' offsets takes up (`multichannel.measure_channel_drift`).
+
+@dataclass
+class Registration:
+    """Maps of each channel onto channel 0, and how well the beads agree."""
+    maps: List[np.ndarray]
+    pairs: List[int]                 # per channel
+    rms_px: List[float]              # residual of the pairs about the map, per channel
+    kind: List[str]                  # "projective" or "translation", per channel
+
+
+def bead_positions(image: np.ndarray, border: int = 6, sigma: float = 1.5,
+                   threshold: float = 0.2, roisize: int = 11) -> np.ndarray:
+    """Sub-pixel (x, y) of the beads in one projection: maxima of the
+    smoothed image above ``threshold`` of its brightest, each fitted with a
+    free-width Gaussian in a ``roisize`` box."""
+    from scipy.ndimage import gaussian_filter, maximum_filter
+    from . import _fit3d
+    image = np.asarray(image, np.float64)
+    smooth = gaussian_filter(image - np.median(image), sigma)
+    peaks = (smooth == maximum_filter(smooth, size=2 * border + 1)) & \
+        (smooth > threshold * smooth.max())
+    half = roisize // 2
+    h, w = image.shape
+    ys, xs = np.nonzero(peaks)
+    keep = (xs >= max(half, border)) & (xs < w - max(half, border)) & \
+        (ys >= max(half, border)) & (ys < h - max(half, border))
+    xs, ys = xs[keep], ys[keep]
+    if not len(xs):
+        return np.empty((0, 2))
+    rois = np.stack([image[y - half:y + half + 1, x - half:x + half + 1] for x, y in zip(xs, ys)])
+    rois = rois - rois.min(axis=(1, 2), keepdims=True)
+    # scaled to a few thousand photons, so the Poisson fit weighs the pixels sensibly
+    rois = (rois / rois.max(axis=(1, 2), keepdims=True) * 1000).astype(np.float32)
+    theta = _fit3d.fit_gauss_free(np.ascontiguousarray(rois), 1.5, 50, 0)[0]
+    return np.c_[xs - half + theta[:, 0], ys - half + theta[:, 1]]
+
+
+def _shift(reference: np.ndarray, other: np.ndarray) -> np.ndarray:
+    """Where ``other`` is relative to ``reference``, (dx, dy), by the peak of
+    their cross-correlation, to a fraction of a pixel."""
+    from scipy.signal import fftconvolve
+    a = reference - reference.mean()
+    b = other - other.mean()
+    c = fftconvolve(b, a[::-1, ::-1], mode="same")
+    iy, ix = np.unravel_index(np.argmax(c), c.shape)
+
+    def vertex(m, i):
+        if 0 < i < len(m) - 1:
+            d = m[i - 1] - 2 * m[i] + m[i + 1]
+            return 0.5 * (m[i - 1] - m[i + 1]) / d if d != 0 else 0.0
+        return 0.0
+    return np.array([ix - c.shape[1] // 2 + vertex(c[iy, :], ix),
+                     iy - c.shape[0] // 2 + vertex(c[:, ix], iy)])
+
+
+def register_channels(projections, settings=None, match_px: float = 3.0) -> Registration:
+    """Maps of every channel onto channel 0 from bead projections.
+
+    ``projections`` is one (C, h, w) array per bead acquisition: each
+    channel's image summed over the stack (`bead_projections`).  Beads of
+    every acquisition are pooled.
+    """
+    from .calibrate.dual import bead_registration, fit_dual_transform
+    from .dualfit import _match
+    settings = settings or bead_registration()
+    projections = [np.asarray(p, np.float64) for p in projections]
+    C = projections[0].shape[0]
+    found = [[bead_positions(p[c]) for c in range(C)] for p in projections]
+    maps, pairs, rms, kinds = [np.eye(3)], [0], [0.0], ["identity"]
+    for c in range(1, C):
+        # the coarse offset from every acquisition's correlation, summed
+        coarse = np.median([_shift(p[0], p[c]) for p in projections], axis=0)
+        source, target = [], []
+        for beads in found:
+            ref, other = beads[0], beads[c]
+            a, b = _match(ref, other - coarse, match_px)
+            source.append(other[b])
+            target.append(ref[a])
+        source, target = np.concatenate(source), np.concatenate(target)
+        if len(source) == 0:
+            raise ValueError(f"no bead of channel {c + 1} pairs with one of channel 1: "
+                             "check the layout, or the beads' brightness")
+        if len(source) >= settings.min_pairs:
+            matrix = fit_dual_transform(source, target, settings).transformation
+            kind = "projective"
+        else:
+            matrix = np.eye(3)
+            matrix[:2, 2] = np.mean(target - source, axis=0)
+            kind = "translation"
+        residual = _apply(matrix, source) - target
+        maps.append(np.asarray(matrix, float))
+        pairs.append(len(source))
+        rms.append(float(np.sqrt(np.mean(np.sum(residual ** 2, axis=1)))))
+        kinds.append(kind)
+    return Registration(maps, pairs, rms, kinds)
+
+
+def bead_projections(paths, layout: ChannelLayout) -> list:
+    """Each bead acquisition at ``paths`` (files or folders, anything
+    `open_stack` reads; a folder is searched for them) summed over all its
+    frames and cut into its channels: (C, h, w) each."""
+    from pathlib import Path
+    from .io.tiff import open_stack
+    files = []
+    for path in [paths] if isinstance(paths, (str, Path)) else paths:
+        path = Path(path)
+        if path.is_dir():
+            files += sorted(p for p in path.rglob("*")
+                            if p.suffix.lower() in (".mat", ".dcimg", ".tif", ".tiff"))
+        else:
+            files.append(path)
+    out, seen = [], set()
+    for f in files:
+        source = open_stack(f)
+        key = tuple(str(p) for p in source.files)
+        if key in seen:                # a series opened through another of its files
+            continue
+        seen.add(key)
+        total = None
+        for _, block in source.frames(chunk=200):
+            s = np.asarray(block, np.float64).sum(axis=0)
+            total = s if total is None else total + s
+        lay = getattr(source, "layout", None) or layout
+        out.append(lay.cut(total[None])[0])
+    if not out:
+        raise ValueError(f"no bead acquisitions at {paths}")
+    return out

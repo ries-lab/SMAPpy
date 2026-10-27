@@ -33,7 +33,7 @@ from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata)
 MODEL_FILTER = "4Pi models (*.h5)"
 LAYOUTS = (("file", "as the file lays them out"), ("typed", "typed corners"),
            ("yale", "4Pi-SMS (Bewersdorf lab)"))
-REGISTRATIONS = (("model", "the model's"), ("none", "none"))
+REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"), ("none", "none"))
 
 
 @dataclass
@@ -53,7 +53,10 @@ class ChannelLayoutSettings:
                                "comma-separated; empty: none")
     registration: str = param("model", label="registration", choices=REGISTRATIONS,
                               help="how the channels map onto the first: the maps kept "
-                                   "with the model, or none (the channels are aligned)")
+                                   "with the model, measured on beads, or none")
+    beads: str = param("", label="beads", kind="open_file",
+                       help="a bead acquisition in this layout (a z stack), or a folder "
+                            "of them; read summed over every frame")
 
 
 @dataclass
@@ -68,6 +71,14 @@ class FourPiModelSettings:
                                "channel's own, to check the registration")
     starts: int = param(2, label="z starts", min=1, max=6, advanced=True,
                         help="how many z planes of the phasor start are fitted from")
+    channel_drift: bool = param(False, label="channel drift",
+                                help="measure how the channels move against each other, "
+                                     "from fits with x and y free per channel, and follow it")
+    drift_blocks: int = param(10, label="drift blocks", min=1, advanced=True,
+                              help="how many blocks of frames, spread over the acquisition, "
+                                   "the drift is measured in")
+    drift_frames: int = param(500, label="frames per block", unit="frames", min=10,
+                              advanced=True, help="how many frames each block fits")
 
 
 @dataclass
@@ -79,8 +90,24 @@ def _numbers(text: str) -> list:
     return [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
 
 
+_REGISTERED = {}       # (bead paths, layout) -> Registration: beads are read once
+
+
+def registration_from_beads(path: str, layout):
+    """The beads' registration for ``layout`` (`channels.register_channels`),
+    measured once per bead path and layout."""
+    from ..channels import bead_projections, register_channels
+    if not path:
+        raise ValueError("registration from beads: choose a bead acquisition")
+    key = (str(path), tuple(layout.regions), tuple(layout.flips))
+    if key not in _REGISTERED:
+        _REGISTERED[key] = register_channels(bead_projections(path, layout))
+    return _REGISTERED[key]
+
+
 def layout_of(settings: FourPiFitSettings, source=None, calibration=None):
-    """The channel layout the settings describe, with the model's maps."""
+    """The channel layout the settings describe, with its maps: the model's,
+    the beads', or none."""
     from ..channels import YALE_4PI, from_corners
     part = settings.model.channels
     if part.layout == "file":
@@ -100,6 +127,8 @@ def layout_of(settings: FourPiFitSettings, source=None, calibration=None):
         mirrored = set(_numbers(part.mirrored))
         layout = from_corners(x, y, part.width, part.height,
                               flip_x=[c + 1 in mirrored for c in range(len(x))])
+    if part.registration == "beads":
+        return layout.with_maps(registration_from_beads(part.beads, layout).maps)
     if part.registration == "model" and calibration is not None:
         maps = calibration.maps()
         if maps is not None:
@@ -141,7 +170,42 @@ class FourPiFit(_FitPlugin):
     def engine(self, settings, camera: CameraMetadata, finder, model):
         from ..multichannel import MultiChannelEngine
         layout = layout_of(settings, calibration=model.calibration)
-        return MultiChannelEngine(camera, finder, model, layout, settings.fit)
+        drift = (self.channel_drift(settings, camera, finder, layout)
+                 if settings.model.channel_drift else None)
+        return MultiChannelEngine(camera, finder, model, layout, settings.fit, drift)
+
+    def channel_drift(self, settings, camera, finder, layout):
+        """The channels' drift, from blocks of frames spread over the
+        acquisition fitted with x and y free in every channel
+        (`multichannel.measure_channel_drift`)."""
+        from ..locs import concat
+        from ..multichannel import MultiChannelEngine, measure_channel_drift
+        from ..pipeline import drive
+        from ..psf import Global4PiPSF
+        from .fit import _open
+        src = settings.source
+        source = _open(src, watch=False)
+        stop = min(src.stop, source.n_frames) if src.stop else source.n_frames
+        blocks = max(int(settings.model.drift_blocks), 1)
+        length = max(int(settings.model.drift_frames), 1)
+        starts = np.linspace(src.start, max(stop - length, src.start), blocks).astype(int)
+        free = Global4PiPSF(self._calibration(settings), shared=(False, False, True, False,
+                                                                 True, True),
+                            n_starts=int(settings.model.starts))
+        engine = MultiChannelEngine(camera, finder, free, layout, settings.fit)
+        parts = []
+        for first in starts:
+            drive(engine, source.frames(chunk=src.chunk, start=int(first),
+                                        stop=int(min(first + length, stop))),
+                  sink=parts.append)
+        parts = [p for p in parts if p is not None and len(p)]
+        if not parts:
+            raise ValueError("channel drift: nothing was fitted in the drift blocks")
+        locs = concat(parts)
+        edges = np.r_[starts, np.inf]
+        return measure_channel_drift(locs, layout.n_channels,
+                                     camera.pixelsize_nm_or_default[0],
+                                     lambda f: np.searchsorted(edges, f, side="right") - 1)
 
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
         # the molecules are found on the channels' sum, in channel 0's pixels,
@@ -153,9 +217,12 @@ class FourPiFit(_FitPlugin):
         part = settings.model.channels
         typed = part.layout == "typed"
         state.shown.update({"region": False,
+                            "model.channels.beads": part.registration == "beads",
                             **{f"model.channels.{n}": typed
                                for n in ("x_corners", "y_corners", "width", "height",
                                          "mirrored")}})
+        state.active.update({"model.drift_blocks": settings.model.channel_drift,
+                             "model.drift_frames": settings.model.channel_drift})
         if not settings.model.link_xy:
             state.notice = Notice("x and y fitted per channel: the table's dx_nm_ch*, "
                                   "dy_nm_ch* are each channel's offset from where the "
@@ -197,7 +264,7 @@ class FourPiFit(_FitPlugin):
             fitted = engine.flush()
             if fitted is not None:
                 text += f", {len(fitted)} fitted"
-        pixel = (camera.pixelsize_nm_or_default[0] if fitted is not None else 1.0)
+        px, py = camera.pixelsize_nm_or_default[0]
 
         def draw(figure):
             panels = figure.subplots(1, layout.n_channels + 1)
@@ -210,8 +277,8 @@ class FourPiFit(_FitPlugin):
                 ax.set_title(f"channel {c + 1}")
                 if fitted is not None and len(fitted):
                     x0, y0 = layout.regions[0][:2]
-                    xy = np.c_[np.asarray(fitted["x_nm"]) / pixel - x0,
-                               np.asarray(fitted["y_nm"]) / pixel - y0]
+                    xy = np.c_[np.asarray(fitted["x_nm"]) / px - x0,
+                               np.asarray(fitted["y_nm"]) / py - y0]
                     there = xy if c == 0 else layout.to_channel(c, xy)
                     ax.plot(there[:, 0], there[:, 1], "+", color="C3", ms=8)
             for ax in panels:
