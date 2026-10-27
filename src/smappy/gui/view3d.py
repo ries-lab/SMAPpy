@@ -19,18 +19,21 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QImage
+from PySide6.QtCore import (QElapsedTimer, QEvent, QObject, QPoint, QPointF, QRectF, QSize,
+                            Qt, QTimer, Signal)
+from PySide6.QtGui import (QAction, QActionGroup, QIcon, QImage, QPainter, QPalette, QPen,
+                           QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QMainWindow, QMenu,
-                               QPushButton, QRadioButton, QToolBar, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
+                               QPushButton, QRadioButton, QSizePolicy, QToolBar, QToolButton,
+                               QVBoxLayout, QWidget, QWidgetAction)
 
 from ..layer_state import LayerSnapshot
 from ..picture import FrameSource, ViewFrame
 from ..render import FieldOfView, axis_unit
 from ..session import Session
+from .. import view_path as vp
 from . import folders
 from .render_view import (RenderWorker, bar_label, canvas_pixels, fill_canvas,
                           frame_canvas, nice_step, toolbar_border, toolbar_sheet)
@@ -80,6 +83,140 @@ class Job3D:
         rgb = render_3d(self.layers, projection, self.slab, fov, preview, engine,
                         budget=budget)
         return upscale(rgb, scale, self.ny, self.nx), fov
+
+
+RELAX_SECONDS = 0.5         # a stopped rock eases back to where it began over this
+
+
+class Motion(QObject):
+    """The title bar's ⟳: the view rocked back and forth about where it was,
+    or spun, until it is stopped.
+
+    A turn of the view is the cheapest way to see depth in a projection --
+    the parts that move against each other are at different depths -- and
+    the player's view path, which can do it, is built key by key and is for
+    movies.  This is the same turn (`view_path.turned`, about the axis
+    `view_path.motion_axis` picks) from a button and Space.
+
+    The angle is taken from the clock, not counted per tick, so the speed is
+    what was set however long a frame takes; each tick renders a preview, as
+    a drag does, and the exact image follows once it stops.  A rock stopped
+    by its button or Space eases back to the view it started from; a press
+    in the picture, an arrow key or a view button takes the view where it is
+    (`halt`).
+    """
+
+    running = Signal(bool)
+
+    def __init__(self, view: "View3D"):
+        super().__init__(view)
+        self.view = view
+        self.kind = "rock"              # "rock" or "spin" (`view_path.motion_angle`)
+        self.amplitude = 15.0           # degrees either way: enough to see depth, not lose the view
+        self.period = 3.0               # seconds for a rock there and back
+        self.speed = 30.0               # degrees a second for a spin
+        self._start: Optional[np.ndarray] = None    # the rotation it started from
+        self._axis = "z"
+        self._angle = 0.0
+        self._relax_from: Optional[float] = None    # the angle a stopped rock eases back from
+        self._clock = QElapsedTimer()
+        # a timer's timeout, not a singleShot: a tick that raised there would
+        # leave PySide in a state the next override segfaults in
+        self.timer = QTimer(self, interval=33)
+        self.timer.timeout.connect(self._tick)
+
+    @property
+    def active(self) -> bool:
+        """Moving, and not on its way back."""
+        return self.timer.isActive() and self._relax_from is None
+
+    def toggle(self) -> None:
+        if self.active:
+            self.stop()
+        else:
+            self.start()
+
+    def start(self) -> None:
+        if self.timer.isActive():               # on the way back: from there, at once
+            self.reset()
+        proj = self.view.projection
+        if proj.rotate_at_centre:
+            proj.pivot_at_centre()
+        self._start = proj.matrix.copy()
+        self._axis = vp.motion_axis(self._start)
+        self._angle = 0.0
+        self._relax_from = None
+        self._clock.start()
+        self.timer.start()
+        self.running.emit(True)
+
+    def stop(self) -> None:
+        """Stop; a rock eases back to the view it started from."""
+        if not self.active:
+            return
+        if self.kind == "rock" and abs(self._angle) > 1e-6:
+            self._relax_from = self._angle
+            self._clock.restart()
+        else:
+            self._finish()
+        self.running.emit(False)
+
+    def halt(self) -> None:
+        """Stop where it is: the view is being taken by hand."""
+        if not self.timer.isActive():
+            return
+        was = self.active
+        self._finish()
+        if was:
+            self.running.emit(False)
+
+    def reset(self) -> None:
+        """Stop, back at the view it started from at once: a rock whose
+        window closes opens again on the view it was rocked about."""
+        if not self.timer.isActive():
+            return
+        was = self.active
+        if self.kind == "rock" and self._start is not None:
+            self._turn(0.0)
+        self._finish()
+        if was:
+            self.running.emit(False)
+
+    def start_view(self) -> np.ndarray:
+        """The rotation it started from, or the view's while it is still."""
+        if self.timer.isActive() and self._start is not None:
+            return self._start.copy()
+        return self.view.projection.matrix.copy()
+
+    def _finish(self) -> None:
+        self.timer.stop()
+        self._relax_from = None
+        self.view.schedule()
+
+    def _turn(self, angle: float) -> None:
+        self._angle = angle
+        self.view.projection.set_matrix(vp.turned(self._start, self._axis, angle))
+        self.view._draw_box()
+        self.view.changed.emit()
+
+    def _tick(self) -> None:
+        try:
+            t = self._clock.elapsed() / 1000.0
+            if self._relax_from is not None:
+                u = min(t / RELAX_SECONDS, 1.0)
+                self._turn(self._relax_from * (1.0 - u * u * (3.0 - 2.0 * u)))
+                if u >= 1.0:
+                    self._finish()
+                    return
+            else:
+                self._turn(vp.motion_angle(t, self.kind, self.amplitude, self.period,
+                                           self.speed))
+            self.view.render(preview=True)
+        except Exception:
+            traceback.print_exc()
+            self.timer.stop()
+            self._relax_from = None
+            self.running.emit(False)
 
 
 class View3D(QWidget):
@@ -145,6 +282,7 @@ class View3D(QWidget):
         self._renderer.failed.connect(self._on_render_failed)
         self._timer = QTimer(singleShot=True, interval=30)
         self._timer.timeout.connect(lambda: self.render(preview=False))
+        self.motion = Motion(self)          # the title bar's ⟳
         self.graphics.mousePressEvent = self._press
         self.graphics.mouseMoveEvent = self._move
         self.graphics.mouseReleaseEvent = self._release
@@ -168,6 +306,7 @@ class View3D(QWidget):
         if what == "projection":
             # the player's view path (`view_path`): its view, the rest of the
             # projection -- the engine, the opacity -- left as it is here
+            self.motion.halt()
             new = self.session.projection
             proj = self.projection
             proj.azimuth, proj.elevation, proj.roll = new.azimuth, new.elevation, new.roll
@@ -221,6 +360,7 @@ class View3D(QWidget):
         # While "follow 2D ROI" is on, the ROI is the slab -- including a line
         # ROI's width, which is the box's second axis.  Opening the window on a
         # drawn ROI used to show whatever slab was there and wait for `from ROI`.
+        self.motion.halt()
         session = self.session
         if session.slab is None or (session.slab_follows_roi and session.roi is not None):
             slab = session.slab_from_roi()
@@ -412,6 +552,7 @@ class View3D(QWidget):
             self.move_along_sight(1.0 if event.key() == Qt.Key_PageUp else -1.0)
             event.accept()
         elif event.key() in turns:
+            self.motion.halt()
             az, el = turns[event.key()]
             proj = self.projection
             if proj.rotate_at_centre:
@@ -427,6 +568,7 @@ class View3D(QWidget):
             pg.GraphicsLayoutWidget.keyPressEvent(self.graphics, event)
 
     def _press(self, event) -> None:
+        self.motion.halt()                  # the view is taken by hand
         self.graphics.setFocus()
         self._last = event.position()
         self._dragging = True
@@ -464,6 +606,7 @@ class View3D(QWidget):
 
     def preset(self, name: str) -> None:
         """Look at the slab from the top, the front or the side (`PRESETS`)."""
+        self.motion.halt()
         slab = self.session.slab
         self.projection.preset(name, slab.angle if slab is not None else 0.0)
         self._draw_box()
@@ -553,13 +696,14 @@ class View3D(QWidget):
 
 
 
-# what the image does with the mouse and the keys, behind *keys*: a line of it
+# what the image does with the mouse and the keys, behind ⋯: a line of it
 # across the title bar was the widest thing in the window and read once
 KEYS = """<table cellspacing="0" cellpadding="3">
 <tr><td><b>drag</b></td><td>turn</td></tr>
 <tr><td><b>shift-drag</b>, middle button</td><td>pan</td></tr>
 <tr><td><b>wheel</b>, pinch</td><td>zoom</td></tr>
 <tr><td><b>arrow keys</b></td><td>turn by 5°</td></tr>
+<tr><td><b>space</b></td><td>rock (or spin) the view, and stop</td></tr>
 <tr><td><b>alt-wheel</b>, page up / down</td><td>move along the line of sight</td></tr>
 <tr><td><b>ctrl-wheel</b></td><td>move the slab in depth</td></tr>
 <tr><td><b>shift-wheel</b></td><td>slab thicker or thinner in depth</td></tr>
@@ -882,48 +1026,188 @@ class OptionsPanel(QWidget):
         self.view3d._draw_guides()
 
 
+def view_icon(face: str, palette: QPalette, size: int = 22) -> QIcon:
+    """A cube with the face looked at filled: top, front or side.
+
+    Drawn, not a file: in the palette's own colours, so it reads on a dark
+    window as on a light one, and drawn again when the theme changes
+    (`View3DToolBar.changeEvent`).  An oblique cube, its front square and
+    its top and right side slanted back, is the one picture of the three
+    views everybody reads the same.
+    """
+    ratio = 2
+    pixmap = QPixmap(size * ratio, size * ratio)
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    edge, depth = 12.0, 8.0
+    x0, y0 = 1.5, 1.5 + depth
+    front = [(x0, y0), (x0 + edge, y0), (x0 + edge, y0 + edge), (x0, y0 + edge)]
+    top = [(x0, y0), (x0 + depth, y0 - depth), (x0 + edge + depth, y0 - depth), (x0 + edge, y0)]
+    side = [(x0 + edge, y0), (x0 + edge + depth, y0 - depth),
+            (x0 + edge + depth, y0 + edge - depth), (x0 + edge, y0 + edge)]
+    for name, corners in (("front", front), ("top", top), ("side", side)):
+        painter.setPen(QPen(palette.color(QPalette.ButtonText), 1.2))
+        painter.setBrush(palette.color(QPalette.Highlight) if name == face else Qt.NoBrush)
+        painter.drawPolygon(QPolygonF([QPointF(x, y) for x, y in corners]))
+    painter.end()
+    return QIcon(pixmap)
+
+
 class View3DToolBar(QToolBar):
-    """The 3D window's title bar, in the 2D one's style (`toolbar_sheet`):
-    what is pressed while looking -- the views, fit -- and two buttons that
-    drop down the rest."""
+    """The 3D window's title bar, in the 2D one's style (`toolbar_sheet`,
+    `RenderToolBar`): what is pressed while looking -- the three views, fit,
+    the rock -- and at the right edge *options* and ⋯, which holds what is
+    used now and then: saving, the mouse and the keys, the help.
+
+    It was a row of words, every one as loud as the next.  The views are
+    pictures of a cube (`view_icon`), their names still the buttons' text
+    for tooltips and tours; fit is the 2D window's ⤢, which means the same.
+    """
 
     def __init__(self, window: "View3DWindow"):
         super().__init__("3D", window)
         self.setMovable(False)
+        self.setIconSize(QSize(22, 22))
         self.border = ""
-        save = QToolButton(text="Save", popupMode=QToolButton.InstantPopup)
-        menu = QMenu(save)
-        menu.addAction("PNG as displayed...", window._save)
-        menu.addAction("Save image...", window._save_image)
-        save.setMenu(menu)
-        self.addWidget(save)
-        tips = {"top": "look down z", "front": "along the slab's width: z up",
-                "side": "along the slab's length: z up"}
+        tips = {"top": "top: look down z", "front": "front: along the slab's width, z up",
+                "side": "side: along the slab's length, z up"}
         self.presets = {}
         for name in PRESETS:
             button = QToolButton(text=name)
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
             button.setToolTip(tips.get(name, name))
             button.clicked.connect(lambda _=False, n=name: window._preset(n))
             self.addWidget(button)
             self.presets[name] = button
-        fit = QToolButton(text="fit")
-        fit.setToolTip("centre the slab and fill the window with it")
-        fit.clicked.connect(window.view.fit)
-        self.addWidget(fit)
-        self.options_button = QToolButton(text="options")
-        self.options_button.setToolTip("how it is drawn, the slab, the view")
-        self.options_button.clicked.connect(
-            lambda: window.options.show_below(self.options_button))
-        self.addWidget(self.options_button)
-        self.keys_button = QToolButton(text="keys")
-        self.keys_button.setToolTip("what the mouse and the keys do in the picture")
-        self.keys_button.clicked.connect(lambda: window.keys.show_below(self.keys_button))
-        self.addWidget(self.keys_button)
+        self._draw_icons()
+        self.addSeparator()
+
+        fit = QAction("fit", self, triggered=window.view.fit)
+        fit.setIconText("⤢")
+        fit.setToolTip("fit: centre the slab and fill the window with it")
+        self.addAction(fit)
+        self.fit_button = self.widgetForAction(fit)
+        self.fit_button.setObjectName("glyph")       # larger (`_style`)
+
+        # a click starts and stops; the arrow beside it chooses rock or spin
+        # and how far and how fast
+        motion = window.view.motion
+        self.motion_action = QAction("rock", self, checkable=True)
+        self.motion_action.setIconText("⟳")
+        self.motion_action.setToolTip("rock the view back and forth to see its depth, "
+                                      "or spin it (Space); the arrow: which, how far, "
+                                      "how fast")
+        self.motion_action.triggered.connect(lambda _=False: motion.toggle())
+        motion.running.connect(self._show_running)
+        self.addAction(self.motion_action)
+        self.motion_button = self.widgetForAction(self.motion_action)
+        self.motion_button.setObjectName("glyph")
+        self.motion_button.setPopupMode(QToolButton.MenuButtonPopup)
+        self.motion_button.setMenu(self._motion_menu(window))
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.addWidget(spacer)
+
+        options = QAction("options", self)
+        options.setIconText("⚙")
+        options.setToolTip("options: how it is drawn, the slab, the view")
+        self.addAction(options)
+        self.options_button = self.widgetForAction(options)
+        self.options_button.setObjectName("glyph")
+        options.triggered.connect(lambda: window.options.show_below(self.options_button))
+
+        self.more_button = QToolButton(text="⋯", popupMode=QToolButton.InstantPopup)
+        self.more_button.setToolTip("more: save the picture, the mouse and the keys, help")
+        more = QMenu(self.more_button)
+        more.addAction("Save image...", window._save_image).setToolTip(
+            "the projection at any resolution, with scale bar and colour bar")
+        more.addAction("PNG as displayed...", window._save)
+        more.addSeparator()
+        more.addAction("Mouse and keys...", lambda: window.keys.show_below(self.more_button))
+        more.addAction("Help", window._help).setToolTip("this window's page (F1)")
+        more.setToolTipsVisible(True)
+        self.more_button.setMenu(more)
+        self.addWidget(self.more_button)
         self._style()
 
+    def _motion_menu(self, window: "View3DWindow") -> QMenu:
+        motion = window.view.motion
+        menu = QMenu(self)
+        kinds = QActionGroup(menu)
+        self.motion_kinds = {}
+        for kind, name in (("rock", "rock back and forth"), ("spin", "spin")):
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(kind == motion.kind)
+            action.triggered.connect(lambda _=False, k=kind: self._set_kind(motion, k))
+            kinds.addAction(action)
+            self.motion_kinds[kind] = action
+        menu.addSeparator()
+        form = QWidget()
+        grid = QFormLayout(form)
+        grid.setContentsMargins(24, 2, 8, 2)
+        grid.setVerticalSpacing(2)
+        self.amplitude = QDoubleSpinBox(minimum=1, maximum=90, decimals=0, suffix="°")
+        self.amplitude.setValue(motion.amplitude)
+        self.amplitude.setToolTip("how far it turns either way")
+        self.period = QDoubleSpinBox(minimum=0.5, maximum=60, decimals=1, suffix=" s")
+        self.period.setValue(motion.period)
+        self.period.setToolTip("how long one rock there and back takes")
+        self.speed = QDoubleSpinBox(minimum=-360, maximum=360, decimals=0, suffix=" °/s")
+        self.speed.setValue(motion.speed)
+        self.speed.setToolTip("degrees a second; negative turns the other way")
+        self.amplitude.valueChanged.connect(lambda v: setattr(motion, "amplitude", v))
+        self.period.valueChanged.connect(lambda v: setattr(motion, "period", v))
+        self.speed.valueChanged.connect(lambda v: setattr(motion, "speed", v))
+        grid.addRow("rock by", self.amplitude)
+        grid.addRow("period", self.period)
+        grid.addRow("spin at", self.speed)
+        holder = QWidgetAction(menu)
+        holder.setDefaultWidget(form)
+        menu.addAction(holder)
+        menu.addSeparator()
+        menu.addAction("Make a movie of this...", window._movie).setToolTip(
+            "the same motion as a view path in the Render tab's player, "
+            "to play and record")
+        menu.setToolTipsVisible(True)
+        return menu
+
+    def _set_kind(self, motion: Motion, kind: str) -> None:
+        """Rock or spin; a motion under way starts again as the new one."""
+        if kind == motion.kind:
+            return
+        moving = motion.active
+        motion.reset()
+        motion.kind = kind
+        if moving:
+            motion.start()
+
+    def _show_running(self, on: bool) -> None:
+        blocked = self.motion_action.blockSignals(True)
+        self.motion_action.setChecked(on)
+        self.motion_action.blockSignals(blocked)
+
+    def _draw_icons(self) -> None:
+        palette = self.palette()
+        for name, button in self.presets.items():
+            button.setIcon(view_icon(name, palette))
+
+    def changeEvent(self, event) -> None:            # noqa: N802 (Qt's name)
+        super().changeEvent(event)
+        if event.type() == QEvent.PaletteChange and getattr(self, "presets", None):
+            self._draw_icons()                       # the theme changed
+
     def _style(self) -> None:
-        sheet, _ = toolbar_sheet(QApplication.font("QLabel"), self.border)
-        self.setStyleSheet(sheet)
+        font = QApplication.font("QLabel")
+        sheet, _ = toolbar_sheet(font, self.border)
+        # a glyph at the label's size is a speck: half again as large, as the
+        # 2D window's ⤢ (`RenderToolBar._style_buttons`)
+        size = (font.pointSizeF() if font.pointSizeF() > 0 else 12) * 1.5
+        self.setStyleSheet(sheet + f" QToolButton#glyph {{ font-size: {size:.0f}pt; "
+                           "padding-top: 0px; padding-bottom: 0px; }")
 
     def set_border(self, colour: str) -> None:
         """The session's colour along the bottom, as on the 2D title bar."""
@@ -951,6 +1235,13 @@ class View3DWindow(QMainWindow):
         self.keys = Popup(keys, self)
         self.toolbar = View3DToolBar(self)
         self.addToolBar(self.toolbar)
+        # Space starts and stops the ⟳ from anywhere in the window: the
+        # picture need not have the focus, and the keys it does take are
+        # the arrows and the page keys
+        motion = QAction("rock or stop", self, triggered=lambda: self.view.motion.toggle())
+        motion.setShortcut(Qt.Key_Space)
+        motion.setShortcutContext(Qt.WindowShortcut)
+        self.addAction(motion)
         self.resize(900, 760)
 
     def createPopupMenu(self):                      # noqa: N802 (Qt's name)
@@ -960,6 +1251,27 @@ class View3DWindow(QMainWindow):
 
     def _preset(self, name: str) -> None:
         self.view.preset(name)
+
+    def _help(self) -> None:
+        from .help_window import show_help
+        show_help('Panels/3D view', self)
+
+    def _movie(self) -> None:
+        """The ⟳'s motion as the player's view path (`view_path.motion_path`),
+        from the view it starts from, for the player to play and record."""
+        view, motion = self.view, self.view.motion
+        projection = copy.deepcopy(view.projection)
+        projection.set_matrix(motion.start_view())
+        motion.reset()
+        try:
+            path = vp.motion_path(vp.Viewpoint.of(projection, view.session.slab),
+                                  motion.kind, motion.amplitude, motion.period, motion.speed)
+        except ValueError as error:
+            QMessageBox.information(self, "Make a movie", str(error))
+            return
+        opener = view.session.window_openers.get("view path")
+        if opener is not None:
+            opener(path)
 
     def clipboard_image(self) -> Optional[QImage]:
         """What Edit > Copy puts on the clipboard: the projection as displayed."""
@@ -1017,7 +1329,8 @@ class View3DWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         # hidden, not deleted (the control window keeps it): shown again, it
-        # is the same projection and slab
+        # is the same projection and slab -- a rock's start, not where it was
+        self.view.motion.reset()
         self.options.hide()
         self.keys.hide()
         self._slab_shown(False)

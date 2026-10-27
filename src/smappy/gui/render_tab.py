@@ -1361,7 +1361,8 @@ class RenderTab(QWidget):
         # through the data in every picture window (`gui.scan_player`)
         from .scan_player import ScanPlayer
         self.player = ScanPlayer(session)
-        layout.addWidget(CollapsibleSection("player", self.player, expanded=False, **HELP))
+        self.player_section = CollapsibleSection("player", self.player, expanded=False, **HELP)
+        layout.addWidget(self.player_section)
         # last and closed: the ordinary picture is x against y, and this is
         # what turns the renderer into SMAP's versatile one
         self.axes = AxesSection(session, view)
@@ -1398,6 +1399,13 @@ class RenderTab(QWidget):
         session.on_change(self._on_session)
         self._bind_layer(0)
         self.axes.bind()
+
+    def show_view_path(self, path) -> None:
+        """The player open on ``path``: the 3D window's *Make a movie of
+        this...* (`ScanPlayer.take_path`)."""
+        self.player_section.set_expanded(True)
+        self.player.take_path(path)
+        QTimer.singleShot(0, self.player_section._scroll_into_view)
 
     @property
     def layer(self) -> Layer:

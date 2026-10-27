@@ -73,7 +73,7 @@ reasoning is here so that it does not have to be re-derived.
   right edge the assistant's button and ⋯: *Save image...* (a TIFF
   re-rendered at a chosen pixel size, colour or float intensity, with the
   pixel size in the resolution tags), *PNG as displayed...*, the colour bar,
-  the keys.  The count of what is drawn is in the status bar.  The ROI is a `Region` (`regions.py`)
+  the keys, *Help*.  The count of what is drawn is in the status bar.  The ROI is a `Region` (`regions.py`)
   in the session; a plugin's `Selection` is the layer's filter *inside* the
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the

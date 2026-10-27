@@ -192,7 +192,8 @@ def test_the_render_toolbar_fits_its_window_with_the_assistant_on_it(app):
     # the count is under the picture, and says nothing about an empty table
     assert bar.counts.parent() is render.statusBar() and bar.counts.text() == ""
     more = [a.text() for a in bar.more_button.menu().actions() if a.text()]
-    assert more == ["Save image...", "PNG as displayed...", "colour bar", "Mouse and keys..."]
+    assert more == ["Save image...", "PNG as displayed...", "colour bar", "Mouse and keys...",
+                    "Help"]
     render.close()
     control.close()
 

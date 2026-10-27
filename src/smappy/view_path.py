@@ -397,6 +397,52 @@ def turn_keys(start: Viewpoint, axis: str = "z", degrees: float = 360.0,
     return keys
 
 
+def motion_axis(rotation: np.ndarray) -> str:
+    """What the 3D window's ⟳ turns about: the data's z where z stands
+    within 45 degrees of upright on the screen -- a turntable, the horizon
+    level -- else the screen's vertical.  Depth is seen from a turn about an
+    axis in the plane of the screen; about z seen from the top, the picture
+    would only turn flat."""
+    upright = abs(float(np.asarray(rotation)[1, 2]))       # data z along screen y
+    return "z" if upright >= math.cos(math.radians(45.0)) else "screen vertical"
+
+
+def motion_angle(t: float, motion: str, amplitude: float, period: float,
+                 speed: float) -> float:
+    """The turn ``t`` seconds into the ⟳'s motion, in degrees: a rock,
+    ``amplitude`` either way and back over ``period`` seconds -- a sine, so
+    it slows into each turnaround -- or a spin at ``speed`` degrees a
+    second."""
+    if motion == "rock":
+        return amplitude * math.sin(2.0 * math.pi * t / max(period, 1e-3))
+    return speed * t
+
+
+def motion_path(start: Viewpoint, motion: str, amplitude: float, period: float,
+                speed: float) -> "ViewPath":
+    """The ⟳'s motion from ``start`` as a path for the player, which records
+    it: one rock (to one side, back, to the other, back) or one whole turn,
+    without *ease*, so that played in a loop it does not stop at the seam.
+    The rock's keys at the far sides have no turn on either side of them,
+    so the path slows into each turnaround as the window's sine does."""
+    axis = motion_axis(start.rotation)
+    if motion == "rock":
+        if not 0 < abs(amplitude) < 180:
+            raise ValueError("a rock turns less than 180 degrees either way")
+        keys = [Key(start)]
+        for angle in (amplitude, 0.0, -amplitude, 0.0):
+            keys.append(Key(Viewpoint(turned(start.rotation, axis, angle),
+                                      np.asarray(start.centre, float).copy(), start.zoom,
+                                      start.focal, copy.deepcopy(start.slab)),
+                            period / 4.0))
+    else:
+        if speed == 0:
+            raise ValueError("a spin needs a speed")
+        keys = [Key(start)] + turn_keys(start, axis, math.copysign(360.0, speed), 1.0,
+                                        360.0 / abs(speed))
+    return ViewPath(keys, ease=False)
+
+
 def projections(path: ViewPath, base, times: Sequence[float]) -> list:
     """The projection of each time on ``path``, as ``base`` (the 3D window's
     projection) with the path's viewpoint."""

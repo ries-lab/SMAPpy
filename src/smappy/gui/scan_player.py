@@ -147,8 +147,10 @@ class ScanPlayer(QWidget):
         layers_row.addWidget(QLabel("layers"))
         layers_row.addWidget(self.layer_choice, 1)
         more_layout.addLayout(layers_row)
-        more_layout.addWidget(CollapsibleSection("view path", self._path_part(), expanded=True))
-        layout.addWidget(CollapsibleSection("more", more, expanded=False))
+        self.path_section = CollapsibleSection("view path", self._path_part(), expanded=True)
+        more_layout.addWidget(self.path_section)
+        self.more_section = CollapsibleSection("more", more, expanded=False)
+        layout.addWidget(self.more_section)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -336,6 +338,24 @@ class ScanPlayer(QWidget):
                                        self.turn_degrees.value(), self.turn_zoom.value(),
                                        self.turn_seconds.value())
         self._fill_keys(len(self.path.keys) - 1)
+
+    def take_path(self, path: vp.ViewPath) -> None:
+        """Play ``path`` alone, looped, recorded from the 3D view: the 3D
+        window's ⟳ handed over by *Make a movie of this...*.  What was in
+        the path before is replaced."""
+        self.stop()
+        self.path = path
+        blocked = self.ease.blockSignals(True)
+        self.ease.setChecked(path.ease)
+        self.ease.blockSignals(blocked)
+        self.coordinate.setCurrentText(NONE)
+        self.ends.setCurrentIndex(self.ends.findData("loop"))
+        self.record_from.setCurrentIndex(self.record_from.findData("3D"))
+        self.more_section.set_expanded(True)
+        self.path_section.set_expanded(True)
+        self._fill_keys()
+        self._dirty = True
+        self._say("the 3D view's motion: ▶ plays it, Record... writes it")
 
     def _save_path(self) -> None:
         if not self.path.keys:
