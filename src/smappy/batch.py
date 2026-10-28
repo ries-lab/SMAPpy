@@ -102,9 +102,15 @@ class Output:
     figures: str = "png"
     fitted: str = "beside_image"
     delete_fitted: bool = False
+    # the summary page's plots across the files: `summary.csv` columns, or
+    # patterns of them; [] is every number that differs between files
+    trends: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        out = dataclasses.asdict(self)
+        if not self.trends:
+            del out["trends"]          # older readers refuse a key they lack
+        return out
 
     @classmethod
     def from_dict(cls, raw) -> "Output":
@@ -114,6 +120,8 @@ class Output:
         if unknown:
             raise BatchError(f"output: no option {', '.join(unknown)}; there are "
                              f"{', '.join(sorted(known))}")
+        if isinstance(raw.get("trends"), str):
+            raw["trends"] = [raw["trends"]]
         return cls(**raw)
 
 
@@ -410,8 +418,11 @@ def validate_chain(spec: ChainSpec, overrides: Optional[Dict[str, Any]] = None,
     return cls, problems
 
 
-def validate(job: Job) -> List[Problem]:
-    """Everything wrong with a job, errors first.  Empty is ready to run."""
+def validate(job: Job, need_files: bool = True) -> List[Problem]:
+    """Everything wrong with a job, errors first.  Empty is ready to run.
+
+    ``need_files=False`` lets the inputs resolve to nothing: a watched folder
+    is empty until the first acquisition lands in it."""
     problems: List[Problem] = []
     for name, value, allowed in (("preflight", job.preflight, PREFLIGHT),
                                  ("rerun", job.rerun, RERUN),
@@ -434,7 +445,8 @@ def validate(job: Job) -> List[Problem]:
                 problems.append(Problem("error", where, f"{entry.folder} is not a folder"))
             if entry.overrides:
                 _check_values(entry.overrides, fields, f"{where}: overrides", problems)
-        if not any(p.level == "error" and p.where.startswith("inputs") for p in problems):
+        if need_files and not any(p.level == "error" and p.where.startswith("inputs")
+                                  for p in problems):
             if not resolve_inputs(job, kind):
                 problems.append(Problem("error", "inputs",
                                         f"no {kind} files: nothing to process"))
@@ -592,6 +604,7 @@ def run_one(cls, job: Job, item: Item, report: Callable[[str], None] = lambda t:
         "schema": RESULT_SCHEMA, "input": str(item.path), "name": item.name,
         "fingerprint": fingerprint(cls, flat, job, item.path),
         "started": datetime.now().isoformat(timespec="seconds"),
+        "input_mtime": _mtime(item.path),
         "status": "failed", "output": {}, "steps": []}
     started = time.perf_counter()
     try:
@@ -625,6 +638,7 @@ def run_one(cls, job: Job, item: Item, report: Callable[[str], None] = lambda t:
                                     **({"written": done.written}
                                        if done is not None and done.written else {})})
         record["n_localizations"] = len(session.locs)
+        record["acquired"] = acquisition_time(session.locs.metadata)
         if fitted is not None:
             record["output"]["fitted"] = str(fitted)
             if job.output.delete_fitted and Path(fitted).exists() and \
@@ -662,72 +676,295 @@ def run(job: Job, limit: Optional[int] = None, force: bool = False,
     Validates first and raises `BatchError` listing every error, so nothing
     starts on a job that cannot finish.  Files run one after another -- the
     plugins are parallel already, and two fits on one GPU are slower than one
-    after the other.
+    after the other.  The summary, the page and the report are written again
+    after every file, so they can be looked at while the batch runs.
     """
     emit = emit or (lambda *a: None)
-    problems = validate(job)
+    cls = _validated(job, emit)
+    items = resolve_inputs(job, cls.input_kind())
+    if limit is not None:
+        items = items[:limit]
+    report = _new_report(job, cls)
+    emit("JOBS", len(items))
+    aborted = None
+    for n, item in enumerate(items, 1):
+        entry, aborted = _process(cls, job, item, f"{n}/{len(items)}", force, emit)
+        report["files"].append(entry)
+        if aborted:
+            break
+        publish(job, report)
+    statuses = [f["status"] for f in report["files"]]
+    report["status"] = ("aborted" if aborted else
+                        "partial" if "failed" in statuses else "complete")
+    report["finished"] = datetime.now().isoformat(timespec="seconds")
+    publish(job, report)
+    emit("REPORT", job.output_folder() / "batch_report.json")
+    return report
+
+
+def _validated(job: Job, emit, need_files: bool = True):
+    problems = validate(job, need_files=need_files)
     errors = [p for p in problems if p.level == "error"]
     for problem in problems:
         emit("WARNING" if problem.level == "warning" else "ERROR", problem)
     if errors:
         raise BatchError("\n".join(map(str, errors)))
-    cls = chain_class(job.chain)
-    items = resolve_inputs(job, cls.input_kind())
-    if limit is not None:
-        items = items[:limit]
+    return chain_class(job.chain)
+
+
+def _new_report(job: Job, cls) -> Dict[str, Any]:
+    job.output_folder().mkdir(parents=True, exist_ok=True)
+    return {"schema": REPORT_SCHEMA,
+            "started": datetime.now().isoformat(timespec="seconds"),
+            "job": chains._plain(job.to_dict()), "chain": chains._plain(job.chain.to_dict()),
+            "versions": {"smappy": _version(),
+                         "plugins": {p.path: p.version for _, _, p in cls.steps}},
+            "files": [], "status": "running"}
+
+
+def _process(cls, job: Job, item: Item, where: str, force: bool, emit
+             ) -> Tuple[Dict[str, Any], Optional[str]]:
+    """One file, skipped if it is done already: its entry in the report, and
+    why the batch must stop if a step said so."""
     out = job.output_folder()
-    out.mkdir(parents=True, exist_ok=True)
-    started = datetime.now()
-    report: Dict[str, Any] = {
-        "schema": REPORT_SCHEMA, "started": started.isoformat(timespec="seconds"),
-        "job": chains._plain(job.to_dict()), "chain": chains._plain(job.chain.to_dict()),
-        "versions": {"smappy": _version(),
-                     "plugins": {p.path: p.version for _, _, p in cls.steps}},
-        "files": [], "status": "running"}
-    emit("JOBS", len(items))
-    aborted = None
-    for n, item in enumerate(items, 1):
-        where = f"{n}/{len(items)}"
-        previous = _read_json(out / item.name / "results.json")
-        _, flat, _ = settings_for(cls, job, item)
-        if (not force and job.rerun == "skip_identical" and previous
-                and previous.get("status") == "done"
-                and previous.get("fingerprint") == fingerprint(cls, flat, job, item.path)):
-            emit("SKIP", where, item.path, "already done with these settings")
-            report["files"].append({"input": str(item.path), "name": item.name,
-                                    "status": "unchanged", "folder": str(out / item.name)})
-            continue
-        emit("START", where, item.path)
-        try:
-            record = run_one(cls, job, item,
-                             report=lambda text, w=where: emit("PROGRESS", w, text))
-        except ChainAborted as why:
-            aborted = str(why)
-            emit("FAILED", where, f"batch stopped: {why}")
-            report["files"].append({"input": str(item.path), "name": item.name,
-                                    "status": "aborted", "message": aborted})
-            break
-        report["files"].append({k: record.get(k) for k in
-                                ("input", "name", "status", "message", "seconds",
-                                 "traceback")} | {"folder": str(out / item.name)})
-        if record["status"] == "done":
-            emit("DONE", where, out / item.name)
-        elif record["status"] == "skipped":
-            emit("SKIP", where, item.path, record.get("message", ""))
-        else:
-            emit("FAILED", where, record.get("message", ""))
-    statuses = [f["status"] for f in report["files"]]
-    report["status"] = ("aborted" if aborted else
-                        "partial" if "failed" in statuses else "complete")
-    report["finished"] = datetime.now().isoformat(timespec="seconds")
+    previous = _read_json(out / item.name / "results.json")
+    _, flat, _ = settings_for(cls, job, item)
+    if (not force and job.rerun == "skip_identical" and previous
+            and previous.get("status") == "done"
+            and previous.get("fingerprint") == fingerprint(cls, flat, job, item.path)):
+        emit("SKIP", where, item.path, "already done with these settings")
+        return {"input": str(item.path), "name": item.name, "status": "unchanged",
+                "folder": str(out / item.name)}, None
+    emit("START", where, item.path)
+    try:
+        record = run_one(cls, job, item,
+                         report=lambda text: emit("PROGRESS", where, text))
+    except ChainAborted as why:
+        emit("FAILED", where, f"batch stopped: {why}")
+        return {"input": str(item.path), "name": item.name, "status": "aborted",
+                "message": str(why)}, str(why)
+    if record["status"] == "done":
+        emit("DONE", where, out / item.name)
+    elif record["status"] == "skipped":
+        emit("SKIP", where, item.path, record.get("message", ""))
+    else:
+        emit("FAILED", where, record.get("message", ""))
+    return ({k: record.get(k) for k in ("input", "name", "status", "message", "seconds",
+                                        "traceback")} | {"folder": str(out / item.name)},
+            None)
+
+
+def publish(job: Job, report: Dict[str, Any]) -> None:
+    """`summary.csv`, the summary page and `batch_report.json`, as the report
+    stands: after every file, so a long batch or a watched folder can be
+    followed in them.  The page is a convenience, and a figure it cannot
+    shrink costs that thumbnail, never the batch."""
     write_summary(job, report)
-    _write_json(out / "batch_report.json", report)
-    emit("REPORT", out / "batch_report.json")
+    try:
+        from .batch_page import write_page
+        write_page(job, report)
+    except Exception:
+        traceback.print_exc()
+    _write_json(job.output_folder() / "batch_report.json", report)
+
+
+# ------------------------------------------------------------------ watching
+
+def is_complete(path: Path, seen: Dict[Path, Tuple[Any, float]], settle: float,
+                now: Optional[float] = None) -> bool:
+    """Whether a file in a watched folder is written to the end.
+
+    A smappy localization file says so itself: its writer marks it
+    ``writing`` until it closes it (`io.hdf5.LocalizationWriter`), and that
+    word wins over any silence, since a live fit can wait minutes for the
+    next frames.  Any other file is complete once neither its size nor its
+    modification time -- of every file of a Micro-Manager series, which fills
+    one file and then begins the next -- has changed for ``settle`` seconds,
+    by its modification time or by what was seen of it.  ``seen`` holds each
+    file's sizes and times, and when they were first seen as they are.
+    """
+    now = time.time() if now is None else now
+    try:
+        from .io.tiff import _series_files
+        files = (_series_files(path) if path.name.lower().endswith((".ome.tif", ".ome.tiff"))
+                 else [path])
+        stats = [f.stat() for f in files]
+    except OSError:
+        return False
+    state = tuple((s.st_size, s.st_mtime) for s in stats)
+    if seen.get(path, (None,))[0] != state:
+        seen[path] = (state, now)
+    writing = _smappy_writing(path)
+    if writing is not None:
+        return not writing
+    quiet = max(now - seen[path][1], now - max(s.st_mtime for s in stats))
+    return quiet >= settle
+
+
+def _smappy_writing(path: Path) -> Optional[bool]:
+    """True while a smappy writer has the file open, False once it closed it,
+    None for any other file -- or one that cannot be read just now, which is
+    what a file being written by a program holding a lock on it looks like."""
+    if path.suffix.lower() not in (".h5", ".hdf5"):
+        return None
+    try:
+        import h5py
+        with h5py.File(path, "r") as f:
+            if f.attrs.get("format") != "smappy-localizations" or "writing" not in f.attrs:
+                return None
+            return bool(f.attrs["writing"])
+    except Exception:
+        return True
+
+
+def watch(job: Job, settle: float = 10.0, poll: float = 2.0, stop=None,
+          emit: Optional[Callable[..., None]] = None, force: bool = False,
+          idle: Optional[float] = None) -> Dict[str, Any]:
+    """Run the job on every input file, and on every new one as it arrives.
+
+    The inputs are looked at again every ``poll`` seconds; a file is run once
+    it is complete (`is_complete`), and again if it changes afterwards.  What
+    is done already with the same settings is skipped, as by `run`, so a
+    watch restarted on the same folder picks up where it was.  Each file is
+    given its name once and keeps it: a later file with the same stem does
+    not rename the folder of one done before it.
+
+    ``stop`` (anything with ``is_set``) ends the watch between files, and
+    KeyboardInterrupt (Ctrl-C, SIGTERM in the command line) ends it at once,
+    leaving the file in hand unfinished, to be redone.  Either way the report,
+    the summary and the page are written, with the status ``stopped``.
+    ``idle`` ends it after that many seconds without a new file: for tests,
+    and for a script that watches one session's acquisitions.
+    """
+    emit = emit or (lambda *a: None)
+    cls = _validated(job, emit, need_files=False)
+    kind = cls.input_kind()
+    report = _new_report(job, cls)
+    report["status"] = "watching"
+    entries: Dict[str, Dict[str, Any]] = {}
+    names: Dict[Path, str] = {}
+    handled: Dict[Path, Any] = {}           # a file's state when it was run
+    seen: Dict[Path, Tuple[Any, float]] = {}
+    stopped = (lambda: stop is not None and stop.is_set())
+    folders = sorted({str(_resolve(i.folder or str(Path(i.file).parent),
+                                   job.origin.parent if job.origin else Path.cwd()))
+                      for i in job.inputs if i.include})
+    emit("WATCHING", *folders)
+    publish(job, report)
+    n, last_new = 0, time.time()
+    try:
+        while not stopped():
+            for item in resolve_inputs(job, kind):
+                if stopped():
+                    break
+                key = item.path.resolve()
+                if not is_complete(key, seen, settle) or handled.get(key) == seen[key][0]:
+                    continue
+                item.name = names.setdefault(key, _free_name(item.name, names.values()))
+                n += 1
+                entry, aborted = _process(cls, job, item, str(n), force, emit)
+                handled[key] = seen[key][0]
+                last_new = time.time()
+                entries[item.name] = entry
+                report["files"] = list(entries.values())
+                publish(job, report)
+                emit("REPORT", job.output_folder() / "batch_report.json")
+                if aborted:
+                    report["status"] = "aborted"
+                    raise _Stop
+            if idle is not None and time.time() - last_new >= idle:
+                break
+            _wait(poll, stopped)
+    except (KeyboardInterrupt, _Stop):
+        pass
+    if report["status"] == "watching":
+        report["status"] = "stopped"
+    report["finished"] = datetime.now().isoformat(timespec="seconds")
+    publish(job, report)
+    emit("REPORT", job.output_folder() / "batch_report.json")
     return report
 
 
-def write_summary(job: Job, report: Dict[str, Any]) -> Path:
-    """One row per file, one column per scalar a step returned: ``summary.csv``.
+class _Stop(Exception):
+    pass
+
+
+def _free_name(name: str, taken) -> str:
+    taken = set(taken)
+    candidate, n = name, 2
+    while candidate in taken:
+        candidate, n = f"{name}_{n}", n + 1
+    return candidate
+
+
+def _wait(seconds: float, stopped) -> None:
+    end = time.time() + seconds
+    while time.time() < end and not stopped():
+        time.sleep(min(0.2, max(end - time.time(), 0)))
+
+
+def stop_on_stdin(stream=None):
+    """An event set when ``stop`` is read from ``stream`` (stdin): how the
+    batch window asks a watch to end after the file in hand, on every
+    platform -- a signal on Windows can only kill.  The end of the stream is
+    not a stop: a watch started from a scheduler has nothing on its stdin."""
+    import sys
+    import threading
+    stream = stream or sys.stdin
+    event = threading.Event()
+
+    def read() -> None:
+        try:
+            for line in stream:
+                if line.strip().lower() == "stop":
+                    event.set()
+                    return
+        except (OSError, ValueError):
+            pass
+    threading.Thread(target=read, daemon=True, name="batch-stop").start()
+    return event
+
+
+def acquisition_time(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+    """When the data were taken, as ISO text, from Micro-Manager's
+    ``StartTime`` wherever the table's metadata carries it (the file's own,
+    or a file entry's); None when it does not say."""
+    found = _find_key(metadata or {}, ("StartTime",), depth=0)
+    if not found:
+        return None
+    import re
+    m = re.match(r"\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", str(found))
+    return f"{m.group(1)}T{m.group(2)}" if m else None
+
+
+def _find_key(value, keys, depth: int):
+    if depth > 4:
+        return None
+    if isinstance(value, dict):
+        for k in keys:
+            if value.get(k):
+                return value[k]
+        children = value.values()
+    elif isinstance(value, (list, tuple)):
+        children = value[:50]
+    else:
+        return None
+    for child in children:
+        found = _find_key(child, keys, depth + 1)
+        if found:
+            return found
+    return None
+
+
+def _mtime(path: Path) -> Optional[str]:
+    try:
+        return datetime.fromtimestamp(Path(path).stat().st_mtime).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
+def summary_rows(job: Job, report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One row per file, one column per scalar a step returned.
 
     Read from each file's ``results.json``, so a file skipped as unchanged
     still has its row from the run that produced it.
@@ -743,14 +980,22 @@ def write_summary(job: Job, report: Dict[str, Any]) -> Path:
         for step in record.get("steps", []):
             row.update(scalars(step.get("data") or {}, f"{step.get('key')}."))
         rows.append(row)
+    return rows
+
+
+def write_summary(job: Job, report: Dict[str, Any]) -> Path:
+    """`summary_rows` as ``summary.csv``; columns in the order first met."""
+    rows = summary_rows(job, report)
     columns: List[str] = []
     for row in rows:
         columns += [c for c in row if c not in columns]
-    path = out / "summary.csv"
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns)
+    path = job.output_folder() / "summary.csv"
+    temporary = path.with_suffix(".csv.part")
+    with temporary.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns or ["file", "status"])
         writer.writeheader()
         writer.writerows(rows)
+    temporary.replace(path)
     return path
 
 

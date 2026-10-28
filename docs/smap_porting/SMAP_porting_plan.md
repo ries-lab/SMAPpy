@@ -189,6 +189,16 @@ renames or removes columns (#68), with recipes, kept bounds and the
 layers' bounds and colour column following; *Save smappy HDF5* has a
 *columns* option.  The array-level work is `smappy/table_edit.py`.
 
+**Several inputs per dataset** (open, recorded 2026-10-28): one dataset that
+is more than one file -- the channels of a two-colour acquisition in separate
+stacks, or a cell's localizations split over several files.  Today one input
+is one file everywhere: the fitters' *source*, File > Open, the PSF
+calibration, and the batch (`docs/batch.md`, "Not yet").  It has to be solved
+once, for all of them together -- what names the files of one dataset, how
+they are paired, what the table records of each -- and not by the batch
+alone.  No use case asks for it yet; MicroClaw and the split-camera fitters
+write one file per acquisition.
+
 ---
 
 ## Implementation plan: where to start

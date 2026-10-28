@@ -308,3 +308,115 @@ def test_the_documented_examples_are_valid():
     job = batch.read_job(examples / "cells.batch.yaml")
     # everything but the example's own data folder, which is not on this machine
     assert [p for p in batch.validate(job) if "inputs" not in p.where] == []
+
+
+def test_a_watch_runs_the_files_there_are_and_each_new_one_once_complete(tmp_path, folder):
+    """The folder is watched; a file written during the watch is run once it
+    is complete, and a smappy file whose writer has not closed it waits,
+    however quiet it is.  Stopping writes the report."""
+    import threading
+    import time
+    from smappy.io.hdf5 import LocalizationWriter
+    job = write(tmp_path, Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
+                              output=Output(figures="none")))
+    events, stop = [], threading.Event()
+    done = lambda: [e[2] for e in events if e[0] == "DONE"]
+    watcher = threading.Thread(target=lambda: events.append(
+        ("RETURN", batch.watch(job, settle=0.3, poll=0.1, stop=stop,
+                               emit=lambda *f: events.append(f)))))
+    watcher.start()
+    deadline = time.time() + 60
+    while len(done()) < 3 and time.time() < deadline:
+        time.sleep(0.05)
+    assert len(done()) == 3
+
+    (folder / "cell9").mkdir()
+    writer = LocalizationWriter(folder / "cell9" / "locs.h5")
+    writer.append(blinks(seed=9))                 # written, and still open
+    time.sleep(1.0)
+    assert len(done()) == 3                       # quiet, but its writer is not done
+    writer.close()
+    while len(done()) < 4 and time.time() < deadline:
+        time.sleep(0.05)
+    assert str(done()[-1]).endswith("cell9_locs")
+    time.sleep(0.5)
+    assert len(done()) == 4                       # each once
+    stop.set()
+    watcher.join(30)
+    report = events[-1][1]
+    assert report["status"] == "stopped"
+    assert sorted(f["name"] for f in report["files"]) == \
+        ["cell0_locs", "cell1_locs", "cell2_locs", "cell9_locs"]
+    out = tmp_path / "job_output"
+    with (out / "summary.csv").open() as f:
+        assert len(list(csv.DictReader(f))) == 4
+    assert json.loads((out / "batch_report.json").read_text())["status"] == "stopped"
+
+    # a second watch on the same folder skips what is done
+    again = batch.watch(job, settle=0.3, poll=0.1, idle=0.5)
+    assert {f["status"] for f in again["files"]} == {"unchanged"}
+
+
+def test_a_file_is_complete_when_it_has_stopped_changing(tmp_path):
+    path = tmp_path / "a.tif"
+    path.write_bytes(b"x" * 10)
+    seen = {}
+    old = path.stat().st_mtime
+    assert not batch.is_complete(path, seen, settle=5, now=old + 1)
+    assert batch.is_complete(path, seen, settle=5, now=old + 6)
+    path.write_bytes(b"x" * 20)                   # grew: wait again
+    new = path.stat().st_mtime
+    assert not batch.is_complete(path, seen, settle=5, now=new + 1)
+
+
+def test_the_summary_page_lists_every_file_with_its_figures_and_numbers(tmp_path, folder):
+    job = write(tmp_path, Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
+                              output=Output(trends=["stats.*", "n_localizations"])))
+    batch.run(job)
+    out = tmp_path / "job_output"
+    page = (out / "index.html").read_text()
+    for name in ("cell0_locs", "cell1_locs", "cell2_locs"):
+        assert f'href="{name}/results.json"' in page
+        thumbs = list((out / name / "thumbnails").glob("*.png"))
+        assert thumbs and all(f"{name}/thumbnails/{t.name}" in page for t in thumbs)
+    assert page.count('class="status done"') == 3
+    assert "stats.n" in page and (out / "trends.png").exists()
+    assert 'http-equiv="refresh"' not in page     # finished: no reloading
+    from smappy.batch_page import trend_columns
+    rows = batch.summary_rows(job, json.loads((out / "batch_report.json").read_text()))
+    assert trend_columns(rows, ["n_localizations"]) == ["n_localizations"]
+    automatic = trend_columns(rows, [])
+    assert 0 < len(automatic) <= 12 and "status" not in automatic
+    assert "n_localizations" in automatic        # differs between the cells
+
+
+@pytest.mark.slow
+def test_the_watch_command_ends_cleanly_on_a_stop_line(tmp_path, folder):
+    """What the batch window does: start `smappy-batch watch`, then write
+    `stop` to its stdin; it finishes, writes its report and exits with 0."""
+    import os
+    import subprocess
+    import sys
+    import time
+    job = Job(chain=chain_spec(), inputs=[Input(folder=str(folder))],
+              output=Output(figures="none"))
+    path = tmp_path / "job.batch.yaml"
+    batch.write_job(job, path)
+    environment = dict(os.environ, PYTHONUTF8="1")
+    process = subprocess.Popen([sys.executable, "-m", "smappy.cli.batch", "watch", str(path),
+                                "--settle", "0.2", "--poll", "0.2"],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                               env=environment)
+    lines = []
+    deadline = time.time() + 120
+    while sum(line.startswith("SMAPPY_DONE") for line in lines) < 3 and time.time() < deadline:
+        lines.append(process.stdout.readline())
+    process.stdin.write("stop\n")
+    process.stdin.flush()
+    rest, _ = process.communicate(timeout=60)
+    assert process.returncode == 0
+    assert lines[0].startswith("SMAPPY_WATCHING")
+    assert "SMAPPY_REPORT" in rest
+    report = json.loads((tmp_path / "job_output" / "batch_report.json").read_text())
+    assert report["status"] == "stopped" and len(report["files"]) == 3
+    assert (tmp_path / "job_output" / "index.html").exists()

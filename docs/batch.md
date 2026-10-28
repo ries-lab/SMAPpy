@@ -297,6 +297,7 @@ output:
   figures: png                  # png | pdf | svg | none
   fitted: beside_image          # image input: beside_image | output
   delete_fitted: false
+  trends: ["stats.*", n_localizations]   # summary page; default: what varies
 preflight: skip                 # skip | proceed | abort
 rerun: skip_identical           # skip_identical | always
 ```
@@ -321,7 +322,8 @@ rerun: skip_identical           # skip_identical | always
   table (`Localize/*`, the simulator) means images, and each file becomes that
   step's `source.path`; anything else means localization files, each opened
   with `File/Load/Auto`.  One input is one file: two-file inputs (a two-colour
-  pair in separate stacks, several files per cell) are not supported yet.
+  pair in separate stacks, several files per cell) are not supported yet (see
+  "Not yet").
 * `.json` is read too; the GUI writes `.yaml`, which allows comments.
 
 ### What is written
@@ -339,11 +341,72 @@ inputs share a stem):
   the JSON-able part of its `data`, and the settings it ran with.
 
 Per batch: `summary.csv` (one row per file, a column per scalar
-`<key>.<name>` any step returned) and `batch_report.json` (the resolved job,
-the resolved chain, versions, every file's status and traceback).
+`<key>.<name>` any step returned), `batch_report.json` (the resolved job,
+the resolved chain, versions, every file's status and traceback), and the
+summary page, `index.html` with `trends.png` (below).  All three are written
+again after every file, so a long batch -- or a watched folder -- can be
+followed in them while it runs.  `results.json` also records `input_mtime`
+and, where the table's metadata has Micro-Manager's `StartTime`, `acquired`.
 
 Files run one after another: the plugins are parallel already, and two fits
 on one GPU are slower than one after the other.
+
+### The summary page
+
+`index.html` in the output folder (`smappy/batch_page.py`): a row per file
+with its status (the reason on hover), when it was taken, its figures as
+thumbnails linked to the full ones (`<name>/thumbnails/`, made from PNG
+figures; an SVG is shown as it is, a PDF linked), and its `summary.csv`
+numbers.  Above the rows, `trends.png`: the numbers `output.trends` names --
+`summary.csv` columns, patterns allowed -- plotted across the files in the
+order they were taken (`acquired`, else the input's modification time), a
+dashed line at the median.  Without `trends`, every number that differs
+between the files and does not repeat another column, at most twelve.  This
+is instrument QC over time, as Picasso Server's history page: the precision
+or the photon count of the same bead sample, week after week.
+
+The page is static HTML with relative links and no script, so the output
+folder can be zipped or served as it is; while a batch or a watch runs it
+reloads itself every 20 s.  `trends` is not part of the fingerprint: it
+changes the page, not a file's result.  There is no PDF: `trends.png` is the
+figure to put in a report, and the thumbnails are what a browser is for.
+
+### Watching a folder
+
+    smappy-batch watch job.batch.yaml [--settle 10] [--poll 2] [--force]
+
+runs the job on the files the inputs match, then keeps looking (every
+`--poll` seconds) and runs it on each new file once it is **complete**:
+
+* a smappy localization file (`.h5`, `.hdf5`) when its writer has closed it
+  -- `LocalizationWriter` marks the file `writing` until `close`, so a live
+  fit that waits minutes for the next frames is never taken half-way, however
+  quiet the file is.  A file whose writer crashed keeps the mark and is not
+  taken; run it with `smappy-batch run`;
+* any other file when neither its size nor its modification time has changed
+  for `--settle` seconds -- for a Micro-Manager series, of every file of the
+  series, since the writer fills one file and then begins the next.
+
+The rest is `run`'s: what is done with the same fingerprint is skipped, so a
+watch restarted on the same folder carries on where it was, and a file that
+changes after it was run is run again.  A file keeps the output name it was
+first given (a later file with the same stem does not rename its folder).
+The summary, the page and the report are rewritten after each file, with the
+status `watching`.  The job validates as for `run`, except that inputs which
+match nothing yet are fine.
+
+**Stopping.**  Ctrl-C or SIGTERM ends the watch at once: the file in hand is
+left without a record, so it is run again next time, and the report, summary
+and page are written with the status `stopped`.  A line `stop` on stdin ends
+it after the file in hand -- what the batch window's Stop sends, on every
+platform (on Windows a signal can only kill).  The end of stdin is not a
+stop, so a watch started by a scheduler with nothing on its stdin runs on.
+The exit code is 0 once stopped, 2 if the job did not validate.
+
+Not meant for: a chain after a live fit.  The fitter's *after the fit*
+(`plugins/after_fit.py`) runs its steps on the table before it is saved,
+and MicroClaw drives the fit; a watcher would only run the same steps on
+the file a second time.
 
 ### Skipping what is done
 
@@ -357,13 +420,15 @@ whose code changed without its `version` changing counts as the same -- bump
 ### Running it
 
     smappy-batch run job.batch.yaml [--limit N] [--force]
+    smappy-batch watch job.batch.yaml [--settle S] [--poll S] [--force]
     smappy-batch validate job.batch.yaml | chain.chain.yaml
     smappy-batch plugins [prefix]
     smappy-batch describe Analysis/Drift/RCC | chain.chain.yaml
 
 Progress goes to stdout as one line per event (`SMAPPY_START 3/20 path`,
-`SMAPPY_DONE`, `SMAPPY_SKIP`, `SMAPPY_FAILED`, `SMAPPY_REPORT path`), which
-is what the batch window reads.  A failed file costs that file; the exit code
+`SMAPPY_DONE`, `SMAPPY_SKIP`, `SMAPPY_FAILED`, `SMAPPY_REPORT path`; a
+watch begins with `SMAPPY_WATCHING folders` and numbers its files without a
+total, `SMAPPY_START 3 path`), which is what the batch window reads.  A failed file costs that file; the exit code
 is 1 if any failed.
 
 **Validation is strict**, unlike reading a saved form.  `settings_from` drops
@@ -381,16 +446,34 @@ drop, remove, an include tick, a status column), the chain panel (the same
 widget as in the plugin tabs, so a chain is edited the same way everywhere),
 the output options, and **Run**, which writes the job file and starts
 `smappy-batch run` as a subprocess -- so a crash or an exhausted memory costs
-the batch and never the GUI -- and reads its progress lines.
+the batch and never the GUI -- and reads its progress lines.  With *watch*
+ticked, Run starts `smappy-batch watch` instead; Stop then asks it to end
+after the file in hand, and a second Stop ends it at once.  **open summary**
+opens `index.html` in the browser.
 
 ## Not yet
 
 * **Pooling across files** -- one histogram of NPC radii over every cell.
   `summary.csv` is the only aggregate for now; a later "summary chain" could
   run over every file's `results.json`.
-* **Inputs of more than one file.**
-* **Parallel files** (`jobs: N`), for analysis-only chains on many cores.
+* **Several inputs per dataset** -- the channels of one acquisition in
+  separate files, a cell split over several.  Not a batch question alone:
+  the fitters, File > Open and the PSF calibration all take one file per
+  dataset, and it will have to be solved once for all of them (how the files
+  of a dataset are named and paired, what the table records of each).  No
+  use case asks for it yet (`docs/smap_porting/SMAP_porting_plan.md`).
 * **Branching chains.**  Deliberately linear; see above.
+* **A table across batches** (Picasso Server's database of every run): each
+  output folder has its own `summary.csv` and trends.  A watch on one
+  folder for months gives the same for one instrument.
+* **A plugin registry** (Picasso's index with pinned downloads): later
+  (`docs/survey/candidates.md`).
+
+Not wanted: **parallel files** (`jobs: N`, decided 2026-10-28).  The
+analysis is parallel already -- the fitters, the C++ neighbour searches and
+the BLAS under the rest use the cores, and two fits share one GPU no faster
+than one after the other -- so files side by side would mostly multiply the
+memory a batch needs and interleave its logs.
 
 ## For agents
 
@@ -419,9 +502,11 @@ MCP server `smappy-mcp` serves the same plugins as tools
 6. `smappy-batch run job.batch.yaml --limit 1`, then read
    `<output>/<name>/results.json` (status, each step's text and numbers, the
    traceback if it failed) and look at `<output>/<name>/figures/`.
-7. Run the rest; `summary.csv` has a row per file.  Re-running skips what is
-   done with the same settings, so fixing one step and running again only
-   redoes what changed.  `--force` redoes everything.
+7. Run the rest; `summary.csv` has a row per file, and `index.html` shows
+   them with their figures.  Re-running skips what is done with the same
+   settings, so fixing one step and running again only redoes what changed.
+   `--force` redoes everything.  For a folder still being filled,
+   `smappy-batch watch` runs on each file as it arrives.
 
 **Things that are easy to get wrong.**
 

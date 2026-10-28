@@ -171,13 +171,64 @@ def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
             pass
 
     monkeypatch.setattr(module, "QProcess", Process)
-    monkeypatch.setattr(window, "validate", lambda: True)
+    monkeypatch.setattr(window, "validate", lambda need_files=True: True)
     monkeypatch.setattr(window, "save_job", lambda ask=True: tmp_path / "j.batch.yaml")
     window.run()
     for line in (lines[0], f"SMAPPY_SKIP\t1/1\t{tmp_path / 'd' / 'a.h5'}\tdone before"):
         window.handle_line(line)
     assert window.table.item(0, 4).text() == "1 skipped"
 
+
+
+def test_a_watch_is_started_by_the_toggle_and_asked_to_stop_before_it_is_ended(
+        app, tmp_path, monkeypatch):
+    from smappy.gui.batch_window import BatchWindow
+    from smappy.batch import Input
+    import smappy.gui.batch_window as module
+    window = BatchWindow()
+    (tmp_path / "d").mkdir()
+    window.add_input(Input(folder=str(tmp_path / "d")))
+    window.trends.setText("stats.*, n_localizations")
+    assert window.job().output.trends == ["stats.*", "n_localizations"]
+    started, written, ended = [], [], []
+
+    class Process:
+        MergedChannels = None
+
+        def __init__(self, *a):
+            self.readyReadStandardOutput = self.finished = self
+
+        def connect(self, *a):
+            pass
+
+        def setProcessChannelMode(self, *a):
+            pass
+
+        def setProcessEnvironment(self, *a):
+            pass
+
+        def start(self, program, args):
+            started.extend(args)
+
+        def write(self, data):
+            written.append(data)
+
+    monkeypatch.setattr(module, "QProcess", Process)
+    monkeypatch.setattr(module, "stop_process", lambda p: ended.append(p))
+    monkeypatch.setattr(window, "validate", lambda need_files=True: not need_files)
+    monkeypatch.setattr(window, "save_job", lambda ask=True: tmp_path / "j.batch.yaml")
+    window.watch.setChecked(True)
+    window.run()
+    assert started[:3] == ["-m", "smappy.cli.batch", "watch"]
+    for line in (f"SMAPPY_WATCHING\t{tmp_path / 'd'}",
+                 f"SMAPPY_START\t1\t{tmp_path / 'd' / 'a.h5'}",
+                 f"SMAPPY_DONE\t1\t{tmp_path / 'out' / 'a'}"):
+        window.handle_line(line)
+    assert window.table.item(0, 4).text() == "1 done"
+    window.stop()
+    assert written == [b"stop\n"] and not ended      # asked, after the file in hand
+    window.stop()
+    assert len(ended) == 1                           # the second Stop ends it
 
 
 def test_a_block_is_built_in_the_panel_with_its_steps_under_it(app, monkeypatch):

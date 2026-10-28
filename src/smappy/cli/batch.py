@@ -1,6 +1,7 @@
 """Run a chain of plugins over many files, headless.
 
     smappy-batch run JOB.batch.yaml [--limit N] [--force]
+    smappy-batch watch JOB.batch.yaml [--settle S] [--poll S] [--force]
     smappy-batch validate JOB.batch.yaml | CHAIN.chain.yaml
     smappy-batch plugins [PREFIX]
     smappy-batch describe PLUGIN/PATH | CHAIN.chain.yaml
@@ -10,6 +11,10 @@ per event, ``SMAPPY_START<tab>3/20<tab>path`` and so on, which is what the
 batch window reads; everything else a plugin says goes there too, prefixed
 ``SMAPPY_PROGRESS``.  The exit code is 0 when every file was processed (or
 was already), 1 when any failed, and 2 when the job did not validate.
+
+``watch`` runs the job on the files there are and then on each new one as it
+is complete, until Ctrl-C (or ``stop`` on its stdin, which ends it after the
+file in hand: what the batch window sends); it exits with 0 once stopped.
 """
 from __future__ import annotations
 
@@ -48,6 +53,14 @@ def main(argv=None) -> int:
     r.add_argument("--limit", type=int, default=None,
                    help="only the first N files: a trial run")
     r.add_argument("--force", action="store_true",
+                   help="also re-run files already done with the same settings")
+    w = sub.add_parser("watch", help="run a job, and on each new file as it arrives")
+    w.add_argument("job")
+    w.add_argument("--settle", type=float, default=10.0,
+                   help="seconds a file must stay unchanged to count as complete")
+    w.add_argument("--poll", type=float, default=2.0,
+                   help="seconds between looks at the folders")
+    w.add_argument("--force", action="store_true",
                    help="also re-run files already done with the same settings")
     v = sub.add_parser("validate", help="check a job or a chain, run nothing")
     v.add_argument("file")
@@ -89,6 +102,8 @@ def main(argv=None) -> int:
         print(f"{errors} error(s), {len(problems) - errors} warning(s)")
         return 2 if errors else 0
     emit = batch.emitter()
+    if args.command == "watch":
+        return _watch(args, emit)
     try:
         job = batch.read_job(args.job)
         report = batch.run(job, limit=args.limit, force=args.force, emit=emit)
@@ -97,6 +112,25 @@ def main(argv=None) -> int:
             emit("ERROR", line)
         return 2
     return 1 if report["status"] != "complete" else 0
+
+
+def _watch(args, emit) -> int:
+    import signal
+    from .. import batch
+
+    def interrupt(*_):
+        raise KeyboardInterrupt
+    # SIGTERM ends a watch as Ctrl-C does: the report is written, not lost
+    signal.signal(signal.SIGTERM, interrupt)
+    try:
+        job = batch.read_job(args.job)
+        batch.watch(job, settle=args.settle, poll=args.poll, force=args.force,
+                    stop=batch.stop_on_stdin(), emit=emit)
+    except (ValueError, OSError) as error:
+        for line in str(error).splitlines():
+            emit("ERROR", line)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

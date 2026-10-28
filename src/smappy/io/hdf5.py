@@ -48,6 +48,10 @@ class LocalizationWriter:
         self._n = 0
         self._file.attrs["format"] = "smappy-localizations"
         self._file.attrs["format_version"] = FORMAT_VERSION
+        # set until `close`: a batch watching a folder takes a file still
+        # True as one a fit is writing, however long it has not grown
+        # (`batch.is_complete`) -- a live acquisition can pause for minutes
+        self._file.attrs["writing"] = True
         if metadata:
             self.set_metadata(metadata)
 
@@ -115,6 +119,7 @@ class LocalizationWriter:
     def close(self) -> None:
         if self._file:
             self._file.attrs["n_localizations"] = self._n
+            self._file.attrs["writing"] = False
             self._file.close()
             self._file = None
 
