@@ -322,11 +322,23 @@ class Popup(QFrame):
         right = button.mapTo(window, QPoint(button.width(), 0)).x() > window.width() / 2
         at = button.mapToGlobal(QPoint(button.width() - self.width() if right else 0,
                                        button.height()))
-        screen = button.screen().availableGeometry()
-        x = max(screen.left(), min(at.x(), screen.right() - self.width()))
-        y = max(screen.top(), min(at.y(), screen.bottom() - self.height()))
-        self.move(x, y)
+        self.move(self._on_screen(at, button.screen()))
         self.show()
+
+    def _on_screen(self, at: QPoint, screen) -> QPoint:
+        screen = screen.availableGeometry()
+        return QPoint(max(screen.left(), min(at.x(), screen.right() - self.width())),
+                      max(screen.top(), min(at.y(), screen.bottom() - self.height())))
+
+    def resizeEvent(self, event) -> None:
+        # A section unfolded inside it grows it rightwards and down from where
+        # it stands, past the screen's edge when it opened near one (the 3D
+        # window's options, its slab unfolded).
+        super().resizeEvent(event)
+        if self.isVisible():
+            at = self._on_screen(self.pos(), self.screen())
+            if at != self.pos():
+                self.move(at)
 
 
 def detach_to_window(section: CollapsibleSection, parent=None) -> "FloatingWindow":
