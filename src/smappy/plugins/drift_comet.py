@@ -24,8 +24,9 @@ class CometDrift(KeepsDrift, Plugin):
     # 2: "RCC first" and "two stage" run under the spline fit (the default)
     # rather than being skipped by it.  3: a transformation besides the shift
     # (off by default: the shift alone gives the numbers it gave).  4: each
-    # file of the selection corrected by a curve of its own
-    version = "4"
+    # file of the selection corrected by a curve of its own.  5: precision
+    # weights, an error bar from halves of the field, a width of z of its own
+    version = "5"
 
     # Longer than this and the run is worth agreeing to first.  Five minutes
     # is where waiting stops being waiting and starts being a decision.
@@ -76,15 +77,20 @@ class CometDrift(KeepsDrift, Plugin):
 
     def describe(self, ctx, settings) -> FormState:
         """What *within* and *dark frames* on auto take: the session's merge
-        settings; and the transformation's knots are read only when there is
-        a transformation, which only the spline fit has."""
+        settings; the transformation's knots are read only when there is
+        a transformation, which only the spline fit has; the precision
+        weights only by the spline fit of the shift alone, and the error bar
+        not with a transformation."""
         dx, dt = merge_values(ctx.session if ctx is not None else None)
+        shift = settings.transformation == "shift"
         return FormState(
             hints={"group_dx_nm": dx, "group_dt": dt,
                    "transformation_knot_frames": settings.spline_knot_frames},
             active={"transformation": settings.spline,
                     "transformation_knot_frames":
-                        settings.spline and settings.transformation != "shift"})
+                        settings.spline and not shift,
+                    "precision_weights": settings.spline and shift,
+                    "split_half": shift or not settings.spline})
 
     def run(self, ctx: Context, settings: DriftSettings) -> Result:
         settings = merge_from_session(settings, ctx.session)

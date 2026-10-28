@@ -123,7 +123,9 @@ def test_the_reference_frame_is_left_where_it_was():
         assert drift.reference == reference
 
 
-def test_the_kernels_gradient_is_the_costs_derivative():
+@pytest.mark.parametrize("z_factor", [1.0, 2.5])
+def test_the_kernels_gradient_is_the_costs_derivative(z_factor):
+    """With one width for all axes, and with z's wider (*z width*)."""
     rng = np.random.default_rng(0)
     n, n_frames = 2000, 40
     coords = np.column_stack([rng.uniform(0, 5000, n), rng.uniform(0, 5000, n),
@@ -143,7 +145,7 @@ def test_the_kernels_gradient_is_the_costs_derivative():
 
         def cost(f, m):
             return fit.cost(f, np.ascontiguousarray(m), frames, idx_i, idx_j,
-                            100.0, 1.0, 0.1)
+                            100.0, 1.0, 0.1, z_factor)
 
         _, d_mu, d_flat = cost(flat, mu)
         eps = 1e-4
@@ -158,7 +160,8 @@ def test_the_kernels_gradient_is_the_costs_derivative():
         assert numeric == pytest.approx(d_mu[5, 1], rel=1e-5, abs=1e-12)
 
 
-def test_with_identity_matrices_the_kernel_is_the_plain_one():
+@pytest.mark.parametrize("z_factor", [1.0, 2.5])
+def test_with_identity_matrices_the_kernel_is_the_plain_one(z_factor):
     rng = np.random.default_rng(2)
     n, n_frames = 1500, 30
     coords = rng.uniform(0, 3000, (n, 3)).astype(np.float32)
@@ -169,9 +172,9 @@ def test_with_identity_matrices_the_kernel_is_the_plain_one():
     params = np.column_stack([np.tile(np.eye(3).ravel(), (n_frames, 1)), mu,
                               np.ones(n_frames), np.ones(n_frames)])
     plain, gradient = _drift.cost_and_gradient(coords, frames, idx_i, idx_j, mu,
-                                               80.0, 1.0)
+                                               80.0, 1.0, z_factor=z_factor)
     total, full = _drift.transformed_cost_and_gradient(
-        coords, frames, idx_i, idx_j, params, 80.0, 1.0)
+        coords, frames, idx_i, idx_j, params, 80.0, 1.0, z_factor=z_factor)
     assert total == pytest.approx(plain, rel=1e-12)
     np.testing.assert_allclose(full[:, 9:12], gradient, rtol=1e-9, atol=1e-12)
 

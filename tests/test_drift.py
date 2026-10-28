@@ -281,6 +281,58 @@ def test_the_compiled_kernel_matches_comets_reference():
     assert np.allclose(got_grad, want_grad, rtol=1e-10, atol=1e-15)
 
 
+@pytest.mark.parametrize("z_factor,weighted", [(2.5, False), (1.0, True), (2.0, True)])
+def test_the_kernel_with_a_z_width_and_precisions_matches_the_reference(z_factor,
+                                                                        weighted):
+    """Per axis: z's own width, and each localization's own precision."""
+    from smappy import _drift
+    from smappy._comet.core.cpu_wrapper import _cost_and_gradient_reference
+
+    case = _cost_case()
+    rng = np.random.default_rng(8)
+    variances = (rng.uniform(5, 40, (len(case[0]), 3)) ** 2) if weighted else None
+    want_total, want_grad = _cost_and_gradient_reference(
+        *case, 30.0, 1.0, z_factor=z_factor, variances=variances)
+    got_total, got_grad = _drift.cost_and_gradient(
+        *case, 30.0, 1.0, z_factor=z_factor, variances=variances)
+    assert got_total == pytest.approx(want_total, rel=1e-12)
+    assert np.allclose(got_grad, want_grad, rtol=1e-10, atol=1e-15)
+
+
+def test_precise_localizations_weigh_what_they_did_without_weights():
+    """Zero precision is COMET's kernel exactly, and a wider z is a z
+    measured in larger units."""
+    from smappy import _drift
+
+    coords, times, idx_i, idx_j, mu = _cost_case()
+    plain = _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu, 30.0, 1.0)
+    zero = _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu, 30.0, 1.0,
+                                    variances=np.zeros((len(coords), 3)))
+    assert zero[0] == pytest.approx(plain[0], rel=1e-12)
+    np.testing.assert_allclose(zero[1], plain[1], rtol=1e-12, atol=1e-18)
+
+    scaled = coords * [1.0, 1.0, 0.5]
+    wide = _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu, 30.0, 1.0,
+                                    z_factor=2.0)
+    narrow = _drift.cost_and_gradient(scaled, times, idx_i, idx_j, mu * [1, 1, 0.5],
+                                      30.0, 1.0)
+    assert wide[0] == pytest.approx(narrow[0], rel=1e-12)
+
+
+def test_an_imprecise_pair_counts_less():
+    from smappy import _drift
+
+    coords = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+    times = np.array([0, 1])
+    pair = (np.array([0]), np.array([1]))
+    mu = np.zeros((2, 3))
+    sharp = _drift.cost_and_gradient(coords, times, *pair, mu, 30.0, 1.0,
+                                     variances=np.full((2, 3), 25.0))[0]
+    blurred = _drift.cost_and_gradient(coords, times, *pair, mu, 30.0, 1.0,
+                                       variances=np.full((2, 3), 900.0))[0]
+    assert blurred < sharp
+
+
 def test_threading_does_not_change_the_answer():
     """The gradient is a scatter-add; per-thread buffers must sum to the same."""
     from smappy import _drift
@@ -325,6 +377,21 @@ def test_quality_control_counts_match_the_reference():
     cross = times[idx_i] != times[idx_j]
     assert counts.sum() == pytest.approx(2 * cross.sum())
     assert (observed >= 0).all() and (null >= 0).all()
+
+
+def test_quality_control_measures_z_in_its_own_width():
+    """The overlap per window is the cost's, *z width* included: the sum of
+    both over windows is twice the cost over the pairs between windows."""
+    from smappy import _drift
+
+    coords, times, idx_i, idx_j, mu = _cost_case()
+    cross = times[idx_i] != times[idx_j]
+    for z_factor in (1.0, 2.5):
+        observed, _, _ = _drift.overlap_per_segment(
+            coords, times, idx_i, idx_j, mu, 30.0, 1.0, z_factor=z_factor)
+        total, _ = _drift.cost_and_gradient(coords, times, idx_i[cross], idx_j[cross],
+                                            mu, 30.0, 1.0, z_factor=z_factor)
+        assert observed.sum() == pytest.approx(2 * total, rel=1e-10)
 
 
 def test_drift_correction_needs_no_plotting_library(monkeypatch):
@@ -569,3 +636,120 @@ def test_a_drift_on_a_time_axis_is_referenced_and_added_on_its_own_axis_only():
         Drift(np.zeros((3, 3)), times_s=times, matrix=np.tile(np.eye(3), (3, 1, 1)))
     with pytest.raises(ValueError, match="no time_s"):
         drift.apply(Localizations({"x_nm": np.zeros(2), "frame": np.arange(2)}, {}))
+
+
+# ------------------------------------------- precisions, and the error bar
+
+def simulate_3d(n_points=300, n_frames=2000, per_frame=15, seed=1, pinned=0.0,
+                amplitude=40.0):
+    """A 3D structure seen with its precisions, z three times worse than x
+    and y, moved by a smooth drift; ``pinned`` of the localizations are
+    out-of-focus fits held at z = +-400 nm whatever the drift, and say so in
+    their precisions."""
+    rng = np.random.default_rng(seed)
+    structure = np.column_stack([rng.uniform(0, 4000, n_points),
+                                 rng.uniform(0, 4000, n_points),
+                                 rng.uniform(-300, 300, n_points)])
+    t = np.arange(n_frames) / n_frames
+    drift = amplitude * np.column_stack([np.sin(5 * t + 0.3), np.cos(4 * t),
+                                         np.sin(6 * t + 1.0)])
+    frame = np.repeat(np.arange(n_frames), per_frame)
+    true = structure[rng.integers(0, n_points, frame.size)]
+    xy_err = rng.uniform(4, 12, frame.size)
+    z_err = 3 * xy_err
+    xyz = (true + drift[frame]
+           + rng.normal(size=(frame.size, 3)) * np.column_stack([xy_err, xy_err, z_err]))
+    bad = rng.random(frame.size) < pinned
+    xy_err[bad], z_err[bad] = 30.0, 200.0
+    xyz[bad, :2] = (true + drift[frame])[bad, :2] + rng.normal(0, 30, (bad.sum(), 2))
+    xyz[bad, 2] = np.where(true[bad, 2] >= 0, 400.0, -400.0)
+    locs = Localizations({"frame": frame, "x_nm": xyz[:, 0], "y_nm": xyz[:, 1],
+                          "z_nm": xyz[:, 2], "xy_err_nm": xy_err, "z_err_nm": z_err},
+                         {"units": "nm"})
+    return locs, drift
+
+
+SPLINE_3D = DriftSettings(max_drift_nm=150, group=False, spline_knot_frames=250)
+
+
+def _rms_error(drift, truth):
+    error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
+    return np.sqrt(np.mean(error ** 2, axis=0))
+
+
+def test_precision_weights_keep_pinned_fits_from_holding_z():
+    """Out-of-focus fits pinned in z do not follow the drift and pull the
+    axial estimate towards none; their precisions say they are poor, and
+    weighted by them they count for little -- what needed a hand-set z cut."""
+    from dataclasses import replace
+
+    locs, truth = simulate_3d(pinned=0.3)
+    plain = estimate_drift(locs, replace(SPLINE_3D, precision_weights=False,
+                                         split_half=False))
+    weighted = estimate_drift(locs, replace(SPLINE_3D, split_half=False))
+    assert _rms_error(plain, truth)[2] > 2.5
+    assert _rms_error(weighted, truth)[2] < 0.6 * _rms_error(plain, truth)[2]
+
+
+def test_the_error_bar_is_the_noise_of_a_curve_where_there_is_no_drift():
+    """With no drift the curve is its noise, and the halves of the field
+    measure it: the curve's spread about its mean is about the noise they
+    give, and no axis is called drift."""
+    locs, _ = simulate_3d(amplitude=0.0)
+    drift = estimate_drift(locs, SPLINE_3D)
+    assert drift.halves.shape == (2, len(drift), 3)
+    spread = np.sqrt(np.mean((drift.drift - drift.drift.mean(0)) ** 2, axis=0))
+    assert np.all((0.4 < spread / drift.noise_nm) & (spread / drift.noise_nm < 2.0))
+    assert drift.insignificant_axes() == "xyz"
+    assert "no drift above the noise in x, y, z" in str(drift)
+
+
+def test_a_real_drift_is_more_than_its_noise():
+    locs, truth = simulate_3d()
+    drift = estimate_drift(locs, SPLINE_3D)
+    assert drift.insignificant_axes() == ""
+    assert np.all(drift.noise_nm < 1.0)
+    # the halves lie about the curve, as far apart as the noise says
+    for half in drift.halves:
+        assert np.sqrt(np.mean((half - drift.drift) ** 2)) < 5 * drift.noise_nm.max()
+
+
+def test_the_halves_are_kept_moved_with_the_reference_and_drawn():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from dataclasses import replace
+
+    locs, _ = simulate_3d(n_frames=600, seed=2)
+    drift = estimate_drift(locs, replace(SPLINE_3D, reference="first frame"))
+    np.testing.assert_allclose(drift.drift[0], 0.0, atol=1e-9)
+    # moved with the curve: about it still, not each to zero at frame 0
+    assert np.abs(drift.halves[:, 0]).max() < 5.0
+    again = Drift.from_dict(drift.to_dict())
+    np.testing.assert_allclose(again.halves, drift.halves, atol=1e-3)
+    np.testing.assert_allclose(again.noise_nm, drift.noise_nm, atol=1e-3)
+    assert drift.apply(locs).metadata["drift_correction"]["noise_nm"] is not None
+    ax = drift.plot()
+    assert sum(line.get_linestyle() == "--" for line in ax.get_lines()) == 6
+    plt.close(ax.figure)
+
+
+def test_without_the_error_bar_there_are_no_halves_and_half_the_cost():
+    from dataclasses import replace
+
+    locs, _ = simulate_3d(n_frames=600)
+    drift = estimate_drift(locs, replace(SPLINE_3D, split_half=False))
+    assert drift.halves is None and drift.noise_nm is None
+    assert "noise" not in str(drift)
+    with_bar = estimate_cost(locs, SPLINE_3D)
+    without = estimate_cost(locs, replace(SPLINE_3D, split_half=False))
+    assert with_bar.seconds > 1.5 * without.seconds
+
+
+def test_rcc_has_the_error_bar_too():
+    from smappy.rcc import RCCSettings, estimate_drift_rcc
+
+    locs, _ = simulate_3d(n_frames=600)
+    drift = estimate_drift_rcc(locs, RCCSettings(n_timepoints=6, group=False))
+    assert drift.halves.shape == (2, len(drift), 3)
+    assert drift.noise_nm is not None

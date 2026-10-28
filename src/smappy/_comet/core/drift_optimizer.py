@@ -105,7 +105,7 @@ def comet_run_kd(dataset, segmentation_mode, segmentation_var, max_locs_per_segm
                  save_corrected_locs=False, save_filepath=None, save_intermediate_results=False,
                  save_correction_details=False, pixelsize_nm=160.0, pixelsize_z_nm=None,
                  interpolation_method='cubic', mode=None, min_max_frames=None,
-                 pair_indices_safety_check=False, interactive=False):
+                 pair_indices_safety_check=False, interactive=False, z_factor=1.0):
     """
         Run COMET drift correction end-to-end.
 
@@ -152,6 +152,9 @@ def comet_run_kd(dataset, segmentation_mode, segmentation_var, max_locs_per_segm
         pixelsize_z_nm : float or None, default=None
             Axial pixel size in nm for the saved molecule set. Defaults to
             pixelsize_nm.
+        z_factor : float, default=1.0
+            smappy: the overlap Gaussian's width in z as a multiple of its
+            lateral width (`csrc/drift.hpp`); 1 is upstream's one sigma.
 
         Returns
         -------
@@ -193,7 +196,7 @@ def comet_run_kd(dataset, segmentation_mode, segmentation_var, max_locs_per_segm
         boxcar_width=boxcar_width,
         segmentation_result=result,
         save_intermdiate_results=save_intermediate_results,
-        mode=mode
+        mode=mode, z_factor=z_factor
     )
     elapsed = time.time() - t0
 
@@ -294,7 +297,8 @@ def optimize_3d_chunked_better_moving_avg_kd(n_segments, locs_nm, idx_i, idx_j, 
                                              save_intermdiate_results=False,
                                              boxcar_width=3, drift_max_bound_factor=2,
                                              segmentation_result=None,
-                                             mode=None, return_calc_time=False):
+                                             mode=None, return_calc_time=False,
+                                             z_factor=1.0):
     """
     Estimate per-segment drift (mu) by minimizing the negative Gaussian-overlap cost
     with an L-BFGS-B optimizer and a coarse-to-fine schedule on sigma.
@@ -377,6 +381,12 @@ def optimize_3d_chunked_better_moving_avg_kd(n_segments, locs_nm, idx_i, idx_j, 
     wrapper = CPU_WRAPPER
     if quality_control:
         qc_wrapper = cpu_wrapper_chunked_qc
+    if z_factor != 1.0:
+        # smappy: the width per axis, which only smappy's wrappers take
+        from functools import partial
+        wrapper = partial(wrapper, z_factor=z_factor)
+        if quality_control:
+            qc_wrapper = partial(qc_wrapper, z_factor=z_factor)
 
     # Initial drift estimate + bounds
     drift_est = np.zeros(n_segments * 3)

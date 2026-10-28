@@ -41,17 +41,30 @@ template <class Coord, class Index>
 py::tuple cost_and_gradient(const Array<Coord>& coords, const Array<Index>& times,
                             const Array<Index>& idx_i, const Array<Index>& idx_j,
                             const Doubles& mu, double sigma, double sigma_factor,
-                            double cutoff_sigmas, int n_threads) {
+                            double cutoff_sigmas, int n_threads, double z_factor,
+                            const py::object& variances) {
     check<Coord, Index>(coords, times, idx_i, idx_j, mu);
     const int64_t n_segments = mu.shape(0);
     const int64_t n_pairs = idx_i.size();
+    if (!(z_factor > 0.0)) throw std::invalid_argument("z_factor must be positive");
+    // per-localization variances, (n, 3), or none (`drift.hpp`)
+    Doubles var;
+    const double* var_data = nullptr;
+    if (!variances.is_none()) {
+        var = Doubles::ensure(variances);
+        if (!var || var.ndim() != 2 || var.shape(0) != coords.shape(0) ||
+            var.shape(1) != 3)
+            throw std::invalid_argument("variances must be (n, 3), one row per localization");
+        var_data = var.data();
+    }
 
     smappy::DriftCost result;
     {
         py::gil_scoped_release release;
         result = smappy::cost_and_gradient<Coord, Index>(
             coords.data(), times.data(), idx_i.data(), idx_j.data(), mu.data(),
-            n_pairs, n_segments, sigma, sigma_factor, cutoff_sigmas, n_threads);
+            n_pairs, n_segments, sigma, sigma_factor, cutoff_sigmas, n_threads,
+            z_factor, var_data);
     }
 
     py::array_t<double> gradient(std::vector<py::ssize_t>{n_segments, 3});
@@ -63,7 +76,7 @@ template <class Coord, class Index>
 py::tuple overlap_per_segment(const Array<Coord>& coords, const Array<Index>& times,
                               const Array<Index>& idx_i, const Array<Index>& idx_j,
                               const Doubles& mu, double sigma, double sigma_factor,
-                              int n_threads) {
+                              int n_threads, double z_factor) {
     check<Coord, Index>(coords, times, idx_i, idx_j, mu);
     const int64_t n_segments = mu.shape(0);
     const int64_t n_pairs = idx_i.size();
@@ -73,7 +86,7 @@ py::tuple overlap_per_segment(const Array<Coord>& coords, const Array<Index>& ti
         py::gil_scoped_release release;
         out = smappy::overlap_per_segment<Coord, Index>(
             coords.data(), times.data(), idx_i.data(), idx_j.data(), mu.data(),
-            n_pairs, n_segments, sigma, sigma_factor, n_threads);
+            n_pairs, n_segments, sigma, sigma_factor, n_threads, z_factor);
     }
 
     auto to_array = [n_segments](const std::vector<double>& v) {
@@ -90,7 +103,7 @@ py::tuple transformed_cost_and_gradient(
         const Array<Coord>& coords, const Array<Index>& times,
         const Array<Index>& idx_i, const Array<Index>& idx_j,
         const Doubles& params, double sigma, double sigma_factor,
-        double cutoff_sigmas, int n_threads) {
+        double cutoff_sigmas, int n_threads, double z_factor) {
     if (coords.ndim() != 2 || coords.shape(1) != 3)
         throw std::invalid_argument("coords must be (n, 3)");
     if (params.ndim() != 2 || params.shape(1) != 14)
@@ -108,7 +121,7 @@ py::tuple transformed_cost_and_gradient(
         result = smappy::transformed_cost_and_gradient<Coord, Index>(
             coords.data(), times.data(), idx_i.data(), idx_j.data(), params.data(),
             n_pairs, n_frames, sigma, sigma_factor, cutoff_sigmas,
-            n_threads);
+            n_threads, z_factor);
     }
     py::array_t<double> gradient(std::vector<py::ssize_t>{n_frames, 14});
     std::copy(result.gradient.begin(), result.gradient.end(), gradient.mutable_data());
@@ -121,17 +134,20 @@ void bind(py::module_& m) {
           py::arg("times"), py::arg("idx_i"), py::arg("idx_j"), py::arg("mu"),
           py::arg("sigma"), py::arg("sigma_factor"),
           py::arg("cutoff_sigmas") = 0.0, py::arg("n_threads") = 0,
-          "Pair overlap and its gradient; cutoff_sigmas <= 0 is the exact kernel.");
+          py::arg("z_factor") = 1.0, py::arg("variances") = py::none(),
+          "Pair overlap and its gradient; cutoff_sigmas <= 0 is the exact kernel, "
+          "z_factor is sigma_z / sigma_xy, variances (n, 3) each localization's.");
     m.def("overlap_per_segment", &overlap_per_segment<Coord, Index>,
           py::arg("coords"), py::arg("times"), py::arg("idx_i"), py::arg("idx_j"),
           py::arg("mu"), py::arg("sigma"), py::arg("sigma_factor"),
-          py::arg("n_threads") = 0,
+          py::arg("n_threads") = 0, py::arg("z_factor") = 1.0,
           "(observed, null, counts) per time window, for quality control.");
     m.def("transformed_cost_and_gradient",
           &transformed_cost_and_gradient<Coord, Index>, py::arg("coords"),
           py::arg("times"), py::arg("idx_i"), py::arg("idx_j"), py::arg("params"),
           py::arg("sigma"), py::arg("sigma_factor"),
           py::arg("cutoff_sigmas") = 0.0, py::arg("n_threads") = 0,
+          py::arg("z_factor") = 1.0,
           "Pair overlap and its gradient with a linear transformation per frame.");
 }
 

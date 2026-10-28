@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
+covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve, smappy.drift.split_halves, smappy.drift.Drift.noise_nm]
 ---
 
 ## What it does
@@ -236,6 +236,13 @@ in each); more windows follow faster drift.  Twenty windows is a good start
 for an acquisition of 10 000 to 50 000 frames.  If the curve looks noisy,
 use fewer windows; if it looks like it cuts corners, use more, or COMET.
 
+**The error bar** (*error bar*).  As in [COMET](plugin:Analysis/Drift/COMET):
+the selected localizations are cut at the median of x or of y, whichever
+they spread further along, the estimate is made again from each half, and
+half the root mean square of the halves' difference is the curve's noise.
+An axis whose curve moves less than twice that noise is reported as having
+no drift above it.  It costs two more estimates, each from half the data.
+
 ## Parameters
 
 The ones shown without *more* are the ones worth looking at; the defaults of
@@ -264,15 +271,21 @@ wide range lets its maximum wander.
 ### exclude_zero_lag
 See *In detail*.
 
+### split_half
+It triples a run that takes seconds.  Off only where those seconds matter,
+as in a batch of many files.
+
 ## Output
 
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
   the pixel columns) of every localization.  The correction is recorded in the
   file's history and can be undone.
 * **The drift curve**, x, y and z against frame (*Show result*), one per
-  file when the selection holds several.  It is
-  saved with the file and drawn again when it is reopened.
-* **The text** gives the range of the drift in x, y and z.
+  file when the selection holds several, with the halves' curves dashed in
+  the same colours.  It is saved with the file and drawn again when it is
+  reopened.
+* **The text** gives the range of the drift in x, y and z, its noise from
+  the error bar, and the axes with no drift above the noise.
 
 A curve that is smooth and plausible (a few hundred nanometres at most, slow
 changes) is a good sign.  A curve that jumps between windows means the

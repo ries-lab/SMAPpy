@@ -51,6 +51,8 @@ they are not tried again:
   clustered, and going 300 -> 150 nm removes just 21% of the pairs.
 * the PyTorch/MPS backend on Apple silicon: the index tensors alone are 5 GB on
   the device and a single cost evaluation did not finish in ten minutes.
+  (COMET's CUDA and torch backends were removed in 2026-10: they served only
+  the time-window fit, nobody ran them, and the torch one could not import.)
 
 ## Saying what it will cost, before it costs it
 
@@ -163,7 +165,9 @@ per frame is one molecule (multi-emitter fits are removed by the log-likelihood
 cut), and a molecule does not move in z between consecutive frames, so averaging
 z only makes it more precise.
 
-**Filter before estimating, and include z.**  Without a z cut the two estimates
+**Filter before estimating, and include z.**  (On simulations the precision
+weights now do most of this filter's work; see "Precision weights and the
+width in z".  This dataset has not been run again with them.)  Without a z cut the two estimates
 disagreed by 8.2 nm rms and the ungrouped z drift range came out 113 nm against
 the grouped 75 nm -- which looked like grouping damaging the axial estimate, and
 was not.  `z_err_nm` has a median of 41 nm and a 95th percentile of 108 nm: the
@@ -191,7 +195,7 @@ the grouped-vs-ungrouped rms (4.3 nm in y) over its median (0.6 nm).
 COMET's answer to this is quality control: per segment, compare the overlap the
 fitted drift achieves against the overlap with no drift correction at all, and
 NaN the segments that fail, so the spline bridges them.  It was wired into the
-`cuda_qc` and `torch_qc` backends only; the CPU path raised "not implemented".
+`cuda_qc` and `torch_qc` backends only (since removed); the CPU path raised "not implemented".
 It now works there (`cpu_wrapper_chunked_qc`, `DriftSettings.quality_control`,
 `--qc`), one extra pass over the pairs, about 4 s of the 150 s run.
 
@@ -432,3 +436,141 @@ What is left is a real trade, not a free win, so it stays a parameter:
 falls roughly quadratically -- 2000 per window is 10x faster (33 s) and moves
 the drift by 2.5 nm rms, 1000 per window is 15x faster and moves it by 6 nm.
 Worth it for a first look at a large dataset, not for the final result.
+
+## Precision weights and the width in z
+
+COMET's overlap counts every pair alike, with one Gaussian width for x, y
+and z.  Two things were tried against that (survey candidate #4,
+`docs/survey/drift_averaging_fitting.md`, DME): **(a)** a wider Gaussian in
+z, $\sigma_z = f\sigma$, with $f = 3$ -- the median `z_err_nm` /
+`xy_err_nm` of these data, which was the plan for its default; **(b)** DME's weighting, each pair a Gaussian of variance
+$2\sigma^2 + p_i^2 + p_j^2$ per axis from the two localizations' own
+precisions, normalised as a density, so an imprecise pair is low and wide.
+Between them, the same widening with every localization given the median
+precision.  Both are in the kernel (`csrc/drift.hpp`: `z_factor`,
+`variances`).
+
+**On simulations, not the clathrin dataset**: `studies/drift_weights`
+(README there): 3D filaments through 600 nm of z, median precision 14 nm
+laterally and 41 nm in z, 90-150 nm of slow drift over 20 000 frames,
+defaults otherwise (merged blinks, 2000-frame knots, target sigma 30 nm).
+rms error of the curve against the drift put in, nm, x / y / z, over four
+seeds:
+
+| data | COMET | z width 3 | median precision | **precision weights** |
+|---|---|---|---|---|
+| dense (100 k locs), `xy_err_nm < 15` | 0.51 / 0.44 / 0.59 | 0.51 / 0.43 / 0.71 | 0.50 / 0.43 / 0.58 | **0.49 / 0.42 / 0.54** |
+| dense, everything | 0.48 / 0.50 / 0.56 | 0.56 / 0.54 / 1.16 | 0.51 / 0.54 / 0.65 | **0.50 / 0.40 / 0.49** |
+| dense, 20% imprecise | 0.52 / 0.53 / 0.68 | 0.59 / 0.58 / 1.68 | 0.57 / 0.59 / 0.98 | **0.53 / 0.44 / 0.57** |
+| sparse (35 k locs) | 0.78 / 0.89 / 1.13 | 0.82 / 0.94 / 1.80 | 0.86 / 0.92 / 1.22 | **0.71 / 0.79 / 0.98** |
+| sparse, 20% pinned | 0.83 / 0.87 / 1.42 | 0.88 / 0.95 / 2.41 | 1.02 / 0.98 / 2.20 | **0.75 / 0.85 / 1.14** |
+| the same, `z_err_nm < 100` | 0.72 / 0.91 / 1.26 | | | 0.72 / 0.88 / 1.09 |
+| drift x2, 40% pinned | 4.35 / 1.94 / 4.62 | 5.65 / 2.61 / 15.4 | | **4.19 / 2.15 / 2.46** |
+| the same, `z_err_nm < 100` | 3.24 / 1.56 / 1.82 | | | 3.37 / 1.67 / 1.63 |
+
+*Imprecise*: a fraction of the localizations given 20-40 nm laterally and
+150-300 nm in z, recorded so and moved so at random.  *Pinned*: out-of-focus
+fits held at z = ±400 nm whatever the z drift, recorded as imprecise -- the
+fit's edge, which is what "the out-of-focus tail carries the axial estimate
+away" above most likely was.  (The x errors of the last two rows are the
+drift reaching *max drift*: see below.)
+
+* **(a) is worse at the default target sigma**, in z always and by a lot
+  where there is junk: 30 nm is already wider than most z precisions, and a
+  Gaussian three times wider lets the pinned planes, which do not move with
+  the drift, outvote the structure (15 nm against 4.6; with $f$ taken from
+  the junk-laden data's own median ratio, above 3, it was 23 nm).  Widening by the
+  median precision is the same mistake, smaller.
+* **(b) is better everywhere**: 10-20% on every axis on clean data, and
+  half of COMET's axial error with 40% pinned junk -- within a nanometre of
+  what the hand-set cut on z gives, which is what it was for.  With the cut
+  as well it is better again.  It costs nothing measurable (one more load
+  and a square root per pair).
+
+The ranking of (a) turns only at a target sigma near the lateral precision,
+where 30 nm in z is narrower than z's precision (sparse, four seeds):
+
+| target sigma | COMET | z width 3 | precision weights |
+|---|---|---|---|
+| 30 nm | 0.78 / 0.89 / 1.13 | 0.82 / 0.94 / 1.80 | **0.71 / 0.79 / 0.98** |
+| 15 nm | 0.66 / 0.64 / 1.12 | 0.64 / 0.62 / 1.09 | **0.58 / 0.51 / 0.97** |
+| 8 nm | 0.58 / 0.52 / 1.83 | 0.53 / 0.46 / **1.17** | **0.45 / 0.36** / 1.20 |
+
+and there the weights do as well.  So **(b) is on by default**
+(`DriftSettings.precision_weights`), and (a) is a setting at 1 (*z width*).
+Two things are worth a look on real data: a smaller default target sigma
+(15 nm was better on every axis with the weights here, but these
+simulations have no aberrations, no mislocalized multi-emitter fits and no
+uneven structure), and DME's other ingredient, the logarithm of each
+localization's neighbour sum, which saturates a dense cluster.
+
+## Every run says its noise
+
+The noise floor above was measured by hand, once.  It is now part of every
+COMET and RCC run (*error bar*, on by default): the estimate is made again
+from each half of the field, cut at the median of x or y, whichever the
+selection spreads along further -- DME's split, which is a split by
+molecule, as "Two ways to be wrong" asks -- and the noise is half the rms
+of the halves' difference.  It doubles a COMET run (each half has about
+half the pairs), and the cost estimate says so.  On the simulations of the
+table above the reported noise and the true error agreed to within a
+factor of about 1.5 in either direction wherever the error was noise (2 in
+the unit tests' small simulation, `tests/test_drift.py`); it
+does not see a bias the halves share -- 40% pinned junk had 4.6 nm of
+axial error and reported 1.4 nm of noise.
+
+## Wavy drift where there is none
+
+COMET on a simulation with no drift returns a curve that wanders by a few
+nm.  Is that the noise of the estimate or a bias of the spline (knots every
+2000 frames, no penalty)?  Noise, on every count (`studies/drift_weights`,
+`driftless`; rms of the curve about its mean, x / y / z, against the noise
+the error bar reports, three seeds):
+
+| density | locs | knots 500 | 1000 | 2000 | 4000 | noise at 2000 |
+|---|---|---|---|---|---|---|
+| 0.01 / nm | 18 k | 1.9 / 1.9 / 2.5 | 1.3 / 1.3 / 1.6 | 0.8 / 1.0 / 1.2 | 0.6 / 0.9 / 1.0 | 1.0 / 1.0 / 1.3 |
+| 0.02 / nm | 35 k | 1.4 / 1.4 / 1.7 | 0.9 / 1.0 / 1.2 | 0.6 / 0.8 / 0.9 | 0.5 / 0.7 / 0.7 | 0.8 / 0.6 / 0.8 |
+| 0.04 / nm | 72 k | 0.9 / 1.0 / 1.1 | 0.6 / 0.8 / 0.8 | 0.4 / 0.6 / 0.6 | 0.3 / 0.5 / 0.6 | 0.4 / 0.5 / 0.6 |
+| 0.08 / nm | 140 k | 0.6 / 0.7 / 0.9 | 0.4 / 0.4 / 0.7 | 0.3 / 0.3 / 0.5 | 0.2 / 0.3 / 0.3 | 0.3 / 0.4 / 0.5 |
+
+* it falls as $1/\sqrt{\mathrm{density}}$ (0.83, 0.61, 0.41, 0.30 nm in x at
+  2000-frame knots: a factor 0.7 per doubling);
+* it grows as the knots get finer, by about $\sqrt{2}$ per halving;
+* it is the split-half noise, cell by cell: the ratio of the two had a
+  median of 1.0 and a largest value of 1.7 over 144 curves' axes.
+
+Peak to peak that is 3-15 nm at the sparsest -- "a few nm of wavy drift" --
+and a spline whose coefficients fit noise looks wavy with a period of a few
+knots.  A spline bias would not fall with density, and with no drift there
+is nothing for the spline to miss.  The precision weights take 10-15% off
+it (0.01 / nm: 1.01 / 1.03 / 1.20 nm without, 0.83 / 0.97 / 1.20 with).
+
+What is done about it: **the text says when a curve is not drift.**  An
+axis whose rms about its mean is below twice its split-half noise is
+reported as "no drift above the noise" (`Drift.insignificant_axes`,
+`SIGNIFICANT`); the largest null ratio, 1.7, is below that, and a real drift
+is tens of times its noise.  The simulation's default scene with no drift
+now says so on all three axes, and with its drift on none.
+
+Not done, and the next step if wanted: **choosing the knot spacing from the
+data.**  The halves give an out-of-sample criterion for free -- fit the
+curve on one half, score the overlap of the other half's pairs under it,
+and take the spacing where that is largest -- which is the out-of-sample
+sharpness this file used to pick 2000 frames by hand.  It costs a fit of
+each half per candidate spacing (four candidates: about four times a run),
+and on the clathrin data that sharpness was flat from 1000 to 4000 frames,
+so it would mostly confirm the default.  A penalty chosen the same way is
+the alternative; the knot spacing is the more readable knob.
+
+## Drift close to max drift is underestimated
+
+Found along the way: with 150 nm of drift range and *max drift* 150 nm the
+curve came out with 9.5 nm rms error in x, shaped like a shrunken copy of
+the drift; at 300 nm the same data gave 0.2 nm.  The pairs are found once,
+in the uncorrected positions, so a molecule seen at two times further apart
+than *max drift* never pairs with itself, and the pairs that remain favour
+smaller drifts.  With 305 nm of drift range and *max drift* 300 nm the bias
+was 3-4 nm (the last two rows of the first table).  *max drift* wants
+margin over the largest drift, not equality.
+
