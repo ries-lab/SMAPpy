@@ -44,7 +44,7 @@ from ..gui.widgets import CollapsibleSection
 from .core import CalibrationSettings
 from .dual import DualColorSettings
 from .elliptical import EllipticalCalibrationSettings
-from .input import acquisition_kind, discover_acquisitions
+from .input import acquisition_kind, discover_acquisitions, is_fourpi_scan
 from .psf_methods import AVERAGE_ONLY, METHODS, MODES, LearningProgress, duration, for_mode
 from .insitu import InSituSettings
 from .insitu_run import InSituModelSettings
@@ -697,7 +697,11 @@ class PSFCalibrationWindow(QMainWindow):
     def _check_kind(self, paths) -> None:
         """A movie added to a bead method, or a bead z-stack to in situ: said at once, with the method that
         reads it offered (`input.acquisition_kind`).  A movie read as a bead stack read every page into
-        memory and ended in a refusal long enough to widen the window."""
+        memory and ended in a refusal long enough to widen the window.  4Pi scans (DCIMG, quadrant .mat)
+        switch the window to the 4Pi mode, the only one that reads them."""
+        if paths and not self.is_fourpi and all(is_fourpi_scan(p) for p in paths):
+            self.mode_box.setCurrentText("4Pi")
+            return
         movies = getattr(self.method, "files", "") == "movies"
         wrong = []
         for path in paths:

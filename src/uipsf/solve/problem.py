@@ -92,6 +92,8 @@ class Problem:
         if tangents is None:
             cap = TANGENT_MAX if self.device.type == "cpu" else 16
             tangents = max(1, min(cap, budget // (min(self.chunk_size, batch.n_emitters) * per_emitter)))
+            # a model whose columns barely use JVPs can take more at once than the JVPs' budget allows
+            tangents = max(tangents, min(cap, getattr(model, "tangents", 0)))
         self.tangents = int(tangents)
         self.linearise = linearise          # pupil columns from the model's linearisation (False: all JVPs)
 
@@ -321,6 +323,12 @@ class Problem:
                                           (t,))[1]
                 dA = torch.func.vmap(field_column)(eye[idx])
                 rows = torch.tensor(idx, device=J.device)
+                if c is None:                   # a pupil every channel sees (a 4Pi objective's): all of them
+                    for i in range(0, len(idx), self.tangents):
+                        J[rows[i:i + self.tangents]] = apply(dA[i:i + self.tangents]).reshape(
+                            len(idx[i:i + self.tangents]), E, -1)
+                    done[idx] = True
+                    continue
                 Jc[rows] = 0
                 for i in range(0, len(idx), self.tangents):
                     Jc[rows[i:i + self.tangents], :, c] = apply(dA[i:i + self.tangents]).reshape(

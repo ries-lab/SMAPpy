@@ -106,7 +106,7 @@ class VectorPSF:
     def intensity(self, p, xyz: torch.Tensor, depth_nm: torch.Tensor | None = None) -> torch.Tensor:
         """[E, K, uY, uX]: the sampled intensity before blur and pixel integration."""
         h, _, _ = self._image_field(p, xyz, depth_nm)
-        return (h * h).sum(-2).sum(-3) * self.norm             # one axis at a time (fast on MPS)
+        return _field_sum(h * h) * self.norm
 
     def _image_field(self, p, xyz, depth_nm):
         """(h, By, Bx): the image field of each dipole, [E, K, F, uY, 2, uX] as (Re, Im), and the real DFT
@@ -192,6 +192,28 @@ class VectorPSF:
 
         return apply
 
+    def field_linearisation(self, p, xyzs, depth_nm: torch.Tensor | None = None):
+        """([h, ...], ``apply(dA)``): the image fields of `_image_field` at each set of positions in
+        ``xyzs``, [E, K, F, uY, 2, uX], and their changes for tangent pupils ``dA`` [T, P, P], a list of
+        [T, E, K, F, uY, 2, uX] -- the fields themselves, not their intensities, for a model that combines two
+        fields coherently (`FourPiModel`).  The sets differ in x and y only (a 4Pi's channels: one bead, its
+        position mapped into each), so the pupil-plane product, the bulk, is formed once and each set costs
+        one wide matrix DFT."""
+        with torch.no_grad():
+            fields = [self._image_field(p, xyz, depth_nm) for xyz in xyzs]
+            WF = self._waves(p, xyzs[0], depth_nm)[..., :, None, :] * self.fields.permute(1, 0, 2)
+            WF_re = torch.cat([WF.real, WF.imag], 2)[:, :, :, None].contiguous()     # [E, K, 2P, 1, F, P]
+            WF_im = torch.cat([-WF.imag, WF.real], 2)[:, :, :, None].contiguous()
+
+        def apply(dA: torch.Tensor) -> list:
+            d = dA.permute(1, 0, 2)[:, :, None]                                  # [P, T, 1, P]
+            d = torch.cat([d, d], -4)                                            # [2P, T, 1, P]
+            f = torch.addcmul(d.real.contiguous() * WF_re, d.imag.contiguous(), WF_im).flatten(-3, -2)
+            return [self.dft.apply_wide(f, By, Bx).unflatten(-4, (dA.shape[0], -1)).movedim(2, 0)
+                    for _, By, Bx in fields]
+
+        return [h for h, _, _ in fields], apply
+
     def _waves(self, p, xyz, depth_nm):
         """exp(2πi k_z z) per emitter and observation, [E, K, P, P], with the depth term in-situ: one
         depth per emitter ([E]) or per emitter and observation ([E, K], `InSituGeometry`).  With a tilt of
@@ -228,7 +250,11 @@ class VectorPSF:
             return My @ I @ Mx.transpose(-1, -2)
         H = gaussian_otf(I.shape[-2:], self.spacing, sigma) * sphere_otf(
             I.shape[-3:], (*self.spacing, dz), self.bead_radius_nm, device=I.device, dtype=I.dtype)
-        I = torch.fft.ifftn(torch.fft.fftn(I, dim=(-3, -2, -1)) * H, dim=(-3, -2, -1)).real
+        # The image is real and H real and even, so the half spectrum suffices: the same numbers, and half
+        # the transform -- the bead kernel was most of a 4Pi pupil tangent's cost on Apple's GPU.
+        X = I.shape[-1]
+        I = torch.fft.irfftn(torch.fft.rfftn(I, dim=(-3, -2, -1)) * H[..., :X // 2 + 1], s=I.shape[-3:],
+                             dim=(-3, -2, -1))
         return bin_pixels(I[..., pad:I.shape[-3] - pad, :, :], self.upsample)
 
     @staticmethod
@@ -242,6 +268,15 @@ class VectorPSF:
         before = torch.cat([before[..., :2], (z[:, :1] - steps.flip(0))[..., None]], -1)
         after = torch.cat([after[..., :2], (z[:, -1:] + steps)[..., None]], -1)
         return torch.cat([before, xyz, after], 1)
+
+
+def _field_sum(x: torch.Tensor) -> torch.Tensor:
+    """[..., F, Y, 2, X] -> [..., Y, X]: the sum over (Re, Im) and the fields, one axis at a time (over two
+    at once MPS was 150× slower).  A single field (the scalar model) is taken rather than summed: on Apple's
+    GPU a sum over a middle axis of length 1 took 58 ms for 8 tangents of 20 beads × 41 slices, taking it
+    0.6 ms; six fields take 3 ms either way."""
+    s = x[..., 0, :] + x[..., 1, :]                                      # [..., F, Y, X]
+    return s[..., 0, :, :] if s.shape[-3] == 1 else s.sum(-3)
 
 
 def _depth(depth_nm, grid):
@@ -273,4 +308,4 @@ def _tangent_intensity(dr, di, WF_re, WF_im, By, Bx, E2):
     T = dr.shape[-3]
     f = torch.addcmul(dr * WF_re, di, WF_im).flatten(-3, -2)               # [E, K, 2P, T·F, P]
     dh = wide_product(f, By, Bx).unflatten(-4, (T, -1))                   # [E, K, T, F, Y, 2, X]
-    return (dh * E2).sum(-2).sum(-3)                                      # one axis at a time (MPS)
+    return _field_sum(dh * E2)

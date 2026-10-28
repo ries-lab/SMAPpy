@@ -57,6 +57,17 @@ def discover_acquisitions(paths, recursive=True):
     return sorted(found, key=lambda p: str(p))
 
 
+def is_fourpi_scan(path) -> bool:
+    """True for 4Pi data: a Hamamatsu DCIMG or a MATLAB quadrant file (`io.quadrants`), which only the
+    4Pi mode reads; a folder when every acquisition in it is one."""
+    from ..io.quadrants import is_quadrant_mat
+    try:
+        found = discover_acquisitions([path])
+    except (OSError, ValueError):
+        return False
+    return bool(found) and all(p.suffix.lower() == '.dcimg' or is_quadrant_mat(p) for p in found)
+
+
 def _plane_axes(md):
     # MM 1.x/2.x TIFF per-plane tags, and MM's newer coordinate dictionary.
     axes = dict(md.get('Axes', md.get('axes', {})))
@@ -184,6 +195,10 @@ def read_bead_stacks(path, dz_nm=None):
     z with the opposite sign. A supplied dz overrides spacing, not grouping.
     """
     path = Path(path)
+    if is_fourpi_scan(path):
+        # read as a TIFF it failed with "not a TIFF file: header=b'MATL'"
+        raise ValueError(f"{path.name} is a 4Pi scan, four phase images per frame: choose the 4Pi mode "
+                         "at the top of the window to calibrate it")
     records = []
     if path.is_dir() and (path / 'NDTiff.index').exists():
         source = open_ndtiff(path)

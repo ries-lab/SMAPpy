@@ -262,6 +262,239 @@ class FourPiModel:
         mu = torch.stack(mu, 1).flatten(2, 3)                       # [E, C, K, Y, X], k = j·M + m
         return mu + self.background(p, batch)
 
+    # ------------------------------------------------------------------ the linearisation
+    #
+    # `Problem` builds the Jacobian from these instead of a JVP through the whole model per column.  A JVP
+    # cost 2.9 forward passes, and the 4Pi model has ~220 columns (two pupils, 63 photon counts per bead):
+    # 49 s per normal equations for 12 beads on Apple's GPU.  Here a pupil column is one matrix DFT per
+    # channel, and the emitter's columns -- and the shares, channel offsets and maps -- products of four
+    # PSF tangents (x, y, z and the interference phase) with the derivatives of small components.
+
+    #: tangents per batch for `Problem`: with every column but the blur's linearised, the JVPs' memory
+    #: budget no longer applies (it gave 1).  29 beads × 123 observations, vectorial, Apple's GPU: 1 tangent
+    #: 17.1 s per normal equations, 4: 13.4 s, 8: 12.4 s, 14 GB each
+    tangents = 8
+
+    def psf_names(self) -> set[str]:
+        """The parameters that change the images otherwise than through the coordinates of
+        `emitter_linearisation` (position, phase, the arms' balance, the coherence, the misalignment) and the
+        photons: the pupils, whose columns come from `pupil_linearisation`, and the blur, by JVPs."""
+        return {s.name for s in self.psf_up.specs()} | {LOWER + s.name for s in self.psf_lo.pupil.specs()}
+
+    def _components(self, h: torch.Tensor, arm: int, polarisation: str) -> torch.Tensor:
+        """The complex field each channel's light is made of, [..., D, uY, uX], from an image field
+        [..., F, uY, 2, uX]: the scalar field (D = 1), or one polarisation's field per dipole (D = 3), as
+        `images` forms them."""
+        field = torch.complex(h[..., 0, :], h[..., 1, :])
+        if self.kind == "scalar":
+            return field
+        on_x, on_y = PLATES[self.plates][arm][polarisation]
+        out = on_x * field[..., :3, :, :] + on_y * field[..., 3:, :, :]
+        if arm == 1:
+            out = out * out.new_tensor([1.0, 1.0, self.axial_sign])[:, None, None]
+        return out
+
+    @property
+    def _norm(self) -> float:
+        return self.psf_up.norm * (1.0 if self.kind == "scalar" else 2.0)
+
+    def _arms(self, p, batch, xyz: torch.Tensor, step):
+        """Every channel's two arms: (pad, Δz, (u, l), tangent_up, tangent_lo), u and l the arms' field
+        components (`_components`), [C, E, J', D, uY, uX], and ``tangent_*(dA)`` their changes for tangent
+        pupils dA [T, P, P] of that arm, [T, C, E, J', D, uY, uX] (`VectorPSF.field_linearisation`: the
+        channels share z, so one pupil-plane product per arm), each as a pair (Re, Im).  The channels
+        stacked, so that each later step is one launch, not four: on Apple's GPU the launches, not the
+        arithmetic, were the cost; and real, not complex: complex products ran 1.5-2× slower there."""
+        up, lo = self.psf_up, self.psf_lo
+        at_up, at_lo = [], []
+        for c in range(self.n_channels):
+            xyz_c, pad, dz = up._stack(self.positions(p, batch, xyz, c), step)
+            half = p["fourpi.offset"].to(xyz_c.dtype) / 2
+            at_up.append(xyz_c + half)
+            at_lo.append(torch.cat([xyz_c[..., :2] - half[:2], -(xyz_c[..., 2:3] - half[2])], -1))
+        h_up, t_up = up.field_linearisation(p, at_up)
+        h_lo, t_lo = lo.field_linearisation(lower_view(p), at_lo)
+        pols = self.polarisations
+
+        def stacked(hs, arm):                                           # (Re, Im), each [C, E, J', D, uY, uX]
+            z = torch.stack([self._components(h, arm, pols[c]) for c, h in enumerate(hs)], -6)
+            return z.real.contiguous(), z.imag.contiguous()
+
+        fields = stacked(h_up, 0), stacked(h_lo, 1)
+
+        def tangent_up(dA):
+            return stacked(t_up(dA), 0)                                 # [T, C, E, J', D, uY, uX] each
+
+        def tangent_lo(dA):
+            return stacked(t_lo(dA), 1)
+
+        return pad, dz, fields, tangent_up, tangent_lo
+
+    def _parts(self, u, l):
+        """The four images before blur, [..., 4, J', uY, uX]: |u|², |l|², Re and Im of u*·l summed over the
+        components, from the fields as (Re, Im) pairs [..., J', D, uY, uX]."""
+        (ur, ui), (lr, li) = u, l
+        parts = torch.stack([_over_d(ur * ur + ui * ui), _over_d(lr * lr + li * li),
+                             _over_d(ur * lr + ui * li), _over_d(ur * li - ui * lr)], -3)
+        return parts.movedim(-3, -4) * self._norm
+
+    def _d_parts(self, u, l, du, dl):
+        """The change of `_parts` for changes du, dl of the fields (None: unchanged), all (Re, Im) pairs: the
+        product rule, d|u|² = 2 Re(u*·du), d(u*·l) = du*·l + u*·dl."""
+        (ur, ui), (lr, li) = u, l
+        d0 = d1 = cr = ci = 0
+        if du is not None:
+            dr, di = du
+            d0 = 2 * _over_d(ur * dr + ui * di)
+            cr = cr + _over_d(dr * lr + di * li)
+            ci = ci + _over_d(dr * li - di * lr)
+        if dl is not None:
+            dr, di = dl
+            d1 = 2 * _over_d(lr * dr + li * di)
+            cr = cr + _over_d(ur * dr + ui * di)
+            ci = ci + _over_d(ur * di - ui * dr)
+        like = cr
+        d0 = d0 if torch.is_tensor(d0) else torch.zeros_like(like)
+        d1 = d1 if torch.is_tensor(d1) else torch.zeros_like(like)
+        return torch.stack([d0, d1, cr, ci], -3).movedim(-3, -4) * self._norm
+
+    def _step(self, z) -> float | None:
+        return float((z[..., 1:] - z[..., :-1]).abs().mean()) if self.psf_up.bead_radius_nm > 0 else None
+
+    def _slices(self, p, batch):
+        """(xyz [E, J, 3], the slices' z, J, M): each bead's position per slice, as `__call__` forms it."""
+        M, K = self.n_phases, batch.data.shape[2]
+        E = p["emitter.xyz"].shape[0]
+        z = batch.z_nm.to(p["emitter.xyz"].dtype)
+        z = z.reshape(K // M, M)[None, :, 0] if z.dim() == 1 else z.reshape(E, K // M, M)[..., 0]
+        xyz = p["emitter.xyz"][:, None, :] + torch.stack([torch.zeros_like(z)] * 2 + [z], -1)
+        return xyz, z, K // M, M
+
+    def pupil_linearisation(self, p: dict[str, torch.Tensor], batch):
+        """[(None, names, field, apply)], one per objective: its pupil's parameters, ``field(p)`` its pupil
+        field and ``apply(dA)`` the change of μ in every channel, [T, E, C, K, Y, X], for tangent pupils dA
+        [T, P, P] (`ForwardModel.pupil_linearisation`; None: all channels, since both pupils reach each)."""
+        with torch.no_grad():
+            xyz, z, J, M = self._slices(p, batch)
+            step = self._step(z)
+            a, b, m = self.light(p)
+            psi = self.phases(p, p["emitter.phase"])
+            cos, sin = torch.cos(psi), torch.sin(psi)
+            N = self.intensity(p, batch).reshape(xyz.shape[0], J, M)
+            sigma = self.psf_up.blur(p)
+            pad, dz, fields, t_up, t_lo = self._arms(p, batch, xyz, step)
+
+        def apply_for(arm):
+            def apply(dA):
+                u, l = fields
+                d = (self._d_parts(u, l, t_up(dA), None) if arm == 0 else self._d_parts(u, l, None, t_lo(dA)))
+                # mixed before the bead kernel and the blur, which act along the slices and pixels only: one
+                # image per mirror step instead of four, so M transforms rather than 4
+                d = self.psf_up._image(self._premix(d, a, b, m, cos, sin), sigma, pad, dz)   # [T, C, E, M, J, Y, X]
+                d = d * N.permute(0, 2, 1)[..., None, None]
+                return d.transpose(-4, -3).flatten(-4, -3).movedim(-5, -4)
+            return apply
+
+        up_names = [s.name for s in self.psf_up.pupil.specs()]
+        return [(None, up_names, lambda q: self.psf_up.pupil_field(q), apply_for(0)),
+                (None, [LOWER + n for n in up_names], lambda q: self.psf_lo.pupil_field(lower_view(q)),
+                 apply_for(1))]
+
+    @staticmethod
+    def _premix(parts, a, b, m, cos, sin):
+        """`_mix` without the photons, which change along the slices: [..., C, E, 4, J', uY, uX] ->
+        [..., C, E, M, J', uY, uX], linear along the slices and pixels, so it commutes with `_image`."""
+        def per_channel(v):
+            return v.reshape(-1, 1, 1, 1, 1, 1)                                  # [C, 1, 1, 1, 1, 1]
+        cos, sin = (v.permute(2, 0, 1)[..., None, None, None] for v in (cos, sin))       # [C, E, M, 1, 1, 1]
+        P = parts[..., None, :, :, :]                                            # [..., C, E, 4, 1, J', Y, X]
+        return (per_channel(a) * P[..., 0, :, :, :, :] + per_channel(b) * P[..., 1, :, :, :, :]
+                + per_channel(m) * (cos * P[..., 2, :, :, :, :] - sin * P[..., 3, :, :, :, :]))
+
+    @staticmethod
+    def _mix(parts, a, b, m, cos, sin, N):
+        """μ from every channel's four images [..., C, E, 4, J, Y, X], as `__call__` mixes them, with a, b, m
+        [C], cos and sin of ψ [E, M, C] and the photons N [E, J, M]: [..., E, C, K, Y, X]."""
+        def per_channel(v):
+            return v.reshape(-1, 1, 1, 1, 1, 1)                                  # [C, 1, 1, 1, 1, 1]
+        cos, sin = (v.permute(2, 0, 1)[:, :, None, :, None, None] for v in (cos, sin))   # [C, E, 1, M, 1, 1]
+        P = parts[..., None, :, :]                                               # [..., C, E, 4, J, 1, Y, X]
+        incoherent = per_channel(a) * P[..., 0, :, :, :, :] + per_channel(b) * P[..., 1, :, :, :, :]
+        cross = cos * P[..., 2, :, :, :, :] - sin * P[..., 3, :, :, :, :]
+        mu = N[..., None, None] * (incoherent + per_channel(m) * cross)          # [..., C, E, J, M, Y, X]
+        return mu.flatten(-4, -3).movedim(-5, -4)
+
+    def emitter_linearisation(self, p: dict[str, torch.Tensor], batch, shared_free=None):
+        """(I, dI, parts) as `ForwardModel.emitter_linearisation`: μ = f_c N·I + b, I [E, C, K, Y, X] each
+        channel's image per photon in it, and dI [9, E, C, K, Y, X] its derivatives with respect to nine
+        coordinates of each observation in each channel: its x, y and z in the channel, its interference
+        phase ψ, the channel's balance r_c and coherence α_c, and the objectives' misalignment Δ (x, y, z).
+        ``parts(p)`` gives those coordinates [E, C, K, 9], the photons f_c N [E, C, K] and the background.
+        So the solver builds the columns of the emitter's parameters, the shares, steps, channel offsets and
+        maps, the balance, the coherence and the misalignment from these, and only the pupils (their own
+        linearisation) and the blur need more.
+
+        A position moves both arms: the upper sees it at +z, the lower at −z, so z's tangent pupils are
+        2πi k_z A_up and −2πi k_z A_lo, x's and y's −2πi k A in both.  The misalignment moves the upper arm
+        by +Δ/2 and the lower one by −Δ/2, so its tangents are half the position's, the lower arm's negated.
+        With a bead kernel these are the derivatives for a shift of the whole stack, as `ForwardModel`'s.
+        ψ, r and α enter after the bead and the blur, I = r P0 + (1 − r) P1 + 2α√(r(1 − r)) (cos ψ P2 −
+        sin ψ P3), so their derivatives are exact whatever moves them."""
+        import math
+        with torch.no_grad():
+            xyz, z, J, M = self._slices(p, batch)
+            step = self._step(z)
+            a, b, m = self.light(p)
+            f = a + b
+            r, alpha = p["fourpi.balance"], p["fourpi.coherence"]
+            root = torch.sqrt((r * (1 - r)).clamp_min(1e-12))
+            psi = self.phases(p, p["emitter.phase"])
+            cos, sin = torch.cos(psi), torch.sin(psi)
+            ones = torch.ones(xyz.shape[0], J, M, dtype=xyz.dtype, device=xyz.device)
+            one, zero = torch.ones_like(r), torch.zeros_like(r)
+            sigma = self.psf_up.blur(p)
+            g = self.grid
+            two_pi_i = 2j * math.pi
+            kx = (-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm)
+            ky = (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm)
+            kz = two_pi_i * g.kz_imm
+            A_up, A_lo = self.psf_up.pupil_field(p), self.psf_lo.pupil_field(lower_view(p))
+            dA_up = torch.stack([kx, ky, kz]).to(A_up.dtype) * A_up
+            dA_lo = torch.stack([kx, ky, -kz]).to(A_lo.dtype) * A_lo
+            pad, dz, (u, l), t_up, t_lo = self._arms(p, batch, xyz, step)
+            du, dl = t_up(dA_up), t_lo(dA_lo)                                        # [3, C, E, J', D, uY, uX]
+            parts = self.psf_up._image(self._parts(u, l), sigma, pad, dz)            # [C, E, 4, J, Y, X]
+            minus = (-dl[0], -dl[1])
+            d = self.psf_up._image(torch.cat([self._d_parts(u, l, du, dl), 0.5 * self._d_parts(u, l, du, minus)]),
+                                   sigma, pad, dz)                                   # [6, C, E, 4, J, Y, X]
+            per_photon = f[:, None, None, None]                                      # μ = f_c N·I
+            I = self._mix(parts, a, b, m, cos, sin, ones) / per_photon
+            d_xyz = self._mix(d, a, b, m, cos, sin, ones) / per_photon               # x, y, z, then Δ
+            # ψ: the cross term turned a quarter, −sin ψ P2 − cos ψ P3
+            d_psi = self._mix(parts, zero, zero, 2 * alpha * root, -sin, cos, ones)
+            d_r = self._mix(parts, one, -one, alpha * (1 - 2 * r) / root, cos, sin, ones)
+            d_alpha = self._mix(parts, zero, zero, 2 * root, cos, sin, ones)
+            dI = torch.cat([d_xyz[:3], torch.stack([d_psi, d_r, d_alpha]), d_xyz[3:]])
+
+        def parts(q):
+            xyz, _, J, M = self._slices(q, batch)
+            psi = self.phases(q, q["emitter.phase"])                                # [E, M, C]
+            a, b, _ = self.light(q)
+            f = a + b
+            N = self.intensity(q, batch)                                            # [E, K]
+            E, K = N.shape
+            pos = []
+            for c in range(self.n_channels):
+                at = self.positions(q, batch, xyz, c).repeat_interleave(M, 1)       # [E, K, 3]
+                ps = psi[:, :, c].repeat(1, J)                                      # [E, K], k = j·M + m
+                light = torch.stack([q["fourpi.balance"][c], q["fourpi.coherence"][c]]).to(at.dtype)
+                offset = q["fourpi.offset"].to(at.dtype)
+                pos.append(torch.cat([at, ps[..., None], light.expand(E, K, 2), offset.expand(E, K, 3)], -1))
+            Nc = f[None, :, None] * N[:, None, :]
+            return torch.stack(pos, 1), Nc, self.background(q, batch)
+
+        return I, dI, parts
+
     def channel_images(self, p, xyz: torch.Tensor, phase: torch.Tensor) -> torch.Tensor:
         """[C, N, Y, X]: each channel's image of one photon at ``xyz`` [N, 3], with ψ_c = ``phase`` + δ_c
         (no mirror step, no bead), each channel's emitter on its own ROI's centre: what the IAB export
@@ -285,6 +518,13 @@ _ALIGNED = {"s": (_R, -1j * _R), "p": (-1j * _R, _R)}
 _CROSSED = {"s": (_R, 1j * _R), "p": (1j * _R, _R)}
 PLATES = {"aligned": (_ALIGNED, _ALIGNED), "crossed": (_ALIGNED, _CROSSED),
           "none": ({"s": (1.0, 0.0), "p": (0.0, 1.0)},) * 2}
+
+
+def _over_d(x: torch.Tensor) -> torch.Tensor:
+    """The sum over the field's components, [..., D, uY, uX] -> [..., uY, uX]; the scalar model's one
+    component taken, not summed: a sum over a middle axis of length 1 took Apple's GPU 0.3 s for eight
+    pupil tangents of 29 beads, the vectorial model's three 0.03 s."""
+    return x[..., 0, :, :] if x.shape[-3] == 1 else x.sum(-3)
 
 
 def analysed(h: torch.Tensor, on_x: complex, on_y: complex) -> torch.Tensor:

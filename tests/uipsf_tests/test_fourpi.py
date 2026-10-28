@@ -337,3 +337,35 @@ def test_a_model_learnt_with_the_beads_size_is_exported_for_a_point(grid):
                   if not k.startswith("emitter.")}
         out[radius] = sample_iab(model, shared, z)
     assert np.allclose(out[0.0][0], out[20.0][0]) and np.allclose(out[0.0][1], out[20.0][1])
+
+
+@pytest.mark.parametrize("kind, radius, per_observation", [("scalar", 0.0, False), ("vector", 0.0, True),
+                                                           ("scalar", 30.0, True), ("vector", 30.0, False)])
+def test_the_linearised_jacobian_is_the_jvps_one(beads, kind, radius, per_observation):
+    """The Jacobian the solver builds from the 4Pi model's linearisations (both pupils' columns by one DFT
+    per channel, the emitter's, shares, channel offsets and maps from four PSF tangents) equals the one
+    from JVPs through the whole model, scalar and vectorial, with and without a bead kernel."""
+    from uipsf.model import PerObservation
+    from uipsf.noise import ShiftedPoisson
+    from uipsf.solve.problem import Problem
+    _, batch, truth = beads
+    model = FourPiModel(beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, bead_radius_nm=radius,
+                        intensity=PerObservation() if per_observation else None)
+    start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
+             "background": truth["emitter.background"]}
+    values = dict(truth)
+    if per_observation:
+        values.pop("emitter.photons")
+        values["emitter.photons_per_slice"] = truth["emitter.photons"][:, None] * torch.linspace(0.8, 1.2, J * M)
+    specs = model.specs(batch, start)
+    shape = next(s.shape for s in specs if s.name == "pupil.magnitude")
+    values["pupil.magnitude"] = torch.linspace(-0.03, 0.05, shape[0])          # a magnitude to differentiate
+    values["lo.pupil.magnitude"] = -values["pupil.magnitude"]
+    p = Params(specs, E, values=values)
+    sub = batch.subset(slice(0, 3))
+    pc = p.subset(slice(0, 3))
+    fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
+    slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
+    for a, b in zip(fast, slow, strict=True):
+        scale = b.abs().flatten(1).amax(1).clamp_min(1e-12)[:, None, None] if b.dim() == 3 else b.abs().max()
+        assert float(((a - b).abs() / scale).max()) < 2e-3

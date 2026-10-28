@@ -979,7 +979,8 @@ class FourPiPupil(_FourPi):
         fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
                     pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
                     n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
-                    bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel)
+                    bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
+                    kind="vector" if settings.vectorial else "scalar")
         run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
         if inputs["run"].save_model:
             path = previous.saved if previous is not None and previous.saved is not None else \

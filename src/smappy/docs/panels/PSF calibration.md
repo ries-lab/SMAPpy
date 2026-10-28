@@ -643,6 +643,12 @@ the data.
 Large enough for a defocused bead, small enough that beads near the edge of
 a channel are kept: 21 pixels for 100-130 nm pixels.
 
+### vectorial
+On by default: the modulation then falls off from the centre of the spot as
+the data's does.  On uiPSF's bead scans it fitted 4 % better than the scalar
+model, uiPSF v1's, and took no longer; on its movie it localised z a little
+better.
+
 ### photons per frame
 On by default: on uiPSF's bead scans it lowered the deviance from 1.16 to
 1.06, the largest single term found.

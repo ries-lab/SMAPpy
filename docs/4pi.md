@@ -1,9 +1,12 @@
 # 4Pi in SMAPpy: what exists, what is wrong with it, and a plan
 
-Status, 2026-10-27: M0-M4 are done (§6-§8).  4Pi runs on the channel layer of M8
-(§9), and on real DCIMG data (§10).  M5, learning from beads in uiPSF v2, is
-merged (§11); its window method is still to come.  Dual colour on the layer
-(M8) and M6-M7 are proposals.
+Status, 2026-10-28: M0-M5 are done (§6-§8, §11, §14): the fitter, the channel
+layer (§9), real DCIMG data (§10), learning from beads in uiPSF v2 and the
+bead average, both in the PSF calibration window, live DCIMG and simulated 4Pi
+cameras (§16).  Of M7 the vectorial model is in and the window's default
+(§17, §19); the locked refit, multicolour and two cameras are not started.  M6
+(in situ) waits on the in-situ learning; dual colour on the layer (M8) is
+planned, not started.
 
 This page is written from four sources:
 - a read of SMAP's 4Pi code (`../SMAP`);
@@ -477,7 +480,7 @@ models, and the risky refactor happens behind tests.
 - First real result: Nup96 4Pi with v1's model.  The two rings, about 50 nm
   apart, are the test of z.
 
-**M5. uiPSF v2 4Pi from beads** (done but for the window method: §8)
+**M5. uiPSF v2 4Pi from beads** (done: §8, §11, §14)
 - `FourPiPSF` (built as `uipsf.model.fourpi.FourPiModel`), the phase axis, the gauges, and the export
   with a measured z_T.
 - Comparison with v1's model on `4pi_40nm_bead`:
@@ -492,8 +495,8 @@ work in progress elsewhere, which it builds on.
 
 **M7. Later, as needed**
 - The uiPSF 4Pi model made vectorial: dipole fields and the s and p
-  polarisations of the channels (D7).  The forward model is in (§17);
-  learning with it, and whether it earns its cost, is being measured.
+  polarisations of the channels (D7).  Done (§17): it fits better at no
+  more cost, and is the window's default since §19.
 - The locked refit (D4).
 - A model-free bead average of I, A and B in SMAPpy.  For each voxel this is
   a linear least-squares fit over beads × phases, with the bead phases taken
@@ -983,13 +986,12 @@ z) and each bead's scatter about that pattern:
   between the arms (r 0.47–0.54); coherence 0.71–0.77; blur (60, 68) nm; channel offsets 0, 1.82,
   −3.05, −1.42 rad, not quarter turns.  v1 learnt a misalignment (`pos_d`) but never used it, and its
   per-channel tip, tilt and defocus took it up channel by channel.
-- **Open: the bead kernel and the coherence trade.**  With a 20 nm bead the coherences rise to
-  0.89–0.95 at the same deviance, although a 20 nm sphere averages a 265 nm fringe by only 2 %.  So
-  the bead kernel is off by default, as in v1, until that is understood.  It also leaves the export a
-  point emitter's, which the beads then fit worse.
-- **Speed:** every shared column is a JVP (the 4Pi model has no linearisation yet, `Problem` falls back),
-  so n ≤ 8 takes 14 min on the Mac's GPU.  Linearising the pupils' columns as `VectorPSF` does is the
-  next step for speed.
+- **The bead kernel and the coherence trade** (open here, settled since): the kernel took the
+  observations' z step, a third of the slices' with three mirror steps, so it damped the fringe by 28 %
+  instead of 3.5 % and the coherence rose to make up for it.  With the slices' step the window learns
+  with the beads' size (40 nm by default) and exports a point emitter (§15, §17).
+- **Speed** (open here, done since): every shared column was a JVP, 14 min for n ≤ 8 on the Mac's GPU.
+  The 4Pi model is now linearised, 9-12× less per iteration (§19).
 
 **Done since (2026-10-27).**
 - **The method in the window.** *4Pi beads* in the PSF calibration window
@@ -1509,3 +1511,80 @@ within ±600 nm:
 **Conclusion:** 100 nm steps over the depth to be imaged lose nothing
 measurable against 20 nm in simulation, and against 50 nm on uiPSF's real beads; they learn 6–9× faster.  50 nm
 buys nothing; above 200 nm the model breaks.
+
+## 19. Speed, the two objectives' Zernikes, and the vectorial default (2026-10-28)
+
+**The linearisation.**  `Problem` builds the Gauss–Newton matrix column by column.  The 4Pi model had no
+linearisation, so each of its ~220 columns was a JVP through the whole model, 2.9 forward passes each.
+It now has the two the one-objective model has (`FourPiModel.pupil_linearisation`,
+`emitter_linearisation`):
+- **A pupil column** is one matrix DFT per channel of the tangent field, then the product rule on the
+  four images: d|u|² = 2 Re(u*·du), d(u*·l) = du*·l + u*·dl.  The channels share z, so the pupil-plane
+  product, the bulk, is formed once per arm and only the DFT's x and y differ
+  (`VectorPSF.field_linearisation`).
+- **Everything else but the blur** goes through nine coordinates of each observation in each channel:
+  x, y and z, the interference phase ψ, the balance r_c, the coherence α_c and the misalignment Δ.  Their
+  derivatives are PSF tangents (x, y, z and Δ: the position's tangent pupils, the lower arm's z and Δ
+  reversed) or exact products after the blur (ψ, r, α).  So the emitter's parameters, the photons per
+  frame, the shares, mirror steps, channel offsets and maps, the balance, the coherence and the
+  misalignment all cost a product each; only the blur's two columns remain JVPs.
+- The channels stacked, real arithmetic instead of complex, the four images mixed into one per mirror
+  step before the bead kernel, a single field taken rather than summed over a length-1 axis (on Apple's
+  GPU that sum took 0.3 s for eight tangents, the rest 0.01 s), and 8 tangents per batch (`tangents`).
+- The Jacobian equals the JVPs' to 10⁻⁴ of each column's largest entry, scalar and vectorial, with and
+  without a bead kernel, at random points and at the learnt optimum, on the CPU and Apple's GPU
+  (`test_the_linearised_jacobian_is_the_jvps_one`).
+
+One normal-equations pass, 29 simulated beads × 41 slices × 3 mirror steps, n ≤ 6, a 20 nm bead,
+Apple's GPU:
+
+| model | JVPs | linearised |
+|---|---|---|
+| scalar | 109 s | 9.1 s |
+| vectorial | 110 s | 11.7 s |
+
+On uiPSF v1's 18 training beads (31 slices × 3 steps, the long test's set) the whole learning took 0.5
+min against 5.0 min, to the same optimum (objective 1 078 007, 64-69 iterations either way).
+
+**Two of the changes help one objective too** (`VectorPSF`): the bead kernel's transform is real
+(`rfftn`, exact, the image being real and the kernel even: 1.5× faster on the CPU, the same on Apple's
+GPU), and the scalar model's single field is taken rather than summed (0.6 against 58 ms per batch of
+tangents there).  The rest is particular to 4Pi: one objective's channels have pupils and foci of their
+own, so there is no pupil-plane product to share.
+
+**Two optima.**  The same learning through JVPs with 8 tangents per batch, instead of 1, reached a better
+optimum, 1 063 226 (1.4 % lower), and a phase scatter of 0.053 rad, within the test's 10 % of v1's 0.051,
+against 0.062.  Only the rounding differs between the runs -- their normal equations agree to 10⁻⁷ -- so
+the optimisation has two basins, and which it reaches is chance.  The worse one puts the misalignment along y (Δ = (−28, 109, −10) nm); fits in §11
+found it along x.  So `test_the_learned_model_measures_v1s_beads_as_straight_as_v1s_model` (long tier)
+fails as the code stood before the linearisation too.  Starting the misalignment from several directions,
+or from the registration, is the fix to try.
+
+**How the two objectives' Zernikes trade.**  The covariance of the pupils, from the Gauss–Newton matrix
+with the beads' own parameters taken out (Schur complement), at the truth of 12 simulated beads (3·10⁶
+photons each, ±500 nm at 50 nm, 3 mirror steps, a 20 nm bead):
+- **Piston, tip, tilt and defocus are not parameters of either pupil:** a relative piston is the beads'
+  phase, a relative tip, tilt or defocus the misalignment Δ, and the common ones the bead's position.
+  These trade exactly.
+- **Every other mode is correlated between the arms, but not exactly:** |r| = 0.90-0.95 (scalar), 0.63-
+  0.89 (vectorial).  One combination per mode is pinned by the interference (±0.3-0.7 mrad here), the
+  other only by each arm's own, incoherent image (±0.8-2.6 mrad): 2.5-7× less well.
+- **Which combination is which follows the mode's symmetry.**  For the even modes (astigmatism,
+  spherical, quadrafoil, hexafoil) the difference up − lo is pinned and the mean loose (r > 0); for
+  the odd ones (coma, trefoil, pentafoil) the mean is pinned and the difference loose (r < 0).  The lower
+  objective looks from the other side, so the same aberration in both appears in its own coordinates
+  as the twin of the upper's.
+- **The vectorial model separates the arms better:** its correlations are lower, and most loose
+  combinations are better determined than the scalar's, up to 2.4× (pentafoil), though secondary
+  spherical is a little worse.  The weakest directions mix the arms' phase and magnitude of the same
+  high mode (Noll 22-28).
+- This is why §17 found the astigmatism difference pinned at 0.80-0.82 rad and its mean loose: the mean
+  is the loose combination for an even mode, and with real data a mismatch of the model goes there first.
+  Learning each objective on its own (one arm blocked) measures exactly the loose combination, so a
+  joint fit with single-objective scans beside the 4Pi ones should pin both.
+
+**The window.**  The pupil model is vectorial by default (*vectorial*, under *4Pi*; off: uiPSF v1's
+scalar model).  The *Pupils* page shows each objective's magnitude beside its phase.  4Pi scans added in
+the single-channel mode turn the window to *4Pi*.  Read as one channel's bead stack they had failed with
+"not a TIFF file".
+

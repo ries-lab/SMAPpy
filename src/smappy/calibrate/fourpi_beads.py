@@ -114,12 +114,13 @@ def _centroid(image, y0, x0, half):
 def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pixel_size_nm,
           steps_rad=(2.0, 0.0, -2.0), n_max: int = 6, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
-          kind: str = "scalar", plates: str = "aligned", warm: Optional[dict] = None):
+          kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     A free photon count per observation by default: on the example beads it took the mean deviance from
-    1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" follows each arm's field
-    through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17).  ``warm``: shared
+    1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
+    arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
+    fitted uiPSF's beads and movie better than "scalar", at no more time.  ``warm``: shared
     values to start from, another model's of the same beads (`learn_fourpi`'s ``values``)."""
     import uipsf
     from uipsf.model import PerObservation
@@ -187,6 +188,9 @@ class FourPiBeadSettings:
     bead_diameter_nm: float = param(40.0, label="bead diameter", unit="nm", min=0.0,
                                     help="the beads' size, taken out of the pupil model: its dyes, spread over "
                                          "its height, average the fringe; 0: point-like")
+    vectorial: bool = param(True, label="vectorial", advanced=True,
+                            help="the pupil model follows each arm's dipole fields through the quarter-wave "
+                                 "plates and the polarising split; off: one scalar field per arm (uiPSF v1)")
     n_max: int = param(6, label="Zernike order", min=2, max=10, advanced=True,
                        help="the highest Zernike order of each objective's pupil")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
@@ -628,38 +632,55 @@ def parameter_rows(run_result: dict, cal) -> tuple:
 
 
 def draw_pupils(figure, fit) -> str:
-    """The two objectives' pupil phases over the aperture, and their Zernike coefficients side by side."""
+    """The two objectives' pupils over the aperture, phase above and magnitude below, and their Zernike
+    coefficients side by side.  The magnitude as the model learns it, 1 + Σ c_j Z_j, before the pupil is
+    rescaled to the reference energy: its shape is what is learnt, its scale is the photons'."""
     import torch
     from uipsf.model.fourpi import lower_view
     from uipsf.optics.zernike import zernike_name
     model = fit.model
     shared = {k: v.detach() for k, v in fit.shared().items()}
-    left, middle, right = figure.subplots(1, 3, gridspec_kw={"width_ratios": [1, 1, 2]})
-    maps = []
+    axes = figure.subplots(2, 3, gridspec_kw={"width_ratios": [1, 1, 2]})
+    maps = {"phase": [], "magnitude": []}
     for psf, values in ((model.psf_up, shared), (model.psf_lo, lower_view(shared))):
         with torch.no_grad():
-            _, phase = psf.pupil({k: v for k, v in values.items() if k.startswith("pupil.")})
+            magnitude, phase = psf.pupil({k: v for k, v in values.items() if k.startswith("pupil.")})
         inside = psf.grid.aperture.detach().cpu().numpy() > 0
-        maps.append(np.where(inside, phase.detach().cpu().double().numpy(), np.nan))
-    lim = max(np.nanmax(np.abs(m)) for m in maps) or 1.0
-    for ax, m, name in ((left, maps[0], "upper objective"), (middle, maps[1], "lower objective")):
-        im = ax.imshow(m, cmap="RdBu_r", vmin=-lim, vmax=lim)
-        ax.set_title(f"{name}: phase (rad)", fontsize="small")
-        ax.set_xticks([])
-        ax.set_yticks([])
-    figure.colorbar(im, ax=[left, middle], shrink=0.7)
-    modes = model.pupils[0].phase_modes
-    x = np.arange(len(modes))
-    up = shared["pupil.phase"].cpu().double().numpy()
-    lo = shared["lo.pupil.phase"].cpu().double().numpy()
-    right.bar(x - 0.2, up, 0.4, label="upper")
-    right.bar(x + 0.2, lo, 0.4, label="lower")
-    right.set_xticks(x)
-    right.set_xticklabels([f"{zernike_name(j)}\n{j}" for j in modes], fontsize="x-small", rotation=90)
-    right.axhline(0, color="0.5", lw=0.6)
-    right.set_ylabel("Zernike coefficient (rad)")
-    right.legend(fontsize="small", frameon=False)
-    return "each objective's pupil as learnt; the deformable mirrors' astigmatism shows with opposite signs"
+        for name, value in (("phase", phase), ("magnitude", magnitude)):
+            maps[name].append(np.where(inside, value.detach().cpu().double().numpy(), np.nan))
+    for row, (name, unit, cmap) in enumerate((("phase", "rad", "RdBu_r"), ("magnitude", "", "viridis"))):
+        left, middle, right = axes[row]
+        if name == "phase":
+            lim = max(np.nanmax(np.abs(m)) for m in maps[name]) or 1.0
+            lo_v, hi_v = -lim, lim
+        else:
+            lo_v = min(np.nanmin(m) for m in maps[name])
+            hi_v = max(np.nanmax(m) for m in maps[name])
+            if hi_v - lo_v < 1e-6:
+                lo_v, hi_v = lo_v - 0.5, hi_v + 0.5
+        for ax, m, arm in ((left, maps[name][0], "upper"), (middle, maps[name][1], "lower")):
+            im = ax.imshow(m, cmap=cmap, vmin=lo_v, vmax=hi_v)
+            ax.set_title(f"{arm}: {name}" + (f" ({unit})" if unit else ""), fontsize="small")
+            ax.set_xticks([])
+            ax.set_yticks([])
+        figure.colorbar(im, ax=[left, middle], shrink=0.7)
+        modes = getattr(model.pupils[0], f"{name}_modes")
+        up = shared[f"pupil.{name}"].cpu().double().numpy()
+        lo = shared[f"lo.pupil.{name}"].cpu().double().numpy()
+        if len(modes) == 0:
+            right.set_axis_off()
+            right.text(0.5, 0.5, f"no {name} modes learnt", ha="center", va="center", fontsize="small")
+            continue
+        x = np.arange(len(modes))
+        right.bar(x - 0.2, up, 0.4, label="upper")
+        right.bar(x + 0.2, lo, 0.4, label="lower")
+        right.set_xticks(x)
+        right.set_xticklabels([f"{zernike_name(j)}\n{j}" for j in modes], fontsize="x-small", rotation=90)
+        right.axhline(0, color="0.5", lw=0.6)
+        right.set_ylabel(f"Zernike coefficient{' (rad)' if unit else ''}", fontsize="small")
+        right.legend(fontsize="small", frameon=False)
+    return ("each objective's pupil as learnt, phase and magnitude; the deformable mirrors' astigmatism "
+            "shows with opposite signs")
 
 
 def stack_views(beads: FourPiBeads, images: Optional[dict], excluded=()):

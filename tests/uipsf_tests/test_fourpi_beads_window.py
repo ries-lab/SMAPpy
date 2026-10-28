@@ -122,3 +122,49 @@ def test_a_beads_stack_is_its_scan_in_the_order_the_stacks_page_lists_them(tmp_p
         assert listed[record["stack"]] == str(discover_acquisitions([record["path"]])[0])
         assert np.min(np.hypot(*(np.asarray(record["exact_xy"][0]) - expected).T)) < 1.0
     assert {r["stack"] for r in beads.records if Path(r["path"]).parent.name == "a"} == {0}
+
+
+def test_4pi_scans_added_in_one_channel_switch_the_window_to_4pi_and_are_refused_as_tiffs(tmp_path):
+    """Quadrant .mat scans added in the single-channel mode: the window turns to the 4Pi mode, the only one
+    that reads them; read as one channel's bead stack they are refused by name, not as a broken TIFF."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from smappy.calibrate.input import read_bead_stacks
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from tests.test_fourpi_channels import _write_quadrant_series
+    paths = _write_quadrant_series(tmp_path, [np.zeros((4, 12, 12), np.uint16)] * 4, files=2)
+    with pytest.raises(ValueError, match="4Pi scan"):
+        read_bead_stacks(paths[0])
+    QApplication.instance() or QApplication([])
+    window = PSFCalibrationWindow([])
+    assert window.mode_box.currentText() == "Single channel"
+    window.add_paths([str(tmp_path)])
+    assert window.mode_box.currentText() == "4Pi"
+    window.close()
+
+
+def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
+    """The *Pupils* page: each objective's phase and magnitude over the aperture, and the coefficients."""
+    import types
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import torch
+    from smappy.calibrate.fourpi_beads import draw_pupils
+
+    import uipsf
+    from uipsf.model.fourpi import FourPiModel
+    from uipsf.params import Params
+    optics = uipsf.Optics(NA=1.35, wavelength_nm=600, n_imm=1.406, n_med=1.406, pixel_size_nm=(129, 129))
+    model = FourPiModel(uipsf.PupilGrid.build(optics, 32, device="cpu"), (13, 13), n_max=4, magnitude_n_max=2)
+    batch = uipsf.Batch(data=torch.zeros(1, 4, 9, 13, 13), z_nm=torch.zeros(9), roi_xy=torch.zeros(1, 4, 2))
+    start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, 4)}
+    values = Params(model.specs(batch, start), 1).physical()
+    values["pupil.magnitude"] = torch.linspace(-0.1, 0.1, values["pupil.magnitude"].numel())
+    shared = {k: v for k, v in values.items() if not k.startswith("emitter.")}
+    figure = plt.figure()
+    text = draw_pupils(figure, types.SimpleNamespace(model=model, shared=lambda: shared))
+    titles = [ax.get_title() for ax in figure.axes]
+    assert "upper: magnitude" in titles and "lower: phase (rad)" in titles and "magnitude" in text
+    plt.close(figure)

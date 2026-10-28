@@ -2215,6 +2215,12 @@ arm's x and y components turned into the channel's polarisation by the quarter-w
 axial dipole reversed, the cross term summed over the dipoles; ``polarisations`` names each channel's, s or
 p.  `images(p, xyz, polarisation=)`; the gauge `swapped` is the scalar model's only.
 
-**No linearisation yet:** `Problem` builds every column by JVP.  v1's 18 beads (4 channels, 63 observations
-of 21², n ≤ 6) learn in 2.7 min on an M1 Pro's GPU, n ≤ 8 in 14 min, a free photon count per observation
-in 6.4 min.  The results, against v1's model, are in `docs/4pi.md` §8.
+**Linearised** (`docs/4pi.md` §19): `pupil_linearisation` gives each objective's pupil columns for every
+channel at once (one pupil-plane product per arm, `VectorPSF.field_linearisation`, then a matrix DFT per
+channel and the product rule on the four images; `Problem` takes a group whose channel is None as all
+channels), and `emitter_linearisation` nine coordinates per observation and channel -- x, y, z, ψ, r_c,
+α_c and Δ -- through which every parameter but the pupils and the blur acts.  Only the blur's columns are
+JVPs; `tangents = 8`, since the JVPs' memory budget no longer binds.  One normal-equations pass of 29 beads
+× 123 observations: 109 s by JVPs, 9.1 s scalar and 11.7 s vectorial; v1's 18 beads with a free photon
+count per observation learn in 0.5 min (5.0 by JVPs).  The results, against v1's model, are in
+`docs/4pi.md` §8.
