@@ -168,3 +168,39 @@ def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
     titles = [ax.get_title() for ax in figure.axes]
     assert "upper: magnitude" in titles and "lower: phase (rad)" in titles and "magnitude" in text
     plt.close(figure)
+
+
+def test_the_beads_own_fringe_period_is_measured_without_any_optics(tmp_path):
+    """Beads drawn with a 260 nm fringe give 260 nm back from their scan alone (`beads_period_nm`)."""
+    from smappy.calibrate.fourpi_beads import beads_period_nm
+    cal = fourpi.model_calibration(period_nm=260.0)
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    xy = np.array([[12.0, 12.0], [31.0, 14.0], [14.0, 31.0], [30.0, 30.0]])
+    path, _ = _dcimg_scan(tmp_path / "beads", cal, layout, xy)
+    beads, _, _ = scan_beads([path], _settings(), CAMERA)
+    assert beads_period_nm(beads) == pytest.approx(260.0, rel=0.02)
+
+
+def test_a_pupil_model_whose_fringe_is_not_its_beads_is_said_to_have_the_wrong_optics(tmp_path):
+    """The check after a pupil model's learning: within 8 % nothing is said -- uiPSF's 4Pi example learnt
+    with its own optics came to 264.1 nm against its beads' 251; uiPSF's 4Pi example learnt
+    with the 4Pi-SMS optics (279.5 nm against its beads' 251) names the period, the beads' and the emission,
+    and the 4Pi methods' finish puts it where the window shows it (`check_period`) (`Run.extra["warning"]`)."""
+    from smappy.calibrate.fourpi_beads import period_mismatch
+    from smappy.calibrate.psf_methods import FourPiPupil, Run
+    assert period_mismatch(255.0, 251.0) is None
+    assert period_mismatch(264.1, 251.0) is None
+    said = period_mismatch(279.5, 251.0, 660.0)
+    assert "279.5 nm" in said and "11% longer" in said and "251.0 nm" in said and "660 nm" in said
+    assert "shorter" in period_mismatch(230.0, 251.0)
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    xy = np.array([[12.0, 12.0], [31.0, 14.0], [14.0, 31.0], [30.0, 30.0]])
+    path, _ = _dcimg_scan(tmp_path / "beads", fourpi.model_calibration(period_nm=260.0), layout, xy)
+    beads, found, _ = scan_beads([path], _settings(), CAMERA)
+    # a model as a pupil model with the wrong emission would come out: its fringe 12 % long
+    run = Run({"fit": object(), "found": {"beads": beads, "layout": found}, "excluded": [],
+               "settings": _settings(), "wavelength_nm": 660.0,
+               "calibration": fourpi.model_calibration(period_nm=291.0)}, False)
+    assert "12% longer" in FourPiPupil().check_period(run) == run.extra["warning"]
+    run.result["calibration"] = fourpi.model_calibration(period_nm=262.0)
+    assert FourPiPupil().check_period(run) is None

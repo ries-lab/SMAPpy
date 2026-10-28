@@ -323,6 +323,13 @@ class PSFCalibrationWindow(QMainWindow):
         self.found_label = QLabel("")
         self.found_label.setWordWrap(True)
         self.found_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # what a run found wrong with itself (`Run.extra["warning"]`): a 4Pi pupil model whose fringe is
+        # not its beads' -- a line that stays, where the status bar's summary is gone at the next message
+        self.warning_label = QLabel("")
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.warning_label.setStyleSheet("color: #c06000")
+        self.warning_label.setVisible(False)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setTextVisible(True)
@@ -344,6 +351,7 @@ class PSFCalibrationWindow(QMainWindow):
         steps.addWidget(self.stop_button)
         layout.addLayout(steps)
         layout.addWidget(self.found_label)
+        layout.addWidget(self.warning_label)
         layout.addWidget(self.progress_bar)
         for button in (self.save_as_button, self.use_button, self.keep_button):
             layout.addWidget(button)
@@ -1042,6 +1050,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.tabs.blockSignals(False)
         self.pages = []
         self.choices = []
+        self.warning_label.setText("")
+        self.warning_label.setVisible(False)
 
     def _table_page(self, page) -> QWidget:
         """A page that is a table (`Page.table`): numbers to read, and *Copy* puts them on the clipboard
@@ -1151,6 +1161,9 @@ class PSFCalibrationWindow(QMainWindow):
         saved = self.run_result.saved
         self.status_bar.showMessage(self.method.summary(self.run_result) + (
             f"; saved {saved.name}" if saved else "; not saved (save model is off)"))
+        warning = self.run_result.extra.get("warning")
+        self.warning_label.setText(warning or "")
+        self.warning_label.setVisible(bool(warning))
         if self.stack_viewer is not None and self.stack_viewer.isVisible():
             self.browse_stack()
 

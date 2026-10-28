@@ -818,16 +818,43 @@ class _FourPi:
                               lambda r: f"{r.get('brightness', float('nan')):.4g}")
 
     def finish(self, run: Run, progress=None) -> Run:
-        """The beads fitted back with the model as saved: z and the phase of every bead against the stage."""
+        """The beads fitted back with the model as saved: z and the phase of every bead against the stage.
+        A pupil model's fringe period checked against the beads' own (`fourpi_beads.period_mismatch`),
+        saved or not: a wrong emission under *microscope* gives a model that looks merely poor."""
         from .fourpi_beads import bead_fits
+        tell = progress or (lambda entry: None)
+        if run.result.get("fit") is not None:
+            tell({"message": "checking the model's fringe period against the beads'", "fraction": 0.93})
+            self.check_period(run)
         cal = run.result.get("calibration")
         if cal is None:
             return run
-        (progress or (lambda entry: None))({"message": "fitting the beads back with the 4Pi model",
-                                             "fraction": 0.95})
+        tell({"message": "fitting the beads back with the 4Pi model", "fraction": 0.95})
         run.extra["fits"] = bead_fits(run.result["found"]["beads"], cal)
         self._images(run)
         return run
+
+    def check_period(self, run: Run) -> Optional[str]:
+        """``run.extra["warning"]``: what `fourpi_beads.period_mismatch` says of the model's fringe period
+        against the beads' own (`beads_period_nm`), None where they agree."""
+        from .fourpi_beads import beads_period_nm, period_mismatch
+        run.extra["warning"] = period_mismatch(self._calibration(run).period_nm,
+                                               beads_period_nm(run.result["found"]["beads"]),
+                                               run.result.get("wavelength_nm"))
+        return run.extra["warning"]
+
+    def _calibration(self, run: Run):
+        """The pupil model's calibration: the saved one, or, with *save model* off, one written to a
+        temporary file -- what the pages draw."""
+        cal = run.result.get("calibration")
+        if cal is None:
+            from .fourpi_beads import save
+            import tempfile
+            s = run.result["settings"]
+            cal = run.result["calibration"] = save(run.result["fit"], Path(tempfile.mkdtemp()) / "model_4pi.h5",
+                                                   s.model_z_range_nm, s.model_dz_nm,
+                                                   layout=run.result["found"]["layout"])
+        return cal
 
     def _images(self, run: Run):
         """The learnt model's images of its beads (`fourpi_beads.fit_images`), once; None for a model that
@@ -852,14 +879,7 @@ class _FourPi:
 
     def pages(self, run: Run) -> list:
         from .fourpi_beads import draw_against_stage, draw_model
-        cal = run.result.get("calibration")
-        if cal is None:
-            from .fourpi_beads import save
-            import tempfile
-            s = run.result["settings"]
-            cal = run.result["calibration"] = save(run.result["fit"], Path(tempfile.mkdtemp()) / "model_4pi.h5",
-                                                   s.model_z_range_nm, s.model_dz_nm,
-                                                   layout=run.result["found"]["layout"])
+        cal = self._calibration(run)
         from .fourpi_beads import (MODEL_PARTS, demodulate, draw_fit, draw_modulation, draw_pupils,
                                    modulation_curves, parameter_rows)
         fits = run.extra.get("fits")
@@ -981,7 +1001,8 @@ class FourPiPupil(_FourPi):
                     n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
                     bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
                     kind="vector" if settings.vectorial else "scalar")
-        run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
+        run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings,
+                   "wavelength_nm": optics["wavelengths"][0]}, False)
         if inputs["run"].save_model:
             path = previous.saved if previous is not None and previous.saved is not None else \
                 default_save_path(paths, False).with_name(default_save_path(paths, False).stem + "_4pi.h5")

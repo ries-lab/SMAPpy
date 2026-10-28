@@ -344,6 +344,41 @@ def steps_of(settings: FourPiBeadSettings, n_steps: int) -> tuple:
 
 # ---------------------------------------------------------------- after a calibration
 
+def beads_period_nm(beads: FourPiBeads, n_beads: int = 8) -> float:
+    """The fringe period the beads show, with no optics: `fourpi.scan_phases` on the centre brightness of
+    the ``n_beads`` brightest through the scan (the first mirror step), as the bead average measures it.
+    On half of uiPSF's 4Pi example (58 beads) the 8 brightest gave 250.9 nm in 2 s, all 58 251.0 nm in 13 s,
+    single beads 249 to 253."""
+    from ..fourpi import scan_phases
+    data = beads.data[:, :, :, 0]                                              # (E, C, J, h, w)
+    h, w = data.shape[-2:]
+    centre = data[..., h // 2 - 2:h // 2 + 3, w // 2 - 2:w // 2 + 3].sum(axis=(3, 4))
+    brightest = np.argsort(-centre.sum(axis=(1, 2)))[:n_beads]
+    dz = float(np.median(np.abs(np.diff(beads.z_nm))))
+    return float(2 * np.pi / scan_phases(centre[brightest]).w * dz)
+
+
+def period_mismatch(model_nm: float, beads_nm: float, wavelength_nm=None, tolerance: float = 0.08):
+    """What to say when a pupil model's fringe period is not its beads' (`beads_period_nm`), None when they
+    agree within ``tolerance``.  A pupil model's period follows from the emission and the immersion index
+    it was given, so a wrong one cannot be learnt away: it lowers the coherence instead.  uiPSF's 4Pi
+    example learnt with the 4Pi-SMS example's optics (660 nm, 100 nm pixels, against 600 nm and 129 nm)
+    came out at 279.5 nm against its beads' 251 nm, with a coherence of 0.2 (58 beads: 281.6 nm, 0.22-0.25).
+    With its own optics it learnt 264.1 nm and 0.77-0.83: even right, a vectorial pupil model's fringe ran
+    5 % longer than the beads', so the warning is at 8 %, not at the 4 % the 4Pi-SMS beads' 680 nm model
+    was long by."""
+    if not (np.isfinite(model_nm) and np.isfinite(beads_nm) and beads_nm > 0):
+        return None
+    off = model_nm / beads_nm - 1
+    if abs(off) <= tolerance:
+        return None
+    emission = f" ({wavelength_nm:g} nm)" if wavelength_nm else ""
+    return (f"The model's fringe period, {model_nm:.1f} nm, is {abs(off):.0%} {'longer' if off > 0 else 'shorter'} "
+            f"than the beads' own, {beads_nm:.1f} nm: the emission{emission} or the immersion index under "
+            f"microscope is likely not this microscope's, and the model made up for it with a lower "
+            f"coherence.  Check the microscope and calibrate again.")
+
+
 def bead_fits(beads: FourPiBeads, cal, box: int = 15) -> dict:
     """Every frame of every bead fitted with the saved model (`psf.Global4PiPSF`), each channel's box at
     its own pixel and the rest of the model's map in the link: z and the phase against the stage, and per

@@ -396,6 +396,21 @@ is not the beads': for the pupil model, the emission wavelength under
 the phase run 7 % steep.  The bead average fits back to its own beads almost
 perfectly, so this page says little about it.
 
+**The fringe period is checked.**  After the pupil model is learnt, the
+window measures the fringe period the beads show on their own, with no optics:
+the same fit of each bead's brightness through the scan the bead average
+starts from, on the eight brightest.  If the model's period differs from it by
+more than 8 %, a line under the detection says so, with both periods and
+the emission.  A smaller difference is not a sign of the wrong optics: with
+its own optics uiPSF's example learnt 264 nm against its beads' 251 nm.  A pupil model cannot learn the period away: the period follows
+from the emission and the immersion index under *microscope*, so with the
+wrong ones the model lowers its coherence to make up for it, and its
+modulation comes out low in every channel.  uiPSF's 4Pi example learnt with
+the 4Pi-SMS example's microscope (660 nm, 100 nm pixels, against 600 nm and
+129 nm) gave 279.5 nm against its beads' 251 nm, and a coherence of 0.2;
+with its own, a coherence of 0.77–0.83.
+The bead average needs no check: its period is the beads'.
+
 ## In situ
 
 A PSF measured with beads on the coverslip is not quite the PSF of molecules
