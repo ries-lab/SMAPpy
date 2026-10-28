@@ -37,7 +37,8 @@ set here.
 
 Not here: a counting fit (copy numbers from the blinks per molecule), the
 clusters to count in (Find clusters, Segment regions, Filter ROIs) and
-qPAINT.  SMAP's ``dyeblinking`` also drew the photons, the on-time and the
+qPAINT, which is *Binding kinetics* (`binding_kinetics.py`) on these
+blinks and dark times.  SMAP's ``dyeblinking`` also drew the photons, the on-time and the
 blinks against a series of dark times, the on-fraction and the duration of a
 molecule; those are left out.
 """

@@ -33,6 +33,7 @@ In the package rather than in ``scripts/`` because it is also a plugin
 on without a microscope.
 """
 from .beads import simulate_bead_tracks, simulate_beads, with_beads
+from .binding import simulate_binding_sites, spot_centres
 from .camera import (ASTIGMATISM, ISOLATED_NM, astigmatic_sigmas, bead_stacks,
                      camera_frames, camera_truth, dual_bead_stacks, dual_camera_frames,
                      dual_transformation, render)
@@ -59,4 +60,5 @@ __all__ = [
     "Labels", "Structure", "load_structure", "presets",
     "TrackSimulationSettings", "jump_nm", "simulate_tracks", "spacing_nm",
     "simulate_beads", "simulate_bead_tracks", "with_beads",
+    "simulate_binding_sites", "spot_centres",
 ]

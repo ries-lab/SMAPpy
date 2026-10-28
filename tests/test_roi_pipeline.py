@@ -50,6 +50,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Summarize/Curves",
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
+                          "Analysis/Regions/Summarize/qPAINT",
                           "Analysis/Regions/Workflow/NPC Analysis"}
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
@@ -329,7 +330,8 @@ def app():
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(per_region=True)
-    assert sorted(tree.refs) == ["Analysis/Measure/Blinking",
+    assert sorted(tree.refs) == ["Analysis/Measure/Binding kinetics",
+                                 "Analysis/Measure/Blinking",
                                  "Analysis/Measure/Circle fit",
                                  "Analysis/Measure/Cluster shape",
                                  "Analysis/Measure/Histogram",
