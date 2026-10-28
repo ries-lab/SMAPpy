@@ -15,7 +15,7 @@ Two implementations of the same maths live here:
 
 ``_cost_and_gradient_reference``
     A plain Python loop, one pair at a time. Slow, but it is the readable
-    statement of what the cost function *is*, and every other backend is
+    statement of what the cost function *is*, and the compiled kernel is
     checked against it.
 ``smappy._drift``
     The same loop in C++, threaded, built with the package. This is what runs.
@@ -23,8 +23,8 @@ Two implementations of the same maths live here:
 smappy: upstream compiles this loop with numba, which is a 40 MB dependency
 carrying its own LLVM and compiling on first call. smappy already ships three
 pybind11 extensions and wheels for every platform, so the same loop moved to
-`csrc/drift.hpp` costs no dependency at all and no compile at run time. numba
-remains only for the CUDA backend, which is an optional extra.
+`csrc/drift.hpp` costs no dependency at all and no compile at run time.
+Upstream's CUDA and torch backends are not vendored; this is the only one.
 
 The kernels take the caller's dtypes as they are -- the optimizer builds float32
 coordinates and int32 indices once and reuses them -- so nothing is copied per
@@ -45,11 +45,16 @@ PARALLEL_PAIR_THRESHOLD = 200_000
 _N_BLOCKS = 16
 
 
-def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
+def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_factor,
+                                 z_factor=1.0, variances=None):
     """Reference implementation: the cost function written out plainly.
 
-    Not used at runtime. Kept as the specification that the compiled kernel and
-    the GPU backends are tested against.
+    Not used at runtime. Kept as the specification that the compiled kernel
+    is tested against.
+
+    smappy: ``z_factor`` (sigma_z / sigma_xy) and ``variances`` ((N, 3), each
+    localization's precision squared per axis) are additions; see
+    `csrc/drift.hpp`.  With neither it is upstream's function.
 
     Parameters
     ----------
@@ -64,8 +69,10 @@ def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_f
     total : float, the summed pair overlap.
     deri : (T, 3) float array, d(total)/d(mu).
     """
-    sigma_sq = (2.0 * sigma * sigma_factor) ** 2
-    inv_sigma = 1.0 / (sigma * sigma_factor)
+    s = sigma * sigma_factor
+    # the variance per axis of a pair's Gaussian, 2 s^2 (upstream's (2s)^2 / 2)
+    base = 2.0 * s * s * np.array([1.0, 1.0, z_factor * z_factor])
+    inv_sigma = 1.0 / s
     deri = np.zeros_like(mu)
     total = 0.0
 
@@ -75,18 +82,18 @@ def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_f
         ti = times[i]
         tj = times[j]
 
-        dx = (coords[i, 0] - mu[ti, 0]) - (coords[j, 0] - mu[tj, 0])
-        dy = (coords[i, 1] - mu[ti, 1]) - (coords[j, 1] - mu[tj, 1])
-        dz = (coords[i, 2] - mu[ti, 2]) - (coords[j, 2] - mu[tj, 2])
+        v = base if variances is None else base + variances[i] + variances[j]
+        norm = inv_sigma * math.sqrt(np.prod(base / v))
+        d = (coords[i] - mu[ti]) - (coords[j] - mu[tj])
 
-        val = math.exp(-(dx * dx + dy * dy + dz * dz) / sigma_sq) * inv_sigma
+        val = math.exp(-float(np.sum(d * d / (2.0 * v)))) * norm
         total += val
 
-        for d in range(3):
+        for k in range(3):
             # The two contributions are exact negatives of each other.
-            contrib = 2.0 * val * (coords[j, d] - coords[i, d] + mu[ti, d] - mu[tj, d]) / sigma_sq
-            deri[tj, d] += contrib
-            deri[ti, d] -= contrib
+            contrib = -val * d[k] / v[k]
+            deri[tj, k] += contrib
+            deri[ti, k] -= contrib
 
     return total, deri
 
@@ -115,8 +122,8 @@ def cpu_wrapper_chunked(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_f
                         val=None, deri=None, chunk_size=None, debug=False, parallel=None):
     """Cost and gradient for the optimizer, on the CPU.
 
-    Signature matches the CUDA and torch wrappers so the optimizer can swap
-    backends. `val`, `deri` and `chunk_size` exist for that compatibility only:
+    Signature as upstream's CUDA and torch wrappers (not vendored). `val`,
+    `deri` and `chunk_size` exist for that compatibility only:
     the compiled kernel needs no scratch buffer and no chunking, since it is not
     working around device memory limits.
     """
@@ -150,7 +157,8 @@ def cpu_wrapper_chunked(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_f
 
 
 def cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,
-                             val=None, deri=None, chunk_size=None, debug=False, parallel=None):
+                             val=None, deri=None, chunk_size=None, debug=False, parallel=None,
+                             z_factor=1.0):
     """`cpu_wrapper_chunked` without the per-call array conversions.
 
     The optimizer calls this a few hundred times with the *same* arrays, and the
@@ -166,10 +174,9 @@ def cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j, sigma, si
     mu = mu.reshape((-1, 3))  # float64 and contiguous, straight from L-BFGS-B
     if parallel is None:
         parallel = idx_i.shape[0] >= PARALLEL_PAIR_THRESHOLD
-    kernel = _cost_and_gradient_njit_parallel if parallel else _cost_and_gradient_njit
-
-    total, gradient = kernel(locs_coords, locs_time, idx_i, idx_j, mu,
-                             float(sigma), float(sigma_factor))
+    total, gradient = _drift.cost_and_gradient(
+        locs_coords, locs_time, idx_i, idx_j, mu, float(sigma), float(sigma_factor),
+        0.0, 0 if parallel else 1, z_factor=float(z_factor))
     # The optimizer minimizes, so hand back the negated overlap.
     return -total, -gradient.flatten()
 
@@ -194,7 +201,7 @@ _EXPTAB = np.exp(-np.arange(float(int(CUTOFF_SIGMAS ** 2 / 4.0) + 2)))
 
 def _cost_and_gradient_njit_parallel_approx(coords, times, idx_i, idx_j, mu,
                                             sigma, sigma_factor, cutoff_sigmas,
-                                            exptab=None):
+                                            exptab=None, z_factor=1.0, variances=None):
     """The compiled kernel with the distance cutoff.
 
     smappy: upstream approximates `exp` with a table and a Taylor series because
@@ -205,16 +212,21 @@ def _cost_and_gradient_njit_parallel_approx(coords, times, idx_i, idx_j, mu,
     """
     return _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu,
                                     float(sigma), float(sigma_factor),
-                                    float(cutoff_sigmas), 0)
+                                    float(cutoff_sigmas), 0,
+                                    z_factor=float(z_factor), variances=variances)
 
 
 def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,
-                               val=None, deri=None, chunk_size=None, debug=False, parallel=None):
-    """`cpu_wrapper_chunked_fast` with the approximate kernel above."""
+                               val=None, deri=None, chunk_size=None, debug=False, parallel=None,
+                               z_factor=1.0, variances=None):
+    """`cpu_wrapper_chunked_fast` with the approximate kernel above.
+
+    smappy: ``z_factor`` is sigma_z / sigma_xy and ``variances`` each
+    localization's precision squared per axis (`csrc/drift.hpp`)."""
     mu = mu.reshape((-1, 3))
     total, gradient = _cost_and_gradient_njit_parallel_approx(
         locs_coords, locs_time, idx_i, idx_j, mu, float(sigma), float(sigma_factor),
-        float(CUTOFF_SIGMAS), _EXPTAB)
+        float(CUTOFF_SIGMAS), _EXPTAB, z_factor=z_factor, variances=variances)
     return -total, -gradient.flatten()
 
 
@@ -223,9 +235,10 @@ def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, 
 # with no drift correction at all.  A segment whose pairs do not overlap better
 # than that null is not supported by its own data -- its drift is a guess -- and
 # `flag_flawed_segments` marks it so the optimizer can set it to NaN and let the
-# spline bridge it.  COMET computes this on its cuda_qc / torch_qc backends
+# spline bridge it.  Upstream computes this on its cuda_qc / torch_qc backends
 # only; this is the same quantity for the CPU path, run once after the fit.
-def _overlap_per_segment_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
+def _overlap_per_segment_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_factor,
+                              z_factor=1.0):
     """Per-segment overlap with the fitted drift, with none, and pair counts.
 
     Same-segment pairs are excluded: their overlap does not depend on the drift,
@@ -233,20 +246,21 @@ def _overlap_per_segment_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_fact
     pair counts for both of its segments, as in the GPU version.
     """
     return _drift.overlap_per_segment(coords, times, idx_i, idx_j, mu,
-                                      float(sigma), float(sigma_factor), 0)
+                                      float(sigma), float(sigma_factor), 0,
+                                      z_factor=float(z_factor))
 
 
 def cpu_wrapper_chunked_qc(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,
-                           val=None, deri=None, chunk_size=None):
+                           val=None, deri=None, chunk_size=None, z_factor=1.0):
     """Cost, gradient and the quality-control metric, on the CPU.
 
-    Signature matches `cuda_wrapper_chunked_qc` / `torch_wrapper_chunked_qc`.
+    Signature as upstream's `cuda_wrapper_chunked_qc` (not vendored).
     """
     loss, gradient = cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j,
-                                              sigma, sigma_factor)
+                                              sigma, sigma_factor, z_factor=z_factor)
     obs, null, pairs = _overlap_per_segment_njit(
         locs_coords, locs_time, idx_i, idx_j, mu.reshape((-1, 3)),
-        float(sigma), float(sigma_factor))
+        float(sigma), float(sigma_factor), z_factor)
 
     denominator = np.maximum(pairs, np.finfo(np.float64).eps)
     qc = {

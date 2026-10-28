@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.drift.Drift.then, smappy.drift.Drift.parameters, smappy.drift._TransformationFit, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
+version: "5"
+covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.drift.Drift.then, smappy.drift.Drift.parameters, smappy.drift.Drift.noise_nm, smappy.drift.Drift.insignificant_axes, smappy.drift.split_halves, smappy.drift.precision_variances, smappy.drift._TransformationFit, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
 ---
 
 ## What it does
@@ -16,7 +16,18 @@ It does not make images.  It asks a simpler question of the localizations
 directly: if the drift were known and taken out, a molecule seen early and
 the same structure seen late would sit on top of each other.  So COMET looks
 for the drift curve that makes localizations from different times **overlap
-as much as possible**, and moves every localization by that curve.
+as much as possible**, and moves every localization by that curve.  A
+precise localization counts for more in that overlap than an imprecise one,
+as in [DME](plugin:Panels/Glossary)
+([Cnossen et al. 2021](https://doi.org/10.1364/OE.426620)), so
+out-of-focus and dim localizations pull little on the result.
+
+Every run also says how far to trust the curve, with a
+[split-half error bar](plugin:Panels/Glossary): it estimates the drift
+again from each half of the field and draws both halves beside the curve.
+Where they differ is noise.  When the curve is no larger than that noise
+the text says so: there is then no drift to correct, and correcting it would
+only add noise.
 
 Use it on **fixed** samples: anything that moves by itself is taken for
 drift.  It needs a few thousand localizations in the selection at the least
@@ -54,7 +65,9 @@ from smappy._comet.core.pair_indices import pair_indices_kdtree
 from smappy._comet.core.cpu_wrapper import cpu_wrapper_chunked_approx
 locs = simulate(n_frames=10000, seed=1, drift=True)
 truth = np.array(locs.metadata["drift_truth"])
-settings = DriftSettings()
+# the default estimate, with its error bar, for the figures that show it
+spline = estimate_drift(locs, DriftSettings())
+settings = DriftSettings(split_half=False)
 grouped = _grouped(locs, settings, None)
 x, y, z = _positions_nm(grouped, None, None)
 frame = np.asarray(grouped["frame"])
@@ -81,6 +94,41 @@ the drift of its own frame, and the overlap of each pair of blobs is added
 up.  The overlap is largest when the drift curve is right, because then
 localizations of the same structure land on top of each other whatever time
 they were recorded at.
+
+With *precision weights* (on by default) each blob is also as wide as its
+localization is uncertain, in each axis on its own: its
+[localization precision](plugin:Panels/Glossary) is added to $\sigma$, and a blob keeps
+the same total amount however wide it is.  Two precise localizations of a
+molecule then overlap strongly, and a dim or out-of-focus one -- wide, and
+in z often three times wider than in x and y -- spreads its little overlap
+thinly and pulls little on the curve.  It is what used to need a hand-set
+filter on z.
+
+```figure Out-of-focus fits are often held at the edge of the z range the fit covers, whatever the drift: here 40% of the simulation's localizations were moved to z = ±400 nm and given the poor precision such fits have (30 nm laterally, 200 nm in z).  Drawn is how far the z drift found with them lies from the z drift found without them.  Counted like any other (COMET as published, orange) they hold the axial drift back by up to a few nm where it is largest; weighted by their precision (blue) they hardly count.
+rng = np.random.default_rng(3)
+cols = {k: np.array(v, dtype=float) if k.endswith("nm") else np.array(v)
+        for k, v in locs.columns.items()}
+f = np.asarray(cols["frame"], int)
+bad = rng.random(len(f)) < 0.4
+cols["z_nm"][bad] = np.where(cols["z_nm"][bad] - truth[f[bad], 2] >= 0, 400.0, -400.0)
+cols["xy_err_nm"][bad], cols["z_err_nm"][bad] = 30.0, 200.0
+pinned = Localizations(cols, locs.metadata)
+fig.set_size_inches(6.5, 2.4)
+ax = fig.subplots()
+clean = spline.drift[:, 2]
+for weights, color, label in ((False, "#ff7f0e", "every localization alike"),
+                              (True, "#1f77b4", "weighted by precision")):
+    found = estimate_drift(pinned, DriftSettings(split_half=False,
+                                                 precision_weights=weights)).drift[:, 2]
+    n = min(len(found), len(clean))
+    ax.plot(np.arange(n), (found[:n] - found[:n].mean()) - (clean[:n] - clean[:n].mean()),
+            color=color, lw=1.2, label=label)
+ax.axhline(0.0, color="0.7", lw=0.8, zorder=0)
+ax.set_xlabel("frame", fontsize=8)
+ax.set_ylabel("z drift, difference (nm)", fontsize=8)
+ax.tick_params(labelsize=7)
+ax.legend(fontsize=7, frameon=False)
+```
 
 **4. Coarse to fine.**  With small blobs the overlap has many small peaks,
 and an optimiser started far from the answer would stop at the nearest one.
@@ -135,8 +183,7 @@ of every frame.  This follows faster changes and can check each window
 (*quality control*), at the price of a noisier curve.
 
 ```figure The drift estimated from the simulation, against the drift that was put in (grey, with the frame-to-frame jitter of the simulation).  The spline at its default 2000-frame knots (blue) follows the slow course of the drift and smooths over wiggles shorter than its knot spacing; the time-window fit (orange, dashed) follows more of them and is noisier.  Only differences between frames are measured, so the curves are compared after removing their mean.
-spline = estimate_drift(locs, settings)
-windows = estimate_drift(locs, DriftSettings(spline=False, backend="cpu"))
+windows = estimate_drift(locs, DriftSettings(spline=False, split_half=False))
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
 frames = np.arange(len(truth))
@@ -158,7 +205,28 @@ axes[0].legend(fontsize=7, frameon=False)
 `y_nm` and `z_nm` (or the pixel columns) of every localization in that
 frame, whether or not it was selected.
 
-**7. A sample that changes size.**  With a *transformation*, each frame
+**7. The error bar.**  With *error bar* on (the default), the field is cut
+in two at its middle, and the drift is estimated again from each half on
+its own.  The two halves hold different molecules, so whatever they
+disagree on is chance: the noise of the curve.  Both are drawn dashed beside
+the curve, and the text gives the noise in nm.  Where the curve moves no
+more than about its noise, there is no drift to speak of.
+
+```figure Left: the simulation's drift as estimated (solid), with the estimates from each half of the field (dashed); they agree to about a nanometre, which is the noise the text reports.  Right: the same on a simulation with no drift at all.  The curve still wanders by a few nm -- that is its noise, as the halves show -- and the text says that there is no drift above the noise.
+still = estimate_drift(simulate(n_frames=10000, seed=1), DriftSettings())
+fig.set_size_inches(7.5, 2.6)
+left, right = fig.subplots(1, 2)
+spline.plot(left)
+still.plot(right)
+for ax, title in ((left, "drift put in"), (right, "no drift")):
+    ax.set_title(title, fontsize=9)
+    ax.tick_params(labelsize=7)
+    ax.xaxis.label.set_size(8)
+    ax.yaxis.label.set_size(8)
+    ax.legend(fontsize=7, frameon=False)
+```
+
+**8. A sample that changes size.**  With a *transformation*, each frame
 also gets a small linear transformation about the middle of the data -- a
 change of scale, a rotation, or the full affine one -- and its parameters
 are smooth curves in time too, with the drift's knots or, with
@@ -221,15 +289,31 @@ Without a session (a script) they are 50 nm and 1 frame, the session's own
 defaults.  The merged blinks are thrown away afterwards.
 
 **The cost.**  With $\mathbf{r}_i$ the position of localization $i$ (x, y
-and z, with z zero for a 2D table), $t_i$ its frame and $\mathbf{d}(t)$ the
-drift, the overlap is
+and z, with z zero for a 2D table), $t_i$ its frame, $\mathbf{d}(t)$ the
+drift and $\Delta_k$ axis $k$ of the corrected separation
+$(\mathbf{r}_i - \mathbf{d}(t_i)) - (\mathbf{r}_j - \mathbf{d}(t_j))$, the
+overlap is
 
-$$C = \sum_{(i,j)} \frac{1}{\sigma}\, \exp\left( -\frac{\left| (\mathbf{r}_i - \mathbf{d}(t_i)) - (\mathbf{r}_j - \mathbf{d}(t_j)) \right|^2}{4\sigma^2} \right) ,$$
+$$C = \sum_{(i,j)} \frac{1}{\sigma} \sqrt{\prod_k \frac{2 s_k^2}{V_{ij,k}}}\, \exp\left( -\sum_k \frac{\Delta_k^2}{2 V_{ij,k}} \right), \qquad V_{ij,k} = 2 s_k^2 + p_{i,k}^2 + p_{j,k}^2 ,$$
 
 summed over the pairs with $|\mathbf{r}_i - \mathbf{r}_j| \leq R$ in the
-uncorrected positions, $R$ the *max drift*.  The exponent is the overlap of
-two Gaussians of width $\sigma$ each, which is a Gaussian of variance
-$2\sigma^2$ in their separation.  The pair list is built once with a KD-tree
+uncorrected positions, $R$ the *max drift*.  The blob widths are
+$s_x = s_y = \sigma$ and $s_z = f\sigma$, $f$ the *z width* (1 by
+default), and $p_{i,k}$ is localization $i$'s precision in axis $k$:
+`xy_err_nm` for x and y, `z_err_nm` for z.  Each term is the overlap of two
+Gaussians, whose separation has the variance $V_{ij,k}$ in each axis, as a
+density: it integrates to the same whatever the precisions, so a precise
+pair is tall and narrow and an imprecise one low and wide.  With *precision
+weights* off, the $p$ are zero; with $f = 1$ as well this is COMET's
+$\exp(-|\Delta|^2 / 4\sigma^2) / \sigma$.  The weights take the
+precisions of what the estimate runs on -- the merged blinks', with *merge
+blinks* -- with z's zero where z is not corrected or the table has no
+`z_err_nm`, and a missing value replaced by the median.  A table without
+`xy_err_nm` is run unweighted, and the run says so.  The weights are for
+the spline fit of the shift alone: the time-window fit and a
+*transformation* run unweighted.  This is DME's weighting, a Gaussian per
+pair from the two precisions; DME's cost differs otherwise -- the logarithm
+of a sum over each localization's neighbours rather than one sum over pairs.  The pair list is built once with a KD-tree
 and not updated as the drift changes, so $R$ must be at least as large as the
 drift between any two times: a pair that starts further apart is never seen.
 $C$ does not change when the same constant is added to the drift of every
@@ -238,10 +322,11 @@ frame, so only differences are determined.
 $-C$ and its gradient are computed by a compiled, multithreaded kernel and
 minimised with L-BFGS-B, stopping when the relative change of the cost falls
 below *ftol* ($10^{-7}$; the gradient tolerance is $10^{-5}$), with every
-parameter bounded to $\pm 2R$.  With *approximate kernel* on, pairs further
-apart than $6\sigma$ after correction are skipped: each contributes less
-than $e^{-9}$ of a coincident pair, and once $\sigma$ is small they are most
-of the pairs.
+parameter bounded to $\pm 2R$.  With *approximate kernel* on, pairs whose
+exponent $\sum_k \Delta_k^2 / 2V_{ij,k}$ is above 9 are skipped -- further
+apart than $6\sigma$, for one width and no precisions: each contributes
+less than $e^{-9}$ of a coincident pair, and once $\sigma$ is small they
+are most of the pairs.
 
 **The spline.**  With $F$ frames and knot spacing $\Delta$, the drift in each
 axis is a clamped cubic B-spline
@@ -262,6 +347,22 @@ $\sigma_{n+1} = \max(\sigma_n / 1.5,\ \sigma_\mathrm{target})$, one full
 L-BFGS-B at each, ending with the one at $\sigma_\mathrm{target}$: with the
 defaults 100, 67, 44 and 30 nm.  The spline fit always runs on the CPU and
 always uses the $6\sigma$ cutoff.
+
+**The error bar** (*error bar*).  The selected localizations are cut at the
+median of x or of y, whichever they spread further along -- DME's split --
+and the whole estimate, passes and blink merging included, is run on each
+half with the same settings.  Each half's curve is moved to the mean of the
+whole curve.  The noise per axis is the root mean square over frames of the
+difference between the two halves' curves, each made zero mean, divided by
+2: each half has half the data, so its noise is $\sqrt{2}$ times the
+whole's, and the difference of two such is $\sqrt{2}$ times that again.
+An axis whose curve has a root mean square about its mean below twice its
+noise is reported as having no drift above the noise.  On simulations with
+no drift, that ratio had a median of 1.0 and was at most 1.7 over 144
+axes; with drift it is in the tens.  A transformation has no error bar: the
+halves have different centres.  The error bar measures noise only.  A bias
+common to both halves -- drift beyond *max drift*, or junk that does not
+follow the drift -- does not show in it.
 
 **Time windows** (*fit spline* off).  The windows are, by *window unit*:
 *window size* consecutive frames that contain localizations; or frames
@@ -366,7 +467,8 @@ the acquisition is merged first, and the fraction it keeps is the fraction
 the whole table is expected to keep.  From the pair count $P$, the time is
 $P\,(16\ \mathrm{ns} + E \times 2.1\ \mathrm{ns})$, plus 0.3 µs per
 localization of the table, with $E = 23$ cost evaluations per width in the
-schedule above; the memory is 24 bytes per pair.  The constants were measured
+schedule above, and twice that with the *error bar*; the memory is 24 bytes
+per pair.  The constants were measured
 on one computer, so the answer is an order of magnitude, and it is only used
 to decide whether to ask.
 
@@ -396,7 +498,28 @@ of zero drift, which is why it scales with *max drift*.
 2000 frames was the best choice on a real 46 000-frame dataset: finer knots
 were noisier without being sharper, and there was no sign of
 over-smoothing up to 4000.  Drift that changes faster wants a smaller
-spacing.
+spacing.  The noise grows by about $\sqrt{2}$ for every halving of the
+spacing; the *error bar* shows whether a finer spacing still leaves the
+drift well above it.
+
+### precision_weights
+Leave it on.  On simulations it lowered the error by 10-20% in every axis,
+and in z by a fifth where a fifth of the localizations were out-of-focus
+fits pinned in z, by half where two fifths were -- within a nanometre of
+what a hand-set filter on z gave.  Off is COMET as
+published, for a table whose precisions cannot be trusted.
+
+### sigma_z_factor
+One width for x, y and z is right at the default *target sigma*: 30 nm is
+already wider than most z precisions, and making z three times wider made
+the axial error worse on simulations (1.1 to 1.8 nm, and 4.6 to 15 nm with
+pinned out-of-focus fits).  It helps only with a *target sigma* near the
+lateral precision (8 nm: 1.8 to 1.2 nm), where the *precision weights* do
+as well.
+
+### split_half
+It doubles the run.  Turn it off for a large ungrouped estimate where the
+time matters more than knowing the noise.
 
 ### spline_penalty
 Rarely needed: the knot spacing already sets how smooth the curve is.  On
@@ -495,7 +618,8 @@ and the run refuses the combination.
   fit at its next step and leaves the table as it was: a curve refined half
   way is not one to subtract.
 * **The drift curve**, x, y and z against frame (*Show result*); an axis
-  with no drift at all is not drawn.  One curve per file when the selection
+  with no drift at all is not drawn.  With the *error bar*, the halves'
+  curves are drawn dashed in the same colours.  One curve per file when the selection
   holds several.  It is saved with the file and drawn
   again when it is reopened.
 * **The transformation**, with *transformation*, in a second panel under the
@@ -506,12 +630,17 @@ and the run refuses the combination.
   an expanding sample has a rising scale, and a positive rotation is
   anticlockwise.  It is saved with the curve, and Transform's *drift of
   another file* applies it with the drift.
-* **The text** gives the range of the drift in x, y and z, with a
-  transformation its centre and the range of each parameter in ppm, and with
-  *quality control* the time windows that were discarded.
+* **The text** gives the range of the drift in x, y and z, with the *error
+  bar* its noise in each axis and the axes with no drift above the noise,
+  with a transformation its centre and the range of each parameter in ppm,
+  and with *quality control* the time windows that were discarded.  The
+  noise is kept in the table's metadata with the correction.
 
 A good result is a smooth curve of plausible size, a few hundred nanometres
-at most, and an image that is visibly sharper after correction.  A curve
+at most, well above its noise, with halves that follow it, and an image
+that is visibly sharper after correction.  A noise of a nanometre or two is
+typical; a curve that wanders by a few nanometres with a noise of the same
+size is noise, and *no drift above the noise* says so.  A curve
 that sits flat at twice *max drift* has run into the optimiser's bound, and
 *max drift* was too small.  Sharp excursions that come straight back usually
 mean the data at that time had too little to go on: merge blinks, filter
@@ -536,6 +665,10 @@ COMET in these ways:
   standard deviation of the no-drift overlap *across windows*.  On a
   bleaching sample that spread mostly measures the falling density, and
   flagged 90 of 92 windows on one dataset.  The lift divides the density out.
+* **Precision weights** are an addition, DME's weighting of each pair by
+  the two localizations' precisions on COMET's cost; COMET counts every
+  pair alike, with one width for all three axes.
+* **The error bar** is an addition, DME's split-half precision.
 * **Two passes** and **RCC first** are additions.
 * **A transformation over time** is an addition.  SMAP's
   *driftcorrectionM* ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)) fitted a magnification alone: it rendered
@@ -555,7 +688,8 @@ COMET in these ways:
   [doi:10.64898/2026.03.27.714864](https://doi.org/10.64898/2026.03.27.714864)
 * Cnossen J, Cui TJ, Joo C, Smith C. Drift correction in localization
   microscopy using entropy minimization. *Opt Express* 29, 27961 (2021).
-  DME, the localization-based method in SMAP.
+  DME, the localization-based method in SMAP; its precision weighting and
+  split-half error bar.
   [doi:10.1364/OE.426620](https://doi.org/10.1364/OE.426620)
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870-872 (2020).  SMAP's *driftcorrectionM*.

@@ -47,12 +47,12 @@ subtract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
 import numpy as np
 
-from .drift import REFERENCES, Drift, _grouped, _positions_nm, _selection
+from .drift import REFERENCES, Drift, _grouped, _positions_nm, _selection, split_halves
 from .locs import Localizations
 from .params import param
 
@@ -132,6 +132,12 @@ class RCCSettings:
                                    help="leave the zero-shift sample out of "
                                         "the axial peak search",
                                    advanced=True)
+    # the estimate again from each half of the field, as COMET's error bar
+    # (`DriftSettings.split_half`); RCC takes seconds, so it costs seconds
+    split_half: bool = param(True, label="error bar",
+                             help="estimate again from each half of the "
+                                  "field and show both: how far they differ "
+                                  "is twice the curve's noise")
     # "as estimated" is zero mean over the time windows (`_solve`'s gauge);
     # see `DriftSettings.reference`
     reference: str = param("as estimated", label="reference",
@@ -193,8 +199,14 @@ def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = No
 
     per_window = np.column_stack([dx, dy, dz])
     drift = _to_frames(centres[occupied], per_window, n_frames)
-    return Drift(drift, None, n_used=len(x), method="rcc").referenced(
-        settings.reference)
+    result = Drift(drift, None, n_used=len(x), method="rcc")
+    if settings.split_half:
+        whole = replace(settings, split_half=False, reference="as estimated")
+        result.halves = split_halves(
+            result, locs, select, pixelsize_nm,
+            lambda half: estimate_drift_rcc(locs, whole, half, pixelsize_nm,
+                                            display, stop))
+    return result.referenced(settings.reference)
 
 
 # ------------------------------------------------------------------- correlating

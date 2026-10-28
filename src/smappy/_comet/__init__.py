@@ -11,14 +11,14 @@ which is why `smappy.drift` records its name and version in the provenance of
 every corrected file.
 
 Only the modules the drift correction actually calls are here -- the CLI, the
-batch runner, the IDL and CUDA/C++ bindings, the docs and COMET's own tests are
+batch runner, the IDL and CUDA/C++ bindings, the CUDA and torch backends
+(the compiled CPU kernel is the only one), the docs and COMET's own tests are
 not.  Upstream's layout is kept so this copy can be diffed against a newer
 release; the only edits are relative imports, two lazy ones, and the two
 cost-function fast paths in `core.cpu_wrapper` that smappy opts into.
 
 Most of this copy is reached only by the time-window fit, which is kept as
-legacy until GPU and CPU are benchmarked; see "To simplify" in
-`smappy.drift` for what goes then.
+legacy; see "To simplify" in `smappy.drift`.
 
 It is vendored rather than depended on because COMET publishes no distribution
 on PyPI, and drift correction that only works from a git checkout is drift
@@ -26,8 +26,6 @@ correction most people never run.
 """
 
 from ._version import __version__
-from .core.backends import (available_backends, best_backend, cuda_available,
-                            describe_backends, torch_available)
 from .core.drift_optimizer import comet_run_kd
 from .core.segmenter import segmentation_wrapper
 
@@ -37,6 +35,4 @@ UPSTREAM = "COMET (github.com/gpufit/Comet)"
 __all__ = [
     "__version__", "UPSTREAM",
     "comet_run_kd", "segmentation_wrapper",
-    "available_backends", "best_backend", "cuda_available", "torch_available",
-    "describe_backends",
 ]

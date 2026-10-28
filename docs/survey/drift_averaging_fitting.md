@@ -96,6 +96,8 @@ Surveyed: DME (qnano/drift-estimation and photonpy), Picasso's AIM, NanoJ-SQUIRR
 *Test data.* Each repo ships simulated particles (`data/simulation/tud_dol100.mat`, `smlm_datafusion3d/data/example_data.mat`, `smlm_classification2d/data/200x_simulated_TUD_flame`); `smappy.simulate` NPCs as well.
 
 #### 3. Precision-weighted, anisotropic drift cost -- DME  (M; MIT, port with attribution)
+*Done (2026-10):* (b) per-pair precision weights in `csrc/drift.hpp`, on by default, and the split-half error bar; (i) a per-axis width as *z width*, which measured worse than one width at the default target sigma.  The log-of-density cost was not tried.  docs/drift.md, "Precision weights and the width in z".
+
 *What it does.*
 * **Cost.** DME maximises `-entropy = (1/N) sum_i log(1 / (1 + sum_j exp(-KL_ij)))` (`dme/DME/DriftEstimation.cu:228-256` constant CRLB, `:290-316` per spot). `KL_ij` is the Kullback-Leibler divergence between the two localizations' Gaussians, built from each one's **own CRLB per axis** (`:28-35`).
 * **Neighbours.** Within 3 x the mean CRLB (`:150-154`), pairs from the same frame excluded (`:121-122`), capped at `maxNeighbors` = 1000 (`dme.py:19`). The list is rebuilt only when the drift has moved more than half the search range (`:107-123`).

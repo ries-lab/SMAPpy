@@ -28,6 +28,12 @@ struct DriftCost {
     std::vector<double> gradient;   // (n_segments, 3), row major
 };
 
+// The cutoff of `cutoff_sigmas` sigma as a bound on the exponent,
+// |d|^2 / (4 s^2) > cutoff^2 / 4.
+inline double cutoff_exponent(double cutoff_sigmas) {
+    return cutoff_sigmas > 0.0 ? cutoff_sigmas * cutoff_sigmas / 4.0 : 0.0;
+}
+
 // `cutoff_sigmas <= 0` disables the cutoff, giving the exact kernel; a positive
 // value skips pairs further apart than that many sigma, whose contribution is
 // below exp(-cutoff^2/4) and which are the large majority once sigma is small.
@@ -35,19 +41,60 @@ struct DriftCost {
 // float32 coordinates and int32 indices and calls this a few hundred times with
 // the same arrays; converting them here would copy gigabytes per evaluation,
 // which is precisely what COMET's `_fast` path exists to avoid.
+//
+// smappy: the width is per axis.  `z_factor` is sigma_z / sigma_xy, so a pair's
+// distance is measured as dx^2 + dy^2 + (dz/k)^2 -- the Mahalanobis distance of
+// a Gaussian k times as wide in z -- and the cutoff is on that distance.  k = 1
+// is COMET.  A fixed k > 1 was measured worse than the precision weights below
+// at the default sigma (docs/drift.md, "Precision weights and the width in z").
+//
+// `variances` (n, 3), or null, is each localization's own variance per axis
+// (its precision squared): a pair's Gaussian then has the variance
+// V_k = 2 s_k^2 + var_i,k + var_j,k per axis and is normalised as a density,
+// sqrt(prod V0_k / prod V_k) / s with V0_k = 2 s_k^2, so that a pair of exact
+// localizations weighs what it did without and imprecise ones count less --
+// DME's weighting (Cnossen et al. 2021) on COMET's cost.  Null is COMET's.
+namespace detail {
+// What a pair needs from the widths: 1/(2 V_k) per axis and the norm.
+struct PairWidth {
+    double half_inv[3];   // 1 / (2 V_k)
+    double norm;          // the density's normalisation, relative to COMET's
+};
+
+inline PairWidth constant_width(double s_eff, double z_factor) {
+    const double v_xy = 2.0 * s_eff * s_eff;
+    const double v_z = v_xy * z_factor * z_factor;
+    return {{0.5 / v_xy, 0.5 / v_xy, 0.5 / v_z}, 1.0 / s_eff};
+}
+
+inline PairWidth pair_width(const PairWidth& base, const double* vi,
+                            const double* vj) {
+    PairWidth w;
+    double ratio = 1.0;
+    for (int k = 0; k < 3; ++k) {
+        const double v0 = 0.5 / base.half_inv[k];
+        const double v = v0 + vi[k] + vj[k];
+        w.half_inv[k] = 0.5 / v;
+        ratio *= v0 / v;
+    }
+    w.norm = base.norm * std::sqrt(ratio);
+    return w;
+}
+}  // namespace detail
+
 template <class Coord, class Index>
 DriftCost cost_and_gradient(const Coord* coords, const Index* times,
                             const Index* idx_i, const Index* idx_j,
                             const double* mu, int64_t n_pairs,
                             int64_t n_segments, double sigma,
                             double sigma_factor, double cutoff_sigmas,
-                            int n_threads) {
+                            int n_threads, double z_factor = 1.0,
+                            const double* variances = nullptr) {
     const double s_eff = sigma * sigma_factor;
-    const double sigma_sq = (2.0 * s_eff) * (2.0 * s_eff);
-    const double inv_sigma_sq = 1.0 / sigma_sq;
-    const double inv_sigma = 1.0 / s_eff;
-    const double cutoff_sq =
-        cutoff_sigmas > 0.0 ? (cutoff_sigmas * s_eff) * (cutoff_sigmas * s_eff) : 0.0;
+    const detail::PairWidth base = detail::constant_width(s_eff, z_factor);
+    // the cutoff on the Mahalanobis distance: sum d_k^2 / (2 V_k) against
+    // cutoff^2 / 4, which for one sigma is |d| > cutoff * s
+    const double cutoff_m = cutoff_exponent(cutoff_sigmas);
     const bool use_cutoff = cutoff_sigmas > 0.0;
 
     const int threads = resolve_threads(n_threads, n_pairs);
@@ -69,26 +116,30 @@ DriftCost cost_and_gradient(const Coord* coords, const Index* times,
             const double* mi = mu + 3 * ti;
             const double* mj = mu + 3 * tj;
 
-            const double dx = (double(ci[0]) - mi[0]) - (double(cj[0]) - mj[0]);
-            const double dy = (double(ci[1]) - mi[1]) - (double(cj[1]) - mj[1]);
-            const double dz = (double(ci[2]) - mi[2]) - (double(cj[2]) - mj[2]);
-            const double diff_sq = dx * dx + dy * dy + dz * dz;
-            if (use_cutoff && diff_sq > cutoff_sq) continue;
+            const double d[3] = {(double(ci[0]) - mi[0]) - (double(cj[0]) - mj[0]),
+                                 (double(ci[1]) - mi[1]) - (double(cj[1]) - mj[1]),
+                                 (double(ci[2]) - mi[2]) - (double(cj[2]) - mj[2])};
+            const detail::PairWidth w =
+                variances ? detail::pair_width(base, variances + 3 * i,
+                                               variances + 3 * j)
+                          : base;
+            const double m = d[0] * d[0] * w.half_inv[0] + d[1] * d[1] * w.half_inv[1] +
+                             d[2] * d[2] * w.half_inv[2];
+            if (use_cutoff && m > cutoff_m) continue;
 
-            const double val = std::exp(-diff_sq * inv_sigma_sq) * inv_sigma;
+            const double val = std::exp(-m) * w.norm;
             local += val;
 
             // the two contributions are exact negatives of each other, so the
-            // difference is formed once and applied to both windows
-            const double weight = 2.0 * val * inv_sigma_sq;
+            // difference is formed once and applied to both windows:
+            // d val / d d_k = -val d_k / V_k
             double* gi = deri + 3 * ti;
             double* gj = deri + 3 * tj;
-            const double cx = -weight * dx;   // == weight * (cj[0]-ci[0]+mi[0]-mj[0])
-            const double cy = -weight * dy;
-            const double cz = -weight * dz;
-            gj[0] += cx; gi[0] -= cx;
-            gj[1] += cy; gi[1] -= cy;
-            gj[2] += cz; gi[2] -= cz;
+            for (int k = 0; k < 3; ++k) {
+                const double c = -2.0 * val * w.half_inv[k] * d[k];
+                gj[k] += c;
+                gi[k] -= c;
+            }
         }
         totals[static_cast<std::size_t>(t)] = local;
     });
@@ -121,9 +172,10 @@ template <class Coord, class Index>
 SegmentOverlap overlap_per_segment(
     const Coord* coords, const Index* times, const Index* idx_i,
     const Index* idx_j, const double* mu, int64_t n_pairs, int64_t n_segments,
-    double sigma, double sigma_factor, int n_threads) {
+    double sigma, double sigma_factor, int n_threads, double z_factor = 1.0) {
     const double s_eff = sigma * sigma_factor;
     const double inv_sigma_sq = 1.0 / ((2.0 * s_eff) * (2.0 * s_eff));
+    const double inv_z_sq = 1.0 / (z_factor * z_factor);   // per axis, as above
     const double inv_sigma = 1.0 / s_eff;
 
     const int threads = resolve_threads(n_threads, n_pairs);
@@ -157,9 +209,11 @@ SegmentOverlap overlap_per_segment(
             const double dz = uz - (mi[2] - mj[2]);
 
             const double val =
-                std::exp(-(dx * dx + dy * dy + dz * dz) * inv_sigma_sq) * inv_sigma;
+                std::exp(-(dx * dx + dy * dy + dz * dz * inv_z_sq) * inv_sigma_sq) *
+                inv_sigma;
             const double none =
-                std::exp(-(ux * ux + uy * uy + uz * uz) * inv_sigma_sq) * inv_sigma;
+                std::exp(-(ux * ux + uy * uy + uz * uz * inv_z_sq) * inv_sigma_sq) *
+                inv_sigma;
 
             o[ti] += val;  o[tj] += val;
             nz[ti] += none; nz[tj] += none;
@@ -210,10 +264,12 @@ TransformedCost transformed_cost_and_gradient(
         const Coord* coords, const Index* times, const Index* idx_i,
         const Index* idx_j, const double* params, int64_t n_pairs,
         int64_t n_frames, double sigma, double sigma_factor,
-        double cutoff_sigmas, int n_threads) {
+        double cutoff_sigmas, int n_threads, double z_factor = 1.0) {
     const double s_eff = sigma * sigma_factor;
     const double inv_sigma_sq = 1.0 / ((2.0 * s_eff) * (2.0 * s_eff));
     const double inv_sigma = 1.0 / s_eff;
+    // per axis, as in `cost_and_gradient`: z measured in units k times wider
+    const double axis_w[3] = {1.0, 1.0, 1.0 / (z_factor * z_factor)};
     const double cutoff_sq =
         cutoff_sigmas > 0.0 ? (cutoff_sigmas * s_eff) * (cutoff_sigmas * s_eff) : 0.0;
     const bool use_cutoff = cutoff_sigmas > 0.0;
@@ -252,7 +308,7 @@ TransformedCost transformed_cost_and_gradient(
                                   pj[3 * r + 2] * xj[2] - pj[9 + r];
                 D[r] = ci - cj;
                 Dn[r] = h[r] * D[r];
-                diff_sq += Dn[r] * Dn[r];
+                diff_sq += axis_w[r] * Dn[r] * Dn[r];
             }
             if (use_cutoff && diff_sq > cutoff_sq) continue;
 
@@ -261,10 +317,10 @@ TransformedCost transformed_cost_and_gradient(
 
             const double weight = 2.0 * val * inv_sigma_sq;
             double G[3];          // d val / d D
-            for (int r = 0; r < 3; ++r) G[r] = -weight * Dn[r] * h[r];
+            for (int r = 0; r < 3; ++r) G[r] = -weight * axis_w[r] * Dn[r] * h[r];
             // d val / d h, for the xy and the z scale
             const double dvdhxy = -weight * (Dn[0] * D[0] + Dn[1] * D[1]);
-            const double dvdhz = -weight * Dn[2] * D[2];
+            const double dvdhz = -weight * axis_w[2] * Dn[2] * D[2];
             double* gi = deri + W * ti;
             double* gj = deri + W * tj;
             for (int r = 0; r < 3; ++r) {

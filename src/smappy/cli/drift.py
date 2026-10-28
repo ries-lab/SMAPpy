@@ -52,8 +52,6 @@ def main() -> None:
                    help="cap per window, to bound memory and runtime")
     p.add_argument("--no-z", action="store_true",
                    help="estimate lateral drift only, even for a 3D dataset")
-    p.add_argument("--backend", default=None, choices=["cuda", "torch", "cpu"],
-                   help="default: the fastest available")
     p.add_argument("--pixelsize", type=float, default=None,
                    help="nm per pixel, if the file is in pixels and does not "
                         "record it")
@@ -81,6 +79,12 @@ def main() -> None:
     p.add_argument("--two-stage", action="store_true",
                    help="grouped pass, then an ungrouped one over a small "
                         "radius: ~9x faster for ~99%% of the improvement")
+    p.add_argument("--no-weights", action="store_true",
+                   help="count every pair alike instead of by the "
+                        "localizations' precisions (COMET as published)")
+    p.add_argument("--no-error-bar", action="store_true",
+                   help="skip the estimates from each half of the field, "
+                        "which double the run and say the curve's noise")
     p.add_argument("--qc", action="store_true",
                    help="discard time windows whose estimate does not beat the "
                         "no-correction overlap, and interpolate across them")
@@ -109,15 +113,17 @@ def main() -> None:
         segmentation_mode=mode, segmentation_var=var,
         max_drift_nm=a.max_drift, target_sigma_nm=a.target_sigma,
         boxcar_width=a.smooth, max_locs_per_segment=a.max_locs_per_window,
-        backend=a.backend, use_z=False if a.no_z else None,
+        use_z=False if a.no_z else None,
         optimizer_ftol=a.ftol, group=not a.ungrouped, quality_control=a.qc,
         two_stage=a.two_stage, spline=not a.per_window,
-        spline_knot_frames=a.knot_frames, transformation=a.transformation)
+        spline_knot_frames=a.knot_frames, transformation=a.transformation,
+        precision_weights=not a.no_weights, split_half=not a.no_error_bar)
 
     if a.rcc:
         drift = estimate_drift_rcc(
             locs, RCCSettings(n_timepoints=a.rcc_windows,
-                              use_z=False if a.no_z else None),
+                              use_z=False if a.no_z else None,
+                              split_half=not a.no_error_bar),
             select=keep, pixelsize_nm=a.pixelsize, display=True)
         corrected = drift.apply(locs, a.pixelsize)
     else:

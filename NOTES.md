@@ -755,6 +755,15 @@ and it is deliberately thin -- an array in, a per-frame drift table out.
   what was found where -- not measurements of the structure.
 * **Units survive.** COMET works in nm; a table in pixels is converted for the
   estimate and the drift divided back by the pixel size when applied.
+* **Each pair counts by its precisions, and every run says its noise.**
+  COMET's overlap counts a 30 nm localization as much as a 5 nm one, with
+  one width for x, y and z, which is why 3D data needed a hand-set z cut.
+  The kernel takes each localization's precision per axis (DME's
+  weighting) and that is the default; a fixed wider Gaussian in z was
+  measured worse.  The estimate is made again from each half of the field,
+  and the curve reports its noise and whether it is above it -- the drift
+  COMET finds where there is none is that noise, not a fault of the spline.
+  Measured in docs/drift.md.
 * **A new file, not an in-place edit.** `_driftc.hdf5` beside the input: drift
   correction is a hypothesis (segmentation width, maximum drift) that is worth
   redoing with other parameters, and the raw fit must stay untouched to redo it.

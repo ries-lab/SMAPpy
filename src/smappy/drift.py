@@ -21,13 +21,14 @@ coordinate.
 
 **To simplify (2026-10 review, kept for now on purpose).**  Only the spline
 fit is the default and the one users run; the time-window fit (`spline=False`)
-is kept as legacy so that GPU and CPU can be benchmarked against it -- it is
-the only path with a CUDA backend.  Once that is measured: if the GPU is not
-much faster, keep the spline fit alone, move its two kernels
-(`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) into this module, and
-delete the rest of `smappy._comet` with the ~13 settings that only the
-time-window fit reads; if it is, give the spline fit a GPU path instead.
-`two_stage` goes either way: the RCC prepass does that job more cheaply.
+is kept as legacy, for quality control and for comparison.  Its CUDA and torch
+backends are gone (2026-10: nobody ran them, the torch one could not work, and
+they were the only reason for the `cuda` extra).  What is left to decide is
+whether to keep the time-window fit at all: without it the spline fit's two
+kernels (`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) move into this
+module and the rest of `smappy._comet` goes with the ~12 settings only the
+time-window fit reads.  `two_stage` goes either way: the RCC prepass does that
+job more cheaply.
 
 Not wrapped: COMET's own file I/O, plotting and molecule-set output.  We hand it
 an array and get an array back; reading and writing stays with `io.hdf5`, so the
@@ -96,6 +97,13 @@ TRANSFORMATIONS = {
 # shifted, A_zz where it is scaled on its own, and det(A)^(1/3) for both
 # where the map mixes them.
 _SCALES = ("xy", "xy+z", "3d")
+
+# A curve whose rms about its mean is less than this many times its noise
+# (`Drift.noise_nm`) is not told apart from no drift.  On simulations with
+# none (docs/drift.md, "Wavy drift where there is none") the ratio had a
+# median of 1.0 and a largest value of 1.7 over 144 curves' axes: there the
+# curve *is* its noise.
+SIGNIFICANT = 2.0
 
 # What a drift curve is zero at (`Drift.referenced`): left as the estimator
 # made it, or the first or the last frame.
@@ -190,11 +198,6 @@ class DriftSettings:
                                                         "sigma; auto: ftol; "
                                                         "time-window fit only",
                                                    advanced=True)
-    backend: Optional[str] = param(None, choices=("cuda", "cpu"),
-                                   help="where the cost is computed; auto: "
-                                        "the fastest available; time-window "
-                                        "fit only",
-                                   advanced=True)
     # Estimate from *grouped* localizations: one entry per emitter blink rather
     # than one per frame.  20-35x faster (it removes exactly the dense, very
     # short-range pairs, which is where the pair count grows fastest) and, on
@@ -328,6 +331,42 @@ class DriftSettings:
         advanced=True)
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
+    # Each pair's Gaussian widened, per axis, by the two localizations' own
+    # precisions and normalised as a density, so that a precise pair counts
+    # more than an imprecise one (DME's weighting on COMET's cost).  It is
+    # also what gives z a width of its own: a z precision three times the
+    # lateral one widens z three times as much.  Measured on simulations
+    # (docs/drift.md, "Precision weights and the width in z"): 10-20% less
+    # error on every axis, and half the axial error where two fifths of the
+    # localizations are out-of-focus fits pinned in z -- the case that
+    # needed a hand-set z cut.  Spline fit, shift only.
+    precision_weights: bool = param(True, label="precision weights",
+                                    help="widen each pair's Gaussian by the "
+                                         "two localizations' precisions, so "
+                                         "imprecise ones count less; needs "
+                                         "xy_err_nm, and z_err_nm for z")
+    # The overlap Gaussian's width in z as a multiple of its lateral width,
+    # the same for every pair.  1 is COMET's one width.  Measured, a larger
+    # one helps z only at a small *target sigma* (8 nm: 1.8 -> 1.2 nm) and
+    # hurts at the default 30 nm, which is already wider than z precisions
+    # (1.1 -> 1.8 nm, and 4.6 -> 15 nm with pinned out-of-focus fits); the
+    # precision weights do the job per pair and better.
+    sigma_z_factor: float = param(1.0, label="z width", unit="x lateral",
+                                  min=0.1, max=20,
+                                  help="the overlap Gaussian's width in z as "
+                                       "a multiple of its lateral width; 1 "
+                                       "is one width for all axes",
+                                  advanced=True)
+    # An error bar: the estimate made again from each half of the field (DME's
+    # split), so that how far the two halves' curves differ says how far the
+    # curve is from the drift by chance -- twice its noise, since each half
+    # has half the data.  Halves of the field are halves of the molecules,
+    # which is what an honest split needs (docs/drift.md, "Two ways to be
+    # wrong").  It costs as much again as the estimate.
+    split_half: bool = param(True, label="error bar",
+                             help="estimate again from each half of the "
+                                  "field and show both: how far they differ "
+                                  "is twice the curve's noise")
     # Which frame the curve is zero at (`Drift.referenced`).  "as estimated"
     # changes nothing: the overlap cost does not see a constant offset, so
     # its gradient never moves the mean of what the optimizer starts at zero
@@ -371,7 +410,8 @@ class Drift:
                  matrix: Optional[np.ndarray] = None,
                  centre_nm: Optional[np.ndarray] = None,
                  transformation: str = "shift",
-                 times_s: Optional[np.ndarray] = None):
+                 times_s: Optional[np.ndarray] = None,
+                 halves: Optional[np.ndarray] = None):
         drift = np.asarray(drift_nm, dtype=np.float64)
         if drift.ndim != 2 or drift.shape[1] != 3:
             raise ValueError(f"drift must be (n_frames, 3), got {drift.shape}")
@@ -404,11 +444,19 @@ class Drift:
                           else np.asarray(centre_nm, dtype=np.float64).reshape(3))
         # the model `matrix` was fitted with (`TRANSFORMATIONS`)
         self.transformation = transformation if matrix is not None else "shift"
+        # the curves estimated from either half of the field (`split_halves`),
+        # (2, n, 3) and centred on this one, or None
+        if halves is not None:
+            halves = np.asarray(halves, dtype=np.float64).reshape(2, -1, 3)
+            if halves.shape[1] != len(drift):
+                raise ValueError(f"halves of {halves.shape[1]} frames for a "
+                                 f"drift of {len(drift)}")
+        self.halves = halves
 
-    def _like(self, drift, matrix, centre, reference=None) -> "Drift":
+    def _like(self, drift, matrix, centre, reference=None, halves=None) -> "Drift":
         return Drift(drift, self.settings, self.n_used, self.flagged_windows,
                      self.method, reference or self.reference, matrix, centre,
-                     self.transformation, self.times_s)
+                     self.transformation, self.times_s, halves)
 
     def referenced(self, reference: str) -> "Drift":
         """The curve shifted to be zero at the first or the last frame.
@@ -428,7 +476,10 @@ class Drift:
             return self
         r = 0 if reference == "first frame" else -1
         if self.matrix is None:
-            return self._like(self.drift - self.drift[r], None, None, reference)
+            # the halves move with the curve, so that they stay about it
+            halves = None if self.halves is None else self.halves - self.drift[r]
+            return self._like(self.drift - self.drift[r], None, None, reference,
+                              halves)
         undo = np.linalg.inv(self.matrix[r])
         matrix = undo @ self.matrix
         drift = (self.drift - self.drift[r]) @ undo.T
@@ -483,6 +534,30 @@ class Drift:
         return {name: np.einsum("fij,ij->f", delta, e) / float((e * e).sum())
                 for name, e in generators}
 
+    @property
+    def noise_nm(self) -> Optional[np.ndarray]:
+        """The curve's noise per axis, from its halves: the rms over frames
+        of the difference of the two half-curves, each made zero mean, over
+        two -- each half has half the data, so its noise is sqrt(2) the
+        whole's, and the difference of two is sqrt(2) that again.  None
+        without halves."""
+        if self.halves is None or not len(self):
+            return None
+        a, b = self.halves
+        difference = (a - a.mean(0)) - (b - b.mean(0))
+        return np.sqrt(np.mean(difference ** 2, axis=0)) / 2.0
+
+    def insignificant_axes(self) -> str:
+        """The axes, as letters, whose curve is not told apart from no drift:
+        its rms about its mean below `SIGNIFICANT` times its noise.  Empty
+        without halves, and for an axis that is not corrected at all."""
+        noise = self.noise_nm
+        if noise is None:
+            return ""
+        spread = np.sqrt(np.mean((self.drift - self.drift.mean(0)) ** 2, axis=0))
+        return "".join("xyz"[a] for a in range(3)
+                       if np.any(self.drift[:, a]) and spread[a] < SIGNIFICANT * noise[a])
+
     def __len__(self) -> int:
         return self.drift.shape[0]
 
@@ -513,6 +588,16 @@ class Drift:
                                for name, values in parameters.items())
             text += (f"; {self.transformation} about ({self.centre_nm[0]:.0f}, "
                      f"{self.centre_nm[1]:.0f}) nm, range {ranges} ppm")
+        noise = self.noise_nm
+        if noise is not None:
+            used = [a for a in range(3) if np.any(self.drift[:, a])] or [0, 1]
+            text += ("; noise " + ", ".join(f"{'xyz'[a]} {noise[a]:.1f}" for a in used)
+                     + " nm (from halves of the field)")
+            flat = self.insignificant_axes()
+            if flat:
+                text += (f"; no drift above the noise in {', '.join(flat)}: "
+                         f"correcting {'it' if len(flat) == 1 else 'them'} "
+                         "adds noise rather than removing drift")
         if self.flagged_windows is not None and len(self.flagged_windows):
             text += (f"; {len(self.flagged_windows)} time window(s) flagged and "
                      f"interpolated over: {list(self.flagged_windows)}")
@@ -594,6 +679,9 @@ class Drift:
                                 else [int(w) for w in self.flagged_windows]),
             "reference": self.reference,
             "transformation": self.transformation,
+            "noise_nm": (None if self.noise_nm is None
+                         else [round(float(v), 3) for v in self.noise_nm]),
+            "insignificant_axes": self.insignificant_axes() or None,
             "settings": asdict(self.settings) if self.settings else None,
         }
         if self.matrix is not None:
@@ -619,6 +707,8 @@ class Drift:
                          transformation=self.transformation)
         if self.times_s is not None:
             saved["times_s"] = self.times_s.tolist()
+        if self.halves is not None:
+            saved["halves"] = self.halves.round(3).tolist()
         return saved
 
     @classmethod
@@ -653,7 +743,7 @@ class Drift:
                    else np.asarray(matrix, dtype=np.float64),
                    centre_nm=saved.get("centre_nm"),
                    transformation=str(saved.get("transformation") or "shift"),
-                   times_s=saved.get("times_s"))
+                   times_s=saved.get("times_s"), halves=saved.get("halves"))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
@@ -668,7 +758,13 @@ class Drift:
         x = self.frames if self.times_s is None else self.times_s
         for axis, label in enumerate("xyz"):
             if np.any(self.drift[:, axis]):
-                ax.plot(x, self.drift[:, axis], label=label)
+                line, = ax.plot(x, self.drift[:, axis], label=label)
+                if self.halves is not None:
+                    # the error bar: how far the halves of the field disagree
+                    for k, half in enumerate(self.halves):
+                        ax.plot(x, half[:, axis], ls="--", lw=0.8,
+                                color=line.get_color(), alpha=0.8,
+                                label="halves" if axis == 0 and k == 0 else None)
         ax.set_xlabel("frame" if self.times_s is None else "time (s)")
         ax.set_ylabel("drift (nm)")
         ax.legend()
@@ -818,6 +914,10 @@ def estimate_cost(locs: Localizations, settings: Optional[DriftSettings] = None,
     seconds = ((pairs + fine) * (_SECONDS_PER_PAIR_SEARCH
                                  + evaluations * _SECONDS_PER_PAIR_EVALUATION)
                + len(locs) * _SECONDS_PER_LOCALIZATION)
+    if settings.split_half:
+        # each half of the field has about half the pairs, so the error bar
+        # costs as much again
+        seconds *= 2.0
     return DriftCost(n_localizations=n_estimate, n_pairs=pairs,
                      n_evaluations=evaluations, seconds=seconds,
                      memory_bytes=max(pairs, fine) * _BYTES_PER_PAIR,
@@ -966,9 +1066,60 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     settings' *reference* says (`Drift.referenced`); the rest is
     `_estimate_drift`'s."""
     settings = settings or DriftSettings()
-    drift = _estimate_drift(locs, settings, select, pixelsize_nm, display,
+    # the passes and the halves run this again, each without the error bar
+    whole = replace(settings, split_half=False)
+    drift = _estimate_drift(locs, whole, select, pixelsize_nm, display,
                             progress, stop)
+    if settings.split_half:
+        if drift.matrix is not None:
+            _log(display, "no error bar with a transformation: the halves of "
+                          "the field have different centres", progress)
+        else:
+            drift.halves = split_halves(
+                drift, locs, select, pixelsize_nm,
+                lambda half: _estimate_drift(locs, whole, half, pixelsize_nm,
+                                             display, progress, stop),
+                display, progress)
+    drift.settings = settings
     return drift.referenced(settings.reference)
+
+
+def split_halves(drift: Drift, locs: Localizations, select,
+                 pixelsize_nm: Optional[float], estimate: Callable[[np.ndarray], Drift],
+                 display: bool = False, progress: Optional[Progress] = None
+                 ) -> Optional[np.ndarray]:
+    """The drift estimated again from each half of the field, (2, n, 3),
+    each moved to ``drift``'s mean; None if a half is too little to
+    estimate from.
+
+    The field is cut at the median of x or y, whichever the selection
+    spreads further along -- DME's split (Cnossen et al. 2021).  A cut in
+    space is a cut between molecules, so the halves share no molecule and
+    their difference is noise; halves at random over localizations would
+    share each molecule's repeats and say the noise is smaller than it is
+    (docs/drift.md, "Two ways to be wrong").  ``estimate(index)`` makes a
+    curve from the rows ``index`` of ``locs``.
+    """
+    index = _selection(locs, select)
+    if len(index) < 4:
+        return None
+    x, y, _ = _positions_nm(locs, pixelsize_nm, False)
+    x, y = x[index], y[index]
+    along, name = (x, "x") if np.var(x) >= np.var(y) else (y, "y")
+    cut = float(np.median(along))
+    halves = []
+    for k, rows in enumerate((index[along < cut], index[along >= cut])):
+        side = "<" if k == 0 else ">="
+        _log(display, f"error bar: half {k + 1} of 2, {name} {side} {cut:.0f} nm, "
+                      f"{len(rows):,} localizations", progress)
+        try:
+            half = estimate(rows)
+        except (ValueError, MemoryError) as error:
+            _log(display, f"no error bar: half {k + 1} could not be "
+                          f"estimated ({error})", progress)
+            return None
+        halves.append(half.drift - half.drift.mean(0) + drift.drift.mean(0))
+    return np.stack(halves)
 
 
 def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
@@ -987,7 +1138,7 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
     time-window fit only looks before it starts.
     """
     _check_stop(stop, "before it started")
-    from ._comet import best_backend, comet_run_kd   # vendored; see _comet/
+    from ._comet import comet_run_kd   # vendored; see _comet/
     from ._comet.core import drift_optimizer
     from ._comet.core.qc_utils import flag_flawed_segments_by_lift
     from ._comet.core.cpu_wrapper import (cpu_wrapper_chunked_approx,
@@ -1031,9 +1182,7 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
     all_frames = np.asarray(locs["frame"], dtype=np.int64)
     n_frames = int(all_frames.max()) + 1 if len(all_frames) else 0
 
-    backend = settings.backend or best_backend()
-    if settings.quality_control:
-        backend += "_qc"
+    backend = "cpu_qc" if settings.quality_control else "cpu"
     drift_optimizer.LAST_QUALITY_CONTROL = None
     drift_optimizer.FLAG_SEGMENTS = lambda q_obs, q_null: flag_flawed_segments_by_lift(
         q_obs, q_null, settings.min_lift)
@@ -1074,6 +1223,7 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
             # the estimate is made from a subset, but must cover every frame of
             # the table it will be applied to
             min_max_frames=(0, n_frames - 1),
+            z_factor=float(settings.sigma_z_factor),
         )
     quality = drift_optimizer.LAST_QUALITY_CONTROL
     return Drift(drift[:, :3], settings, n_used=len(dataset),
@@ -1113,6 +1263,13 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     x, y, z = _positions_nm(source, pixelsize_nm, settings.use_z)
     coords = np.ascontiguousarray(np.column_stack([x, y, z]), dtype=np.float32)
     frames = np.ascontiguousarray(source["frame"], dtype=np.int32)
+    z_factor = float(settings.sigma_z_factor)
+    variances = None
+    if settings.precision_weights and settings.transformation == "shift":
+        variances = precision_variances(source, bool(np.any(z)))
+        if variances is None:
+            _log(display, "no precision weights: the table has no xy_err_nm",
+                 progress)
 
     # One uninterruptible scipy call that has to hold every pair at once, so
     # this is where too large a radius turns into swap and a dead process.
@@ -1130,7 +1287,10 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     basis = _spline_basis(np.arange(n_frames), n_coefficients, 0.0, n_frames - 1.0)
     basis_t = basis.T.tocsr()
     _log(display, f"spline drift: {n_coefficients} coefficients over {n_frames} "
-                  f"frames, {len(idx_i):,} pairs", progress)
+                  f"frames, {len(idx_i):,} pairs"
+                  + (", weighted by precision" if variances is not None else "")
+                  + (f", z width {z_factor:.2f}x lateral" if z_factor != 1.0 else ""),
+         progress)
     transformed = settings.transformation != "shift"
     if transformed:
         model = _TransformationFit(settings, coords, n_frames, display, progress)
@@ -1156,10 +1316,11 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
         if transformed:
             value, gradient, extra = model.cost(
                 flat[n_coefficients * 3:], mu, frames, idx_i, idx_j, sigma,
-                factor, penalty)
+                factor, penalty, z_factor)
         else:
             value, gradient = cpu_wrapper_chunked_approx(
-                mu, coords, frames, idx_i, idx_j, sigma, factor)
+                mu, coords, frames, idx_i, idx_j, sigma, factor,
+                z_factor=z_factor, variances=variances)
         gradient = basis_t @ gradient.reshape(n_frames, 3)
         if penalty:
             value += penalty * float((c * (curvature @ c)).sum())
@@ -1196,6 +1357,28 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     return Drift(drift, settings, n_used=len(coords),
                  matrix=model.matrices(coefficients[n_coefficients * 3:]),
                  centre_nm=model.centre, transformation=settings.transformation)
+
+
+def precision_variances(locs: Localizations, use_z: bool) -> Optional[np.ndarray]:
+    """Each localization's precision squared per axis, (n, 3), for the
+    precision weights; None where the table has no ``xy_err_nm``.
+
+    z is zero where z is not corrected (the axis then carries nothing), and
+    where z is but the table has no ``z_err_nm``.  A missing or non-finite
+    precision counts as the median one, not as perfect.
+    """
+    if "xy_err_nm" not in locs or not len(locs):
+        return None
+    xy = np.asarray(locs["xy_err_nm"], dtype=np.float64)
+    z = (np.asarray(locs["z_err_nm"], dtype=np.float64)
+         if use_z and "z_err_nm" in locs else np.zeros(len(xy)))
+    out = np.column_stack([xy, xy, z]) ** 2
+    for axis in range(3):
+        bad = ~np.isfinite(out[:, axis])
+        if bad.any():
+            good = out[~bad, axis]
+            out[bad, axis] = np.median(good) if len(good) else 0.0
+    return np.ascontiguousarray(out)
 
 
 def _n_coefficients(n_frames: int, knot_frames: int) -> int:
@@ -1320,7 +1503,8 @@ class _TransformationFit:
             return d
         return g_xy, g_z, chain
 
-    def cost(self, flat, mu, frames, idx_i, idx_j, sigma, factor, penalty):
+    def cost(self, flat, mu, frames, idx_i, idx_j, sigma, factor, penalty,
+             z_factor=1.0):
         """(cost, d/d mu per frame, d/d the transformation's variables), signs
         as the optimizer minimises them."""
         from . import _drift
@@ -1335,7 +1519,7 @@ class _TransformationFit:
             [matrix.reshape(-1, 9), mu, g_xy, g_z]))
         total, gradient = _drift.transformed_cost_and_gradient(
             self.coords, frames, idx_i, idx_j, params, float(sigma),
-            float(factor), float(CUTOFF_SIGMAS))
+            float(factor), float(CUTOFF_SIGMAS), z_factor=float(z_factor))
         gradient = -gradient
         d_matrix = (gradient[:, :9].reshape(-1, 3, 3)
                     + chain(gradient[:, 12], gradient[:, 13]))
