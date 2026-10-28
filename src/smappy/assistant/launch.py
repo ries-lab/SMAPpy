@@ -233,8 +233,11 @@ def open_terminal(script_file: Path, title: str = "SMAPpy assistant",
                   bounds: Optional[Tuple[int, int, int, int]] = None,
                   run=subprocess.Popen) -> List[str]:
     """Run ``script_file`` in a new terminal window, at ``bounds`` (left,
-    top, right, bottom in screen points) where that can be set.  Returns the
-    command used, for the log and the tests."""
+    top, right, bottom in screen points) where that can be set: on a Mac
+    Terminal's bounds, on Linux the place (not the size, which xterm and
+    gnome-terminal take in characters) where the terminal takes
+    ``--geometry``.  On Windows ``start`` opens the console where Windows
+    puts it.  Returns the command used, for the log and the tests."""
     if sys.platform == "darwin":
         lines = ['tell application "Terminal"', "activate",
                  f"set t to do script {_applescript_string(shlex.quote(str(script_file)))}"]
@@ -245,7 +248,7 @@ def open_terminal(script_file: Path, title: str = "SMAPpy assistant",
     elif sys.platform.startswith("win"):
         command = ["cmd", "/c", "start", title, "cmd", "/k", str(script_file)]
     else:
-        command = _linux_terminal(script_file, title)
+        command = _linux_terminal(script_file, title, bounds)
     run(command)
     return command
 
@@ -267,7 +270,51 @@ def raise_terminal(run=subprocess.run) -> bool:
     return getattr(done, "returncode", 1) == 0
 
 
-def _linux_terminal(script_file: Path, title: str) -> List[str]:
+#: finds the terminal SMAPpy started: the client's command line, which the
+#: window's name shows, names the config file (the client sets its own title)
+_TERMINAL_WINDOW = '(first window whose name contains "mcp-gui.json")'
+
+
+def terminal_bounds(run=subprocess.run) -> Optional[Tuple[int, int, int, int]]:
+    """Where the terminal SMAPpy started is, (left, top, right, bottom), for
+    *File > Workspace > Save*: on a Mac, and only while it is open.  Asked
+    only if Terminal is running, which telling it would start."""
+    if sys.platform != "darwin":
+        return None
+    script = ('if application "Terminal" is running then\n'
+              f'tell application "Terminal" to get bounds of {_TERMINAL_WINDOW}\n'
+              'end if')
+    try:
+        done = run(["osascript", "-e", script], capture_output=True, timeout=5, text=True)
+        values = [int(v) for v in str(done.stdout).strip().split(",")]
+    except Exception:
+        return None
+    if getattr(done, "returncode", 1) != 0 or len(values) != 4:
+        return None
+    return tuple(values)
+
+
+def set_terminal_bounds(bounds: Tuple[int, int, int, int], run=subprocess.run) -> bool:
+    """The open terminal SMAPpy started moved to ``bounds``: a workspace
+    opened with the terminal still up.  False where it cannot be."""
+    if sys.platform != "darwin":
+        return False
+    script = ('if application "Terminal" is running then\n'
+              f'tell application "Terminal" to set bounds of {_TERMINAL_WINDOW} '
+              'to {%d, %d, %d, %d}\nend if' % tuple(bounds))
+    try:
+        done = run(["osascript", "-e", script], capture_output=True, timeout=5)
+    except Exception:
+        return False
+    return getattr(done, "returncode", 1) == 0
+
+
+#: the terminals whose ``--geometry`` takes a place alone, ``+x+y``
+_PLACED = {"gnome-terminal": "--geometry=+{0}+{1}", "xfce4-terminal": "--geometry=+{0}+{1}",
+           "xterm": "-geometry +{0}+{1}"}
+
+
+def _linux_terminal(script_file: Path, title: str, bounds=None) -> List[str]:
     target = ["/bin/sh", str(script_file)]
     for name, args in (("x-terminal-emulator", ["-T", title, "-e"]),
                        ("gnome-terminal", ["--title", title, "--"]),
@@ -275,7 +322,9 @@ def _linux_terminal(script_file: Path, title: str) -> List[str]:
                        ("xfce4-terminal", ["-T", title, "-x"]),
                        ("xterm", ["-T", title, "-e"])):
         if shutil.which(name):
-            return [name, *args, *target]
+            place = (_PLACED[name].format(bounds[0], bounds[1]).split()
+                     if bounds is not None and name in _PLACED else [])
+            return [name, *place, *args, *target]
     raise RuntimeError("no terminal program found (x-terminal-emulator, gnome-terminal, "
                        "konsole, xfce4-terminal, xterm)")
 

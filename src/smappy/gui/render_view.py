@@ -92,6 +92,9 @@ KEYS = """<table cellspacing="0" cellpadding="3">
 <tr><td><b>double-click</b>, Ctrl+0</td><td>show everything</td></tr>
 <tr><td><b>[ ]</b> or <b>, .</b></td><td>turn a line ROI by 5°, with Shift by 1°</td></tr>
 <tr><td><b>Esc</b></td><td>stop drawing an ROI</td></tr>
+<tr><td><b>Space</b></td><td>play or pause the player, or the 3D view's ⟳, whichever was used last</td></tr>
+<tr><td><b>Alt+wheel</b> (Option)</td><td>the player a step on or back per notch</td></tr>
+<tr><td><b>Alt+drag</b> (Option)</td><td>scrub the player: the picture's width is the whole scan</td></tr>
 <tr><td><b>polygon ROI</b></td><td>a click per corner, double-click closes</td></tr>
 <tr><td><b>circle ROI</b></td><td>press at the centre, drag out to the rim</td></tr>
 <tr><td><b>Ctrl+3</b></td><td>show or hide the 3D view</td></tr>
@@ -286,6 +289,12 @@ class RenderView(QWidget):
         self._right_press = None
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
+        # Alt (Option) with the wheel or a drag moves the player
+        # (`ScanPlayer.step_by`, `scrub`), set by the Render tab; a picture
+        # without one (the ROI manager's) zooms and pans as ever
+        self.scrubber = None
+        self._scrub_from: Optional[tuple] = None     # (x where pressed, step then)
+        self._wheel_rest = 0                         # a trackpad's part of a notch
         # the trackpad's pinch, and the clicks of a drawing: installed last,
         # since the viewport has events for it before __init__ is through
         self.graphics.viewport().installEventFilter(self)
@@ -295,6 +304,9 @@ class RenderView(QWidget):
         if self.drawing and event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
                                              QEvent.MouseButtonDblClick):
             return self._draw_event(event)
+        if self.scrubber is not None and self._scrub_event(event):
+            event.accept()
+            return True
         if event.type() == QEvent.MouseButtonDblClick and \
                 event.button() == Qt.LeftButton:
             # a double-click shows everything, as Reset view does
@@ -331,6 +343,38 @@ class RenderView(QWidget):
             event.accept()
             return True
         return super().eventFilter(obj, event)
+
+    def _scrub_event(self, event) -> bool:
+        """Alt+wheel steps the player a step a notch, Alt+drag scrubs it,
+        the picture's width the whole scan; True when the event was that.
+        Taken here, before pyqtgraph, which would zoom and pan.  Not
+        Ctrl+wheel: on a Mac's trackpad that arrives as a pinch."""
+        kind = event.type()
+        if kind == QEvent.Wheel and event.modifiers() & Qt.AltModifier:
+            delta = event.angleDelta()
+            # some systems turn an Alt+wheel sideways; whichever moved
+            self._wheel_rest += delta.y() or delta.x()
+            notches = int(self._wheel_rest / 120)
+            if notches:
+                self._wheel_rest -= notches * 120
+                self.scrubber.step_by(-notches)     # down, or towards you: on
+            return True
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                and event.modifiers() & Qt.AltModifier:
+            self._scrub_from = (event.position().x(), self.scrubber.slider.value())
+            self.graphics.setCursor(Qt.SizeHorCursor)
+            return True
+        if self._scrub_from is not None:
+            if kind == QEvent.MouseMove:
+                x0, index = self._scrub_from
+                width = max(1, self.graphics.viewport().width())
+                self.scrubber.scrub(index, (event.position().x() - x0) / width)
+                return True
+            if kind == QEvent.MouseButtonRelease:
+                self._scrub_from = None
+                self.graphics.unsetCursor()
+                return True
+        return False
 
     def shutdown(self) -> None:
         """Stop the render thread; called on the GUI thread at exit."""

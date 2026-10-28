@@ -85,3 +85,29 @@ def test_the_movie_browser_steps_through_the_frames_with_molecules_only(app, tmp
     assert browser.plane_label.text() == "1/2: frame 8 of 40" and "2 molecules ringed" in browser.title.text()
     browser.plane_slider.setValue(1)
     assert browser.plane_label.text() == "2/2: frame 32 of 40"
+
+
+def test_delete_removes_the_selected_file_and_selects_the_next_and_clear_empties_the_list(app):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    window = PSFCalibrationWindow()
+    window.paths[:] = ["a.tif", "b.tif", "c.tif"]
+    window._refresh_files()
+    window.show()
+    window.activateWindow()
+    window.file_list.setFocus()
+    app.processEvents()
+    window.file_list.setCurrentRow(1)
+    QTest.keyClick(window.file_list, Qt.Key_Delete)
+    assert window.paths == ["a.tif", "c.tif"]
+    assert window.file_list.currentItem().text() == "c.tif"
+    QTest.keyClick(window.file_list, Qt.Key_Backspace)      # at the end: the last one
+    assert window.paths == ["a.tif"] and window.file_list.currentItem().text() == "a.tif"
+    QTest.keyClick(window.file_list, Qt.Key_Delete)
+    assert window.paths == [] and window.file_list.count() == 0
+    window.paths[:] = ["a.tif", "b.tif"]
+    window._refresh_files()
+    window.clear_paths()
+    assert window.paths == [] and window.file_list.count() == 0
+    window.close()

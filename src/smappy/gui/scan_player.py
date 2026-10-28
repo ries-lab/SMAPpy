@@ -16,6 +16,11 @@ run meanwhile sees a scanned table.  Its timer is a `QTimer`'s ``timeout``
 rather than a ``singleShot`` (a single shot that raises leaves PySide in a
 state the next override segfaults in), and each tick catches what it
 raises, stops and says so.
+
+Space in the render and the 3D windows plays and pauses it once it was the
+animation used last (`gui.animation`), and Alt (Option on a Mac) with the
+wheel over the picture steps it, with a drag scrubs it (`step_by`,
+`scrub`): the picture is looked at while the slider is in another window.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QLabel, QListWidget, QMenu, QMessageBox,
                                QProgressDialog, QPushButton, QSlider, QSpinBox,
@@ -44,6 +49,9 @@ NONE = "none"
 
 class ScanPlayer(QWidget):
     """Play a window of one coordinate through the data, in every window."""
+
+    #: played, stepped, scrubbed or handed a path: Space now means the player
+    used = Signal()
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -351,6 +359,7 @@ class ScanPlayer(QWidget):
         self.coordinate.setCurrentText(NONE)
         self.ends.setCurrentIndex(self.ends.findData("loop"))
         self.record_from.setCurrentIndex(self.record_from.findData("3D"))
+        self.used.emit()
         self.more_section.set_expanded(True)
         self.path_section.set_expanded(True)
         self._fill_keys()
@@ -620,6 +629,7 @@ class ScanPlayer(QWidget):
     def _on_play(self, on: bool) -> None:
         self.play.setText("❚❚" if on else "▶")
         if on:
+            self.used.emit()
             if self.session.scan is None or self.path_moves():
                 self.show_step(self.slider.value())
             self._set_speed()
@@ -647,7 +657,40 @@ class ScanPlayer(QWidget):
         self._path_changed()            # path alone, the steps are seconds x speed
 
     def _on_slider(self, index: int) -> None:
+        self.used.emit()
         self.show_step(index)
+
+    def toggle_play(self) -> None:
+        """Play, or pause where it is: Space."""
+        self.play.setChecked(not self.play.isChecked())
+
+    def step_count(self) -> int:
+        """How many steps there are now; 0 when nothing can be scanned (and
+        the line under the slider says why)."""
+        try:
+            return len(self.prepare())
+        except (ValueError, KeyError) as error:
+            self._say(str(error).strip("'\""))
+            return 0
+
+    def step_by(self, n: int) -> None:
+        """``n`` steps on (back, below 0), paused: a notch of Alt+wheel.
+        From stopped, the first step is the first."""
+        self.pause()
+        self.used.emit()
+        if self.step_count():
+            stopped = self.session.scan is None and self.coordinate.currentText() != NONE
+            # stopped, the slider is at 0 but nothing is shown: a notch shows the first step
+            self.show_step(max(0, n - 1) if stopped else self.slider.value() + n)
+
+    def scrub(self, index: int, fraction: float) -> None:
+        """Step ``index`` moved on by ``fraction`` of all the steps: an
+        Alt+drag over the picture, its width the whole scan."""
+        n = self.step_count()
+        if n:
+            self.pause()
+            self.used.emit()
+            self.show_step(int(round(index + fraction * (n - 1))))
 
     def drawing(self) -> bool:
         """A picture window has not drawn the last step yet

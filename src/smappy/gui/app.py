@@ -537,6 +537,7 @@ class ControlWindow(QMainWindow):
                 beside=self.render_window)
             server.assistant.windows = self._assistant_windows()
             controls.find_panel = self._assistant_panel
+            controls.saved_bounds = self.saved_terminal
             controls.changed.connect(
                 lambda: self.allow_assistant.setChecked(server.listening))
             self.assistant_button.attach(controls)
@@ -1111,15 +1112,36 @@ class ControlWindow(QMainWindow):
         return windows
 
     def window_geometries(self) -> Dict[str, str]:
-        """Where the windows are now; the 3D view only once it was opened."""
-        return {name: bytes(window.saveGeometry().toBase64()).decode()
-                for name, window in self._windows().items()}
+        """Where the windows are now; the 3D view only once it was opened,
+        the assistant's terminal while it is open and can be asked (a Mac's
+        Terminal, `launch.terminal_bounds`), as "left,top,right,bottom"."""
+        from ..assistant import launch
+        geometries = {name: bytes(window.saveGeometry().toBase64()).decode()
+                      for name, window in self._windows().items()}
+        terminal = launch.terminal_bounds()
+        if terminal is not None:
+            geometries["terminal"] = ",".join(str(v) for v in terminal)
+        return geometries
 
     def apply_windows(self) -> None:
         """Put the windows where the loaded workspace had them; a workspace
-        saved without them leaves them where they are."""
+        saved without them leaves them where they are.  The terminal is put
+        there when it is started, and moved there if it is open now."""
         for name, window in self._windows().items():
             self._place(name, window)
+        terminal = self.saved_terminal()
+        if terminal is not None:
+            from ..assistant import launch
+            launch.set_terminal_bounds(terminal)
+
+    def saved_terminal(self):
+        """The loaded workspace's place of the assistant's terminal, (left,
+        top, right, bottom), or None."""
+        try:
+            values = tuple(int(v) for v in self.workspace.windows.get("terminal", "").split(","))
+        except ValueError:
+            return None
+        return values if len(values) == 4 else None
 
     def _place(self, name: str, window: QWidget) -> None:
         geometry = self.workspace.windows.get(name)
@@ -2021,6 +2043,7 @@ class RenderWindow(QMainWindow):
         return self.view.qimage()
 
 
+MIN_RENDER_WIDTH = 400       # narrower than this, the picture overlaps the control window instead
 DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
 SPLINE_FITTER = "Localize/Spline 3D"            # a simulation drawn with a calibration
 DUAL_SPLINE_FITTER = "Localize/Spline 3D 2C"    # ... a split one, with a dual-colour one
@@ -2090,12 +2113,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     install_identity(app, session)
     render = RenderWindow(session)
     control = ControlWindow(session, render)
+    # the control window at the top left, the picture against its right
+    # edge and as tall, the assistant's terminal beside that when started
+    # (`assistant_pane.terminal_column`); shown first, so its frame -- the
+    # title bar included -- is known and the picture goes against that
     screen = app.primaryScreen().availableGeometry()
     control.move(screen.left(), screen.top())
-    render.move(screen.left() + control.width() + 20, screen.top())
+    control.show()
+    frame = control.frameGeometry()
+    room = screen.right() + 1 - (frame.right() + 1)
+    render.resize(max(MIN_RENDER_WIDTH, min(render.width(), room)), control.height())
+    render.move(min(frame.right() + 1, screen.right() + 1 - render.width()), frame.top())
     control.apply_windows()      # where the workspace keeps them, if it does
     render.show()
-    control.show()
+    control.raise_()             # in front, as before, with the focus
+    control.activateWindow()
     args = list(argv[1:])
     if "--handoff" in args:      # started by *Open in a new window* elsewhere
         at = args.index("--handoff")

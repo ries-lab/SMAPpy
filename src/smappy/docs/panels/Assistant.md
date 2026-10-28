@@ -85,7 +85,13 @@ the first.
 * **One I start myself**: SMAPpy only listens; start your client with the
   command *copy command* copies (`smappy-mcp --attach`), or give its settings
   the entry *copy JSON* copies.  On a Mac the terminal is Terminal, placed beside
-the picture; elsewhere it opens where the system puts it.
+the picture -- against its right edge, as tall, about 480 points wide,
+narrower where the screen ends sooner and over the picture's edge where
+there is no room at all.  *File > Workspace > Save* keeps where it is then,
+and a workspace opened puts it back there.  On Linux the terminal is put
+at the same place where it takes `--geometry` (xterm, gnome-terminal,
+xfce4-terminal), at its own size; on Windows it opens where the system
+puts it.
 
 ## Every day: the toolbar button
 

@@ -1363,6 +1363,14 @@ class RenderTab(QWidget):
         self.player = ScanPlayer(session)
         self.player_section = CollapsibleSection("player", self.player, expanded=False, **HELP)
         layout.addWidget(self.player_section)
+        # opened, it is what Space plays and Alt+wheel over the picture steps
+        # (`gui.animation`); the shortcut on the picture's window
+        from .animation import animations, install_space
+        animations(session).set_player(self.player)
+        self.player_section.toggled.connect(lambda on: on and self.player.used.emit())
+        if view is not None:
+            view.scrubber = self.player
+            install_space(view.window(), session)
         # last and closed: the ordinary picture is x against y, and this is
         # what turns the renderer into SMAP's versatile one
         self.axes = AxesSection(session, view)
