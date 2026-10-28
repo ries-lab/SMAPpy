@@ -300,3 +300,24 @@ def test_the_vectorial_model_is_differentiable_in_its_pupils(beads):
     assert mu.shape == batch.data.shape and torch.isfinite(mu).all()
     mu.sum().backward()
     assert p["pupil.phase"].grad.abs().sum() > 0 and p["lo.pupil.phase"].grad.abs().sum() > 0
+
+
+def test_a_beads_blur_in_z_is_the_same_whatever_the_mirror_steps(grid):
+    """The bead kernel works along the slices: a stack with three mirror steps per slice is blurred as the
+    same slices with one, not as if they were three times closer."""
+    J3 = 9
+    z = -np.arange(-(J3 // 2), J3 // 2 + 1) * 50.0
+    roi_xy = torch.zeros(1, C, 2)
+    out = {}
+    for steps in (1, 3):
+        model = FourPiModel(grid, (R, R), n_phases=steps, n_max=4, magnitude_n_max=0, bead_radius_nm=50.0,
+                            steps_rad=[0.0, 2.0, -2.0][:steps])
+        batch = uipsf.Batch(data=torch.zeros(1, C, J3 * steps, R, R),
+                            z_nm=torch.tensor(np.repeat(z, steps), dtype=torch.float32), roi_xy=roi_xy)
+        start = {"xyz": torch.zeros(1, 3), "photons": torch.full((1,), 1000.0), "background": torch.zeros(1, C)}
+        params = Params(model.specs(batch, start), 1)
+        values = params.physical()
+        values["fourpi.coherence"] = torch.ones(C)
+        with torch.no_grad():
+            out[steps] = model(values, batch)[0, :, ::steps]          # each slice's first mirror step
+    assert torch.allclose(out[1], out[3], rtol=1e-4, atol=1e-4 * float(out[1].max()))

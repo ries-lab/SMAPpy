@@ -183,6 +183,9 @@ class FourPiBeadSettings:
                               help="a scan's phase steps per slice, as set; a scan of one phase per slice "
                                    "has none")
     roi_size: int = param(21, label="box", unit="px", min=9, help="the box each bead is cut to, per channel")
+    bead_diameter_nm: float = param(40.0, label="bead diameter", unit="nm", min=0.0,
+                                    help="the beads' size, taken out of the pupil model: its dyes, spread over "
+                                         "its height, average the fringe; 0: point-like")
     n_max: int = param(6, label="Zernike order", min=2, max=10, advanced=True,
                        help="the highest Zernike order of each objective's pupil")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
@@ -266,10 +269,13 @@ def read_scan(path, settings: FourPiBeadSettings, camera):
 def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
     """Every bead of the scans ``paths`` in every channel (`FourPiBeads`), with the layout and the
     registration the ROIs were cut by.  A series of files (one DCIMG per slice) is read once, through
-    any of its files."""
+    any of its files; a folder is each scan found in it (`input.discover_acquisitions`)."""
     from ..channels import bead_positions, register_channels
+    from .input import discover_acquisitions
     tell = progress or (lambda text: None)
     scans, seen = [], set()
+    # folders as the window's list holds them: each scan in them, one per series
+    paths = [found for path in paths for found in (discover_acquisitions([path]) or [path])]
     for path in paths:
         from ..io.tiff import open_stack
         key = tuple(str(p) for p in getattr(open_stack(path), "files", [path]))
@@ -366,17 +372,31 @@ def bead_fits(beads: FourPiBeads, cal, box: int = 15) -> dict:
             "phase_slope": phase_slope, "phase_per_nm": float(cal.phase_per_nm)}
 
 
-def draw_model(figure, cal) -> str:
-    """The saved model: each channel's incoherent part through focus (x against z) and its modulation
-    |A, B| / I at the centre against z."""
+#: what the *Model* page shows of each channel's volumes
+MODEL_PARTS = ("I", "A", "B", "|A, B| / I")
+
+
+def draw_model(figure, cal, show: str = "I") -> str:
+    """The saved model: each channel's ``show`` (`MODEL_PARTS`: the incoherent part I, the interference's
+    A and B, or the modulation |A, B| / I) through focus, x against z, and its modulation at the centre
+    against z."""
     V = cal.volumes                                   # (C, 3, z, y, x)
     C, _, Z, H, W = V.shape
     axes = figure.subplots(1, C + 1)
     z = cal.z_index_to_nm(np.arange(Z))
     for c in range(C):
-        axes[c].imshow(V[c, 0, :, H // 2, :], aspect="auto", cmap="magma",
-                       extent=(-W / 2, W / 2, z[-1], z[0]))
-        axes[c].set_title(f"channel {c + 1}: I", fontsize="small")
+        I, A, B = (V[c, k, :, H // 2, :] for k in range(3))
+        image = {"I": I, "A": A, "B": B}.get(show)
+        if image is None:
+            image = np.hypot(A, B) / np.clip(I, 1e-12 * I.max(), None)
+            options = dict(cmap="viridis", vmin=0, vmax=1)
+        elif show == "I":
+            options = dict(cmap="magma")
+        else:
+            lim = np.abs(image).max() or 1.0
+            options = dict(cmap="RdBu_r", vmin=-lim, vmax=lim)
+        axes[c].imshow(image, aspect="auto", extent=(-W / 2, W / 2, z[-1], z[0]), **options)
+        axes[c].set_title(f"channel {c + 1}: {show}", fontsize="small")
         axes[c].set_xlabel("x (px)")
     axes[0].set_ylabel("z (nm)")
     for c in range(C):
@@ -446,3 +466,215 @@ def average_model(found: dict, excluded=(), settings: Optional[FourPiBeadSetting
     step = float(abs(beads.z_nm[1] - beads.z_nm[0]))
     return iab_from_beads(np.asarray(stacks), dz=step, steps=steps_of(settings, M), layout=layout.to_dict(),
                           transforms=np.asarray(layout.maps))
+
+
+# ---------------------------------------------------------------- what the window shows of a learnt model
+
+def fit_images(fit, beads: FourPiBeads, used) -> dict:
+    """The learnt model's images of the beads it was learnt from, as the data are laid out: ``model``
+    [E, C, J, M, Y, X] for the ``used`` beads (the fit's emitters, in order), each bead's ``background``
+    [E, C] and its phase in every channel and mirror step, ``psi`` [E, M, C] -- the bead's own phase, the
+    step and the channel's offset, what demodulates it (`demodulate`)."""
+    import torch
+    from uipsf.noise import ShiftedPoisson
+    from uipsf.solve import Problem
+    from uipsf.workflows.fourpi import _device_batch
+    used = list(used)
+    sub = FourPiBeads(beads.data[used], beads.roi_xy[used], beads.z_nm, [beads.records[i] for i in used])
+    batch = _device_batch(sub.batch(), fit.model)
+    with torch.no_grad():
+        mu = Problem(fit.model, ShiftedPoisson(), batch).expected(fit.result.params).numpy()
+    E, C, J, M, Y, X = sub.data.shape
+    values = {k: v.detach().cpu().double().numpy() for k, v in fit.result.params.physical().items()}
+    steps = np.r_[0.0, values.get("fourpi.steps", np.zeros(0))]
+    deltas = np.r_[0.0, values["fourpi.delta"]]
+    psi = values["emitter.phase"][:, None, None] + steps[None, :, None] + deltas[None, None, :]
+    return {"used": used, "model": mu.reshape(E, C, J, M, Y, X), "background": values["emitter.background"],
+            "psi": psi}
+
+
+def demodulate(images: np.ndarray, background: np.ndarray, psi: np.ndarray):
+    """(I, Q) of bead images [E, C, J, M, Y, X] taken at the phases ``psi`` [E, M, C], background [E, C]
+    taken off: per bead, channel, slice and pixel the least squares of n_m = I + Re(Q e^{i psi_m}) over the
+    mirror steps -- the model-free incoherent part and interference, which needs three steps or more."""
+    E, C, J, M, Y, X = images.shape
+    if M < 3:
+        raise ValueError("demodulating a bead needs three mirror steps or more")
+    n = images - background[:, :, None, None, None, None]
+    I = np.empty((E, C, J, Y, X))
+    Q = np.empty((E, C, J, Y, X), complex)
+    for e in range(E):
+        for c in range(C):
+            ps = psi[e, :, c]
+            solve = np.linalg.pinv(np.stack([np.ones(M), np.cos(ps), -np.sin(ps)], 1))      # [3, M]
+            coef = np.einsum("km,jmyx->kjyx", solve, n[e, c])
+            I[e, c], Q[e, c] = coef[0], coef[1] + 1j * coef[2]
+    return I, Q
+
+
+def modulation_curves(I: np.ndarray, Q: np.ndarray, radius_px: float = 4.0) -> dict:
+    """Each channel's modulation through the scan, pooled over the beads: at the centre pixel, and
+    Σ|Q| / Σ I within ``radius_px`` of it; [C, J] each."""
+    Y, X = I.shape[-2:]
+    yy, xx = np.mgrid[:Y, :X]
+    disc = np.hypot(yy - (Y - 1) / 2, xx - (X - 1) / 2) <= radius_px
+    c, d = (Y // 2, X // 2), disc
+    centre = np.abs(Q[..., c[0], c[1]]).sum(0) / np.clip(I[..., c[0], c[1]].sum(0), 1e-12, None)
+    pooled = np.abs(Q[..., d]).sum((0, -1)) / np.clip(I[..., d].sum((0, -1)), 1e-12, None)
+    return {"centre": centre, "integrated": pooled}
+
+
+def draw_fit(figure, beads: FourPiBeads, images: dict, bead: int, step: int = 0) -> str:
+    """One bead, data against the model, every channel a column: its centre 3x3 pixels through the scan
+    at every mirror step, then x-z sections of the data, the model and the residual at ``step``."""
+    used = images["used"]
+    if bead not in used:
+        figure.subplots().axis("off")
+        return f"bead {bead} was not used: the model has no image of it"
+    k = used.index(bead)
+    data, model = beads.data[bead].astype(float), images["model"][k]
+    C, J, M, Y, X = data.shape
+    z, cy, cx = beads.z_nm, Y // 2, X // 2
+    order = np.argsort(z)
+    axes = figure.subplots(4, C, squeeze=False)
+    styles = ("-", "--", ":")
+    for c in range(C):
+        ax = axes[0, c]
+        for m in range(M):
+            d = data[c, :, m, cy - 1:cy + 2, cx - 1:cx + 2].sum((-2, -1))
+            f = model[c, :, m, cy - 1:cy + 2, cx - 1:cx + 2].sum((-2, -1))
+            line, = ax.plot(z[order], f[order], styles[m % 3], lw=1.2, label=f"model, step {m + 1}")
+            ax.plot(z[order], d[order], "o", ms=3, color=line.get_color(), label=f"data, step {m + 1}")
+        ax.set_title(f"channel {c + 1}", fontsize="small")
+        ax.set_xlabel("stage z (nm)")
+        extent = (z[order][0], z[order][-1], -(X // 2), X // 2)
+        sections = (data[c, order, step, cy].T, model[c, order, step, cy].T)
+        top = max(s.max() for s in sections)
+        for row, (name, image) in enumerate((("data", sections[0]), ("model", sections[1])), start=1):
+            axes[row, c].imshow(image, aspect="auto", origin="lower", cmap="magma", vmin=0, vmax=top, extent=extent)
+            axes[row, c].set_title(f"{name}, step {step + 1}", fontsize="small")
+        residual = sections[0] - sections[1]
+        r = np.abs(residual).max() or 1.0
+        axes[3, c].imshow(residual, aspect="auto", origin="lower", cmap="RdBu_r", vmin=-r, vmax=r, extent=extent)
+        axes[3, c].set_title(f"data − model, ±{100 * r / max(top, 1e-12):.0f} %", fontsize="small")
+    axes[0, 0].set_ylabel("photons, centre 3x3")
+    for row in range(1, 4):
+        axes[row, 0].set_ylabel("x (px)")
+    axes[0, 0].legend(fontsize="x-small", frameon=False, ncol=2)
+    return f"bead {bead}: data as dots, the model as lines; below, the sections at mirror step {step + 1}"
+
+
+def draw_modulation(figure, z_nm, data: Optional[dict], model: dict, coherence=None) -> str:
+    """Each channel's modulation through the scan, at the centre pixel and within 4 px: the data's,
+    demodulated with the fit's phases (`demodulate`), as dots, the model's as lines."""
+    axes = figure.subplots(1, 2)
+    order = np.argsort(z_nm)
+    C = model["centre"].shape[0]
+    for ax, key, name in zip(axes, ("centre", "integrated"), ("at the centre pixel", "within 4 px")):
+        for c in range(C):
+            line, = ax.plot(z_nm[order], model[key][c, order], lw=1.3, label=f"channel {c + 1}")
+            if data is not None:
+                ax.plot(z_nm[order], data[key][c, order], "o", ms=3, color=line.get_color())
+        ax.set(xlabel="stage z (nm)", ylabel="modulation |Q| / I", ylim=(0, 1.05), title=name)
+    axes[0].legend(fontsize="small", frameon=False)
+    if coherence is not None:
+        figure.suptitle("coherence α " + ", ".join(f"{a:.2f}" for a in coherence), fontsize="medium")
+    return ("the data (dots), demodulated with the fit's phases, against the model (lines); the bead's size is "
+            "in both" if data is not None else "the model's modulation; the data's needs three mirror steps")
+
+
+def parameter_rows(run_result: dict, cal) -> tuple:
+    """(columns, rows) of what the 4Pi model learnt: per channel and for the instrument."""
+    from ..fourpi import modulation
+    rows = []
+
+    def per(name, values, fmt="{:.2f}"):
+        rows.append((name, ", ".join(fmt.format(v) for v in values)))
+    p = cal.parameters
+    fit = run_result.get("fit")
+    s = run_result["settings"]
+    if fit is not None:
+        model = fit.model
+        rows.append(("model", f"{model.kind}" + (f", plates {model.plates}, polarisations "
+                                                 + "".join(model.polarisations) if model.kind == "vector" else "")))
+        values = {k: v.detach().cpu().double().numpy() for k, v in fit.shared().items()}
+        rows.append(("objective", f"{float(fit.result.history[-1]['objective']):,.0f}"))
+        per("coherence α", values["fourpi.coherence"])
+        share = np.r_[1 - values["fourpi.share"].sum(), values["fourpi.share"]]
+        per("share of the light", share)
+        per("upper arm's fraction", values["fourpi.balance"])
+        deltas = np.r_[0.0, values["fourpi.delta"]]
+        per("phase offset δ (rad)", deltas)
+        if len(deltas) == 4:
+            pairs = np.angle(np.exp(1j * (deltas[[1, 3]] - deltas[[0, 2]])))
+            per("channel 2 − 1, 4 − 3 (rad)", pairs)
+        set_steps = steps_of(s, len(values.get("fourpi.steps", [])) + 1)
+        learnt = np.r_[0.0, values.get("fourpi.steps", np.zeros(0))]
+        per("mirror steps learnt (rad)", learnt)
+        per("mirror steps set (rad)", np.asarray(set_steps) - set_steps[0])
+        per("objectives' offset Δx, Δy, Δz (nm)", values["fourpi.offset"], "{:.0f}")
+        per("blur σ (nm)", values["psf.sigma"], "{:.0f}")
+    rows.append(("bead diameter (nm)", f"{getattr(s, 'bead_diameter_nm', 0):g}"))
+    rows.append(("fringe period (nm)", f"{cal.period_nm:.1f}"))
+    per("model modulation at focus, centre pixel", modulation(cal, 0.0, 0.5))
+    per("model modulation at focus, within 4 px", modulation(cal, 0.0, 4.0))
+    if "w_per_slice" in p:
+        rows.append(("solved", str(p.get("channels", ""))))
+    return ("parameter", "value"), rows
+
+
+def draw_pupils(figure, fit) -> str:
+    """The two objectives' pupil phases over the aperture, and their Zernike coefficients side by side."""
+    import torch
+    from uipsf.model.fourpi import lower_view
+    from uipsf.optics.zernike import zernike_name
+    model = fit.model
+    shared = {k: v.detach() for k, v in fit.shared().items()}
+    left, middle, right = figure.subplots(1, 3, gridspec_kw={"width_ratios": [1, 1, 2]})
+    maps = []
+    for psf, values in ((model.psf_up, shared), (model.psf_lo, lower_view(shared))):
+        with torch.no_grad():
+            _, phase = psf.pupil({k: v for k, v in values.items() if k.startswith("pupil.")})
+        inside = psf.grid.aperture.detach().cpu().numpy() > 0
+        maps.append(np.where(inside, phase.detach().cpu().double().numpy(), np.nan))
+    lim = max(np.nanmax(np.abs(m)) for m in maps) or 1.0
+    for ax, m, name in ((left, maps[0], "upper objective"), (middle, maps[1], "lower objective")):
+        im = ax.imshow(m, cmap="RdBu_r", vmin=-lim, vmax=lim)
+        ax.set_title(f"{name}: phase (rad)", fontsize="small")
+        ax.set_xticks([])
+        ax.set_yticks([])
+    figure.colorbar(im, ax=[left, middle], shrink=0.7)
+    modes = model.pupils[0].phase_modes
+    x = np.arange(len(modes))
+    up = shared["pupil.phase"].cpu().double().numpy()
+    lo = shared["lo.pupil.phase"].cpu().double().numpy()
+    right.bar(x - 0.2, up, 0.4, label="upper")
+    right.bar(x + 0.2, lo, 0.4, label="lower")
+    right.set_xticks(x)
+    right.set_xticklabels([f"{zernike_name(j)}\n{j}" for j in modes], fontsize="x-small", rotation=90)
+    right.axhline(0, color="0.5", lw=0.6)
+    right.set_ylabel("Zernike coefficient (rad)")
+    right.legend(fontsize="small", frameon=False)
+    return "each objective's pupil as learnt; the deformable mirrors' astigmatism shows with opposite signs"
+
+
+def stack_views(beads: FourPiBeads, images: Optional[dict], excluded=()):
+    """`model_views.ModelViews` of the beads for the stack browser: a row per channel, the frames as
+    recorded (slice by slice, each mirror step in turn), each bead on its own -- 4Pi beads are not
+    averaged, each sits at its own phase -- with the model's images where there are any."""
+    from .model_views import ModelViews
+    E, C, J, M, Y, X = beads.data.shape
+    frames = lambda a: [a[c].reshape(J * M, Y, X).astype(float) for c in range(C)]   # noqa: E731
+    shown = {}
+    for e in range(E):
+        model = None
+        if images is not None and e in images["used"]:
+            model = frames(images["model"][images["used"].index(e)])
+        shown[e] = (frames(beads.data[e]), model)
+    first = images["used"][0] if images is not None and images["used"] else 0
+    data, model = shown[first]
+    views = ModelViews(data, model if model is not None else [], np.repeat(beads.z_nm, M),
+                       [f"channel {c + 1}" for c in range(C)], averaged=False)
+    views.beads = {e: (d, m if m is not None else []) for e, (d, m) in shown.items()}
+    views.states = {e: "excluded" if e in set(excluded) else "used" for e in range(E)}
+    return views

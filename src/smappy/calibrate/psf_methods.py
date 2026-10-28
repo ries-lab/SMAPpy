@@ -791,7 +791,7 @@ class _FourPi:
     it the beads fitted back with the saved model, z and the phase against the stage."""
     columns = ("bead", "stack", "x, y (px)", "brightness", "z slope", "z scatter (nm)", "state")
     marks_include = False
-    has_stack = False
+    has_stack = True                   # each bead's channels, frame by frame (`fourpi_beads.stack_views`)
     files = "bead scans"
     use_label = "Use in Spline 4Pi"
     listed = False                     # a 4Pi model: never one for Spline 3D's *auto*
@@ -826,7 +826,21 @@ class _FourPi:
         (progress or (lambda entry: None))({"message": "fitting the beads back with the 4Pi model",
                                              "fraction": 0.95})
         run.extra["fits"] = bead_fits(run.result["found"]["beads"], cal)
+        self._images(run)
         return run
+
+    def _images(self, run: Run):
+        """The learnt model's images of its beads (`fourpi_beads.fit_images`), once; None for a model that
+        was not fitted to them (the bead average)."""
+        fit = run.result.get("fit")
+        if fit is None:
+            return None
+        if "images" not in run.extra:
+            from .fourpi_beads import fit_images
+            beads = run.result["found"]["beads"]
+            used = [i for i in range(len(beads.records)) if i not in set(run.result["excluded"])]
+            run.extra["images"] = fit_images(fit, beads, used)
+        return run.extra["images"]
 
     def save_as(self, run: Run, path) -> Path:
         from .fourpi_beads import save
@@ -846,11 +860,52 @@ class _FourPi:
             cal = run.result["calibration"] = save(run.result["fit"], Path(tempfile.mkdtemp()) / "model_4pi.h5",
                                                    s.model_z_range_nm, s.model_dz_nm,
                                                    layout=run.result["found"]["layout"])
+        from .fourpi_beads import (MODEL_PARTS, demodulate, draw_fit, draw_modulation, draw_pupils,
+                                   modulation_curves, parameter_rows)
         fits = run.extra.get("fits")
-        return [Page("Model", lambda f, s, e: draw_model(f, cal), follows_selection=False),
-                Page("z against the stage",
-                     lambda f, s, e: (draw_against_stage(f, fits, s, run.result["excluded"]) if fits is not None
-                                      else _not_yet(f, "the beads are fitted back after calibrating")))]
+        beads = run.result["found"]["beads"]
+        M = beads.data.shape[3]
+        pages = [Page("Model", lambda f, s, e, chosen: draw_model(f, cal, chosen["show"]), follows_selection=False,
+                      controls={"show": MODEL_PARTS}),
+                 Page("z against the stage",
+                      lambda f, s, e: (draw_against_stage(f, fits, s, run.result["excluded"]) if fits is not None
+                                       else _not_yet(f, "the beads are fitted back after calibrating")))]
+        fit = run.result.get("fit")
+
+        def bead_of(selected, images):
+            chosen = [b for b in selected if b in images["used"]]
+            if chosen:
+                return chosen[0]
+            light = beads.data[images["used"]].sum(axis=(1, 2, 3, 4, 5))
+            return images["used"][int(np.argmax(light))]
+
+        def model_vs_data(figure, selected, excluded, chosen):
+            images = self._images(run)
+            return draw_fit(figure, beads, images, bead_of(selected, images), int(chosen["mirror step"]) - 1)
+
+        def curves(figure, selected, excluded):
+            images = self._images(run)
+            data = model = None
+            if images is not None and M >= 3:
+                used = images["used"]
+                data = modulation_curves(*demodulate(beads.data[used].astype(float), images["background"],
+                                                     images["psi"]))
+                model = modulation_curves(*demodulate(images["model"], images["background"], images["psi"]))
+            if model is None:
+                # no fit of the beads, or no steps to demodulate them with: the saved model's own
+                from ..fourpi import modulation
+                model = {key: np.stack([modulation(cal, zz, r) for zz in beads.z_nm], 1)
+                         for key, r in (("centre", 0.5), ("integrated", 4.0))}
+            return draw_modulation(figure, beads.z_nm, data, model, cal.parameters.get("coherence"))
+
+        pages.append(Page("Modulation", curves, follows_selection=False))
+        pages.append(Page("Parameters", None, follows_selection=False,
+                          table=lambda: parameter_rows(run.result, cal)))
+        if fit is not None:
+            pages.insert(1, Page("Model vs data", model_vs_data,
+                                 controls={"mirror step": tuple(str(m + 1) for m in range(M))}))
+            pages.append(Page("Pupils", lambda f, s, e: draw_pupils(f, fit), follows_selection=False))
+        return pages
 
     def rows(self, run: Run, marks: dict) -> list:
         beads = run.result["found"]["beads"]
@@ -876,13 +931,26 @@ class _FourPi:
         return "exclude"
 
     def stacks(self, run: Run):
-        return None, None
+        """Each bead's channels, frame by frame, with the learnt model's images of it where there are any
+        (`fourpi_beads.stack_views`); the browser's axial axis is the beads' own stage z."""
+        from .fourpi_beads import stack_views
+        views = stack_views(run.result["found"]["beads"], self._images(run), run.result["excluded"])
+        return views, run.result.get("calibration")
 
     def summary(self, run: Run) -> str:
+        """The beads, the fringe period, and how much of the light interferes: the coherence a pupil model
+        learnt (the fraction its optics do not explain away) and each model's modulation at focus -- of a
+        bead average the beads' own (`fourpi.modulation`)."""
+        from ..fourpi import modulation
         cal = run.result.get("calibration")
         n = len(run.result["found"]["beads"].records) - len(run.result["excluded"])
-        return (f"{n} beads learnt; fringe period {cal.period_nm:.1f} nm" if cal is not None else
-                f"{n} beads learnt")
+        if cal is None:
+            return f"{n} beads learnt"
+        text = f"{n} beads learnt; fringe period {cal.period_nm:.1f} nm"
+        coherence = cal.parameters.get("coherence")
+        if coherence is not None:
+            text += "; coherence " + ", ".join(f"{c:.2f}" for c in coherence)
+        return text + "; modulation at focus " + ", ".join(f"{m:.2f}" for m in modulation(cal))
 
 
 class FourPiPupil(_FourPi):
@@ -911,7 +979,7 @@ class FourPiPupil(_FourPi):
         fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
                     pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
                     n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
-                    progress=progress, cancel=cancel)
+                    bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel)
         run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings}, False)
         if inputs["run"].save_model:
             path = previous.saved if previous is not None and previous.saved is not None else \

@@ -56,6 +56,9 @@ class ModelViews:
     beads: dict = field(default_factory=dict)       # bead -> (data per channel, model per channel)
     states: dict = field(default_factory=dict)      # bead -> "used", "rejected", ...
     mirror_axis: Optional[int] = None
+    #: False for beads that are not averaged (4Pi: each bead at its own phase), so the viewer shows one at a
+    #: time; ``model`` empty where there is no model of them
+    averaged: bool = True
 
     def of(self, bead=None):
         """(data, model) per channel: the average, or the bead ``bead`` alone."""

@@ -170,20 +170,22 @@ class StackViewer(QMainWindow):
 
     def _show_view_controls(self) -> None:
         has = self.views is not None
-        for box in (self.model_box, self.residual_box, self.average_box):
-            box.setVisible(has)
+        modelled = has and bool(self.views.model)
+        for box in (self.model_box, self.residual_box):
+            box.setVisible(modelled)
         beads = has and bool(self.views.beads)
-        self.average_box.setVisible(beads)
+        averaged = beads and self.views.averaged
+        self.average_box.setVisible(averaged)
         for widget in (self.bead_slider, self.bead_label, self.bead_caption):
             widget.setVisible(beads)
-            widget.setEnabled(beads and not self.average_box.isChecked())
+            widget.setEnabled(beads and not (averaged and self.average_box.isChecked()))
         for box in (self.linked_box, self.native_box):
             box.setVisible(len(self.volumes) > 1)
 
     @property
     def bead(self):
         """The bead shown alone, or None for the average."""
-        if self.views is None or self.average_box.isChecked() or not self._bead_ids:
+        if self.views is None or not self._bead_ids or (self.views.averaged and self.average_box.isChecked()):
             return None
         return self._bead_ids[min(self.bead_slider.value(), len(self._bead_ids) - 1)]
 
@@ -221,9 +223,10 @@ class StackViewer(QMainWindow):
         """(title, volume, kind) of each panel, in order: each channel's data, then its model and its
         residual as ticked; kind "data" or "residual" decides the colour scale."""
         data = self.shown_volumes()
-        if self.views is None or not (self.model_box.isChecked() or self.residual_box.isChecked()):
+        model = self.views.of(self.bead)[1] if self.views is not None else None
+        if not model or not (self.model_box.isChecked() or self.residual_box.isChecked()):
             return [(title, v, "data") for title, v in zip(self.titles, data)]
-        model = self._mirrored(self.views.of(self.bead)[1])
+        model = self._mirrored(model)
         out = []
         for title, d, m in zip(self.titles, data, model):
             out.append((" ".join(p for p in (title, "data") if p), d, "data"))

@@ -352,7 +352,10 @@ where the registration puts the bead.
   own phase.  It refines the maps between the channels itself.  The saved
   model is rendered from it at three phases and separated into the
   incoherent part I and the interference A, B, demodulated by the fringe
-  period the model itself shows.
+  period the model itself shows.  The bead's size (*bead diameter*, 40 nm by default) is taken out:
+  its dyes sit at different heights, each at its own point of the fringe,
+  which lowers the interference a point emitter would show -- by 2–4 % for
+  40 nm, 13–22 % for 100 nm.  The saved model is a point's.
 - **bead average:** I, A and B solved from the beads themselves, with no
   physical model.
   - Each bead's box is moved onto the bead to a fraction of a pixel, its

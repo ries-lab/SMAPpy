@@ -248,7 +248,10 @@ class FourPiModel:
         psi = self.phases(p, p["emitter.phase"])                   # [E, M, C]
         cos, sin = torch.cos(psi), torch.sin(psi)
         N = self.intensity(p, batch).reshape(E, K // M, M)          # [E, J, M]
-        step = batch.z_step_nm if self.psf_up.bead_radius_nm > 0 else None
+        # the slices' step, not `Batch.z_step_nm`'s: that averages over the observations, where each slice's z
+        # is repeated once per mirror step, and gave a third of the step for three -- the bead kernel then
+        # damped the fringe by 28 % instead of 3.5 % and the coherence rose to make up for it
+        step = float((z[..., 1:] - z[..., :-1]).abs().mean()) if self.psf_up.bead_radius_nm > 0 else None
         mu = []
         for c in range(C):
             parts = self.images(p, self.positions(p, batch, xyz, c), step, self.polarisations[c])   # [E, 4, J, Y, X]

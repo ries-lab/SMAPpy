@@ -682,6 +682,20 @@ def refine_period(phase, phase_err, z_env_nm, z_env_err_nm, frame, phase_per_nm:
     return float(trials[best])
 
 
+def modulation(cal: FourPiCalibration, z_nm: float = 0.0, radius_px: float = 4.0) -> np.ndarray:
+    """Each channel's modulation at height ``z_nm``: Σ|A, B| / Σ I over the pixels within ``radius_px`` of
+    the spot's centre, the photon-weighted fraction of the light that swings with the phase.  Of a bead
+    average it is the beads' own (the data's); of a pupil model, its coherence and its optics together
+    (docs/4pi.md §17)."""
+    V = np.asarray(cal.volumes, float)                      # (C, 3, nz, ny, nx)
+    k = int(np.clip(np.rint(cal.z_nm_to_index(z_nm)), 0, V.shape[2] - 1))
+    ny, nx = V.shape[-2:]
+    yy, xx = np.mgrid[:ny, :nx]
+    disc = np.hypot(yy - (ny - 1) / 2, xx - (nx - 1) / 2) <= radius_px
+    I, A, B = V[:, 0, k], V[:, 1, k], V[:, 2, k]
+    return np.hypot(A, B)[:, disc].sum(axis=1) / np.clip(I[:, disc].sum(axis=1), 1e-12, None)
+
+
 def render_frames(cal: FourPiCalibration, layout, frame, x, y, z_nm, photons, phase0,
                   n_frames: int, background: float = 10.0, seed: int = 0,
                   frame_shape=None, roisize: int = None):

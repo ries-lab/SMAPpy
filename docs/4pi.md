@@ -1008,7 +1008,13 @@ z) and each bead's scatter about that pattern:
   and its camera: the example data's layout, NA 1.35, n 1.406, an emission
   placeholder of 660 nm.  With them chosen, *Spline 4Pi* finds the layout
   and the camera with nothing typed.  It stands in until the Ries-lab 4Pi
-  has its own entry.
+  has its own entry.  Beside it, *uiPSF 4Pi example* and its camera (2026-10-28): uiPSF's
+  example data, as uiPSF v1's settings give them -- 129 nm pixels, 0.44
+  photons per ADU, offset 100, NA 1.35, n 1.406, 600 nm -- and no regions,
+  the quadrant files being already cut.  The PSF calibration window reads
+  folders of 4Pi scans (DCIMG or quadrant files, one per numbered series,
+  `input.discover_acquisitions`); before, a folder of them read as no stack
+  at all.
 
 **Still to do for M5.**
 - The beads' fitted positions against v1's own (`locres`), bead by bead.

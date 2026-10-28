@@ -15,6 +15,7 @@ from the bead table's states.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -139,6 +140,10 @@ class StackBrowser(QWidget):
                 raise ValueError(f"a movie of {n} frames, not a bead z-stack: in situ learns from movies")
             while len(self._cache) >= CACHED:
                 self._cache.pop(next(iter(self._cache)))
+            fourpi = _fourpi_scan(path)
+            if fourpi is not None:
+                self._cache[path] = [fourpi]
+                return self._cache[path]
             try:
                 self._cache[path] = read_bead_stacks(path, self.dz_nm)
             except ValueError as error:
@@ -287,3 +292,18 @@ class StackBrowser(QWidget):
     def wheelEvent(self, event) -> None:
         steps = event.angleDelta().y() / 120.0
         self.plane_slider.setValue(int(np.clip(self.plane_slider.value() - steps, 0, self.plane_slider.maximum())))
+
+
+def _fourpi_scan(path):
+    """A 4Pi scan (DCIMG, quadrant files) as the camera recorded it, every frame with all its channels and
+    the mirror steps in turn, its planes unnamed -- where *4Pi beads* ring the beads, on channel 0's
+    frame pixels -- or None for any other file."""
+    from ..io.dcimg import is_dcimg
+    from ..io.quadrants import is_quadrant_mat
+    from ..io.tiff import open_stack
+    from .input import BeadStack
+    if not (Path(path).suffix.lower() == ".dcimg" and is_dcimg(path)) and not is_quadrant_mat(path):
+        return None
+    source = open_stack(path)
+    images = np.concatenate([block for _, block in source.frames(chunk=200)])
+    return BeadStack(images, np.arange(len(images), dtype=float), source=str(path), axes={"unknown_dz": True})

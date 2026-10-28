@@ -474,6 +474,27 @@
           "fixed": 100.0
         }
       }
+    },
+    {
+      "name": "uiPSF 4Pi example camera",
+      "comment": "The camera of uiPSF's 4Pi example data (zenodo 10823308: 4pi_40nm_bead, 4pi_smlm_nup96), as uiPSF v1's settings for them give it: 129 nm pixels on the sample, offset 100, 0.44 photons per ADU. The quadrant files carry no camera tags: chosen by hand. An example until the Ries-lab 4Pi has its own entry.",
+      "parameters": {
+        "em_on": {
+          "fixed": false
+        },
+        "pixelsize_um": {
+          "fixed": 0.129
+        },
+        "conversion": {
+          "fixed": 0.44
+        },
+        "emgain": {
+          "fixed": 1.0
+        },
+        "offset": {
+          "fixed": 100.0
+        }
+      }
     }
   ],
   "microscopes": [
@@ -848,6 +869,19 @@
         }
       },
       "camera": "4Pi-SMS example camera"
+    },
+    {
+      "name": "uiPSF 4Pi example",
+      "comment": "The 4Pi of uiPSF's example data (zenodo 10823308; Liu et al. 2025, Nat Methods): silicone objectives (NA 1.35, n 1.406), 600 nm emission, 40 nm beads scanned with mirror steps of 2, 0, -2 rad, as uiPSF v1's settings for that data give them. Its quadrant files are already cut into the four channels, so no regions: 'as the file lays them out'. Not identified from a file: chosen by hand.",
+      "identify": {},
+      "devices": {},
+      "parameters": {
+        "NA": 1.35,
+        "n_immersion": 1.406,
+        "wavelength_nm": 600
+      },
+      "channels": {},
+      "camera": "uiPSF 4Pi example camera"
     }
   ]
 }

@@ -489,7 +489,8 @@ class PSFCalibrationWindow(QMainWindow):
         # a fitter's camera settings: the same resolution, the last microscope used included
         settings = CameraSettings(microscope=optics.microscope, camera=optics.camera,
                                   **optics.camera_overrides())
-        path = discover_acquisitions(self.paths[:1])[0]
+        # a path nothing is found in is opened as it is, and says what is wrong with it
+        path = (discover_acquisitions(self.paths[:1]) or [self.paths[0]])[0]
         if require:
             return pupil.camera_for(path, settings)
         return settings.resolve(open_stack(path), require=False)

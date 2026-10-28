@@ -1,6 +1,8 @@
 """4Pi across a frame: the channel layout, the multi-channel engine, the
 sources that read 4Pi data, and the Spline 4Pi fitter end to end."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -567,6 +569,45 @@ def _growing_dcimg(path, frames, first: int, step: int, pause: float):
     thread = threading.Thread(target=write, daemon=True)
     thread.start()
     return thread
+
+
+def test_the_calibration_window_finds_4pi_scans_in_folders_one_per_numbered_series(tmp_path):
+    """Folders of bead scans as the PSF calibration window's *Add folder...* searches them: a DCIMG series
+    and a quadrant-file series are one acquisition each, by their first file; a folder of each kind under
+    one parent is found from the parent."""
+    from tests.test_fourpi import _write_new_dcimg
+    from smappy.calibrate.input import discover_acquisitions
+    frames = np.random.default_rng(1).integers(100, 200, (3, 16, 32)).astype(np.uint16)
+    scan = tmp_path / "dcimg"
+    scan.mkdir()
+    for k in range(3):
+        _write_new_dcimg(scan / f"Cell01_642_000_{k:03d}.dcimg", frames, frames[:, 1023 - (1024 - 8), :4])
+    quads = tmp_path / "quads"
+    quads.mkdir()
+    paths = _write_quadrant_series(quads, [np.zeros((4, 12, 12), np.uint16)] * 4, files=2)
+    found = discover_acquisitions([tmp_path])
+    assert found == sorted([(scan / "Cell01_642_000_000.dcimg").resolve(), Path(paths[0]).resolve()], key=str)
+    assert discover_acquisitions([quads]) == [Path(paths[0]).resolve()]
+
+
+def test_the_bead_browser_shows_a_4pi_scan_as_the_camera_recorded_it(tmp_path):
+    """The PSF calibration window's bead browser on 4Pi scans: a DCIMG's frames as they are, a quadrant
+    series' channels side by side, every frame."""
+    pytest.importorskip("PySide6")
+    from tests.test_fourpi import _write_new_dcimg
+    from smappy.calibrate.stack_browser import _fourpi_scan
+    frames = np.random.default_rng(2).integers(100, 200, (5, 16, 32)).astype(np.uint16)
+    _write_new_dcimg(tmp_path / "scan.dcimg", frames, frames[:, 1023 - (1024 - 8), :4])
+    shown = _fourpi_scan(tmp_path / "scan.dcimg")
+    assert np.array_equal(shown.images, frames)
+    quads = tmp_path / "quads"
+    quads.mkdir()
+    stacks = [np.full((4, 12, 12), c, np.uint16) for c in range(4)]
+    paths = _write_quadrant_series(quads, stacks, files=2)
+    shown = _fourpi_scan(paths[0])
+    assert shown.images.shape == (4, 12, 48)
+    assert np.array_equal(shown.images[0, 0, ::12], [0, 1, 2, 3])
+    assert _fourpi_scan(tmp_path / "missing.tif") is None
 
 
 def test_a_dcimg_file_being_written_is_followed_frame_by_frame_to_its_end(tmp_path):
