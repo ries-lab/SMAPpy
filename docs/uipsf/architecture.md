@@ -2224,3 +2224,8 @@ JVPs; `tangents = 8`, since the JVPs' memory budget no longer binds.  One normal
 × 123 observations: 109 s by JVPs, 9.1 s scalar and 11.7 s vectorial; v1's 18 beads with a free photon
 count per observation learn in 0.5 min (5.0 by JVPs).  The results, against v1's model, are in
 `docs/4pi.md` §8.
+
+**The start** (`docs/4pi.md` §20): stage 1 holds only the balance; Δ is free from `OFFSET_START_NM`, off the
+symmetric point where it has no curvature, so the learning reaches one optimum or its swap, whatever the
+rounding.  The window's vectorial model learns a rotationally symmetric magnitude (`magnitude_modes`,
+`optics.zernike.symmetric_modes`): free in every mode it had three optima on v1's beads.

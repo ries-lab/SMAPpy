@@ -120,11 +120,16 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     A free photon count per observation by default: on the example beads it took the mean deviance from
     1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
     arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
-    fitted uiPSF's beads and movie better than "scalar", at no more time.  ``warm``: shared
+    fitted uiPSF's beads and movie better than "scalar", at no more time.  Its pupils' magnitude is
+    rotationally symmetric (`uipsf.optics.zernike.symmetric_modes`), the objectives' apodisation alone:
+    free in every mode it found three optima on uiPSF v1's beads by where the learning started (907 711 to
+    922 288), symmetric one, 914 132, from every start, with the phase and z scatter as small (docs/4pi.md
+    §20).  The scalar model keeps every mode: it needs them, 1 060 569 against 1 107 108.  ``warm``: shared
     values to start from, another model's of the same beads (`learn_fourpi`'s ``values``)."""
     import uipsf
     from uipsf.model import PerObservation
     from uipsf.model.fourpi import FourPiModel
+    from uipsf.optics.zernike import symmetric_modes
     from uipsf.workflows.fourpi import learn_fourpi
     px = (pixel_size_nm, pixel_size_nm) if np.isscalar(pixel_size_nm) else tuple(pixel_size_nm)
     optics = uipsf.Optics(NA=NA, wavelength_nm=wavelength_nm, n_imm=n_imm, n_med=n_imm, pixel_size_nm=px)
@@ -133,7 +138,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     C, M = beads.data.shape[1], beads.data.shape[3]
     model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=n_max, steps_rad=steps_rad,
                         bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None,
-                        kind=kind, plates=plates)
+                        kind=kind, plates=plates, magnitude_modes=symmetric_modes(n_max) if kind == "vector" else None)
     return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
 
 

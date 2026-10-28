@@ -3,8 +3,8 @@
 **The fit** (`learn_fourpi`) follows `beads.fit_beads`: the data's start (`model.fourpi_start`), then
 each bead's phase from a circle of twelve on the starting model -- the fringe's phase at the focus is
 the pupils', which the data alone do not give, and a bead started half a turn off can stop there --
-then the Zernikes up to n = 4 of both objectives with everything else but the arms' misalignment and
-balance (`SYMMETRIC`), then all of them.
+then the Zernikes up to n = 4 of both objectives with everything else but the arms' balance, the
+misalignment started off zero (`OFFSET_START_NM`), then all of them.
 
 **The export** (`calibration`) samples the model as SMAPpy's fitter will evaluate it: each channel's
 image of one photon on the centre of its ROI, at three phases 2π/3 apart.  The model is
@@ -30,11 +30,19 @@ from ..solve import FitResult, GaussNewtonLBFGS, Problem
 from .beads import _like, _loosened, _tagged
 
 PHASE_TRIALS = 12
-#: held at their start in stage 1: at the start the two pupils are alike, the balance even and the arms
-#: aligned, the symmetric point of the arms' gauge (`model.fourpi.swapped`), where these have no curvature.
-#: With one phase per stack (no mirror steps) both solvers' steps there were all rejected: 2 iterations,
-#: 116 393 nats against the truth's 42 886 on simulated beads; held for stage 1, the fit reached 43 086.
-SYMMETRIC = ("fourpi.offset", "fourpi.balance")
+#: held at its start in stage 1: at the start the two pupils are alike and the balance even, near the
+#: symmetric point of the arms' gauge (`model.fourpi.swapped`), where it has no curvature.
+SYMMETRIC = ("fourpi.balance",)
+#: where stage 1 starts the arms' misalignment Δ, nm.  At Δ = 0 -- the symmetric point -- it has no
+#: curvature either: with one phase per stack (no mirror steps) both solvers' steps there were all
+#: rejected, 2 iterations, 116 393 nats against the truth's 42 886 on simulated beads.  Held at 0 for
+#: stage 1 and freed in stage 2, it broke away in whichever direction the rounding tipped it, and v1's 18
+#: real beads have optima Δ ≈ 110 nm along y and along x, 1 078 007 and 1 063 226 nats, the worse with
+#: 18 % more phase scatter.  Started here and free in stage 1, every start along ±x or ±y reached one
+#: stage-1 optimum (or its swap, Δ → −Δ) and stage 2 then 1 060 569, with the phase scatter 7 % and z's
+#: 5 % above v1's model's (docs/4pi.md §20).  Any direction would do; 60 nm is a fraction of the ~100
+#: nm measured, small beside the fringe's ~270 nm.
+OFFSET_START_NM = (60.0, 0.0, 0.0)
 
 
 @dataclass
@@ -116,6 +124,7 @@ def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None 
         return FourPiFit(model, result, start, None)
     low = model if first_order is None else model.with_pupils([pu.truncated(first_order) for pu in model.pupils])
     values = _pupil_values(params.physical(), model, low, embed=False)
+    values["fourpi.offset"] = torch.tensor(OFFSET_START_NM, dtype=dtype, device=device)
     specs = [_like(s, params.specs[s.name]) for s in low.specs(batch, start)]
     p1 = Params(specs, batch.n_emitters, dtype=dtype, device=device, values=values).fix(*SYMMETRIC)
     first = _loosened(solver).solve(Problem(low, noise, batch), p1, progress=_tagged(progress, 1), cancel=cancel)

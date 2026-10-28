@@ -98,6 +98,14 @@ def zernike_modes(n_max: int, exclude=("piston", "tilt", "defocus")) -> list[int
     return [j for j in range(1, n_modes(n_max) + 1) if j not in drop]
 
 
+
+def symmetric_modes(n_max: int) -> list[int]:
+    """The rotationally symmetric modes (m = 0) of radial order 2 … n_max: Noll 4, 11, 22 up to 6.  A
+    pupil's magnitude in these is the apodisation and transmission of an objective, which have no
+    direction; a 4Pi model's magnitude free in every mode found three optima on uiPSF v1's beads by
+    where it started, in these one (docs/4pi.md §20)."""
+    return [j for j in zernike_modes(n_max, exclude=("piston",)) if noll_to_nm(j)[1] == 0]
+
 def zernike(j: int, rho: np.ndarray, phi: np.ndarray) -> np.ndarray:
     """Noll-normalised Zernike polynomial j at (rho, phi); not cut to the disc."""
     n, m = noll_to_nm(j)

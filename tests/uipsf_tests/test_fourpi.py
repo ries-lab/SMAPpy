@@ -59,6 +59,15 @@ def beads(grid):
     return model, simulate(model, p, batch, seed=2), {k: v for k, v in p.physical().items()}
 
 
+def test_an_objectives_apodisation_is_its_rotationally_symmetric_magnitude_modes(grid):
+    """The window's vectorial model learns the magnitude in these alone (docs/4pi.md §20)."""
+    from uipsf.optics.zernike import symmetric_modes
+    assert symmetric_modes(6) == [4, 11, 22]
+    model = FourPiModel(grid, (R, R), n_max=6, magnitude_modes=symmetric_modes(6))
+    assert all(pu.magnitude_modes == [4, 11, 22] for pu in model.pupils)
+    assert all(pu.truncated(4).magnitude_modes == [4, 11] for pu in model.pupils)
+
+
 def test_swapping_the_arms_labels_leaves_every_image_unchanged(beads):
     model, batch, truth = beads
     with torch.no_grad():

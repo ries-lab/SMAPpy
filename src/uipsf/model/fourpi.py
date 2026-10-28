@@ -88,18 +88,20 @@ def lower_view(p: dict) -> dict:
 
 class FourPiModel:
     def __init__(self, grid, roi_shape, n_channels: int = 4, n_phases: int = 3, *, n_max: int = 6,
-                 magnitude_n_max: int | None = None, upsample: int = 1, bead_radius_nm: float = 0.0,
-                 sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None, coherence: float = 0.8,
-                 transforms=None, fit_transform: bool = True, intensity=None, background=None,
+                 magnitude_n_max: int | None = None, magnitude_modes=None, upsample: int = 1,
+                 bead_radius_nm: float = 0.0, sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None,
+                 coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
                  pupils=None, kind: str = "scalar", plates: str = "aligned", polarisations=None):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
         3π/2); ``transforms`` each channel c ≥ 1's 3×3 map onto channel 0's chip pixels, the identity by
-        default.  ``pupils`` (upper, lower) replaces the two `ZernikePupil`s, for a first stage.  ``kind``
-        "scalar" or "vector", and for a vectorial model the ``plates`` ("aligned", "crossed" or "none") and
-        each channel's polarisation, s or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a
-        turn apart, the pairs a quarter turn), as the module docstring says."""
+        default.  ``magnitude_modes`` the pupils' magnitude modes, if not those up to ``magnitude_n_max``
+        (`optics.zernike.symmetric_modes` for an objective's apodisation alone).  ``pupils`` (upper, lower)
+        replaces the two `ZernikePupil`s, for a first stage.  ``kind`` "scalar" or "vector", and for a
+        vectorial model the ``plates`` ("aligned", "crossed" or "none") and each channel's polarisation, s
+        or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a turn apart, the pairs a quarter
+        turn), as the module docstring says."""
         if kind not in ("scalar", "vector"):
             raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
         if plates not in PLATES:
@@ -114,7 +116,8 @@ class FourPiModel:
         if len(self.polarisations) != self.n_channels or set(self.polarisations) - {"s", "p"}:
             raise ValueError(f"one polarisation, s or p, per channel: got {self.polarisations}")
         if pupils is None:
-            pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max) for _ in range(2)]
+            pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max,
+                                   magnitude_modes=magnitude_modes) for _ in range(2)]
         self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,
                                 bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm)
         self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind=kind,

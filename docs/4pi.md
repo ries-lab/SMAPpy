@@ -4,7 +4,7 @@ Status, 2026-10-28: M0-M5 are done (§6-§8, §11, §14): the fitter, the channe
 layer (§9), real DCIMG data (§10), learning from beads in uiPSF v2 and the
 bead average, both in the PSF calibration window, live DCIMG and simulated 4Pi
 cameras (§16).  Of M7 the vectorial model is in and the window's default
-(§17, §19); the locked refit, multicolour and two cameras are not started.  M6
+(§17, §19), with a start that reaches one optimum (§20); the locked refit, multicolour and two cameras are not started.  M6
 (in situ) waits on the in-situ learning; dual colour on the layer (M8) is
 planned, not started.
 
@@ -1557,8 +1557,7 @@ optimum, 1 063 226 (1.4 % lower), and a phase scatter of 0.053 rad, within the t
 against 0.062.  Only the rounding differs between the runs -- their normal equations agree to 10⁻⁷ -- so
 the optimisation has two basins, and which it reaches is chance.  The worse one puts the misalignment along y (Δ = (−28, 109, −10) nm); fits in §11
 found it along x.  So `test_the_learned_model_measures_v1s_beads_as_straight_as_v1s_model` (long tier)
-fails as the code stood before the linearisation too.  Starting the misalignment from several directions,
-or from the registration, is the fix to try.
+fails as the code stood before the linearisation too.  §20 settles it.
 
 **How the two objectives' Zernikes trade.**  The covariance of the pupils, from the Gauss–Newton matrix
 with the beads' own parameters taken out (Schur complement), at the truth of 12 simulated beads (3·10⁶
@@ -1588,3 +1587,47 @@ scalar model).  The *Pupils* page shows each objective's magnitude beside its ph
 the single-channel mode turn the window to *4Pi*.  Read as one channel's bead stack they had failed with
 "not a TIFF file".
 
+
+## 20. One optimum: the misalignment's start and the magnitude (2026-10-28)
+
+The learning on uiPSF v1's 18 beads (31 slices × 3 steps, a free photon count per observation, n ≤ 6) from
+several starts of the misalignment Δ, each a whole learning (stage 1 to n = 4, then all), with the
+long test's phase and z scatter of the beads fitted back (v1's model: 0.0506 rad, 6.76 nm).
+
+**The start.**  Δ was held at 0 through stage 1 -- the symmetric point of the arms' gauge, where it has no
+curvature -- and freed in stage 2, where it broke away in whichever direction the rounding tipped it.
+Freed in stage 1 from an offset start, every start reached one stage-1 optimum or its swap (Δ → −Δ),
+1 080 227 against 1 215 094 held:
+
+| scalar model | objective | Δ (nm) | phase (rad) | z (nm) |
+|---|---|---|---|---|
+| Δ held at 0 in stage 1 (before) | 1 078 007 or 1 063 226, by rounding | (−28, 109, −10) | 0.062 | |
+| stage 2 from Δ = (100, 0, 0) | 1 056 993 | (116, 5, −3) | 0.0512 | 7.93 |
+| Δ free in stage 1 from (±60, 0, 0) or (0, ±60, 0) | 1 060 569 | ±(100, 49, −33) | 0.0543 | 7.12 |
+
+The last is now `learn_fourpi`'s (`OFFSET_START_NM` = (60, 0, 0), only the balance held in stage 1): the
+same optimum by JVPs and linearised, with 8 tangents or 1, and the long test passes again.  The lowest
+objective found, 1 056 993, came only from one start in stage 2 and has z 17 % worse than v1's.
+
+**The vectorial model still had several, with the magnitude free in every mode.**  Its magnitude was the
+cause, as the optics suggest (an objective's magnitude is its apodisation and transmission, with little
+structure).  Final objectives from Δ free in stage 1 from 0, (60, 0, 0) and (0, 60, 0), for the pupils'
+magnitude in
+
+| magnitude | objectives | phase (rad) | z (nm) |
+|---|---|---|---|
+| every mode to n = 6 (27 each) | 914 133, 922 288, 907 711 | 0.052-0.054 | 5.8-6.5 |
+| to n = 4 | 922 326, 931 317, 922 938 | 0.052-0.054 | 6.2-6.3 |
+| to n = 2 | 940 373, 963 980, 940 373 | 0.053 | 6.4-6.8 |
+| rotationally symmetric, Noll 4, 11, 22 | 914 132 from all three | 0.0527 | 6.58 |
+| uniform | 1 039 166 from all three | 0.0561 | 6.37 |
+
+The rotationally symmetric magnitude (`uipsf.optics.zernike.symmetric_modes`, 3 coefficients per
+objective against 27) reaches one optimum, 0.7 % above the best of the free ones and within the free ones'
+phase and z scatter; a uniform magnitude loses 14 %.  So the window's vectorial model (`fourpi_beads.learn`)
+has the symmetric magnitude; `FourPiModel`'s default is unchanged.  The scalar model keeps every mode: it
+uses them, presumably for what its scalar fields leave out -- symmetric 1 107 108 (phase 0.0563, z 7.71),
+uniform 1 344 285 -- and with Δ's new start it reaches one optimum anyway.
+
+The vectorial learning with the symmetric magnitude took 0.4 min.  Not looked at: whether the high
+modes' phase has optima of its own on other beads, and the 4Pi-SMS's DCIMG beads.
