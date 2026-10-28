@@ -275,8 +275,11 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
     from .input import discover_acquisitions
     tell = progress or (lambda text: None)
     scans, seen = [], set()
-    # folders as the window's list holds them: each scan in them, one per series
-    paths = [found for path in paths for found in (discover_acquisitions([path]) or [path])]
+    # folders as the window's list holds them: each scan in them, one per series, in the order the Stacks
+    # page lists them (`input.discover_acquisitions`, sorted by path) -- a bead's "stack" is its file there,
+    # and in the order the files were added the rings of bead12_ fell on bead13_
+    paths = sorted({Path(found) for path in paths for found in (discover_acquisitions([path]) or [path])},
+                   key=str)
     for path in paths:
         from ..io.tiff import open_stack
         key = tuple(str(p) for p in getattr(open_stack(path), "files", [path]))

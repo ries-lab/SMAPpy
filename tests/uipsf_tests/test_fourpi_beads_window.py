@@ -100,3 +100,23 @@ def test_the_4pi_bead_average_gives_a_model_that_fits_its_beads(tmp_path):
     assert model.period_nm == pytest.approx(cal.period_nm, rel=0.02)
     fits = bead_fits(beads, model, box=13)
     assert all(abs(s - 1) < 0.1 for s in fits["slope"].values())
+
+
+def test_a_beads_stack_is_its_scan_in_the_order_the_stacks_page_lists_them(tmp_path):
+    """Scans added out of sorted order: each bead's ``stack`` is still its file's place on the Stacks page
+    (`input.discover_acquisitions`), so its ring falls on its own scan.  In the order added, the 4Pi
+    example's bead12_ beads were ringed on bead13_."""
+    from smappy.calibrate.input import discover_acquisitions
+    cal = fourpi.model_calibration()
+    layout = from_corners([4, 54, 104, 154], [2] * 4, 44, 44, flip_x=[0, 0, 1, 1])
+    first = np.array([[12.0, 12.0], [31.0, 30.0]])
+    second = np.array([[30.0, 13.0], [13.0, 31.0]])
+    a, _ = _dcimg_scan(tmp_path / "a", cal, layout, first, n=11)
+    b, _ = _dcimg_scan(tmp_path / "b", cal, layout, second, n=11, seed=1)
+    beads, _, _ = scan_beads([b, a], _settings(), CAMERA)
+    listed = [str(p) for p in discover_acquisitions([b, a])]
+    for record in beads.records:
+        expected = first if "/a/" in record["path"] else second
+        assert listed[record["stack"]] == str(discover_acquisitions([record["path"]])[0])
+        assert np.min(np.hypot(*(np.asarray(record["exact_xy"][0]) - expected).T)) < 1.0
+    assert {r["stack"] for r in beads.records if "/a/" in r["path"]} == {0}
