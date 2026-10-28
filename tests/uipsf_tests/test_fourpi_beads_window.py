@@ -1,5 +1,7 @@
 """*4Pi beads* of the PSF calibration window: a DCIMG bead scan read through the channel layer, its beads
 found and registered, the model's export fitted back to it, and the window's own section."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 from smappy import fourpi
@@ -116,7 +118,7 @@ def test_a_beads_stack_is_its_scan_in_the_order_the_stacks_page_lists_them(tmp_p
     beads, _, _ = scan_beads([b, a], _settings(), CAMERA)
     listed = [str(p) for p in discover_acquisitions([b, a])]
     for record in beads.records:
-        expected = first if "/a/" in record["path"] else second
+        expected = first if Path(record["path"]).parent.name == "a" else second
         assert listed[record["stack"]] == str(discover_acquisitions([record["path"]])[0])
         assert np.min(np.hypot(*(np.asarray(record["exact_xy"][0]) - expected).T)) < 1.0
-    assert {r["stack"] for r in beads.records if "/a/" in r["path"]} == {0}
+    assert {r["stack"] for r in beads.records if Path(r["path"]).parent.name == "a"} == {0}
