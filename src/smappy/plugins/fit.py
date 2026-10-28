@@ -355,9 +355,9 @@ class OutputSettings:
                             help="camera frames kept with the table, in "
                                  "photons, after their average; 0: none")
     show_tags: str = param("PIZStage", label="show image tags", advanced=True,
-                           help="image tags drawn when the fit is done, "
-                                "names or parts of names; empty: none "
-                                "(Analysis/Process/Image Tags)")
+                           help="image tags drawn while the fit runs and when "
+                                "it is done, names or parts of names; empty: "
+                                "none (Analysis/Process/Image Tags)")
 
     def resolve(self, source_path: str) -> Optional[Path]:
         if not self.save:
@@ -1204,10 +1204,42 @@ class _FitPlugin(Plugin):
                                 "localizations": s["localizations"],
                                 "behind": behind[0]})
 
+        tags_shown = [time.perf_counter(), -1]      # when, and at how many frames
+
+        def live_tags() -> None:
+            """The image tags so far, every `LIVE_TAGS_SECONDS`: into the live
+            table's metadata (``("tags", table)``), and drawn -- the same
+            figures as at the end (`image_tags.plots`) -- when *show image
+            tags* names some (``("plots", {name: draw})``).
+
+            A fit of 90 000 frames runs for many minutes, and a focus lock
+            that has run into its limit is what one wants to see while it can
+            still be done something about, not after.
+            """
+            now = time.perf_counter()
+            if now - tags_shown[0] < LIVE_TAGS_SECONDS or len(tags) == tags_shown[1]:
+                return
+            tags_shown[:] = [now, len(tags)]
+            table = tags.table()
+            if len(table) < 2:                     # nothing has changed yet
+                return
+            ctx.emit("tags", table)
+            if settings.output.show_tags:
+                from .image_tags import names, plots as tag_plots
+                shown = names(table, settings.output.show_tags)
+                if shown:
+                    frames = (np.asarray(collected["frame"])
+                              if "frame" in collected else None)
+                    ctx.emit("plots", tag_plots(table, shown, frames))
+
+        def progress(engine) -> None:
+            report(engine)
+            live_tags()
+
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
-            drive(engine, blocks, sink=sink, progress=report, read_ahead=2,
+            drive(engine, blocks, sink=sink, progress=progress, read_ahead=2,
                   flush_seconds=0.0 if src.live else None)
             record["frame_tags"] = tags.table()
             # kept with the localizations, so a file that was fitted against
@@ -1297,6 +1329,10 @@ class _FitPlugin(Plugin):
 LIVE_POLL_SECONDS = 0.05
 # a live fit this far behind the camera says so, once
 LIVE_BEHIND_WARN_SECONDS = 5.0
+# how often a running fit hands on its image tags and redraws their figures:
+# drawing them is a few tens of milliseconds on the GUI thread, and a focus
+# lock drifts over minutes, not seconds
+LIVE_TAGS_SECONDS = 5.0
 
 
 def _until(blocks, stop_event):

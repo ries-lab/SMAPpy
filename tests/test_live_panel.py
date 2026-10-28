@@ -199,3 +199,58 @@ def test_a_fit_started_with_the_render_tab_on_layer_two_finishes_its_table(app):
     assert not session.live and len(session.locs) == 300
     assert len(tab.strip.buttons) == len(session.layers) == 2
     assert tab.layer is session.layers[1]
+
+
+class DrawsAsItGoes(Plugin):
+    """A fit's shape: streams a table, the image tags and their figures,
+    and ends with figures of the same names."""
+    path = "Test/DrawsAsItGoes"
+    name = "DrawsAsItGoes"
+    changes_locs = True
+    drawn = []
+
+    def run(self, ctx, settings):
+        import time
+        from smappy.locs import concat
+        from smappy.plugins.image_tags import plots
+        ctx.emit("start", {"extent": (0, 5000, 0, 5000)})
+        for frame in range(1, 4):
+            ctx.emit("block", block(frame))
+            tags = {"frame": np.arange(frame + 1), "PIZ": np.linspace(50, 49, frame + 1)}
+            ctx.emit("tags", tags)
+            ctx.emit("plots", {"PIZ": lambda ax, n=frame: self.drawn.append(n)})
+            time.sleep(0.05)
+        final = plots(tags, ["PIZ"])
+        return Result(locs=concat([block(f) for f in range(1, 4)]),
+                      plots={"PIZ": lambda ax: (self.drawn.append("final"),
+                                                final["PIZ"](ax))})
+
+
+@pytest.mark.parametrize("asked", [True, False])
+def test_a_fits_image_tags_are_drawn_while_it_runs_and_end_as_its_figure(app, asked):
+    """Opened from the stream, kept in the live table's metadata, and the
+    final figure drawn in the same window -- also for a run nobody asked for
+    (MicroClaw's, `start_run(ask=False)`), which opens no window otherwise."""
+    from PySide6.QtCore import QEventLoop, QTimer
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session()
+    panel = PluginPanel(DrawsAsItGoes, session)
+    seen = []
+    session.on_change(lambda what: seen.append(
+        (session.locs.metadata.get("frame_tags") or {}).get("PIZ")))
+    DrawsAsItGoes.drawn = []
+    loop = QEventLoop()
+    panel.ended.connect(lambda *_: loop.quit())
+    if asked:
+        panel.run()
+    else:
+        assert panel.start_run(ask=False)
+    QTimer.singleShot(10000, loop.quit)
+    loop.exec()
+    app.processEvents()
+    window = panel._window
+    assert window is not None and window.isVisible()
+    assert list(window.panes) == ["PIZ"]
+    assert DrawsAsItGoes.drawn[-1] == "final" and len(DrawsAsItGoes.drawn) >= 2
+    assert any(v is not None and len(v) >= 3 for v in seen)    # tags while live
+    window.close()

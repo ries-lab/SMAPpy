@@ -9,8 +9,9 @@ the UV, did the focus lock hold while the localizations thinned out.
 
 The piezo position is the one looked at most -- a focus lock that ran into
 its limit or jumped shows there before it shows in the data -- so the fit
-draws it by itself when it finishes (`OutputSettings.show_tags`), with the
-same function as here.
+draws it by itself (`OutputSettings.show_tags`), with the same function as
+here: every few seconds while it runs, from the tags read so far
+(`fit.LIVE_TAGS_SECONDS`), and once more when it finishes.
 
 Ported from SMAP's ``Analyze/other/DisplayImageTags``.  SMAP plots tag k for
 the frames where its value is not zero, to hide the frames it did not read;

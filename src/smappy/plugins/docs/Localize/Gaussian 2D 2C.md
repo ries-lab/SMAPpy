@@ -452,8 +452,10 @@ chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
 `PIZStage` draws the piezo position, which shows at once whether the focus
-lock held.  On a microscope whose piezo has another name, put that name (or
-part of it) here.  Every tag that changed is kept in the file whatever this
+lock held.  The figure opens while the fit runs and is redrawn every 5
+seconds, so a focus lock that slips is seen during the acquisition; when the
+fit is done the same window shows the final figure.  On a microscope whose
+piezo has another name, put that name (or part of it) here.  Every tag that changed is kept in the file whatever this
 says; Analysis/Process/Image Tags draws any of them later.
 
 ### region.shapes
