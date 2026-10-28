@@ -510,7 +510,10 @@ class Context:
 
         ``("start", {"extent": ...})`` once, then ``("block", Localizations)``
         per finished block, for a plugin that produces localizations over
-        minutes.  A no-op when nobody is listening.
+        minutes.  A fit also hands on ``("tags", table)``, its image tags so
+        far, and ``("plots", {name: draw})``, figures the panel shows while
+        it runs and replaces with the result's of the same names.  A no-op
+        when nobody is listening.
         """
         if self._stream:
             self._stream(event, payload)

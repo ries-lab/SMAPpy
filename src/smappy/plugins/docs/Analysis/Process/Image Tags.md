@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.frametags.FrameTags, smappy.frametags.flatten, smappy.frametags.acquisition, smappy.plugins.image_tags.names, smappy.plugins.image_tags.per_frame, smappy.plugins.image_tags.summary, smappy.plugins.image_tags.draw_tag]
+covers: [smappy.frametags.FrameTags, smappy.session.Session.set_live_metadata, smappy.frametags.flatten, smappy.frametags.acquisition, smappy.plugins.image_tags.names, smappy.plugins.image_tags.per_frame, smappy.plugins.image_tags.summary, smappy.plugins.image_tags.draw_tag]
 ---
 
 ## What it does
@@ -20,8 +20,11 @@ the UV?
 The piezo position is the main thing to check for quality.  A focus lock
 that drifted, jumped or ran into the end of its range shows up there at
 once, while in the localizations it shows only as a slow loss of quality.
-So the fit draws the piezo position on its own when it finishes (see *show
-image tags* in the fit's output settings), with the same drawing as here.
+So the fit draws the piezo position on its own (see *show image tags* in the
+fit's output settings), with the same drawing as here.  The figure opens
+while the fit is still running and is redrawn every few seconds, so a focus
+lock that slips during a long acquisition is seen while there is still time
+to act.  When the fit is done, the same window shows the final figure.
 
 It needs a table fitted from a Micro-Manager acquisition (an OME-TIFF
 series, an NDTiff dataset or a folder of single images) by this program.  A
@@ -83,6 +86,13 @@ fig.tight_layout()
 **Which table.**  The localizations, whatever the layer shows: the
 count beside the tags is of localizations per frame, and a blink merged
 over several frames would be counted once, in its first.
+
+**During the fit.**  Every 5 seconds the fit hands on the tags recorded so
+far, and only when new frames have arrived.  They go into the metadata of the
+table that is still growing, so this plugin can be run on a fit that is
+still running, and the fit's own figure is redrawn from them.  The
+localization rate beside the tags is that of the localizations fitted so
+far.
 
 **What is compared.**  The metadata of a frame is flattened to
 `Device-Property` keys first.  User data that Micro-Manager wraps as

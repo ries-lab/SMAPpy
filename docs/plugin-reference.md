@@ -38,7 +38,10 @@ and `smappy/simulate` are the record, and the code wins where they differ.
 * `ctx.session` -- may be `None`; a script can say `Context(locs=locs)`, so
   never assume a session exists.
 * `ctx.report(text)` for progress, `ctx.emit(event, payload)` to hand partial
-  results on.  Both are no-ops when nobody is listening.
+  results on.  Both are no-ops when nobody is listening.  The panel takes
+  `("plots", {name: draw})` from any plugin: figures shown while it runs, in
+  the window its result's figures of the same names then replace (a fit's
+  image tags, every few seconds).
 * `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
   as its own line that progress does not overwrite.  Put the warnings in the
   result's text if they should reach the history.

@@ -1468,6 +1468,15 @@ class Session:
         self.log("live recipes", "applied to the finished table: " + ", ".join(names))
         return locs
 
+    def set_live_metadata(self, key: str, value) -> None:
+        """Put ``value`` in the live table's metadata under ``key``, as the
+        finished table will have it: a fit's image tags so far, which it
+        hands on every few seconds, so *Plot image tags* works on a fit
+        still running.  Ignored once the fit has ended -- the finished
+        table carries its own."""
+        if self._live:
+            self.locs.metadata[key] = value
+
     def end_live(self) -> None:
         """The fit ended without a finished table -- it failed: keep what came.
 

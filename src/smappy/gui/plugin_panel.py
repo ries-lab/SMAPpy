@@ -262,6 +262,7 @@ class PluginPanel(QWidget):
         # table change `Session.apply` takes while a fit is appending
         self._owns_live = False
         self._show_figures = True
+        self._live_figures = False
         self._warnings = 0
         self._follow_timer = QTimer(self, singleShot=True, interval=120)
         self._follow_timer.timeout.connect(self._follow_step)
@@ -471,6 +472,34 @@ class PluginPanel(QWidget):
             self.session.begin_live(payload.get("extent"), payload.get("path"))
         elif event == "block":
             self.session.append(payload)
+        elif event == "tags":
+            # the image tags so far, where *Plot image tags* and a saved
+            # table look for them (`Session.set_live_metadata`)
+            from ..frametags import KEY
+            if self._owns_live:
+                self.session.set_live_metadata(KEY, payload)
+        elif event == "plots":
+            self._show_live_plots(payload)
+
+    def _show_live_plots(self, plots: dict) -> None:
+        """Figures a run draws while it goes (``("plots", {name: draw})``,
+        the fit's image tags), in the window its result will be shown in.
+
+        Opened without the focus, and redrawn in place: the fit hands them
+        on every few seconds, and the final result's figures of the same
+        names replace them there (`_on_done`).
+        """
+        from ..plugins import _as_plot
+        from .figures import ResultWindow
+        figures = [_as_plot(draw, name) for name, draw in plots.items()]
+        if not figures:
+            return
+        if self._window is None:
+            self._window = ResultWindow(self.plugin.name, self)
+        if not self._window.isVisible():
+            self._window.show()
+        self._window.show_plots(figures, "running")
+        self._live_figures = True
 
     def preview(self) -> None:
         """The work, shown and thrown away."""
@@ -686,6 +715,7 @@ class PluginPanel(QWidget):
         # a run somebody asked for shows its figures when it is done; one
         # that nobody is there to answer (`start_run(ask=False)`) does not
         self._show_figures = ask
+        self._live_figures = False          # drawn while it ran (`_show_live_plots`)
         for button in self._buttons():
             button.setEnabled(False)
         if stop is not None:
@@ -974,8 +1004,12 @@ class PluginPanel(QWidget):
         self.result_button.setToolTip(RESULT_TIP)
         # The figures are what most runs are for: a measurement is read off
         # them, so the window opens without a second click on Show result.
+        # A window opened while the run went (`_show_live_plots`) ends with
+        # the final figures, whoever started the run.
         if result.figures() and (following or self._show_figures):
             self.plot(raise_window=not following)
+        elif result.figures() and self._live_figures:
+            self.plot(raise_window=False)
         self.ended.emit("done", result)
 
     def _on_failed(self, message: str, text: str) -> None:

@@ -130,11 +130,11 @@ def test_a_table_without_tags_says_so():
                         ImageTagsSettings())
 
 
-def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
-    """A simulated acquisition rewritten as a Micro-Manager TIFF with tags."""
+def _tagged_acquisition(tmp_path):
+    """A simulated acquisition rewritten as a Micro-Manager TIFF with tags:
+    its path and the camera to fit it with."""
     from smappy.plugins import get
-    from smappy.plugins.fit import (CameraSettings, GaussianFit, GaussianFitSettings,
-                                    OutputSettings, SourceSettings)
+    from smappy.plugins.fit import CameraSettings
     from smappy.simulate import (CameraOutputSettings, LabellingSettings,
                                  SimulationSettings)
     made = get("File/Simulate/Simulate")().run(Context(), SimulationSettings(
@@ -150,11 +150,17 @@ def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
             writer.write(image.astype(np.uint16), metadata=None,
                          extratags=[(51123, "s", 0, json.dumps(_plane(frame)), True)])
     cam = sim.camera
+    return path, CameraSettings(conversion=cam["conversion"], offset=cam["offset"],
+                                pixelsize_um=cam["pixelsize_um"], em_on=False)
+
+
+def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
+    from smappy.plugins.fit import (GaussianFit, GaussianFitSettings, OutputSettings,
+                                    SourceSettings)
+    path, camera = _tagged_acquisition(tmp_path)
     out = tmp_path / "out.hdf5"
     result = GaussianFit().run(Context(), GaussianFitSettings(
-        source=SourceSettings(path=str(path), chunk=25),
-        camera=CameraSettings(conversion=cam["conversion"], offset=cam["offset"],
-                              pixelsize_um=cam["pixelsize_um"], em_on=False),
+        source=SourceSettings(path=str(path), chunk=25), camera=camera,
         output=OutputSettings(path=str(out), raw_frames=0)))
     assert "PIZStage-Position" in result.plots            # shown by default
     assert "PIZStage-Position" in result.text
@@ -162,3 +168,73 @@ def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
         np.testing.assert_allclose(stored["frame_tags"]["PIZStage-Position"],
                                    50.0 - 0.01 * np.arange(N_FRAMES), atol=1e-9)
         assert "devices" in stored["acquisition"]
+
+
+@pytest.mark.parametrize("show", ["PIZ", ""])
+def test_a_running_fit_hands_on_its_tags_and_draws_them_as_it_goes(tmp_path, monkeypatch,
+                                                                    show):
+    """Every `LIVE_TAGS_SECONDS` (here at once) the tags so far, and -- when
+    *show image tags* names some -- the figures the end will show, by name."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.plugins import fit as fit_module
+    from smappy.plugins.fit import (GaussianFit, GaussianFitSettings, OutputSettings,
+                                    SourceSettings)
+    monkeypatch.setattr(fit_module, "LIVE_TAGS_SECONDS", 0.0)
+    path, camera = _tagged_acquisition(tmp_path)
+    events = []
+    result = GaussianFit().run(
+        Context(stream=lambda event, payload: events.append((event, payload))),
+        GaussianFitSettings(source=SourceSettings(path=str(path), chunk=10),
+                            camera=camera,
+                            output=OutputSettings(save=False, raw_frames=0,
+                                                  show_tags=show)))
+    tags = [p for e, p in events if e == "tags"]
+    assert len(tags) >= 2                       # more than once, growing
+    counts = [len(t["frame"]) for t in tags]
+    assert counts == sorted(counts) and counts[0] < N_FRAMES
+    for table in tags:                          # a consistent copy each time
+        assert all(len(v) == len(table["frame"]) for v in table.values())
+        np.testing.assert_allclose(table["PIZStage-Position"],
+                                   50.0 - 0.01 * table["frame"], atol=1e-9)
+    drawn = [p for e, p in events if e == "plots"]
+    if not show:
+        assert not drawn and "PIZStage-Position" not in result.plots
+        return
+    assert drawn and all(list(p) == ["PIZStage-Position"] for p in drawn)
+    ax = Figure().subplots()
+    drawn[-1]["PIZStage-Position"](ax)          # the same drawing as at the end
+    assert ax.get_ylabel() == "PIZStage-Position"
+    assert "PIZStage-Position" in result.plots   # and the final figure, by the same name
+
+
+def test_the_tags_can_be_read_while_another_thread_adds_frames():
+    """The reader adds on its thread while the fit copies on its own.
+
+    Without the lock, hundreds of copies in five runs of this had a column
+    shorter than the frames, or failed on a dictionary changing size.
+    """
+    import sys
+    import threading
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)                 # switch threads often: provoke it
+    tags = FrameTags()
+    done = threading.Event()
+
+    def read():
+        for frame in range(3000):
+            tags.add(frame, _plane(frame % N_FRAMES))
+        done.set()
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    copies = 0
+    while not done.is_set() or copies < 5:
+        table = tags.table()
+        if table:
+            assert all(len(v) == len(table["frame"]) for v in table.values())
+            copies += 1
+    reader.join()
+    sys.setswitchinterval(interval)
+    assert len(tags.table()["frame"]) == 3000

@@ -24,6 +24,7 @@ The static part -- the summary and the first frame's device properties -- is
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -83,9 +84,15 @@ class FrameTags:
     order.  A tag's column is started the first time its value differs from
     the first frame's and filled in backwards with that value, so the
     columns are complete without the first frames having been kept.
+
+    `add` runs on the reader's thread and `table` may be asked for on the
+    fit's while frames are still coming -- the live figure of the tags -- so
+    both hold a lock: mid-`add`, the frames are one ahead of the columns
+    and a new column may be going into the dictionary being copied.
     """
 
     def __init__(self):
+        self._lock = threading.Lock()
         self.frames: List[int] = []
         self._first: Dict[str, object] = {}
         self._columns: Dict[str, list] = {}
@@ -98,9 +105,13 @@ class FrameTags:
     def add(self, frame: int, md: Optional[dict]) -> None:
         if md is None:
             return
+        with self._lock:
+            self._add(int(frame), md)
+
+    def _add(self, frame: int, md: dict) -> None:
         values = dict(flatten(md))
         n = len(self.frames)
-        self.frames.append(int(frame))
+        self.frames.append(frame)
         if n == 0:
             self._first = {k: v for k, v in values.items() if k not in _IGNORED}
             return
@@ -141,8 +152,13 @@ class FrameTags:
     def table(self) -> Dict[str, np.ndarray]:
         """``{"frame": frames, tag: values}``, numbers as float, states as text.
 
-        Empty when no frame carried metadata.
+        Empty when no frame carried metadata.  A copy: the reader goes on
+        adding to the columns, never to what this returned.
         """
+        with self._lock:
+            return self._table()
+
+    def _table(self) -> Dict[str, np.ndarray]:
         if not self.frames:
             return {}
         out = {"frame": np.asarray(self.frames, np.int64)}
