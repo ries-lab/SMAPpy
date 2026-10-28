@@ -2,7 +2,7 @@
 title: Batch window
 summary: Runs one chain of plugins over many files, each on its own, and writes every file's table, numbers and figures to an output folder with a summary of all of them.
 widget: smappy.gui.batch_window.BatchWindow
-covers: [smappy.gui.batch_window.BatchWindow, smappy.batch.resolve_inputs, smappy.batch.validate, smappy.batch.settings_for, smappy.batch.fingerprint, smappy.batch.run_one, smappy.batch.run, smappy.batch.write_summary, smappy.batch.scalars, smappy.batch.json_safe]
+covers: [smappy.gui.batch_window.BatchWindow, smappy.batch.resolve_inputs, smappy.batch.validate, smappy.batch.settings_for, smappy.batch.fingerprint, smappy.batch.run_one, smappy.batch.run, smappy.batch.write_summary, smappy.batch.summary_rows, smappy.batch.scalars, smappy.batch.json_safe, smappy.batch.publish, smappy.batch.watch, smappy.batch.is_complete, smappy.batch.stop_on_stdin, smappy.batch_page.write_page, smappy.batch_page.trend_columns, smappy.batch_page.draw_trends]
 ---
 
 ## What it does
@@ -25,6 +25,14 @@ batch as a whole gets a table with one row per file.
 The chain can start with a fit (a *Localize* plugin), and then the inputs are
 camera images; otherwise the inputs are localization files.  Either way one
 input is one file.
+
+With *watch* ticked, the batch does not end with the files there are: it
+keeps looking at the folders and runs the chain on each new file as soon as
+the microscope has finished writing it -- for a folder that fills during a
+day of acquisitions, or the same bead sample measured every week.  A summary
+page in the output folder shows every file with its figures and numbers, and
+plots chosen numbers across the files in the order they were taken, so a
+change in the instrument shows as a trend.
 
 It opens from **Plugins > Batch...**, or on its own as `smappy-batch-gui`.  It
 is a front end to the job file and the command `smappy-batch`: everything it
@@ -72,10 +80,22 @@ version was bumped because its numbers moved is re-run on every file, while
 one whose code changed without a new version is not.
 
 **6. The report.**  The output folder holds, per input, a folder named after
-it, and for the whole batch `summary.csv` and `batch_report.json`
-(see *Output*).  The table's *status* column follows the run as it goes:
+it, and for the whole batch `summary.csv`, `batch_report.json` and the
+summary page, `index.html` (see *Output*), all written again after every
+file, so they can be read while the batch runs.  The table's *status* column follows the run as it goes:
 *running*, *done*, *skipped* or *failed*, with the reason in the tooltip,
 and a folder row counts its files.
+
+**7. Watching.**  With *watch* ticked, Run processes the files there are,
+then looks at the folders every 2 seconds.  A new file is run once it is
+**complete**: a localization file written by SMAPpy's fitter once the fit
+has closed it -- the file says so itself, so a live acquisition that pauses
+for minutes is never taken half-way -- and any other file once neither its
+size nor its time stamp has changed for 10 seconds (for a Micro-Manager
+series, of all its files).  What is done already is skipped as in step 5,
+so a watch started again on the same folder carries on where it was, and a
+file that changes after it was run is run again.  The watch runs until
+*Stop*.
 
 ## In detail
 
@@ -104,13 +124,24 @@ are first met.  In `results.json` a step's data is kept as far as it is
 JSON: arrays and lists of up to 1000 values, nested dictionaries; tables and
 anything larger are left out, and a NaN is written as `null`.
 
+**The trends** on the summary page are the `summary.csv` columns named in
+*trend columns* (patterns such as `stats.*` allowed), one panel each,
+against the time each file was taken: Micro-Manager's `StartTime` where the
+file's metadata has it, else the input's modification time, else simply the
+files in order.  A failed file has no point; the dashed line is the median.
+With *trend columns* empty, every number that differs between the files is
+plotted, except one that repeats a column before it, at most twelve, the
+seconds each file took last.  A number the same in every file is usually a
+setting echoed back, and is left out.
+
 **Names.**  A file's output folder is its name without the extension (and
 without `.ome.tif` or `_sml.mat`); two inputs with the same name get their
 parent folder's name in front, and a number if even that is not enough.
 
 **The run** exits with 0 when every file was done (or already was), 1 when
 any failed or the batch was stopped by a step's *abort*, and 2 when the job
-did not validate; the log's last line says which.
+did not validate; the log's last line says which.  A watch exits with 0
+once stopped.
 
 ## Controls
 
@@ -228,6 +259,12 @@ whole batch.
 settings, plugin versions, output options and input file (see *How it
 works*); *always* runs every file again.
 
+### trend columns
+Empty plots every number that differs between the files.  Name a few to
+follow over time, the ones that say the instrument is as it was -- the
+precision, the photons, the number of localizations -- and leave out the
+ones that differ because the cells do.
+
 ### open job...
 Opens a `.batch.yaml` file into the window.
 
@@ -244,6 +281,12 @@ validation, which lists them.
 Runs only the first file: a trial run, to check the numbers and figures
 before the rest.
 
+### watch
+Runs the files there are, then each new one in the folders as soon as it is
+complete (see *How it works*), until *Stop*.  The folders may be empty at
+the start.  *first file only* does not apply.  Not needed after a live fit:
+a fitter's *after the fit* runs its steps there already.
+
 ### Run
 Validates, saves the job (asking for a name the first time) and starts the
 batch.  The progress bar counts files; the status bar shows what the
@@ -251,7 +294,12 @@ current step says.
 
 ### Stop
 Ends the batch program.  A file cut off half-way has no finished record,
-so the next run does it again; the files already done are kept.
+so the next run does it again; the files already done are kept.  A watch is
+asked to stop instead, and ends once the file in hand is done, with its
+summary written; pressing *Stop* again ends it at once.
+
+### open summary
+Opens the summary page, `index.html`, in the system's browser.
 
 ### open output
 Opens the output folder in the system's file browser.  Opened from the main
@@ -276,7 +324,13 @@ and for the batch
   the table to take to a statistics program;
 * `batch_report.json` -- the job and the chain as they were resolved, the
   plugin versions, the list of files the folders resolved to, and each file's
-  status, message and traceback.  It is the record of which files a run saw.
+  status, message and traceback.  It is the record of which files a run saw;
+* `index.html` -- the summary page: a row per file with its status, when it
+  was taken, its figures as thumbnails (click for the full figure) and its
+  numbers, and above them `trends.png`, the *trend columns* across the
+  files.  It is a plain page with relative links: the output folder can be
+  zipped or copied and the page still works.  While a batch or a watch runs
+  it reloads itself every 20 seconds.
 
 A good run ends with *finished* in the log and every row *done* or
 *skipped*.  *finished, with failures*: hover over a *failed* status or read
@@ -302,9 +356,16 @@ its fitting `Batchprocessor`
   `results.json` and into one `summary.csv`.
 * **Re-runs skip what is done** with the same settings and plugin versions;
   SMAP runs every file again.
+* **A folder can be watched**, and a page shows every file and plots numbers
+  across them; SMAP has neither.  The idea is Picasso Server's
+  (Strauss 2022), not SMAP's.
 
 ## References
 
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).
   [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
+* Strauss MT. Picasso-server: a community-based, open-source processing
+  framework for super-resolution data. *Commun Biol* 5, 930 (2022) -- the
+  folder watcher and the plots of every run's numbers over time.
+  [doi:10.1038/s42003-022-03909-5](https://doi.org/10.1038/s42003-022-03909-5)

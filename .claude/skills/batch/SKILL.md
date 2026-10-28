@@ -18,8 +18,14 @@ written for you.  Read it first.  In short:
    strict, and names the fields that do exist when one does not.
 5. `smappy-batch run <job> --limit 1`, then read
    `<output>/<name>/results.json` and look at `<output>/<name>/figures/`.
-6. Run the rest.  `summary.csv` has a row per file; a re-run skips files
-   done with the same settings.
+6. Run the rest.  `summary.csv` has a row per file, and `index.html` in the
+   output folder shows each file's status, figures and numbers, with the
+   job's `output.trends` columns plotted across the files; a re-run skips
+   files done with the same settings.
+7. For a folder still being filled by the microscope, `smappy-batch watch
+   <job>` runs the chain on each new file once it is complete, until
+   Ctrl-C or a `stop` line on its stdin.  Not after a live fit: the
+   fitter's *after the fit* does that.
 
 A step that needs a plugin which does not exist: write it following
 `CLAUDE.md` ("Writing a plugin"), give it a `version`, return its numbers

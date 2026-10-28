@@ -169,8 +169,10 @@ whole-cell 3D) and large; listed for completeness.
   long chain cheap in the GUI; the fingerprint machinery in `batch.py` already says which steps changed.
 * **Several inputs per job and parallel files** (PYME bakeshop, `recipes/batchProcess.py:35-60`): named
   inputs, each a glob list, zipped by position (`{'ch1': [...], 'ch2': [...]}`) and run on
-  `cpu_count()` processes with an SVG backend.  Both are in SMAPpy's own *Not yet* list
-  (`docs/batch.md:386-393`); PYME's zip-by-index form is the simplest schema for "two stacks per cell".
+  `cpu_count()` processes with an SVG backend.  Several inputs per dataset is in SMAPpy's own *Not
+  yet* list (`docs/batch.md`), as a question for every plugin that reads files, not only the batch;
+  PYME's zip-by-index form is the simplest schema for "two stacks per cell".  Parallel files were
+  decided against (2026-10-28): the analysis is parallel already.
 * **Analysis chained onto acquisition** (PYME `cluster/rules.py:1-35, 376-382, 786-811`): a localisation
   rule releases frames as the spooler writes them, and `on_completion` chains recipe rules (render, then
   measure) with input patterns like `{{spool_dir}}/analysis/{{series_stub}}.h5r`; Barentine 2023 reports
@@ -187,6 +189,7 @@ whole-cell 3D) and large; listed for completeness.
   `PYME/reports/templates`): an HTML page per input with its numbers and figures.  SMAPpy writes
   `results.json` and PNGs per file; one generated `index.html` in the batch output folder (a row per file:
   thumbnails of each figure, the summary scalars, status) would make a 50-cell batch browsable.
+  *Built 2026-10-28* (`smappy/batch_page.py`).
 * **Recipes look good in notebooks** (PYME `recipe.py:960`, `_repr_mimebundle_` → SVG of the graph) and
   rules show live status tables in Jupyter (`rules.py:80-120`).  A `_repr_html_` for `Chain`,
   `Localizations` and `Result` (columns, history, the figures) is cheap and helps the scripting users.

@@ -5,7 +5,10 @@ job (`batch.write_job`) and starts ``smappy-batch run`` on it as a separate
 process, reading the ``SMAPPY_*`` lines it prints -- the way MPS's GUI runs
 its batch -- so a crash or an exhausted memory costs the batch and never
 this window or the session behind it, and what the window did can be done
-again from a terminal with the file it wrote.
+again from a terminal with the file it wrote.  With *watch* ticked it starts
+``smappy-batch watch`` instead, which runs on until stopped; its Stop is a
+``stop`` line on the runner's stdin, which ends it after the file in hand,
+and only a second Stop kills it.
 
 The same class is ``smappy-batch-gui`` on its own and *Tools -> Batch...* in
 smappy; the only difference is whether there is a session to open a result
@@ -79,6 +82,7 @@ class BatchWindow(QMainWindow):
         self._buffer = b""
         self._running: Dict[str, int] = {}
         self.report_path: Optional[Path] = None
+        self._stopping = False
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -181,6 +185,12 @@ class BatchWindow(QMainWindow):
         form.addRow("when a step asks", self.preflight)
         self.rerun = self._combo(batch.RERUN, "skip_identical")
         form.addRow("files already done", self.rerun)
+        self.trends = QLineEdit()
+        self.trends.setPlaceholderText("every number that differs between files")
+        self.trends.setToolTip("summary.csv columns plotted across the files on the "
+                               "summary page, comma-separated; patterns allowed "
+                               "(stats.*)")
+        form.addRow("trend columns", self.trends)
         split.addWidget(out_box)
 
         # ---- running
@@ -195,6 +205,9 @@ class BatchWindow(QMainWindow):
             buttons.addWidget(button)
         buttons.addStretch(1)
         self.try_one = QCheckBox("first file only")
+        self.watch = QCheckBox("watch")
+        self.watch.setToolTip("run on the files there are, then on each new one in "
+                              "the folders as soon as it is complete, until Stop")
         self.run_button = QPushButton("Run")
         self.run_button.clicked.connect(self.run)
         self.stop_button = QPushButton("Stop")
@@ -202,7 +215,12 @@ class BatchWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop)
         self.results_button = QPushButton("open output")
         self.results_button.clicked.connect(self.open_output)
-        for w in (self.try_one, self.run_button, self.stop_button, self.results_button):
+        self.page_button = QPushButton("open summary")
+        self.page_button.setToolTip("the summary page in the browser: a row per file "
+                                    "with its figures and numbers, and plots across files")
+        self.page_button.clicked.connect(self.open_page)
+        for w in (self.try_one, self.watch, self.run_button, self.stop_button,
+                  self.results_button, self.page_button):
             buttons.addWidget(w)
         column.addLayout(buttons)
         self.progress = QProgressBar()
@@ -378,7 +396,9 @@ class BatchWindow(QMainWindow):
                                  locs=self.save_locs.isChecked(),
                                  figures=self.figures.currentData(),
                                  fitted=self.fitted.currentData(),
-                                 delete_fitted=self.delete_fitted.isChecked()),
+                                 delete_fitted=self.delete_fitted.isChecked(),
+                                 trends=[t.strip() for t in self.trends.text().split(",")
+                                         if t.strip()]),
                    preflight=self.preflight.currentData(),
                    rerun=self.rerun.currentData(), origin=self.job_path)
 
@@ -397,6 +417,7 @@ class BatchWindow(QMainWindow):
                            (self.preflight, job.preflight), (self.rerun, job.rerun)):
             box.setCurrentIndex(max(box.findData(value), 0))
         self.delete_fitted.setChecked(out.delete_fitted)
+        self.trends.setText(", ".join(out.trends))
         self.setWindowTitle(f"SMAPpy batch -- {self.job_path.name}")
 
     def open_job(self) -> None:
@@ -422,8 +443,8 @@ class BatchWindow(QMainWindow):
         self.setWindowTitle(f"SMAPpy batch -- {target.name}")
         return target
 
-    def validate(self) -> bool:
-        problems = batch.validate(self.job())
+    def validate(self, need_files: bool = True) -> bool:
+        problems = batch.validate(self.job(), need_files=need_files)
         for problem in problems:
             self.log.appendPlainText(str(problem))
         errors = sum(p.level == "error" for p in problems)
@@ -434,7 +455,8 @@ class BatchWindow(QMainWindow):
     def run(self) -> None:
         if self.process is not None:
             return
-        if not self.validate():
+        watching = self.watch.isChecked()
+        if not self.validate(need_files=not watching):
             return
         path = self.save_job(ask=self.job_path is None)
         if path is None:
@@ -452,17 +474,32 @@ class BatchWindow(QMainWindow):
         for key, value in UTF8_ENVIRONMENT.items():
             environment.insert(key, value)
         self.process.setProcessEnvironment(environment)
-        args = ["-m", "smappy.cli.batch", "run", str(path)]
-        if self.try_one.isChecked():
-            args += ["--limit", "1"]
+        self._stopping = False
+        if watching:
+            args = ["-m", "smappy.cli.batch", "watch", str(path)]
+        else:
+            args = ["-m", "smappy.cli.batch", "run", str(path)]
+            if self.try_one.isChecked():
+                args += ["--limit", "1"]
         self.log.appendPlainText(f"$ smappy-batch {' '.join(args[2:])}")
         self.run_button.setEnabled(False)
+        self.watch.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.process.start(sys.executable, args)
 
     def stop(self) -> None:
-        if self.process is not None:
-            stop_process(self.process)
+        """End the batch.  A watch is asked first, and ends after the file in
+        hand with its report written; a second Stop, or a plain run, ends the
+        program at once."""
+        if self.process is None:
+            return
+        if self.watch.isChecked() and not self._stopping:
+            self._stopping = True
+            self.process.write(b"stop\n")
+            self.log.appendPlainText("stopping after the file in hand "
+                                     "(Stop again to end it now)")
+            return
+        stop_process(self.process)
 
     def _read(self) -> None:
         # split as bytes and decode whole lines: a read can end inside a
@@ -481,7 +518,9 @@ class BatchWindow(QMainWindow):
             return
         self.log.appendPlainText(f"{event.lower()}: {'  '.join(fields[1:])}"
                                  if event else line)
-        if event == "JOBS":
+        if event == "WATCHING":
+            self.progress.setRange(0, 0)
+        elif event == "JOBS":
             self.progress.setRange(0, max(int(fields[1]), 1))
             self.progress.setValue(0)
         elif event in ("START", "DONE", "SKIP", "FAILED") and len(fields) > 1:
@@ -493,7 +532,7 @@ class BatchWindow(QMainWindow):
                 text = {"START": "running", "DONE": "done", "SKIP": "skipped",
                         "FAILED": "failed"}[event]
                 self._mark(row, text, fields[-1] if event in ("FAILED", "SKIP") else "")
-            if event != "START":
+            if event != "START" and "/" in where:
                 self.progress.setValue(int(where.split("/")[0]))
         elif event == "REPORT":
             self.report_path = Path(fields[1])
@@ -531,9 +570,13 @@ class BatchWindow(QMainWindow):
         self.process = None
         self._running = {}
         self.run_button.setEnabled(True)
+        self.watch.setEnabled(True)
         self.stop_button.setEnabled(False)
         if self.progress.maximum() == 0:
             self.progress.setRange(0, 1)
+        if self.watch.isChecked() and code == 0:
+            self.log.appendPlainText("watch ended; open summary shows what it did")
+            return
         self.log.appendPlainText({0: "finished", 1: "finished, with failures",
                                   2: "did not start: the job has errors"}
                                  .get(code, f"stopped ({code})"))
@@ -551,6 +594,17 @@ class BatchWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def open_page(self) -> None:
+        """The summary page, `index.html`, in the system's browser."""
+        page = self.job().output_folder() / "index.html"
+        if not page.exists():
+            QMessageBox.information(self, "Summary", f"No summary page yet: {page} is "
+                                    "written once the first file is done.")
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(page)))
 
     def _browse_output(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Output folder",
