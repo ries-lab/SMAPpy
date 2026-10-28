@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5, smappy.plugins.file.left_out, smappy.plugins.file.region_counts, smappy.table_edit.keep_columns]
+covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.io.hdf5.save_session_block, smappy.handoff.session_block, smappy.region_table.RegionTable.to_hdf5, smappy.plugins.file.left_out, smappy.plugins.file.region_counts, smappy.table_edit.keep_columns]
 ---
 
 ## What it does
@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory() as folder:
     with h5py.File(saved, "r") as f:
         columns = sorted(f["locs"])
         metadata = json.loads(f.attrs["metadata"])
-        extra = [name for name in ("results/saved", "gui/state") if name in f]
+        extra = [name for name in ("results/saved", "gui/state", "gui/session") if name in f]
 ```
 
 **1. The table.**  Every column of the current table is written as it is
@@ -69,10 +69,20 @@ numbers do rather than a megabyte of text in the attribute.
 drift curve, say -- so that its figure can be drawn again later.  That goes
 into `/results/saved`.
 
-**4. The GUI, optionally.**  With *save the GUI state too*, the tabs, their
-plugins and their settings are written into `/gui/state`, without the
-window's size and position.  They are not put back when the file is opened;
-File > Workspace > From data file does that.
+**4. The session, optionally.**  With *save the GUI state too*, the tabs,
+their plugins and their settings are written into `/gui/state`, and the rest
+of the session into `/gui/session`: the layers (their filters, files,
+merging of blinks, colours and display, the image layers and which image
+each shows), the settings blinks are merged with, the 2D view's range, the
+3D view's angle and its box, which windows were open -- the 3D view, the ROI
+manager, plugins opened from the Plugins menu with their settings -- and
+where every window was.  None of it is put back when the file is opened
+with File > Open.  File > Open and restore opens the file and puts all of
+it back, and File > Restore saved session does the same for the file that
+is open; File > Workspace > From data file takes the tabs alone.  The
+windows come back on the screens there are: a window saved on a monitor
+that is not connected now is moved onto the nearest one and shrunk to fit
+it.  A script's save, with no windows, writes the layers and the 3D view.
 
 ```figure What a saved file holds: a simulated table after one Math Parser run, with an ROI drawn.
 fig.set_size_inches(7.5, 3.3)
@@ -105,10 +115,12 @@ metadata is one attribute.  An entry is a few hundred bytes.
 it before is gone, including tool results and a GUI state the session no
 longer has.
 
-**What is not saved.**  The layers -- their filters, whether they merge
-blinks, their colours -- belong to the session, not to the file; only the
-bounds a plugin asked to keep with the table (Remove Localizations' hide
-flag, for instance) come back.  The merged blinks are not saved either.
+**What is not saved.**  Without *save the GUI state too* the layers --
+their filters, whether they merge blinks, their colours -- are not saved;
+only the bounds a plugin asked to keep with the table (Remove
+Localizations' hide flag, for instance) come back.  The merged blinks are
+never saved: they are merged again when the file is opened.  An image
+opened and then not shown in a layer is not saved.
 
 **How big the file is.**  Before compression, a table of $N$
 localizations takes
@@ -131,9 +143,10 @@ Empty works only when the open file is itself `.hdf5` or `.h5`: after
 opening a `_sml.mat` or a csv, give the new file a name.
 
 ### gui_state
-Useful for a file that is a record of how it was analysed; it costs little
-space.  Nothing is restored unless someone asks for it, so it does no
-harm in a file that is shared.
+Useful for a file that is a record of how it was analysed, and for coming
+back to a piece of work where it was left; it costs a few kB.  Nothing is
+restored unless someone asks for it (File > Open and restore), so it does
+no harm in a file that is shared.
 
 ### region_results
 Off, the ROIs are kept -- their places, shapes, *use* flags and comments --

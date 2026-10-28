@@ -414,6 +414,9 @@ class Session:
         # set by the GUI: what to write into the file's `gui` group.  A session
         # in a script has none, and saves only data.
         self.gui_state_provider: Optional[Callable[[], Dict]] = None
+        # set by the GUI: the session block (`handoff.session_block`) with the
+        # 2D view and the windows; without one the layers and 3D view alone
+        self.session_block_provider: Optional[Callable[[], Dict]] = None
         # set by the GUI: the windows a plugin may open (`Plugin.window`), by
         # name, each called with the plugin's settings
         self.window_openers: Dict[str, Callable[[Any], None]] = {}
@@ -957,7 +960,9 @@ class Session:
 
         `gui_state` defaults to the `save_gui_state_in_files` preference.  What
         gets written is whatever `gui_state_provider` returns, so the session
-        stays ignorant of tabs and windows; the GUI sets it.  Without
+        stays ignorant of tabs and windows; the GUI sets it.  With it goes the
+        session block, `handoff.session_block` -- the layers and the views --
+        or what `session_block_provider` makes of it (`gui.restore`).  Without
         `region_results` the ROIs are saved and the numbers measured in them
         are not -- for a project whose results are large and can be measured
         again.  Without `region_figures` the numbers are saved and what each
@@ -967,6 +972,7 @@ class Session:
         stays unsaved, and the open file stays the one it was.
         """
         from .io.formats import writer_for
+        from . import handoff as _handoff
         from .io.hdf5 import save_gui_state, save_localizations, save_results
         path = Path(path or self.path)
         if self.is_protected(path):
@@ -1011,9 +1017,16 @@ class Session:
         if gui_state is None:
             from . import config
             gui_state = bool(config.get("save_gui_state_in_files", True))
-        if gui_state and self.gui_state_provider is not None:
+        if gui_state:
+            from .io.hdf5 import save_session_block
             try:
-                save_gui_state(path, self.gui_state_provider())
+                if self.gui_state_provider is not None:
+                    save_gui_state(path, self.gui_state_provider())
+                # the layers and views, and the windows where the GUI adds
+                # them; headless, the layers and the 3D view alone
+                block = (self.session_block_provider() if self.session_block_provider
+                         else _handoff.session_block(self))
+                save_session_block(path, block)
             except Exception as e:
                 # deliberately everything: the localizations are already on
                 # disk by now, and the GUI state is a convenience.  Whatever a

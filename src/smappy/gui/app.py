@@ -31,6 +31,7 @@ from .errors import ERROR_STYLE, details_window, message_of
 from .merging import merger_for
 from . import make_app
 from . import identity
+from . import restore as restore_module
 from .identity import install_identity
 
 
@@ -263,6 +264,17 @@ class ControlWindow(QMainWindow):
         # any -- an Add file... and an Open image... beside it were three
         # entries for one thing, and the wrong one replaced a table
         open_ = self._action(menu, "Open...", QKeySequence.Open, lambda: self.open())
+        # a saved file's whole session -- tabs, layers, views, windows -- on
+        # request only: Open stays one click and leaves the windows alone
+        # (`gui.restore`)
+        open_restore = self._action(menu, "Open and restore...", None,
+                                    lambda: self.open_and_restore())
+        open_restore.setToolTip("open a smappy HDF5 file and bring back the session "
+                                "it was saved with: tabs, layers, views, windows")
+        restore_open = self._action(menu, "Restore saved session", None,
+                                    lambda: self.restore_open_file())
+        restore_open.setToolTip("the session the open file was saved with: tabs, "
+                                "layers, views, windows")
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         self._action(menu, "Session name...", None, self.rename_session)
@@ -330,7 +342,8 @@ class ControlWindow(QMainWindow):
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
-        self._load_locked = [open_, save, save_as, self.new_window_action,
+        self._load_locked = [open_, open_restore, restore_open, save, save_as,
+                             self.new_window_action,
                              self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
                              self.redo_menu.menuAction()]
@@ -492,6 +505,8 @@ class ControlWindow(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self.release_offers)
         QApplication.instance().aboutToQuit.connect(self._stop_assistant)
         session.gui_state_provider = self.plugin_state
+        session.session_block_provider = lambda: restore_module.session_block(self)
+        self._restore_pending: Optional[Path] = None   # *Open and restore*
         session.on_change(self._on_session)
         self._on_session("locs")
 
@@ -834,16 +849,78 @@ class ControlWindow(QMainWindow):
             QMessageBox.information(self, "Workspace from data file",
                                     "that file carries no workspace")
             return
-        self.workspace = Workspace.from_dict(state)
-        missing = self.workspace.prune(list(plugins.refs()))
-        self.build_tabs()
-        self.session.apply_default_filters(self.workspace.filters)
-        self._update_title(f"from {Path(path).name}")
+        missing = self.apply_workspace_state(state, f"from {Path(path).name}")
         if missing:
             QMessageBox.information(
                 self, "Workspace from data file",
                 "restored, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
+
+    def apply_workspace_state(self, state: dict, label: str) -> list:
+        """The tabs and values of a file's `gui` group in place of these;
+        the plugins it names that are not installed here."""
+        self.workspace = Workspace.from_dict(state)
+        missing = self.workspace.prune(list(plugins.refs()))
+        self.build_tabs()
+        self.session.apply_default_filters(self.workspace.filters)
+        self._update_title(label)
+        return list(missing or [])
+
+    # ------------------------------------------------ restoring a session
+    def open_and_restore(self, path=None) -> None:
+        """*File > Open and restore*: open a smappy HDF5 file in place of
+        what is open, and once it is read, bring back its session
+        (`gui.restore`)."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open and restore",
+                                                  folders.start(), name_filter())
+            if not path:
+                return
+        self._restore_pending = Path(path)
+        self.load_paths([str(path)], append=False)
+
+    def restore_open_file(self) -> None:
+        """*File > Restore saved session*: the open file's, onto its table."""
+        path = self.session.path
+        if not path or Path(path).suffix.lower() not in (".h5", ".hdf5"):
+            QMessageBox.information(self, "Restore saved session",
+                                    "the open file is not a smappy HDF5 file: "
+                                    "only those carry a session")
+            return
+        self.restore_from(Path(path))
+
+    def restore_from(self, path: Path) -> None:
+        """Bring back the session ``path`` was saved with; the table it
+        applies to must be that file's, already open."""
+        from ..io.hdf5 import load_gui_state, load_session_block
+        state, block = load_gui_state(path), load_session_block(path)
+        if not state and not block:
+            QMessageBox.information(self, "Restore saved session",
+                                    f"{path.name} was saved without its session")
+            return
+        missing = restore_module.restore(self, path, state, block)
+        self.statusBar().showMessage(
+            f"restored the session of {path.name}"
+            + ("" if block else " (its tabs: the file is older than the rest)"), 8000)
+        if missing:
+            QMessageBox.information(
+                self, "Restore saved session",
+                "restored, without plugins that are not installed here:\n"
+                + "\n".join(sorted(set(missing))))
+
+    def _restore_if_pending(self) -> None:
+        """After the loads of *Open and restore*: the restore, if the file
+        that was asked for is the one open (it may have failed to load)."""
+        path, self._restore_pending = self._restore_pending, None
+        if path is None:
+            return
+        try:
+            if self.session.path and Path(self.session.path).resolve() == path.resolve():
+                self.restore_from(path)
+        except Exception as e:            # the file is open; the rest is a convenience
+            traceback.print_exc()
+            QMessageBox.warning(self, "Restore saved session",
+                                f"the file is open, its session could not be restored:\n{e}")
 
     def collect_workspace(self) -> Workspace:
         """The workspace as it stands: values, order, and which section is open.
@@ -1627,6 +1704,7 @@ class ControlWindow(QMainWindow):
             self._set_loading(False)
             self._on_session("locs")          # back to "name: N localizations"
             self._open_pending_images()
+            self._restore_if_pending()
             return
         path, args, append, reset_view = self._queue.pop(0)
         self._set_loading(True)

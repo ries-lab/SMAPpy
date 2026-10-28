@@ -170,8 +170,9 @@ the fit settings, and what a tool kept with the file -- a drift curve, say
 (`/results/saved`) -- so its figure can be shown again.  A table is opened
 as it was saved: a fit writes nanometres and the pixel size, and a file from
 an earlier version that also has camera-pixel columns (`x_pix`, ...) keeps
-them.  The GUI state that may be in the file (`/gui`)
-is left alone: File > Workspace > From data file puts it back on request.
+them.  The session that may be saved with the file (`/gui`: tabs, layers,
+views, windows) is left alone: File > Open and restore puts it back on
+request, File > Workspace > From data file the tabs alone.
 An HDF5 file from Picasso or DECODE is read by its own reader, below.
 
 **SMAP.**  SMAP keeps its table in `saveloc.loc`, one field per column.
