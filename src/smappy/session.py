@@ -951,7 +951,8 @@ class Session:
         return metadata
 
     def save(self, path=None, gui_state: Optional[bool] = None,
-             region_results: bool = True, region_figures: bool = True) -> Path:
+             region_results: bool = True, region_figures: bool = True,
+             columns: Optional[Sequence[str]] = None) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
         `gui_state` defaults to the `save_gui_state_in_files` preference.  What
@@ -961,6 +962,9 @@ class Session:
         are not -- for a project whose results are large and can be measured
         again.  Without `region_figures` the numbers are saved and what each
         region kept to draw its figures again (`Plugin.keep`) is not.
+        ``columns`` saves only those, and the positions and file number
+        (`table_edit.keep_columns`); the session keeps every column, so it
+        stays unsaved, and the open file stays the one it was.
         """
         from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
@@ -987,7 +991,17 @@ class Session:
         for im in images:
             if im.kind == "raw":
                 im.metadata["filenumber"] = int(im.metadata.get("filenumber", 0))
-        save_localizations(path, self.locs, metadata)
+        table = self.locs
+        if columns:
+            from .table_edit import keep_columns
+            table = keep_columns(self.locs, columns)
+            # the recipes and kept bounds of the columns left out go with them
+            for key in ("derived", KEPT_BOUNDS):
+                if key in table.metadata:
+                    metadata[key] = table.metadata[key]
+                else:
+                    metadata.pop(key, None)
+        save_localizations(path, table, metadata)
         # after the table: all of these write into the same file, and they are
         # a convenience where the localizations are the point
         if images:
@@ -1006,8 +1020,9 @@ class Session:
                 # provider manages to raise must not turn a good save into a
                 # reported failure.
                 self.log("save", f"the GUI state was not saved: {e}")
-        self.path = path
-        self.set_unsaved(False)
+        if table is self.locs:
+            self.path = path
+            self.set_unsaved(False)
         return path
 
     def set_locs(self, locs: Localizations, undoable: bool = True,
@@ -1185,6 +1200,36 @@ class Session:
                         "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
                         "files": None if layer.files is None else list(layer.files)})
         return out
+
+    def _renamed_bounds(self, renamed: Dict[str, str]) -> List[Dict[str, Tuple]]:
+        """Each localization layer's bounds on the columns ``renamed``
+        renames, under their new names."""
+        out = []
+        for layer in self.layers:
+            ranges = {} if layer.is_image else layer.ranges
+            out.append({new: ranges[old] for old, new in (renamed or {}).items()
+                        if old in ranges})
+        return out
+
+    def _follow_renames(self, renamed: Dict[str, str],
+                        bounds: List[Dict[str, Tuple]]) -> None:
+        """Columns renamed (*Edit columns*): each layer's bounds, read before
+        the table changed (`_renamed_bounds`), and the columns it colours and
+        weighs by follow the column.  An undo brings the old name back
+        without its bound: a layer keeps no bound on a column its table does
+        not have."""
+        for layer, moved in zip(self.layers, bounds):
+            if layer.is_image:
+                continue
+            for name, (lo, hi) in moved.items():
+                layer.set_bound(name, lo, hi)
+            settings = layer.state.settings
+            changes = {name: renamed[getattr(settings, name)]
+                       for name in ("color_field", "weight_field")
+                       if getattr(settings, name) in renamed}
+            if changes:
+                layer.state.settings = dataclasses.replace(settings, **changes)
+        self.changed("layer")
 
     def set_layer_configs(self, configs: Sequence[Dict]) -> None:
         """Make the localization layers say what ``configs`` say.
@@ -2045,6 +2090,9 @@ class Session:
         # overrides the rule either way; see it for when that is right.
         changed = (result.locs is not None or bool(result.files)
                    or bool(result.placements))
+        # read before the table changes: a layer drops a bound on a column
+        # the new table does not have the moment it is set
+        renamed = self._renamed_bounds(result.renamed_columns)
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
@@ -2115,6 +2163,8 @@ class Session:
         # Render tab's work done by a plugin (`Analysis/Process/Layers`)
         if result.layers:
             self.set_layer_configs(result.layers)
+        if result.renamed_columns:
+            self._follow_renames(result.renamed_columns, renamed)
         # the ROI manager's project as a chain left it: the ROIs its segmenter
         # found, the runs of its evaluators and the pipeline they make.  Into
         # the project that is there, which the ROI manager's window holds.

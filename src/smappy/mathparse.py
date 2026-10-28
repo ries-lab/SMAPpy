@@ -403,3 +403,59 @@ def apply_recipes(locs: Localizations, only: Optional[Sequence[str]] = None,
             if report:
                 report(f"{field} = {expression}: {error}")
     return done
+
+
+def rename_in(expression: str, old: str, new: str) -> str:
+    """The expression with the column ``old`` read as ``new``.
+
+    Only where ``old`` is a column: a function called ``old(...)`` and a
+    word inside a longer name stay, and the rest of the text is kept as it
+    was typed -- spacing, brackets and all -- since the expression is shown
+    back to the user.  Positions come from the tree, line 1 only: a recipe
+    is one line.
+    """
+    text = (expression or "").strip()
+    if not text:
+        return expression
+    tree = parse(text)
+    called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    spans = sorted((node.col_offset, node.end_col_offset) for node in ast.walk(tree)
+                   if isinstance(node, ast.Name) and node.id == old
+                   and id(node) not in called)
+    raw = text.encode()          # the offsets are in UTF-8 bytes
+    for start, end in reversed(spans):
+        raw = raw[:start] + new.encode() + raw[end:]
+    return raw.decode()
+
+
+def rename_recipes(locs: Localizations, old: str, new: str) -> List[str]:
+    """Rename a column in the recipes: the field one defines and the names
+    the expressions read.  Returns the fields whose recipe changed."""
+    changed = []
+    out = []
+    for recipe in recipes(locs):
+        entry = dict(recipe)
+        if entry["field"] == old:
+            entry["field"] = new
+        expression = entry.get("expression", "")
+        if expression and old in names_in(expression):
+            entry["expression"] = rename_in(expression, old, new)
+        if entry != recipe:
+            changed.append(entry["field"])
+        out.append(entry)
+    if changed:
+        locs.metadata[RECIPES] = out
+    return changed
+
+
+def readers_of(locs: Localizations, field: str) -> List[str]:
+    """The derived fields whose expression reads ``field``, in recipe order."""
+    out = []
+    for recipe in recipes(locs):
+        expression = recipe.get("expression", "")
+        try:
+            if expression and field in names_in(expression):
+                out.append(recipe["field"])
+        except ExpressionError:
+            continue
+    return out

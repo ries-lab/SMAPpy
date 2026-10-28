@@ -250,6 +250,11 @@ class SaveSettings:
         True, label="save the ROI figures' data",
         help="what each ROI kept to draw its figures again; off keeps the "
              "numbers, and a figure is drawn by measuring again")
+    columns: list = param(default_factory=list, label="columns", kind="columns",
+                          advanced=True,
+                          help="the columns to save; all ticked saves every "
+                               "column. Positions and the file number are "
+                               "always saved")
 
 
 def region_counts(session) -> Dict[str, int]:
@@ -301,7 +306,10 @@ class Save(Plugin):
         if ctx is None or ctx.session is None:
             return FormState()
         text = left_out(ctx.session, settings)
-        return FormState(notice=None if text is None else Notice(text, kind="info"))
+        state = FormState(notice=None if text is None else Notice(text, kind="info"))
+        if len(ctx.session.locs):
+            state.choices["columns"] = list(ctx.session.locs.keys())
+        return state
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:
@@ -312,8 +320,14 @@ class Save(Plugin):
         writer_for(path)                       # fail before doing the work
         written = ctx.session.save(path, gui_state=settings.gui_state,
                                    region_results=settings.region_results,
-                                   region_figures=settings.region_figures)
+                                   region_figures=settings.region_figures,
+                                   columns=settings.columns or None)
         text = f"{len(ctx.session.locs)} localizations to {written}"
+        if settings.columns:
+            from ..table_edit import keep_columns
+            locs = ctx.session.locs
+            text += (f", {len(keep_columns(locs, settings.columns).keys())} "
+                     f"of {len(locs.keys())} columns")
         missing = left_out(ctx.session, settings, done=True)
         if missing:                       # said before, and kept in the log
             text += "; " + missing[0].lower() + missing[1:]
