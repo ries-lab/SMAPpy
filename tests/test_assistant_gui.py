@@ -760,3 +760,35 @@ def test_with_the_panels_switched_off_a_run_goes_straight_to_the_session(control
     answer = server.assistant.call("run_plugin", {"path": "Analysis/Drift/RCC",
                                                   "apply": True})
     assert isinstance(answer, dict) and answer["applied"] and not controls._windows
+
+
+def test_the_terminal_goes_beside_the_picture_as_tall_and_narrows_but_never_leaves_the_screen():
+    from PySide6.QtCore import QRect
+    from smappy.gui.assistant_pane import TERMINAL_MIN, TERMINAL_WIDTH, terminal_column
+    screen = QRect(0, 25, 2560, 1415)
+    picture = QRect(600, 25, 900, 1000)
+    assert terminal_column(picture, screen) == (1500, 25, 1500 + TERMINAL_WIDTH, 1025)
+    narrow = QRect(0, 25, 1500 + 400, 1415)            # room for 400 only: narrowed
+    assert terminal_column(picture, narrow) == (1500, 25, 1900, 1025)
+    tight = QRect(0, 25, 1500 + TERMINAL_MIN - 1, 1415)  # less than the least: over the picture
+    left, top, right, bottom = terminal_column(picture, tight)
+    assert right == 1500 + TERMINAL_MIN - 1 and right - left == TERMINAL_WIDTH
+    assert (top, bottom) == (25, 1025)
+    assert terminal_column(None, screen) == (2560 - TERMINAL_WIDTH, 25, 2560, 1440)
+
+
+def test_on_linux_the_terminal_is_placed_where_its_geometry_option_takes_a_place(monkeypatch):
+    from smappy.assistant import launch
+    monkeypatch.setattr(launch.shutil, "which", lambda name: name == "xterm")
+    command = launch._linux_terminal(Path("/tmp/s.sh"), "t", (1500, 25, 1980, 1025))
+    assert command[:3] == ["xterm", "-geometry", "+1500+25"]
+    assert launch._linux_terminal(Path("/tmp/s.sh"), "t")[:2] == ["xterm", "-T"]
+
+
+def test_the_terminals_bounds_are_read_back_for_the_workspace(monkeypatch):
+    from smappy.assistant import launch
+    monkeypatch.setattr(launch.sys, "platform", "darwin")
+    answer = subprocess.CompletedProcess([], 0, stdout="1500, 25, 1980, 1025\n")
+    assert launch.terminal_bounds(run=lambda *a, **k: answer) == (1500, 25, 1980, 1025)
+    closed = subprocess.CompletedProcess([], 0, stdout="\n")      # Terminal not running
+    assert launch.terminal_bounds(run=lambda *a, **k: closed) is None

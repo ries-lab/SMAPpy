@@ -33,7 +33,7 @@ import traceback
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QPushButton,
@@ -41,6 +41,31 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QVBoxLayout, QWidget)
 
 from .widgets import note_style
+
+TERMINAL_WIDTH = 480    # wide enough for a client's replies, which wrap; narrow enough to sit beside
+TERMINAL_MIN = 360      # narrower than this, it goes over the picture's right edge instead
+
+
+def terminal_column(beside: Optional[QRect], screen: QRect, width: int = TERMINAL_WIDTH,
+                    minimum: int = TERMINAL_MIN):
+    """The assistant's terminal beside the picture ``beside`` (its frame),
+    (left, top, right, bottom): against its right edge, as tall, narrowed
+    down to ``minimum`` where the screen ends sooner; with less room than
+    that, at the screen's right edge over the picture.  Never past the
+    screen: a window with its title bar off it cannot be moved by hand."""
+    right_edge = screen.right() + 1
+    width = min(width, screen.width())
+    if beside is None:
+        return (right_edge - width, screen.top(), right_edge, screen.bottom() + 1)
+    top = max(beside.top(), screen.top())
+    bottom = min(beside.bottom() + 1, screen.bottom() + 1)
+    left = beside.right() + 1
+    if right_edge - left >= minimum:
+        width = min(width, right_edge - left)
+    else:
+        left = right_edge - width
+    left = max(left, screen.left())
+    return (left, top, left + width, bottom)
 
 OPENS = ("run_plugin", "run_chain")      # proposals shown in a panel, not done here
 NEW_STYLE = "font-weight: bold; color: #c06000;"
@@ -128,6 +153,9 @@ class AssistantControls(QObject):
         # a pinned plugin's panel, shown in its tab: the main window's
         # (`ControlWindow._assistant_panel`); without one, its window
         self.find_panel: Optional[Callable] = None
+        # where a loaded workspace had the terminal, (left, top, right,
+        # bottom), else None: the main window's (`ControlWindow.saved_terminal`)
+        self.saved_bounds: Optional[Callable] = None
         self.show_runs(prefs["show_runs"])
         self._windows: Dict[str, QWidget] = {}
         self.settings_window: Optional[QWidget] = None
@@ -264,22 +292,16 @@ class AssistantControls(QObject):
         return answer == QMessageBox.Yes
 
     def _column(self):
-        """Where the terminal goes: a column beside the picture -- right of
-        it if the screen has room, else over its right edge -- as
-        AppleScript takes it, (left, top, right, bottom)."""
+        """Where the terminal goes, as AppleScript takes it, (left, top,
+        right, bottom): where the loaded workspace had it, if that is on a
+        screen, else beside the picture (`terminal_column`)."""
+        saved = self.saved_bounds() if self.saved_bounds is not None else None
+        if saved is not None and QApplication.screenAt(QPoint(saved[0], saved[1])) is not None:
+            return tuple(saved)
         window = self.beside
         screen = (window.screen() if window is not None else
                   QApplication.primaryScreen()).availableGeometry()
-        width = 560
-        if window is not None:
-            left = window.frameGeometry().right() + 8
-            if screen.right() - left < 420:
-                left = screen.right() - width
-            else:
-                width = min(width, screen.right() - left)
-        else:
-            left = screen.right() - width
-        return (left, screen.top() + 30, left + width, screen.bottom())
+        return terminal_column(window.frameGeometry() if window is not None else None, screen)
 
     def show_proposals(self) -> None:
         """The list of proposals, dropped down under the toolbar's button."""

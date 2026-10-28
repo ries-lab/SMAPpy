@@ -306,3 +306,82 @@ def test_stop_redraws_the_picture_even_while_a_step_is_drawing(app):
     job, generation = jobs[1]
     view._on_rendered([np.zeros((job.fov.ny, job.fov.nx, 3), np.float32)], generation)
     assert view.tile_valid and not view.frame_source.drawing
+
+
+def test_space_plays_whichever_was_used_last_the_player_or_the_3d_rock(app):
+    from smappy.gui.animation import animations
+    from smappy.gui.scan_player import ScanPlayer
+    from smappy.gui.view3d import View3DWindow
+    session = Session(table())
+    window = View3DWindow(session)
+    window.show()
+    app.processEvents()
+    record = animations(session)
+    motion = window.view.motion
+    # no player used yet: Space in the 3D window rocks, as it always did
+    record.space(motion)
+    assert motion.active
+    record.space(motion)
+    assert not motion.active
+    player = ScanPlayer(session)
+    record.set_player(player)
+    player.coordinate.setCurrentText("frame")
+    player.used.emit()                          # its section opened
+    record.space(motion)                        # now the player, in the 3D window too
+    assert player.play.isChecked() and not motion.active
+    record.space()                              # and in the render window
+    assert not player.play.isChecked()
+    motion.start()                              # the rock used last again
+    player.timer.stop()
+    record.space()
+    assert not motion.active and not player.play.isChecked()
+    motion.halt()
+    window.close()
+
+
+def test_alt_wheel_steps_the_player_and_alt_drag_scrubs_it_over_the_picture(app):
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent, QWheelEvent
+    from smappy.gui.render_view import RenderView
+    from smappy.gui.scan_player import ScanPlayer
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(400, 400)
+    player = ScanPlayer(session)
+    view.scrubber = player
+    player.coordinate.setCurrentText("frame")
+    player.window_.setValue(100)
+    player.step.setValue(100)
+    n = len(player.prepare())
+    viewport = view.graphics.viewport()
+    range_before = view.view.viewRange()
+
+    def wheel(dy, modifiers=Qt.AltModifier):
+        event = QWheelEvent(QPointF(200, 200), QPointF(200, 200), QPoint(0, 0), QPoint(0, dy),
+                            Qt.NoButton, modifiers, Qt.NoScrollPhase, False)
+        return view.eventFilter(viewport, event)
+
+    assert wheel(-120)                          # a notch down: the first step, from stopped
+    assert (session.scan.lo, session.scan.hi) == (0, 100)
+    assert wheel(-240) and player.slider.value() == 2
+    assert wheel(-60) and player.slider.value() == 2     # half a notch: not yet
+    assert wheel(-60) and player.slider.value() == 3
+    assert wheel(120) and player.slider.value() == 2     # up: back
+    assert view.view.viewRange() == range_before          # no zoom meanwhile
+    assert not wheel(-120, Qt.NoModifier)                 # the plain wheel is pyqtgraph's
+
+    def mouse(kind, x, modifiers=Qt.AltModifier, button=Qt.LeftButton):
+        buttons = Qt.NoButton if kind == QEvent.MouseButtonRelease else Qt.LeftButton
+        event = QMouseEvent(kind, QPointF(x, 200), QPointF(x, 200), button, buttons, modifiers)
+        return view.eventFilter(viewport, event)
+
+    width = viewport.width()
+    assert mouse(QEvent.MouseButtonPress, 0)
+    assert mouse(QEvent.MouseMove, width / 2)
+    assert player.slider.value() == int(round(2 + (n - 1) / 2))
+    assert mouse(QEvent.MouseMove, 10 * width)            # past the end: the last step
+    assert player.slider.value() == n - 1
+    assert mouse(QEvent.MouseButtonRelease, 10 * width)
+    assert not mouse(QEvent.MouseMove, 0, Qt.NoModifier)  # released: moves are pyqtgraph's
+    view.scrubber = None                                  # a picture without a player
+    assert not wheel(-120)

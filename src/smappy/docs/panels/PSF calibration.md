@@ -495,7 +495,12 @@ Adds folders, several at once; with *search subdirectories* ticked, every
 acquisition inside them.
 
 ### Remove
-Removes the selected entries.
+Removes the selected entries.  Delete (or Backspace) on the list does the
+same and selects the next entry, so pressing it again and again empties the
+list from there.
+
+### Clear
+Empties the list.
 
 ### search subdirectories
 Whether *Add folder...*, and a folder dropped on the window, looks inside the

@@ -320,6 +320,15 @@ narrow some layers and leave the others whole: tracks drawn as they grow,
 over all the localizations they came from.  *Record...* writes every step, as the 2D or
 the 3D window shows it, to a movie.
 
+The player can be driven from the picture, without the slider.  Space, in
+the render window or the 3D window, plays and pauses it once it is the
+animation used last -- opening the player, playing it or moving it is using
+it; starting the 3D window's rock is using that, and Space then rocks
+again.  Alt (Option on a Mac) with the wheel over the picture moves it a
+step on or back per notch, and Alt with a drag scrubs it: a drag across the
+whole width of the picture is the whole scan.  The plain wheel and drag
+still zoom and pan.
+
 **8. Moving the view.**  The player's *view path*, under *more*, moves the
 3D view along a path through key views: the views one adds as they are,
 and turns and zooms made for one.  Between the keys the view moves
@@ -924,7 +933,9 @@ transitions smooth.  Equal to the window, the steps are side by side, as in
 a movie of separate frames.
 
 ### ▶
-Plays; pressed again, pauses, and the window stays where it is.
+Plays; pressed again, pauses, and the window stays where it is.  Space in
+the render or the 3D window does the same, once the player was the last
+animation used.
 
 ### ■
 Stops and shows everything again.

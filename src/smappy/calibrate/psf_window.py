@@ -210,10 +210,17 @@ class PSFCalibrationWindow(QMainWindow):
         self.file_list.setToolTip("the bead stacks; drop files or folders here (several at once) to add them")
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_list.setMaximumHeight(120)
+        # Delete (Backspace on a Mac keyboard) removes the selection and selects the next entry, so
+        # pressing it again and again empties the list; a widget shortcut, so the window's other keys
+        # and a focused field's own Backspace are left alone.
+        for key in (Qt.Key_Delete, Qt.Key_Backspace):
+            shortcut = QShortcut(QKeySequence(key), self.file_list)
+            shortcut.setContext(Qt.WidgetShortcut)
+            shortcut.activated.connect(self.remove_paths)
         flayout.addWidget(self.file_list)
         brow = QHBoxLayout()
         for label, slot in (("Add files...", self.add_files), ("Add folder...", self.add_directory),
-                            ("Remove", self.remove_paths)):
+                            ("Remove", self.remove_paths), ("Clear", self.clear_paths)):
             button = QPushButton(label)
             button.clicked.connect(slot)
             brow.addWidget(button)
@@ -782,10 +789,21 @@ class PSFCalibrationWindow(QMainWindow):
         self.add_dropped(paths)
 
     def remove_paths(self) -> None:
+        """Remove the selected entries and select the one after them (the last, at the end)."""
+        rows = sorted(self.file_list.row(item) for item in self.file_list.selectedItems())
+        if not rows:
+            return
         for item in self.file_list.selectedItems():
             if item.text() in self.paths:
                 self.paths.remove(item.text())
         self._refresh_files()
+        if self.paths:
+            self.file_list.setCurrentRow(min(rows[0], len(self.paths) - 1))
+
+    def clear_paths(self) -> None:
+        if self.paths:
+            self.paths.clear()
+            self._refresh_files()
 
     # ---------------------------------------------------------------- work
     def error(self, exc) -> None:

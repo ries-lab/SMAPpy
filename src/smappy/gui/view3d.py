@@ -704,7 +704,7 @@ KEYS = """<table cellspacing="0" cellpadding="3">
 <tr><td><b>shift-drag</b>, middle button</td><td>pan</td></tr>
 <tr><td><b>wheel</b>, pinch</td><td>zoom</td></tr>
 <tr><td><b>arrow keys</b></td><td>turn by 5°</td></tr>
-<tr><td><b>space</b></td><td>rock (or spin) the view, and stop</td></tr>
+<tr><td><b>space</b></td><td>rock (or spin) the view, and stop; the player instead, when it was used last</td></tr>
 <tr><td><b>alt-wheel</b>, page up / down</td><td>move along the line of sight</td></tr>
 <tr><td><b>ctrl-wheel</b></td><td>move the slab in depth</td></tr>
 <tr><td><b>shift-wheel</b></td><td>slab thicker or thinner in depth</td></tr>
@@ -1265,11 +1265,11 @@ class View3DWindow(QMainWindow):
         self.addToolBar(self.toolbar)
         # Space starts and stops the ⟳ from anywhere in the window: the
         # picture need not have the focus, and the keys it does take are
-        # the arrows and the page keys
-        motion = QAction("rock or stop", self, triggered=lambda: self.view.motion.toggle())
-        motion.setShortcut(Qt.Key_Space)
-        motion.setShortcutContext(Qt.WindowShortcut)
-        self.addAction(motion)
+        # the arrows and the page keys.  Once the Render tab's player was
+        # used last, Space plays and pauses that instead (`gui.animation`)
+        from .animation import animations, install_space
+        animations(session).set_motion(self.view.motion)
+        install_space(self, session, self.view.motion)
         self.resize(900, 760)
 
     def createPopupMenu(self):                      # noqa: N802 (Qt's name)

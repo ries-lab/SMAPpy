@@ -397,7 +397,8 @@ The slab along its length: its width across the screen, z vertical.
 
 ### rock
 ⟳.  Starts and stops the motion; Space does the same from anywhere in the
-window.  The small arrow beside it opens the choices below.  Stopped, a rock
+window -- unless the Render tab's player was used since the motion last
+ran, when Space plays and pauses the player instead.  The small arrow beside it opens the choices below.  Stopped, a rock
 eases back to where it began; a spin stays where it got to.  Dragging, an
 arrow key or a view button stops it at once.
 
