@@ -748,6 +748,25 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     return out[0], out[1]
 
 
+def with_columns_of(locs: Localizations, settings: RenderSettings) -> RenderSettings:
+    """The settings without a colour or weight column the table does not have.
+
+    A layer keeps the column it colours by while the table changes under it
+    -- *Edit columns* renames or removes one, an undo brings back a table
+    without it -- and the picture then is the plain one, not a KeyError on
+    every redraw.  An empty table (a live fit before its first block) has no
+    columns yet and is left alone: it draws nothing either way.
+    """
+    if not len(locs):
+        return settings
+    gone = {}
+    if settings.color_field is not None and settings.color_field not in locs:
+        gone["color_field"] = None
+    if settings.weight_field is not None and settings.weight_field not in locs:
+        gone["weight_field"] = None
+    return replace(settings, **gone) if gone else settings
+
+
 def render_locs(locs: Localizations, fov: FieldOfView,
                 settings: Optional[RenderSettings] = None,
                 display: Optional[DisplaySettings] = None, select=None,
@@ -758,7 +777,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     a boolean mask, or an index array.  Only the three or four columns the render
     needs are indexed, so filtering never copies the table.
     """
-    settings = settings or RenderSettings()
+    settings = with_columns_of(locs, settings or RenderSettings())
     rendered = _render_locs(locs, fov, settings, display, select, n_threads, use_extension)
     if settings.color_field is not None and rendered.color is None:
         # Nothing in view: the kernels make no colour planes from no colours,

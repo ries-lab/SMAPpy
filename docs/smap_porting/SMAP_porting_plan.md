@@ -175,15 +175,19 @@ raw frames)
 GPU fitter (#10) · background before fitting (#6) · astigmatic z (#11) ·
 4Pi (#13) · DECODE / DECODE-plex (#15) · sCMOS maps (#22) · uiPSF robustness
 (#24) · depth-dependent aberrations (#26) · GainOffsetFFT (#27) · DHPSF (#29) ·
-Register3Dstacks (#44) · combine files (#65) · grouped table as primary (#66) ·
-rename/remove fields (#68) · alternating excitation (#71) · TIFF intensity at
-sites (#124).
+Register3Dstacks (#44) · combine files (#65) · alternating excitation (#71) ·
+TIFF intensity at sites (#124).
 
-**GroupAny (#67)**: still no plugin needed.  The regions machinery now covers
-the measuring half: a block over any id column.  What is left is collapsing
-each region into one row (one localization per cluster or track).  If ever
-wanted, that is `group.combine` keyed by the id column: an option of
-Regions to column, or a small plugin of its own.
+**Done (2026-10): #66, #67, #68.**  *Collapse by id*
+(`Analysis/Process/Collapse by id`, `plugins/collapse.py`) is GroupAny (#67)
+and Connect2Unconnect's compact form (#66): the table replaced by one row
+per value of an id column -- `group_id`, `track_id`, `cluster_id` or any
+whole-number column -- by `group.combine`, mainly for a smaller file; the
+form that writes a group's values into every member row was declined.
+*Edit columns* (`Analysis/Process/Edit columns`, `plugins/edit_columns.py`)
+renames or removes columns (#68), with recipes, kept bounds and the
+layers' bounds and colour column following; *Save smappy HDF5* has a
+*columns* option.  The array-level work is `smappy/table_edit.py`.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5, smappy.plugins.file.left_out, smappy.plugins.file.region_counts]
+covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5, smappy.plugins.file.left_out, smappy.plugins.file.region_counts, smappy.table_edit.keep_columns]
 ---
 
 ## What it does
@@ -40,7 +40,8 @@ with tempfile.TemporaryDirectory() as folder:
         extra = [name for name in ("results/saved", "gui/state") if name in f]
 ```
 
-**1. The table.**  Every column of the current table is written as it is,
+**1. The table.**  Every column of the current table is written as it is
+-- or those ticked under *columns* --
 one dataset per column under `/locs`, with its own type, compressed.  It is
 the single localizations: the merged blinks -- [merge
 blinks](plugin:Panels/Glossary), also called grouping or linking, combines
@@ -146,6 +147,17 @@ step (Localization Statistics' histograms: about 2 kB) -- so it is
 usually worth keeping.  Off, every number is saved, and an ROI's figure is
 drawn by running its step again, which for most plugins takes
 milliseconds and for a slow one is the reason to keep it.
+
+### columns
+Untick what nobody will read again -- a simulation's truth columns, the
+four `bg*` columns of a MINFLUX file -- for a smaller file that opens
+faster.  The positions (`x_nm`, `y_nm`, `z_nm`) and `filenumber` are saved
+whatever is ticked, or the file would not open as the same files.  A derived
+column left out takes its recipe with it, and so does one whose expression
+reads a column left out; a filter bound the table keeps on a column left out
+goes too.  The session keeps every column: it stays marked unsaved, and
+File > Save goes on saving to the file it had.  To take columns out of the
+session itself, use [Edit columns](plugin:Analysis/Process/Edit columns).
 
 ## Output
 
