@@ -1433,7 +1433,7 @@ What this shows:
   astigmatism common to both arms resembles.  A common astigmatism of the order of 0.1–0.2 rad is
   therefore not to be read from a single fit.
 
-## 18. The bead scan's z step and range (in progress, 2026-10-28)
+## 18. The bead scan's z step and range (2026-10-28)
 
 **The question.**  How coarse can the z step of a 4Pi bead scan be, with 3 mirror steps per slice,
 before the learnt model gets worse?  50 nm is the plan; 100 nm if it costs nothing.  Then the
@@ -1454,7 +1454,7 @@ scan's range, at that step.
   noise costs, not unmodelled structure.  `benchmarks/fourpi/zstep_real.py` covers that on uiPSF's
   real 50 nm scans: every second slice against all, judged on held-out beads.
 
-**So far** (±500 nm, 3·10⁶ photons per bead, seeds 0–2):
+**The step** (±500 nm, seeds 0–2 at 3·10⁶ photons per bead, 0–1 at 3·10⁵):
 
 | step | slices | learning | z from phase, rms | envelope z, rms | wrong fringes | period |
 |---|---|---|---|---|---|---|
@@ -1462,14 +1462,50 @@ scan's range, at that step.
 | 20 nm | 51 | 11.5 min | 2.392–2.400 nm | 9.02–9.03 nm | 0 % | 287.15–287.29 nm |
 | 50 nm | 21 | 3.8–5.0 min | 2.391–2.392 nm | 9.02–9.03 nm | 0 % | 287.13–287.14 nm |
 | 75 nm | 14 | 2.0–2.8 min | 2.392 nm | 9.02 nm | 0 % | 287.15–287.16 nm |
-| 100 nm | 11 | 1.4–1.7 min | 2.392–2.393 nm | 9.02 nm | 0 % | 287.18–287.21 nm |
+| 100 nm | 11 | 1.4–1.9 min | 2.392–2.393 nm | 9.02 nm | 0 % | 287.18–287.21 nm |
 | 250 nm | 5 | 0.8 min | 71 nm | 54 nm | 13.6 % | 256 nm |
+| *3·10⁵ photons per bead:* | | | | | | |
+| 20 nm | 51 | 12–17 min | 2.392–2.394 nm | 9.02–9.07 nm | 0 % | 287.05–287.08 nm |
+| 50 nm | 21 | 4.6 min | 2.392 nm | 9.03–9.04 nm | 0 % | 287.06–287.08 nm |
+| 75 nm | 14 | 2.0–2.8 min | 2.394–2.395 nm | 9.02–9.05 nm | 0 % | 287.11–287.23 nm |
+| 100 nm | 11 | 1.3–1.9 min | 2.395–2.400 nm | 9.02–9.05 nm | 0 % | 287.22–287.33 nm |
 
-What this shows so far:
-- With bright beads, 20 to 100 nm steps all give the true model's performance.
+- With bright or ten times dimmer beads, 20 to 100 nm steps all give the true model's performance;
+  at 3·10⁵ photons the scatter between seeds (0.03 nm in envelope z) is as large as any trend.
 - The model breaks down between 200 nm (6 slices, still exact in a first trial) and 250 nm.
 - The pupils' coefficients differ by up to 0.06 rad between fits with no pattern by step: equivalent
   descriptions of the same images.
 
-**Still to come:** 3·10⁵ photons per bead; the real beads at 50 and 100 nm; the range at the chosen
-step (±300 to ±1000 nm, the same budget per bead, molecules judged within ±400 and ±600 nm).
+**Real beads** (`zstep_real.py`, uiPSF's 50 nm scans, scalar model, 20 beads to learn, 10 held out):
+
+| step | slices | held-out deviance per pixel | coherence per channel | learning |
+|---|---|---|---|---|
+| 50 nm (all) | 21 | 1.963 | 0.79 / 0.75 / 0.74 / 0.72 | 11.2 min |
+| 100 nm (every second) | 11 | 1.941 | 0.79 / 0.75 / 0.75 / 0.73 | 7.1 min |
+
+The model from every second slice predicts the held-out beads at least as well: real beads show no
+structure along z that 100 nm steps miss.
+
+**The range**, at 100 nm steps, with the same photons and background per bead whatever the range (a
+scan of the same duration), seeds 0–2; molecules judged within ±400 nm and, beyond the shortest scan,
+within ±600 nm:
+
+| scan | slices | learning | z from phase, ±400 / ±600 | envelope z, ±400 / ±600 | wrong fringes |
+|---|---|---|---|---|---|
+| true model | | | 2.392 / 3.011 nm | 9.02 / 9.70 nm | 0 % |
+| ±300 nm | 7 | 1.3–1.7 min | 2.392–2.400 / 3.011–3.024 nm | 9.02 / 9.70–9.74 nm | 0 % |
+| ±500 nm | 11 | 1.5–2.0 min | 2.392–2.393 / 3.011–3.012 nm | 9.02 / 9.70–9.71 nm | 0 % |
+| ±750 nm | 16 | 4.0–7.2 min | 2.391–2.394 / 3.011 nm | 9.01–9.03 / 9.70–9.71 nm | 0 % |
+| ±1000 nm | 21 | 5.9–6.5 min | 2.392–2.393 / 3.009–3.012 nm | 9.01–9.03 / 9.70–9.72 nm | 0 % |
+
+- Every range gives the true model's performance, even ±300 nm judged out to ±600 nm: a Zernike
+  pupil extrapolates in z, because the defocus it adds is fixed by the optics, not learnt.
+- ±300 nm is the only one with a visible spread between seeds beyond its range (0.04 nm in envelope
+  z at ±600), and the only one whose period scatters by 0.13 nm.
+- This again assumes the true PSF is a pupil model.  Real aberrations that a pupil does not describe
+  (a bead's halo, scattered light) are learnt only where the scan reaches, so a scan should cover the
+  depth one images.
+
+**Conclusion:** 100 nm steps over the depth to be imaged lose nothing
+measurable against 20 nm in simulation, and against 50 nm on uiPSF's real beads; they learn 6–9× faster.  50 nm
+buys nothing; above 200 nm the model breaks.
