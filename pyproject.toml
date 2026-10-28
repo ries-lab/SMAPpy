@@ -93,10 +93,10 @@ movie = []
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
 # which are all behind flags.
 drift = ["matplotlib>=3.7.3"]
-# COMET's GPU backend is written in numba-CUDA, so numba is needed only to use
-# an NVIDIA GPU.  The CPU path is compiled either way and is what runs without
-# this: 1:17 for a 46k-frame dataset, 5 s at the grouped spline default.
-cuda = ["numba>=0.59"]
+# Empty: COMET's numba-CUDA backend, which was all this extra was for, was
+# removed (2026-10); the compiled CPU kernel is the only one.  Kept so that
+# `smappy-smlm[cuda]`, written down while it was an extra, still installs.
+cuda = []
 # Empty: the GUI is in `dependencies` above.  `smappy-smlm[gui]` is kept
 # working for anyone who wrote it down while it was an extra.
 gui = []

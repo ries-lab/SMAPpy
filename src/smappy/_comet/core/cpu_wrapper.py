@@ -15,7 +15,7 @@ Two implementations of the same maths live here:
 
 ``_cost_and_gradient_reference``
     A plain Python loop, one pair at a time. Slow, but it is the readable
-    statement of what the cost function *is*, and every other backend is
+    statement of what the cost function *is*, and the compiled kernel is
     checked against it.
 ``smappy._drift``
     The same loop in C++, threaded, built with the package. This is what runs.
@@ -23,8 +23,8 @@ Two implementations of the same maths live here:
 smappy: upstream compiles this loop with numba, which is a 40 MB dependency
 carrying its own LLVM and compiling on first call. smappy already ships three
 pybind11 extensions and wheels for every platform, so the same loop moved to
-`csrc/drift.hpp` costs no dependency at all and no compile at run time. numba
-remains only for the CUDA backend, which is an optional extra.
+`csrc/drift.hpp` costs no dependency at all and no compile at run time.
+Upstream's CUDA and torch backends are not vendored; this is the only one.
 
 The kernels take the caller's dtypes as they are -- the optimizer builds float32
 coordinates and int32 indices once and reuses them -- so nothing is copied per
@@ -48,8 +48,8 @@ _N_BLOCKS = 16
 def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
     """Reference implementation: the cost function written out plainly.
 
-    Not used at runtime. Kept as the specification that the compiled kernel and
-    the GPU backends are tested against.
+    Not used at runtime. Kept as the specification that the compiled kernel
+    is tested against.
 
     Parameters
     ----------
@@ -115,8 +115,8 @@ def cpu_wrapper_chunked(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_f
                         val=None, deri=None, chunk_size=None, debug=False, parallel=None):
     """Cost and gradient for the optimizer, on the CPU.
 
-    Signature matches the CUDA and torch wrappers so the optimizer can swap
-    backends. `val`, `deri` and `chunk_size` exist for that compatibility only:
+    Signature as upstream's CUDA and torch wrappers (not vendored). `val`,
+    `deri` and `chunk_size` exist for that compatibility only:
     the compiled kernel needs no scratch buffer and no chunking, since it is not
     working around device memory limits.
     """
@@ -223,7 +223,7 @@ def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, 
 # with no drift correction at all.  A segment whose pairs do not overlap better
 # than that null is not supported by its own data -- its drift is a guess -- and
 # `flag_flawed_segments` marks it so the optimizer can set it to NaN and let the
-# spline bridge it.  COMET computes this on its cuda_qc / torch_qc backends
+# spline bridge it.  Upstream computes this on its cuda_qc / torch_qc backends
 # only; this is the same quantity for the CPU path, run once after the fit.
 def _overlap_per_segment_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
     """Per-segment overlap with the fitted drift, with none, and pair counts.
@@ -240,7 +240,7 @@ def cpu_wrapper_chunked_qc(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigm
                            val=None, deri=None, chunk_size=None):
     """Cost, gradient and the quality-control metric, on the CPU.
 
-    Signature matches `cuda_wrapper_chunked_qc` / `torch_wrapper_chunked_qc`.
+    Signature as upstream's `cuda_wrapper_chunked_qc` (not vendored).
     """
     loss, gradient = cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j,
                                               sigma, sigma_factor)

@@ -8,6 +8,8 @@
 # The cost-function fast paths (``cpu_wrapper_chunked_fast``,
 # ``cpu_wrapper_chunked_approx``) are additions for smappy's drift
 # correction; everything upstream provides behaves as it does upstream.
+# The CUDA and torch backends are not vendored (removed 2026-10): the compiled
+# CPU kernel is the only one, and `mode` is "cpu" or "cpu_qc".
 # ``io_utils`` and ``_dialogs`` are imported inside the functions that use
 # them rather than at module level, so pandas and tkinter are needed only
 # if those saving paths are actually taken.
@@ -18,30 +20,11 @@ import h5py
 import numpy as np
 from scipy.ndimage import convolve
 from scipy.optimize import minimize
-from .backends import best_backend
-try:
-    # smappy: the CUDA kernels are numba's, and numba is an optional extra
-    # (`pip install smappy-smlm[cuda]`).  Without it the CPU backend is used,
-    # which is compiled either way -- see cpu_wrapper.
-    from numba import cuda
-    from .cuda_wrapper import cuda_wrapper_chunked
-    from .cuda_wrapper.cuda_wrapper_qc import cuda_wrapper_chunked_qc
-except ImportError:
-    cuda = None
-    cuda_wrapper_chunked = cuda_wrapper_chunked_qc = None
 from .pair_indices import pair_indices_kdtree
 
 from .pair_indices import estimate_pairs
-# qc_utils only needs numpy/matplotlib, so it must not sit behind the torch guard:
-# the cuda_qc backend needs it whether or not torch is installed.
 from .qc_utils import flag_flawed_segments, plot_q_with_baseline
 
-try:
-    from .pytorch_wrapper.pytorch_util import device_available
-    from .pytorch_wrapper.pytorch_wrapper import torch_wrapper_chunked
-    from .pytorch_wrapper.pytorch_wrapper_qc import torch_wrapper_chunked_qc
-except ModuleNotFoundError:
-    pass # torch not installed
 from .segmenter import segmentation_wrapper
 from .cpu_wrapper import cpu_wrapper_chunked, cpu_wrapper_chunked_qc
 
@@ -155,11 +138,10 @@ def comet_run_kd(dataset, segmentation_mode, segmentation_var, max_locs_per_segm
             Spline used to convert per-segment drift to per-frame drift.
         max_locs_per_segment : int or None, default=None
             Optional downsampling cap per segment (to control memory/time).
-        mode : str or None, default=None, options={"cuda", "cuda_qc", "torch", "torch_qc", "cpu"}
-            Compute backend. When None, the fastest backend available on this
-            machine is selected: numba-cuda if an NVIDIA GPU is present, then
-            PyTorch if it has a GPU (CUDA or Apple MPS), otherwise the NumPy
-            backend. See :func:`comet.core.backends.best_backend`.
+        mode : str or None, default=None, options={"cpu", "cpu_qc"}
+            "cpu_qc" adds quality control.  smappy: upstream's CUDA and torch
+            backends are not vendored -- the compiled CPU kernel is the only
+            one, and None means it.
         return_corrected_locs : bool, default=False
             If True, also return drift-corrected localizations.
         pixelsize_nm : float, default=160.0
@@ -182,8 +164,7 @@ def comet_run_kd(dataset, segmentation_mode, segmentation_var, max_locs_per_segm
         """
 
     if mode is None:
-        mode = best_backend()
-        _log(display, f"Using '{mode}' backend.")
+        mode = "cpu"
 
     loc_frames = dataset[:, -1]
     if min_max_frames is None:
@@ -354,8 +335,8 @@ def optimize_3d_chunked_better_moving_avg_kd(n_segments, locs_nm, idx_i, idx_j, 
         - center frames per segment
         - any additional structures required by backend (e.g., pair indices)
         If None, pairs/ids may be built internally depending on implementation.
-    mode : str, default=cuda
-        If True, use the CPU backend; otherwise try GPU (CUDA) and fall back to CPU if unavailable.
+    mode : str, default="cpu"
+        "cpu", or "cpu_qc" for quality control (the only backends vendored).
     return_calc_time : bool, default=False
         If True, also return the total computation time in seconds.
 
@@ -370,69 +351,32 @@ def optimize_3d_chunked_better_moving_avg_kd(n_segments, locs_nm, idx_i, idx_j, 
     if segmentation_result is None:
         segmentation_result = {}
     if mode is None:
-        mode = best_backend()
+        mode = "cpu"
     intermediate_results_filehandle = None
     sigma_factor = 1.0
 
-    # Extract coordinate + time arrays, convert to device if CUDA
+    # smappy: the CPU arrays, built once and reused by every evaluation;
+    # upstream's CUDA and torch device copies went with those backends
     coords = locs_nm[:, :3].astype(np.float32).copy()
     times = locs_nm[:, 3].astype(np.int32).copy()
 
     chunk_size = int(1E8)  # 1E7
 
     quality_control = mode.endswith("_qc")
-
-    if mode == "cuda" or mode == "cuda_qc":
-        d_coords = cuda.to_device(coords)
-        d_times = cuda.to_device(times)
-        if len(idx_i) * 4 > 2e9:
-            # Use mapped memory if index arrays are large
-            _log(display_steps, "Large index arrays - using mapped memory.")
-            d_idx_i = cuda.mapped_array_like(idx_i.astype(np.int32), wc=True)
-            d_idx_j = cuda.mapped_array_like(idx_j.astype(np.int32), wc=True)
-            d_idx_i[:] = idx_i
-            d_idx_j[:] = idx_j
-        else:
-            d_idx_i = cuda.to_device(idx_i.astype(np.int32))
-            d_idx_j = cuda.to_device(idx_j.astype(np.int32))
-        # Preallocate device arrays
-        d_sigma = np.float64(sigma_nm)
-        d_val = cuda.to_device(np.zeros(chunk_size))
-        d_deri = cuda.to_device(np.zeros((n_segments, 3), dtype=np.float64))
-        wrapper = cuda_wrapper_chunked
-        if quality_control:
-            qc_wrapper = cuda_wrapper_chunked_qc
-    elif mode == "torch" or mode == "torch_qc":
-        try:
-            import torch
-            device = device_available()
-        except ImportError:
-            raise ImportError("Torch is not installed or no suitable device found for torch mode.")
-        d_coords = torch.as_tensor(coords, dtype=torch.float32, device=device)
-        d_times = torch.as_tensor(times, dtype=torch.int64, device=device)
-        d_idx_i = torch.as_tensor(idx_i, dtype=torch.int64, device=device)
-        d_idx_j = torch.as_tensor(idx_j, dtype=torch.int64, device=device)
-        d_sigma = torch.as_tensor(sigma_nm, dtype=torch.float32, device=device)
-        d_val = device  # not used for torch implementation, for now abused to pass device
-        d_deri = None  # not needed for torch implementation
-        wrapper = torch_wrapper_chunked
-        if quality_control:
-            qc_wrapper = torch_wrapper_chunked_qc
-    else:
-        # Fallback: CPU arrays
-        _log(display_steps, "Using CPU backend (no GPU acceleration).")
-        d_coords = coords
-        d_times = times
-        d_sigma = sigma_nm
-        d_idx_i, d_idx_j = idx_i, idx_j
-        # The compiled CPU kernel allocates its own accumulator and needs no
-        # per-pair scratch; a (n_pairs,) float64 buffer would be 800 MB at 100 M
-        # pairs, for nothing.
-        d_val = None
-        d_deri = None
-        wrapper = CPU_WRAPPER
-        if quality_control:
-            qc_wrapper = cpu_wrapper_chunked_qc
+    if mode not in ("cpu", "cpu_qc"):
+        raise ValueError(f"backend {mode!r}: only the CPU one is vendored")
+    d_coords = coords
+    d_times = times
+    d_sigma = sigma_nm
+    d_idx_i, d_idx_j = idx_i, idx_j
+    # The compiled CPU kernel allocates its own accumulator and needs no
+    # per-pair scratch; a (n_pairs,) float64 buffer would be 800 MB at 100 M
+    # pairs, for nothing.
+    d_val = None
+    d_deri = None
+    wrapper = CPU_WRAPPER
+    if quality_control:
+        qc_wrapper = cpu_wrapper_chunked_qc
 
     # Initial drift estimate + bounds
     drift_est = np.zeros(n_segments * 3)

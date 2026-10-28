@@ -136,7 +136,7 @@ of every frame.  This follows faster changes and can check each window
 
 ```figure The drift estimated from the simulation, against the drift that was put in (grey, with the frame-to-frame jitter of the simulation).  The spline at its default 2000-frame knots (blue) follows the slow course of the drift and smooths over wiggles shorter than its knot spacing; the time-window fit (orange, dashed) follows more of them and is noisier.  Only differences between frames are measured, so the curves are compared after removing their mean.
 spline = estimate_drift(locs, settings)
-windows = estimate_drift(locs, DriftSettings(spline=False, backend="cpu"))
+windows = estimate_drift(locs, DriftSettings(spline=False))
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
 frames = np.arange(len(truth))

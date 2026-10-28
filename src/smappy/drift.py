@@ -21,13 +21,14 @@ coordinate.
 
 **To simplify (2026-10 review, kept for now on purpose).**  Only the spline
 fit is the default and the one users run; the time-window fit (`spline=False`)
-is kept as legacy so that GPU and CPU can be benchmarked against it -- it is
-the only path with a CUDA backend.  Once that is measured: if the GPU is not
-much faster, keep the spline fit alone, move its two kernels
-(`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) into this module, and
-delete the rest of `smappy._comet` with the ~13 settings that only the
-time-window fit reads; if it is, give the spline fit a GPU path instead.
-`two_stage` goes either way: the RCC prepass does that job more cheaply.
+is kept as legacy, for quality control and for comparison.  Its CUDA and torch
+backends are gone (2026-10: nobody ran them, the torch one could not work, and
+they were the only reason for the `cuda` extra).  What is left to decide is
+whether to keep the time-window fit at all: without it the spline fit's two
+kernels (`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) move into this
+module and the rest of `smappy._comet` goes with the ~12 settings only the
+time-window fit reads.  `two_stage` goes either way: the RCC prepass does that
+job more cheaply.
 
 Not wrapped: COMET's own file I/O, plotting and molecule-set output.  We hand it
 an array and get an array back; reading and writing stays with `io.hdf5`, so the
@@ -190,11 +191,6 @@ class DriftSettings:
                                                         "sigma; auto: ftol; "
                                                         "time-window fit only",
                                                    advanced=True)
-    backend: Optional[str] = param(None, choices=("cuda", "cpu"),
-                                   help="where the cost is computed; auto: "
-                                        "the fastest available; time-window "
-                                        "fit only",
-                                   advanced=True)
     # Estimate from *grouped* localizations: one entry per emitter blink rather
     # than one per frame.  20-35x faster (it removes exactly the dense, very
     # short-range pairs, which is where the pair count grows fastest) and, on
@@ -987,7 +983,7 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
     time-window fit only looks before it starts.
     """
     _check_stop(stop, "before it started")
-    from ._comet import best_backend, comet_run_kd   # vendored; see _comet/
+    from ._comet import comet_run_kd   # vendored; see _comet/
     from ._comet.core import drift_optimizer
     from ._comet.core.qc_utils import flag_flawed_segments_by_lift
     from ._comet.core.cpu_wrapper import (cpu_wrapper_chunked_approx,
@@ -1031,9 +1027,7 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
     all_frames = np.asarray(locs["frame"], dtype=np.int64)
     n_frames = int(all_frames.max()) + 1 if len(all_frames) else 0
 
-    backend = settings.backend or best_backend()
-    if settings.quality_control:
-        backend += "_qc"
+    backend = "cpu_qc" if settings.quality_control else "cpu"
     drift_optimizer.LAST_QUALITY_CONTROL = None
     drift_optimizer.FLAG_SEGMENTS = lambda q_obs, q_null: flag_flawed_segments_by_lift(
         q_obs, q_null, settings.min_lift)

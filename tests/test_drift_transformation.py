@@ -261,7 +261,7 @@ def test_transform_applies_another_files_transformation(tmp_path):
 def test_the_time_window_fit_refuses_a_transformation():
     locs, _, _, _ = simulate(per_frame=20)
     with pytest.raises(ValueError, match="spline"):
-        estimate_drift(locs, settings("xy scale", spline=False, backend="cpu"))
+        estimate_drift(locs, settings("xy scale", spline=False))
 
 
 def test_a_3d_affine_transformation_needs_z():

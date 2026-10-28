@@ -18,18 +18,17 @@ project -- and drift correction that only works from a git checkout is drift
 correction almost nobody runs.  It is in the published package, so `pip install smappy-smlm` is all a user
 needs: COMET's cost function is compiled with smappy's own C++ extensions
 (`csrc/drift.hpp`) rather than with numba, so drift correction has no optional
-dependency at all.  numba is needed only for COMET's NVIDIA GPU backend, which
-is the `[cuda]` extra.
+dependency at all.
 
 Only the modules the drift correction reaches are included.  COMET's CLI, batch
-runner, utilities, its own test suite, its documentation, and its IDL and
-CUDA/C++ bindings are not here; use upstream for those.  The changes to what is
-here are: absolute imports made relative, so the copy is self-contained and
-cannot collide with an installed COMET; two imports made lazy, so pandas and
-tkinter are needed only if COMET's own saving paths are taken; the numba CUDA
-imports made optional; and the CPU cost function moved from numba to smappy's
-own C++, keeping upstream's function names and signatures so nothing else
-changed.  Each file says all of this in its header.
+runner, utilities, its own test suite, its documentation, its IDL and CUDA/C++
+bindings, and its CUDA and torch backends are not here; use upstream for those.
+The changes to what is here are: absolute imports made relative, so the copy is
+self-contained and cannot collide with an installed COMET; two imports made
+lazy, so pandas and tkinter are needed only if COMET's own saving paths are
+taken; and the CPU cost function moved from numba to smappy's own C++, keeping
+upstream's function names and signatures so nothing else changed.  Each file says
+all of this in its header.
 
 **COMET is a published method, and smappy is not its author.**  Drift-corrected
 files record it in the `/drift` group's attributes, so a result can be traced
@@ -62,7 +61,6 @@ the versions they distribute.
 | PyYAML | runtime | MIT |
 | Matplotlib | optional `viewer` | Matplotlib license (BSD-compatible, PSF-derived) |
 | Pillow | optional `image` | MIT-CMU (HPND) |
-| numba | optional `cuda` | BSD 2-Clause (pulls in llvmlite, BSD 2-Clause) |
 | pybind11 | build only, and its headers are compiled into the extension modules | BSD 3-Clause |
 | setuptools | build only | MIT |
 | pytest | test only | MIT |

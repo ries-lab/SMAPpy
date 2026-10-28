@@ -38,7 +38,7 @@ def simulate(n_points=200, n_frames=50, per_frame=30, seed=1):
 
 # the per-window fit; the package default is the spline, tested separately
 SETTINGS = DriftSettings(segmentation_var=2, initial_sigma_nm=120, max_drift_nm=100,
-                         target_sigma_nm=10, backend="cpu", spline=False, group=False)
+                         target_sigma_nm=10, spline=False, group=False)
 
 
 def test_recovers_known_drift():
@@ -103,7 +103,7 @@ def test_grouped_estimate_still_corrects_every_localization():
     # two localizations of the same emitter in consecutive frames, so grouping
     # has something to collapse
     settings = DriftSettings(segmentation_var=2, initial_sigma_nm=120, max_drift_nm=100,
-                             target_sigma_nm=10, backend="cpu", spline=False,
+                             target_sigma_nm=10, spline=False,
                              group=True, group_dx_nm=30.0)
     corrected, drift = correct_drift(locs, settings)
 
@@ -151,7 +151,7 @@ def test_two_stage_matches_the_single_pass():
     locs, truth, _ = simulate()
     single = estimate_drift(locs, SETTINGS)
     two = estimate_drift(locs, DriftSettings(
-        segmentation_var=2, backend="cpu", spline=False, two_stage=True,
+        segmentation_var=2, spline=False, two_stage=True,
         group_dx_nm=30.0, two_stage_radius_nm=60.0))
 
     for drift in (single, two):
@@ -168,7 +168,7 @@ def test_an_rcc_prepass_recovers_the_same_drift_over_a_small_radius():
     """
     locs, truth, _ = simulate()
     drift = estimate_drift(locs, DriftSettings(
-        segmentation_var=2, backend="cpu", spline=False, group=False,
+        segmentation_var=2, spline=False, group=False,
         rcc_prepass=True, rcc_prepass_windows=8, rcc_prepass_max_drift_nm=400.0,
         max_drift_nm=50.0, initial_sigma_nm=None, target_sigma_nm=10.0))
     error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
@@ -185,7 +185,7 @@ def test_an_rcc_prepass_runs_before_the_spline_fit_too():
     locs, truth, _ = simulate()
     told = []
     drift = estimate_drift(locs, DriftSettings(
-        backend="cpu", spline=True, spline_knot_frames=5, group=False,
+        spline=True, spline_knot_frames=5, group=False,
         rcc_prepass=True, rcc_prepass_windows=8, rcc_prepass_max_drift_nm=400.0,
         max_drift_nm=30.0, initial_sigma_nm=None, target_sigma_nm=10.0),
         progress=told.append)
@@ -198,7 +198,7 @@ def test_two_stage_runs_both_passes_with_the_spline_fit():
     locs, truth, _ = simulate()
     told = []
     drift = estimate_drift(locs, DriftSettings(
-        backend="cpu", spline=True, spline_knot_frames=5, two_stage=True,
+        spline=True, spline_knot_frames=5, two_stage=True,
         group_dx_nm=30.0, two_stage_radius_nm=60.0, max_drift_nm=100,
         initial_sigma_nm=120, target_sigma_nm=10), progress=told.append)
     assert any("pass 2 of 2" in line for line in told)
@@ -235,7 +235,7 @@ def test_the_slow_run_dialogue_offers_rcc_first():
 def test_spline_drift_needs_no_time_windows():
     locs, truth, _ = simulate()
     drift = estimate_drift(locs, DriftSettings(
-        backend="cpu", spline=True, group=False, spline_knot_frames=5,
+        spline=True, group=False, spline_knot_frames=5,
         max_drift_nm=100, initial_sigma_nm=120, target_sigma_nm=10))
 
     error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
@@ -247,7 +247,7 @@ def test_spline_drift_needs_no_time_windows():
 def test_spline_penalty_smooths():
     locs, _, _ = simulate()
     rough, smooth = (estimate_drift(locs, DriftSettings(
-        backend="cpu", spline=True, group=False, spline_knot_frames=2,
+        spline=True, group=False, spline_knot_frames=2,
         max_drift_nm=100, initial_sigma_nm=120, target_sigma_nm=10,
         spline_penalty=p)).drift
         for p in (0.0, 1e4))
@@ -463,7 +463,7 @@ def test_progress_is_optional_everywhere():
 def test_a_subset_per_window_is_the_same_on_every_run():
     """The subset was drawn from numpy's global state, so two runs differed."""
     locs, _, _ = simulate()
-    settings = DriftSettings(segmentation_var=5, backend="cpu", spline=False,
+    settings = DriftSettings(segmentation_var=5, spline=False,
                              group=False, max_locs_per_segment=100,
                              max_drift_nm=100, initial_sigma_nm=120,
                              target_sigma_nm=10)

@@ -52,8 +52,6 @@ def main() -> None:
                    help="cap per window, to bound memory and runtime")
     p.add_argument("--no-z", action="store_true",
                    help="estimate lateral drift only, even for a 3D dataset")
-    p.add_argument("--backend", default=None, choices=["cuda", "torch", "cpu"],
-                   help="default: the fastest available")
     p.add_argument("--pixelsize", type=float, default=None,
                    help="nm per pixel, if the file is in pixels and does not "
                         "record it")
@@ -109,7 +107,7 @@ def main() -> None:
         segmentation_mode=mode, segmentation_var=var,
         max_drift_nm=a.max_drift, target_sigma_nm=a.target_sigma,
         boxcar_width=a.smooth, max_locs_per_segment=a.max_locs_per_window,
-        backend=a.backend, use_z=False if a.no_z else None,
+        use_z=False if a.no_z else None,
         optimizer_ftol=a.ftol, group=not a.ungrouped, quality_control=a.qc,
         two_stage=a.two_stage, spline=not a.per_window,
         spline_knot_frames=a.knot_frames, transformation=a.transformation)
