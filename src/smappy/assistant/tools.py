@@ -78,8 +78,9 @@ class ToolSpec:
 def tool(description: str, needs: str = "", **params: Dict[str, Any]):
     """Mark a method as a tool.  Each keyword is an argument's JSON schema;
     one with a ``default`` in the method's signature is optional.
-    ``needs="viewer"`` (or ``"panels"``) lists the tool only where the
-    assistant has that -- the running GUI's view, its plugin windows: a
+    ``needs="viewer"`` (or ``"panels"``, ``"windows"``) lists the tool only
+    where the assistant has that -- the running GUI's view, its plugin
+    windows, its other windows: a
     model shown a tool that always refuses would keep trying it."""
     def mark(function):
         function._tool = (description, params)
@@ -1099,6 +1100,11 @@ SMAPpy analyses single-molecule localization microscopy data.  These tools
 work on one open session.
 
 How to work:
+* A user often says what they need and not how.  Help as they ask: explain
+  how to do it in SMAPpy (the plugin, its settings, what the numbers mean);
+  suggest it (run_plugin with apply=true, a proposal in suggest mode; show
+  the place you mean); or do it (act mode).  When unclear, explain and offer
+  to suggest.
 * session_state first.  find_plugins for a question, then read_doc of the
   candidates before choosing: each page says what the method is for, when not
   to use it, how to choose its settings and what a good and a bad result look

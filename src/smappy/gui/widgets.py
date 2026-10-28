@@ -314,8 +314,14 @@ class Popup(QFrame):
         self.content = content
 
     def show_below(self, button: QWidget) -> None:
+        """Under ``button``: from its left edge, or from its right edge
+        leftwards when it is in the right half of its window, so that a panel
+        from a button at a title bar's right edge stays over the window."""
         self.adjustSize()
-        at = button.mapToGlobal(QPoint(0, button.height()))
+        window = button.window()
+        right = button.mapTo(window, QPoint(button.width(), 0)).x() > window.width() / 2
+        at = button.mapToGlobal(QPoint(button.width() - self.width() if right else 0,
+                                       button.height()))
         screen = button.screen().availableGeometry()
         x = max(screen.left(), min(at.x(), screen.right() - self.width()))
         y = max(screen.top(), min(at.y(), screen.bottom() - self.height()))

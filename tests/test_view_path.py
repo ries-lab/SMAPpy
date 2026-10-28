@@ -130,3 +130,52 @@ def test_a_key_keeps_the_box_and_the_front_face_moves_through_the_sample():
         assert box.center[2] + box.size[2] / 2 == pytest.approx(400.0 - 600.0 * t)
     again = vp.ViewPath.from_dict(path.to_dict())
     assert again.at(0.5).slab.size[2] == pytest.approx(500.0)
+
+
+def test_the_motion_turns_about_z_when_z_stands_up_and_about_the_screen_from_above():
+    assert vp.motion_axis(viewpoint(el=90.0).rotation) == "z"         # front: a turntable
+    assert vp.motion_axis(viewpoint(el=60.0).rotation) == "z"
+    assert vp.motion_axis(viewpoint(el=0.0).rotation) == "screen vertical"    # top
+    assert vp.motion_axis(viewpoint(el=20.0).rotation) == "screen vertical"
+
+
+def test_a_rock_is_a_sine_and_a_spin_a_constant_rate():
+    assert vp.motion_angle(0.75, "rock", 15.0, 3.0, 30.0) == pytest.approx(15.0)
+    assert vp.motion_angle(2.25, "rock", 15.0, 3.0, 30.0) == pytest.approx(-15.0)
+    assert vp.motion_angle(3.0, "rock", 15.0, 3.0, 30.0) == pytest.approx(0.0, abs=1e-9)
+    assert vp.motion_angle(2.0, "spin", 15.0, 3.0, 30.0) == pytest.approx(60.0)
+
+
+def test_a_rock_made_a_path_turns_as_far_either_way_and_loops_without_a_seam():
+    start = viewpoint(el=90.0, centre=(100.0, 50.0, 0.0))
+    path = vp.motion_path(start, "rock", 15.0, 3.0, 30.0)
+    assert path.seconds == pytest.approx(3.0) and path.closed and not path.ease
+
+    def angle(t):
+        R = path.at(t).rotation
+        return math.degrees(math.acos(np.clip((np.trace(R.T @ start.rotation) - 1) / 2, -1, 1)))
+
+    assert angle(0.25) == pytest.approx(15.0, abs=1e-6)
+    assert angle(0.75) == pytest.approx(15.0, abs=1e-6)
+    assert angle(0.5) == pytest.approx(0.0, abs=1e-6)
+    # about z: the z axis stays upright on the screen throughout
+    for t in np.linspace(0, 1, 9):
+        assert path.at(t).rotation[1, 2] == pytest.approx(start.rotation[1, 2], abs=1e-9)
+        np.testing.assert_allclose(path.at(t).centre, start.centre)
+    spin = vp.motion_path(start, "spin", 15.0, 3.0, 30.0)
+    assert spin.seconds == pytest.approx(12.0) and spin.closed
+    with pytest.raises(ValueError):
+        vp.motion_path(start, "spin", 15.0, 3.0, 0.0)
+
+
+def test_an_axis_chosen_for_the_motion_is_taken_whatever_the_view():
+    front = viewpoint(el=90.0)
+    assert vp.motion_axis(front.rotation, "x") == "x"
+    assert vp.motion_axis(front.rotation, vp.FROM_VIEW) == "z"
+    with pytest.raises(ValueError):
+        vp.motion_axis(front.rotation, "w")
+    # a rock about x from the front tips z towards the viewer and back
+    path = vp.motion_path(front, "rock", 20.0, 2.0, 30.0, "x")
+    R = path.at(0.25).rotation
+    assert abs(R[1, 2]) == pytest.approx(math.cos(math.radians(20.0)), abs=1e-9)
+    np.testing.assert_allclose(R[:, 0], front.rotation[:, 0], atol=1e-9)    # x stays put

@@ -410,6 +410,9 @@ class ControlWindow(QMainWindow):
         # Line Profile with no line ROI offers this (`LineProfile.describe`):
         # the render window, drawing a line
         session.window_openers["draw line"] = lambda settings=None: self.draw_line()
+        # the 3D window's *Make a movie of this...*: its rock or spin as the
+        # Render tab's player's view path (`ScanPlayer.take_path`)
+        session.window_openers["view path"] = self.open_view_path
         # Transform with given settings: Register layers' *apply*, with the
         # named transformation it measured (`transform.settings_for`)
         session.window_openers["transform"] = self.open_transform
@@ -1327,6 +1330,16 @@ class ControlWindow(QMainWindow):
                 # closing over the loop variable would undo the whole list
                 # whichever entry was picked
                 entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
+
+    def open_view_path(self, path) -> None:
+        """The Render tab in front, its player open on ``path``."""
+        for index, widget in enumerate(self._tab_widgets()):
+            if isinstance(widget, RenderTab):
+                self.tabs.setCurrentIndex(index)
+                widget.show_view_path(path)
+                self.show()
+                self.raise_()
+                return
 
     def draw_line(self) -> None:
         """Start drawing a line ROI on the picture, which comes to the front."""

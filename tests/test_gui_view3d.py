@@ -38,8 +38,15 @@ def test_the_window_opens_on_the_roi_and_is_the_picture_and_a_title_bar(app):
     assert session.slab.size[1] == pytest.approx(250.0)      # without pressing a button
     # the options drop from the title bar; nothing else opens beside it
     assert not window.options.isVisible() and not window.keys.isVisible()
-    texts = [b.text() for b in window.toolbar.findChildren(type(window.toolbar.keys_button))]
-    assert {"Save", "top", "front", "side", "fit", "options", "keys"} <= set(texts)
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QToolButton
+    bar = window.toolbar
+    texts = {b.text() for b in bar.findChildren(QToolButton)} | \
+        {a.text() for a in bar.findChildren(QAction)}
+    assert {"top", "front", "side", "fit", "rock", "options", "\u22ef", "Save image...",
+            "PNG as displayed...", "Mouse and keys...", "Help"} <= texts
+    # the views are pictures, their names for the tooltips and the tours
+    assert all(not bar.presets[name].icon().isNull() for name in ("top", "front", "side"))
     window.toolbar.options_button.click()
     assert window.options.isVisible()
     window.close()
@@ -177,3 +184,100 @@ def test_the_3d_button_shows_and_hides_the_window_and_follows_it(app):
             control.view3d_window.close()
         render.close()
         control.close()
+
+
+def _wait(app, seconds):
+    import time
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
+
+
+def test_the_rock_turns_the_view_and_eases_back_to_where_it_began(app):
+    from smappy.gui.view3d import RELAX_SECONDS, View3DWindow
+
+    window = View3DWindow(Session(table()))
+    window.show()
+    app.processEvents()
+    window._preset("front")
+    motion, proj = window.view.motion, window.view.projection
+    start = proj.matrix.copy()
+    window.toolbar.motion_action.trigger()
+    assert motion.active and window.toolbar.motion_action.isChecked()
+    _wait(app, 0.4)
+    assert not np.allclose(proj.matrix, start)
+    # about z from the front: z stays upright on the screen
+    assert proj.matrix[1, 2] == pytest.approx(start[1, 2], abs=1e-9)
+    window.toolbar.motion_action.trigger()                   # stop: it eases back
+    assert not motion.active and not window.toolbar.motion_action.isChecked()
+    _wait(app, RELAX_SECONDS + 0.3)
+    assert not motion.timer.isActive()
+    np.testing.assert_allclose(proj.matrix, start, atol=1e-9)
+    window.close()
+
+
+def test_a_spin_stops_where_it_is_and_a_view_button_takes_over(app):
+    from smappy.gui.view3d import View3DWindow
+
+    window = View3DWindow(Session(table()))
+    window.show()
+    app.processEvents()
+    motion, proj = window.view.motion, window.view.projection
+    window.toolbar._restart(motion, "kind", "spin")
+    motion.speed = 90.0
+    motion.toggle()
+    _wait(app, 0.3)
+    motion.toggle()
+    assert not motion.timer.isActive()                       # no way back for a spin
+    turned = proj.matrix.copy()
+    _wait(app, 0.1)
+    np.testing.assert_allclose(proj.matrix, turned)
+    motion.toggle()
+    window.toolbar.presets["top"].click()                    # taken by hand: stops at once
+    assert not motion.timer.isActive()
+    window.close()
+
+
+def test_make_a_movie_hands_the_rock_to_the_players_view_path(app):
+    from smappy.gui.scan_player import NONE, ScanPlayer
+    from smappy.gui.view3d import View3DWindow
+
+    session = Session(table())
+    player = ScanPlayer(session)
+    session.window_openers["view path"] = player.take_path
+    window = View3DWindow(session)
+    window.show()
+    app.processEvents()
+    window._preset("front")
+    start = window.view.projection.matrix.copy()
+    window.view.motion.toggle()
+    _wait(app, 0.2)
+    window._movie()
+    assert not window.view.motion.timer.isActive()
+    np.testing.assert_allclose(window.view.projection.matrix, start, atol=1e-9)
+    assert len(player.path.keys) == 5 and not player.path.ease
+    np.testing.assert_allclose(player.path.keys[0].view.rotation, start, atol=1e-9)
+    assert player.coordinate.currentText() == NONE
+    assert player.ends.currentData() == "loop" and player.record_from.currentData() == "3D"
+    window.close()
+
+
+def test_a_rock_about_an_axis_chosen_in_its_menu_tips_z_from_the_front(app):
+    from smappy.gui.view3d import View3DWindow
+
+    window = View3DWindow(Session(table()))
+    window.show()
+    app.processEvents()
+    window._preset("front")
+    motion, proj = window.view.motion, window.view.projection
+    start = proj.matrix.copy()
+    window.toolbar.motion_axes["x"].trigger()
+    assert motion.axis == "x"
+    motion.toggle()
+    _wait(app, 0.4)
+    assert proj.matrix[1, 2] != pytest.approx(start[1, 2], abs=1e-3)     # z tips
+    np.testing.assert_allclose(proj.matrix[:, 0], start[:, 0], atol=1e-9)   # about x
+    motion.reset()
+    np.testing.assert_allclose(proj.matrix, start, atol=1e-9)
+    window.close()

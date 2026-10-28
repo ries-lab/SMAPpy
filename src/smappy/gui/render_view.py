@@ -127,6 +127,9 @@ class RenderWorker(QObject):
         _LIVE_THREADS.append(self.thread)
         self._gpu = None
         self._gpu_tried = False
+        # why there is none, for the 3D view's note: a missing wgpu and a
+        # machine with no usable adapter want different answers
+        self.gpu_error = ""
         # one per engine: a drag frame costs an order of magnitude more on the
         # CPU than on the GPU, so a rate learned under one says nothing about
         # the next.  Keyed by the engine that was actually used, not asked for.
@@ -142,6 +145,8 @@ class RenderWorker(QObject):
                 self.engine_ready.emit(self._gpu.name)
             except Exception as e:
                 print(f"no GPU engine: {e}")
+                self.gpu_error = ("wgpu is not installed" if isinstance(e, ImportError)
+                                  else f"{type(e).__name__}: {e}")
                 self.engine_ready.emit("")
         return self._gpu
 
@@ -1205,7 +1210,7 @@ class RenderToolBar(QToolBar):
         self.keys = Popup(keys, self)
         self.more_button = QToolButton(text="\u22ef", popupMode=QToolButton.InstantPopup)
         self.more_button.setToolTip("more: save the picture, the colour bar, "
-                                    "the mouse and the keys")
+                                    "the mouse and the keys, help")
         more = QMenu(self.more_button)
         more.addAction("Save image...", self._save_image).setToolTip(
             "the picture at any resolution, with scale bar and colour bar")
@@ -1224,6 +1229,8 @@ class RenderToolBar(QToolBar):
         more.addSeparator()
         more.addAction("Mouse and keys...",
                        lambda: self.keys.show_below(self.more_button))
+        more.addAction("Help", self._help).setToolTip("the Render tab's page, which "
+                                                      "describes this window too")
         more.setToolTipsVisible(True)
         self.more_button.setMenu(more)
         self.more_action = self.addWidget(self.more_button)
@@ -1248,6 +1255,10 @@ class RenderToolBar(QToolBar):
     def _show_layout_choice(self, what: str = "layers") -> None:
         if what in ("layers", "locs"):
             self.layers_action.setVisible(len(self.view.session.layers) > 1)
+
+    def _help(self) -> None:
+        from .help_window import show_help
+        show_help("Panels/Render tab", self.window())
 
     def add_right(self, widget: QWidget):
         """A widget at the right edge, before *more*: the assistant's button."""

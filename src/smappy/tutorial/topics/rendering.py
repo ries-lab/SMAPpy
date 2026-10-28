@@ -222,10 +222,13 @@ def make(d) -> None:
     d.pump(0.5)
     d.settle()
     bar = window.toolbar
-    d.shot("Drag to turn it, scroll to zoom. Top, front and side jump to those "
-           "views; fit brings the whole box back. Keys lists the rest.",
-           spot=[d.union(bar.presets["top"], bar.keys_button), d.window_rect(window)],
+    d.shot("Drag to turn it, scroll to zoom. The cubes jump to the top, front "
+           "and side views; the arrows bring the whole box back.",
+           spot=[d.union(bar.presets["top"], bar.fit_button), d.window_rect(window)],
            point=bar.presets["front"])
+    d.shot("The circling arrow, or Space, rocks the view back and forth: what "
+           "moves against the rest is at another depth.",
+           spot=[bar.motion_button, d.window_rect(window)], point=bar.motion_button)
     panel = window.panel
     window.options.show_below(bar.options_button)
     panel.depth_color.setChecked(True)

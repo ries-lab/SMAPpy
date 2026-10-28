@@ -73,7 +73,7 @@ reasoning is here so that it does not have to be re-derived.
   right edge the assistant's button and ⋯: *Save image...* (a TIFF
   re-rendered at a chosen pixel size, colour or float intensity, with the
   pixel size in the resolution tags), *PNG as displayed...*, the colour bar,
-  the keys.  The count of what is drawn is in the status bar.  The ROI is a `Region` (`regions.py`)
+  the keys, *Help*.  The count of what is drawn is in the status bar.  The ROI is a `Region` (`regions.py`)
   in the session; a plugin's `Selection` is the layer's filter *inside* the
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the
@@ -345,7 +345,7 @@ ROI, only while the 3D window is open: closing it lifts the cut, reopening
 puts it back, since a restriction nobody can see is one nobody remembers).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
 float intensity, with projection and slab in the ImageJ metadata.
 
-Phase 3 is in (`gpu.py`, extra ``[gpu]``): the GPU engine on wgpu-py
+Phase 3 is in (`gpu.py`; wgpu a dependency since 0.5.8, the extra ``[gpu]`` before): the GPU engine on wgpu-py
 (Metal on macOS, Vulkan / DX12 elsewhere, headless).  A table is uploaded
 once (x, y, z, precision, weight, colour value); a compute shader projects,
 clips to the slab, derives the sigma as `SigmaSettings` does, and splats the
