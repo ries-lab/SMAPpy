@@ -321,3 +321,19 @@ def test_a_beads_blur_in_z_is_the_same_whatever_the_mirror_steps(grid):
         with torch.no_grad():
             out[steps] = model(values, batch)[0, :, ::steps]          # each slice's first mirror step
     assert torch.allclose(out[1], out[3], rtol=1e-4, atol=1e-4 * float(out[1].max()))
+
+
+def test_a_model_learnt_with_the_beads_size_is_exported_for_a_point(grid):
+    """The export draws a point emitter: a model with a bead kernel exports, and as the same model
+    without one -- the bead's size is the beads', not the molecules'."""
+    from uipsf.workflows.fourpi import sample_iab
+    z = np.array([-200.0, 0.0, 200.0])
+    out = {}
+    for radius in (0.0, 20.0):
+        model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, bead_radius_nm=radius)
+        batch = uipsf.Batch(data=torch.zeros(1, C, 9 * M, R, R), z_nm=torch.zeros(9 * M), roi_xy=torch.zeros(1, C, 2))
+        start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, C)}
+        shared = {k: v for k, v in Params(model.specs(batch, start), 1).physical().items()
+                  if not k.startswith("emitter.")}
+        out[radius] = sample_iab(model, shared, z)
+    assert np.allclose(out[0.0][0], out[20.0][0]) and np.allclose(out[0.0][1], out[20.0][1])

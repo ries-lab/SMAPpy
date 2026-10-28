@@ -91,9 +91,13 @@ def _pupil_values(values, model, low, embed: bool):
 
 
 def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None = 4, solver=None,
-                 start: dict | None = None, progress=None, cancel=None) -> FourPiFit:
+                 start: dict | None = None, progress=None, cancel=None, values: dict | None = None) -> FourPiFit:
     """Learn ``model`` from 4Pi bead stacks ``batch`` (module docstring): [E, C, J·M, Y, X] photons,
-    z-major, ``Batch.z_nm`` each slice's z repeated M times and ``Batch.roi_xy`` each channel's ROI."""
+    z-major, ``Batch.z_nm`` each slice's z repeated M times and ``Batch.roi_xy`` each channel's ROI.
+
+    ``values`` (physical, by name) replace the start's: a warm start, from another model of the same beads
+    -- a scalar fit's for a vectorial one.  With them the low-order first stage is skipped: it is there to
+    find the pupils' gross shape, which they already have."""
     from ..model.fourpi_start import rough_start
     noise = noise if noise is not None else ShiftedPoisson()
     solver = solver if solver is not None else GaussNewtonLBFGS()
@@ -101,7 +105,15 @@ def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None 
     dtype, device = batch.data.dtype, batch.data.device
     start = start if start is not None else rough_start(batch, model)
     params = Params(model.specs(batch, start), batch.n_emitters, dtype=dtype, device=device)
+    if values:
+        known = {k: torch.as_tensor(v, dtype=dtype, device=device) for k, v in values.items() if k in params.specs}
+        params = Params(list(params.specs.values()), batch.n_emitters, dtype=dtype, device=device,
+                        values={**params.physical(), **known})
     params = best_phases(model, batch, params, noise)
+    if values:
+        result = solver.solve(Problem(model, noise, batch), params, progress=_tagged(progress, 2), cancel=cancel)
+        result.history = [dict(h, stage=2) for h in result.history]
+        return FourPiFit(model, result, start, None)
     low = model if first_order is None else model.with_pupils([pu.truncated(first_order) for pu in model.pupils])
     values = _pupil_values(params.physical(), model, low, embed=False)
     specs = [_like(s, params.specs[s.name]) for s in low.specs(batch, start)]
@@ -121,13 +133,16 @@ def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None 
 def sample_iab(model: FourPiModel, shared: dict, z_nm, roi_px: int | None = None):
     """(I, Q) of every channel at heights ``z_nm`` [J]: I [C, J, Y, X] real and Q [C, J, Y, X] complex, one
     photon of the emitter on each channel's ROI centre, so that the image at the bead's phase φ is
-    I + Re(Q e^{iφ}).  Sampled at three phases and demodulated (module docstring)."""
-    if roi_px is not None:
+    I + Re(Q e^{iφ}).  Sampled at three phases and demodulated (module docstring).  The emitter is a point:
+    a model learnt with the beads' size (``bead_radius_nm``) is drawn without it -- and needs to be, its bead
+    kernel works along a stack's slices, which a set of heights is not."""
+    if roi_px is not None or model.psf_up.bead_radius_nm > 0:
         import copy
         model = copy.copy(model)
         for name in ("psf_up", "psf_lo"):
             base = getattr(model, name)
-            setattr(model, name, type(base)(base.grid, base.pupil, (roi_px, roi_px), upsample=base.upsample,
+            roi = (roi_px, roi_px) if roi_px is not None else base.roi_shape
+            setattr(model, name, type(base)(base.grid, base.pupil, roi, upsample=base.upsample,
                                             kind=base.kind, sigma_nm=base.sigma_init))
     dev, dt = model.grid.rho.device, model.grid.rho.dtype
     p = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}

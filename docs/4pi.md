@@ -1403,3 +1403,32 @@ What this shows:
 The vectorial model is better on every count, by a little.  The fitter
 reads the IAB export, sampled from the model, so the gain is in the
 model's I, A and B: the modulation's shape and its change with z.
+
+**Cost, and a warm start** (2026-10-28; uiPSF's example, 6 scans, 29 beads, the 40 nm bead taken out,
+n ≤ 6, Apple's GPU):
+
+| model | time | iterations (first stage) | objective | coherence |
+|---|---|---|---|---|
+| scalar | 13.2 min | 76 (36) | 7,089,164 | 0.72–0.79 |
+| vector, from scratch | 10.7 min | 56 (35) | 6,812,561 | 0.77–0.82 |
+| vector, from the scalar fit | 7.8 min | 34 (–) | 6,827,283 | 0.76–0.81 |
+
+What this shows:
+- **The vectorial model costs no more.**  One forward pass over the 29 beads takes 0.16 s against the
+  scalar's 0.17 s: the six fields go through one batched matrix DFT.  It also needs fewer iterations.
+- **A warm start from the scalar fit does not pay.**  It is quicker on its own, but scalar and warm
+  vector together take 21 min against 10.7, and it stops 14,700 worse: the scalar optimum is not near the
+  vectorial one.  `learn_fourpi(values=...)` keeps it possible.
+- **The Zernikes agree within about 0.05 rad rms**, except the split of the astigmatism (Noll 6)
+  between the objectives:
+
+  | model | upper | lower | difference | mean |
+  |---|---|---|---|---|
+  | scalar | +0.39 | −0.41 | 0.80 | 0.00 |
+  | vector, from scratch | +0.59 | −0.23 | 0.82 | +0.18 |
+  | vector, warm | +0.50 | −0.32 | 0.82 | +0.09 |
+
+  The difference between the arms is pinned to 0.80–0.82 rad; their mean is not.  In the vectorial
+  model it trades with something else, most likely the circular components' azimuthal winding, which
+  astigmatism common to both arms resembles.  A common astigmatism of the order of 0.1–0.2 rad is
+  therefore not to be read from a single fit.

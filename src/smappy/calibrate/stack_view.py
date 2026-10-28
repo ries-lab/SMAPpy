@@ -185,9 +185,10 @@ class StackViewer(QMainWindow):
     @property
     def bead(self):
         """The bead shown alone, or None for the average."""
-        if self.views is None or not self._bead_ids or (self.views.averaged and self.average_box.isChecked()):
+        ids = getattr(self, "_bead_ids", [])        # (a redraw while `set_views` is still setting up)
+        if self.views is None or not ids or (self.views.averaged and self.average_box.isChecked()):
             return None
-        return self._bead_ids[min(self.bead_slider.value(), len(self._bead_ids) - 1)]
+        return ids[min(self.bead_slider.value(), len(ids) - 1)]
 
     def _on_view(self, _checked=None) -> None:
         self._show_view_controls()
