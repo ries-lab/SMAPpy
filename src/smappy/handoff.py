@@ -32,6 +32,10 @@ The protocol is three files' worth of state, all temporary:
 
 The raw camera frames are not handed on: they can be gigabytes, and the copy
 is for working with the localizations.
+
+The layers and the 3D view are serialised once, here, for two uses: the
+handoff, and the session block a saved file carries (`session_block`,
+`/gui/session`) for *File > Open and restore* to put back (`gui.restore`).
 """
 from __future__ import annotations
 
@@ -102,11 +106,24 @@ def _from_plain(cls, data):
     return cls(**kwargs)
 
 
-def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
-    """Everything the new instance opens with, but the table's columns."""
+def layer_states(session) -> list:
+    """Every layer as it stands, in order: a localization layer's filter,
+    files, grouping, render and display settings; an image layer's display,
+    which image it shows (`_image_key`) and how."""
     layers = []
     for layer in session.layers:
         if layer.is_image:
+            if layer.image is None or layer.image.is_empty:
+                continue
+            layers.append({
+                "kind": "image", "name": layer.name, "visible": bool(layer.visible),
+                "image": _image_key(session, layer.image),
+                "frame": int(layer.frame), "image_show": layer.image_show,
+                "image_planes": None if layer.image_planes is None
+                else list(layer.image_planes),
+                "follow_z": bool(layer.follow_z), "image_3d": layer.image_3d,
+                "display": _plain(layer.get_display()),
+            })
             continue
         ranges = layer.ranges
         layers.append({
@@ -117,14 +134,166 @@ def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
             "render": _plain(layer.state.settings),
             "display": _plain(layer.get_display()),
         })
+    return layers
+
+
+def _image_key(session, image) -> Dict[str, Any]:
+    """What finds an image again in the session a file opens: its name,
+    kind and shape, and which of the images so called it is.  Not the object
+    nor a place in a list -- a file's images come back as new objects, in
+    the order `saved_images` wrote them."""
+    same = [im for im in session.images
+            if (im.name, im.kind) == (image.name, image.kind)]
+    nth = next((n for n, im in enumerate(same) if im is image), 0)
+    return {"name": image.name or "", "kind": image.kind,
+            "shape": list(np.shape(image.data)), "nth": nth}
+
+
+def _find_image(session, key: Dict[str, Any]):
+    """The session's image `_image_key` describes, or None."""
+    same = [im for im in session.images if not im.is_empty
+            and (im.name or "", im.kind) == (key.get("name") or "", key.get("kind"))]
+    shaped = [im for im in same
+              if list(np.shape(im.data)) == list(key.get("shape") or [])]
+    pool = shaped or same
+    if not pool:
+        return None
+    nth = int(key.get("nth") or 0)
+    return pool[nth] if nth < len(pool) else pool[0]
+
+
+def apply_layers(session, configs) -> None:
+    """Make the session's layers those `layer_states` described, in its
+    order.  An image layer whose image the session does not have (a session
+    handed over without its frames) is left out; localization layers beyond
+    the list are removed, so the count is the saved one."""
+    from .render import DisplaySettings, RenderSettings
+    configs = list(configs or [])
+    locs_configs = [c for c in configs if c.get("kind", "locs") != "image"]
+    if not locs_configs:
+        return
+    session.set_layer_configs([{"grouped": c.get("grouped"),
+                                "bounds": c.get("bounds") or {},
+                                "files": c.get("files")} for c in locs_configs])
+    locs_layers = [l for l in session.layers if not l.is_image]
+    for layer, config in zip(locs_layers, locs_configs):
+        layer.name = config.get("name") or layer.name
+        layer.visible = bool(config.get("visible", True))
+        if config.get("render"):
+            layer.state.settings = _from_plain(RenderSettings, config["render"])
+        if config.get("display"):
+            layer.set_display(_from_plain(DisplaySettings, config["display"]))
+    locs_layers = locs_layers[:len(locs_configs)]
+    # the image layers there are, matched to the saved ones by their image;
+    # a saved one with no match here is made, one with no image dropped
+    images = [l for l in session.layers if l.is_image]
+    ordered, kept = [], iter(locs_layers)
+    from .session import Layer
+    for config in configs:
+        if config.get("kind", "locs") != "image":
+            ordered.append(next(kept))
+            continue
+        image = _find_image(session, config.get("image") or {})
+        if image is None:
+            continue
+        layer = next((l for l in images if l.image is image), None)
+        if layer is None:
+            layer = Layer.from_image(image)
+        else:
+            images.remove(layer)
+        layer.name = config.get("name") or layer.name
+        layer.visible = bool(config.get("visible", True))
+        layer.frame = int(config.get("frame") or 0)
+        planes = config.get("image_planes")
+        layer.set_image_view(config.get("image_show") or "slice",
+                             tuple(planes) if planes else None,
+                             bool(config.get("follow_z")),
+                             config.get("image_3d") or "plane")
+        if config.get("display"):
+            layer.set_display(_from_plain(DisplaySettings, config["display"]))
+        ordered.append(layer)
+    session.layers = ordered
+    session.changed("layers")
+
+
+def view_state(session, projection=None) -> Dict[str, Any]:
+    """The 3D view: its projection (``projection``, the window's own copy,
+    when it has one) and the slab -- the session's, so a script has it too."""
+    slab = session.slab
+    return {
+        "projection": _plain(projection if projection is not None
+                             else session.projection),
+        "slab": None if slab is None else {"center": _plain(slab.center),
+                                           "size": _plain(slab.size),
+                                           "angle": float(slab.angle)},
+        "slab_follows_roi": bool(session.slab_follows_roi),
+        "slab_z": None if session.slab_z is None else list(session.slab_z),
+        "select_in_slab": bool(session.select_in_slab),
+    }
+
+
+def apply_view_state(session, state: Optional[Dict[str, Any]]) -> None:
+    """Put back what `view_state` kept."""
+    if not state:
+        return
+    from .view3d import Projection, Slab
+    if state.get("projection"):
+        session.set_projection(_from_plain(Projection, state["projection"]))
+    session.slab_z = tuple(state["slab_z"]) if state.get("slab_z") else None
+    session.select_in_slab = bool(state.get("select_in_slab"))
+    slab = state.get("slab")
+    follows = bool(state.get("slab_follows_roi", True))
+    if slab:
+        session.set_slab(Slab(slab["center"], slab["size"], float(slab.get("angle") or 0.0)),
+                         follow_roi=follows)
+    else:
+        session.slab_follows_roi = follows
+
+
+#: the version of the session block a saved file carries (`session_block`)
+BLOCK_VERSION = 1
+
+
+def session_block(session, view=None, projection=None, windows=None) -> Dict[str, Any]:
+    """What a saved file needs beyond its table, ROIs and tabs to bring the
+    session back (*File > Open and restore*): the layers, the merge settings,
+    the 3D view, and -- from the GUI -- the 2D view's range and the windows.
+    The table's metadata, files and results are in the file already."""
+    return {
+        "version": BLOCK_VERSION,
+        "layers": layer_states(session),
+        "group_settings": _plain(session.group_settings),
+        "view": _plain(view) if view is not None else None,
+        "view3d": view_state(session, projection),
+        "windows": _plain(windows) if windows is not None else None,
+    }
+
+
+def apply_session_block(session, block: Optional[Dict[str, Any]]) -> None:
+    """The Qt-free half of a restore: merge settings, layers and 3D view.
+    The 2D range and the windows are the GUI's (`gui.restore`)."""
+    if not block:
+        return
+    from .group import GroupSettings
+    if block.get("group_settings"):
+        settings = _from_plain(GroupSettings, block["group_settings"])
+        if settings != session.group_settings:
+            session.set_group_settings(settings)
+    apply_layers(session, block.get("layers"))
+    apply_view_state(session, block.get("view3d"))
+
+
+def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
+    """Everything the new instance opens with, but the table's columns."""
     return {
         "version": VERSION,
         "metadata": _plain(session.file_metadata()),
         "files": [_plain(f.to_dict()) for f in session.files],
         "results": _plain(session.results),
-        "layers": layers,
+        "layers": layer_states(session),
         "group_settings": _plain(session.group_settings),
         "view": _plain(view) if view is not None else None,
+        "view3d": view_state(session),
         "gui_state": _plain(gui_state) if gui_state is not None else None,
         # what the copy was taken from, for its log
         "source": str(session.path) if session.path else session.display_name,
@@ -343,7 +512,6 @@ def apply_state(session, locs: Localizations, state: Dict[str, Any],
     way; then the files, results and layers are put back as they were.
     """
     from .io.formats import FileInfo
-    from .render import DisplaySettings, RenderSettings
     identity = state.get("identity") or {}
     name = identity.get("name") or "snapshot"
     # before the table: the grouped table handed in was linked with these
@@ -368,17 +536,7 @@ def apply_state(session, locs: Localizations, state: Dict[str, Any],
     session.log("copy", f"{len(locs)} localizations of {state.get('source') or 'a session'}")
     session.results = dict(state.get("results") or {})
     session.changed("results")
-    configs = state.get("layers") or []
-    session.set_layer_configs([{"grouped": c.get("grouped"),
-                                "bounds": c.get("bounds") or {},
-                                "files": c.get("files")} for c in configs])
-    layers = [l for l in session.layers if not l.is_image]
-    for layer, config in zip(layers, configs):
-        layer.name = config.get("name") or layer.name
-        layer.visible = bool(config.get("visible", True))
-        if config.get("render"):
-            layer.state.settings = _from_plain(RenderSettings, config["render"])
-        if config.get("display"):
-            layer.set_display(_from_plain(DisplaySettings, config["display"]))
+    apply_layers(session, state.get("layers"))
+    apply_view_state(session, state.get("view3d"))
     session.rename(identity.get("name") or "", colour=identity.get("colour") or "")
     session.changed("layers")

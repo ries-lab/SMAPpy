@@ -256,6 +256,10 @@ def save_localizations(path, locs: Localizations,
 
 GUI_GROUP = "gui"
 GUI_STATE = "gui/state"
+# the rest of the session beside the tabs -- layers, views, windows
+# (`handoff.session_block`) -- for *File > Open and restore*; a file without
+# it restores its tabs alone
+GUI_SESSION = "gui/session"
 
 
 def save_gui_state(path, state: Optional[Dict[str, object]]) -> None:
@@ -279,6 +283,31 @@ def load_gui_state(path) -> Optional[Dict[str, object]]:
             if GUI_STATE not in f:
                 return None
             return json.loads(f[GUI_STATE][()])
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def save_session_block(path, block: Optional[Dict[str, object]]) -> None:
+    """Write (or clear) the session block of an existing localization file."""
+    import h5py
+    with h5py.File(path, "a") as f:
+        if GUI_SESSION in f:
+            del f[GUI_SESSION]
+        if not block:
+            return
+        f.require_group(GUI_GROUP)
+        f.create_dataset(GUI_SESSION, data=json.dumps(block, default=_json_default),
+                         dtype=h5py.string_dtype("utf-8"))
+
+
+def load_session_block(path) -> Optional[Dict[str, object]]:
+    """The session block saved with a file, or None.  Never raises on a bad one."""
+    import h5py
+    try:
+        with h5py.File(path, "r") as f:
+            if GUI_SESSION not in f:
+                return None
+            return json.loads(f[GUI_SESSION][()])
     except (OSError, KeyError, ValueError):
         return None
 

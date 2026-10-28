@@ -291,15 +291,20 @@ values, which section is open -- is saved:
 * and, optionally, **appended to the localization file**, so reopening a dataset
   restores the session that produced it.
 
-Recommendation for the optional part, which is the one thing left open: embed
-the plugin state (tabs, instances, values) but *not* the window geometry.
-Geometry is machine-specific -- it travels badly to a colleague's screen and is
-the only part that is worthless as provenance -- while the plugin state is small
-(a few kB of JSON) and is genuinely a record of how the file was produced.  A
+The plugin state (tabs, instances, values) goes into `/gui/state`, small (a
+few kB of JSON) and genuinely a record of how the file was produced.  Beside
+it, `/gui/session` (`handoff.session_block`, the serialisation *Open in a new
+window* uses) keeps the rest of the session -- layers, views, open windows --
+and the window geometry, which first was left out: it travels badly to a
+colleague's screen.  It is kept as plain rectangles and put back only by
+*File > Open and restore* (`gui/restore.py`), each moved onto a screen there
+is and shrunk to fit it, so a file saved at a two-monitor desk opens on a
+laptop with every window in reach.  A
 preference turns the embedding off (`save_gui_state_in_files`) for anyone who
 wants their data files to contain only data.  Reading it back is deliberately
 *not* automatic: rearranging someone's tabs because they opened a colleague's
-dataset would be a surprise, so it is a menu item, *File > Workspace > From data file*.  Values are a flat map of dotted names read off the form
+dataset would be a surprise, so it is a menu item, *File > Workspace > From data file*
+for the tabs, *File > Open and restore* and *Restore saved session* for the whole.  Values are a flat map of dotted names read off the form
 widgets -- so a form left mid-edit with an unparseable number is still saveable,
 and a panel never opened keeps the values it was given rather than being
 blanked -- and are read back a field at a time: a name the plugin no longer has
