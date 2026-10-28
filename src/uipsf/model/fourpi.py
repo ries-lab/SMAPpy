@@ -38,7 +38,8 @@ mirror step.
 microscope acquires them in, so that the bleaching curve runs along time: ``Batch.z_nm`` is [K] with
 each slice's z repeated M times.
 
-**Scalar or vectorial** (``kind``).  The scalar model is v1's: one field per arm.  The vectorial one
+**Vectorial or scalar** (``kind``, vectorial by default).  The scalar model is v1's: one field per arm, kept
+for comparison with v1 and for optics the vectorial model does not describe.  The vectorial one
 (M7, docs/4pi.md §17) follows each arm's field through the 4Pi-SMS's polarisation optics (Wang et al.
 2021, Nat Protoc 16:677): a quarter-wave plate right after each objective, its axes at 45° to the setup
 plane; a retarder with its axes along s and p in one arm (the quartz wedges, part of δ_c); the 50:50
@@ -68,7 +69,7 @@ from __future__ import annotations
 
 import torch
 
-from ..optics.zernike import noll_to_nm
+from ..optics.zernike import noll_to_nm, symmetric_modes
 from ..params import Bounded, ParamSpec
 from .background import Constant
 from .channels import inverse_map, normalised, unpack_transform
@@ -91,13 +92,15 @@ class FourPiModel:
                  magnitude_n_max: int | None = None, magnitude_modes=None, upsample: int = 1,
                  bead_radius_nm: float = 0.0, sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None,
                  coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
-                 pupils=None, kind: str = "scalar", plates: str = "aligned", polarisations=None):
+                 pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
         3π/2); ``transforms`` each channel c ≥ 1's 3×3 map onto channel 0's chip pixels, the identity by
-        default.  ``magnitude_modes`` the pupils' magnitude modes, if not those up to ``magnitude_n_max``
-        (`optics.zernike.symmetric_modes` for an objective's apodisation alone).  ``pupils`` (upper, lower)
+        default.  ``magnitude_modes`` the pupils' magnitude modes, if not those up to ``magnitude_n_max``;
+        with neither, a vectorial model's are the rotationally symmetric ones (`optics.zernike.symmetric_modes`,
+        an objective's apodisation: free in every mode the learning had three optima, docs/4pi.md §20) and a
+        scalar model's every mode to ``n_max``, which it needs.  ``pupils`` (upper, lower)
         replaces the two `ZernikePupil`s, for a first stage.  ``kind`` "scalar" or "vector", and for a
         vectorial model the ``plates`` ("aligned", "crossed" or "none") and each channel's polarisation, s
         or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a turn apart, the pairs a quarter
@@ -116,6 +119,8 @@ class FourPiModel:
         if len(self.polarisations) != self.n_channels or set(self.polarisations) - {"s", "p"}:
             raise ValueError(f"one polarisation, s or p, per channel: got {self.polarisations}")
         if pupils is None:
+            if magnitude_modes is None and magnitude_n_max is None and kind == "vector":
+                magnitude_modes = symmetric_modes(n_max)
             pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max,
                                    magnitude_modes=magnitude_modes) for _ in range(2)]
         self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,

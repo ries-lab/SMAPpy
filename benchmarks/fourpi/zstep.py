@@ -48,7 +48,7 @@ def truth_values(model):
 
 def model_of():
     return FourPiModel(grid, (R, R), n_phases=M, n_max=6, steps_rad=[2.0, 0.0, -2.0], bead_radius_nm=20.0,
-                       intensity=PerObservation())
+                       intensity=PerObservation(), kind="scalar")
 
 
 def scan(step, seed):

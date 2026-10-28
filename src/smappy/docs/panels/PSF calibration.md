@@ -664,8 +664,9 @@ the data's does.  On uiPSF's bead scans it fitted 4 % better than the scalar
 model, uiPSF v1's, and took no longer; on its movie it localised z a little
 better.  Its pupils' magnitude is rotationally symmetric, as an objective's
 apodisation is: free in every direction it let the learning end in one of
-several answers by where it started.  The scalar model keeps the full
-magnitude, which it needs.
+several answers by where it started.  Keep it on.  Off is uiPSF v1's scalar
+model, for a comparison with v1's models; it keeps the full magnitude, which
+it needs, and fits v1's beads less well.
 
 ### photons per frame
 On by default: on uiPSF's bead scans it lowered the deviance from 1.16 to

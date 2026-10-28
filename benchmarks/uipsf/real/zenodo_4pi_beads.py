@@ -102,7 +102,7 @@ def main():
     grid = uipsf.PupilGrid.build(optics, 64, device=a.device)
     model = FourPiModel(grid, batch.data.shape[-2:], n_max=a.n_max, steps_rad=[2, 0, -2],
                         bead_radius_nm=a.bead_radius,
-                        intensity=PerObservation() if a.photons == "observation" else None)
+                        intensity=PerObservation() if a.photons == "observation" else None, kind="scalar")
     t = time.time()
     fit = learn_fourpi(model, batch, noise=ShiftedPoisson(),
                        progress=lambda e: print(e.get("stage"), e.get("iteration"), e.get("objective"),

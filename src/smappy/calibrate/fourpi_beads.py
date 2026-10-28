@@ -121,7 +121,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
     arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
     fitted uiPSF's beads and movie better than "scalar", at no more time.  Its pupils' magnitude is
-    rotationally symmetric (`uipsf.optics.zernike.symmetric_modes`), the objectives' apodisation alone:
+    rotationally symmetric (`FourPiModel`'s default for it), the objectives' apodisation alone:
     free in every mode it found three optima on uiPSF v1's beads by where the learning started (907 711 to
     922 288), symmetric one, 914 132, from every start, with the phase and z scatter as small (docs/4pi.md
     §20).  The scalar model keeps every mode: it needs them, 1 060 569 against 1 107 108.  ``warm``: shared
@@ -129,7 +129,6 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     import uipsf
     from uipsf.model import PerObservation
     from uipsf.model.fourpi import FourPiModel
-    from uipsf.optics.zernike import symmetric_modes
     from uipsf.workflows.fourpi import learn_fourpi
     px = (pixel_size_nm, pixel_size_nm) if np.isscalar(pixel_size_nm) else tuple(pixel_size_nm)
     optics = uipsf.Optics(NA=NA, wavelength_nm=wavelength_nm, n_imm=n_imm, n_med=n_imm, pixel_size_nm=px)
@@ -138,7 +137,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     C, M = beads.data.shape[1], beads.data.shape[3]
     model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=n_max, steps_rad=steps_rad,
                         bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None,
-                        kind=kind, plates=plates, magnitude_modes=symmetric_modes(n_max) if kind == "vector" else None)
+                        kind=kind, plates=plates)
     return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
 
 
@@ -195,7 +194,8 @@ class FourPiBeadSettings:
                                          "its height, average the fringe; 0: point-like")
     vectorial: bool = param(True, label="vectorial", advanced=True,
                             help="the pupil model follows each arm's dipole fields through the quarter-wave "
-                                 "plates and the polarising split; off: one scalar field per arm (uiPSF v1)")
+                                 "plates and the polarising split: keep it on.  Off: uiPSF v1's scalar "
+                                 "model, to compare with v1")
     n_max: int = param(6, label="Zernike order", min=2, max=10, advanced=True,
                        help="the highest Zernike order of each objective's pupil")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,

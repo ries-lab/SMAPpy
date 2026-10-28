@@ -2202,7 +2202,7 @@ src/smappy/calibrate/fourpi_beads.py   find_beads(paths, conversion, offset) -> 
 benchmarks/uipsf/real/zenodo_4pi_beads.py   v1's 18 beads learnt and fitted back with both models
 ```
 
-**The model.**  Two scalar `VectorPSF`s, one per objective, each with its own `ZernikePupil` (``pupil.*`` and
+**The model.**  Two `VectorPSF`s, one per objective, vectorial by default (below; ``kind="scalar"`` is v1's), each with its own `ZernikePupil` (``pupil.*`` and
 ``lo.pupil.*``) and one blur.  The lower arm sees the emitter at −z.  Each channel mixes the arms' light
 (a share f_c, a balance r_c), their interference (a coherence α_c) and a phase φ_e + s_m + δ_c.  Δ, the
 objectives' misalignment, is shared by the channels.  Observations are z-major (slice, then mirror step),
@@ -2213,7 +2213,8 @@ so `Bleaching` runs along the acquisition.  Each channel c ≥ 1 has a projectiv
 arm's x and y components turned into the channel's polarisation by the quarter-wave plates' Jones rows
 (``plates``: "aligned", the 4Pi-SMS's, gives the circular components; "crossed"; "none"), the lower arm's
 axial dipole reversed, the cross term summed over the dipoles; ``polarisations`` names each channel's, s or
-p.  `images(p, xyz, polarisation=)`; the gauge `swapped` is the scalar model's only.
+p.  `images(p, xyz, polarisation=)`; the gauge `swapped` is the scalar model's only.  Its pupils' magnitude
+is rotationally symmetric unless ``magnitude_modes`` or ``magnitude_n_max`` says otherwise (`docs/4pi.md` §20).
 
 **Linearised** (`docs/4pi.md` §19): `pupil_linearisation` gives each objective's pupil columns for every
 channel at once (one pupil-plane product per arm, `VectorPSF.field_linearisation`, then a matrix DFT per

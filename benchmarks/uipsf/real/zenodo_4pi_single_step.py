@@ -41,7 +41,7 @@ Z_NM = np.linspace(-500, 500, 21)
 
 def model_for(grid, shape, n_phases, n_max):
     return FourPiModel(grid, shape, n_phases=n_phases, n_max=n_max, steps_rad=[2, 0, -2][:n_phases],
-                       intensity=PerObservation())
+                       intensity=PerObservation(), kind="scalar")
 
 
 def labelled_like(model, shared, reference):

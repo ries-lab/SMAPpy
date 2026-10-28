@@ -1625,7 +1625,8 @@ magnitude in
 The rotationally symmetric magnitude (`uipsf.optics.zernike.symmetric_modes`, 3 coefficients per
 objective against 27) reaches one optimum, 0.7 % above the best of the free ones and within the free ones'
 phase and z scatter; a uniform magnitude loses 14 %.  So the window's vectorial model (`fourpi_beads.learn`)
-has the symmetric magnitude; `FourPiModel`'s default is unchanged.  The scalar model keeps every mode: it
+has the symmetric magnitude, and so has `FourPiModel`, now vectorial by default (scripts and benchmarks
+that want v1's model say ``kind="scalar"``).  The scalar model keeps every mode: it
 uses them, presumably for what its scalar fields leave out -- symmetric 1 107 108 (phase 0.0563, z 7.71),
 uniform 1 344 285 -- and with Δ's new start it reaches one optimum anyway.
 

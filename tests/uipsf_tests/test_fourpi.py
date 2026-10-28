@@ -47,7 +47,7 @@ def _truth(model):
 def beads(grid):
     """Six simulated 4Pi bead stacks: astigmatism of opposite sign in the two objectives (as v1 found), a
     little coma and spherical, misaligned arms, unequal channels; 11 slices 80 nm apart × 3 mirror steps."""
-    model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0)
+    model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, kind="scalar")
     z = -np.arange(-(J // 2), J // 2 + 1) * 100.0
     roi_xy = np.random.default_rng(0).uniform(20, 180, (E, 1, 2)).repeat(C, 1)
     batch = uipsf.Batch(data=torch.zeros(E, C, J * M, R, R), z_nm=torch.tensor(np.repeat(z, M), dtype=torch.float32),
@@ -60,12 +60,15 @@ def beads(grid):
 
 
 def test_an_objectives_apodisation_is_its_rotationally_symmetric_magnitude_modes(grid):
-    """The window's vectorial model learns the magnitude in these alone (docs/4pi.md §20)."""
+    """A 4Pi model is vectorial unless asked, and learns the magnitude in these alone (docs/4pi.md §20); the
+    scalar model keeps every mode."""
     from uipsf.optics.zernike import symmetric_modes
     assert symmetric_modes(6) == [4, 11, 22]
-    model = FourPiModel(grid, (R, R), n_max=6, magnitude_modes=symmetric_modes(6))
+    model = FourPiModel(grid, (R, R), n_max=6)
+    assert model.kind == "vector"
     assert all(pu.magnitude_modes == [4, 11, 22] for pu in model.pupils)
     assert all(pu.truncated(4).magnitude_modes == [4, 11] for pu in model.pupils)
+    assert len(FourPiModel(grid, (R, R), n_max=6, kind="scalar").pupils[0].magnitude_modes) == 27
 
 
 def test_swapping_the_arms_labels_leaves_every_image_unchanged(beads):
@@ -81,7 +84,7 @@ def test_the_start_finds_the_channels_offsets_and_turns_reversed_steps_round(bea
     """Told the mirror steps the other way round from how they enter the model's phase ([−2, 0, 2]), the
     start turns them round from the fringe's direction and finds the channels' offsets from the light."""
     model, batch, truth = beads
-    told = FourPiModel(model.grid, (R, R), n_max=4, magnitude_n_max=0, steps_rad=[-2, 0, 2])
+    told = FourPiModel(model.grid, (R, R), n_max=4, magnitude_n_max=0, steps_rad=[-2, 0, 2], kind="scalar")
     start = rough_start(batch, told)
     assert start["steps_flipped"]
     assert np.allclose(start["steps"].numpy(), [-2, -4])
@@ -94,7 +97,7 @@ def test_the_start_finds_the_channels_offsets_and_turns_reversed_steps_round(bea
 def test_a_4pi_bead_fit_recovers_both_pupils_the_misalignment_the_phases_and_the_steps(beads):
     from uipsf.workflows.fourpi import learn_fourpi
     model, batch, truth = beads
-    fresh = FourPiModel(model.grid, (R, R), n_max=4, magnitude_n_max=0, steps_rad=[2, 0, -2])
+    fresh = FourPiModel(model.grid, (R, R), n_max=4, magnitude_n_max=0, steps_rad=[2, 0, -2], kind="scalar")
     fit = learn_fourpi(fresh, batch, first_order=None)
     got, std = fit.shared(), fit.result.std
     # the arms' labels are a gauge: compare with the truth or its swap, whichever the fit took
@@ -230,7 +233,8 @@ def test_the_learned_model_measures_v1s_beads_as_straight_as_v1s_model():
                         z_nm=torch.as_tensor(np.repeat(z, Mb), dtype=torch.float32), s=1.0,
                         roi_xy=torch.as_tensor(np.transpose(cor, (1, 0, 2))[..., ::-1].astype(np.float32).copy()))
     grid = uipsf.PupilGrid.build(_optics(), 64)
-    model = FourPiModel(grid, (Y, X), n_max=N_MAX_REAL, steps_rad=[2, 0, -2], intensity=PerObservation())
+    model = FourPiModel(grid, (Y, X), n_max=N_MAX_REAL, steps_rad=[2, 0, -2], intensity=PerObservation(),
+                        kind="scalar")
     fit = learn_fourpi(model, batch)
     cal = calibration(fit, z_range_nm=600, dz_nm=25, roi_px=21)
     assert 255 < cal.period_nm < 280
@@ -320,7 +324,7 @@ def test_a_beads_blur_in_z_is_the_same_whatever_the_mirror_steps(grid):
     out = {}
     for steps in (1, 3):
         model = FourPiModel(grid, (R, R), n_phases=steps, n_max=4, magnitude_n_max=0, bead_radius_nm=50.0,
-                            steps_rad=[0.0, 2.0, -2.0][:steps])
+                            steps_rad=[0.0, 2.0, -2.0][:steps], kind="scalar")
         batch = uipsf.Batch(data=torch.zeros(1, C, J3 * steps, R, R),
                             z_nm=torch.tensor(np.repeat(z, steps), dtype=torch.float32), roi_xy=roi_xy)
         start = {"xyz": torch.zeros(1, 3), "photons": torch.full((1,), 1000.0), "background": torch.zeros(1, C)}
@@ -339,7 +343,7 @@ def test_a_model_learnt_with_the_beads_size_is_exported_for_a_point(grid):
     z = np.array([-200.0, 0.0, 200.0])
     out = {}
     for radius in (0.0, 20.0):
-        model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, bead_radius_nm=radius)
+        model = FourPiModel(grid, (R, R), n_max=4, magnitude_n_max=0, bead_radius_nm=radius, kind="scalar")
         batch = uipsf.Batch(data=torch.zeros(1, C, 9 * M, R, R), z_nm=torch.zeros(9 * M), roi_xy=torch.zeros(1, C, 2))
         start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, C)}
         shared = {k: v for k, v in Params(model.specs(batch, start), 1).physical().items()
