@@ -1385,3 +1385,15 @@ What this shows:
   matrix DFTs are batched, and the solver's other costs dominate.
 - **The 4Pi-SMS beads disagree**, but they are five, without steps.  The
   vectorial model is the better description where the data can tell.
+
+**Both models, exported, on uiPSF's example movie** (`4pi_smlm_nup96`,
+4000 frames, Spline 4Pi with the models' maps, *4Pi z* windows of 500):
+
+| model | localizations | likelihood per pixel | median z error | expected wrong fringes | envelope scatter / error | period |
+|---|---|---|---|---|---|---|
+| scalar | 34,654 | −0.5567 | 9.2 nm | 11.96 % | 1.24 | 265.9 nm |
+| vector | 34,443 | −0.5562 | 8.9 nm | 11.08 % | 1.23 | 264.1 nm |
+
+The vectorial model is better on every count, by a little.  The fitter
+reads the IAB export, sampled from the model, so the gain is in the
+model's I, A and B: the modulation's shape and its change with z.
