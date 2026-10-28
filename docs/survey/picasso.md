@@ -46,6 +46,12 @@ SMAPpy instead: `plugins/blinking.py` already has the blinks, dark frames and
 bursts per region (same dark-time convention) but explicitly says "Not here: a
 counting fit ... and qPAINT"; the porting plan (B4) defers qPAINT "after looking
 at Picasso".  This is that look: it is small.
+**Done** (2026-10): *Binding kinetics* (`plugins/binding_kinetics.py`,
+`smappy/binding_kinetics.py`) per region, with the ML dark time censored at
+the acquisition's ends and the unbiased index, Picasso's cumulative fit as
+an option, and the frame-analysis values for curation; *Summarize/qPAINT*
+calibrates the influx on an ROI keyword.  Test data:
+`simulate.simulate_binding_sites`.
 How it fits: a `per_region` value in `blinking.py` (`tau_dark_frames`,
 `tau_bright_frames`, `qpaint_index`, `n_sites`) plus a `SiteAnalysisPlugin`
 (`Analysis/Regions/Summarize`) that calibrates the influx from ROIs tagged with a
@@ -272,7 +278,8 @@ that needs frame blocks (the pipeline already reads blocks).
   frame, accept/reject with keys, one pick after another.  The time trace is the
   fastest way to judge a DNA-PAINT site (regular blinks vs one sticky burst).  In
   SMAPpy: a figure in the ROI manager's site view (`gui/roi_site.py`) and a key
-  for *use*.
+  for *use*.  *Done*: *Binding kinetics*' trace is the figure the ROI manager
+  shows per ROI, and Space toggles *use*.
 * **qPAINT in the pick info** (Render *Show info > Calculate info below*): per-pick
   number of localizations, events, RMSD, bright/dark time, units, means and
   histograms; "Calibrate influx" button.  The natural home in SMAPpy is the

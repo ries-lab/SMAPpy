@@ -20,6 +20,18 @@ papers and in other software.
 * **burst** (also called a dark-time-merged count, SMAP's `locsdf`): the
   blinks joined across dark times up to a set length -- with the length
   chosen well, the blinks of one molecule.
+* **DNA-PAINT** (points accumulation for imaging in nanoscale topography): a
+  fluorescent imager strand in solution binds to and unbinds from a docking
+  strand on the target, so each binding site blinks again and again, without
+  bleaching.
+* **binding event** (in Picasso, a linked localization): the localizations
+  of one binding of an imager to a site -- in a region, every localization
+  joined across gaps of a few frames.
+* **bright time** (also called the binding time, or `len` in Picasso): how
+  many frames a binding event lasts, its first to its last.
+* **qPAINT** (quantitative PAINT): counting the binding sites of a region
+  from how often it is bound -- the rate of its binding events, the
+  **qPAINT index**, over the rate of a single site, the **influx**.
 * **merge blinks** (also called grouping or linking): combine the
   localizations in consecutive frames that come from one blinking event into
   one localization, with the photons added and a better precision.
