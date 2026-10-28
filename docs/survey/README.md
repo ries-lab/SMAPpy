@@ -65,6 +65,9 @@ code:
    y and z), why `docs/drift.md` needs a hard z cut; DME weights each pair by
    the two localizations' own precisions per axis, and gives a split-half
    error bar for the drift, which nothing in SMAPpy reports yet.  M.
+   *Done 2026-10-28:* per-pair precision weights (on by default), a
+   *z width* setting and a split-half error bar for COMET and RCC
+   (`docs/drift.md`).
 
 ## A shortlist across the areas
 
@@ -73,8 +76,8 @@ Ranked by value for the effort; sizes S ≤ a day, M a few days, L a week+.
 | # | what | from | size | route | fits in SMAPpy as |
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Counting fit (B4)**: oligomer fractions by ML on bursts per region, blinking from monomers or the NPC fit | papers; `smappy/npc.py` already has the pgf | M | own | a Summarize plugin over *Blinking* |
-| 2 | **qPAINT**: sites = 1/(influx · τ_dark), influx calibrated on known picks; an ML dark-time fit | Picasso | S | MIT | a value of *Blinking*, calibration in Summarize |
-| 3 | fixes 1–3 above | | S–M each | | |
+| 2 | **qPAINT**: sites = 1/(influx · τ_dark), influx calibrated on known picks; an ML dark-time fit. ✅ *Binding kinetics* and *Summarize/qPAINT* (2026-10-28) | Picasso | S | MIT | a per-region plugin of its own, calibration in Summarize |
+| 3 | fixes 1–3 above (fix 4, COMET's weights, done 2026-10-28) | | S–M each | | |
 | 4 | **Colocalisation per localization** (CBC / DoC; Coloc-Tesseler) | Locan; PoCA paper | S | BSD | a *Neighbourhood* quantity (Locan's weighting looks wrong: follow the paper) |
 | 5 | **Single-molecule test per cluster** (hull area against its expectation) and a temporal accumulation check | Locan (Ebert 2022) | S | BSD | values of *Cluster shape*, so *Filter ROIs* drops them |
 | 6 | **Sticky / partial-event filters**: clusters whose frames bunch in time; binding-event cores | Picasso (RESI clusterer) | S | MIT | an option shared by *Find clusters* |
@@ -98,16 +101,22 @@ UX section of each file:
 * **Batch**: several named inputs per job zipped by position, files run in
   parallel (both on SMAPpy's own "not yet" list), an HTML report per batch,
   and a folder watcher with a per-file QC table (Picasso Server).
+  *2026-10-28:* the watcher and the HTML page with trends across files are
+  built; parallel files are not wanted; several inputs stay open.
 * **Live**: run a chain on a file when the acquisition finishes it (PYME's
-  cluster).
+  cluster).  *Already there*: a fitter's *After the fit* runs a saved chain.
 * **Trying settings**: test a clustering on one ROI before the whole field;
   a parameter scan; ToMATo's persistence diagram as the Preview.
 * **Browsing**: a slider through the ROIs, pick curation by time trace,
   linked selection between a plot and the image, per-track features as
-  columns so the layer filter is the track filter (TrackMate).
+  columns so the layer filter is the track filter (TrackMate).  *2026-10-28:*
+  pick curation by time trace is *Binding kinetics* in the ROI manager.
+* **Session**: a portable session file (PYME's `.pvs`).  *Built 2026-10-28*:
+  *File > Open and restore…*.
 * **Scripting**: notebook display of chains and results, an embedded console.
 * **Plugins**: a registry of external plugins with pinned hashes, loaded only
-  when enabled (Picasso).
+  when enabled (Picasso).  *Decided 2026-10-28: later*; what is missing is
+  in [candidates.md](candidates.md).
 * **Exchange**: TrackMate XML/CSV import and export.
 
 ## Licence-restricted, worth considering for re-implementation
