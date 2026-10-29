@@ -271,6 +271,32 @@ def test_a_failed_install_is_tried_twice_and_reported(tmp_path):
     assert "the update failed" in (tmp_path / "u.log").read_text()
 
 
+def test_the_helper_runs_on_the_python_the_environment_was_made_from(monkeypatch, tmp_path):
+    from smappy import updater
+    base = tmp_path / "python.exe"
+    base.write_text("")
+    # in a venv (a uv tool's): its own python.exe is locked on Windows while
+    # the helper runs, and uv rebuilds the environment around it
+    monkeypatch.setattr(sys, "_base_executable", str(base), raising=False)
+    assert updater.helper_python() == str(base)
+    monkeypatch.setattr(sys, "_base_executable", str(tmp_path / "gone.exe"), raising=False)
+    assert updater.helper_python() == sys.executable
+
+
+def test_the_failure_window_quotes_uvs_error_and_its_cause(own_config):
+    updates.log_file().write_text(
+        "SMAPpy update\n\n$ uv tool upgrade smappy-smlm\n"
+        "error: Failed to upgrade smappy-smlm\n"
+        "  Caused by: failed to remove directory `C:\\uv\\tools\\smappy-smlm`\n"
+        "  Caused by: The process cannot access the file (os error 32)\n"
+        "exit code 2; trying again in 5 s\n\nthe update failed\n")
+    error = updates.log_error()
+    assert error.startswith("error: Failed to upgrade") and error.endswith("(os error 32)")
+    assert "trying again" not in error
+    updates.log_file().write_text("nothing went wrong here\n")
+    assert updates.log_error() == ""
+
+
 def test_the_next_start_says_the_update_worked_and_reads_the_result_once(own_config, monkeypatch):
     _app()
     from PySide6.QtWidgets import QMainWindow
@@ -292,11 +318,12 @@ def test_a_failed_update_is_shown_with_pips_output(own_config, monkeypatch):
                                                  "log": str(updates.log_file())}))
     shown = []
     monkeypatch.setattr(QMessageBox, "exec", lambda box: shown.append(
-        (box.text(), box.detailedText())))
+        (box.text(), box.detailedText(), box.informativeText())))
     window = QMainWindow()
     Updates(window).report_last_update()
     assert shown and shown[0][0].startswith("The update failed")
     assert "Access is denied" in shown[0][1]
+    assert shown[0][2].startswith("ERROR: Could not install packages")
     window.deleteLater()
 
 

@@ -103,13 +103,27 @@ def spawn(argv: List[str], **kwargs) -> subprocess.Popen:
         return subprocess.Popen(argv, **options)
 
 
+def helper_python() -> str:
+    """The Python the helper runs on: the one SMAPpy's environment was made
+    from, not the environment's own.  On Windows a venv's
+    ``Scripts\\python.exe`` stays locked while the helper runs, and
+    ``uv tool upgrade`` rebuilds a tool's environment where its Python has
+    changed -- which then fails on that one file (0.5.8, October 2026).
+    The base interpreter is outside every environment an install touches,
+    and the helper needs nothing but the standard library."""
+    base = getattr(sys, "_base_executable", None)
+    if base and base != sys.executable and Path(base).exists():
+        return base
+    return sys.executable
+
+
 def start_helper(plan: Path, python: Optional[str] = None) -> subprocess.Popen:
     """This file, copied beside the plan, run isolated (``-I``: no user site,
     no current directory on the path) so that it imports nothing of the
-    installation it replaces."""
+    installation it replaces, on a Python outside it (`helper_python`)."""
     script = Path(plan).parent / "smappy_updater.py"
     shutil.copyfile(__file__, script)
-    return spawn([python or sys.executable, "-I", str(script), str(plan)],
+    return spawn([python or helper_python(), "-I", str(script), str(plan)],
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

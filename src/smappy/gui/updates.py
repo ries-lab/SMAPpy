@@ -209,7 +209,9 @@ class Updates(QObject):
                     if done.get("ok") else "The update failed; this is still SMAPpy " + now)
             box = QMessageBox(QMessageBox.Warning, "Update and restart",
                               f"{what}.", QMessageBox.Close, self.window)
-            box.setInformativeText(f"The whole output is in {done.get('log')}. To try "
+            error = "" if done.get("ok") else updates.log_error()
+            box.setInformativeText((f"{error}\n\n" if error else "") +
+                                   f"The whole output is in {done.get('log')}. To try "
                                    f"by hand, close SMAPpy and run:\n{updates.update_command()}")
             box.setDetailedText(updates.log_tail())
             box.exec()

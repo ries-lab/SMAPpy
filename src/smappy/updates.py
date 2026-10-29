@@ -254,3 +254,23 @@ def log_tail(lines: int = 15) -> str:
     except OSError:
         return ""
     return "\n".join(text.strip().splitlines()[-lines:])
+
+
+def log_error() -> str:
+    """What the install's output says went wrong: the last ``error:`` line
+    (uv's; pip's is ``ERROR:``) and uv's ``Caused by:`` lines under it,
+    which name the file and the OS error -- the end of the log is often only
+    a hint or the retry's notice."""
+    try:
+        lines = log_file().read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    starts = [i for i, line in enumerate(lines) if line.strip().lower().startswith("error")]
+    if not starts:
+        return ""
+    found = [lines[starts[-1]].strip()]
+    for line in lines[starts[-1] + 1:]:
+        if not line.strip().lower().startswith("caused by"):
+            break
+        found.append(line.strip())
+    return "\n".join(found)
