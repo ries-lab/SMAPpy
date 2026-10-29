@@ -1583,9 +1583,12 @@ photons each, ±500 nm at 50 nm, 3 mirror steps, a 20 nm bead):
   joint fit with single-objective scans beside the 4Pi ones should pin both.
 
 **The window.**  The pupil model is vectorial by default (*vectorial*, under *4Pi*; off: uiPSF v1's
-scalar model).  The *Pupils* page shows each objective's magnitude beside its phase.  4Pi scans added in
-the single-channel mode turn the window to *4Pi*.  Read as one channel's bead stack they had failed with
-"not a TIFF file".
+scalar model).  The *Pupils* page shows each objective's magnitude beside its phase, and a third column,
+what the two arms leave together: W_up(k) + W_lo(−k) (the magnitude's difference), zero where the lower
+pupil is the upper one's twin and the arms make the same PSF at every height -- the even modes' sum, the
+odd ones' difference, so the mirrors' opposite astigmatism cancels there and equal comas do not
+(`fourpi_beads.arms_mismatch`).  4Pi scans added in the single-channel mode turn the window to *4Pi*.
+Read as one channel's bead stack they had failed with "not a TIFF file".
 
 
 ## 20. One optimum: the misalignment's start and the magnitude (2026-10-28)

@@ -167,7 +167,48 @@ def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
     text = draw_pupils(figure, types.SimpleNamespace(model=model, shared=lambda: shared))
     titles = [ax.get_title() for ax in figure.axes]
     assert "upper: magnitude" in titles and "lower: phase (rad)" in titles and "magnitude" in text
+    assert "upper + lower(−k)" in titles and "upper − lower(−k)" in titles
     plt.close(figure)
+
+
+def test_a_lower_pupil_that_is_the_upper_ones_twin_makes_the_same_psf_and_no_mismatch():
+    """The pupils page's third column: a lower pupil that is the upper one's twin (phase −(−1)^m c, magnitude
+    (−1)^m c) gives both arms the same image at every height, and `arms_mismatch` is zero; the same
+    coefficients in both arms are not compensated: astigmatism and spherical add up there, coma does not."""
+    import torch
+    from smappy.calibrate.fourpi_beads import arms_mismatch
+
+    import uipsf
+    from uipsf.model.fourpi import FourPiModel
+    from uipsf.optics.zernike import noll_to_nm
+    from uipsf.params import Params
+    optics = uipsf.Optics(NA=1.35, wavelength_nm=600, n_imm=1.406, n_med=1.406, pixel_size_nm=(129, 129))
+    model = FourPiModel(uipsf.PupilGrid.build(optics, 32, device="cpu"), (13, 13), n_max=4, magnitude_n_max=2,
+                        kind="scalar")
+    batch = uipsf.Batch(data=torch.zeros(1, 4, 9, 13, 13), z_nm=torch.zeros(9), roi_xy=torch.zeros(1, 4, 2))
+    start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, 4)}
+    p = Params(model.specs(batch, start), 1).physical()
+    up = model.pupils[0]
+    rng = np.random.default_rng(3)
+    for which, sign in (("phase", -1.0), ("magnitude", 1.0)):
+        modes = getattr(up, f"{which}_modes")
+        c = torch.tensor(rng.normal(0, 0.3 if which == "phase" else 0.05, len(modes)), dtype=p["fourpi.offset"].dtype)
+        parity = torch.tensor([(-1.0) ** abs(noll_to_nm(j)[1]) for j in modes], dtype=c.dtype)
+        p[f"pupil.{which}"], p[f"lo.pupil.{which}"] = c, sign * parity * c
+    p["fourpi.offset"] = torch.zeros(3, dtype=p["fourpi.offset"].dtype)
+    mismatch = arms_mismatch(model, p)
+    assert np.nanmax(np.abs(mismatch["phase"])) < 1e-9 and np.nanmax(np.abs(mismatch["magnitude"])) < 1e-9
+    z = torch.linspace(-600, 600, 7, dtype=p["fourpi.offset"].dtype)
+    xyz = torch.stack([torch.zeros_like(z), torch.zeros_like(z), z], -1)[None]
+    with torch.no_grad():
+        parts = model.images(p, xyz)
+    np.testing.assert_allclose(parts[0, 1].numpy(), parts[0, 0].numpy(), atol=1e-6 * float(parts[0, 0].max()))
+
+    p["lo.pupil.phase"] = p["pupil.phase"].clone()
+    c = arms_mismatch(model, p)["phase_coefficients"]
+    for j, v in c.items():
+        expected = 2 * float(p["pupil.phase"][up.phase_modes.index(j)]) if noll_to_nm(j)[1] % 2 == 0 else 0.0
+        assert v == pytest.approx(expected, abs=1e-12)
 
 
 def test_the_beads_own_fringe_period_is_measured_without_any_optics(tmp_path):

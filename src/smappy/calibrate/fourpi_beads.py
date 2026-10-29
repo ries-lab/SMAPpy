@@ -671,16 +671,43 @@ def parameter_rows(run_result: dict, cal) -> tuple:
     return ("parameter", "value"), rows
 
 
+def arms_mismatch(model, shared: dict) -> dict:
+    """How far the lower objective's pupil is from the twin of the upper one, {"phase": [P, P], "magnitude":
+    [P, P]} (NaN outside the aperture) and the coefficients of each: W_up(k) + W_lo(−k) and
+    M_up(k) − M_lo(−k).  Zero where the arms compensate: the lower objective sees the emitter from the
+    other side, z → −z, so its pupil makes the upper one's PSF -- the same intensity at every height --
+    when it is the upper one's twin, A_lo(k) = A_up*(−k) (`uipsf.model.fourpi`, "The arms' labels are a
+    gauge").  A mode of azimuthal order m flips with (−1)^m under k → −k, so for the even ones
+    (astigmatism, spherical) the mismatch is the sum of the two arms' coefficients, for the odd ones (coma,
+    trefoil) their difference: a plain sum of the two maps would call opposite comas compensated."""
+    from uipsf.optics.zernike import noll_to_nm, zernike_basis
+    up, lo = model.pupils
+    grid = model.psf_up.grid
+    inside = grid.aperture.detach().cpu().numpy() > 0
+    out = {}
+    for which, sign in (("phase", 1.0), ("magnitude", -1.0)):
+        a = up.coefficients(shared, which)
+        b = lo.coefficients({k[len("lo."):]: v for k, v in shared.items() if k.startswith("lo.")}, which)
+        modes = sorted(set(a) | set(b))
+        c = {j: a.get(j, 0.0) + sign * (-1.0) ** abs(noll_to_nm(j)[1]) * b.get(j, 0.0) for j in modes}
+        basis = zernike_basis(grid, modes, high_na=up.high_na and which == "phase").cpu().double().numpy()
+        values = np.tensordot(np.array([c[j] for j in modes]), basis, axes=1) if modes else np.zeros(inside.shape)
+        out[which] = np.where(inside, values, np.nan)
+        out[f"{which}_coefficients"] = c
+    return out
+
+
 def draw_pupils(figure, fit) -> str:
-    """The two objectives' pupils over the aperture, phase above and magnitude below, and their Zernike
-    coefficients side by side.  The magnitude as the model learns it, 1 + Σ c_j Z_j, before the pupil is
-    rescaled to the reference energy: its shape is what is learnt, its scale is the photons'."""
+    """The two objectives' pupils over the aperture, phase above and magnitude below, how far they are
+    from compensating each other (`arms_mismatch`), and their Zernike coefficients side by side.  The
+    magnitude as the model learns it, 1 + Σ c_j Z_j, before the pupil is rescaled to the reference energy:
+    its shape is what is learnt, its scale is the photons'."""
     import torch
     from uipsf.model.fourpi import lower_view
     from uipsf.optics.zernike import zernike_name
     model = fit.model
     shared = {k: v.detach() for k, v in fit.shared().items()}
-    axes = figure.subplots(2, 3, gridspec_kw={"width_ratios": [1, 1, 2]})
+    axes = figure.subplots(2, 4, gridspec_kw={"width_ratios": [1, 1, 1, 2]})
     maps = {"phase": [], "magnitude": []}
     for psf, values in ((model.psf_up, shared), (model.psf_lo, lower_view(shared))):
         with torch.no_grad():
@@ -688,10 +715,11 @@ def draw_pupils(figure, fit) -> str:
         inside = psf.grid.aperture.detach().cpu().numpy() > 0
         for name, value in (("phase", phase), ("magnitude", magnitude)):
             maps[name].append(np.where(inside, value.detach().cpu().double().numpy(), np.nan))
+    mismatch = arms_mismatch(model, shared)
     for row, (name, unit, cmap) in enumerate((("phase", "rad", "RdBu_r"), ("magnitude", "", "viridis"))):
-        left, middle, right = axes[row]
+        left, middle, both, right = axes[row]
         if name == "phase":
-            lim = max(np.nanmax(np.abs(m)) for m in maps[name]) or 1.0
+            lim = max(np.nanmax(np.abs(m)) for m in maps[name] + [mismatch[name]]) or 1.0
             lo_v, hi_v = -lim, lim
         else:
             lo_v = min(np.nanmin(m) for m in maps[name])
@@ -701,9 +729,22 @@ def draw_pupils(figure, fit) -> str:
         for ax, m, arm in ((left, maps[name][0], "upper"), (middle, maps[name][1], "lower")):
             im = ax.imshow(m, cmap=cmap, vmin=lo_v, vmax=hi_v)
             ax.set_title(f"{arm}: {name}" + (f" ({unit})" if unit else ""), fontsize="small")
+        # Colour bars as insets below the maps, taking no room from them: a bar that steals room from some
+        # maps and not others drew them at different sizes, and one beside the third ran into the
+        # coefficients' axis label.  The phase's mismatch on the arms' own scale, so that what is left reads
+        # against what each arm has; the magnitude's is about zero, the arms' about one, so it has its own.
+        def bar(mappable, ax):
+            figure.colorbar(mappable, cax=ax.inset_axes([0.1, -0.12, 0.8, 0.05]), orientation="horizontal")
+        bar(im, middle)
+        if name == "phase":
+            both.imshow(mismatch[name], cmap=cmap, vmin=lo_v, vmax=hi_v)
+        else:
+            r = np.nanmax(np.abs(mismatch[name])) or 1.0
+            bar(both.imshow(mismatch[name], cmap="RdBu_r", vmin=-r, vmax=r), both)
+        both.set_title("upper + lower(−k)" if name == "phase" else "upper − lower(−k)", fontsize="small")
+        for ax in (left, middle, both):
             ax.set_xticks([])
             ax.set_yticks([])
-        figure.colorbar(im, ax=[left, middle], shrink=0.7)
         modes = getattr(model.pupils[0], f"{name}_modes")
         up = shared[f"pupil.{name}"].cpu().double().numpy()
         lo = shared[f"lo.pupil.{name}"].cpu().double().numpy()
@@ -712,15 +753,19 @@ def draw_pupils(figure, fit) -> str:
             right.text(0.5, 0.5, f"no {name} modes learnt", ha="center", va="center", fontsize="small")
             continue
         x = np.arange(len(modes))
-        right.bar(x - 0.2, up, 0.4, label="upper")
-        right.bar(x + 0.2, lo, 0.4, label="lower")
+        right.bar(x - 0.27, up, 0.27, label="upper")
+        right.bar(x, lo, 0.27, label="lower")
+        right.bar(x + 0.27, [mismatch[f"{name}_coefficients"][j] for j in modes], 0.27, color="0.4",
+                  label="mismatch")
         right.set_xticks(x)
         right.set_xticklabels([f"{zernike_name(j)}\n{j}" for j in modes], fontsize="x-small", rotation=90)
         right.axhline(0, color="0.5", lw=0.6)
         right.set_ylabel(f"Zernike coefficient{' (rad)' if unit else ''}", fontsize="small")
         right.legend(fontsize="small", frameon=False)
-    return ("each objective's pupil as learnt, phase and magnitude; the deformable mirrors' astigmatism "
-            "shows with opposite signs")
+    return ("each objective's pupil as learnt, phase and magnitude, and what is left of them together: the "
+            "lower pupil turned through the centre, as it sees the emitter from the other side, added to "
+            "the upper one (its magnitude subtracted) -- zero where the two arms make the same PSF.  The "
+            "deformable mirrors' astigmatism shows with opposite signs and cancels there")
 
 
 def stack_views(beads: FourPiBeads, images: Optional[dict], excluded=()):
