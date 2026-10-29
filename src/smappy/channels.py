@@ -41,6 +41,15 @@ handling one frame.  A `ChannelLayout` says, for each channel,
 
 Channel 0 is the reference: positions are reported in its pixels, and the
 other channels' ROIs are cut where the map puts the molecule.
+
+The channels need not be one size: a dual-colour splitter's seam is where it
+was measured or typed, not always in the middle.  A block keeps one array,
+the smaller channels padded at their far side, and each channel's own size
+(`ChannelLayout.sizes`) says where its pixels end.  A camera ROI may cut into
+a channel: what is left is smaller, and ``origins`` says where its first
+pixel lies in the channel's whole rectangle, so that the maps -- measured
+between whole rectangles -- and the positions reported keep their meaning
+whatever ROI the movie was taken with.
 """
 
 from __future__ import annotations
@@ -57,6 +66,13 @@ class ChannelLayout:
     flips: List[Tuple[bool, bool]] = None             # (flip x, flip y) per channel
     maps: List[np.ndarray] = None                     # channel c -> channel 0, 3x3
     name: str = ""
+    #: per channel, where the first pixel of its rectangle as cut lies in its whole rectangle (after the
+    #: flip): (0, 0) unless a camera ROI cut into it (`on_camera`).  The maps are between whole rectangles.
+    origins: List[Tuple[int, int]] = None
+    #: per channel, a map that is not projective -- a dual-colour registration's polynomial -- with
+    #: ``to_reference`` and ``to_channel`` between whole rectangles, used in place of ``maps``, which then
+    #: hold its projective part for what wants a matrix (`describe_map`).  Not kept in the record.
+    warps: list = None
     _inverse: list = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
@@ -64,14 +80,15 @@ class ChannelLayout:
         n = len(self.regions)
         if not 1 <= n <= 4:
             raise ValueError("a layout has one to four channels")
-        sizes = {(w, h) for _, _, w, h in self.regions}
-        if len(sizes) != 1:
-            raise ValueError(f"every channel's rectangle must have one size; got {sorted(sizes)}")
+        if any(w <= 0 or h <= 0 for _, _, w, h in self.regions):
+            raise ValueError(f"a channel's rectangle is empty: {self.regions}")
         self.flips = [tuple(bool(v) for v in f) for f in (self.flips or [(False, False)] * n)]
+        self.origins = [tuple(int(v) for v in o) for o in (self.origins or [(0, 0)] * n)]
         maps = self.maps if self.maps is not None else [np.eye(3)] * n
         self.maps = [np.asarray(m, float).reshape(3, 3) for m in maps]
-        if len(self.flips) != n or len(self.maps) != n:
-            raise ValueError("one flip and one map per channel")
+        self.warps = list(self.warps) if self.warps is not None else [None] * n
+        if len(self.flips) != n or len(self.maps) != n or len(self.origins) != n or len(self.warps) != n:
+            raise ValueError("one flip, one map and one origin per channel")
         self._inverse = [np.linalg.inv(m) for m in self.maps]
 
     @property
@@ -79,17 +96,28 @@ class ChannelLayout:
         return len(self.regions)
 
     @property
+    def sizes(self) -> List[Tuple[int, int]]:
+        """Each channel's own (width, height)."""
+        return [r[2:] for r in self.regions]
+
+    @property
     def size(self) -> Tuple[int, int]:
-        """One channel's (width, height)."""
-        return self.regions[0][2:]
+        """A block's channel (width, height): the largest channel's, the others padded to it."""
+        return (max(w for w, _ in self.sizes), max(h for _, h in self.sizes))
+
+    @property
+    def same_size(self) -> bool:
+        return len(set(self.sizes)) == 1
 
     # ---------------------------------------------------------------- cutting
     def cut(self, frames: np.ndarray) -> np.ndarray:
         """(n, H, W) frames -> (n, C, h, w) channels, each flipped to match
-        channel 0."""
+        channel 0; a channel smaller than the block padded with zeros beyond
+        its own size."""
         frames = np.asarray(frames)
         if frames.ndim == 2:
             frames = frames[None]
+        W, H = self.size
         out = []
         for (x, y, w, h), (fx, fy) in zip(self.regions, self.flips):
             if y + h > frames.shape[-2] or x + w > frames.shape[-1]:
@@ -100,6 +128,8 @@ class ChannelLayout:
                 part = part[:, :, ::-1]
             if fy:
                 part = part[:, ::-1, :]
+            if (w, h) != (W, H):
+                part = np.pad(part, ((0, 0), (0, H - h), (0, W - w)))
             out.append(part)
         return np.stack(out, axis=1)
 
@@ -110,11 +140,25 @@ class ChannelLayout:
     # ---------------------------------------------------------------- mapping
     def to_reference(self, channel: int, xy) -> np.ndarray:
         """Channel ``channel``'s pixel positions (n, 2), in channel 0's."""
-        return _apply(self.maps[channel], xy)
+        warp = self.warps[channel]
+        if not self._cut_into and warp is None:
+            return _apply(self.maps[channel], xy)
+        xy = np.asarray(xy, float).reshape(-1, 2) + self.origins[channel]
+        out = warp.to_reference(xy) if warp is not None else _apply(self.maps[channel], xy)
+        return out - self.origins[0]
 
     def to_channel(self, channel: int, xy) -> np.ndarray:
         """Channel 0's pixel positions (n, 2), in channel ``channel``'s."""
-        return _apply(self._inverse[channel], xy)
+        warp = self.warps[channel]
+        if not self._cut_into and warp is None:
+            return _apply(self._inverse[channel], xy)
+        xy = np.asarray(xy, float).reshape(-1, 2) + self.origins[0]
+        out = warp.to_channel(xy) if warp is not None else _apply(self._inverse[channel], xy)
+        return out - self.origins[channel]
+
+    @property
+    def _cut_into(self) -> bool:
+        return any(self.origins[c] != (0, 0) for c in range(self.n_channels))
 
     def on_frame(self, channel: int, xy) -> np.ndarray:
         """A channel's pixel positions back on the frame, the flip undone:
@@ -130,32 +174,59 @@ class ChannelLayout:
 
     # ---------------------------------------------------------------- record
     def to_dict(self) -> dict:
-        return {"name": self.name, "regions": [list(r) for r in self.regions],
-                "flips": [list(f) for f in self.flips],
-                "maps": [m.tolist() for m in self.maps]}
+        out = {"name": self.name, "regions": [list(r) for r in self.regions],
+               "flips": [list(f) for f in self.flips],
+               "maps": [m.tolist() for m in self.maps]}
+        if self._cut_into:
+            out["origins"] = [list(o) for o in self.origins]
+        return out
 
     @classmethod
     def from_dict(cls, record: dict) -> "ChannelLayout":
         return cls([tuple(r) for r in record["regions"]],
                    [tuple(f) for f in record.get("flips") or []] or None,
                    [np.asarray(m) for m in record.get("maps") or []] or None,
-                   record.get("name", ""))
+                   record.get("name", ""),
+                   [tuple(o) for o in record.get("origins") or []] or None)
 
     def with_maps(self, maps: Sequence[np.ndarray]) -> "ChannelLayout":
-        return ChannelLayout(self.regions, self.flips, list(maps), self.name)
+        return ChannelLayout(self.regions, self.flips, list(maps), self.name, self.origins)
 
-    def on_camera(self, roi_offset=(0, 0)) -> "ChannelLayout":
+    def _with(self, regions, origins) -> "ChannelLayout":
+        return ChannelLayout(regions, self.flips, self.maps, self.name, origins, self.warps)
+
+    def on_camera(self, roi_offset=(0, 0), shape: Optional[Tuple[int, int]] = None,
+                  cut_into: bool = False) -> "ChannelLayout":
         """The layout on the frames of a camera ROI whose corner is at
         ``roi_offset`` on the chip: every rectangle moved by it.  The maps
-        are between channel images and do not change."""
+        are between channel images and do not change.
+
+        With ``cut_into``, a ROI may cut into a channel -- at its corner, or,
+        given the frames' ``shape`` (height, width), at its far side: what is
+        left of the channel is cut, and its ``origins`` keep where it lies in
+        the whole rectangle.  Without it such a ROI is refused, as 4Pi's
+        geometry wants every channel whole."""
         ox, oy = (int(round(v)) for v in roi_offset)
-        if not (ox or oy):
-            return self
-        regions = [(x - ox, y - oy, w, h) for x, y, w, h in self.regions]
-        if any(x < 0 or y < 0 for x, y, _, _ in regions):
-            raise ValueError(f"the camera ROI, at ({ox}, {oy}) on the chip, cuts off a channel "
-                             f"of {self.name or 'the layout'}")
-        return ChannelLayout(regions, self.flips, self.maps, self.name)
+        regions, origins = [], []
+        for (x, y, w, h), (fx, fy), (px, py) in zip(self.regions, self.flips, self.origins):
+            x, y = x - ox, y - oy
+            x1, y1 = max(x, 0), max(y, 0)
+            x2, y2 = x + w, y + h
+            if shape is not None and cut_into:
+                x2, y2 = min(x2, shape[1]), min(y2, shape[0])
+            if (x1, y1, x2, y2) != (x, y, x + w, y + h) and not cut_into:
+                raise ValueError(f"the camera ROI, at ({ox}, {oy}) on the chip, cuts off a channel "
+                                 f"of {self.name or 'the layout'}")
+            if x2 <= x1 or y2 <= y1:
+                raise ValueError(f"the camera ROI, at ({ox}, {oy}) on the chip, leaves nothing of a "
+                                 f"channel of {self.name or 'the layout'}")
+            # where the first pixel of what is left lies in the whole rectangle, after the flip: a
+            # flipped channel's first pixel is at the far side of what is left
+            left, top = x1 - x, y1 - y
+            nw, nh = x2 - x1, y2 - y1
+            origins.append((px + (w - nw - left if fx else left), py + (h - nh - top if fy else top)))
+            regions.append((x1, y1, nw, nh))
+        return self._with(regions, origins)
 
 
 def describe_map(matrix, size: Tuple[int, int]) -> dict:
@@ -565,7 +636,7 @@ def save_registration(path, layout: ChannelLayout, registration: Optional[Regist
     record = {"format": REGISTRATION_FORMAT, "version": 1,
               "date": datetime.date.today().isoformat(), "source": str(source),
               "layout": layout.to_dict(),
-              "maps_about_centre": [describe_map(m, layout.size) for m in layout.maps]}
+              "maps_about_centre": [describe_map(m, size) for m, size in zip(layout.maps, layout.sizes)]}
     if registration is not None:
         record["pairs"] = list(registration.pairs)
         record["rms_px"] = list(registration.rms_px)

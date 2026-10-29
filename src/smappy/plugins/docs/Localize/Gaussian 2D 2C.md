@@ -1,6 +1,6 @@
 ---
-version: "6"
-covers: [smappy.dualfit.region_counterparts, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
+version: "7"
+covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.chip_halves, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
 ## What it does
@@ -51,11 +51,10 @@ For 3D data with a bead calibration, use
 ## How it works
 
 ```figure-setup
-from dataclasses import replace
 from scipy.special import erf
 from scipy.spatial import cKDTree
 from smappy.calibrate.dual import ChannelTransform
-from smappy.dualfit import DualChannelEngine, combine_peaks
+from smappy.multichannel import MultiChannelEngine, channel_candidates, paired_candidates
 from smappy.metadata import CameraMetadata
 from smappy.camera import to_photons
 from smappy.pipeline import FitSettings
@@ -69,12 +68,13 @@ frames, truth = dual_camera_frames(150, seed=3, labelling=LabellingSettings(effi
 geometry = {"layout": "up-down", "main_channel": "upper", "split_position": 100,
             "image_shape": [200, 100], "coordinate_system": "camera-chip"}
 transform = ChannelTransform(dual_transformation(), geometry, {})
+layout = transform.layout()            # the two halves as channels, and the map between them
 camera = CameraMetadata(conversion=0.5, offset=100.0, pixelsize_um=0.1,
                         em_on=False, roi=(0, 0, 100, 200))
-finder = replace(DetectionSettings().finder(), split=(0, 100.0))
-engine = DualChannelEngine(camera, finder, DualGaussianModelSettings().model(),
-                           transform, FitSettings(roisize=13))
-engine.push(frames, 0)
+finder = DetectionSettings().finder()
+engine = MultiChannelEngine(camera, finder, DualGaussianModelSettings().model(), layout,
+                            FitSettings(roisize=13), detection="pairs", photon_factors=(1.0, 1.0))
+engine.push(layout.cut(frames), 0)
 locs = engine.flush()
 # each localization's dye: the nearest true molecule in its frame
 dye = np.zeros(len(locs), int)
@@ -84,29 +84,35 @@ for f in np.unique(locs["frame"]):
     dye[np.flatnonzero(m)] = np.where(d < 50, truth["channel"][t][i], 0)
 ```
 
-**1. The two halves, and the map between them.**  Which half is which, and
+**1. The two channels, and the map between them.**  Which half is which, and
 where the seam is, comes with the transformation (its *geometry*: up-down or
-right-left, mirrored or not, which half is the main one).  The
-transformation itself maps a position on the secondary half to the position
-on the main half where the same molecule appears.  It is a projective map --
-a shift, a rotation, a magnification and a slight tilt of the image plane --
-or, when it was measured with the *polynomial* model, a third-order
-polynomial that also follows a field distortion.  Positions are in pixels of
-the camera chip, so the same file serves a movie taken with another camera
-ROI on the same chip.
+right-left, mirrored or not, which half is the main one).  The two halves of
+the bead image it was measured on are cut apart as two channel images, the
+main one first, and a mirrored half is flipped back as it is cut -- a flip
+moves pixels, it does not resample them.  The halves need not be the same
+size: the seam is where it was measured.  The transformation maps a position
+in the secondary channel to the position in the main channel where the same
+molecule appears.  It is a projective map -- a shift, a rotation, a
+magnification and a slight tilt of the image plane -- or, when it was
+measured with the *polynomial* model, a third-order polynomial that also
+follows a field distortion.  The halves are rectangles on the camera chip,
+so the same file serves a movie taken with another camera ROI: a ROI that
+cuts into a half leaves less of it, and its pixels keep their place in it.
 
 ```figure Left: one simulated frame.  Each molecule appears in both halves; the lines join the two spots the fit treats as one emitter, each line starting at the main-half spot.  Right: why a shift is not enough -- where each point of the secondary half lands, less where the map's shift at the centre of the field would put it.  What is left is the small turn and magnification between the halves, half a pixel at the edges of this 100-pixel field -- as much as the precision many times over.
 shown = 60
-here = combine_peaks(finder(to_photons(frames[shown:shown + 1], camera), first_frame=shown)[0],
-                     transform, frames.shape[1:], 13)
-ref, sec = here[0], here[1]
+block = layout.cut(to_photons(frames[shown:shown + 1], camera))
+found = [finder(np.ascontiguousarray(block[:, c]), first_frame=shown)[0] for c in range(2)]
+at, _, inside = channel_candidates(paired_candidates(found, layout)[0], layout, 13)
+ref = layout.on_frame(0, at[inside, 0])           # each fit box's centre, back on the frame
+sec = layout.on_frame(1, at[inside, 1])
 fig.set_size_inches(7.2, 4.4)
 left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1, 1.5]})
 image = to_photons(frames[shown], camera)
 left.imshow(image, cmap="gray", vmax=np.percentile(image, 99.7))
-for a, b, c, d in zip(ref.x, ref.y, sec.x, sec.y):
+for (a, b), (c, d) in zip(ref, sec):
     left.plot([a, c], [b, d], color="#34c3ff", lw=0.8, alpha=0.8)
-left.plot(ref.x, ref.y, "o", mfc="none", mec="#ffb000", ms=6, mew=1)
+left.plot(ref[:, 0], ref[:, 1], "o", mfc="none", mec="#ffb000", ms=6, mew=1)
 left.axhline(99.5, color="w", lw=0.8, ls="--")
 left.text(2, 8, "main", color="w", fontsize=8)
 left.text(2, 108, "secondary", color="w", fontsize=8)
@@ -124,25 +130,26 @@ right.set_title("the map, less its shift at the centre (arrows x20)", fontsize=9
 fig.colorbar(arrows, ax=right, fraction=0.046, label="px")
 ```
 
-**2. Candidates in both halves.**  Detection is that of
+**2. Candidates in each channel.**  Detection is that of
 [Gaussian 2D](plugin:Localize/Gaussian 2D) -- a difference-of-Gaussians
-filter and local maxima above the *cutoff* -- with one change: the dynamic
-cutoff is set for **each half on its own**.  The two halves are two detection
-channels that happen to share a chip; a cutoff set over both would be set by
-the brighter one, and the fainter partner of every pair in the dim half would
+filter and local maxima above the *cutoff* -- run on **each channel on its
+own**, so a dynamic cutoff is set from each channel's own noise.  The two
+channels happen to share a chip; a cutoff set over both would be set by the
+brighter one, and the fainter partner of every pair in the dim channel would
 not be found.  (An absolute cutoff is the same number in both.)
 
-**3. Pairing.**  The peaks of the secondary half are mapped onto the main
-half with the transformation.  A main peak and a mapped secondary peak within
+**3. Pairing.**  The peaks of the secondary channel are mapped onto the main
+channel with the transformation.  A main peak and a mapped secondary peak within
 4 pixels of each other, each the other's nearest, are one molecule: they
 become one candidate, at their mean position weighted by the square root of
 each peak's height.  Peaks without a partner are **kept**: a molecule of the
 dye that puts little light into one half may be found only in the other, and
-it is still fitted.  The candidate is rounded to a pixel in the main half,
-that pixel is mapped into the secondary half and rounded again, and a box
+it is still fitted.  The candidate is rounded to a pixel in the main channel,
+that pixel is mapped into the secondary channel and rounded again, and a box
 (the [fit box](plugin:Panels/Glossary), also called ROI size or fitting
-window: *fit box*) is cut at each.  A candidate whose two fit boxes do not both fit
-inside the frame, each on its own half, is dropped.
+window: *fit box*) is cut at each.  A candidate whose two fit boxes do not
+both lie inside their own channels is dropped -- half a fit box from the
+seam too, where a fit box would reach into the other channel.
 
 **4. One fit for both fit boxes.**  Each fit box has its own Gaussian model, as in
 the single-channel fit, and the two are fitted at once by maximum likelihood:
@@ -345,7 +352,9 @@ $\sigma_x = \sigma_a / \sqrt{N}$ against $\sigma_a / \sqrt{N/2}$ for one half:
 the factor $\sqrt{2}$ of the figure.
 
 **What is written.**  `x_nm`, `y_nm` are the linked position, in the main
-half's coordinates.  With the photons free, `photons` is
+channel's own pixels counted from its corner on the chip, whatever camera ROI
+the movie was taken with.  (Before version 7 they were the chip's pixels: for
+a main half on the right or at the bottom, the seam's position more.)  With the photons free, `photons` is
 $N_0 + N_1$ and `photons_err` the two errors added in quadrature; `ratio` is
 $N_1 / (N_0 + N_1)$.  With *link photons* on, one number $\hat{N}$ is fitted
 and the halves see $\hat{N}$ and $r\,\hat{N}$ for the *photon ratio* $r$;
@@ -355,10 +364,10 @@ alone.)  `logl_rel` is the log-likelihood per pixel of
 the two fit boxes together.  EM gain (an EMCCD's electron multiplication) and the camera's read noise are handled as in the
 single-channel fit ([Gaussian 2D](plugin:Localize/Gaussian 2D)), the read
 noise in both fit boxes.
-The first frames are checked against the transformation's geometry: a
-registration made on another camera ROI is refused, and a movie without a
-camera ROI in its metadata is taken to start at the chip's corner, with a
-warning.
+A transformation measured in the bead image's own pixels (a
+*ROI-local* geometry, made without the camera ROI) needs a movie of the same
+size, and a movie without a camera ROI in its metadata is taken to start at
+the chip's corner, with a warning.
 
 **Compared with the paper.**  The global fit is that of
 [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4), whose software
@@ -368,8 +377,8 @@ offers a Gaussian PSF beside its spline.  Where the code departs from the public
   translation, the translation being the sub-pixel remainder left when the
   partner fit box is rounded to whole pixels.  Here the scale for x and y is the
   transformation's local derivative, and it acts about the fit box's centre (the
-  $(1 - f)\,h$ above), so a mirrored splitter, $f = -1$, needs no flipped
-  image.
+  $(1 - f)\,h$ above).  A mirrored half is flipped back as it is cut, so $f$
+  is close to 1 for any splitter.
 * **No bead calibration is needed.**  The paper builds its transformation from
   beads; here the movie alone can give it (*calibrate from this movie*), by
   voting on the vectors between localizations of the same frame.
@@ -464,16 +473,16 @@ but a bright bead or a dirty corner -- press *Preview* and draw on the
 frame it shows: the buttons above the figure draw a rectangle or a polygon
 to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
 shapes away.  With shapes to fit in, only the candidates inside one of them
-are fitted; a candidate inside a shape left out never is.  The frame is
-still filtered whole, so a dynamic cutoff is set as without a region.  The
-shapes are in the frame's pixels and kept with the settings -- in the
-workspace, a chain or a batch they apply to every file.  Draw on either
-half: a shape applies to both, because the two halves are one sample.  Each
-shape is carried through the registration into the other half, where the
-Preview draws it dotted, and both halves' peaks are kept or left out by it
-before they are paired -- so a bead left out on one half is not fitted from
-its partner on the other, and the dim channel's own peaks inside a cell are
-kept.  Before a registration is chosen, a shape acts on its own half only.
+are fitted; a candidate inside a shape left out never is.  The channels
+are still filtered whole, so a dynamic cutoff is set as without a region.
+The shapes are drawn on channel 1, the main channel, in its own pixels --
+where the positions are reported -- and kept with the settings: in the
+workspace, a chain or a batch they apply to every file.  They act on the
+pairs: each channel's peaks are found and paired first, and a molecule is
+kept or left out by where it lies in channel 1 -- so a bead left out is not
+fitted from its partner in the other channel, and a molecule only the dim
+channel saw is judged where it lies.  Draw after the registration is chosen:
+without one the Preview shows the frame as the camera wrote it.
 
 ## Output
 
@@ -481,7 +490,7 @@ The table, one row per molecule and frame:
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm` | the position, in the main half's coordinates |
+| `x_nm`, `y_nm` | the position, in the main channel's own pixels from its corner on the chip |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | its precision (CRLB), from both halves |
 | `photons`, `photons_err` | the photons of both halves together |
 | `photons_ch0`, `photons_ch1` | the photons in the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |
@@ -501,13 +510,12 @@ drift curve -- open with the fit's result.
 
 What to check:
 
-* **The preview.**  It draws the peaks found in both halves, and the
-  secondary half's peaks mapped back onto the main half with the
-  transformation (cyan crosses).  A cross that sits on its partner's circle is
-  a good registration; a cross beside it shows the error directly.  The
-  filtered image's title gives the cutoff of each half, the one detection
-  applied to that frame: the first half's line on the colour bar is solid,
-  the second's dashed.
+* **The preview.**  It shows the two channels side by side, with the peaks
+  found in each (circles), the second channel's peaks mapped onto the first
+  with the transformation (crosses), and the fitted positions in both.  A
+  cross that sits on its partner's circle is a good registration; a cross
+  beside it shows the error directly.  The line above gives each channel's
+  cutoff, the one detection applied to that frame.
 * **The ratio histogram** should show one clear peak per dye.  Peaks that
   merge mean too few photons or dyes too alike; a pile-up at 0 or 1 is
   molecules whose partner fit box held only background -- a dye that sends almost

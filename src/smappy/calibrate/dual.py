@@ -523,6 +523,54 @@ class Polynomial:
         return q
 
 
+def chip_halves(geometry) -> tuple:
+    """The main and the secondary half as rectangles (x, y, width, height) on the chip: the bead image the
+    geometry was measured on, cut at its split.  The bead image's corner is its camera ROI's when the
+    geometry records one, else the chip's; a ROI-local geometry is its own chip."""
+    height, width = (int(v) for v in geometry['image_shape'])
+    ox = oy = 0
+    if geometry.get('coordinate_system') == 'camera-chip':
+        rois = [s.get('roi') for s in geometry.get('sources') or [] if s.get('roi') is not None]
+        if rois:
+            ox, oy = int(rois[0][0]), int(rois[0][1])
+    split = int(geometry['split_position'])
+    if 'right-left' in geometry['layout']:
+        low, high = (ox, oy, split - ox, height), (split, oy, ox + width - split, height)
+    else:
+        low, high = (ox, oy, width, split - oy), (ox, split, width, oy + height - split)
+    if min(low[2], low[3], high[2], high[3]) <= 0:
+        raise ValueError(f"the split at {split} is outside the {width} x {height} bead image at ({ox}, {oy})")
+    return (low, high) if geometry['main_channel'] in ('upper', 'left') else (high, low)
+
+
+def _channel_to_chip(rect, flip) -> np.ndarray:
+    """3x3: a channel's own pixels (after its flip) onto the chip."""
+    x, y, w, h = rect
+    m = np.array([[1., 0., x], [0., 1., y], [0., 0., 1.]])
+    if flip[0]:
+        m = m @ np.array([[-1., 0., w - 1], [0., 1., 0.], [0., 0., 1.]])
+    if flip[1]:
+        m = m @ np.array([[1., 0., 0.], [0., -1., h - 1], [0., 0., 1.]])
+    return m
+
+
+@dataclass
+class _ChipWarp:
+    """A registration that is not projective, between the two channels' own pixels: the chip's map read
+    through each channel's corner and flip."""
+    mapping: object                  # to_reference / to_secondary on the chip
+    main: np.ndarray                 # main channel's pixels -> chip
+    secondary: np.ndarray            # secondary channel's pixels -> chip
+
+    def to_reference(self, xy):
+        chip = map_points(self.secondary, xy)
+        return map_points(np.linalg.inv(self.main), self.mapping.to_reference(chip))
+
+    def to_channel(self, xy):
+        chip = map_points(self.main, xy)
+        return map_points(np.linalg.inv(self.secondary), self.mapping.to_secondary(chip))
+
+
 class _Mapping:
     """Both directions between the channels, whatever describes them.
 
@@ -543,6 +591,22 @@ class _Mapping:
 
     def transform(self, secondary_xy):
         return self.to_reference(secondary_xy)
+
+    def layout(self):
+        """The two channels as the channel layer has them (`smappy.channels.ChannelLayout`), on the chip:
+        the main half channel 0, the secondary channel 1 flipped back along its mirror, and the map
+        between their own pixels -- this one's, read through each half's corner and flip.  A polynomial
+        registration rides as the layout's warp, exact; its projective part is the map."""
+        from ..channels import ChannelLayout
+        main, secondary = chip_halves(self.geometry)
+        mirror = self.geometry.get('mirror_axis_xy')
+        flip = (mirror == 0, mirror == 1)
+        to_main, to_secondary = _channel_to_chip(main, (False, False)), _channel_to_chip(secondary, flip)
+        matrix = np.linalg.inv(to_main) @ np.asarray(self.transformation, float) @ to_secondary
+        warp = (_ChipWarp(self, to_main, to_secondary)
+                if getattr(self, 'polynomial', None) is not None else None)
+        return ChannelLayout([main, secondary], [(False, False), flip], [np.eye(3), matrix / matrix[2, 2]],
+                             name=f"dual colour, {self.geometry['layout']}", warps=[None, warp])
 
 
 @dataclass
@@ -587,6 +651,14 @@ class DualColorCalibration(_Mapping):
     def z_index_to_nm(self, index):
         return self.main.z_index_to_nm(index)
 
+    def layer_splines(self):
+        """(main, secondary) as the channel layer fits them: the secondary flipped back along the mirror,
+        as its channel is (`layout`).  It is stored as the camera sees it (`build_dual_calibration`)."""
+        mirror = self.geometry.get('mirror_axis_xy')
+        if mirror is None:
+            return self.main, self.secondary
+        return self.main, mirrored_spline(self.secondary, axis=2 - int(mirror))
+
     def as_transform(self):
         """Just the registration, for a fit that brings its own PSF model."""
         return ChannelTransform(self.transformation, self.geometry, self.parameters)
@@ -594,6 +666,20 @@ class DualColorCalibration(_Mapping):
     def validate_image(self, shape, roi=None):
         """Check a later split frame before applying this calibration."""
         check_geometry(self.geometry, shape, roi)
+
+
+def mirrored_spline(cal: SplineCalibration, axis: int) -> SplineCalibration:
+    """``cal`` reflected along ``axis`` of its (z, y, x) grid, exactly: each cell's cubic read from its
+    other end, c'_q = (−1)^q Σ_p C(p, q) c_p, and the cells reversed -- the spline of the flipped bead
+    stack, without fitting it again.  Its stack, if kept, is flipped too."""
+    from math import comb
+    coeff = np.asarray(cal.coeff, np.float64).reshape(4, 4, 4, *cal.coeff.shape[1:])   # pz, py, px, z, y, x
+    power = {0: 0, 1: 1, 2: 2}[axis]
+    reflect = np.array([[(-1) ** q * comb(p, q) if p >= q else 0 for p in range(4)] for q in range(4)], float)
+    coeff = np.moveaxis(np.tensordot(reflect, np.moveaxis(coeff, power, 0), axes=(1, 0)), 0, power)
+    coeff = np.flip(coeff, axis=3 + axis)
+    psf = None if cal.psf is None else np.flip(cal.psf, axis=axis).copy()
+    return replace(cal, coeff=np.ascontiguousarray(coeff.reshape(cal.coeff.shape), np.float32), psf=psf)
 
 
 def with_registration(calibration: DualColorCalibration, transform) -> DualColorCalibration:

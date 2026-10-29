@@ -1,6 +1,6 @@
 ---
-version: "8"
-covers: [smappy.dualfit.region_counterparts, smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations]
+version: "9"
+covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations]
 ---
 
 ## What it does
@@ -116,10 +116,11 @@ linked = both.unpack(both.fit(images, link))
 
 The detection, the pairing of the two halves' peaks, the fit boxes and the global
 fit are those of [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C), which
-explains them step by step: each half is thresholded on its own, the
-secondary peaks are mapped onto the main half, peaks within 4 pixels are
-merged into one candidate and peaks without a partner are kept, and a fit box is
-cut in each half and both are fitted at once by maximum likelihood.  What is
+explains them step by step: the halves are cut apart as two channels, each
+searched with its own cutoff, the secondary peaks are mapped onto the main
+channel, peaks within 4 pixels are merged into one candidate and peaks without
+a partner are kept, and a fit box is cut in each channel and both are fitted at
+once by maximum likelihood.  What is
 new here is the model in each fit box, where it comes from, and z.
 
 **1. The calibration.**  The Dual-colour calibration steps the objective
@@ -365,11 +366,16 @@ split as the beads did gives their total, both within 1%.  (Before version
 back at 0.57, with 3.4 times its photons -- and before version 3 a linked
 fit reported the main half's share rather than the total.)
 
-**Mirrored splitters.**  A splitter that mirrors one half is handled by the
-link: the local scale of the transformation along the mirrored axis is
-$-1$, and the partner fit box is evaluated about its centre.  The calibration
-stores the secondary PSF in the camera's own orientation, so no image is
-flipped.
+**Mirrored splitters.**  A splitter that mirrors one half has that half
+flipped back as it is cut into its channel -- a flip moves pixels, it does
+not resample them -- so the local scale of the transformation is close to 1
+along both axes.  The calibration stores the secondary PSF in the camera's
+own orientation; it is flipped too, exactly, by reading each cell of its
+spline from the other end ($c'_q = (-1)^q \sum_{p \geq q} \binom{p}{q} c_p$
+for the coefficient of power $q$) and reversing the cells, rather than
+fitting a spline to the flipped bead stack again.  (Before version 9 the half
+was fitted as the camera saw it, with a scale of $-1$; the numbers are the
+same but for the rounding of a box's corner.)
 
 **Compared with the paper.**  The fit and the calibration follow
 [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4).  Where the code
@@ -378,9 +384,7 @@ departs from the publication:
 * **The link.**  In the paper a shared parameter reaches a channel through a
   scale and a translation, the translation being the sub-pixel remainder of
   rounding the partner fit box to whole pixels.  Here the scale for x and y is
-  the transformation's local derivative, applied about the fit box's centre, which
-  is what lets a mirrored splitter be a factor of $-1$ rather than a flipped
-  image.
+  the transformation's local derivative, applied about the fit box's centre.
 * **The bead positions.**  The paper fits each channel's beads with that
   channel's own spline model to find the transformation.  Here each bead is
   located by an elliptical Gaussian fitted to the average of the 11 middle
@@ -400,10 +404,11 @@ dual-colour calibration listed for this microscope and state, as in
 [Spline 3D](plugin:Localize/Spline 3D); ▾ or a right click lists all found,
 and a fitted `.h5` stands for the calibration it was fitted with.  It records whether the beads
 were taken with EM gain, and data taken the other way is warned about (an EM
-register mirrors the image, and the PSF with it).  The first frames are
-checked against its geometry: a calibration made on another camera ROI is
-refused, and a movie with no camera ROI in its metadata is taken to start at
-the chip's corner, with a warning.
+register mirrors the image, and the PSF with it).  Its halves are rectangles
+on the camera chip, so a movie from another camera ROI is cut where its
+pixels lie in them; one made without the camera ROI (*ROI-local*) needs a
+movie of the bead image's size, and a movie with no camera ROI in its
+metadata is taken to start at the chip's corner, with a warning.
 
 ### transform.path
 A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
@@ -477,16 +482,16 @@ but a bright bead or a dirty corner -- press *Preview* and draw on the
 frame it shows: the buttons above the figure draw a rectangle or a polygon
 to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
 shapes away.  With shapes to fit in, only the candidates inside one of them
-are fitted; a candidate inside a shape left out never is.  The frame is
-still filtered whole, so a dynamic cutoff is set as without a region.  The
-shapes are in the frame's pixels and kept with the settings -- in the
-workspace, a chain or a batch they apply to every file.  Draw on either
-half: a shape applies to both, because the two halves are one sample.  Each
-shape is carried through the registration into the other half, where the
-Preview draws it dotted, and both halves' peaks are kept or left out by it
-before they are paired -- so a bead left out on one half is not fitted from
-its partner on the other, and the dim channel's own peaks inside a cell are
-kept.  Before a registration is chosen, a shape acts on its own half only.
+are fitted; a candidate inside a shape left out never is.  The channels
+are still filtered whole, so a dynamic cutoff is set as without a region.
+The shapes are drawn on channel 1, the main channel, in its own pixels --
+where the positions are reported -- and kept with the settings: in the
+workspace, a chain or a batch they apply to every file.  They act on the
+pairs: each channel's peaks are found and paired first, and a molecule is
+kept or left out by where it lies in channel 1 -- so a bead left out is not
+fitted from its partner in the other channel, and a molecule only the dim
+channel saw is judged where it lies.  Draw after the registration is chosen:
+without one the Preview shows the frame as the camera wrote it.
 
 ## Output
 
@@ -495,7 +500,7 @@ photons of each half beside the totals:
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm`, `z_nm` | the linked position, in the main half's coordinates, and the height |
+| `x_nm`, `y_nm`, `z_nm` | the linked position, in the main channel's own pixels from its corner on the chip, and the height |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm`, `z_err_nm` | their precision (CRLB), from both halves |
 | `photons`, `photons_err` | the photons of both halves together: the sum of the two, or, linked, the one fitted number |
 | `photons_ch0`, `photons_ch1` | photons free: the photons of the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |
@@ -513,12 +518,12 @@ camera pixels.
 What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
 (the z histogram, `logl_rel`, `z_err_nm`):
 
-* **The preview** draws the secondary half's peaks mapped onto the main half
-  with the calibration's transformation (cyan crosses); a cross on its
-  partner's circle means the calibration fits this data.  A calibration made
-  with a different split, camera ROI or splitter alignment misses.  The
-  filtered image's title gives each half's own cutoff on that frame (solid
-  and dashed lines on the colour bar).
+* **The preview** shows the two channels side by side and draws the second
+  channel's peaks mapped onto the first with the calibration's
+  transformation (crosses); a cross on its partner's circle means the
+  calibration fits this data.  A calibration made with a different splitter
+  alignment misses.  The line above gives each channel's own cutoff on that
+  frame.
 * **The ratio histogram** should show one peak per dye, and should not change
   with z: a ratio that drifts with height means the two PSFs do not describe
   the two halves at the same z.
@@ -553,8 +558,9 @@ changes:
   Here the PSFs are only clipped, so the fitted background is the
   background.
 * **No refractive index factor** (SMAP's is 0.8 when switched on).
-* **Detection per half**, as in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
-  the dynamic cutoff is set for each half on its own.
+* **Detection per channel**, as in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
+  each half is cut into a channel of its own and searched with its own
+  dynamic cutoff.
 * **Raw frames by number, not by spacing.**  SMAP's CameraConverter keeps
   every `diffrawframes`-th frame after the average; here a number of frames
   is kept, spaced evenly over the fitted range, so that a long acquisition

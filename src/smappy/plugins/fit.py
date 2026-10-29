@@ -1473,8 +1473,8 @@ class DualModelSettings(_LinkedChannels):
         if camera is not None:
             warn_on_em_mismatch(calibration.main, camera.em_on)
             warn_on_microscope_mismatch(calibration.main, camera.microscope)
-        return GlobalSplinePSF((calibration.main, calibration.secondary),
-                               self.shared())
+        # the secondary as the channel layer cuts it, flipped back along a mirror
+        return GlobalSplinePSF(calibration.layer_splines(), self.shared())
 
 
 @dataclass
@@ -1740,9 +1740,11 @@ def sample_rois(source, camera, finder, roisize: int, src) -> np.ndarray:
 class _TwoChannelFit(_FitPlugin):
     """What both two-channel fitters share: one emitter, both halves.
 
-    Candidates are found over the whole frame, each half thresholded on its
-    own, and combined; each gets an ROI in both halves, and the pair is fitted
-    at once with the parameters the form links (`dualfit`).  The two differ
+    On the channel layer (`channels`, docs/4pi.md §9): the registration's
+    halves are cut into two channel images, each searched with its own
+    cutoff, the peaks paired (`multichannel.paired_candidates`); each pair
+    gets a ROI in both channels and is fitted at once with the parameters the
+    form links (`multichannel.MultiChannelEngine`).  The two differ
     only in where the registration comes from -- a dual-colour bead
     calibration, which brings the two PSFs with it, or a transformation alone
     -- so that is all each of them says (`read_registration`).
@@ -1920,58 +1922,160 @@ class _TwoChannelFit(_FitPlugin):
         """The Gaussian width the calibration pass's plain fit starts from, px."""
         return 1.3
 
-    def region_counterparts(self, settings, camera, shapes) -> list:
-        """A shape drawn on one half applies to both (`dualfit.region_counterparts`).
-        Without a registration yet -- a preview before one is chosen -- the
-        shapes act on the half they are drawn on."""
-        from ..dualfit import region_counterparts
-        try:
-            registration = self.registration(settings)
-        except Exception:
-            return []
-        origin = camera.roi_offset if camera is not None else (0, 0)
-        return region_counterparts(shapes, registration, origin)
-
-    def back_projected(self, settings, camera, candidates):
-        from ..dualfit import secondary_to_reference, which_channel
+    # ----------------------------------------------------------- the channel layer
+    def channel_layout(self, settings, base, camera: Optional[CameraMetadata] = None):
+        """The two channels on this movie's frames (`calibrate.dual.ChannelTransform.layout`): the
+        registration's halves on the chip, put on the movie's camera ROI, which may cut into them -- a
+        calibration from one ROI applies to a movie from another, its pixels keeping their place in
+        the halves (`ChannelLayout.on_camera`)."""
+        import warnings
         registration = self.registration(settings)
-        ox, oy = camera.roi_offset
-        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
-                                   registration.geometry)
-        mapped = secondary_to_reference(candidates.x[secondary],
-                                        candidates.y[secondary],
-                                        registration, (ox, oy))
-        return mapped[:, 0], mapped[:, 1]
+        geometry = registration.geometry
+        shape = tuple(base.shape[-2:])
+        if geometry.get("coordinate_system") == "roi-local":
+            if shape != tuple(geometry["image_shape"]):
+                raise ValueError("ROI-local calibration requires the original bead image dimensions")
+            roi = (0, 0)
+        elif camera is None or camera.roi is None:
+            warnings.warn("the movie has no camera ROI: a full-chip transformation is applied as if "
+                          "the frames began at the chip's corner", stacklevel=2)
+            roi = (0, 0)
+        else:
+            roi = camera.roi_offset
+        return registration.layout().on_camera(roi, shape, cut_into=True)
 
-    def finder(self, settings, camera=None):
-        """Each half thresholded on its own.
+    def open_source(self, settings, watch: bool = False, stop_event=None):
+        """The movie read as its two channels (`channels.ChannelSource`): from here on nothing sees
+        the halves of the chip."""
+        from ..channels import ChannelSource
+        base = _open(settings.source, watch=watch, stop_event=stop_event)
+        camera = self._camera(settings)
+        return ChannelSource.wrap(base, self.channel_layout(settings, base, camera))
 
-        The two halves are two detection channels; a dynamic cutoff pooled
-        over both is set by whichever is brighter, and the dim one then loses
-        the fainter partner of every pair -- which is most of the pairs a
-        registration would have had, and most of the colour the fit is for.
-        """
-        from dataclasses import replace as _replace
-        base = super().finder(settings, camera)
+    def watch_blocks(self, source, path, **options):
+        return source.watch(**options)
+
+    def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
+        # positions are in channel 0's own pixels, where the camera ROI is behind the channel layer
+        return replace(camera, roi=None)
+
+    def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
+        # each channel is searched alone; the region, drawn on channel 0, picks among the pairs
+        # (`engine`), so a molecule only the other channel saw is judged where it lies
+        return self.finder(settings, camera)
+
+    def photon_factors(self, settings) -> tuple:
+        """The link's photon factor per channel (`multichannel.build_link`): the splitter's photon
+        ratio over the split the secondary's PSF already carries -- one, for a spline pair and no
+        ratio given; for a registration alone the beads' measured ratio, or one."""
+        registration = self.registration(settings)
+        ratio = settings.model.photon_ratio
+        scale = 1.0
+        if hasattr(registration, "secondary"):
+            from ..psf import photon_scales
+            scale = float(photon_scales(registration.layer_splines())[1])
+            if ratio is None:
+                ratio = scale
+        if ratio is None:
+            ratio = registration.parameters.get("secondary_main_brightness_ratio", 1.0)
+        return (1.0, float(ratio) / scale)
+
+    def engine(self, settings, camera, finder, model, source=None):
+        from ..multichannel import MultiChannelEngine
+        source = source if source is not None else self.open_source(settings)
+        region = getattr(settings, "region", None)
+        select = None
+        if region is not None and region.active():
+            shapes = list(region.shapes)
+            select = lambda x, y: in_region(x, y, shapes)      # noqa: E731
+        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit,
+                                  detection="pairs", photon_factors=self.photon_factors(settings),
+                                  select=select)
+
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         try:
-            geometry = self.registration(settings).geometry
-        except Exception:
-            return base                          # none yet: preview only
-        return _replace(base, split=self._split_for_detection(geometry, camera))
+            settings = self.with_calibration(settings)
+        except ValueError:
+            pass
+        return self._reading_once(settings, lambda: self._layer_preview(ctx, settings, frame))
 
-    def engine(self, settings, camera, finder, model):
-        from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, self.registration(settings),
-                                 settings.fit, settings.model.photon_ratio)
+    def _layer_preview(self, ctx: Context, settings, frame: int) -> Result:
+        """One frame: each channel with the molecules found in it, with its own cutoff; on channel 1
+        -- where a fit region is drawn, in the pixels positions are reported in -- the second
+        channel's peaks put there by the registration, the cheapest check of it there is; and the
+        fitted positions in both.  Without a registration, the frame as the camera wrote it."""
+        from ..camera import to_photons
+        from . import ShapeEdit
+        src = settings.source
+        if not src.path:
+            raise ValueError("choose a source file")
+        try:
+            source = self.open_source(settings)
+        except Exception as error:
+            result = super().preview(ctx, settings, frame)
+            result.text = f"{result.text}; the channels not cut -- {error}"
+            return result
+        layout = source.layout
+        index = int(np.clip(frame, 0, max(source.n_frames - 1, 0)))
+        camera = self._camera(settings)
+        if camera is None:
+            raise ValueError(f"could not read the camera from {src.path}")
+        camera.require("conversion", "offset")
+        raw = source.frame(index)
+        channels = to_photons(raw[None], camera) / camera.excess_noise
+        finder = self.finder(settings, camera)
+        found, cutoffs = [], []
+        for c, (w, h) in enumerate(layout.sizes):
+            candidates, filtered = finder(np.ascontiguousarray(channels[:, c, :h, :w]), first_frame=index)
+            found.append(candidates)
+            cutoffs.append(float(np.max(finder.cutoffs(filtered)[0])))
+        projected = layout.to_reference(1, np.c_[found[1].x, found[1].y].astype(float))
+        text = (f"frame {index}: " + ", ".join(f"{len(f)} in channel {c + 1} (cutoff {k:.3g})"
+                                                for c, (f, k) in enumerate(zip(found, cutoffs))))
+        fitted, trouble = None, ""
+        try:
+            model = self.model(settings, camera)
+            engine = self.engine(settings, camera, finder, model, source)
+            engine.push(raw[None], index)
+            fitted = engine.flush()
+            text += f"; {engine.stats['matched']} paired, {0 if fitted is None else len(fitted)} fitted"
+        except Exception as error:
+            trouble = str(error)
+            text += f"; not fitted -- {error}"
+        (px, py), _ = camera.pixelsize_nm_or_default
+        ox, oy = layout.origins[0]
+        shapes = list(settings.region.shapes)
+
+        def draw(figure):
+            panels = figure.subplots(1, 2)
+            for c, ax in enumerate(panels):
+                w, h = layout.sizes[c]
+                ax.imshow(channels[0, c, :h, :w], cmap="gray")
+                ax.set_title(f"channel {c + 1}")
+                ax.plot(found[c].x, found[c].y, "o", mfc="none", color="C1", ms=8)
+                if fitted is not None and len(fitted):
+                    xy = np.c_[np.asarray(fitted["x_nm"]) / px - ox, np.asarray(fitted["y_nm"]) / py - oy]
+                    there = xy if c == 0 else layout.to_channel(c, xy)
+                    ax.plot(there[:, 0], there[:, 1], "+", color="C3", ms=8)
+                ax.set_xticks([])
+                ax.set_yticks([])
+            panels[0].plot(projected[:, 0], projected[:, 1], "x", color="C0", ms=6)
+            draw_region(panels[0], shapes)
+        return Result(text=text, settings=settings,
+                      plot=Plot(draw, panels=2, size=(7, 3.6),
+                                edit=ShapeEdit("region.shapes", panel=0, shapes=shapes)),
+                      data={"frame": index, "candidates": sum(len(f) for f in found),
+                            "cutoff": tuple(cutoffs), "projected": projected,
+                            "locs": fitted, "error": trouble})
 
 
 @register("Localize/Spline 3D 2C")
 class DualSplineFit(_TwoChannelFit):
     """The 3D two-channel workflow: one emitter, both halves of a split frame.
 
-    Candidates are found over the whole frame and combined, each gets an ROI
-    in both channels, and the pair is fitted at once with the parameters the
-    form links -- SMAP's ``fit_global_dualchannel``.  Beyond x, y and z it
+    Candidates are found in each channel and paired, each gets an ROI in both
+    channels, and the pair is fitted at once with the parameters the form
+    links -- SMAP's ``fit_global_dualchannel``.  Beyond x, y and z it
     yields ``ratio``, the fraction of the photons in the secondary channel,
     which is what separates the two dyes.
     """
@@ -1990,7 +2094,9 @@ class DualSplineFit(_TwoChannelFit):
     #    longer written
     # 7: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     # 8: a fit region drawn on one half applies to both
-    version = "8"
+    # 9: on the channel layer (docs/4pi.md §9): positions in the main channel's own pixels from its
+    #    corner on the chip, each channel searched alone, a box never across the seam
+    version = "9"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2251,8 +2357,8 @@ class DualGaussianFitSettings(_Finishing, _Writing, _Transform, _Reading):
 class DualGaussianFit(_TwoChannelFit):
     """The 2D two-channel workflow: one emitter, both halves, no PSF model.
 
-    `DualSplineFit` without the calibration.  Candidates are found over the
-    whole frame and combined, each gets a ROI in both halves, and the pair is
+    `DualSplineFit` without the calibration.  Candidates are found in each
+    channel and paired, each gets a ROI in both channels, and the pair is
     fitted at once with x and y shared through the registration -- so the two
     photon numbers that come back are one molecule's, split by colour.
 
@@ -2274,7 +2380,8 @@ class DualGaussianFit(_TwoChannelFit):
     #    no longer written
     # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     # 6: a fit region drawn on one half applies to both
-    version = "6"
+    # 7: on the channel layer, as Spline 3D 2C's 9
+    version = "7"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

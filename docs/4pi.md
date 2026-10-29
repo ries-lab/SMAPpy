@@ -720,8 +720,7 @@ the last two mirrored: SMAP's `Yale4Pi_settings_3D.txt`.
   weighted by their errors.
 
 **Not done yet in M4.**
-- **Dual colour** still runs on `dualfit`.  Its port is M8 (§9), as part of
-  making the channel geometry one layer for every multi-channel fit.
+- **Dual colour** ran on `dualfit`; it is on the layer since M8's step 1 (§9).
 - **A *Simulate* preset** for 4Pi.
 - **The Nup96 ring-spacing check** on z, which needs the ROI segmentation of
   the pores.
@@ -788,6 +787,50 @@ two-channel tests and on a saved run.  The bead calibration and the
 movie registration give the same maps.  It is worth doing when the next
 multi-channel need comes: more than two colours, channel drift for dual
 colour, biplane plus colour.  It is not required for 4Pi.
+
+**Step 1, dual colour on the layer (begun 2026-10-29).**  M8 has three goals, taken one at a time:
+dual colour on the layer; channel drift for dual colour; and a source of two files, one camera per
+channel, with frames paired between them.  Step 1 is the first, and was decided as follows.
+
+- **The bar.**  Not bit-identical: the layer cuts the channels before the peak finder filters them,
+  where `dualfit` filtered the whole frame across the seam; a flipped channel rounds its ties the other
+  way; and a mirrored secondary is fitted flipped back, with its spline flipped too, where `dualfit` cut it
+  as the camera saw it with a link factor of −1.  The bar is the same localizations, positions within
+  0.001 px and photons within 1e-4, for every molecule more than a box from the seam and the borders; the
+  few near the seam may differ, and are counted.  Measured on six scenarios end to end through the
+  plugins -- up-down, mirrored in y and in x, right-left with the main channel second, unequal halves,
+  spline and Gaussian -- whose tables before the port are kept as the reference.
+- **Positions in channel 0's own pixels**, as 4Pi's: `x_nm` of dual-colour data moves by the main
+  half's corner against files fitted before.  They are counted from channel 0's rectangle *on the chip*,
+  so a calibration from one camera ROI applies to a movie from another: a ROI that cuts into a channel
+  leaves that channel smaller, and its pixels keep their place in the rectangle (`ChannelLayout.origins`).
+- **Channels of different sizes**: a measured or typed seam need not be in the middle.  A block keeps
+  one array, (n, C, h, w) with the smaller channels padded, and every channel's own size; the summed
+  detection of 4Pi still needs one size.
+- **Detection per channel, then paired**, as `dualfit` did: a dye can be dark in one channel, so each
+  channel is searched with its own cutoff, the second channel's peaks are put on channel 0 by the map,
+  mutual nearest neighbours within 4 px are merged, and a lone peak keeps its partner's box where the
+  map puts it.
+- **The calibrations stay as they are on disk.**  A dual-colour calibration or a `_2ct.h5` is read as a
+  two-rectangle layout on the chip -- the main half channel 0 -- with the map re-expressed between the
+  channels' own pixels; the secondary spline is flipped to the layer's orientation when there is a mirror.
+
+**Step 1, done (2026-10-29).**  Both two-colour fitters run on the layer (`_TwoChannelFit.open_source`,
+`MultiChannelEngine(detection="pairs")`).  Against the reference tables, end to end through the plugins:
+- up-down, main half first, spline or Gaussian: the same tables, to the bit;
+- unequal halves, main half second (spline right-left, Gaussian lower): every molecule more than a box
+  from an edge the same to 1e-5 px and the photons to the bit;
+- mirrored (spline in y, Gaussian in x): of about 400 localizations the median difference is 0 and the
+  99th percentile 4e-4 px; 2-3 differ by up to 0.4 px, each with another molecule within 7 px, where the
+  likelihood is flat and the flipped summation moves the fit;
+- lost: 0 in up-down, 24-52 in the others, every one with itself or its partner within half a box of its
+  channel's edge -- the boxes `dualfit` let straddle the seam.  None was gained.
+
+A movie from a camera ROI that cuts into both halves gives the whole frame's positions
+(`test_a_movie_from_a_smaller_camera_roi_is_fitted_where_the_calibrations_halves_have_it`).  Still on the
+old split path, to retire next: the movie registration's plain fit (`_TwoChannelFit._calibrate`, a
+`PeakFinder.split`), `dualfit.DualChannelEngine` and `combine_peaks` (no plugin uses them now; the
+pupil calibration's `_pair_link` still uses `dualfit.build_link`), `region_counterparts`.
 
 ## 10. Real data: 4Pi-SMS Nup96 in DCIMG (2026-10-27)
 

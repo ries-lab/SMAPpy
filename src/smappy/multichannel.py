@@ -16,6 +16,12 @@ the interference (the four phases are a quarter turn apart) and gives every
 molecule its whole signal, twice the signal-to-noise of one channel: one peak
 per molecule, nothing to pair.  SMAP found peaks per channel and merged them
 (``PeakCombiner``), which a dark channel defeats.
+
+Two colours are the other way round: each dye is bright in one channel and
+may be all but dark in the other, so a sum would add one channel's noise to
+the other's signal.  Their molecules are found in each channel with its own
+cutoff and paired (`paired_candidates`), as `dualfit` did on the halves of a
+chip.
 """
 
 from __future__ import annotations
@@ -27,7 +33,10 @@ import numpy as np
 
 from .channels import ChannelLayout, detection_lookup, local_scale, onto_reference
 from .detect import Candidates
-from .dualfit import PairedROIs, _concat_pairs, paired_to_localizations
+from .dualfit import MATCH_PIXELS, PairedROIs, _concat_pairs, _match, paired_to_localizations
+
+#: how the engine finds its molecules: on the channels' sum (4Pi), or in each channel, paired (two colours)
+DETECTION = ("sum", "pairs")
 
 
 def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Optional[list] = None,
@@ -40,6 +49,9 @@ def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Option
     a step where a rotation crosses a rounding boundary -- cost no more than half a pixel of alignment in
     one channel of the four.
     """
+    if not layout.same_size:
+        raise ValueError("the channels' sum needs channels of one size; these are "
+                         f"{layout.sizes}: find the molecules in each channel instead")
     n, C, h, w = channels.shape
     total = np.array(channels[:, 0], np.float32)
     for c in range(1, C):
@@ -49,6 +61,49 @@ def detection_image(channels: np.ndarray, layout: ChannelLayout, lookups: Option
         lookup = lookups[c] if lookups is not None else detection_lookup(layout, c, (h, w), resampling)
         total += onto_reference(channels[:, c], lookup)
     return total
+
+
+def paired_candidates(found: List[Candidates], layout: ChannelLayout,
+                      match_px: float = MATCH_PIXELS) -> Tuple[Candidates, int]:
+    """Two channels' peaks as one list on channel 0's pixels, and how many were pairs.
+
+    `dualfit.combine_peaks`' steps, SMAP's ``PeakCombiner``'s, on the channels' own pixels: the second
+    channel's peaks put on channel 0 by the map; mutual nearest neighbours within ``match_px`` merged
+    as a mean weighted by the square root of their values, their value the sum; every peak only one
+    channel saw kept too -- a lone peak in channel 0, the lone ones of channel 1, then the pairs, per
+    frame -- and every position rounded to channel 0's pixel.  Where the box goes in the other channel
+    is then `channel_candidates`'.
+    """
+    if len(found) != 2:
+        raise ValueError(f"pairing takes two channels, not {len(found)}")
+    ref_all, other_all = found
+    frames, xs, ys, values = [], [], [], []
+    matched = 0
+    for frame in np.unique(np.r_[ref_all.frame, other_all.frame]):
+        ref = ref_all[ref_all.frame == frame]
+        other = other_all[other_all.frame == frame]
+        here = np.c_[ref.x, ref.y].astype(float)
+        mapped = (layout.to_reference(1, np.c_[other.x, other.y].astype(float)) if len(other)
+                  else np.empty((0, 2)))
+        weight_ref = np.sqrt(np.maximum(ref.value, 0.0))
+        weight_other = np.sqrt(np.maximum(other.value, 0.0))
+        a, b = _match(here, mapped, match_px)
+        merged = ((here[a] * weight_ref[a, None] + mapped[b] * weight_other[b, None])
+                  / np.maximum(weight_ref[a] + weight_other[b], 1e-12)[:, None])
+        matched += len(a)
+        lone_ref = np.setdiff1d(np.arange(len(here)), a)
+        lone_other = np.setdiff1d(np.arange(len(mapped)), b)
+        positions = np.vstack([here[lone_ref], mapped[lone_other], merged])
+        frames.append(np.full(len(positions), frame, np.int64))
+        xs.append(positions[:, 0])
+        ys.append(positions[:, 1])
+        values.append(np.concatenate([ref.value[lone_ref], other.value[lone_other],
+                                      ref.value[a] + other.value[b]]))
+    if not frames:
+        return Candidates.empty(), 0
+    return (Candidates(np.concatenate(frames), np.rint(np.concatenate(xs)).astype(np.int32),
+                       np.rint(np.concatenate(ys)).astype(np.int32),
+                       np.concatenate(values).astype(np.float32)), matched)
 
 
 def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: int,
@@ -61,7 +116,6 @@ def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: i
     ``drift`` moves each channel's position by its offset in the
     candidate's frame (`ChannelDrift`).
     """
-    w, h = layout.size
     half = (roisize - 1) // 2
     ref = np.c_[candidates.x, candidates.y].astype(float)
     n, C = len(ref), layout.n_channels
@@ -70,6 +124,7 @@ def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: i
     keep = np.ones(n, bool)
     shift = None if drift is None else drift.at(candidates.frame)
     for c in range(C):
+        w, h = layout.sizes[c]                      # each channel's own pixels, not its padding
         exact = ref if c == 0 else layout.to_channel(c, ref)
         if shift is not None:
             exact = exact + shift[:, c]
@@ -82,11 +137,13 @@ def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: i
 
 
 def build_link(candidates: Candidates, residual: np.ndarray, layout: ChannelLayout,
-               roisize: int, n_parameters: int) -> np.ndarray:
+               roisize: int, n_parameters: int, photon_factors=None) -> np.ndarray:
     """The ``(n, 2, C, P)`` link: x and y offset by each channel's remainder
     and scaled by the map's local factor about the ROI centre, as in
     `dualfit.build_link`; every other parameter offset 0, factor 1 -- the
-    channels' shares of the light are in their models."""
+    channels' shares of the light are in their models -- but the photons',
+    where ``photon_factors`` gives one per channel: a two-colour splitter's
+    ratio, for a photon number shared by the channels (`dualfit.build_link`)."""
     n, C = len(candidates), layout.n_channels
     link = np.zeros((n, 2, C, n_parameters), np.float32)
     link[:, 1] = 1.0
@@ -99,6 +156,8 @@ def build_link(candidates: Candidates, residual: np.ndarray, layout: ChannelLayo
         link[:, 1, c, 1] = fy
         link[:, 0, c, 0] += (1.0 - fx) * half
         link[:, 0, c, 1] += (1.0 - fy) * half
+    if photon_factors is not None:
+        link[:, 1, :, 2] = np.asarray(photon_factors, np.float32)
     return link
 
 
@@ -196,6 +255,13 @@ class MultiChannelEngine:
     layout: ChannelLayout
     settings: "FitSettings" = None
     drift: Optional[ChannelDrift] = None
+    #: "sum" (4Pi: one peak per molecule on the channels' sum) or "pairs" (two colours: each channel
+    #: searched with its own cutoff, the peaks paired, `paired_candidates`)
+    detection: str = "sum"
+    #: the link's photon factor per channel (`build_link`), or None for one
+    photon_factors: Optional[Tuple[float, ...]] = None
+    #: which paired molecules to fit, by their (x, y) on channel 0: a fit region drawn there
+    select: Optional[object] = None
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
@@ -211,9 +277,13 @@ class MultiChannelEngine:
         if self.model.n_channels != self.layout.n_channels:
             raise ValueError(f"the model has {self.model.n_channels} channels, the layout "
                              f"{self.layout.n_channels}")
+        if self.detection not in DETECTION:
+            raise ValueError(f"detection must be one of {DETECTION}")
         self.stats = {"frames": 0, "candidates": 0, "pairs": 0, "localizations": 0,
                       "dropped_at_border": 0, "rejected": 0,
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
+        if self.detection == "pairs":
+            self.stats["matched"] = 0
 
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
@@ -226,20 +296,14 @@ class MultiChannelEngine:
             raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
                              f"(a ChannelSource's), got {frames.shape}")
         channels = to_photons(frames, self.camera) / self.camera.excess_noise
-        if self._lookups is None:
-            h, w = channels.shape[-2:]
-            self._lookups = [None] + [detection_lookup(self.layout, c, (h, w), self.resampling)
-                                      for c in range(1, self.layout.n_channels)]
-        summed = detection_image(channels, self.layout, self._lookups)
-        candidates, _ = self.finder(summed, first_frame=first_frame,
-                                    n_threads=self.settings.n_threads)
+        candidates = self.find(channels, first_frame)
         roisize = self.settings.roisize
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
                                                        self.drift)
         candidates, positions, residual = candidates[keep], positions[keep], residual[keep]
         images = cut_channel_rois(channels, candidates, positions, roisize, first_frame)
         link = build_link(candidates, residual, self.layout, roisize,
-                          len(self.model.parameters))
+                          len(self.model.parameters), self.photon_factors)
         self.stats["detect_seconds"] += time.perf_counter() - started
         self.stats["frames"] += len(frames)
         self.stats["candidates"] += len(keep)
@@ -250,6 +314,25 @@ class MultiChannelEngine:
         if self._buffered >= self.settings.block_rois():
             return self.flush()
         return None
+
+    def find(self, channels: np.ndarray, first_frame: int = 0) -> Candidates:
+        """The molecules of a block of channels in photons, on channel 0's pixels (`detection`)."""
+        if self.detection == "pairs":
+            found = []
+            for c, (w, h) in enumerate(self.layout.sizes):
+                own = np.ascontiguousarray(channels[:, c, :h, :w])
+                found.append(self.finder(own, first_frame=first_frame, n_threads=self.settings.n_threads)[0])
+            candidates, matched = paired_candidates(found, self.layout)
+            self.stats["matched"] += matched
+            if self.select is not None:
+                candidates = candidates[self.select(candidates.x, candidates.y)]
+            return candidates
+        if self._lookups is None:
+            h, w = channels.shape[-2:]
+            self._lookups = [None] + [detection_lookup(self.layout, c, (h, w), self.resampling)
+                                      for c in range(1, self.layout.n_channels)]
+        summed = detection_image(channels, self.layout, self._lookups)
+        return self.finder(summed, first_frame=first_frame, n_threads=self.settings.n_threads)[0]
 
     def flush(self):
         import time
@@ -272,10 +355,13 @@ class MultiChannelEngine:
         locs = paired_to_localizations(result, pairs, self.model, self.camera)
         # in channel 0's own pixels: the camera ROI, which the table writer
         # adds for a chip, is the channel layer's business here
+        # counted from channel 0's whole rectangle, which a camera ROI may have cut into
+        # (`ChannelLayout.origins`), so that a position means the same whatever ROI the movie had
         roi_x, roi_y = self.camera.roi_offset
-        for name, roi in (("x_pix", roi_x), ("y_pix", roi_y),
-                          ("peak_x_pix", roi_x), ("peak_y_pix", roi_y)):
-            locs.columns[name] = (np.asarray(locs[name], float) - roi).astype(np.float64)
+        ox, oy = self.layout.origins[0]
+        for name, roi, origin in (("x_pix", roi_x, ox), ("y_pix", roi_y, oy),
+                                  ("peak_x_pix", roi_x, ox), ("peak_y_pix", roi_y, oy)):
+            locs.columns[name] = (np.asarray(locs[name], float) - roi + origin).astype(np.float64)
         keep = valid(locs, self.settings.max_fit_distance)
         self.stats["rejected"] += int((~keep).sum())
         locs = locs[keep]

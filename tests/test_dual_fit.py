@@ -370,17 +370,13 @@ def test_the_link_flags_reach_the_model():
 
 
 @pytest.mark.parametrize("pixelsize", [0.1, None])
-def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
+def test_a_2c_preview_shows_each_channels_peaks_and_the_fits_where_the_channels_have_them(
         tmp_path, pixelsize):
-    """Peaks come from both halves; localizations only from the main one.
-
-    Every secondary peak is mapped into the main channel and each pair is
-    fitted as one emitter at the *reference* position, so nothing fitted can
-    lie on the secondary half.  The peak panel shows the secondary peaks
-    back-projected, so a registration error is visible as a + beside its o.
-    The preview once drew fits one chip-ROI offset away whenever it fell back
-    to pixel units, which put them on the secondary half anyway.
-    """
+    """Peaks are found in each channel; the second channel's are put on the first by the
+    registration, which is the cheapest check of it there is (an x beside each o); the fits are
+    drawn in both.  The movie's camera ROI starts 20 px down the chip, and the positions are counted
+    from the main half's corner on the chip whatever ROI the movie had -- the preview once drew fits
+    one ROI offset away whenever it fell back to pixel units."""
     import tifffile
     from dataclasses import replace
     import matplotlib
@@ -393,7 +389,8 @@ def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
     cal = dual_calibration(ratio=0.3)
     frame = split_frame([(25.0, 15.0), (42.0, 21.0)], 24.0, 9000., 0.3, 30., rng, cal)
     tifffile.imwrite(tmp_path / "split.tif", (frame[None] + 100).astype(np.uint16))
-    cal.geometry = dict(cal.geometry, split_position=SPLIT + oy)  # chip coordinates
+    # chip coordinates: the beads covered the chip from its corner to the movie's far edge
+    cal.geometry = dict(cal.geometry, split_position=SPLIT + oy, image_shape=[SHAPE[0] + oy, SHAPE[1]])
     calibration_file = _dual_calibration_file(tmp_path / "dual.h5", cal)
 
     plugin = DualSplineFit()
@@ -409,29 +406,28 @@ def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
 
     result = plugin.preview(Context(), settings, frame=0)
     assert result.data["error"] == "" and len(result.data["locs"]) == 2
+    px = (pixelsize or 0.1) * 1000
+    np.testing.assert_allclose(np.sort(np.asarray(result.data["locs"]["y_nm"]) / px), [15 + oy, 21 + oy],
+                               atol=0.2)
 
     figure = plt.figure()
     result.plot.draw_into(figure)
-    panels = {a.get_title().split(":")[-1].strip(): a for a in figure.axes
-              if a.get_title()}
-    peaks, fits = panels["peaks found"], panels["fitted"]
+    panels = {a.get_title(): a for a in figure.axes if a.get_title()}
+    first, second = panels["channel 1"], panels["channel 2"]
 
     def marked(panel, marker):
         line = next(l for l in panel.lines if l.get_marker() == marker)
         return np.c_[line.get_xdata(), line.get_ydata()]
 
-    found = marked(peaks, "o")
-    assert set(np.rint(found[:, 1]).astype(int)) == {15, 21, 47, 53}  # both halves
-    projected = marked(peaks, "+")
-    assert len(projected) == 2 and np.all(projected[:, 1] < SPLIT)
-    # each back-projected peak lands on its main-channel partner
-    main = found[found[:, 1] < SPLIT]
-    nearest = np.min(np.linalg.norm(projected[:, None] - main[None], axis=2), axis=1)
-    assert np.all(nearest < 1.0)
-
-    drawn = marked(fits, "+")
-    assert np.all(drawn[:, 1] < SPLIT)                   # the main half only
-    np.testing.assert_allclose(np.sort(drawn[:, 1]), [15, 21], atol=0.5)
+    # in each channel's own pixels: the movie's part of the main half starts at its row 20
+    found = marked(first, "o")
+    np.testing.assert_allclose(np.sort(found[:, 1]), [15, 21], atol=1)
+    projected = marked(first, "x")
+    nearest = np.min(np.linalg.norm(projected[:, None] - found[None], axis=2), axis=1)
+    assert len(projected) == 2 and np.all(nearest < 1.0)
+    np.testing.assert_allclose(np.sort(marked(first, "+")[:, 1]), [15, 21], atol=0.5)
+    np.testing.assert_allclose(np.sort(marked(second, "+")[:, 1]), np.sort(marked(second, "o")[:, 1]),
+                               atol=1)
     plt.close(figure)
 
 
@@ -490,11 +486,12 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
         assert np.median(np.abs(y[mine] - y0)) < 0.1
 
 
-def test_a_split_preview_reports_each_halfs_own_cutoff(tmp_path):
-    """The halves of a split frame are thresholded apart, and the preview says
-    both: the dim half's cutoff is its own, far below the bright one's."""
+def test_a_split_preview_reports_each_channels_own_cutoff(tmp_path):
+    """Each channel is searched alone, and the preview says both cutoffs: the dim channel's is its
+    own, far below the bright one's."""
     import tifffile
-    from smappy.detect import DynamicCutoff, find_candidates, local_maxima
+    from smappy.camera import to_photons
+    from smappy.detect import DynamicCutoff, local_maxima
     from smappy.plugins.fit import DualSplineFit
 
     rng = np.random.default_rng(6)
@@ -511,25 +508,20 @@ def test_a_split_preview_reports_each_halfs_own_cutoff(tmp_path):
     settings.fit.roisize = 13
 
     result = plugin.preview(Context(), settings, frame=0)
-    assert result.data["halves"] == ("top", "bottom")
-    upper, lower = result.data["cutoff"]
+    first, second = result.data["cutoff"]
 
-    # computed here, from the maxima of each half
+    # computed here, from the maxima of each channel
     camera = plugin._camera(settings)
     finder = plugin.finder(settings, camera)
-    assert finder.split == (0, SPLIT)
-    photons = tifffile.imread(tmp_path / "split.tif").astype(np.float32) - 100
-    filtered = finder.filter(photons.reshape(1, *photons.shape[-2:]))
-    _, rows, _, values = local_maxima(filtered, use_extension=False)
+    channels = plugin._reading_once(settings, lambda: plugin.open_source(settings)).frame(0)
+    photons = to_photons(channels, camera)
     cutoff = DynamicCutoff(settings.detection.cutoff)
-    assert upper == pytest.approx(cutoff(values[rows < SPLIT]), rel=1e-6)
-    assert lower == pytest.approx(cutoff(values[rows >= SPLIT]), rel=1e-6)
-    assert lower < 0.5*upper
-    # and they are what detection held each half to
-    kept = find_candidates(filtered, finder.cutoff, split=finder.split)
-    for half, value in ((kept.y < SPLIT, upper), (kept.y >= SPLIT, lower)):
-        assert half.any() and np.all(kept.value[half] > value)
-    assert f"{upper:.3g} top, {lower:.3g} bottom" in result.text
+    for c, expected in ((0, first), (1, second)):
+        filtered = finder.filter(np.ascontiguousarray(photons[c][None], np.float32))
+        _, _, _, values = local_maxima(filtered, use_extension=False)
+        assert expected == pytest.approx(cutoff(values), rel=1e-6)
+    assert second < 0.5 * first
+    assert f"(cutoff {first:.3g})" in result.text and f"(cutoff {second:.3g})" in result.text
 
 
 def test_a_fit_region_drawn_on_one_half_applies_to_the_other_too():
@@ -596,3 +588,61 @@ def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from
     flipped = ChannelTransform(moved.transformation, dict(moved.geometry, main_channel="lower"), {})
     with pytest.raises(ValueError, match="wrong halves"):
         with_registration(beads, flipped)
+
+
+# ------------------------------------------------------------- the channel layer
+def _plugin_on(tmp_path, frames, cal, roi, name):
+    """Spline 3D 2C on ``frames`` written as a TIFF, its camera ROI ``roi`` (x, y, w, h) on the chip."""
+    import tifffile
+    from dataclasses import replace
+    from smappy.plugins.fit import DualSplineFit
+    tifffile.imwrite(tmp_path / f"{name}.tif", (frames + 100).astype(np.uint16))
+    plugin = DualSplineFit()
+    settings = plugin.Settings()
+    settings.source.path = str(tmp_path / f"{name}.tif")
+    settings.camera.conversion, settings.camera.offset = 1.0, 100.0
+    settings.camera.pixelsize_um = 0.1
+    settings.detection.cutoff_mode, settings.detection.cutoff = "absolute", 20.0
+    settings.model.calibration = str(_dual_calibration_file(tmp_path / f"{name}_dual.h5", cal))
+    settings.fit.roisize = 13
+    settings.output.save = False
+    read = plugin._camera
+    plugin._camera = lambda s: replace(read(s), roi=roi)
+    return plugin, settings
+
+
+def test_a_movie_from_a_smaller_camera_roi_is_fitted_where_the_calibrations_halves_have_it(tmp_path):
+    """The calibration's halves are on the chip; a movie whose camera ROI cuts into both is cut where
+    its pixels lie in them, and its molecules come out where the whole frame's do."""
+    rng = np.random.default_rng(3)
+    cal = dual_calibration(ratio=0.3)
+    truth = [(22.0, 13.0), (40.0, 18.5)]
+    frames = np.stack([split_frame(truth, 24.0, 9000., 0.3, 30., rng, cal) for _ in range(6)])
+    results = {}
+    for name, (x0, y0, x1, y1) in (("whole", (0, 0, 64, 64)), ("cut", (6, 4, 58, 60))):
+        plugin, settings = _plugin_on(tmp_path, frames[:, y0:y1, x0:x1], cal, (x0, y0, x1 - x0, y1 - y0), name)
+        results[name] = plugin.run(Context(), settings).locs
+    whole, cut = results["whole"], results["cut"]
+    assert len(whole) == len(cut) == 12
+    for key in ("x_nm", "y_nm", "z_nm", "ratio"):
+        np.testing.assert_allclose(np.sort(cut[key]), np.sort(whole[key]), rtol=1e-5, atol=1e-3)
+
+
+def test_a_fit_region_drawn_on_channel_1_picks_among_the_pairs():
+    """The region is drawn where positions are reported, on channel 1, and acts on the pairs: a
+    molecule excluded there is fitted in neither channel."""
+    from smappy.multichannel import MultiChannelEngine
+    from smappy.plugins.fit import in_region
+    rng = np.random.default_rng(4)
+    cal = dual_calibration(ratio=0.3)
+    frames = np.stack([split_frame([(20.0, 14.0), (44.0, 18.0)], 24.0, 9000., 0.3, 30., rng, cal)
+                       for _ in range(4)])
+    box = {"kind": "exclude", "points": [[14, 8], [26, 8], [26, 20], [14, 20]]}
+    lay = cal.layout()
+    engine = MultiChannelEngine(camera(), finder(), GlobalSplinePSF(cal.layer_splines(), LINK_XYZ), lay,
+                                FitSettings(roisize=13), detection="pairs", photon_factors=(1.0, 1.0),
+                                select=lambda x, y: in_region(x, y, [box]))
+    engine.push(lay.cut(frames))
+    locs = engine.flush()
+    assert engine.stats["matched"] == 8 and len(locs) == 4
+    np.testing.assert_allclose(np.asarray(locs["x_nm"]) / 100, 44.0, atol=0.2)
