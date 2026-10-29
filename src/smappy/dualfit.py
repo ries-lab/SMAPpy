@@ -1,39 +1,33 @@
-"""Two channels on one chip, fitted as one emitter.
+"""What a fit of one emitter in two channels of one chip needs beyond the channel layer.
 
-The split-frame companion to `pipeline.py`: candidates found anywhere on the
-frame are combined into one list, each gets an ROI in *both* halves, and the
-pair goes to the global fitter, which shares the parameters the caller marks.
+The fit itself is `multichannel.MultiChannelEngine` on `channels.ChannelLayout` (docs/4pi.md §9): the
+halves are cut into two channel images, each searched alone and the peaks paired (`paired_candidates`),
+each pair cut in both channels and fitted at once.  Until 2026-10 this module did that on the frame as
+the camera delivered it -- one search over both halves, SMAP's ``PeakCombiner``, ROIs cut in chip
+pixels; the layer gave the same numbers away from the seam (docs/4pi.md §9) and that path is gone.
+What stays is what both paths had to agree on:
 
-This follows SMAP's ``fit_global_dualchannel`` workflow
+* **The link** (`LINK_XYZ`, `PARAMETERS`): which parameters the channels share.
+* **The pairing tolerance** (`MATCH_PIXELS`) and the mutual-nearest match (`_match`), SMAP's
+  ``matchlocs``, which the registration and the layer's pairing both use.
+* **The split-frame geometry** (`split_axis`, `reference_is_first`, `which_channel`): how a
+  registration records which half is which, read by the registration and the simulator.
+* **The table** (`PairedROIs`, `paired_to_localizations`): the global fit's output as localizations.
 
-    PeakFinder -> PeakCombiner -> RoiAdder -> RoiCutterWF -> MLE_global_spline
-
-with `combine_peaks` standing for ``PeakCombiner`` and `cut_paired_rois` for
-``RoiAdder`` + ``RoiCutterWF``.  Two points of that design are easy to get
-wrong and are the reason this module exists:
-
-* **The candidate list is the union, not the intersection.**  A molecule seen
-  in only one channel is still fitted; its partner ROI is cut where the
-  transformation says it should be, and the fit sees whatever is there --
-  background, usually, which is the right answer for a molecule of the other
-  colour.  Pairing only the peaks that both channels found would throw away
-  most of a two-colour dataset.
-* **Nothing is resampled.**  Each ROI is cut at an integer pixel, and the
-  sub-pixel remainder of the transformed position is handed to the fitter as
-  an offset in its link -- the same convention `calibrate/dual.py` uses for
-  the beads.  Warping the image to align the channels would correlate the
-  noise between pixels and break the Poisson likelihood the fitter assumes.
+Two points of the design hold on the layer unchanged.  **The candidate list is the union, not the
+intersection**: a molecule seen in only one channel is still fitted, its partner ROI cut where the
+registration puts it.  **Nothing is resampled**: each ROI is cut at an integer pixel and the sub-pixel
+remainder goes to the fitter as an offset in its link, which keeps the Poisson likelihood true.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Tuple
 
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .calibrate.dual import DualColorCalibration
 from .columns import add_xy_err
 from .detect import Candidates
 
@@ -83,7 +77,7 @@ class PairedROIs:
 
         The global x is the reference channel's ROI x, so its own sub-pixel
         residual has to be added back -- SMAP does this after the fit
-        (``P(:,1) = P(:,1) + channelshift(1,1,:)``).  `combine_peaks` leaves
+        (``P(:,1) = P(:,1) + channelshift(1,1,:)``).  The pairing leaves
         that residual at zero for the reference channel, as ``PeakCombiner``
         does, so this is normally a no-op; it is here because the general form
         of the link allows it not to be.
@@ -110,8 +104,8 @@ def reference_is_first(geometry: dict) -> bool:
 def which_channel(x: np.ndarray, y: np.ndarray, geometry: dict) -> np.ndarray:
     """True where a position falls in the main (reference) half of the chip.
 
-    ``PeakCombiner`` asks the transformation the same question through
-    ``getRef``; the split-frame geometry answers it directly.
+    The registration's question about a chip position; ``PeakCombiner`` asked
+    the transformation through ``getRef``, the geometry answers it directly.
     """
     along = x if split_axis(geometry) == 1 else y
     low = along < geometry["split_position"]
@@ -140,148 +134,6 @@ def _linearise(mapping, x: np.ndarray, y: np.ndarray,
             (along_y[:, 1] - here[:, 1]) / step)
 
 
-def secondary_to_reference(x: np.ndarray, y: np.ndarray,
-                           calibration: DualColorCalibration,
-                           origin: Tuple[float, float] = (0.0, 0.0)) -> np.ndarray:
-    """Positions on the secondary half, seen from the reference channel.
-
-    The one mapping `combine_peaks` pairs peaks with, and what a preview
-    draws the secondary peaks back-projected by -- so that when a projected
-    peak does not land on its partner, the offset on screen is the offset the
-    combiner works with, not a copy of it.  ``origin`` is the camera ROI's
-    corner on the chip, since the transformation is in chip coordinates.
-    """
-    x, y = np.asarray(x, float), np.asarray(y, float)
-    if not len(x):
-        return np.empty((0, 2))
-    ox, oy = origin
-    return calibration.to_reference(np.c_[x + ox, y + oy]) - (ox, oy)
-
-
-def region_counterparts(shapes, calibration: DualColorCalibration,
-                        origin: Tuple[float, float] = (0.0, 0.0)) -> list:
-    """Each shape of a fit region drawn in one half, mapped into the other.
-
-    A molecule is seen in both halves, and its two peaks are found apart and
-    paired afterwards (`combine_peaks`), so a region drawn on one half alone
-    would keep the peaks of that half and leave the other's to be fitted,
-    or not, on their own: an excluded bead still fitted from its partner,
-    the dim channel's lone peaks lost from an included cell.  With its
-    counterpart beside it, a shape means the same area of the sample in both.
-    A shape is in the half its centre is in, and is carried through the
-    registration point by point -- for a splitter, nearly a translation, so
-    a polygon stays one.
-    """
-    out = []
-    ox, oy = origin
-    for shape in shapes or ():
-        points = np.asarray(shape.get("points") or [], float)
-        if len(points) < 3:
-            continue
-        chip = points + (ox, oy)
-        centre = chip.mean(axis=0)
-        in_reference = bool(which_channel(centre[:1], centre[1:], calibration.geometry)[0])
-        mapped = (calibration.to_secondary(chip) if in_reference
-                  else calibration.to_reference(chip)) - (ox, oy)
-        out.append({**shape, "points": [[float(x), float(y)] for x, y in mapped]})
-    return out
-
-
-# ------------------------------------------------------------------ combining
-def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
-                  image_shape: Tuple[int, int], roisize: int,
-                  origin: Tuple[float, float] = (0.0, 0.0),
-                  match_pixels: float = MATCH_PIXELS):
-    """Candidates from both halves of the chip, merged into one list per frame.
-
-    Returns ``(reference, secondary, residual, counts)``: `Candidates` at
-    integer pixels in each channel, ``(n, 2, 2)`` sub-pixel residuals (dx, dy
-    per channel; zero for the reference), and how many peaks were merged and
-    how many candidates fell off the frame -- two peaks becoming one pair is
-    the normal case, not a loss, and the statistics must not confuse them.
-
-    The steps are ``PeakCombiner``'s, in its order:
-
-    1. split the maxima by which half of the chip they are on;
-    2. map the secondary ones into reference coordinates;
-    3. match within ``match_pixels``; merge a matched pair as a mean weighted
-       by ``sqrt(photons)`` -- inverse-variance on the position, and what the
-       4Pi branch of ``PeakCombiner`` uses (the two-channel branch squares the
-       photons instead, with a comment in the SMAP source questioning it);
-    4. the combined list is *every* candidate: matched pairs, and the peaks
-       only one channel saw;
-    5. round the reference position to a pixel, map that rounded position into
-       the secondary channel, round again, and keep the remainder as the
-       sub-pixel offset the fitter is given.
-    """
-    geometry = calibration.geometry
-    height, width = image_shape
-    half = (roisize - 1) // 2
-    ox, oy = origin
-
-    is_reference = which_channel(candidates.x + ox, candidates.y + oy, geometry)
-    frames, xs, ys, values = [], [], [], []
-    matched = 0
-
-    for frame in np.unique(candidates.frame):
-        on_frame = candidates.frame == frame
-        ref = candidates[on_frame & is_reference]
-        other = candidates[on_frame & ~is_reference]
-        # the secondary peaks, seen from the reference channel
-        mapped = secondary_to_reference(other.x, other.y, calibration, origin)
-        here = np.c_[ref.x, ref.y].astype(float)
-
-        weight_ref = np.sqrt(np.maximum(ref.value, 0.0))
-        weight_other = np.sqrt(np.maximum(other.value, 0.0))
-        a, b = _match(here, mapped, match_pixels)
-        merged = ((here[a] * weight_ref[a, None] + mapped[b] * weight_other[b, None])
-                  / np.maximum(weight_ref[a] + weight_other[b], 1e-12)[:, None])
-        matched += len(a)
-        lone_ref = np.setdiff1d(np.arange(len(here)), a)
-        lone_other = np.setdiff1d(np.arange(len(mapped)), b)
-
-        positions = np.vstack([here[lone_ref], mapped[lone_other], merged])
-        strength = np.concatenate([ref.value[lone_ref], other.value[lone_other],
-                                   ref.value[a] + other.value[b]])
-        frames.append(np.full(len(positions), frame, np.int64))
-        xs.append(positions[:, 0])
-        ys.append(positions[:, 1])
-        values.append(strength)
-
-    if not frames:
-        empty = Candidates.empty()
-        return empty, empty, np.empty((0, 2, 2)), {"matched": 0, "dropped": 0}
-
-    frame = np.concatenate(frames)
-    x_ref = np.rint(np.concatenate(xs))
-    y_ref = np.rint(np.concatenate(ys))
-    value = np.concatenate(values).astype(np.float32)
-
-    # the rounded reference pixel, mapped forward: where the partner ROI goes
-    exact = calibration.to_secondary(np.c_[x_ref + ox, y_ref + oy]) - (ox, oy)
-    x_sec, y_sec = np.rint(exact[:, 0]), np.rint(exact[:, 1])
-    residual = np.zeros((len(frame), 2, 2))
-    residual[:, 1, 0] = exact[:, 0] - x_sec
-    residual[:, 1, 1] = exact[:, 1] - y_sec
-
-    # both ROIs have to lie inside the frame; a border candidate is dropped, as
-    # `cut_rois` drops one rather than shifting it inward and biasing the fit
-    inside = np.ones(len(frame), bool)
-    for cx, cy in ((x_ref, y_ref), (x_sec, y_sec)):
-        inside &= ((cx >= half) & (cx < width - half)
-                   & (cy >= half) & (cy < height - half))
-    # and each ROI must stay on its own half, or the two would overlap
-    inside &= which_channel(x_ref + ox, y_ref + oy, geometry)
-    inside &= ~which_channel(x_sec + ox, y_sec + oy, geometry)
-
-    def picked(x, y):
-        return Candidates(frame[inside], x[inside].astype(np.int32),
-                          y[inside].astype(np.int32), value[inside])
-
-    counts = {"matched": int(matched), "dropped": int((~inside).sum())}
-    return picked(x_ref, y_ref), picked(x_sec, y_sec), residual[inside], counts
-
-
 def _match(a: np.ndarray, b: np.ndarray, tolerance: float):
     """Mutually nearest pairs within ``tolerance`` -- SMAP's ``matchlocs``."""
     if not len(a) or not len(b):
@@ -292,97 +144,7 @@ def _match(a: np.ndarray, b: np.ndarray, tolerance: float):
     return np.flatnonzero(take), nearest[take]
 
 
-# -------------------------------------------------------------------- cutting
-def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarray,
-               calibration: DualColorCalibration,
-               origin: Tuple[float, float] = (0.0, 0.0),
-               photon_ratio: Optional[float] = None, *,
-               roisize: int) -> np.ndarray:
-    """The ``(n, 2, 2, 5)`` link the global fitter takes.
-
-    The fitter evaluates each channel at ``factor * global + offset``, in that
-    channel's own ROI pixel coordinates.  The factors are the local scale of
-    the transformation for x and y, and for the photon number the splitter's
-    photon ratio over the split the secondary's PSF already carries -- one,
-    for a spline pair and no ratio given -- so that a shared photon number is
-    spread over the channels as the ratio says (`_GlobalPSF.unpack` reports
-    the total).  Everything else is offset 0, factor 1: the two
-    calibrations are checked on load to share one z grid, so z needs neither.
-
-    The x and y offsets are the sub-pixel residual *plus* ``(1 - factor) *
-    half``: the scale acts about the ROI centre, where both ROIs were cut, not
-    about the ROI's corner.  For a splitter that is nearly a translation the
-    term is a hundredth of a pixel; for a *mirrored* splitter the factor is -1
-    and without it the partner channel is evaluated at a negative coordinate,
-    outside its ROI -- its photons fit to nothing and the colour is lost.
-    """
-    n = len(reference)
-    link = np.zeros((n, 2, 2, 5), np.float32)
-    link[:, 1] = 1.0                                   # factors default to one
-    link[:, 0, :, 0] = residual[:, :, 0]               # x offsets
-    link[:, 0, :, 1] = residual[:, :, 1]               # y offsets
-
-    ox, oy = origin
-    fx, fy = _linearise(calibration.to_secondary,
-                        reference.x + ox, reference.y + oy)
-    link[:, 1, 1, 0] = fx
-    link[:, 1, 1, 1] = fy
-    half = (int(roisize) - 1) / 2.0
-    link[:, 0, 1, 0] += (1.0 - fx) * half
-    link[:, 0, 1, 1] += (1.0 - fy) * half
-    # The factor is on the secondary's *model*, and a dual bead calibration's
-    # secondary spline already carries the beads' split
-    # (`GlobalSplinePSF.photon_scales`): multiplying by the ratio again
-    # counted it twice.  So a ratio given is divided by the one the splines
-    # carry, and none given means theirs -- a factor of one.  The beads'
-    # measured ratio is the fallback only for a registration alone (the 2D
-    # fitter's), which has no PSF to carry one; it reads a few per cent high
-    # against the splines' (0.274 for 0.252 at a fifth of the light).
-    scale = 1.0
-    if hasattr(calibration, "secondary"):
-        from .psf import photon_scales
-        scale = float(photon_scales((calibration.main, calibration.secondary))[1])
-        if photon_ratio is None:
-            photon_ratio = scale
-    if photon_ratio is None:
-        photon_ratio = calibration.parameters.get(
-            "secondary_main_brightness_ratio", 1.0)
-    link[:, 1, 1, 2] = photon_ratio / scale
-    return link
-
-
-def cut_paired_rois(photons: np.ndarray, reference: Candidates, secondary: Candidates,
-                    residual: np.ndarray, roisize: int,
-                    calibration: DualColorCalibration, first_frame: int = 0,
-                    origin: Tuple[float, float] = (0.0, 0.0),
-                    photon_ratio: Optional[float] = None) -> PairedROIs:
-    """Cut the pair of ROIs for every candidate out of the same split frame.
-
-    No resampling: each ROI is taken at its own integer pixel and the
-    remainder rides along in the link.
-    """
-    from .fit_rois import _block_index
-
-    photons = np.asarray(photons, np.float32)
-    if photons.ndim == 2:
-        photons = photons[None]
-    half = (roisize - 1) // 2
-    span = np.arange(-half, half + 1)
-    index = _block_index(reference.frame, first_frame, len(photons))
-
-    cut = []
-    for channel in (reference, secondary):
-        rows = channel.y[:, None] + span
-        cols = channel.x[:, None] + span
-        cut.append(photons[index[:, None, None], rows[:, :, None], cols[:, None, :]])
-    images = np.ascontiguousarray(np.stack(cut, axis=1), np.float32)
-
-    link = build_link(reference, secondary, residual, calibration, origin, photon_ratio,
-                      roisize=roisize)
-    return PairedROIs(images, link, reference, roisize, residual)
-
-
-# --------------------------------------------------------------------- driving
+# ------------------------------------------------------------------ the table
 def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizations":
     """Raw global-fit output as a localization table, in camera pixels.
 
@@ -457,131 +219,6 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
             cols[f"dz_nm_ch{channel}"] = p[f"z_nm_ch{channel}"] - p["z_nm_ch0"]
     add_xy_err(cols)
     return Localizations({k: np.asarray(v) for k, v in cols.items()}, {})
-
-
-@dataclass
-class DualChannelEngine:
-    """`LocalizationEngine` for a split frame: two ROIs per candidate, one fit.
-
-    Frames go in whole -- both halves at once, as the camera delivers them --
-    because that is how the peaks are found and combined.
-    """
-
-    camera: "CameraMetadata"
-    finder: "PeakFinder"
-    model: "PSFModel"          # GlobalSplinePSF or GlobalGaussianPSF
-    calibration: DualColorCalibration
-    settings: "FitSettings" = None
-    photon_ratio: Optional[float] = None
-
-    _pairs: List[PairedROIs] = field(default_factory=list, init=False)
-    _buffered: int = field(default=0, init=False)
-    _checked: bool = field(default=False, init=False)
-    stats: dict = field(default_factory=dict, init=False)
-
-    def __post_init__(self):
-        from .pipeline import FitSettings
-        if self.settings is None:
-            self.settings = FitSettings()
-        self.stats = {"frames": 0, "candidates": 0, "pairs": 0, "matched": 0,
-                      "localizations": 0, "dropped_at_border": 0, "rejected": 0,
-                      "detect_seconds": 0.0, "fit_seconds": 0.0}
-
-    def _check_frames(self, shape) -> None:
-        """Is this the camera the transformation was measured on?
-
-        Once, on the first frames.  The calibration's own check
-        (`calibrate.dual.check_geometry`) -- a ROI-local one must see the bead
-        images' shape, a full-chip one a ROI of the frame's size -- which the
-        fitters never called, so a movie from another camera ROI was fitted
-        with a registration that did not belong to it.  A camera without a
-        ROI is taken to sit at the chip's corner, which is what the offsets
-        of the fit assume anyway -- said, for a full-chip transformation,
-        since the camera settings offer no ROI to give instead.
-        """
-        self._checked = True
-        validate = getattr(self.calibration, "validate_image", None)
-        if validate is None:
-            return
-        import warnings
-        roi = self.camera.roi
-        if roi is None:
-            roi = (0, 0, int(shape[-1]), int(shape[-2]))
-            if getattr(self.calibration, "geometry", {}).get(
-                    "coordinate_system") == "camera-chip":
-                warnings.warn("the movie has no camera ROI: a full-chip "
-                              "transformation is applied as if the frames "
-                              "began at the chip's corner", stacklevel=3)
-        with warnings.catch_warnings():
-            # that a ROI-local shape cannot prove the camera position is true
-            # and nothing to act on here -- the 2C plugins make exactly such a
-            # registration from the movie they then fit
-            warnings.filterwarnings("ignore", message="ROI-local calibration")
-            validate(shape, tuple(int(v) for v in roi))
-
-    def push(self, frames: np.ndarray, first_frame: int = 0):
-        import time
-        from .camera import to_photons
-
-        if not self._checked:
-            self._check_frames(np.shape(frames))
-        started = time.perf_counter()
-        photons = to_photons(frames, self.camera) / self.camera.excess_noise
-        candidates, _ = self.finder(photons, first_frame=first_frame,
-                                    n_threads=self.settings.n_threads)
-        reference, secondary, residual, counts = combine_peaks(
-            candidates, self.calibration, photons.shape[-2:], self.settings.roisize,
-            origin=self.camera.roi_offset)
-        pairs = cut_paired_rois(photons, reference, secondary, residual,
-                                self.settings.roisize, self.calibration,
-                                first_frame=first_frame,
-                                origin=self.camera.roi_offset,
-                                photon_ratio=self.photon_ratio)
-        self.stats["detect_seconds"] += time.perf_counter() - started
-        self.stats["frames"] += len(photons)
-        self.stats["candidates"] += len(candidates)
-        self.stats["matched"] += counts["matched"]      # seen in both channels
-        self.stats["dropped_at_border"] += counts["dropped"]
-
-        if len(pairs):
-            self._pairs.append(pairs)
-            self._buffered += len(pairs)
-        if self._buffered >= self.settings.block_rois():
-            return self.flush()
-        return None
-
-    def flush(self):
-        import time
-        from .locs import valid, to_nm
-
-        if not self._pairs:
-            return None
-        pairs = _concat_pairs(self._pairs)
-        self._pairs, self._buffered = [], 0
-
-        from .pipeline import with_readout, without_readout
-        started = time.perf_counter()
-        variance = self.camera.readout_variance
-        result = self.model.fit(with_readout(pairs.images, variance), pairs.link,
-                                iterations=self.settings.iterations,
-                                n_threads=self.settings.n_threads)
-        without_readout(result, self.model, variance)
-        self.stats["fit_seconds"] += time.perf_counter() - started
-        self.stats["pairs"] += len(pairs)
-
-        locs = paired_to_localizations(result, pairs, self.model, self.camera)
-        keep = valid(locs, self.settings.max_fit_distance)
-        self.stats["rejected"] += int((~keep).sum())
-        locs = locs[keep]
-        self.stats["localizations"] += len(locs)
-
-        return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
-
-    def __str__(self) -> str:
-        s = self.stats
-        return (f"{s['localizations']} localizations from {s['frames']} split "
-                f"frames ({s['detect_seconds']:.1f} s detection and pairing, "
-                f"{s['fit_seconds']:.1f} s fitting)")
 
 
 def _concat_pairs(parts: List[PairedROIs]) -> PairedROIs:

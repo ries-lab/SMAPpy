@@ -406,22 +406,19 @@ def test_the_ratio_and_the_photons_are_the_dyes_not_the_beads(dim_secondary):
 def test_linked_photons_are_the_total_with_the_split_from_the_beads(dim_secondary):
     """Biplane: one photon number, the split taken from the beads.  The PSFs
     are normalised together, so that number is the emitter's total -- and
-    `build_link` once multiplied the secondary by the beads' ratio on top of
-    a spline that already carried it."""
-    from smappy.dualfit import build_link
+    the link once multiplied the secondary by the beads' ratio on top of a
+    spline that already carried it."""
+    from smappy.plugins.fit import DualSplineFit, DualSplineFitSettings
     from smappy.psf import GlobalSplinePSF
     cal = dim_secondary
     model = GlobalSplinePSF((cal.main, cal.secondary), (True,)*5)
-    class spot:                          # where the candidates were: any
-        x = y = np.full(400, 40)
-
-        def __len__(self):
-            return 400
-    spot = spot()
-    link = build_link(spot, spot, np.zeros((400, 2, 2)), cal, roisize=13)
-    link[:, 0] = 0.0                     # the ROIs are cut on the spot
-    link[:, 1, :, :2] = 1.0
-    assert np.allclose(link[:, 1, 1, 2], 1.0)       # the split is in the PSFs
+    plugin = DualSplineFit()
+    plugin.registration = lambda settings: cal
+    factors = plugin.photon_factors(DualSplineFitSettings())
+    assert factors == pytest.approx((1.0, 1.0))      # the split is in the PSFs
+    link = np.zeros((400, 2, 2, 5), np.float32)      # the ROIs are cut on the spot
+    link[:, 1] = 1.0
+    link[:, 1, :, 2] = factors
     values = model.unpack(model.fit(_molecules(0.2), link), link)
     assert np.median(values['photons']) == pytest.approx(2000, rel=0.05)
     assert np.all(values['ratio'] == 0)

@@ -1,12 +1,11 @@
 """One emitter seen in several channels of a frame, fitted as one: the engine.
 
-`smappy.dualfit` does this for two halves of a chip; this is the same fit
-for any `ChannelLayout` -- the four phase images of a 4Pi microscope, in
-rectangles of one chip or in separate files side by side -- and the same
-conventions: every channel's ROI is cut at its own integer pixel, nothing is
-resampled for the fit, and the sub-pixel remainder of where the layout's map
-puts the molecule rides in the fitter's link, with the map's local scale as
-the link's factor (`dualfit.build_link`, whose reasons hold here unchanged).
+For any `ChannelLayout` -- the two halves of a two-colour splitter, the four
+phase images of a 4Pi microscope, in rectangles of one chip or in separate
+files side by side -- with one set of conventions: every channel's ROI is cut
+at its own integer pixel, nothing is resampled for the fit, and the sub-pixel
+remainder of where the layout's map puts the molecule rides in the fitter's
+link, with the map's local scale as the link's factor (`build_link`).
 
 What differs is where the candidates come from.  A 4Pi molecule's four
 images differ only by the interference, which shifts its light between them,
@@ -20,8 +19,8 @@ per molecule, nothing to pair.  SMAP found peaks per channel and merged them
 Two colours are the other way round: each dye is bright in one channel and
 may be all but dark in the other, so a sum would add one channel's noise to
 the other's signal.  Their molecules are found in each channel with its own
-cutoff and paired (`paired_candidates`), as `dualfit` did on the halves of a
-chip.
+cutoff and paired (`paired_candidates`), as SMAP's ``PeakCombiner`` did on
+the halves of a chip.
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ def paired_candidates(found: List[Candidates], layout: ChannelLayout,
                       match_px: float = MATCH_PIXELS) -> Tuple[Candidates, int]:
     """Two channels' peaks as one list on channel 0's pixels, and how many were pairs.
 
-    `dualfit.combine_peaks`' steps, SMAP's ``PeakCombiner``'s, on the channels' own pixels: the second
+    SMAP's ``PeakCombiner``'s steps, on the channels' own pixels: the second
     channel's peaks put on channel 0 by the map; mutual nearest neighbours within ``match_px`` merged
     as a mean weighted by the square root of their values, their value the sum; every peak only one
     channel saw kept too -- a lone peak in channel 0, the lone ones of channel 1, then the pairs, per
@@ -138,12 +137,21 @@ def channel_candidates(candidates: Candidates, layout: ChannelLayout, roisize: i
 
 def build_link(candidates: Candidates, residual: np.ndarray, layout: ChannelLayout,
                roisize: int, n_parameters: int, photon_factors=None) -> np.ndarray:
-    """The ``(n, 2, C, P)`` link: x and y offset by each channel's remainder
-    and scaled by the map's local factor about the ROI centre, as in
-    `dualfit.build_link`; every other parameter offset 0, factor 1 -- the
-    channels' shares of the light are in their models -- but the photons',
-    where ``photon_factors`` gives one per channel: a two-colour splitter's
-    ratio, for a photon number shared by the channels (`dualfit.build_link`)."""
+    """The ``(n, 2, C, P)`` link the global fitter takes: each channel is
+    evaluated at ``factor * global + offset`` in its own ROI's pixels.
+
+    x and y are offset by each channel's sub-pixel remainder and scaled by the
+    map's local factor (`channels.local_scale`) -- *about the ROI centre*,
+    where every channel's ROI was cut, not about its corner: hence the
+    ``(1 - factor) * half`` added to the offset.  For a splitter that is
+    nearly a translation that term is a hundredth of a pixel; along a mirror
+    the factor is -1, and without it the partner channel was evaluated
+    outside its ROI -- its photons fitted to nothing and the colour was lost.
+    Every other parameter is offset 0, factor 1 -- the channels' shares of
+    the light are in their models -- but the photons', where
+    ``photon_factors`` gives one per channel: a two-colour splitter's ratio,
+    for a photon number shared by the channels
+    (`plugins.fit._TwoChannelFit.photon_factors`)."""
     n, C = len(candidates), layout.n_channels
     link = np.zeros((n, 2, C, n_parameters), np.float32)
     link[:, 1] = 1.0

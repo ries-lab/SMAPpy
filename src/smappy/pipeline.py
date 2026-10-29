@@ -271,9 +271,9 @@ def drive(engine, frames: Iterable[Tuple[int, np.ndarray]],
           flush_seconds: Optional[float] = None) -> Localizations:
     """Push blocks through anything with ``push`` and ``flush``.
 
-    Split out of `fit_stack` so that the dual-channel engine
-    (`smappy.dualfit.DualChannelEngine`), which buffers pairs of ROIs rather
-    than single ones, is driven by the same loop.
+    Split out of `fit_stack` so that the multi-channel engine
+    (`smappy.multichannel.MultiChannelEngine`), which buffers one ROI per
+    channel rather than single ones, is driven by the same loop.
 
     ``flush_seconds`` fits what is buffered at least that often, for a live
     source: the buffer holds thousands of ROIs, and a sparse acquisition would

@@ -831,10 +831,23 @@ channel, with frames paired between them.  Step 1 is the first, and was decided 
   channel's edge -- the boxes `dualfit` let straddle the seam.  None was gained.
 
 A movie from a camera ROI that cuts into both halves gives the whole frame's positions
-(`test_a_movie_from_a_smaller_camera_roi_is_fitted_where_the_calibrations_halves_have_it`).  Still on the
-old split path, to retire next: the movie registration's plain fit (`_TwoChannelFit._calibrate`, a
-`PeakFinder.split`), `dualfit.DualChannelEngine` and `combine_peaks` (no plugin uses them now; the
-pupil calibration's `_pair_link` still uses `dualfit.build_link`), `region_counterparts`.
+(`test_a_movie_from_a_smaller_camera_roi_is_fitted_where_the_calibrations_halves_have_it`).
+
+**The old split path, retired (2026-10-29).**  `dualfit.DualChannelEngine`, `combine_peaks`,
+`cut_paired_rois`, `build_link` and `region_counterparts` are gone, with the single-channel fitters'
+hooks for them (`back_projected`, `region_counterparts`, a split cutoff in the preview).  Their tests
+run on `MultiChannelEngine` now, with the same tolerances: z, the colour ratio, linked photons, the
+unlinked partner's offsets, a mirrored splitter.  The pupil calibration's fit quality (`_pair_link`)
+builds its link itself, identical to the old one (checked plain and mirrored).  `dualfit` keeps what
+both paths shared: `LINK_XYZ`, `MATCH_PIXELS` and `_match`, the geometry (`which_channel`,
+`split_axis`), `PairedROIs` and `paired_to_localizations`.
+
+Two things stay on the chip by design, not as leftovers.  **The movie registration**
+(`_TwoChannelFit._calibrate`, *calibrate from this movie*) fits the whole frame with a plain Gaussian
+and registers the halves from that: it measures the layout, so there is none yet to cut the frame by,
+and it thresholds each half on its own (`PeakFinder.split`) at a provisional seam.  **The registration's
+geometry** (`which_channel`, `split_position`) is how a `_2ct.h5` records which half is which, read when
+the layout is built (`chip_halves`).
 
 ## 10. Real data: 4Pi-SMS Nup96 in DCIMG (2026-10-27)
 

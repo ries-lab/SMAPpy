@@ -96,7 +96,7 @@ def two_colour(n, ratio=0.35, shift=(0.4, -0.25), widths=(1.1, 1.4), sz=13,
         for _ in range(n)])
     link = link_array(n, 2)
     link[:, 0, 1, X] = shift[0]          # the sub-pixel remainder of the
-    link[:, 0, 1, Y] = shift[1]          # transformed position, as `build_link`
+    link[:, 0, 1, Y] = shift[1]          # transformed position, as `multichannel.build_link`
     return np.ascontiguousarray(rois, np.float32), link, (x, y)
 
 

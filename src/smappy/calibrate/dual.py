@@ -574,9 +574,9 @@ class _ChipWarp:
 class _Mapping:
     """Both directions between the channels, whatever describes them.
 
-    `dualfit` asks only these two questions, so that adding a model here costs
-    nothing there: `combine_peaks` used to invert a 3x3 itself, which quietly
-    made the projective map the only one possible.
+    The fitters ask only these two questions (through `layout`), so that
+    adding a model here costs nothing there: the old pairing inverted a 3x3
+    itself, which quietly made the projective map the only one possible.
     """
 
     def to_reference(self, secondary_xy):

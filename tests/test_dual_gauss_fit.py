@@ -68,12 +68,24 @@ def camera():
                           em_on=False, roi=(0, 0, SHAPE[1], SHAPE[0]))
 
 
+def paired_engine(finder, model, t, settings, photon_factors=None):
+    """The fit as Gaussian 2D 2C runs it: `MultiChannelEngine` on the
+    registration's two channels, the peaks of each paired, fed whole split
+    frames cut into the channels first, as `ChannelSource` does."""
+    from smappy.multichannel import MultiChannelEngine
+    layout = t.layout()
+    engine = MultiChannelEngine(camera(), finder, model, layout, settings,
+                                detection="pairs", photon_factors=photon_factors)
+    push = engine.push
+    engine.push = lambda frames, first_frame=0: push(layout.cut(np.asarray(frames)), first_frame)
+    return engine
+
+
 # ------------------------------------------------------------- the engine
 def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
-    """`DualChannelEngine` with a Gaussian model instead of a spline: the same
+    """The paired fit with a Gaussian model instead of a spline: the same
     pairing, the same link, a width per channel instead of a z."""
     from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.dualfit import DualChannelEngine
 
     rng = np.random.default_rng(4)
     t = transform()
@@ -83,8 +95,7 @@ def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
 
     finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0))
     model = GlobalGaussianPSF(sigma=1.2)
-    engine = DualChannelEngine(camera(), finder, model, t,
-                               FitSettings(roisize=13))
+    engine = paired_engine(finder, model, t, FitSettings(roisize=13))
     engine.push(raw, first_frame=0)
     locs = engine.flush()
 
@@ -122,7 +133,6 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     """Unlinking x and y is how to check the transformation, and the partner's
     position used to be dropped: the table had the reference's alone."""
     from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.dualfit import DualChannelEngine
 
     rng = np.random.default_rng(6)
     frames, _ = movie(30, rng, transform())
@@ -131,8 +141,7 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
 
     def fit(t, shared):
         model = GlobalGaussianPSF(sigma=1.2, shared=shared)
-        engine = DualChannelEngine(camera(), finder, model, t,
-                                   FitSettings(roisize=13))
+        engine = paired_engine(finder, model, t, FitSettings(roisize=13))
         engine.push(raw, first_frame=0)
         return engine.flush()
 
@@ -157,15 +166,13 @@ def test_linked_photons_are_the_emitters_total():
     """One photon number for both halves, the split typed in: the number
     reported is the total over the halves, not the main half's share."""
     from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.dualfit import DualChannelEngine
 
     rng = np.random.default_rng(8)
     frames, _ = movie(40, rng, transform(), ratio=0.35, photons=6000.)
-    engine = DualChannelEngine(
-        camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
+    engine = paired_engine(
+        PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
         GlobalGaussianPSF(sigma=1.2, shared=(True, True, True, False, False)),
-        transform(), FitSettings(roisize=13),
-        photon_ratio=0.35 / 0.65)
+        transform(), FitSettings(roisize=13), photon_factors=(1.0, 0.35 / 0.65))
     engine.push((frames + 100).astype(np.uint16), first_frame=0)
     locs = engine.flush()
     assert np.median(locs["photons"]) == pytest.approx(6000, rel=0.05)
@@ -173,17 +180,16 @@ def test_linked_photons_are_the_emitters_total():
 
 
 def test_frames_from_another_camera_roi_are_refused():
-    """The geometry check existed and neither fitter called it."""
-    from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.dualfit import DualChannelEngine
+    """A registration in the bead image's own pixels cannot be placed on a
+    movie of another size: the channels are not cut at all."""
+    from smappy.plugins.fit import DualGaussianFit
 
     t = transform()
     t.geometry["coordinate_system"] = "roi-local"
-    engine = DualChannelEngine(camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
-                               GlobalGaussianPSF(sigma=1.2), t,
-                               FitSettings(roisize=13))
+    plugin = DualGaussianFit()
+    plugin.registration = lambda settings: t
     with pytest.raises(ValueError, match="original bead image"):
-        engine.push(np.zeros((2, SHAPE[0] + 8, SHAPE[1]), np.uint16) + 100)
+        plugin.channel_layout(None, np.zeros((2, SHAPE[0] + 8, SHAPE[1])), camera())
 
 
 # -------------------------------------------------------------- the plugin

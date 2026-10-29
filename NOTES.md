@@ -983,10 +983,11 @@ This works only because of a coincidence worth stating: `GaussFree` and
 `CSpline` both have five parameters, with `(x, y, photons, background)` first
 and one model-specific parameter fifth -- z for the spline, sigma for the
 Gaussian.  The link array is therefore the same shape for both, and
-`dualfit.build_link` leaves that fifth slot at offset 0, factor 1 in either
+the link (`multichannel.build_link`; `dualfit.build_link` before the channel
+layer) leaves that fifth slot at offset 0, factor 1 in either
 case: correct for z because the channels are checked to share a z grid, and
 correct for sigma because sigma is free per channel and the link is never
-consulted.  `combine_peaks`, `cut_paired_rois` and `build_link` are shared
+consulted.  The pairing, the cutting and the link are shared
 verbatim; `paired_to_localizations` is the single place the two part.
 
 **Sigma free per channel.**  The two halves of a ratiometric splitter see
@@ -1456,7 +1457,7 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   would make the blur the optics' own, at four times the pixels per fit.
 * **The dual fit quality is Spline 3D 2C's global fit** (`pupil.fit_quality`):
   one x, y and z per pair through the learnt transform, the photons free per
-  channel, the link built by `dualfit.build_link` -- as the bead average's
+  channel, the link built as `multichannel.build_link` builds it -- as the bead average's
   `fit_paired_bead_diagnostics` does, and as the data will be fitted.  Each
   channel on its own half of the calibration never tried the transform, and
   on Zenodo showed the dim channel wandering by 32 nm rms where the pair's

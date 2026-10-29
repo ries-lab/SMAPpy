@@ -882,20 +882,23 @@ def _centred(error, bead_id, valid) -> np.ndarray:
 
 
 def _pair_link(calibration, roi_xy, roisize: int) -> np.ndarray:
-    """The global fit's link [E, 2, 2, 5] for each pair's two ROIs, as the dual fitter builds it
-    (`dualfit.build_link`): each ROI was cut around its own channel's detection (`dual_rois`), so the
-    secondary's offset is where the transform puts the main ROI's centre, less its own centre."""
-    from ..detect import Candidates
-    from ..dualfit import build_link
+    """The global fit's link [E, 2, 2, 5] for each pair's two ROIs, as the two-colour fitters build it
+    (`multichannel.build_link`): each ROI was cut around its own channel's detection (`dual_rois`), on
+    the chip, so the secondary's offset is where the transform puts the main ROI's centre, less its own
+    centre, and its factor the transform's local scale -- -1 along a mirror -- acting about the ROI's
+    centre.  The photon factor is one: the secondary spline already carries the beads' split."""
+    from ..dualfit import _linearise
     main, second = np.asarray(roi_xy[:, 0], float), np.asarray(roi_xy[:, 1], float)
-    exact = calibration.to_secondary(main)
-    residual = np.zeros((len(main), 2, 2))
-    residual[:, 1] = exact - second
-
-    def candidates(xy):
-        return Candidates(np.zeros(len(xy), np.int64), xy[:, 0].astype(np.int32), xy[:, 1].astype(np.int32),
-                          np.ones(len(xy), np.float32))
-    return build_link(candidates(main), candidates(second), residual, calibration, roisize=roisize)
+    link = np.zeros((len(main), 2, 2, 5), np.float32)
+    link[:, 1] = 1.0
+    link[:, 0, 1, :2] = calibration.to_secondary(main) - second
+    at = np.trunc(main)                                         # the scale is read at the ROI's pixel
+    fx, fy = _linearise(calibration.to_secondary, at[:, 0], at[:, 1])
+    half = (int(roisize) - 1) / 2.0
+    link[:, 1, 1, 0], link[:, 1, 1, 1] = fx, fy
+    link[:, 0, 1, 0] += (1.0 - fx) * half
+    link[:, 0, 1, 1] += (1.0 - fy) * half
+    return link
 
 
 def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:

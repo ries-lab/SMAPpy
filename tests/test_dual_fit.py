@@ -10,11 +10,12 @@ import pytest
 from smappy.calibrate.core import spline_coefficients
 from smappy.calibrate.dual import DualColorCalibration
 from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-from smappy.dualfit import (DualChannelEngine, LINK_XYZ, combine_peaks,
-                            cut_paired_rois, which_channel)
+from smappy.dualfit import LINK_XYZ, which_channel
 from smappy.io.calibration import SplineCalibration, evaluate_spline
 from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
+from smappy.multichannel import (MultiChannelEngine, channel_candidates,
+                                 paired_candidates)
 from smappy.pipeline import FitSettings
 from smappy.plugins import Context
 from smappy.psf import GlobalSplinePSF
@@ -77,6 +78,39 @@ def finder():
     return PeakFinder(DoGFilter(1.2), AbsoluteCutoff(20.0))
 
 
+class OnTheLayer:
+    """The two-colour fit as the fitters run it -- `MultiChannelEngine` on the
+    registration's `layout`, the peaks of each channel paired -- fed whole
+    split frames, cut into the two channels first as `ChannelSource` does."""
+
+    def __init__(self, camera, finder, model, registration, settings,
+                 photon_factors=None):
+        self.layout = registration.layout()
+        self.engine = MultiChannelEngine(camera, finder, model, self.layout, settings,
+                                         detection="pairs",
+                                         photon_factors=photon_factors)
+        self.stats = self.engine.stats
+
+    def push(self, frames, first_frame=0):
+        return self.engine.push(self.layout.cut(np.asarray(frames)), first_frame)
+
+    def flush(self):
+        return self.engine.flush()
+
+
+def global_model(cal, shared=LINK_XYZ):
+    """The pair of PSFs as the channels see them, a mirrored half flipped back."""
+    return GlobalSplinePSF(tuple(cal.layer_splines()), shared)
+
+
+def peaks_of(frame, cal):
+    """Each channel's own peaks, found alone, and the layout they are on."""
+    layout = cal.layout()
+    block = layout.cut(frame[None])
+    return [finder()(np.ascontiguousarray(block[:, c, :h, :w]))[0]
+            for c, (w, h) in enumerate(layout.sizes)], layout
+
+
 # ------------------------------------------------------------------ geometry
 def test_a_position_is_assigned_to_the_half_of_the_chip_it_is_on():
     geometry = dual_calibration().geometry
@@ -101,18 +135,18 @@ def test_a_molecule_both_channels_saw_becomes_one_candidate_with_two_rois():
     truth = [(20.0, 12.0), (44.0, 20.0)]
     frame = split_frame(truth, 20.0, 6000., 0.45, 30., rng, cal)
 
-    candidates, _ = finder()(frame[None])
-    reference, secondary, residual, counts = combine_peaks(candidates, cal, SHAPE, 13)
+    found, layout = peaks_of(frame, cal)
+    reference, matched = paired_candidates(found, layout)
 
     assert len(reference) == len(truth)            # merged, not duplicated
-    assert counts == {"matched": len(truth), "dropped": 0}
+    assert matched == len(truth)
     order = np.argsort(reference.x)
     for got, (x, y) in zip(order, sorted(truth)):
         assert abs(reference.x[got] - x) <= 1 and abs(reference.y[got] - y) <= 1
-    # every reference ROI sits in the main half and every partner in the other
-    assert which_channel(reference.x, reference.y, cal.geometry).all()
-    assert not which_channel(secondary.x, secondary.y, cal.geometry).any()
-    # the reference channel carries no sub-pixel offset; the partner does
+    # every pair gets a ROI in both channels; the reference channel carries no
+    # sub-pixel offset, the partner does
+    _, residual, keep = channel_candidates(reference, layout, 13)
+    assert keep.all()
     assert np.allclose(residual[:, 0], 0)
     assert np.abs(residual[:, 1]).max() > 0.05
 
@@ -129,12 +163,12 @@ def test_a_molecule_only_one_channel_saw_is_still_fitted():
     frame[7:22, 17:32] += patch                    # main channel only
     frame = rng.poisson(frame).astype(np.float32)
 
-    candidates, _ = finder()(frame[None])
-    reference, secondary, _, counts = combine_peaks(candidates, cal, SHAPE, 13)
+    found, layout = peaks_of(frame, cal)
+    reference, matched = paired_candidates(found, layout)
 
-    assert len(reference) == 1 and counts["matched"] == 0      # nothing to pair with
+    assert len(reference) == 1 and matched == 0                # nothing to pair with
     assert abs(reference.x[0] - x) <= 1 and abs(reference.y[0] - y) <= 1
-    assert not which_channel(secondary.x, secondary.y, cal.geometry).any()
+    assert channel_candidates(reference, layout, 13)[2].all()  # its partner ROI is cut anyway
 
 
 def test_candidates_whose_partner_would_fall_off_the_frame_are_dropped():
@@ -142,19 +176,18 @@ def test_candidates_whose_partner_would_fall_off_the_frame_are_dropped():
     from smappy.detect import Candidates
     edge = Candidates(np.zeros(3, np.int64), np.array([2, 30, 62], np.int32),
                       np.array([2, 14, 30], np.int32), np.ones(3, np.float32))
-    reference, secondary, _, counts = combine_peaks(edge, cal, SHAPE, 13)
-    # only the middle one leaves room for a 13-pixel ROI in both halves
-    assert len(reference) == 1 and reference.x[0] == 30
-    assert counts["dropped"] == 2
+    _, _, keep = channel_candidates(edge, cal.layout(), 13)
+    # only the middle one leaves room for a 13-pixel ROI in both channels
+    assert keep.tolist() == [False, True, False]
 
 
 # ---------------------------------------------------------------------- fits
 def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     rng = np.random.default_rng(2)
     cal = dual_calibration(ratio=0.35)
-    model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
+    model = global_model(cal)
     settings = FitSettings(roisize=13)
-    engine = DualChannelEngine(camera(), finder(), model, cal, settings)
+    engine = OnTheLayer(camera(), finder(), model, cal, settings)
 
     truth, z_index, total = (25.0, 15.0), 26.0, 12000.
     frames = np.stack([split_frame([truth], z_index, total, 0.35, 30., rng, cal)
@@ -177,8 +210,8 @@ def test_the_two_colours_come_apart_in_the_ratio():
     the photon ratio, which only a free photon parameter can measure."""
     rng = np.random.default_rng(3)
     cal = dual_calibration()
-    model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
-    engine = DualChannelEngine(camera(), finder(), model, cal,
+    model = global_model(cal)
+    engine = OnTheLayer(camera(), finder(), model, cal,
                               FitSettings(roisize=13))
 
     ratios = []
@@ -203,8 +236,8 @@ def test_linking_the_photons_makes_the_ratio_meaningless_but_z_tighter():
 
     spread = {}
     for name, shared in (("xyz", LINK_XYZ), ("all", (True,) * 5)):
-        engine = DualChannelEngine(
-            camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), shared),
+        engine = OnTheLayer(
+            camera(), finder(), global_model(cal, shared),
             cal, FitSettings(roisize=13))
         engine.push(frames, 0)
         locs = engine.flush()
@@ -221,8 +254,8 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_in_x_y_and_z():
     cal = dual_calibration()
     frames = np.stack([split_frame([(25.0, 15.0)], 22.0, 12000., 0.5, 30., rng, cal)
                        for _ in range(60)])
-    engine = DualChannelEngine(
-        camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), (False,) * 5),
+    engine = OnTheLayer(
+        camera(), finder(), global_model(cal, (False,) * 5),
         cal, FitSettings(roisize=13))
     engine.push(frames, 0)
     locs = engine.flush()
@@ -257,8 +290,8 @@ def test_a_split_frame_runs_through_fit_stack_style_blocks():
     """Blocks are buffered and flushed like the single-channel engine's."""
     rng = np.random.default_rng(5)
     cal = dual_calibration()
-    engine = DualChannelEngine(
-        camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ),
+    engine = OnTheLayer(
+        camera(), finder(), global_model(cal),
         cal, FitSettings(roisize=13))
 
     total = 0
@@ -463,8 +496,8 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
     truth = [(25.0, 12.0), (42.0, 20.0)]
     frames = np.stack([split_frame(truth, 24.0, 9000., 0.3, 30., rng, cal)
                        for _ in range(30)])
-    model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
-    engine = DualChannelEngine(camera(), finder(), model, cal,
+    model = global_model(cal)
+    engine = OnTheLayer(camera(), finder(), model, cal,
                                FitSettings(roisize=13))
     engine.push(frames)
     locs = engine.flush()
@@ -522,27 +555,6 @@ def test_a_split_preview_reports_each_channels_own_cutoff(tmp_path):
         assert expected == pytest.approx(cutoff(values), rel=1e-6)
     assert second < 0.5 * first
     assert f"(cutoff {first:.3g})" in result.text and f"(cutoff {second:.3g})" in result.text
-
-
-def test_a_fit_region_drawn_on_one_half_applies_to_the_other_too():
-    from smappy.dualfit import region_counterparts
-    from smappy.plugins.fit import in_region
-    cal = dual_calibration()
-    box = {"kind": "exclude", "points": [[10, 10], [20, 10], [20, 20], [10, 20]]}
-    mirrored = region_counterparts([box], cal)
-    # the main half's box, where the secondary half sees the same sample
-    np.testing.assert_allclose(mirrored[0]["points"][0], [10 + 0.37, 10 + SPLIT - 0.21])
-    assert mirrored[0]["kind"] == "exclude"
-    # and one drawn on the secondary half comes back onto the main one
-    back = region_counterparts(mirrored, cal)
-    np.testing.assert_allclose(back[0]["points"], box["points"], atol=1e-9)
-    # a bead excluded on the main half is excluded in both: neither peak is fitted
-    x, y = np.array([15.0, 15.37, 40.0]), np.array([15.0, 15.0 + SPLIT - 0.21, 40.0])
-    assert in_region(x, y, [box]).tolist() == [False, True, True]
-    assert in_region(x, y, [box] + mirrored).tolist() == [False, False, True]
-    # with an offset camera ROI, shapes in the frame's pixels still land right
-    shifted = region_counterparts([box], cal, origin=(4.0, 6.0))
-    np.testing.assert_allclose(shifted[0]["points"], mirrored[0]["points"])
 
 
 def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from_the_movie(tmp_path, monkeypatch):

@@ -31,7 +31,7 @@ chip pixel of ROI c's centre (`Batch.roi_xy`),
     P = roi_xy[e, 0] + (x / px₀, y / py₀),     Q = H⁻¹ P,     (x_c, y_c) = (Q − roi_xy[e, c]) · (px_c, py_c).
 
 The transform is applied exactly, not linearised about the ROI centre as
-SMAPpy's fitter does (`dualfit.build_link`): it is cheap, and the fit is
+SMAPpy's fitter does (`multichannel.build_link`): it is cheap, and the fit is
 where the transform is refined.
 
 **Parameter names.**  The main channel keeps the single-channel names

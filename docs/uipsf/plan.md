@@ -542,7 +542,7 @@ Every calibration takes this path, so it is specified exactly and tested end to 
 4. **Two channels.**
    - Both channels are sampled on one z grid, the condition SMAPpy enforces.
    - The transform is SMAPpy's 3×3 projective map, secondary → main, in chip pixels.
-   - A biplane offset is in the PSFs, not the grid, so both splines share z, as `dualfit.build_link` assumes.
+   - A biplane offset is in the PSFs, not the grid, so both splines share z, as `multichannel.build_link` assumes.
 5. **Check, with SMAPpy's fitter.** SMAPpy's `validation.fit_bead_diagnostics` (*Calculate fit quality*) fits the beads with the real Spline 3D. The same ROIs are also fitted by uipsf's pupil-model localisation (§5.6), which needs no extra code. z and photon ratios must agree within the spline's interpolation error. A disagreement means the sampling or the spline is wrong, not the model.
 
 ## 7. SMAPpy integration
@@ -634,7 +634,7 @@ normalises them jointly with each channel's `photon_normalization`, as `positive
 calibration** (decided October 2026): SMAPpy saves the result with `save_dual_color_calibration`, so its
 global fitter reads a uipsf calibration as one of its own; `tests/uipsf_tests/test_smappy_dual.py` builds one that way
 from a two-channel model and recovers x, y (0.005 px), z (3 nm) and the colour ratio with
-`DualChannelEngine`.  Bead rejection stays per pair, as SMAPpy's.
+the two-colour engine (`MultiChannelEngine`).  Bead rejection stays per pair, as SMAPpy's.
 
 **The v1 bridge stays** for what v2 does not do yet (blinking data, in situ, voxel models) and is
 retired after M5, its tests becoming v2's acceptance tests. Found in passing: its plugin's `run`

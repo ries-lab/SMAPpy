@@ -303,8 +303,8 @@ ratiometric splitter see different wavelengths and rarely share a focus, and
 forcing one width on both would bias the photon split, which is the very thing
 being measured.
 
-Beyond that the two workflows share everything: `combine_peaks`, the fit box
-cutting and the link array are the same code, because the Gaussian's fifth
+Beyond that the two workflows share everything: the pairing, the fit box
+cutting and the link array are the same code (`multichannel`), because the Gaussian's fifth
 parameter (sigma) sits in the same slot as the spline's (z) and the link leaves
 that slot alone in both cases.  See `docs/dual_color_calibration.md` for the
 bead route, which produces a transformation this fit will also accept.

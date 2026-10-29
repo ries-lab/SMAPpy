@@ -229,7 +229,7 @@ def fit_paired_bead_diagnostics(result, bead_ids=None, plane_stride=5):
     """Refit the calibration beads with the *two-channel* fitter.
 
     This is the workflow a dual-colour dataset is actually fitted with --
-    `smappy.dualfit`'s global spline with x, y and z shared and the photons
+    Spline 3D 2C's global spline with x, y and z shared and the photons
     free per channel -- run backwards on the beads that built the calibration.
     There is one z per bead *pair*, not one per channel, which is the whole
     point of the global fit, so the result is a single set of curves.
@@ -249,7 +249,7 @@ def fit_paired_bead_diagnostics(result, bead_ids=None, plane_stride=5):
     model = GlobalSplinePSF(tuple(models), shared=LINK_XYZ)
     # The production link, on ROIs that are already aligned: no sub-pixel
     # offset and no local scale left to correct, and a photon factor of one:
-    # the secondary spline already carries the beads' split (`build_link`).
+    # the secondary spline already carries the beads' split (`multichannel.build_link`).
     link = np.zeros((len(raw), 2, 2, 5), np.float32)
     link[:, 1] = 1.0
 

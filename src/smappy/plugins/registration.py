@@ -57,8 +57,8 @@ def chip_pixels(locs, report=None):
     """The table's positions as chip pixels.
 
     A transformation is a statement about the camera, so it lives in chip
-    pixels -- `dualfit.which_channel` and `combine_peaks` both read it that
-    way.  A fit writes nm only, so they are recovered from the pixel size the
+    pixels -- `dualfit.which_channel` and the channel layout
+    (`ChannelTransform.layout`) both read it that way.  A fit writes nm only, so they are recovered from the pixel size the
     conversion recorded (`locs.in_pixels`) rather than demanded back from the
     user; a file saved in pixels gives its own.
     """

@@ -1,7 +1,7 @@
 """A two-channel uipsf model as SMAPpy's dual calibration, fitted by SMAPpy's global fitter (plan §6.4, §7.1).
 
 What SMAPpy will do with a two-channel model file, written out here with SMAPpy's own functions, so
-that the file is known to carry everything its global fitter (`dualfit.DualChannelEngine`) needs: each
+that the file is known to carry everything its global fitter (`multichannel.MultiChannelEngine`) needs: each
 channel sampled on one z grid (`LearnedPSF.psf(…, channel=c)`), normalised jointly by
 `positive_pair_models`, the transform and the split's geometry from the file, saved and loaded as a
 `DualColorCalibration`.  Split frames drawn from uipsf's own forward model are then fitted: position,
@@ -93,9 +93,10 @@ def _frames(model, shared, emitters, n, rng, background=20.0):
 
 def test_smappys_global_fitter_reads_a_two_channel_model_as_its_own_dual_calibration(tmp_path):
     from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.dualfit import LINK_XYZ, DualChannelEngine
+    from smappy.dualfit import LINK_XYZ
     from smappy.locs import in_pixels
     from smappy.metadata import CameraMetadata
+    from smappy.multichannel import MultiChannelEngine
     from smappy.pipeline import FitSettings
     from smappy.psf import GlobalSplinePSF
     model, shared = _model()
@@ -109,9 +110,11 @@ def test_smappys_global_fitter_reads_a_two_channel_model_as_its_own_dual_calibra
     n = 20
     frames = _frames(model, shared, emitters, n, np.random.default_rng(0))
     camera = CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=PIXEL / 1000, em_on=False)
-    engine = DualChannelEngine(camera, PeakFinder(DoGFilter(1.2), AbsoluteCutoff(20.0)),
-                               GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ), cal, FitSettings(roisize=13))
-    engine.push(frames)
+    layout = cal.layout()                                    # the halves as two channels, as Spline 3D 2C reads them
+    engine = MultiChannelEngine(camera, PeakFinder(DoGFilter(1.2), AbsoluteCutoff(20.0)),
+                                GlobalSplinePSF(tuple(cal.layer_splines()), LINK_XYZ), layout,
+                                FitSettings(roisize=13), detection="pairs")
+    engine.push(layout.cut(frames))
     locs = engine.flush()
     assert engine.stats["matched"] >= 0.9 * 2 * n           # both halves detected, paired by the transform
     x, y = in_pixels(locs, "x_pix", "y_pix")

@@ -437,7 +437,7 @@ def split_layout(s: SimulationSettings) -> dict:
     With a dual-colour calibration all of it is the calibration's: its
     halves, its registration, mirror included, and its two splines, so the
     frames are what Spline 3D 2C fitted with that calibration expects --
-    each half's spot where and as its model puts it (`dualfit.build_link`).
+    each half's spot where and as its model puts it (`multichannel.build_link`).
     Without one, the built-in splitter (`dual_transformation`), upper half
     main, Gaussians of each half's width.
     """

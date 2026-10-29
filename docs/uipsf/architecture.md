@@ -838,7 +838,7 @@ per channel on one z grid (`sample_psf(…, channel=c)`), normalised by SMAPpy's
 (its `photon_normalization` comes back as the share, 0.30), with the model's transform and the split's
 geometry (`Pairs.geometry`, stored in the model file: `LearnedPSF.geometry`), saved and reloaded as a
 `DualColorCalibration`.  Split frames drawn from uipsf's forward model (mirrored layout, 0.5° turn,
-ratiometric, 20 000 photons) fitted by `DualChannelEngine`: x and y within 0.005 px, z within 3 nm,
+ratiometric, 20 000 photons) fitted by Spline 3D 2C's engine (`MultiChannelEngine`, `detection="pairs"`): x and y within 0.005 px, z within 3 nm,
 ratio 0.295–0.298; photons are the light in the spline's box around focus (82 %), as with SMAPpy's own
 bead calibrations.  On Zenodo the stored geometry equals SMAPpy's field for field (`test_pairing.py`).
 
@@ -955,7 +955,7 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   done.
 - **Dual colour: the fit quality is the global fit** (`pupil.fit_quality`): each slice of a pair fitted
   by `GlobalSplinePSF` with x, y and z shared (`LINK_XYZ`), the photons free per channel, the link built
-  by `dualfit.build_link` from each ROI's centre and the learnt transform, as Spline 3D 2C builds it.
+  from each ROI's centre and the learnt transform, as Spline 3D 2C builds it (`multichannel.build_link`).
   Before, each channel was fitted alone with its own half of the calibration, which never tried the
   transform or whether the two splines agree on z.  On 8 simulated ratiometric pairs (mirrored, ±600 nm,
   `test_smappy_dual.py`): z −0.2 nm from the truth in the median, 6.6 nm rms after each bead's offset, the

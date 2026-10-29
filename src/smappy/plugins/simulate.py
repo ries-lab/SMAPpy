@@ -251,7 +251,9 @@ class Simulate(Plugin):
     # 2: diffusion in 3D by default; the split camera a camera option, with
     # its transformation written beside the recipe
     # 3: a split camera with a dual-colour calibration drawn as calibrated
-    version = "3"
+    # 4: that camera's truth in the main half's own pixels, where the
+    #    two-colour fitters report positions
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields

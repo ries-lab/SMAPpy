@@ -323,7 +323,7 @@ def warp_onto_reference(image: np.ndarray, layout: ChannelLayout, channel: int,
                         grid: Optional[np.ndarray] = None) -> np.ndarray:
     """A channel's images (n, h, w) resampled onto channel 0's pixels, for
     detection only -- never for the fit, which cuts each channel at its own
-    pixels (`smappy.dualfit`).  Bilinear; outside the channel, zero."""
+    pixels (`multichannel.cut_channel_rois`).  Bilinear; outside the channel, zero."""
     from scipy.ndimage import map_coordinates
     image = np.asarray(image, np.float32)
     h, w = image.shape[-2:]

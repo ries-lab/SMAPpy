@@ -233,20 +233,16 @@ REGION_STYLE = {"include": dict(color="#2ca02c", ls="-"),
                 "exclude": dict(color="#d62728", ls="--")}
 
 
-def draw_region(ax, shapes, counterparts=()) -> None:
+def draw_region(ax, shapes) -> None:
     """The region's shapes as outlines on a frame: green the parts fitted
-    in, dashed red the parts left out; their counterparts in the other half
-    of a split frame (`dualfit.region_counterparts`) thin and dotted."""
-    for drawn, mirrored in ((shapes, False), (counterparts, True)):
-        for shape in drawn or ():
-            points = np.asarray(shape.get("points") or [], float)
-            if len(points) < 3:
-                continue
-            closed = np.vstack([points, points[:1]])
-            style = dict(REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"]))
-            if mirrored:
-                style["ls"] = ":"
-            ax.plot(closed[:, 0], closed[:, 1], lw=1.0 if mirrored else 1.5, **style)
+    in, dashed red the parts left out."""
+    for shape in shapes or ():
+        points = np.asarray(shape.get("points") or [], float)
+        if len(points) < 3:
+            continue
+        closed = np.vstack([points, points[:1]])
+        style = REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"])
+        ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
 
 
 @dataclass
@@ -580,13 +576,13 @@ class _FitPlugin(Plugin):
 
     def engine(self, settings, camera: CameraMetadata, finder, model):
         """What consumes the frames.  One ROI per candidate by default; the
-        two-channel fitter overrides this with one pair per candidate."""
+        multi-channel fitters override this with one ROI per channel."""
         from ..pipeline import LocalizationEngine
         return LocalizationEngine(camera, finder, model, settings.fit)
 
     def finder(self, settings, camera: Optional[CameraMetadata] = None):
-        """What finds the candidates.  A two-channel fitter overrides this to
-        threshold each half of the split frame separately."""
+        """What finds the candidates, in each channel on its own for a
+        multi-channel fitter."""
         return settings.detection.finder(settings.fit.n_threads)
 
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
@@ -595,27 +591,8 @@ class _FitPlugin(Plugin):
         finder = self.finder(settings, camera)
         region = getattr(settings, "region", None)
         if region is not None and region.active():
-            return RegionFinder(finder, list(region.shapes)
-                                + self.region_counterparts(settings, camera,
-                                                           region.shapes))
+            return RegionFinder(finder, list(region.shapes))
         return finder
-
-    def region_counterparts(self, settings, camera, shapes) -> list:
-        """The region's shapes as they fall on the frame's other half, for a
-        split frame whose halves are one sample; none for one channel."""
-        return []
-
-    @staticmethod
-    def _split_for_detection(geometry, camera) -> Optional[tuple]:
-        """``(axis, position)`` in frame coordinates, for a split frame.
-
-        The geometry records the seam on the chip; detection works on the
-        frame the camera actually delivered, so the ROI corner comes off.
-        """
-        from ..dualfit import split_axis
-        axis = split_axis(geometry)              # 0 = rows (y), 1 = columns (x)
-        offset = camera.roi_offset[1 - axis] if camera is not None else 0
-        return (axis, float(geometry["split_position"]) - offset)
 
     CAMERA_FIELDS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
 
@@ -930,16 +907,6 @@ class _FitPlugin(Plugin):
         from .after_fit import with_session_merge
         return finish_localizations(locs, with_session_merge(wanted, ctx.session), ctx.report)
 
-    def back_projected(self, settings, camera: CameraMetadata, candidates):
-        """Peaks from a second channel, drawn where the first channel sees them.
-
-        None for a single-channel fitter.  The two-channel one returns the
-        secondary half's peaks mapped into the reference channel, which is the
-        cheapest check of a transformation there is: a projected peak that
-        misses its partner shows the registration error directly.
-        """
-        return None
-
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """Detect and fit one frame, and draw what came out.
 
@@ -973,27 +940,12 @@ class _FitPlugin(Plugin):
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
         candidates, filtered = finder(photons[None], first_frame=index)
-        # what detection applied to this frame, from the finder's own code:
-        # one number, or one per half of a split frame
-        cutoffs = tuple(float(c) for c in finder.cutoffs(filtered)[0])
-        split = getattr(finder, "split", None)
-        halves = (None if len(cutoffs) == 1 else
-                  ("top", "bottom") if split[0] == 0 else ("left", "right"))
-        said = (f"{cutoffs[0]:.3g}" if halves is None else
-                ", ".join(f"{c:.3g} {h}" for c, h in zip(cutoffs, halves)))
-        top_cutoff = max(cutoffs)
+        # what detection applied to this frame, from the finder's own code
+        cutoff = float(finder.cutoffs(filtered)[0][0])
+        said = f"{cutoff:.3g}"
 
-        try:
-            projected = self.back_projected(settings, camera, candidates)
-        except Exception:
-            projected = None      # no calibration: the fit will say so below
-
-        # the region as drawn, and where it falls on the other half of a split
-        # frame: read now, while this preview's registration is at hand
         region = getattr(settings, "region", None)
         shapes = list(getattr(region, "shapes", []) or [])
-        counterparts = (self.region_counterparts(settings, camera, shapes)
-                        if region is not None and region.active() else [])
 
         locs, trouble = None, ""
         # the focus in the sample found first, as a run finds it, and drawn beside the frame
@@ -1030,46 +982,30 @@ class _FitPlugin(Plugin):
             fitted = (x - offset[0], y - offset[1])
 
         def plot(figure) -> None:
-            """Detection on the left, the fit on the right.
-
-            Every peak the finder found, and for two channels the secondary
-            peaks projected into the reference channel; the filtered image
-            the cutoff acts on; and only what was actually fitted -- which for
-            a two-channel fit is one position per emitter, in the reference
-            channel, however many halves the peaks were found on.
-            """
+            """Detection on the left, the fit on the right: every peak the
+            finder found, the filtered image the cutoff acts on, and only what
+            was actually fitted."""
             peaks, filtered_ax, fits = figure.subplots(1, 3, sharex=True, sharey=True)
             shown = np.percentile(photons, 99.8) or None
 
             peaks.imshow(photons, cmap="gray", vmax=shown)
             peaks.plot(candidates.x, candidates.y, "o", mfc="none", mec="lime",
                        ms=9, mew=1, label=f"{len(candidates)} peaks")
-            if projected is not None and len(projected[0]):
-                peaks.plot(*projected, "+", color="cyan", ms=9, mew=1.5,
-                           label=f"{len(projected[0])} channel 2 peaks, "
-                                 "back-projected")
             peaks.set(title=f"frame {index}: peaks found")
             peaks.legend(fontsize=7, loc="upper right")
-            draw_region(peaks, shapes, counterparts)
+            draw_region(peaks, shapes)
 
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
             # and a single bright molecule would otherwise flatten the rest
-            top = (2*top_cutoff if np.isfinite(top_cutoff) and top_cutoff > 0
-                   else None)
+            top = 2*cutoff if np.isfinite(cutoff) and cutoff > 0 else None
             image = filtered_ax.imshow(filtered[0], cmap="viridis", vmin=0, vmax=top)
             bar = figure.colorbar(image, ax=filtered_ax, fraction=0.046)
             if top is not None:
-                # a split frame: the first half's line solid, the second's dashed
-                for value, style in zip(cutoffs, ("-", "--")):
-                    bar.ax.axhline(value, color="red", lw=1.5, ls=style)
+                bar.ax.axhline(cutoff, color="red", lw=1.5)
             filtered_ax.plot(candidates.x, candidates.y, ".", color="red", ms=3)
-            if halves is None:
-                line = f"red line at the cutoff, {said}"
-            else:
-                line = (f"cutoffs {cutoffs[0]:.3g} {halves[0]} (red), "
-                        f"{cutoffs[1]:.3g} {halves[1]} (dashed)")
-            filtered_ax.set(title=f"{settings.detection.filter} filtered; {line}")
+            filtered_ax.set(title=f"{settings.detection.filter} filtered; "
+                                  f"red line at the cutoff, {said}")
 
             fits.imshow(photons, cmap="gray", vmax=shown)
             if fitted is not None:
@@ -1092,8 +1028,7 @@ class _FitPlugin(Plugin):
         return Result(text=text, settings=settings, plots=extra,
                       plot=Plot(draw=plot, panels=3, size=(15, 6), edit=edit),
                       data={"frame": index, "candidates": len(candidates),
-                            "cutoff": cutoffs[0] if halves is None else cutoffs,
-                            "halves": halves, "locs": locs, "error": trouble})
+                            "cutoff": cutoff, "locs": locs, "error": trouble})
 
     def run(self, ctx: Context, settings) -> Result:
         from ..io.hdf5 import LocalizationWriter
@@ -1750,8 +1685,8 @@ class _TwoChannelFit(_FitPlugin):
     -- so that is all each of them says (`read_registration`).
 
     The registration is read once per run or preview and handed to the
-    finder, the model, the engine and the back-projection, which each read the
-    file before: three times a run, four a preview.  It is kept with the path
+    channel layout, the model and the photon factors, which would each read
+    the file otherwise.  It is kept with the path
     it came from, so that a preview with another file chosen meanwhile never
     gets a run's.
     """
@@ -1802,15 +1737,6 @@ class _TwoChannelFit(_FitPlugin):
         return self._reading_once(
             settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
             measured)
-
-    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
-        try:
-            settings = self.with_calibration(settings)
-        except ValueError:
-            pass
-        return self._reading_once(
-            settings, lambda: super(_TwoChannelFit, self).preview(ctx, settings,
-                                                                  frame))
 
     # ------------------------------------------------------------ calibrate
     def _calibrate(self, ctx: Context, settings):
@@ -1967,7 +1893,12 @@ class _TwoChannelFit(_FitPlugin):
     def photon_factors(self, settings) -> tuple:
         """The link's photon factor per channel (`multichannel.build_link`): the splitter's photon
         ratio over the split the secondary's PSF already carries -- one, for a spline pair and no
-        ratio given; for a registration alone the beads' measured ratio, or one."""
+        ratio given; for a registration alone the beads' measured ratio, or one.
+
+        A dual bead calibration's secondary spline carries the beads' split (`psf.photon_scales`):
+        multiplying by the ratio again counted it twice.  The beads' measured ratio is the fallback
+        only for a registration alone, which has no PSF to carry one; it reads a few per cent high
+        against the splines' (0.274 for 0.252 at a fifth of the light)."""
         registration = self.registration(settings)
         ratio = settings.model.photon_ratio
         scale = 1.0

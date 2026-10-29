@@ -107,7 +107,7 @@ class _GlobalPSF(PSFModel):
     The parameters are ``(x, y, photons, background, *)``, the fifth being z
     for a spline and sigma for a Gaussian.  That is not a coincidence of
     numbering: because both models put a single fifth parameter in the same
-    slot, one link array serves both, and `dualfit.build_link` -- which leaves
+    slot, one link array serves both, and `multichannel.build_link` -- which leaves
     that slot at offset 0, factor 1 -- needs to know nothing about the model.
     """
 
