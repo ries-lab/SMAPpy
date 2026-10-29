@@ -645,7 +645,7 @@ class Drift:
                         if mask is not None:
                             values = values[mask]
                         if name.endswith("_pix"):
-                            values = values * _pixelsize_nm(locs, pixelsize_nm)
+                            values = values * _pixelsize_nm(locs, pixelsize_nm, axis)
                         positions[:, axis] = values
                         break
             relative = positions - self.centre_nm
@@ -657,7 +657,7 @@ class Drift:
                 continue
             shift = move[:, axis]
             if name.endswith("_pix"):
-                shift = shift / _pixelsize_nm(locs, pixelsize_nm)
+                shift = shift / _pixelsize_nm(locs, pixelsize_nm, axis)
             values = np.asarray(columns[name], dtype=np.float64).copy()
             if mask is None:
                 values += shift
@@ -1789,19 +1789,24 @@ def _selection(locs: Localizations, select) -> np.ndarray:
     return select.astype(np.int64)
 
 
-def _pixelsize_nm(locs: Localizations, pixelsize_nm: Optional[float]) -> float:
-    """The pixel size, given or from the table's own provenance."""
-    if pixelsize_nm is not None:
-        return float(pixelsize_nm)
-    value = locs.metadata.get("pixelsize_nm")
+def _pixelsize_nm(locs: Localizations, pixelsize_nm: Optional[float],
+                  axis: int = 0) -> float:
+    """The pixel size along ``axis`` (0 x, 1 y), given or from the table's
+    own provenance: a camera's pixels can differ in x and y (SMAP's
+    117 x 127 nm), and `y_pix` moves by the second."""
+    from .metadata import pixel_sizes
+    value = pixelsize_nm
+    if value is None:
+        value = locs.metadata.get("pixelsize_nm")
     if value is None:
         camera = locs.metadata.get("camera") or {}
-        micron = camera.get("pixelsize_um") if isinstance(camera, dict) else None
-        value = None if micron is None else float(micron) * 1000.0
+        micron = pixel_sizes(camera.get("pixelsize_um")
+                             if isinstance(camera, dict) else None)
+        value = None if micron is None else [m * 1000.0 for m in micron]
     if value is None:
         raise ValueError("this table is in pixels and its pixel size is not "
                          "recorded; pass pixelsize_nm=...")
-    return float(value)
+    return pixel_sizes(value)[axis]
 
 
 def _positions_nm(locs: Localizations, pixelsize_nm: Optional[float],

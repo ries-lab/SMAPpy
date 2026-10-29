@@ -34,6 +34,61 @@ def test_smap_sml_v73(tmp_path):
     assert meta.pixelsize_nm == 100.0 and meta.n == n
 
 
+
+def test_a_smap_files_pixel_size_lets_drift_move_its_pixel_columns(tmp_path):
+    # a SMAP table keeps xpix beside xnm, and drift moves both: the pixel
+    # size has to be where drift looks, not only in the SMAP block
+    from smappy.drift import Drift
+    path = tmp_path / "run_sml.mat"
+    n = 4
+    with h5py.File(path, "w") as f:
+        loc = f.create_group("saveloc/loc")
+        loc["xnm"] = np.full((1, n), 1170, np.float32)
+        loc["ynm"] = np.full((1, n), 1170, np.float32)
+        loc["xpix"] = np.full((1, n), 10, np.float32)
+        loc["ypix"] = np.full((1, n), 10, np.float32)
+        loc["frame"] = np.arange(1, n + 1, dtype=np.float64)[None]
+        # x and y pixels of their own sizes, as on some of SMAP's setups
+        f.create_group("saveloc/file/info")["cam_pixelsize_um"] = np.array([[0.117, 0.127]])
+    locs, info = load(path)
+    assert info.pixelsize_nm == 117.0
+    drift = np.zeros((n, 3))
+    drift[:, 0] = 11.7 * np.arange(n)
+    drift[:, 1] = 12.7 * np.arange(n)
+    moved = Drift(drift).apply(locs)
+    assert np.allclose(moved["x_nm"], 1170 - drift[:, 0])
+    assert np.allclose(moved["x_pix"], 10 - np.arange(n) / 10)
+    assert np.allclose(moved["y_pix"], 10 - np.arange(n) / 10)
+
+
+def test_a_smap_files_camera_lands_in_the_camera_metadata(tmp_path):
+    import scipy.io as sio
+    n = 3
+    loc = {"xnm": np.arange(n, dtype=float), "ynm": np.zeros(n),
+           "frame": np.arange(1.0, n + 1)}
+    info = {"cam_pixelsize_um": [0.117, 0.127], "conversion": 15.8,
+            "offset": 196.0, "emgain": 100.0, "EMon": True,
+            "roi": [271.0, 170.0, 200.0, 200.0], "exposure": 200.0,
+            "timediff": 200.0, "comment": "a string, passed over"}
+    v5 = tmp_path / "v5_sml.mat"
+    sio.savemat(v5, {"saveloc": {"loc": loc, "file": {"info": info}}})
+    v73 = tmp_path / "v73_sml.mat"
+    with h5py.File(v73, "w") as f:            # the shape MATLAB's -v7.3 writes
+        for k, v in loc.items():
+            f[f"saveloc/loc/{k}"] = np.asarray(v)[None]
+        for k, v in info.items():
+            f[f"saveloc/file/info/{k}"] = (np.array([[v]], np.uint8) if k == "EMon"
+                                           else np.frombuffer(v.encode(), np.uint8
+                                                              ).astype(np.uint16)[None]
+                                           if isinstance(v, str)
+                                           else np.atleast_2d(v))
+    for path in (v5, v73):
+        camera = load(path)[0].metadata["camera"]
+        assert camera == {"pixelsize_um": [0.117, 0.127], "conversion": 15.8,
+                          "offset": 196.0, "emgain": 100.0, "em_on": True,
+                          "roi": [271, 170, 200, 200], "exposure_ms": 200.0,
+                          "frame_time_ms": 200.0}, path.name
+
 def test_minflux_npy_and_zip(tmp_path):
     n, k = 30, 3
     itr = np.zeros((n, k), dtype=[("itr", "i4"), ("loc", "f8", (3,)), ("eco", "f8"),

@@ -265,3 +265,4 @@ def test_a_smap_files_frame_time_is_its_timediff_unless_a_placeholder():
     assert _sml_camera({"exposure": 30.0, "timediff": 33.0}) == {
         "exposure_ms": 30.0, "frame_time_ms": 33.0}
     assert _sml_camera({"exposure": 30.0, "timediff": 1.0}) == {"exposure_ms": 30.0}
+    assert _sml_camera({"pixelsize_um": 0.117})["pixelsize_um"] == 0.117

@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
+from ..metadata import pixel_sizes
 
 
 # What a table's metadata says about the session rather than about the
@@ -208,7 +209,8 @@ def _load_smappy(path: Path) -> Tuple[Localizations, FileInfo]:
     from .hdf5 import load_localizations
     locs = load_localizations(path)
     cam = (locs.metadata.get("camera") or {})
-    px = cam.get("pixelsize_um")
+    px = pixel_sizes(cam.get("pixelsize_um"))
+    px = px and px[0]
     return locs, FileInfo(path.name, str(path), "smappy",
                           pixelsize_nm=px * 1000 if px else None, metadata=locs.metadata)
 
@@ -295,14 +297,7 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
             if file is not None and "info" in file:
                 # `file` may be a struct array: the first file's info then
                 inf = file["info"]
-                px = _h5_scalar(inf, "cam_pixelsize_um")
-                if px is not None and px.dtype.kind == "f":
-                    info["pixelsize_um"] = float(px[0])
-                for k in ("numberOfFrames", "conversion", "offset", "emgain",
-                          "exposure", "timediff"):
-                    v = _h5_scalar(inf, k)
-                    if v is not None and v.dtype.kind == "f":
-                        info[k] = float(v[0])
+                info = _sml_info(lambda k: _h5_scalar(inf, k))
     else:                                                    # MATLAB v5-v7
         import scipy.io as sio
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
@@ -314,11 +309,8 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         try:
             files = m["saveloc"].file
             first = files[0] if isinstance(files, np.ndarray) else files
-            px = np.atleast_1d(first.info.cam_pixelsize_um)
-            info["pixelsize_um"] = float(px[0])
-            for k in ("exposure", "timediff"):
-                if hasattr(first.info, k):
-                    info[k] = float(np.atleast_1d(getattr(first.info, k))[0])
+            info = _sml_info(lambda k: np.atleast_1d(getattr(first.info, k))
+                             if hasattr(first.info, k) else None)
         except (AttributeError, TypeError, ValueError):
             pass
     if "frame" in columns:
@@ -329,7 +321,8 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     for name, values in columns.items():
         if values.dtype == np.float64:
             columns[name] = values.astype(np.float32)
-    px = info.get("pixelsize_um")
+    px = pixel_sizes(info.get("pixelsize_um"))
+    px = px and px[0]                   # the file's one number: its x pixel
     metadata = {"units": "nm", "source": str(path), "smap": info}
     camera = _sml_camera(info)
     if camera:
@@ -341,8 +334,48 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                           pixelsize_nm=px * 1000 if px else None, metadata=info)
 
 
+def _sml_info(get: Callable) -> Dict:
+    """The camera's numbers of a SMAP file's ``file.info``; ``get(name)`` is
+    the field as an array, or None (or a string) where it is missing."""
+    info = {}
+
+    def numbers(name):
+        v = get(name)
+        if isinstance(v, np.ndarray) and v.size and v.dtype.kind in "fiub":
+            return v.ravel()
+        return None
+
+    px = numbers("cam_pixelsize_um")
+    if px is not None:
+        info["pixelsize_um"] = _sml_pixel(px)
+    for k in ("numberOfFrames", "conversion", "offset", "emgain",
+              "exposure", "timediff"):
+        v = numbers(k)
+        if v is not None:
+            info[k] = float(v[0])
+    em = numbers("EMon")
+    if em is not None:
+        info["EMon"] = bool(em[0])
+    roi = numbers("roi")
+    if roi is not None and roi.size == 4:
+        info["roi"] = [int(v) for v in roi]     # x, y on the chip, w, h
+    return info
+
+
+def _sml_pixel(px: np.ndarray):
+    """SMAP's ``cam_pixelsize_um``: one number, or x and y where they differ
+    -- they do on some setups (117 x 127 nm), and SMAP scaled `ynm` by the
+    second."""
+    values = [float(v) for v in np.ravel(px)[:2]]
+    return values[0] if len(values) == 1 or values[0] == values[1] else values
+
+
 def _sml_camera(info: Dict) -> Dict:
-    """The exposure and the frame time of a SMAP file, as smappy keeps them.
+    """A SMAP file's camera as smappy keeps it: where a fit of smappy's
+    records it, so that what moves `x_pix` as well as `x_nm` (drift) finds
+    the pixel size, *File properties* shows the conversion, and the chip
+    region places the image (SMAP's `xnm` is ``(xpix + roi x) * pixel``, as
+    smappy's).
 
     SMAP's ``timediff`` is the frame time it measured from the timestamps of
     the first and last frames -- or 1, a placeholder some of its loaders
@@ -350,6 +383,13 @@ def _sml_camera(info: Dict) -> Dict:
     a ``timediff`` below it is the placeholder and is dropped.
     """
     camera = {}
+    pixel = pixel_sizes(info.get("pixelsize_um"))
+    if pixel is not None and min(pixel) > 0:
+        camera["pixelsize_um"] = info["pixelsize_um"]
+    for smap, ours in (("conversion", "conversion"), ("offset", "offset"),
+                       ("emgain", "emgain"), ("EMon", "em_on"), ("roi", "roi")):
+        if info.get(smap) is not None:
+            camera[ours] = info[smap]
     exposure = info.get("exposure")
     if exposure is not None and exposure > 0:
         camera["exposure_ms"] = float(exposure)
