@@ -772,10 +772,25 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
     shared = {k: v.detach() for k, v in fit.shared().items()}
     # The maps in a block on the left, phase and magnitude as columns, the arms and their mismatch as rows;
     # the coefficients on the right.  Side by side in two rows the round maps left most of the page white.
-    # The bars horizontal, under the maps they read: constrained layout gives every map of a row the same
-    # margin, so a bar under one map shrinks none.
-    maps_fig, bars_fig = figure.subfigures(1, 2, width_ratios=[1.1, 1])
-    grid = maps_fig.subplots(3, 2)
+    # The bars horizontal, as wide as the map above them (insets on the map's own drawn box), in rows of
+    # their own so they meet no title; the two under the last row level.  The maps pulled together, the
+    # left column to its right edge and the right to its left, the block narrow so the charts are wide.
+    maps_fig, bars_fig = figure.subfigures(1, 2, width_ratios=[0.55, 1])
+    rows = maps_fig.add_gridspec(5, 2, height_ratios=[1, 1, 0.3, 1, 0.3])
+    grid = np.array([[maps_fig.add_subplot(rows[r, c]) for c in range(2)] for r in (0, 1, 3)])
+    for r in (2, 4):                              # room for the bars and their numbers
+        for c in range(2):
+            maps_fig.add_subplot(rows[r, c]).set_axis_off()
+    for ax in grid[:, 0]:
+        ax.set_anchor("E")
+    for ax in grid[:, 1]:
+        ax.set_anchor("W")
+
+    def bar(mappable, ax):
+        """A colour bar under ``ax``, its width."""
+        cax = ax.inset_axes([0.0, -0.17, 1.0, 0.07])
+        maps_fig.colorbar(mappable, cax=cax, orientation="horizontal")
+        cax.tick_params(labelsize="x-small")
     charts = bars_fig.subplots(2, 1, height_ratios=[1.6, 1])     # the phase has many modes, the magnitude few
     maps = {"phase": [], "magnitude": []}
     for psf, values in ((model.psf_up, shared), (model.psf_lo, lower_view(shared))):
@@ -806,15 +821,11 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
         # the phase's mismatch on the arms' own scale, so that what is left reads against what each arm has,
         # one bar for the column; the magnitude's is about zero, the arms' about one, so it has its own
         if name == "phase":
-            both.imshow(mismatch[name], cmap=cmap, vmin=lo_v, vmax=hi_v)
-            bars = [maps_fig.colorbar(im, ax=[up_ax, lo_ax, both], location="bottom", shrink=0.8, aspect=15)]
+            bar(both.imshow(mismatch[name], cmap=cmap, vmin=lo_v, vmax=hi_v), both)
         else:
             r = np.nanmax(np.abs(mismatch[name])) or 1.0
-            mis = both.imshow(mismatch[name], cmap="RdBu_r", vmin=-r, vmax=r)
-            bars = [maps_fig.colorbar(im, ax=lo_ax, location="bottom", shrink=0.8, aspect=15),
-                    maps_fig.colorbar(mis, ax=both, location="bottom", shrink=0.8, aspect=15)]
-        for b in bars:
-            b.ax.tick_params(labelsize="x-small")
+            bar(im, lo_ax)
+            bar(both.imshow(mismatch[name], cmap="RdBu_r", vmin=-r, vmax=r), both)
         both.set_title("upper + lower(−k)" if name == "phase" else "upper − lower(−k)", fontsize="x-small")
         for ax in (up_ax, lo_ax, both):
             ax.set_xticks([])

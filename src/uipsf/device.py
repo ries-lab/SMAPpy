@@ -8,8 +8,14 @@ CPU in float64 (`to_cpu64`).  Gradient checks run in float64 on the CPU.
 from __future__ import annotations
 
 import os
+import warnings
 
 import torch
+
+# torch's own use of the deprecated `torch.jit.script` (torch 2.14.1), which needs nothing from the user: its
+# forward-mode decompositions call it when the first JVP imports them (`params` derivatives), and the compiler
+# again at its first call.  Here, at import, because the first JVP comes before any compile.
+warnings.filterwarnings("ignore", message=r"`torch\.jit\.script` is deprecated", category=FutureWarning)
 
 
 def default_device() -> torch.device:
@@ -54,14 +60,11 @@ _COMPILED: dict = {}
 
 
 def _quiet_compiler() -> None:
-    """Silence two lines the compiler prints on Apple's GPU and that need nothing from the user: inductor's
-    "Not enough SMs to use max_autotune_gemm mode" (a CUDA count it applies to every GPU) and torch's own
-    use of the deprecated `torch.jit.script` (torch 2.14.1).  Both come at the first call, not here, so
-    the filters stay."""
+    """Silence a line the compiler prints on Apple's GPU and that needs nothing from the user: inductor's
+    "Not enough SMs to use max_autotune_gemm mode" (a CUDA count it applies to every GPU).  It comes at the
+    first call, not here, so the level stays.  torch's `torch.jit.script` warning is filtered at import."""
     import logging
-    import warnings
     logging.getLogger("torch._inductor.utils").setLevel(logging.ERROR)
-    warnings.filterwarnings("ignore", message=r"`torch\.jit\.script` is deprecated", category=FutureWarning)
 
 
 def compiled(fn, device):

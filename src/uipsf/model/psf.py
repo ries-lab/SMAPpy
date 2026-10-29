@@ -261,7 +261,8 @@ class VectorPSF:
     def _padded_stack(xyz, dz, pad):
         """``pad`` more planes at each end, z continuing in the stack's direction, x and y the end plane's."""
         z = xyz[..., 2]
-        sign = 1.0 if float((z[:, -1] - z[:, 0]).mean()) >= 0 else -1.0
+        # detached: z may carry a gradient (the beads' z is learnt), and only its direction is read here
+        sign = 1.0 if float((z[:, -1] - z[:, 0]).detach().mean()) >= 0 else -1.0
         steps = sign * dz * torch.arange(1, pad + 1, device=xyz.device, dtype=xyz.dtype)
         before = xyz[:, :1].repeat(1, pad, 1)
         after = xyz[:, -1:].repeat(1, pad, 1)
