@@ -89,6 +89,8 @@ def _pupil_values(values, model, low, embed: bool):
     for pre, full, cut in (("", model.pupils[0], low.pupils[0]), (LOWER, model.pupils[1], low.pupils[1])):
         for which in ("phase", "magnitude"):
             name = f"{pre}pupil.{which}"
+            if name not in values:                       # the lower magnitude, when it is the upper's
+                continue
             own = full.phase_modes if which == "phase" else full.magnitude_modes
             lo_modes = cut.phase_modes if which == "phase" else cut.magnitude_modes
             if embed:

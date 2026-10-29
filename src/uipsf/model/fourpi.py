@@ -93,7 +93,7 @@ class FourPiModel:
                  bead_radius_nm: float = 0.0, sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None,
                  coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
                  pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None,
-                 round_sigma: bool = False):
+                 round_sigma: bool = False, same_magnitude: bool = False):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
@@ -106,13 +106,18 @@ class FourPiModel:
         vectorial model the ``plates`` ("aligned", "crossed" or "none") and each channel's polarisation, s
         or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a turn apart, the pairs a quarter
         turn), as the module docstring says.  ``round_sigma`` makes the blur one σ for x and y
-        (`VectorPSF`'s): the window's choice, an x and a y σ apart being astigmatism the pupils should hold."""
+        (`VectorPSF`'s): the window's choice, an x and a y σ apart being astigmatism the pupils should hold.
+        ``same_magnitude`` gives both objectives one magnitude, each in its own frame: twin objectives have
+        the same apodisation, and how much light each arm brings is the balance's (``fourpi.balance``), the
+        magnitude's scale being the reference energy's.  The lower pupil then has no ``lo.pupil.magnitude``
+        and reads the upper one's through `lower_view`."""
         if kind not in ("scalar", "vector"):
             raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
         if plates not in PLATES:
             raise ValueError(f"plates must be one of {', '.join(PLATES)}, got {plates!r}")
         self.grid = grid
         self.kind, self.plates = kind, plates
+        self.same_magnitude = bool(same_magnitude)
         #: the lower arm's axial dipole field against the upper's: reversed, as the module docstring
         #: derives; +1 only to test that against data
         self.axial_sign = -1.0
@@ -165,7 +170,7 @@ class FourPiModel:
             from .fourpi_start import rough_start
             start = rough_start(batch, self)
         C = self.n_channels
-        specs = self.psf_up.specs() + [ParamSpec(LOWER + s.name, s.shape) for s in self.psf_lo.pupil.specs()]
+        specs = self.psf_up.specs() + [ParamSpec(LOWER + s.name, s.shape) for s in self._lower_specs()]
         share = float(1.0 / C)
         specs += [
             ParamSpec("fourpi.offset", (3,), init=0.0),
@@ -289,7 +294,15 @@ class FourPiModel:
         """The parameters that change the images otherwise than through the coordinates of
         `emitter_linearisation` (position, phase, the arms' balance, the coherence, the misalignment) and the
         photons: the pupils, whose columns come from `pupil_linearisation`, and the blur, by JVPs."""
-        return {s.name for s in self.psf_up.specs()} | {LOWER + s.name for s in self.psf_lo.pupil.specs()}
+        return {s.name for s in self.psf_up.specs()} | {LOWER + s.name for s in self._lower_specs()}
+
+    def _lower_specs(self):
+        """The lower pupil's own parameters: all of its pupil's, but its magnitude when it is the upper's."""
+        return [s for s in self.psf_lo.pupil.specs() if not (self.same_magnitude and s.name == "pupil.magnitude")]
+
+    def lower_name(self, name: str) -> str:
+        """The parameter the lower pupil's ``name`` is: its own, or with ``same_magnitude`` the upper's."""
+        return name if self.same_magnitude and name == "pupil.magnitude" else LOWER + name
 
     def _components(self, h: torch.Tensor, arm: int, polarisation: str) -> torch.Tensor:
         """The complex field each channel's light is made of, [..., D, uY, uX], from an image field
@@ -405,9 +418,10 @@ class FourPiModel:
                 return d.transpose(-4, -3).flatten(-4, -3).movedim(-5, -4)
             return apply
 
+        # a shared magnitude is in both groups: the solver adds the two arms' columns (`Problem`)
         up_names = [s.name for s in self.psf_up.pupil.specs()]
         return [(None, up_names, lambda q: self.psf_up.pupil_field(q), apply_for(0)),
-                (None, [LOWER + n for n in up_names], lambda q: self.psf_lo.pupil_field(lower_view(q)),
+                (None, [self.lower_name(n) for n in up_names], lambda q: self.psf_lo.pupil_field(lower_view(q)),
                  apply_for(1))]
 
     @staticmethod
@@ -552,9 +566,12 @@ def swapped(model: FourPiModel, shared: dict) -> dict:
     if up.phase_modes != lo.phase_modes or up.magnitude_modes != lo.magnitude_modes:
         raise ValueError("swapping the arms needs the same modes in both pupils")
     for which, modes, sign in (("phase", up.phase_modes, -1.0), ("magnitude", up.magnitude_modes, 1.0)):
-        a, b = torch.as_tensor(shared[f"pupil.{which}"]), torch.as_tensor(shared[f"{LOWER}pupil.{which}"])
+        a = torch.as_tensor(shared[f"pupil.{which}"])
+        b = torch.as_tensor(shared.get(f"{LOWER}pupil.{which}", a))          # a shared magnitude: the same
         parity = a.new_tensor([(-1.0) ** abs(noll_to_nm(j)[1]) for j in modes])
-        out[f"pupil.{which}"], out[f"{LOWER}pupil.{which}"] = sign * parity * b, sign * parity * a
+        out[f"pupil.{which}"] = sign * parity * b
+        if f"{LOWER}pupil.{which}" in shared:
+            out[f"{LOWER}pupil.{which}"] = sign * parity * a
     out["fourpi.offset"] = -torch.as_tensor(shared["fourpi.offset"])
     out["fourpi.balance"] = 1 - torch.as_tensor(shared["fourpi.balance"])
     return out

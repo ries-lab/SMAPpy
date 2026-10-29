@@ -1030,7 +1030,7 @@ class FourPiPupil(_FourPi):
                     n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
                     bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
                     kind="vector" if settings.vectorial else "scalar",
-                    magnitude_modes=magnitude_modes_of(settings))
+                    magnitude_modes=magnitude_modes_of(settings), same_magnitude=settings.same_magnitude)
         run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings,
                    "wavelength_nm": optics["wavelengths"][0]}, False)
         if inputs["run"].save_model:

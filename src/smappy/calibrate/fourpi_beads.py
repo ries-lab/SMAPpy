@@ -115,7 +115,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
           steps_rad=(2.0, 0.0, -2.0), n_max: int = 6, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
           kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None, magnitude_modes=None,
-          round_sigma: bool = True):
+          round_sigma: bool = True, same_magnitude: bool = False):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     A free photon count per observation by default: on the example beads it took the mean deviance from
@@ -127,7 +127,8 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     922 288), symmetric one, 914 132, from every start, with the phase and z scatter as small (docs/4pi.md
     §20).  The scalar model keeps every mode: it needs them, 1 060 569 against 1 107 108.  ``warm``: shared
     values to start from, another model's of the same beads (`learn_fourpi`'s ``values``).
-    ``magnitude_modes`` the pupils' magnitude modes (Noll), the model's default if None.  The blur is one σ
+    ``magnitude_modes`` the pupils' magnitude modes (Noll), the model's default if None; ``same_magnitude``
+    one magnitude for both objectives (`FourPiModel`).  The blur is one σ
     for x and y (``round_sigma``): an x and a y σ apart are astigmatism, which the pupils should hold."""
     import uipsf
     from uipsf.model import PerObservation
@@ -140,7 +141,8 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     C, M = beads.data.shape[1], beads.data.shape[3]
     model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=n_max, steps_rad=steps_rad,
                         bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None,
-                        kind=kind, plates=plates, magnitude_modes=magnitude_modes, round_sigma=round_sigma)
+                        kind=kind, plates=plates, magnitude_modes=magnitude_modes, round_sigma=round_sigma,
+                        same_magnitude=same_magnitude)
     return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
 
 
@@ -211,7 +213,10 @@ class FourPiBeadSettings:
     magnitude_modes: str = param("auto", label="magnitude modes", advanced=True,
                                  help="the pupils' magnitude modes, Noll indices comma-separated (4, 11); auto: "
                                       "the rotationally symmetric ones up to the Zernike order (vectorial), "
-                                      "every one (scalar); none: a flat magnitude")
+                                      "every one (scalar); empty or none: a flat magnitude")
+    same_magnitude: bool = param(False, label="same magnitude", advanced=True,
+                                 help="both objectives one magnitude shape, as twin objectives have; how much "
+                                      "light each brings stays free")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
                                           help="a bead's photon count free in every frame, as its light varies")
     model_z_range_nm: float = param(600.0, label="model z range", unit="nm", min=100.0, advanced=True,
@@ -368,11 +373,12 @@ def brightness_outliers(beads: FourPiBeads, factor: float) -> list:
 
 
 def magnitude_modes_of(settings: FourPiBeadSettings) -> Optional[list]:
-    """The *magnitude modes* as Noll indices: None for *auto* (the model's default), [] for *none*."""
+    """The *magnitude modes* as Noll indices: None for *auto* (the model's default), [] -- a flat magnitude --
+    for an empty field or *none*."""
     text = str(settings.magnitude_modes).strip().lower()
-    if text in ("", "auto"):
+    if text == "auto":
         return None
-    if text == "none":
+    if text in ("", "none"):
         return []
     try:
         modes = sorted({int(w) for w in text.replace(";", ",").split(",") if w.strip()})
@@ -738,6 +744,7 @@ def arms_mismatch(model, shared: dict) -> dict:
     order m flips with (−1)^m under k → −k, so for the even ones (astigmatism, spherical) the mismatch is the
     sum of the two arms' coefficients, for the odd ones (coma, trefoil) their difference: a plain sum of the two
     maps would call opposite comas compensated."""
+    from uipsf.model.fourpi import lower_view
     from uipsf.optics.zernike import noll_to_nm, zernike_basis
     up, lo = model.pupils
     grid = model.psf_up.grid
@@ -745,7 +752,7 @@ def arms_mismatch(model, shared: dict) -> dict:
     out = {}
     for which, sign in (("phase", 1.0), ("magnitude", -1.0)):
         a = up.coefficients(shared, which)
-        b = lo.coefficients({k[len("lo."):]: v for k, v in shared.items() if k.startswith("lo.")}, which)
+        b = lo.coefficients(lower_view(shared), which)          # a shared magnitude: the upper one's
         modes = sorted(set(a) | set(b))
         c = {j: a.get(j, 0.0) + sign * (-1.0) ** abs(noll_to_nm(j)[1]) * b.get(j, 0.0) for j in modes}
         basis = zernike_basis(grid, modes, high_na=up.high_na and which == "phase").cpu().double().numpy()
@@ -835,7 +842,7 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
         modes = getattr(model.pupils[0], f"{name}_modes")
         scale = factor if name == "phase" else 1.0
         up = shared[f"pupil.{name}"].cpu().double().numpy() * scale
-        lo = shared[f"lo.pupil.{name}"].cpu().double().numpy() * scale
+        lo = shared.get(f"lo.pupil.{name}", shared[f"pupil.{name}"]).cpu().double().numpy() * scale
         if len(modes) == 0:
             right.set_axis_off()
             right.text(0.5, 0.5, f"no {name} modes learnt", ha="center", va="center", fontsize="small")

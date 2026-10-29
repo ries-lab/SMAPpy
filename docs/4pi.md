@@ -1845,7 +1845,23 @@ not dropped).  With the isolation, the first ten Zenodo scans give 41 beads wher
 **A round blur** (`FourPiModel(round_sigma=True)`, the window's default): one σ for x and y.  On 8 Zenodo
 beads it learnt 56 nm.  An x and a y σ apart are astigmatism, which belongs to the pupils.
 
-**The magnitude modes** can be set (*magnitude modes*): 4 and 11 alone learnt on the same 8 beads in 20 s.
+**The magnitude modes** can be set (*magnitude modes*; empty or *none* is a flat magnitude, *auto* the model's
+default), and both objectives can share one magnitude (*same magnitude*, `FourPiModel(same_magnitude=True)`):
+the lower pupil has no ``lo.pupil.magnitude`` and reads the upper one's, each in its own frame -- for the
+rotationally symmetric modes the frames do not matter.  Its linearised Jacobian column is the sum of the two
+arms' (`Problem._shared_columns` adds the groups of a pupil every channel sees).  On 8 Zenodo beads, vectorial,
+n ≤ 6:
+
+| magnitude | objective | time |
+|---|---|---|
+| per objective, Noll 4, 11, 22 | 661 647 | 21 s |
+| shared, 4, 11, 22 | 661 731 | 14 s |
+| shared, 4, 11 | 668 384 | 17 s |
+| flat | 735 380 | 37 s |
+
+Left free, the two objectives learnt nearly the same magnitude (−0.166 / −0.163, −0.072 / −0.065,
+−0.081 / −0.053), and sharing it costs 84 in the objective for three coefficients fewer.  Noll 22 is worth
+6 700, a flat magnitude 74 000.
 
 **Rotating A and B by each channel's phase offset** would make B about 0 and A about the modulated part of
 I, and would read better, but would not interpolate better: a cubic spline is linear in its knots, so the

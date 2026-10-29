@@ -688,7 +688,16 @@ table, and *Exclude / include* lets them in again.
 *auto* is the rotationally symmetric modes up to the *Zernike order* --
 Noll 4, 11 and 22 up to the 6th -- for the vectorial model, and every mode
 for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
-*none* holds the magnitude flat.
+an empty field or *none* holds the magnitude flat.  On eight of uiPSF's
+example beads, 4 and 11 alone fitted 1 % worse than *auto*, and a flat
+magnitude 11 % worse: the apodisation matters.
+
+### same magnitude
+Both objectives get one magnitude shape, as twin objectives have; how much
+light each arm brings is learnt apart either way.  On eight of uiPSF's
+example beads the two objectives, left free, learnt nearly the same
+magnitude, and one shared magnitude fitted as well (0.01 % apart) in two
+thirds of the time.
 
 ### vectorial
 On by default: the modulation then falls off from the centre of the spot as

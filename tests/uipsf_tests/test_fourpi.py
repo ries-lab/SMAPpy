@@ -382,3 +382,30 @@ def test_the_linearised_jacobian_is_the_jvps_one(beads, kind, radius, per_observ
     for a, b in zip(fast, slow, strict=True):
         scale = b.abs().flatten(1).amax(1).clamp_min(1e-12)[:, None, None] if b.dim() == 3 else b.abs().max()
         assert float(((a - b).abs() / scale).max()) < 2e-3
+
+
+@pytest.mark.parametrize("kind", ["scalar", "vector"])
+def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sums_both_arms(beads, kind):
+    """``same_magnitude``: no ``lo.pupil.magnitude``, the lower pupil reading the upper's, and the solver's
+    linearised column for it -- the sum of what it does through each objective -- the JVP's."""
+    from uipsf.model.fourpi import lower_view
+    from uipsf.noise import ShiftedPoisson
+    from uipsf.solve.problem import Problem
+    _, batch, truth = beads
+    model = FourPiModel(beads[0].grid, (R, R), n_max=4, magnitude_n_max=2, kind=kind, same_magnitude=True)
+    start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
+             "background": truth["emitter.background"]}
+    specs = model.specs(batch, start)
+    names = {s.name for s in specs}
+    assert "pupil.magnitude" in names and "lo.pupil.magnitude" not in names and "lo.pupil.phase" in names
+    values = {k: v for k, v in truth.items() if k != "lo.pupil.magnitude"}
+    shape = next(s.shape for s in specs if s.name == "pupil.magnitude")
+    values["pupil.magnitude"] = torch.linspace(-0.03, 0.05, shape[0])
+    p = Params(specs, E, values=values)
+    assert torch.equal(lower_view(p.physical())["pupil.magnitude"], p.physical()["pupil.magnitude"])
+    sub, pc = batch.subset(slice(0, 3)), p.subset(slice(0, 3))
+    fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
+    slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
+    for a, b in zip(fast, slow, strict=True):
+        scale = b.abs().flatten(1).amax(1).clamp_min(1e-12)[:, None, None] if b.dim() == 3 else b.abs().max()
+        assert float(((a - b).abs() / scale).max()) < 2e-3

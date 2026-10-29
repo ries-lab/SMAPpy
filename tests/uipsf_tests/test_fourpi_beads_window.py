@@ -270,6 +270,7 @@ def test_the_magnitude_modes_are_read_as_noll_indices():
     assert magnitude_modes_of(FourPiBeadSettings()) is None
     assert magnitude_modes_of(FourPiBeadSettings(magnitude_modes="11, 4")) == [4, 11]
     assert magnitude_modes_of(FourPiBeadSettings(magnitude_modes="none")) == []
+    assert magnitude_modes_of(FourPiBeadSettings(magnitude_modes="")) == []         # empty: flat, not auto
     with pytest.raises(ValueError, match="Noll 2"):
         magnitude_modes_of(FourPiBeadSettings(magnitude_modes="1, 4"))
 

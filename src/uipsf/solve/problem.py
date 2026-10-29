@@ -354,8 +354,13 @@ class Problem:
                 dA = torch.func.vmap(field_column)(eye[idx])
                 rows = torch.tensor(idx, device=J.device)
                 if c is None:                   # a pupil every channel sees (a 4Pi objective's): all of them
+                    # added, not set: a parameter both objectives read (a shared magnitude) is in both groups,
+                    # and its column is the sum of what it does through each
+                    fresh = [i for i in idx if not done[i]]
+                    if fresh:
+                        J[fresh] = 0
                     for i in range(0, len(idx), self.tangents):
-                        J[rows[i:i + self.tangents]] = apply(dA[i:i + self.tangents]).reshape(
+                        J[rows[i:i + self.tangents]] += apply(dA[i:i + self.tangents]).reshape(
                             len(idx[i:i + self.tangents]), E, -1)
                     done[idx] = True
                     continue
