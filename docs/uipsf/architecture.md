@@ -118,6 +118,9 @@ result.params.physical()["pupil.phase"], result.std["pupil.phase"]
 2. `Problem.normal_equations` takes each chunk of emitters, computes μ, one JVP per emitter parameter
    (a unit tangent on that parameter of every emitter at once) and one per shared parameter (vmapped),
    and adds JᵀWJ and Jᵀg per emitter in float64 on the CPU.  Priors add their exact least-squares terms.
+   A parameter the model sees only squared (`Transform.squared`: the blur σ, `Magnitude`) also gets the
+   curvature Gauss–Newton drops, max(g_i / u_i, 0): without it σ → 0 had no curvature and was stepped
+   by ∝ 1/σ (`_squared_curvature`, docs/4pi.md §21).
 3. `LevenbergMarquardt` solves (H + λD)δ = −g by the Schur complement of the emitter blocks,
    Jacobi-scaled, with D Moré's running maximum of diag(H); accepts only decreases; adapts λ by the gain
    ratio; stops on decrease, step, gradient, no decrease, max_iter or cancel.  At the end the block

@@ -32,6 +32,8 @@ def _like(value: float, x: torch.Tensor) -> torch.Tensor:
 class Transform:
     """Physical value = forward(unconstrained)."""
 
+    squared = False                             # the model sees only the square of the unconstrained value
+
     def forward(self, x):
         return x
 
@@ -47,7 +49,12 @@ class Magnitude(Transform):
     """|x|: for a parameter the model sees only squared, such as a Gaussian's σ.  Its sign is not
     identifiable, and a solver's step may cross zero (a cold and a warm fit gave σ = ±40.8 nm at the
     same objective, M7); reporting the magnitude makes the two the same answer.  At x = 0 the
-    derivative is 0, as that of σ² already is."""
+    derivative is 0, as that of σ² already is.
+
+    ``squared`` tells the solver the model sees x², so that it can add the curvature Gauss–Newton leaves
+    out (`Problem.normal_equations`)."""
+
+    squared = True
 
     def forward(self, x):
         return x.abs()
@@ -191,6 +198,12 @@ class Params:
                 r[a:b] = res.reshape(-1)
                 dr[a:b] = dphys[a:b] / sigma.reshape(-1)
         return r, dr
+
+    def squared(self, scope: str) -> torch.Tensor:
+        """Which packed free parameters the model sees only squared (`Transform.squared`): [P_s] or [E, P_e]."""
+        parts = [torch.full((self.specs[n].size,), self.specs[n].transform.squared) for n in self._free(scope)]
+        flags = torch.cat(parts) if parts else torch.zeros(0, dtype=torch.bool)
+        return flags.expand(self.n_emitters, -1) if scope == "emitter" else flags
 
     def derivative(self, scope: str) -> torch.Tensor:
         """d(physical)/d(unconstrained) of each packed free parameter: [P_s] or [E, P_e].

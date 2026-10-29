@@ -49,6 +49,25 @@ class Normal:
     g_e: torch.Tensor           # [E, P_e]
 
 
+def _squared_curvature(params, scope: str, g: torch.Tensor) -> torch.Tensor:
+    """The curvature Gauss–Newton leaves out of a parameter the model sees only squared, packed like ``g``.
+
+    With v = u² (σ² of the blur, `params.Magnitude`), ∂²F/∂u² = 4u²·∂²F/∂v² + 2·∂F/∂v.  Gauss–Newton keeps
+    the first term only, which vanishes as u → 0, while the second is ∂F/∂u / u, from the gradient alone.
+    Without it a σ whose optimum is 0 (the data no wider than the pupil's PSF) was stepped by ∝ 1/σ: the
+    4Pi-SMS beads' fits predicted 4 753 nats and lost 2.4 M, and 7 of 12 stopped 2-11 k nats short; with
+    it every start reached one optimum (docs/4pi.md §21).  Added only where it is positive -- ∂F/∂v > 0,
+    the objective wanting σ smaller -- so that H stays positive definite; at u = 0 exactly the gradient is
+    0 and nothing is added.  Like the rest of H it scales as 1/a² when u is written in units a times
+    larger, so the iterates stay unit-free (`test_rescaling_a_parameter_leaves_the_iterates_unchanged`)."""
+    flags = params.squared(scope)
+    if not bool(flags.any()):
+        return torch.zeros_like(g)
+    u = to_cpu64(params.shared_vector() if scope == "shared" else params.emitter_matrix())
+    extra = torch.where(u != 0, g / torch.where(u != 0, u, torch.ones_like(u)), torch.zeros_like(u))
+    return torch.where(flags, extra.clamp(min=0), torch.zeros_like(u))
+
+
 # Output values (emitters × tangents × pixels) per batch of Jacobian columns, by device.  2²¹ is
 # 5 tangents of 20 beads of 41 × 21² pixels, ~3 GB of intermediate images; twice that swapped on a
 # 32 GB M1 Pro (Problem.__init__).
@@ -182,6 +201,9 @@ class Problem:
         trace: each product then recomputes the model (2.3 gradients' worth), cheaper for few products.
         """
         parts = []
+        squared = bool(params.squared("shared").any() or params.squared("emitter").any())
+        g_s = torch.zeros(params.shared_vector().numel(), dtype=torch.float64)
+        g_e = torch.zeros(params.emitter_matrix().shape, dtype=torch.float64)
         for sl, b in self.chunks():
             pc = params.subset(sl)
             us, ue = pc.shared_vector().detach(), pc.emitter_matrix().detach()
@@ -198,10 +220,16 @@ class Problem:
                 def jvp_fn(a, e, f=f, us=us, ue=ue):
                     return torch.func.jvp(f, (us, ue), (a, e))[1]
             with torch.no_grad():
-                _, w = self.noise.derivatives(mu.reshape(b.data.shape), b.data, b.s, b.mask)
+                grad, w = self.noise.derivatives(mu.reshape(b.data.shape), b.data, b.s, b.mask)
             parts.append((sl, us, ue, vjp_fn, jvp_fn, w.flatten(1)))
+            if squared:                                 # the data's gradient, for `_squared_curvature`
+                gs, ge = vjp_fn(grad.flatten(1))
+                g_s += to_cpu64(gs)
+                g_e[sl] = to_cpu64(ge)
         _, dr_s = (to_cpu64(t) for t in params.prior_residuals("shared"))
         _, dr_e = (to_cpu64(t) for t in params.prior_residuals("emitter"))
+        diag_s = dr_s ** 2 + _squared_curvature(params, "shared", g_s)       # what normal_equations adds to
+        diag_e = dr_e ** 2 + _squared_curvature(params, "emitter", g_e)      # the diagonal beyond JᵀWJ
 
         def product(v_s: torch.Tensor, v_e: torch.Tensor):
             out_s, out_e = torch.zeros_like(v_s), torch.zeros_like(v_e)
@@ -212,7 +240,7 @@ class Problem:
                 gs, ge = vjp_fn(w * dmu)
                 out_s += to_cpu64(gs)
                 out_e[sl] = to_cpu64(ge)
-            return out_s + dr_s ** 2 * v_s, out_e + dr_e ** 2 * v_e
+            return out_s + diag_s * v_s, out_e + diag_e * v_e
 
         return product
 
@@ -237,6 +265,8 @@ class Problem:
             H_se[sl] = to_cpu64(torch.einsum("iem,jem->eij", wJ_s, J_e))
             H_ee[sl] = to_cpu64(torch.einsum("iem,jem->eij", wJ_e, J_e))
             g_e[sl] = to_cpu64(torch.einsum("iem,em->ei", J_e, grad))
+        H_ss += torch.diag(_squared_curvature(params, "shared", g_s))
+        H_ee += torch.diag_embed(_squared_curvature(params, "emitter", g_e))
         r, dr = (to_cpu64(t) for t in params.prior_residuals("shared"))
         H_ss += torch.diag(dr ** 2)
         g_s += dr * r

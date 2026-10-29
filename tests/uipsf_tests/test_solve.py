@@ -164,6 +164,30 @@ def test_the_gauss_newton_operator_multiplies_by_the_normal_equations_matrix(opt
                               rtol=1e-9, atol=1e-9)
 
 
+
+def test_the_blurs_curvature_is_the_objectives_where_gauss_newton_alone_has_none(optics):
+    # docs/4pi.md §21: σ enters only squared, so Gauss–Newton's curvature of it vanishes as σ → 0 while the
+    # objective's does not; on the 4Pi-SMS beads, whose σ fell to 0, the steps ∝ 1/σ stalled 7 fits of 12.
+    model, truth, batch = small_beads(optics, n=3)
+    values = truth.physical()
+    values["psf.sigma"] = torch.zeros(2, dtype=f64)
+    batch = simulate(model, parameters(model, batch, values, dtype=f64), batch, seed=3)
+    problem = Problem(model, Poisson(), batch)
+    i = dict((n, lo) for n, lo, _ in truth.layout("shared"))["psf.sigma"]
+    for sigma in (5.0, 1.0):
+        values["psf.sigma"] = torch.full((2,), sigma, dtype=f64)
+        p = parameters(model, batch, values, dtype=f64)
+        h, step = problem.normal_equations(p).H_ss[i, i], torch.zeros(p.shared_vector().numel(), dtype=f64)
+        step[i] = 1e-3 * sigma
+        curvature = (problem.value_and_grad(p.replace(shared=p.shared_vector() + step))[1][i]
+                     - problem.value_and_grad(p.replace(shared=p.shared_vector() - step))[1][i]) / (2 * step[i])
+        assert abs(h - curvature) < 0.03 * curvature
+        operator = problem.gauss_newton_operator(p, trace=False)
+        unit = torch.zeros_like(step)
+        unit[i] = 1.0
+        Hv_s, _ = operator(unit, torch.zeros(p.n_emitters, p.emitter_matrix().shape[1], dtype=f64))
+        assert abs(Hv_s[i] - h) < 1e-9 * h
+
 @pytest.mark.parametrize("parts", ["per-observation", "per-slice", "planar"])
 def test_the_emitter_linearisation_gives_the_jvps_normal_equations_for_every_component(optics, parts):
     from uipsf.model import PerObservation, PerSliceFactor, Planar

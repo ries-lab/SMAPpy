@@ -555,6 +555,10 @@ work in progress elsewhere, which it builds on.
 - Wang J, Allgeyer ES, Sirinakis G, … Bewersdorf J (2021). Implementation of a
   4Pi-SMS super-resolution microscope. *Nat Protoc* 16:677.
   [doi:10.1038/s41596-020-00428-7](https://doi.org/10.1038/s41596-020-00428-7).
+- Hao X, Antonello J, Allgeyer ES, Bewersdorf J, Booth MJ (2017). Aberrations
+  in 4Pi microscopy. *Opt Express* 25:14049.
+  [doi:10.1364/OE.25.014049](https://doi.org/10.1364/OE.25.014049).
+  The covariant and contra-variant modes of the two pupils (§21).
 
 ## 6. What M0 and M1 found (2026-10-27)
 
@@ -1681,3 +1685,132 @@ uniform 1 344 285 -- and with Δ's new start it reaches one optimum anyway.
 
 The vectorial learning with the symmetric magnitude took 0.4 min.  Not looked at: whether the high
 modes' phase has optima of its own on other beads, and the 4Pi-SMS's DCIMG beads.
+
+
+## 21. The pupils in Hao et al.'s 4Pi modes (2026-10-29)
+
+**The idea.**  Hao et al. (2017) describe the two pupils by modes Q±_j: Z_j in the upper pupil and ±Z_j in
+the lower, in coordinates that mirror x and y between the objectives and flip the phase with the direction
+of travel.  It is a rotation of the two arms' coefficients by 45°, mode by mode.  In `FourPiModel`'s frames,
+each objective's own, it is
+
+    q+_j = (c_up − s_j c_lo)/√2,   q−_j = (c_up + s_j c_lo)/√2,   s_j = (−1)^|m_j|.
+
+For Noll 1-4 the model already parametrises this way: q+ is the bead's phase (piston) and position (tip,
+tilt, defocus), q− the misalignment Δ, and q−_1 does nothing.  §19's split of the higher modes -- the
+difference pinned for even m, the mean for odd m -- is the same one, so q+ are Hao's covariant modes and
+the ones the interference pins.  The paper simulates the modes' foci only; its claim that they help phase
+retrieval is not tested there.
+
+**The test** (`benchmarks/uipsf/real/zenodo_4pi_mode_basis.py`): `ModeBasisFourPi` reads ``pupil.phase``
+as q+ and ``lo.pupil.phase`` as q− (the magnitudes stay per objective), so `learn_fourpi`'s truncation
+and the linearised Jacobian run unchanged.  Its images and Jacobian equal the per-objective model's to
+10⁻⁷.  §20's setting: v1's 18 beads, a free photon count per observation, vectorial, the symmetric
+magnitude, n ≤ 6, Apple's GPU.
+
+| basis | Δ start (nm) | iterations (stage 1 + 2) | time | objective | phase (rad) | z (nm) |
+|---|---|---|---|---|---|---|
+| per objective | (60, 0, 0) | 29 + 15 | 28 s | 914 133 | 0.0527 | 6.59 |
+| q± | (60, 0, 0) | 29 + 14 | 28 s | 914 133 | 0.0527 | 6.58 |
+| per objective | (0, 60, 0) | 26 + 13 | 25 s | 914 132 | 0.0527 | 6.58 |
+| q± | (0, 60, 0) | 20 + 13 | 25 s | 914 133 | 0.0527 | 6.59 |
+| per objective | 0 | 26 + 16 | 34 s | 914 132 | 0.0527 | 6.58 |
+| q± | 0 | 26 + 15 | 32 s | 914 133 | 0.0527 | 6.58 |
+
+Every run reaches the same optimum: Δ = (−17, −14, 143) nm and the same coefficients to 0.01 rad.
+
+**What this shows:**
+- **The basis does not make the learning more robust or faster.**  The optimum was already unique after
+  §20, and the damping by diag H, which the rotation does change, costs at most a few iterations.
+- **On real beads, q± is the basis in which the pupils decouple.**  At the optimum, with the beads' own
+  parameters taken out (Schur complement), the arms correlate at |r| = 0.48-0.85: positively for even m
+  and negatively for odd m, as §19 found on simulated beads.  In q± no pair correlates by more than
+  |r| = 0.19.
+- **q+ is 1.6-3× better determined than q−:** ±0.3-0.6 mrad against ±0.7-1.1 mrad.  So the interference
+  pins q+, and q− is fixed only by each arm's incoherent image.
+- **The physics reads off directly.**  The astigmatism that sets z's range is almost all q+:
+  q+_6 = 0.58 rad and q−_6 = 0.11 rad, §17's difference of 0.82 rad.  The largest q− terms are
+  spherical, q−_11 = 0.12 rad, and astigmatism; everything else is below 0.07 rad.
+
+**So:** keep the model per objective.  Use q± where it says more than the two pupils: to report the
+pupils with their errors (the *Pupils* page, the export's parameters), and as the place for a prior or a
+truncation of q− if a data set ever has the loose directions run off.  Nothing here needed one.
+
+**The first stage's orders split** (2026-10-29, the same script's ``--stage1 P,M``: q+ to radial order P
+and q− to M in stage 1, ``none`` holding q− at 0, then everything; 4,4 is `learn_fourpi`'s own and gives
+its numbers exactly).  Three Δ starts each, (60, 0, 0), (0, 60, 0) and 0.
+
+*v1's 18 beads* (3 mirror steps):
+
+| stage 1 | objectives | iterations | time |
+|---|---|---|---|
+| per objective, n ≤ 4 | 914 132-133 | 44, 39, 42 | 25-34 s |
+| q± 4, 4 | 914 133 | 43, 33, 41 | 25-32 s |
+| q± 6, 4 | 914 133 | 31, 30, 34 | 22-33 s |
+| q± 4, none | 914 132-133 | 40, 31, 39 | 23-33 s |
+
+The same optimum from every start, and the same phase and z scatter (0.0527 rad, 6.58 nm).  q+ to 6 in
+stage 1 saves a quarter of the iterations; stage 1 then ends at 918 704 instead of 940 071.
+
+*The 4Pi-SMS example's 5 beads* (`4pi_sms_nup96/Beads_stack`, 101 slices 20 nm apart, no mirror steps;
+camera 0.5 e⁻/ADU, offset 100, 100 nm pixels, NA 1.35, 680 nm, as §10 and §17).  Two things had to be
+found first:
+- **The window's *4Pi-SMS (Bewersdorf lab)* channels do not fit these data.**  `channels.YALE_4PI` puts
+  the channels at x = 151, 389, 1474, 1713; SMAP's calibration of the same beads
+  (`Cell01_642_000_000_3dcal.mat`) at 93, 469, 1409, 1769.  With the preset, `scan_beads` registered the
+  channels wrongly and kept 1 bead of 5; with SMAP's corners typed it keeps all 5 and registers them as §10
+  did (affine, 0.06-0.10 px).
+- **The blur σ falls to 0 on these beads, and the solver stalls there.**  σ enters squared, so at 0 its
+  Jacobian column vanishes and Gauss–Newton's curvature of it with it, and every step's σ component is
+  enormous (why, and the fix, at the end of this section).  Levenberg–Marquardt from the stalled point predicted 4 753 nats of gain and got 2.4 million
+  more; L-BFGS's line search rejected every step.  7 of the 12 runs stopped stage 2 within 7 iterations,
+  at 801 354-805 189, the others went on to 794 835-799 976.  Held at 0, σ stalls nothing.
+
+With σ held at 0:
+
+| stage 1 | from (60, 0, 0) | from (0, 60, 0) | from 0 |
+|---|---|---|---|
+| per objective, n ≤ 4 | 796 797 | 796 797 | 793 783 |
+| q± 4, 4 | 796 797 | 796 797 | 793 783 |
+| q± 4, none | 796 797 | 793 783 | 796 797 |
+| q± 6, 4 | 798 982 | 798 982 | 798 982 |
+
+- **Three optima.**  793 783: Δ = (−44, −93, 413) nm, coherence 0.63-0.68.  796 797: Δ = (51, 88, −437) nm,
+  coherence 0.58-0.64.  798 982: Δ = (63, 41, −133) nm, coherence 0.45.  The first two are near-twins,
+  Δ reversed: the arms' labels, which the vectorial model does not swap exactly.
+- **The basis changes nothing:** per objective and q± 4, 4 reach the same optimum from each start.
+- **No split of the orders gives one optimum.**  Holding q− at 0 only changes which twin a start reaches.
+  q+ to 6 reaches one optimum from every start, but the worst of the three, 5 200 nats above the best.
+- **Five beads without mirror steps** leave Δz free to run to ±400 nm, three times v1's 143 nm.  Mirror
+  steps measure the modulation in every slice, and only then did §20's start reach one optimum.
+
+**So, for the orders:** splitting them is not worth adding.  It saves a quarter of the iterations on
+beads that already have one optimum, and on beads that don't it gives none.  What the 4Pi-SMS beads need is
+a σ that cannot stall the solver, and either both of Δz's signs tried, keeping the better one, or mirror
+steps.
+
+**The σ stall, fixed (2026-10-29).**  The model sees the blur only as σ², so the objective is
+F ≈ F₀ + a·σ² near σ = 0, with curvature 2a.  Gauss–Newton's curvature of σ is 4σ²·(JᵀWJ in σ²), which
+vanishes there, while the gradient 2aσ vanishes only as fast as σ: the Gauss–Newton step is
+−a/(2σ·JᵀWJ), ∝ 1/σ.  The missing term is exact and costs nothing: ∂²F/∂σ² = 4σ²·∂²F/∂(σ²)² + 2·∂F/∂(σ²),
+and 2·∂F/∂(σ²) = g_σ/σ.  `Problem.normal_equations` (and the matrix-free operator) now add it, where
+positive, for every parameter whose transform says the model sees it squared (`Transform.squared`,
+`Magnitude`).  On simulated beads near σ = 0 H's σ entry then matches the objective's finite-difference
+curvature (0.01198 against 0.01198 at σ = 1 nm; 0.00024 without), `test_solve.py::
+test_the_blurs_curvature_is_the_objectives_where_gauss_newton_alone_has_none`.
+
+With σ free again, per objective, n ≤ 4 in stage 1:
+
+| beads | from (60, 0, 0) | from (0, 60, 0) | from 0 | before the fix |
+|---|---|---|---|---|
+| 4Pi-SMS | 796 797, 47 it. | 796 797, 52 | 796 797, 56 | 805 189, 799 976, 805 188 |
+| v1 | 914 132.6, 41 | 914 132.4, 41 | 914 132.7, 38 | 914 132-133, 44, 39, 42 |
+
+On the 4Pi-SMS beads every start reaches one optimum now, σ = 0, the 796 797 twin (Δz = −437 nm); held at 0
+before, the start from 0 had found the better one, 793 783, so the twins remain, and trying both Δz signs
+is still to do.  v1's beads, whose σ is 57 nm, are unchanged.  The term is in uipsf's solver, so it serves
+every model with a blur: on simulated dual-colour beads whose σ is 0, LM without it ran to its 100
+iterations (biplane and ratiometric) and L-BFGS stopped on "step", 0.3 nats short in ratiometric; with it
+both converge, LM in 10 iterations.  SMAPpy's own fitters are not concerned: the spline models fit no
+width, and the Gaussian ones fit σ itself, not σ².
+

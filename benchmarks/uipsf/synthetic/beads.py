@@ -61,6 +61,7 @@ class Rescaled(Transform):
 
     def __init__(self, inner, factor):
         self.inner, self.factor = inner, float(factor)
+        self.squared = inner.squared                # inner(a·x) sees x² wherever inner sees it
 
     def forward(self, x):
         return self.inner.forward(self.factor * x)
