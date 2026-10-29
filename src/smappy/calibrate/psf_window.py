@@ -1204,6 +1204,17 @@ class PSFCalibrationWindow(QMainWindow):
         """The result page in front, an index into ``pages``; -1 for the Stacks page."""
         return self.tabs.currentIndex() - 1
 
+    def window_image(self):
+        """What Edit > Copy window as image takes from here: the page in front -- its figure drawn again
+        at twice the screen's resolution, a table or the Stacks page as shown (`figures.window_image`).
+        Not ``clipboard_image``: Cmd+C here is the selected text's."""
+        from ..gui.figures import figure_image, window_image
+        index = self._page_index()
+        figure = self.pages[index][0] if 0 <= index < len(self.pages) else None
+        if figure is not None:
+            return figure_image(figure)
+        return window_image(self.tabs.currentWidget())
+
     def redraw(self) -> None:
         """Draw the page in front, with the table's selection and marks."""
         index = self._page_index()

@@ -102,16 +102,36 @@ class FigurePane(QWidget):
         self.canvas.draw_idle()
 
     def clipboard_image(self):
-        """The figure as a picture to paste, at twice the screen's resolution:
-        a screen grab is too coarse for a slide."""
-        from io import BytesIO
-        from PySide6.QtGui import QImage
+        """The figure as a picture to paste (`figure_image`)."""
         if self.plot is None:
             return None
         self.draw()
-        buffer = BytesIO()
-        self.figure.savefig(buffer, format="png", dpi=2 * self.figure.get_dpi())
-        return QImage.fromData(buffer.getvalue(), "PNG")
+        return figure_image(self.figure)
+
+
+def figure_image(figure):
+    """A matplotlib figure as a QImage to paste, at twice the screen's
+    resolution: a screen grab is too coarse for a slide."""
+    from io import BytesIO
+    from PySide6.QtGui import QImage
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", dpi=2 * figure.get_dpi())
+    return QImage.fromData(buffer.getvalue(), "PNG")
+
+
+def window_image(window):
+    """What Edit > Copy window as image takes from a window that does not
+    say (``window_image``, ``clipboard_image``): the figure in view -- the largest matplotlib canvas
+    shown, drawn again at twice the screen's resolution -- else the window as
+    it is on screen.  So every window can be copied, and a figure comes out
+    sharp."""
+    from matplotlib.backends.backend_qt import FigureCanvasQT
+    shown = [c for c in window.findChildren(FigureCanvasQT)
+             if c.isVisible() and c.width() > 50 and c.height() > 50]
+    if shown:
+        canvas = max(shown, key=lambda c: c.width() * c.height())
+        return figure_image(canvas.figure)
+    return window.grab().toImage()
 
 
 def summary_plot(plots: Sequence[Plot]) -> Plot:

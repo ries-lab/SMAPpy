@@ -357,10 +357,18 @@ class ControlWindow(QMainWindow):
         self.copy_action.setShortcutContext(Qt.ApplicationShortcut)
         self._action(edit, "Copy rendered image", None,
                      lambda: self.copy(self.render_window))
+        # Apart from Copy, so that Cmd+C stays the selected text's in a window
+        # that is not a picture: the bead table, a form
+        copy_window = self._action(edit, "Copy window as image", QKeySequence("Ctrl+Shift+C"),
+                                   lambda: self.copy_window_image())
+        copy_window.setToolTip("the window last in front as a picture: its page or figure, "
+                               "drawn sharp, else the window as it is shown")
+        copy_window.setShortcutContext(Qt.ApplicationShortcut)
         edit.setToolTipsVisible(True)
         # the window Copy means when it is chosen from this menu, which makes
         # the control window the active one: the last picture that was
         self._picture_window: Optional[QWidget] = None
+        self._last_window: Optional[QWidget] = None      # any, for Copy window as image
         QApplication.instance().focusWindowChanged.connect(self._on_focus_window)
         view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
@@ -1355,11 +1363,15 @@ class ControlWindow(QMainWindow):
 
     # ---------------------------------------------------------------- copy
     def _on_focus_window(self, window) -> None:
-        """Remember the last window that has a picture to copy."""
+        """Remember the last window that has a picture to copy, and the last
+        window other than this one, for Copy window as image -- not a menu,
+        a tooltip or a dialog, which take the focus on their way."""
         widget = next((w for w in QApplication.topLevelWidgets()
                        if window is not None and w.windowHandle() == window), None)
         if widget is not None and hasattr(widget, "clipboard_image"):
             self._picture_window = widget
+        if widget is not None and widget is not self and widget.windowType() == Qt.Window:
+            self._last_window = widget
 
     def _copy_window(self) -> QWidget:
         """The window Copy is about: the one in front if it has a picture,
@@ -1379,7 +1391,8 @@ class ControlWindow(QMainWindow):
         """Copy what is in front: selected text, else that window's picture.
 
         Any window can take part by having a ``clipboard_image()`` that
-        returns a QImage, or None when it has nothing to show.  The picture
+        returns a QImage, or None when it has nothing to show.  Any window at
+        all is Copy window as image's (`copy_window_image`).  The picture
         is put on the clipboard as an image, to paste into a slide or a
         notebook; saving it at a chosen pixel size is the Save menus' job.
         Returns whether anything was copied.
@@ -1397,6 +1410,33 @@ class ControlWindow(QMainWindow):
         QApplication.clipboard().setImage(image)
         self.statusBar().showMessage(
             f"Copied {window.windowTitle() or 'the picture'} "
+            f"({image.width()} x {image.height()} px)", 3000)
+        return True
+
+    def copy_window_image(self, window: Optional[QWidget] = None) -> bool:
+        """Copy a window as a picture: the one in front, else the last one
+        other than this.  What the window says (``window_image()``, else
+        ``clipboard_image()``), else its figure in view drawn sharp, else the
+        window as it is shown (`figures.window_image`).  Returns whether
+        anything was copied."""
+        from .figures import window_image
+        if window is None:
+            active = QApplication.activeWindow()
+            window = active if active is not None and active is not self else self._last_window
+            try:
+                if window is None or not window.isVisible():
+                    window = self.render_window
+            except RuntimeError:                  # closed and deleted since
+                window = self.render_window
+        own = getattr(window, "window_image", None) or getattr(window, "clipboard_image", None)
+        image = own() if own is not None else None
+        if image is None or image.isNull():
+            image = window_image(window)
+        if image is None or image.isNull():
+            return False
+        QApplication.clipboard().setImage(image)
+        self.statusBar().showMessage(
+            f"Copied {window.windowTitle() or 'the window'} "
             f"({image.width()} x {image.height()} px)", 3000)
         return True
 

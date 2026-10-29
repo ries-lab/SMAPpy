@@ -88,3 +88,48 @@ def test_a_window_with_nothing_to_show_copies_nothing(windows):
 
     empty = ResultWindow("empty")
     assert not control.copy(empty)
+
+
+def test_copy_window_as_image_takes_any_window_its_figure_sharp_else_itself(windows):
+    """Edit > Copy window as image: a window that says nothing -- a stack viewer -- gives its figure in
+    view, drawn again at twice the screen's resolution, else itself."""
+    app, control, render = windows
+    from matplotlib.figure import Figure
+    from PySide6.QtWidgets import QLabel, QMainWindow
+    from smappy.gui.canvas import canvas_class
+
+    figure = Figure(figsize=(4, 3))
+    figure.subplots().plot([0, 1], [1, 0])
+    with_figure = QMainWindow()
+    with_figure.setCentralWidget(canvas_class()(figure))
+    with_figure.resize(500, 400)
+    with_figure.show()
+    plain = QMainWindow()
+    plain.setCentralWidget(QLabel("a window"))
+    plain.resize(300, 200)
+    plain.show()
+    app.processEvents()
+    assert control.copy_window_image(with_figure)
+    image = app.clipboard().image()
+    assert image.width() == pytest.approx(2 * figure.get_dpi() * figure.get_figwidth(), abs=2)
+    assert control.copy_window_image(plain)
+    assert not app.clipboard().image().isNull()
+    # Cmd+C leaves a window that is not a picture alone: there it is the selected text's
+    app.clipboard().setText("kept")
+    assert not control.copy(plain)
+    assert app.clipboard().text() == "kept"
+    with_figure.close()
+    plain.close()
+
+
+def test_the_psf_calibration_window_copies_the_page_in_front_as_an_image_not_on_cmd_c(windows):
+    app, control, render = windows
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+
+    window = PSFCalibrationWindow([])
+    window.show()
+    app.processEvents()
+    assert control.copy_window_image(window)     # the Stacks page, as it is shown
+    assert not app.clipboard().image().isNull()
+    assert not control.copy(window)
+    window.close()
