@@ -1827,3 +1827,27 @@ iterations (biplane and ratiometric) and L-BFGS stopped on "step", 0.3 nats shor
 both converge, LM in 10 iterations.  SMAPpy's own fitters are not concerned: the spline models fit no
 width, and the Gaussian ones fit σ itself, not σ².
 
+
+
+## 22. The window's estimate, its bead finding and a round blur (2026-10-29)
+
+**The time estimate.**  The window said 3.5 min per 505 bead frames (slice × mirror step), measured before
+§19's speed-ups, and counted every bead found, excluded or not.  On the Zenodo 4Pi beads (21 slices × 3
+steps, Apple's GPU, n ≤ 6, vectorial) the learning now takes 21, 31, 30, 73 and 90 s for 4, 8, 16, 32 and
+41 beads (252 to 2583 frames): about 15 s and 0.03 s per frame (`psf_methods.FourPiPupil`).  Ten beads of
+101 slices and 3 steps are about 2 min, where the window said 21.  It counts the beads not marked out.
+
+**Finding the beads** has the settings the bead calibration has: a *peak threshold* (0.2 of the brightest,
+as before), an *isolation* (both of a pair closer than the box left out; before, only maxima within 6 px
+were merged) and an *outlier factor* (2.5: a bead that far from the median brightness is marked excluded,
+not dropped).  With the isolation, the first ten Zenodo scans give 41 beads where they gave 47.
+
+**A round blur** (`FourPiModel(round_sigma=True)`, the window's default): one σ for x and y.  On 8 Zenodo
+beads it learnt 56 nm.  An x and a y σ apart are astigmatism, which belongs to the pupils.
+
+**The magnitude modes** can be set (*magnitude modes*): 4 and 11 alone learnt on the same 8 beads in 20 s.
+
+**Rotating A and B by each channel's phase offset** would make B about 0 and A about the modulated part of
+I, and would read better, but would not interpolate better: a cubic spline is linear in its knots, so the
+spline of the rotated knots is the rotated spline, with the same error.  What is steep is the PSF across
+the pixels, which only finer knots in x and y would follow.

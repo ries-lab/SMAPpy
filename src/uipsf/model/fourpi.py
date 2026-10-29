@@ -92,7 +92,8 @@ class FourPiModel:
                  magnitude_n_max: int | None = None, magnitude_modes=None, upsample: int = 1,
                  bead_radius_nm: float = 0.0, sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None,
                  coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
-                 pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None):
+                 pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None,
+                 round_sigma: bool = False):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
@@ -104,7 +105,8 @@ class FourPiModel:
         replaces the two `ZernikePupil`s, for a first stage.  ``kind`` "scalar" or "vector", and for a
         vectorial model the ``plates`` ("aligned", "crossed" or "none") and each channel's polarisation, s
         or p (default s, p, s, p: the 4Pi-SMS's channels in pairs half a turn apart, the pairs a quarter
-        turn), as the module docstring says."""
+        turn), as the module docstring says.  ``round_sigma`` makes the blur one σ for x and y
+        (`VectorPSF`'s): the window's choice, an x and a y σ apart being astigmatism the pupils should hold."""
         if kind not in ("scalar", "vector"):
             raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
         if plates not in PLATES:
@@ -124,9 +126,9 @@ class FourPiModel:
             pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max,
                                    magnitude_modes=magnitude_modes) for _ in range(2)]
         self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,
-                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm)
+                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma)
         self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind=kind,
-                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm)
+                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma)
         C, M = self.n_channels, self.n_phases
         steps = torch.zeros(M) if steps_rad is None else torch.as_tensor(steps_rad, dtype=torch.float32)
         self.steps_init = (steps - steps[0])[1:]

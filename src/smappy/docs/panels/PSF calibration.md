@@ -340,7 +340,10 @@ mirrors at every slice (*mirror steps*), or one phase per slice, as a scan
 that only moves the stage has.
 
 **2. The beads** are found on the first channel's image, summed over the
-whole scan, where the interference averages out.  The channels are
+whole scan, where the interference averages out: every peak above *peak
+threshold* of the brightest one, both of any two closer than *isolation*.
+A bead brighter or dimmer than the median one by more than *outlier factor*
+is marked excluded in the table, where it can be let in again.  The channels are
 registered from the same images (an affine map from a few beads, a
 projective one from eight or more), and every channel's box (*box*) is cut
 where the registration puts the bead.
@@ -349,7 +352,8 @@ where the registration puts the bead.
 - **pupil model (uiPSF):** uiPSF's 4Pi pupil model.  One pupil per objective,
   shared by the channels.  The two arms' fields are added with each
   channel's phase offset, coherence and arm balance, and each bead has its
-  own phase.  It refines the maps between the channels itself.  The saved
+  own phase.  The extra blur is round, one σ for x and y: a blur wider in x
+  than in y is astigmatism, which belongs to the pupils.  It refines the maps between the channels itself.  The saved
   model is rendered from it at three phases and separated into the
   incoherent part I and the interference A, B, demodulated by the fringe
   period the model itself shows.  The bead's size (*bead diameter*, 40 nm by default) is taken out:
@@ -357,7 +361,9 @@ where the registration puts the bead.
   which lowers the interference a point emitter would show -- by 2–4 % for
   40 nm, 13–22 % for 100 nm.  The saved model is a point's.  Its *Pupils*
   page shows each objective's phase (in the *units* chosen above it) and
-  magnitude, and a third column, what the two leave together: the lower
+  magnitude, a row each, their Zernike coefficients beside them, the key
+  aberrations (astigmatism, coma, spherical) in colour, and a third row,
+  what the two leave together: the lower
   pupil turned through the centre, as it sees the emitter from the other
   side, added to the upper one -- zero where the two arms make the same PSF
   at every height.  The deformable mirrors' opposite astigmatism cancels
@@ -391,8 +397,9 @@ times.  The pupil model's errors can be taken at their word; the bead
 average is a check of it that assumes no optics, and the better choice the
 more beads, and the more phases, the scan has.
 
-The pages are *Model* -- each channel's I through focus, and its modulation
-|A, B| / I at the centre -- and *z against the stage*: every bead fitted back
+The pages are *Model* -- each channel's I, A, B or modulation |A, B| / I
+through focus, the channels on one colour scale, and the modulation at the
+centre -- and *z against the stage*: every bead fitted back
 with the saved model, the envelope's z and z from the phase, each less the
 stage.  A good model gives a flat line for the envelope's z, a few tens of
 nanometres wide, in the model's z range.  It should give a flat line for the
@@ -663,6 +670,25 @@ the data.
 ### box
 Large enough for a defocused bead, small enough that beads near the edge of
 a channel are kept: 21 pixels for 100-130 nm pixels.
+
+### peak threshold
+0.2 finds beads down to a fifth of the brightest's peak.  Lower it when dim
+beads are missed; raise it when specks of background are taken for beads.
+
+### isolation
+0 takes the *box*: no other bead within a bead's box, whose light the model
+would take for its own.
+
+### outlier factor
+2.5 marks out a bead more than 2.5 times brighter or dimmer than the median
+one -- two beads stuck together, or a speck.  The marked beads stay in the
+table, and *Exclude / include* lets them in again.
+
+### magnitude modes
+*auto* is the rotationally symmetric modes up to the *Zernike order* --
+Noll 4, 11 and 22 up to the 6th -- for the vectorial model, and every mode
+for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
+*none* holds the magnitude flat.
 
 ### vectorial
 On by default: the modulation then falls off from the centre of the spot as

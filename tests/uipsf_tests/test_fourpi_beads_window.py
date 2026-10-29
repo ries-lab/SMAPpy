@@ -104,6 +104,25 @@ def test_the_4pi_bead_average_gives_a_model_that_fits_its_beads(tmp_path):
     assert all(abs(s - 1) < 0.1 for s in fits["slope"].values())
 
 
+def test_4pi_scans_added_in_one_channel_switch_the_window_to_4pi_and_are_refused_as_tiffs(tmp_path):
+    """Quadrant .mat scans added in the single-channel mode: the window turns to the 4Pi mode, the only one
+    that reads them; read as one channel's bead stack they are refused by name, not as a broken TIFF."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from smappy.calibrate.input import read_bead_stacks
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from tests.test_fourpi_channels import _write_quadrant_series
+    paths = _write_quadrant_series(tmp_path, [np.zeros((4, 12, 12), np.uint16)] * 4, files=2)
+    with pytest.raises(ValueError, match="4Pi scan"):
+        read_bead_stacks(paths[0])
+    QApplication.instance() or QApplication([])
+    window = PSFCalibrationWindow([])
+    assert window.mode_box.currentText() == "Single channel"
+    window.add_paths([str(tmp_path)])
+    assert window.mode_box.currentText() == "4Pi"
+    window.close()
+
+
 def test_a_beads_stack_is_its_scan_in_the_order_the_stacks_page_lists_them(tmp_path):
     """Scans added out of sorted order: each bead's ``stack`` is still its file's place on the Stacks page
     (`input.discover_acquisitions`), so its ring falls on its own scan.  In the order added, the 4Pi
@@ -122,25 +141,6 @@ def test_a_beads_stack_is_its_scan_in_the_order_the_stacks_page_lists_them(tmp_p
         assert listed[record["stack"]] == str(discover_acquisitions([record["path"]])[0])
         assert np.min(np.hypot(*(np.asarray(record["exact_xy"][0]) - expected).T)) < 1.0
     assert {r["stack"] for r in beads.records if Path(r["path"]).parent.name == "a"} == {0}
-
-
-def test_4pi_scans_added_in_one_channel_switch_the_window_to_4pi_and_are_refused_as_tiffs(tmp_path):
-    """Quadrant .mat scans added in the single-channel mode: the window turns to the 4Pi mode, the only one
-    that reads them; read as one channel's bead stack they are refused by name, not as a broken TIFF."""
-    pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
-    from smappy.calibrate.input import read_bead_stacks
-    from smappy.calibrate.psf_window import PSFCalibrationWindow
-    from tests.test_fourpi_channels import _write_quadrant_series
-    paths = _write_quadrant_series(tmp_path, [np.zeros((4, 12, 12), np.uint16)] * 4, files=2)
-    with pytest.raises(ValueError, match="4Pi scan"):
-        read_bead_stacks(paths[0])
-    QApplication.instance() or QApplication([])
-    window = PSFCalibrationWindow([])
-    assert window.mode_box.currentText() == "Single channel"
-    window.add_paths([str(tmp_path)])
-    assert window.mode_box.currentText() == "4Pi"
-    window.close()
 
 
 def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
@@ -166,13 +166,15 @@ def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
     figure = plt.figure()
     text = draw_pupils(figure, types.SimpleNamespace(model=model, shared=lambda: shared))
     titles = [ax.get_title() for ax in figure.axes]
-    assert "upper: magnitude" in titles and "lower: phase (nm)" in titles and "magnitude" in text
+    rows = [ax.get_ylabel() for ax in figure.axes]
+    assert "upper" in rows and "lower" in rows and "mismatch" in rows and "magnitude" in text
+    assert "phase (nm)" in titles and "magnitude" in titles
     assert "upper + lower(−k)" in titles and "upper − lower(−k)" in titles
     plt.close(figure)
 
 
 def test_a_lower_pupil_that_is_the_upper_ones_twin_makes_the_same_psf_and_no_mismatch():
-    """The pupils page's third column: a lower pupil that is the upper one's twin (phase −(−1)^m c, magnitude
+    """The pupils page's mismatch row: a lower pupil that is the upper one's twin (phase −(−1)^m c, magnitude
     (−1)^m c) gives both arms the same image at every height, and `arms_mismatch` is zero; the same
     coefficients in both arms are not compensated: astigmatism and spherical add up there, coma does not."""
     import torch
@@ -245,3 +247,62 @@ def test_a_pupil_model_whose_fringe_is_not_its_beads_is_said_to_have_the_wrong_o
     assert "12% longer" in FourPiPupil().check_period(run) == run.extra["warning"]
     run.result["calibration"] = fourpi.model_calibration(period_nm=262.0)
     assert FourPiPupil().check_period(run) is None
+
+
+def test_beads_closer_than_the_isolation_are_both_left_out():
+    from smappy.calibrate.fourpi_beads import isolated
+    kept = isolated(np.array([[10.0, 10.0], [15.0, 10.0], [60.0, 60.0]]), 21)
+    assert kept.tolist() == [[60.0, 60.0]]
+    assert len(isolated(np.zeros((0, 2)), 21)) == 0
+
+
+def test_a_bead_far_brighter_or_dimmer_than_the_median_is_an_outlier():
+    from smappy.calibrate.fourpi_beads import FourPiBeads, brightness_outliers
+    light = [100, 110, 90, 105, 400, 20]
+    beads = FourPiBeads(np.zeros((6, 1, 1, 1, 1, 1)), np.zeros((6, 1, 2)), np.zeros(1),
+                        [{"brightness": b} for b in light])
+    assert brightness_outliers(beads, 2.5) == [4, 5]
+    assert brightness_outliers(beads, 0) == []
+
+
+def test_the_magnitude_modes_are_read_as_noll_indices():
+    from smappy.calibrate.fourpi_beads import FourPiBeadSettings, magnitude_modes_of
+    assert magnitude_modes_of(FourPiBeadSettings()) is None
+    assert magnitude_modes_of(FourPiBeadSettings(magnitude_modes="11, 4")) == [4, 11]
+    assert magnitude_modes_of(FourPiBeadSettings(magnitude_modes="none")) == []
+    with pytest.raises(ValueError, match="Noll 2"):
+        magnitude_modes_of(FourPiBeadSettings(magnitude_modes="1, 4"))
+
+
+def test_a_round_blur_is_one_sigma_for_both_axes_and_blurs_both():
+    """``round_sigma``: ``psf.sigma`` one value, the image the same as with that σ given for x and y."""
+    import torch
+
+    import uipsf
+    from uipsf.model.fourpi import FourPiModel
+    from uipsf.params import Params
+    optics = uipsf.Optics(NA=1.35, wavelength_nm=600, n_imm=1.406, n_med=1.406, pixel_size_nm=(129, 129))
+    grid = uipsf.PupilGrid.build(optics, 32, device="cpu")
+    batch = uipsf.Batch(data=torch.zeros(1, 4, 3, 13, 13), z_nm=torch.zeros(3), roi_xy=torch.zeros(1, 4, 2))
+    start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, 4)}
+    images = []
+    for round_sigma in (True, False):
+        model = FourPiModel(grid, (13, 13), n_phases=3, n_max=4, round_sigma=round_sigma, sigma_nm=(70.0, 70.0))
+        values = Params(model.specs(batch, start), 1).physical()
+        assert values["psf.sigma"].shape == ((1,) if round_sigma else (2,))
+        xyz = torch.zeros(3, 3)
+        images.append(model.channel_images(values, xyz, torch.zeros(3)))
+    assert torch.allclose(images[0], images[1], atol=1e-6)
+
+
+def test_the_learning_estimate_counts_only_the_beads_not_marked_out_and_marks_the_outliers():
+    from smappy.calibrate.fourpi_beads import FourPiBeads
+    from smappy.calibrate.psf_methods import Detected, FourPiPupil
+    beads = FourPiBeads(np.zeros((10, 4, 101, 3, 1, 1)), np.zeros((10, 4, 2)), np.zeros(101),
+                        [{"brightness": 1.0}] * 10)
+    detected = Detected({"beads": beads, "outliers": [3]}, "10 beads")
+    method = FourPiPupil()
+    assert method.detected_marks(detected) == {3: "exclude"}
+    every, fewer = method.seconds(detected, {}), method.seconds(detected, {b: "exclude" for b in range(5)})
+    assert 60 < every < 200 and fewer < every            # ten beads of 101 slices x 3 steps: about 2 min
+    assert "learning takes about" in method.detected_text(detected, {})

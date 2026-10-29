@@ -946,15 +946,22 @@ class PSFCalibrationWindow(QMainWindow):
         if self.run_result is not None:
             self.run_result = None
             self._clear_pages()
-        self.marks = {}
+        marks_of = getattr(self.method, "detected_marks", None)
+        self.marks = dict(marks_of(detected)) if marks_of else {}
         self.detected = detected
-        self.found_label.setText(detected.text)
+        self._show_detected_text()
         sources = getattr(detected.found, "sources", None) or []
         self.stack_browser.box_px = self._box_px()
         states = getattr(self.method, "detected_states", None)
         self.stack_browser.set_marks(detected.positions, sources, states(detected) if states else None)
         self.refresh_table()
         self._update_buttons()
+
+    def _show_detected_text(self) -> None:
+        """The detection's line, with the time calibrating the beads as marked takes where the method knows
+        it (`detected_text`): excluding beads shortens it."""
+        text_of = getattr(self.method, "detected_text", None)
+        self.found_label.setText(text_of(self.detected, self.marks) if text_of else self.detected.text)
 
     def detect(self) -> None:
         """Find the beads and say how many and how long calibrating them will take; nothing is learnt."""
@@ -1269,6 +1276,8 @@ class PSFCalibrationWindow(QMainWindow):
             else:
                 self.marks[bead] = ("exclude" if self.run_result is None
                                     else self.method.mark(self.run_result, bead))
+        if self.run_result is None:
+            self._show_detected_text()
         self.refresh_table()
         self.redraw()
 

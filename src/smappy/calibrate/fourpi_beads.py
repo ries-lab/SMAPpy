@@ -114,7 +114,8 @@ def _centroid(image, y0, x0, half):
 def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pixel_size_nm,
           steps_rad=(2.0, 0.0, -2.0), n_max: int = 6, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
-          kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None):
+          kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None, magnitude_modes=None,
+          round_sigma: bool = True):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     A free photon count per observation by default: on the example beads it took the mean deviance from
@@ -125,7 +126,9 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     free in every mode it found three optima on uiPSF v1's beads by where the learning started (907 711 to
     922 288), symmetric one, 914 132, from every start, with the phase and z scatter as small (docs/4pi.md
     §20).  The scalar model keeps every mode: it needs them, 1 060 569 against 1 107 108.  ``warm``: shared
-    values to start from, another model's of the same beads (`learn_fourpi`'s ``values``)."""
+    values to start from, another model's of the same beads (`learn_fourpi`'s ``values``).
+    ``magnitude_modes`` the pupils' magnitude modes (Noll), the model's default if None.  The blur is one σ
+    for x and y (``round_sigma``): an x and a y σ apart are astigmatism, which the pupils should hold."""
     import uipsf
     from uipsf.model import PerObservation
     from uipsf.model.fourpi import FourPiModel
@@ -137,7 +140,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     C, M = beads.data.shape[1], beads.data.shape[3]
     model = FourPiModel(grid, batch.data.shape[-2:], n_channels=C, n_phases=M, n_max=n_max, steps_rad=steps_rad,
                         bead_radius_nm=bead_radius_nm, intensity=PerObservation() if photons_per_observation else None,
-                        kind=kind, plates=plates)
+                        kind=kind, plates=plates, magnitude_modes=magnitude_modes, round_sigma=round_sigma)
     return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
 
 
@@ -189,6 +192,13 @@ class FourPiBeadSettings:
                               help="a scan's phase steps per slice, as set; a scan of one phase per slice "
                                    "has none")
     roi_size: int = param(21, label="box", unit="px", min=9, help="the box each bead is cut to, per channel")
+    threshold: float = param(0.2, label="peak threshold", min=0.01, max=1.0,
+                             help="a bead's peak, as a fraction of the brightest's: lower finds dimmer beads")
+    min_distance_px: float = param(0.0, label="isolation", unit="px", min=0.0, beside=True,
+                                   help="beads closer than this are both left out; 0: the box")
+    brightness_range: float = param(2.5, label="outlier factor", min=0.0,
+                                    help="beads brighter or dimmer than the median by more than this factor are "
+                                         "marked excluded (clusters, dim specks); 0: none")
     bead_diameter_nm: float = param(40.0, label="bead diameter", unit="nm", min=0.0,
                                     help="the beads' size, taken out of the pupil model: its dyes, spread over "
                                          "its height, average the fringe; 0: point-like")
@@ -198,6 +208,10 @@ class FourPiBeadSettings:
                                  "model, to compare with v1")
     n_max: int = param(6, label="Zernike order", min=2, max=10, advanced=True,
                        help="the highest Zernike order of each objective's pupil")
+    magnitude_modes: str = param("auto", label="magnitude modes", advanced=True,
+                                 help="the pupils' magnitude modes, Noll indices comma-separated (4, 11); auto: "
+                                      "the rotationally symmetric ones up to the Zernike order (vectorial), "
+                                      "every one (scalar); none: a flat magnitude")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
                                           help="a bead's photon count free in every frame, as its light varies")
     model_z_range_nm: float = param(600.0, label="model z range", unit="nm", min=100.0, advanced=True,
@@ -312,7 +326,8 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
         C, J, M, H, W = stack.shape
         if M != steps:
             raise ValueError("the scans' mirror steps differ")
-        for p0 in bead_positions(projections[k][0]):
+        for p0 in isolated(bead_positions(projections[k][0], threshold=settings.threshold),
+                           settings.min_distance_px or settings.roi_size):
             exact = [np.asarray(p0, float) if c == 0 else layout.to_channel(c, [p0])[0] for c in range(C)]
             centres = [np.rint(e).astype(int) for e in exact]
             if any(not (half <= cx < W - half and half <= cy < H - half) for cx, cy in centres):
@@ -329,6 +344,43 @@ def scan_beads(paths, settings: FourPiBeadSettings, camera, progress=None):
     J = scans[0][1].shape[1]
     z_nm = -(np.arange(J) - (J - 1) // 2) * scan_step_nm(scans[0][0], settings.z_step_nm)
     return FourPiBeads(np.stack(data), np.asarray(roi_xy, float), z_nm, records), layout, registration
+
+
+def isolated(positions: np.ndarray, distance: float) -> np.ndarray:
+    """The (x, y) ``positions`` with no other closer than ``distance``: both of a close pair go, as in the
+    bead calibration (`core.detect_beads`) -- a neighbour in a bead's box is light the model is not of."""
+    from scipy.spatial import cKDTree
+    positions = np.asarray(positions, float).reshape(-1, 2)
+    good = np.ones(len(positions), bool)
+    for a, b in cKDTree(positions).query_pairs(float(distance)) if len(positions) > 1 else ():
+        good[a] = good[b] = False
+    return positions[good]
+
+
+def brightness_outliers(beads: FourPiBeads, factor: float) -> list:
+    """The beads brighter or dimmer than the median bead by more than ``factor`` (none for 0): a cluster of
+    beads, or a speck too dim to learn from.  By each bead's ``brightness`` (`scan_beads`)."""
+    light = np.array([r.get("brightness", np.nan) for r in beads.records], float)
+    if not factor or len(light) < 3:
+        return []
+    ratio = light / np.nanmedian(light)
+    return [i for i, r in enumerate(ratio) if not (1 / factor <= r <= factor)]
+
+
+def magnitude_modes_of(settings: FourPiBeadSettings) -> Optional[list]:
+    """The *magnitude modes* as Noll indices: None for *auto* (the model's default), [] for *none*."""
+    text = str(settings.magnitude_modes).strip().lower()
+    if text in ("", "auto"):
+        return None
+    if text == "none":
+        return []
+    try:
+        modes = sorted({int(w) for w in text.replace(";", ",").split(",") if w.strip()})
+    except ValueError:
+        raise ValueError(f"magnitude modes: Noll indices like 4, 11, or auto or none; not {settings.magnitude_modes!r}")
+    if any(j < 2 for j in modes):
+        raise ValueError("magnitude modes start at Noll 2: piston is the photon count")
+    return modes
 
 
 def steps_of(settings: FourPiBeadSettings, n_steps: int) -> tuple:
@@ -427,26 +479,31 @@ MODEL_PARTS = ("I", "A", "B", "|A, B| / I")
 def draw_model(figure, cal, show: str = "I") -> str:
     """The saved model: each channel's ``show`` (`MODEL_PARTS`: the incoherent part I, the interference's
     A and B, or the modulation |A, B| / I) through focus, x against z, and its modulation at the centre
-    against z."""
+    against z.  One colour scale for the channels, with its bar: the channels' light compared at a glance."""
     V = cal.volumes                                   # (C, 3, z, y, x)
     C, _, Z, H, W = V.shape
     axes = figure.subplots(1, C + 1)
     z = cal.z_index_to_nm(np.arange(Z))
+    images = []
     for c in range(C):
         I, A, B = (V[c, k, :, H // 2, :] for k in range(3))
         image = {"I": I, "A": A, "B": B}.get(show)
-        if image is None:
-            image = np.hypot(A, B) / np.clip(I, 1e-12 * I.max(), None)
-            options = dict(cmap="viridis", vmin=0, vmax=1)
-        elif show == "I":
-            options = dict(cmap="magma")
-        else:
-            lim = np.abs(image).max() or 1.0
-            options = dict(cmap="RdBu_r", vmin=-lim, vmax=lim)
-        axes[c].imshow(image, aspect="auto", extent=(-W / 2, W / 2, z[-1], z[0]), **options)
+        images.append(np.hypot(A, B) / np.clip(I, 1e-12 * I.max(), None) if image is None else image)
+    if show == "I":
+        options = dict(cmap="magma", vmin=0, vmax=max(float(i.max()) for i in images) or 1.0)
+    elif show in ("A", "B"):
+        lim = max(float(np.abs(i).max()) for i in images) or 1.0
+        options = dict(cmap="RdBu_r", vmin=-lim, vmax=lim)
+    else:
+        options = dict(cmap="viridis", vmin=0, vmax=1)
+    for c in range(C):
+        im = axes[c].imshow(images[c], aspect="auto", extent=(-W / 2, W / 2, z[-1], z[0]), **options)
         axes[c].set_title(f"channel {c + 1}: {show}", fontsize="small")
         axes[c].set_xlabel("x (px)")
     axes[0].set_ylabel("z (nm)")
+    # under the channels, where it runs into neither the modulation's axis nor the maps
+    figure.colorbar(im, ax=list(axes[:C]), location="bottom", shrink=0.6, aspect=40,
+                    label="modulation" if show not in ("I", "A", "B") else "per pixel, of one photon")
     for c in range(C):
         i, a, b = V[c, 0, :, H // 2, W // 2], V[c, 1, :, H // 2, W // 2], V[c, 2, :, H // 2, W // 2]
         axes[C].plot(z, np.hypot(a, b) / np.maximum(i, 1e-12), label=f"{c + 1}")
@@ -701,17 +758,25 @@ def arms_mismatch(model, shared: dict) -> dict:
 def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
     """The two objectives' pupils over the aperture, phase above (in ``units``, uiPSF's `PHASE_UNIT` if None)
     and magnitude below, how far they are from compensating each other (`arms_mismatch`), and their Zernike
-    coefficients side by side.  The
-    magnitude as the model learns it, 1 + Σ c_j Z_j, before the pupil is rescaled to the reference energy:
-    its shape is what is learnt, its scale is the photons'."""
+    coefficients side by side, the key aberrations (astigmatism, coma, spherical) in their colours as on the
+    one-channel pages (`uipsf.diagnostics.figures.FAMILY_COLOURS`).  The magnitude as the model learns it,
+    1 + Σ c_j Z_j, before the pupil is rescaled to the reference energy: its shape is what is learnt, its
+    scale is the photons'."""
     import torch
-    from uipsf.diagnostics.figures import phase_factor
+    from matplotlib.patches import Patch
+    from uipsf.diagnostics.figures import FAMILY_COLOURS, OTHER, phase_factor
     from uipsf.model.fourpi import lower_view
-    from uipsf.optics.zernike import zernike_name
+    from uipsf.optics.zernike import zernike_family, zernike_name
     model = fit.model
     factor, label = phase_factor(model.psf_up.grid.optics.wavelength_nm, units)
     shared = {k: v.detach() for k, v in fit.shared().items()}
-    axes = figure.subplots(2, 4, gridspec_kw={"width_ratios": [1, 1, 1, 2]})
+    # The maps in a block on the left, phase and magnitude as columns, the arms and their mismatch as rows;
+    # the coefficients on the right.  Side by side in two rows the round maps left most of the page white.
+    # The bars horizontal, under the maps they read: constrained layout gives every map of a row the same
+    # margin, so a bar under one map shrinks none.
+    maps_fig, bars_fig = figure.subfigures(1, 2, width_ratios=[1.1, 1])
+    grid = maps_fig.subplots(3, 2)
+    charts = bars_fig.subplots(2, 1, height_ratios=[1.6, 1])     # the phase has many modes, the magnitude few
     maps = {"phase": [], "magnitude": []}
     for psf, values in ((model.psf_up, shared), (model.psf_lo, lower_view(shared))):
         with torch.no_grad():
@@ -722,8 +787,11 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
             maps[name].append(np.where(inside, value.detach().cpu().double().numpy() * scale, np.nan))
     mismatch = arms_mismatch(model, shared)
     mismatch["phase"] = mismatch["phase"] * factor
-    for row, (name, unit, cmap) in enumerate((("phase", label, "RdBu_r"), ("magnitude", "", "viridis"))):
-        left, middle, both, right = axes[row]
+    for ax, row in zip(grid[:, 0], ("upper", "lower", "mismatch")):
+        ax.set_ylabel(row, fontsize="small")
+    for col, (name, unit, cmap) in enumerate((("phase", label, "RdBu_r"), ("magnitude", "", "viridis"))):
+        up_ax, lo_ax, both = grid[:, col]
+        right = charts[col]
         if name == "phase":
             lim = max(np.nanmax(np.abs(m)) for m in maps[name] + [mismatch[name]]) or 1.0
             lo_v, hi_v = -lim, lim
@@ -732,25 +800,27 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
             hi_v = max(np.nanmax(m) for m in maps[name])
             if hi_v - lo_v < 1e-6:
                 lo_v, hi_v = lo_v - 0.5, hi_v + 0.5
-        for ax, m, arm in ((left, maps[name][0], "upper"), (middle, maps[name][1], "lower")):
+        for ax, m in ((up_ax, maps[name][0]), (lo_ax, maps[name][1])):
             im = ax.imshow(m, cmap=cmap, vmin=lo_v, vmax=hi_v)
-            ax.set_title(f"{arm}: {name}" + (f" ({unit})" if unit else ""), fontsize="small")
-        # Colour bars as insets below the maps, taking no room from them: a bar that steals room from some
-        # maps and not others drew them at different sizes, and one beside the third ran into the
-        # coefficients' axis label.  The phase's mismatch on the arms' own scale, so that what is left reads
-        # against what each arm has; the magnitude's is about zero, the arms' about one, so it has its own.
-        def bar(mappable, ax):
-            figure.colorbar(mappable, cax=ax.inset_axes([0.1, -0.12, 0.8, 0.05]), orientation="horizontal")
-        bar(im, middle)
+        up_ax.set_title(name + (f" ({unit})" if unit else ""), fontsize="small")
+        # the phase's mismatch on the arms' own scale, so that what is left reads against what each arm has,
+        # one bar for the column; the magnitude's is about zero, the arms' about one, so it has its own
         if name == "phase":
             both.imshow(mismatch[name], cmap=cmap, vmin=lo_v, vmax=hi_v)
+            bars = [maps_fig.colorbar(im, ax=[up_ax, lo_ax, both], location="bottom", shrink=0.8, aspect=15)]
         else:
             r = np.nanmax(np.abs(mismatch[name])) or 1.0
-            bar(both.imshow(mismatch[name], cmap="RdBu_r", vmin=-r, vmax=r), both)
-        both.set_title("upper + lower(−k)" if name == "phase" else "upper − lower(−k)", fontsize="small")
-        for ax in (left, middle, both):
+            mis = both.imshow(mismatch[name], cmap="RdBu_r", vmin=-r, vmax=r)
+            bars = [maps_fig.colorbar(im, ax=lo_ax, location="bottom", shrink=0.8, aspect=15),
+                    maps_fig.colorbar(mis, ax=both, location="bottom", shrink=0.8, aspect=15)]
+        for b in bars:
+            b.ax.tick_params(labelsize="x-small")
+        both.set_title("upper + lower(−k)" if name == "phase" else "upper − lower(−k)", fontsize="x-small")
+        for ax in (up_ax, lo_ax, both):
             ax.set_xticks([])
             ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
         modes = getattr(model.pupils[0], f"{name}_modes")
         scale = factor if name == "phase" else 1.0
         up = shared[f"pupil.{name}"].cpu().double().numpy() * scale
@@ -760,19 +830,35 @@ def draw_pupils(figure, fit, units: Optional[str] = None) -> str:
             right.text(0.5, 0.5, f"no {name} modes learnt", ha="center", va="center", fontsize="small")
             continue
         x = np.arange(len(modes))
-        right.bar(x - 0.27, up, 0.27, label="upper")
-        right.bar(x, lo, 0.27, label="lower")
-        right.bar(x + 0.27, [mismatch[f"{name}_coefficients"][j] * scale for j in modes], 0.27, color="0.4",
-                  label="mismatch")
+        families = [zernike_family(j) for j in modes]
+        colours = [FAMILY_COLOURS.get(f, OTHER) for f in families]
+        # the arms told apart by fill, the aberration by colour: upper solid, lower hatched, the mismatch pale
+        right.bar(x - 0.27, up, 0.27, color=colours)
+        right.bar(x, lo, 0.27, color="white", edgecolor=colours, hatch="////", lw=0.8)
+        right.bar(x + 0.27, [mismatch[f"{name}_coefficients"][j] * scale for j in modes], 0.27, color=colours,
+                  alpha=0.35)
         right.set_xticks(x)
         right.set_xticklabels([f"{zernike_name(j)}\n{j}" for j in modes], fontsize="x-small", rotation=90)
+        for tick, f in zip(right.get_xticklabels(), families):
+            if f is not None:
+                tick.set_color(FAMILY_COLOURS[f])
+                tick.set_fontweight("bold")
         right.axhline(0, color="0.5", lw=0.6)
-        right.set_ylabel(f"Zernike coefficient{f' ({unit})' if unit else ''}", fontsize="small")
-        right.legend(fontsize="small", frameon=False)
+        right.set_ylabel(f"{name}{f' ({unit})' if unit else ''}", fontsize="small")
+        if col == 0:
+            right.set_title("Zernike coefficients", fontsize="small")
+            handles = [Patch(color="0.45", label="upper"),
+                       Patch(facecolor="white", edgecolor="0.45", hatch="////", label="lower"),
+                       Patch(color="0.45", alpha=0.35, label="mismatch")]
+            handles += [Patch(color=c, label=f) for f, c in FAMILY_COLOURS.items()
+                        if any(f in (zernike_family(j) for j in getattr(model.pupils[0], f"{w}_modes"))
+                               for w in ("phase", "magnitude"))]
+            right.legend(handles=handles, fontsize="x-small", frameon=False, ncols=2)
     return ("each objective's pupil as learnt, phase and magnitude, and what is left of them together: the "
             "lower pupil turned through the centre, as it sees the emitter from the other side, added to "
             "the upper one (its magnitude subtracted) -- zero where the two arms make the same PSF.  The "
-            "deformable mirrors' astigmatism shows with opposite signs and cancels there")
+            "deformable mirrors' astigmatism shows with opposite signs and cancels there.  The key "
+            "aberrations in colour: astigmatism, coma and spherical")
 
 
 def stack_views(beads: FourPiBeads, images: Optional[dict], excluded=()):

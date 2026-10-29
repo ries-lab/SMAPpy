@@ -152,7 +152,8 @@ def sample_iab(model: FourPiModel, shared: dict, z_nm, roi_px: int | None = None
             base = getattr(model, name)
             roi = (roi_px, roi_px) if roi_px is not None else base.roi_shape
             setattr(model, name, type(base)(base.grid, base.pupil, roi, upsample=base.upsample,
-                                            kind=base.kind, sigma_nm=base.sigma_init))
+                                            kind=base.kind, sigma_nm=base.sigma_init,
+                                            round_sigma=base.round_sigma))
     dev, dt = model.grid.rho.device, model.grid.rho.dtype
     p = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}
     z = torch.as_tensor(np.asarray(z_nm, float), dtype=dt, device=dev)

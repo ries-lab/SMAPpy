@@ -794,6 +794,12 @@ class _FourPi:
     files = "bead scans"
     use_label = "Use in Spline 4Pi"
     listed = False                     # a 4Pi model: never one for Spline 3D's *auto*
+    #: the learning's time, a start and a time per bead frame (slice x mirror step), None where it is not
+    #: known.  The pupil model's measured on the Zenodo 4Pi beads, 21 slices x 3 steps, on a Mac's GPU
+    #: (2026-10-29): 21, 31, 30, 73, 90 s for 252, 504, 1008, 2016, 2583 frames -- far from the 3.5 min per
+    #: 505 frames the window had said, which was from before the learning was made faster
+    START_SECONDS: float = 0.0
+    SECONDS_PER_FRAME: Optional[float] = None
 
     def detect(self, paths, dual, inputs, progress=None) -> Detected:
         from .fourpi_beads import scan_beads
@@ -801,16 +807,37 @@ class _FourPi:
         if camera is None:
             raise ValueError("4Pi beads need the camera's conversion and offset: give them under microscope")
         tell = _counted(progress, 0.0, 1.0) or (lambda text: None)
-        beads, layout, registration = scan_beads(paths, inputs["fourpi"], camera, tell)
+        from .fourpi_beads import brightness_outliers
+        settings = inputs["fourpi"]
+        beads, layout, registration = scan_beads(paths, settings, camera, tell)
         E, C, J, M = beads.data.shape[:4]
-        # measured: 3.5 min for 5 beads of 101 slices on a Mac's GPU, about in proportion to the frames
-        seconds = 210.0 * E * J * M / 505
         rms = ", ".join(f"{r:.2f}" for r in registration.rms_px[1:])
-        return Detected({"beads": beads, "layout": layout, "registration": registration},
-                        f"{E} beads in {C} channels, {J} slices x {M} phase step{'s' if M > 1 else ''}; the "
-                        f"channels registered from {min(registration.pairs[1:])} pairs ({rms} px); learning takes "
-                        f"about {duration(seconds)}",
-                        [(r["stack"], r["x_px"], r["y_px"], i) for i, r in enumerate(beads.records)], seconds)
+        outliers = brightness_outliers(beads, settings.brightness_range)
+        found = {"beads": beads, "layout": layout, "registration": registration, "outliers": outliers}
+        text = (f"{E} beads in {C} channels, {J} slices x {M} phase step{'s' if M > 1 else ''}"
+                + (f" ({len(outliers)} marked out by brightness)" if outliers else "")
+                + f"; the channels registered from {min(registration.pairs[1:])} pairs ({rms} px)")
+        detected = Detected(found, text, [(r["stack"], r["x_px"], r["y_px"], i) for i, r in enumerate(beads.records)])
+        detected.seconds = self.seconds(detected, self.detected_marks(detected))
+        return detected
+
+    def seconds(self, detected: Detected, marks: dict) -> Optional[float]:
+        """About how long learning the beads not marked out takes (`SECONDS_PER_FRAME`)."""
+        if not self.SECONDS_PER_FRAME:
+            return None
+        beads = detected.found["beads"]
+        E, C, J, M = beads.data.shape[:4]
+        used = E - sum(1 for b, wish in marks.items() if wish == "exclude" and b < E)
+        return self.START_SECONDS + self.SECONDS_PER_FRAME * used * J * M
+
+    def detected_marks(self, detected: Detected) -> dict:
+        """The beads *outlier factor* leaves out, marked so: in the table, and let in again by hand."""
+        return {b: "exclude" for b in detected.found.get("outliers", ())}
+
+    def detected_text(self, detected: Detected, marks: dict) -> str:
+        """The detection's line with the time learning the beads as marked takes."""
+        seconds = self.seconds(detected, marks)
+        return detected.text + ("" if seconds is None else f"; learning takes about {duration(seconds)}")
 
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found["beads"].records, marks,
@@ -978,13 +1005,14 @@ class FourPiPupil(_FourPi):
     """The pupil model in the 4Pi mode: uiPSF's 4Pi pupil model learnt from the beads (`fourpi_beads.learn`),
     rendered at three phases and saved as I, A and B with the period it shows."""
     key, label = "fourpi_pupil", "pupil model (uiPSF), 4Pi"
+    START_SECONDS, SECONDS_PER_FRAME = 15.0, 0.03
     sections = {"start from": False, "microscope": True, "model": False, "spline": False, "averaging": False,
                 "4Pi": True}
     needs_torch = True
 
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
             marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
-        from .fourpi_beads import FourPiBeads as Beads, learn, save, steps_of
+        from .fourpi_beads import FourPiBeads as Beads, learn, magnitude_modes_of, save, steps_of
         from .pupil import default_save_path
         found = detected.found if detected is not None else self.detect(paths, dual, inputs, progress).found
         beads = found["beads"]
@@ -1001,7 +1029,8 @@ class FourPiPupil(_FourPi):
                     pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
                     n_max=settings.n_max, photons_per_observation=settings.photons_per_observation,
                     bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
-                    kind="vector" if settings.vectorial else "scalar")
+                    kind="vector" if settings.vectorial else "scalar",
+                    magnitude_modes=magnitude_modes_of(settings))
         run = Run({"fit": fit, "found": found, "excluded": excluded, "settings": settings,
                    "wavelength_nm": optics["wavelengths"][0]}, False)
         if inputs["run"].save_model:
