@@ -457,16 +457,15 @@ class PupilModel:
 
         from . import plots
         cal = run.result.cal
-        from uipsf.diagnostics.figures import PHASE_UNITS
+        from uipsf.diagnostics.figures import unit_choices
         pages = []
         halves = getattr(cal, "halves", None)            # after *Uncertainty from halves*
         for title, draw in figures(cal, reference=run.result.start, halves=halves).items():
             if title == "Beads":
                 continue
             if title.startswith("Pupil and Zernikes"):
-                # the phase in nm, waves or rad: a choice above the page, as the Zernike table has all three;
-                # nm first, the unit an optician reads (the first choice is the one shown)
-                units = ("nm",) + tuple(u for u in PHASE_UNITS if u != "nm")
+                # the phase in nm, waves or rad: a choice above the page, `PHASE_UNIT` first (the one shown)
+                units = unit_choices()
                 pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
                                   follows_selection=False, controls={"units": units}))
             else:
@@ -591,7 +590,7 @@ class InSitu:
 
     def pages(self, run: Run) -> list:
         from uipsf.diagnostics import figures
-        from uipsf.diagnostics.figures import PHASE_UNITS, zernike_table
+        from uipsf.diagnostics.figures import unit_choices, zernike_table
 
         from .insitu_views import draw_model_vs_data, draw_rounds, draw_z_bins
         result = run.result
@@ -602,7 +601,7 @@ class InSitu:
             if title == "Beads":
                 continue
             if title.startswith("Pupil and Zernikes"):
-                units = ("nm",) + tuple(u for u in PHASE_UNITS if u != "nm")
+                units = unit_choices()
                 pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
                                   follows_selection=False, controls={"units": units}))
             else:
@@ -924,7 +923,9 @@ class _FourPi:
         if fit is not None:
             pages.insert(1, Page("Model vs data", model_vs_data,
                                  controls={"mirror step": tuple(str(m + 1) for m in range(M))}))
-            pages.append(Page("Pupils", lambda f, s, e: draw_pupils(f, fit), follows_selection=False))
+            from uipsf.diagnostics.figures import unit_choices
+            pages.append(Page("Pupils", lambda f, s, e, chosen: draw_pupils(f, fit, chosen["units"]),
+                              follows_selection=False, controls={"units": unit_choices()}))
         return pages
 
     def rows(self, run: Run, marks: dict) -> list:

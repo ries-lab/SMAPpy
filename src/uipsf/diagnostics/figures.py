@@ -27,6 +27,29 @@ OTHER = "#b0b0b0"
 #: what a phase is shown in: radians, waves (rad / 2π) or nanometres of wavefront (waves × λ).  Radians are
 #: what the model fits; a wave and its nanometres are what an optician reads, and λ/14 rms is Maréchal's limit
 PHASE_UNITS = ("rad", "waves", "nm")
+#: The one switch for the unit every aberration is shown in -- the pupils' maps, the Zernikes' bars and
+#: tables, of every PSF learning (one channel, dual colour, in situ, 4Pi) -- where a figure or a page is not
+#: told otherwise, and the first of the window's *units*.  nm of wavefront: an aberration's size in nm reads
+#: the same at any wavelength, which radians and waves do not.  The model and its files stay in radians.
+PHASE_UNIT = "nm"
+
+
+def unit_choices() -> tuple[str, ...]:
+    """`PHASE_UNITS` with `PHASE_UNIT` first, as the window offers them (its first choice is the one shown)."""
+    return (PHASE_UNIT,) + tuple(u for u in PHASE_UNITS if u != PHASE_UNIT)
+
+
+def phase_factor(wavelength_nm: float, units: str | None = None) -> tuple[float, str]:
+    """(factor, label) that turn a phase in radians into ``units`` (`PHASE_UNITS`, `PHASE_UNIT` if None) at
+    ``wavelength_nm``."""
+    units = units or PHASE_UNIT
+    if units == "rad":
+        return 1.0, "rad"
+    if units == "waves":
+        return 1.0 / (2 * np.pi), "waves"
+    if units == "nm":
+        return float(wavelength_nm) / (2 * np.pi), "nm"
+    raise ValueError(f"phase units {units!r}: one of {', '.join(PHASE_UNITS)}")
 
 
 def _shared(source) -> dict:
@@ -75,16 +98,9 @@ def tilt_text(source) -> str:
     return f"coverslip tilt x {one(tx, ex)}, y {one(ty, ey)}"
 
 
-def phase_scale(source, channel: int = 0, units: str = "rad") -> tuple[float, str]:
-    """(factor, label) that turn a phase in radians into ``units`` (`PHASE_UNITS`), λ the channel's own."""
-    if units == "rad":
-        return 1.0, "rad"
-    if units == "waves":
-        return 1.0 / (2 * np.pi), "waves"
-    if units == "nm":
-        wavelength = float(source.model.channels[channel].psf.grid.optics.wavelength_nm)
-        return wavelength / (2 * np.pi), "nm"
-    raise ValueError(f"phase units {units!r}: one of {', '.join(PHASE_UNITS)}")
+def phase_scale(source, channel: int = 0, units: str | None = None) -> tuple[float, str]:
+    """`phase_factor` at the channel's own λ."""
+    return phase_factor(source.model.channels[channel].psf.grid.optics.wavelength_nm, units)
 
 
 def pupil_maps(source, channel: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -105,9 +121,9 @@ def _label(j: int) -> str:
     return f"{zernike_name(j)}\n{j}"
 
 
-def draw_pupil(fig, source, channel: int = 0, vertical: bool = False, units: str = "rad") -> None:
-    """The pupil's phase (in ``units``, `PHASE_UNITS`) and magnitude over the aperture, side by side or,
-    ``vertical``, one above the other."""
+def draw_pupil(fig, source, channel: int = 0, vertical: bool = False, units: str | None = None) -> None:
+    """The pupil's phase (in ``units``, `PHASE_UNITS`; `PHASE_UNIT` if None) and magnitude over the
+    aperture, side by side or, ``vertical``, one above the other."""
     magnitude, phase = pupil_maps(source, channel)
     factor, label = phase_scale(source, channel, units)
     phase = phase * factor
@@ -135,10 +151,10 @@ def half_values(halves, source, which: str = "phase", channel: int = 0) -> tuple
 
 
 def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label: str = "start",
-                  units: str = "rad", halves=None) -> None:
-    """The phase (in ``units``, `PHASE_UNITS`) and, where there are any, the magnitude Zernikes with their
-    CRLBs as error bars; ``reference`` (another `Calibration` or `LearnedPSF`) drawn beside them, mode by
-    mode.  The key aberrations' legend goes below the bars, out of their way.
+                  units: str | None = None, halves=None) -> None:
+    """The phase (in ``units``, `PHASE_UNITS`; `PHASE_UNIT` if None) and, where there are any, the magnitude
+    Zernikes with their CRLBs as error bars; ``reference`` (another `Calibration` or `LearnedPSF`) drawn
+    beside them, mode by mode.  The key aberrations' legend goes below the bars, out of their way.
 
     With ``halves`` (`halves.HalfSplits`), a second, wider whisker on each bar is the uncertainty from the
     half-split fits, and every half's own value is a dot beside the bar: the whisker says how large, the
@@ -163,7 +179,7 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
                 for row in each * factor:
                     ax.plot(x - width / 3, row, ".", color="k", markersize=3, alpha=0.7)
         if w == "phase":
-            decimals = {"rad": 2, "waves": 3, "nm": 1}[units]
+            decimals = {"rad": 2, "waves": 3, "nm": 1}[label]
             # the key aberrations' values on their bars: the numbers a calibration is read by
             span = float(np.nanmax(np.abs(values))) if len(values) else 1.0
             for xi, v, f in zip(x, values, families, strict=True):
@@ -205,7 +221,7 @@ def draw_zernikes(fig, source, channel: int = 0, reference=None, reference_label
 
 
 def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, reference_label: str = "start",
-                            units: str = "rad", halves=None) -> None:
+                            units: str | None = None, halves=None) -> None:
     """The pupil (`draw_pupil`, one map above the other) on the left, its Zernikes (`draw_zernikes`) on the
     right: the picture and the numbers it is made of, read together, the phase in ``units``."""
     left, right = fig.subfigures(1, 2, width_ratios=[1, 2.4])
@@ -221,14 +237,17 @@ def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[
     ``reference``'s beside them: the numbers of `draw_zernikes`, to read or copy, each key aberration's
     row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted."""
     from ..optics.zernike import noll_to_nm
-    # nm first, the unit an optician reads; rad, what the model fits, and waves after the magnitude
-    columns = ["channel", "Noll", "name", "aberration", "n", "m", "phase (nm)", "± (nm)", "magnitude", "±",
-               "phase (rad)", "± (rad)", "phase (waves)", "± (waves)"]
+    # the phase in `PHASE_UNIT` first, the others after the magnitude
+    first, *others = unit_choices()
+    columns = ["channel", "Noll", "name", "aberration", "n", "m", f"phase ({first})", f"± ({first})", "magnitude",
+               "±"]
+    for u in others:
+        columns += [f"phase ({u})", f"± ({u})"]
     if halves is not None:
         # the half-split uncertainty beside the CRLB, and how many CRLBs it is: above 1, the CRLB is optimistic
-        columns += ["± halves (nm)", "± halves (rad)", "halves / CRLB", "magnitude ± halves"]
+        columns += [f"± halves ({first})", "halves / CRLB", "magnitude ± halves"]
     if reference is not None:
-        columns += ["start phase (rad)", "start magnitude"]
+        columns += [f"start phase ({first})", "start magnitude"]
     rows = []
     for c in range(source.model.n_channels):
         phase = {j: (v, e) for j, v, e in zip(*zernikes(source, "phase", c), strict=True)}
@@ -242,19 +261,20 @@ def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[
             start_phase = {j: v for j, v, _ in zip(*zernikes(reference, "phase", c), strict=True)}
             start_magnitude = {j: v for j, v, _ in zip(*zernikes(reference, "magnitude", c), strict=True)}
         nan = (float("nan"), float("nan"))
+        f = {u: phase_scale(source, c, u)[0] for u in PHASE_UNITS}
         for j in sorted(set(phase) | set(magnitude)):
             n, m = noll_to_nm(j)
             radians = phase.get(j, nan)
-            waves = tuple(v * phase_scale(source, c, "waves")[0] for v in radians)
-            nm = tuple(v * phase_scale(source, c, "nm")[0] for v in radians)
-            row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *nm,
-                   *magnitude.get(j, nan), *radians, *waves)
+            row = (c + 1, j, zernike_name(j), zernike_family(j) or "", n, m, *(v * f[first] for v in radians),
+                   *magnitude.get(j, nan))
+            for u in others:
+                row += tuple(v * f[u] for v in radians)
             if halves is not None:
                 spread = half_phase.get(j, float("nan"))
-                row += (spread * phase_scale(source, c, "nm")[0], spread, spread / radians[1],
-                        half_magnitude.get(j, float("nan")))
+                row += (spread * f[first], spread / radians[1], half_magnitude.get(j, float("nan")))
             if reference is not None:
-                row += (start_phase.get(j, float("nan")), start_magnitude.get(j, float("nan")))
+                row += (start_phase.get(j, float("nan")) * phase_scale(reference, c, first)[0],
+                        start_magnitude.get(j, float("nan")))
             rows.append(tuple(float(v) if isinstance(v, (np.floating, float)) else v for v in row))
     colours = [FAMILY_COLOURS.get(row[3]) for row in rows]
     return columns, rows, colours
@@ -310,7 +330,7 @@ def figures(cal, reference=None, halves=None) -> dict:
     out = {}
     for c in range(cal.model.n_channels):
         tag = "" if cal.model.n_channels == 1 else f" {c + 1}"
-        out[f"Pupil and Zernikes{tag}"] = lambda fig, c=c, units="rad": draw_pupil_and_zernikes(
+        out[f"Pupil and Zernikes{tag}"] = lambda fig, c=c, units=None: draw_pupil_and_zernikes(
             fig, cal, c, reference, units=units, halves=halves)
     if cal.atlas is not None:
         out["Residual atlas"] = lambda fig: draw_atlas(fig, cal.atlas)

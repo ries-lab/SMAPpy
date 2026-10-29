@@ -355,7 +355,13 @@ where the registration puts the bead.
   period the model itself shows.  The bead's size (*bead diameter*, 40 nm by default) is taken out:
   its dyes sit at different heights, each at its own point of the fringe,
   which lowers the interference a point emitter would show -- by 2–4 % for
-  40 nm, 13–22 % for 100 nm.  The saved model is a point's.
+  40 nm, 13–22 % for 100 nm.  The saved model is a point's.  Its *Pupils*
+  page shows each objective's phase (in the *units* chosen above it) and
+  magnitude, and a third column, what the two leave together: the lower
+  pupil turned through the centre, as it sees the emitter from the other
+  side, added to the upper one -- zero where the two arms make the same PSF
+  at every height.  The deformable mirrors' opposite astigmatism cancels
+  there; equal comas do not.
 - **bead average:** I, A and B solved from the beads themselves, with no
   physical model.
   - Each bead's box is moved onto the bead to a fraction of a pixel, its
@@ -891,9 +897,10 @@ The bead average's other pages are the bead calibration's (*Overview*,
 diagnostics*), explained on its page.  The pupil model's:
 
 - **Pupil and Zernikes**: on the left the learnt phase and magnitude over the
-  pupil, the phase in the *units* chosen above the page: radians, as the
-  model is fitted; waves, radians / 2π; or nm of wavefront, waves times the
-  *emission* wavelength.  (Maréchal's criterion for a near-perfect PSF is an
+  pupil, the phase in the *units* chosen above the page: nm of wavefront,
+  the first and the one shown, waves times the *emission* wavelength; waves,
+  radians / 2π; or radians, as the model is fitted.  An aberration's size in
+  nm reads the same at any wavelength.  (Maréchal's criterion for a near-perfect PSF is an
   rms wavefront error below 1/14 of a wave.)  The phase of an astigmatic PSF is a saddle; the
   magnitude should be close to 1.  On the right every mode's coefficient with
   its uncertainty as an error bar, beside the *start from* model's when
@@ -924,10 +931,10 @@ diagnostics*), explained on its page.  The pupil model's:
   its CRLB, *coverslip tilt x 0.52° ± 0.03°, y −0.10° ± 0.03°*, and in the
   line under the buttons; the calibration file keeps it too.  A tilt within
   about two of its CRLBs of 0 is no tilt.
-- **Zernike table**: the same numbers, every channel's phase -- in radians,
-  waves and nm -- and magnitude with their uncertainties (and the *start from* model's); after
+- **Zernike table**: the same numbers, every channel's phase -- in nm, then
+  radians and waves -- and magnitude with their uncertainties (and the *start from* model's, in nm); after
   *Uncertainty from halves...* also the halves' uncertainty (*± halves*, in
-  rad and nm, and for the magnitude) and *halves / CRLB*, above 1 where the
+  nm, and for the magnitude) and *halves / CRLB*, above 1 where the
   CRLB is optimistic.  The key
   aberrations' rows in their colours; *Copy* puts the table on the
   clipboard, tab-separated, for a spreadsheet.

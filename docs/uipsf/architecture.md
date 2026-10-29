@@ -876,7 +876,9 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   model mode by mode), `draw_atlas`, `draw_beads`, each drawing on a figure it is given; `figures(cal,
   reference)` gives them as {title: draw}, for tabs that draw lazily.  They read a `Calibration` or a
   `LearnedPSF` alike through `zernikes` and `pupil_maps`.  The phase is drawn in rad, waves or nm
-  (`PHASE_UNITS`, `phase_scale`), and with a `HalfSplits` the half-split uncertainty beside the CRLB.
+  (`PHASE_UNITS`, `phase_scale`), nm unless told otherwise: `PHASE_UNIT` is the one switch for every
+  learning's figures and tables, SMAPpy's 4Pi pupils too (`phase_factor`); the model and its files stay
+  in rad.  With a `HalfSplits` the half-split uncertainty is drawn beside the CRLB.
 - **Half-split uncertainty** (`diagnostics.halves`): `half_splits` learns the calibration again on K
   complementary random halves of its used beads, each cold from the run's own start with every bead of
   the half pinned in by a decision, and estimates the full fit's standard deviation as the root mean

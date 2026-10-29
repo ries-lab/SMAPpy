@@ -244,7 +244,7 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     assert all(sorted(a + b) == sorted(used) for a, b in halves.splits)
     table = next(page for _, _, page in window.pages if page.title == "Zernike table")
     columns, rows, *_ = table.table()
-    assert "± halves (rad)" in columns and np.isfinite([r[columns.index("± halves (rad)")] for r in rows]).any()
+    assert "± halves (nm)" in columns and np.isfinite([r[columns.index("± halves (nm)")] for r in rows]).any()
     _every_page_draws(window)
     from uipsf.export import load_model
     assert load_model(model_path(window.run_result.saved), device="cpu").halves.n_splits == 2

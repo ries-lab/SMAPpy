@@ -1588,7 +1588,10 @@ what the two arms leave together: W_up(k) + W_lo(−k) (the magnitude's differen
 pupil is the upper one's twin and the arms make the same PSF at every height -- the even modes' sum, the
 odd ones' difference, so the mirrors' opposite astigmatism cancels there and equal comas do not
 (`fourpi_beads.arms_mismatch`).  4Pi scans added in the single-channel mode turn the window to *4Pi*.
-Read as one channel's bead stack they had failed with "not a TIFF file".
+Read as one channel's bead stack they had failed with "not a TIFF file". Interference phases -- the
+channels' offsets, the mirror steps, the cavity's phase in *4Pi z* -- are shown in multiples of π
+(`fourpi.in_pi`, `pi_axis`), aberrations in nm (`uipsf.diagnostics.figures.PHASE_UNIT`); columns and
+files keep radians.
 
 
 ## 20. One optimum: the misalignment's start and the magnitude (2026-10-28)

@@ -89,7 +89,9 @@ def draw_fringes(ax, phase, z_env_nm, phase0, phase_per_nm, limit: int = 50000):
     line[np.abs(np.diff(line, prepend=line[0])) > np.pi] = np.nan
     ax.plot(grid, line, color="C3", lw=1)
     ax.set_xlabel("envelope z (nm)")
-    ax.set_ylabel("phase - cavity phase (rad)")
+    ax.set_ylabel("phase − cavity phase")
+    from ..fourpi import pi_axis
+    pi_axis(ax)
 
 
 def draw_cavity(ax, cavity, frame=None, truth=None):
@@ -102,7 +104,9 @@ def draw_cavity(ax, cavity, frame=None, truth=None):
     ax.errorbar(cavity.centres, cavity.phase0, yerr=cavity.error, fmt="o", ms=3,
                 color="C0", label="measured")
     ax.set_xlabel("frame")
-    ax.set_ylabel("cavity phase (rad)")
+    ax.set_ylabel("cavity phase")
+    from ..fourpi import pi_axis
+    pi_axis(ax)
     if truth is not None:
         ax.legend(frameon=False, fontsize="small")
 

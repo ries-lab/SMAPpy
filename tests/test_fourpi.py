@@ -469,3 +469,22 @@ def test_a_model_whose_interference_exceeds_its_light_is_not_raised_onto_a_pedes
     assert In[0, 2, 0, 0] < 1e-6                           # no pedestal
     assert np.all(np.hypot(An, Bn) <= In + 1e-12)
     assert np.allclose(An[0, 2, 7, 7] / In[0, 2, 7, 7], 0.8)
+
+
+def test_an_interference_phase_is_shown_in_multiples_of_pi():
+    """`in_pi` and `pi_axis`: a quarter turn reads 0.5π, the axis ticks fall on round multiples of π
+    while its data stays in radians."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    assert fourpi.in_pi(0.54 * np.pi) == "0.54π" and fourpi.in_pi(-np.pi / 2) == "−0.50π"
+    assert fourpi.in_pi(1e-5) == "0"
+    fig = Figure()
+    ax = fig.subplots()
+    ax.plot([0, 1], [-np.pi, np.pi])
+    fourpi.pi_axis(ax)
+    fig.canvas.draw()
+    ticks = [t for t in ax.get_yticks() if -np.pi <= t <= np.pi]
+    assert np.allclose(np.asarray(ticks) / np.pi * 2, np.round(np.asarray(ticks) / np.pi * 2))
+    labels = {t.get_text() for t in ax.get_yticklabels()}
+    assert {"−π", "0", "π"} <= labels and "0.5π" in labels

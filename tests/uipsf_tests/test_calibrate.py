@@ -127,8 +127,8 @@ def test_the_zernike_table_holds_the_bars_numbers_and_colours_the_key_aberration
     modes, values, _ = zernikes(symmetric_fixed, "phase")
     phase = {row[1]: row[columns.index("phase (rad)")] for row in rows}
     assert all(phase[j] == pytest.approx(v) for j, v in zip(modes, values, strict=True))
-    start = columns.index("start phase (rad)")
-    assert all(row[start] == pytest.approx(row[columns.index("phase (rad)")]) for row in rows if row[1] in modes)
+    start = columns.index("start phase (nm)")
+    assert all(row[start] == pytest.approx(row[columns.index("phase (nm)")]) for row in rows if row[1] in modes)
     for row, colour in zip(rows, colours, strict=True):
         assert colour == FAMILY_COLOURS.get(row[columns.index("aberration")])
 
@@ -151,6 +151,25 @@ def test_the_phase_is_shown_in_rad_waves_or_nm_of_the_channels_wavelength(symmet
         assert row[columns.index("phase (waves)")] == pytest.approx(rad / (2 * np.pi), nan_ok=True)
         assert row[columns.index("phase (nm)")] == pytest.approx(rad * 660 / (2 * np.pi), nan_ok=True)
         assert row[columns.index("± (nm)")] == pytest.approx(err * 660 / (2 * np.pi), nan_ok=True)
+
+
+def test_one_switch_sets_the_unit_every_aberration_is_shown_in(symmetric_fixed, monkeypatch):
+    """`PHASE_UNIT`: nm by default -- the bars, their axis, the table's first phase column and the window's
+    first *units* -- and set to waves, all of them follow."""
+    import importlib
+
+    import numpy as np
+    figures = importlib.import_module("uipsf.diagnostics.figures")   # the package's `figures` is a function
+    for unit, factor in (("nm", 660 / (2 * np.pi)), ("waves", 1 / (2 * np.pi))):
+        monkeypatch.setattr(figures, "PHASE_UNIT", unit)
+        modes, values, _ = figures.zernikes(symmetric_fixed, "phase")
+        fig = Figure()
+        figures.draw_zernikes(fig, symmetric_fixed)
+        assert fig.axes[0].get_ylabel() == unit
+        assert np.allclose([b.get_height() for b in fig.axes[0].patches[:len(modes)]], values * factor)
+        columns, _, _ = figures.zernike_table(symmetric_fixed, reference=symmetric_fixed)
+        assert columns[6] == f"phase ({unit})" and f"start phase ({unit})" in columns
+        assert figures.unit_choices()[0] == unit and sorted(figures.unit_choices()) == sorted(figures.PHASE_UNITS)
 
 
 @pytest.mark.long

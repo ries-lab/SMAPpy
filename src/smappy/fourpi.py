@@ -127,6 +127,35 @@ class FourPiCalibration:
 
 # ---------------------------------------------------------------- building
 
+def in_pi(rad, digits: int = 2) -> str:
+    """An interference phase as a fraction of a half turn, "0.54π": a fringe's phase is read against π (a
+    quarter turn is 0.5π, the opposite fringe π), which radians hide.  Only the shown text: the columns
+    and files keep radians."""
+    v = float(rad) / np.pi
+    return "0" if round(v, digits) == 0 else f"{v:.{digits}f}π".replace("-", "−")
+
+
+def pi_axis(ax, which: str = "y") -> None:
+    """Ticks of a phase axis whose data is in radians at round multiples of π, written "0.5π", "−π":
+    the data stays in radians, so a caller's lines, limits and histograms need no change."""
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+    class PiLocator(MaxNLocator):
+        def tick_values(self, vmin, vmax):
+            return super().tick_values(vmin / np.pi, vmax / np.pi) * np.pi
+
+    def text(v, _):
+        f = round(v / np.pi, 6)
+        if f == 0:
+            return "0"
+        body = "π" if abs(f) == 1 else f"{abs(f):g}π"
+        return ("−" if f < 0 else "") + body
+
+    axis = ax.yaxis if which == "y" else ax.xaxis
+    axis.set_major_locator(PiLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+    axis.set_major_formatter(FuncFormatter(text))
+
+
 def normalise(I, A, B, focal_plane: int):
     """Offset and scale the channels' volumes together, as the fitter needs.
 

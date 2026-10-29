@@ -166,7 +166,7 @@ def test_the_pupils_page_draws_both_objectives_phase_and_magnitude():
     figure = plt.figure()
     text = draw_pupils(figure, types.SimpleNamespace(model=model, shared=lambda: shared))
     titles = [ax.get_title() for ax in figure.axes]
-    assert "upper: magnitude" in titles and "lower: phase (rad)" in titles and "magnitude" in text
+    assert "upper: magnitude" in titles and "lower: phase (nm)" in titles and "magnitude" in text
     assert "upper + lower(−k)" in titles and "upper − lower(−k)" in titles
     plt.close(figure)
 

@@ -142,12 +142,13 @@ dz = np.asarray(locs["z_nm"])[loc] - z[true]
 dp = np.angle(np.exp(1j * (np.asarray(locs["phase_rad"])[loc] - (cal.phase_per_nm * z[true] + 0.7))))
 for ax, d, err, unit, scale in ((axes[0], dx * 100, locs["x_err_nm"][loc], "x - true x (nm)", 40),
                                 (axes[1], dz, locs["z_err_nm"][loc], "z - true z (nm)", 120),
-                                (axes[2], dp, locs["phase_err_rad"][loc], "phase - true phase (rad)", 0.3)):
+                                (axes[2], dp, locs["phase_err_rad"][loc], "phase − true phase", 0.3)):
     ax.hist(d, np.linspace(-scale, scale, 41), color="0.6", density=True)
     s = np.median(err)
     g = np.linspace(-scale, scale, 200)
     ax.plot(g, np.exp(-0.5 * (g / s) ** 2) / (s * np.sqrt(2 * np.pi)), color="C3")
     ax.set_xlabel(unit, fontsize="small"); ax.set_yticks([])
+fourpi.pi_axis(axes[2], "x")
 ```
 
 ## In detail
