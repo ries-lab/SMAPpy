@@ -254,8 +254,8 @@ def saturation_of(images, settings):
     """The ADU at which a pixel counts as saturated: the setting, else the integer type's full scale."""
     if settings.saturation_adu is not None:
         return float(settings.saturation_adu)
-    images = np.asarray(images)
-    return float(np.iinfo(images.dtype).max) if np.issubdtype(images.dtype, np.integer) else None
+    dtype = getattr(images, 'dtype', None) or np.asarray(images).dtype     # a `Planes` is not read for it
+    return float(np.iinfo(dtype).max) if np.issubdtype(dtype, np.integer) else None
 
 
 def find_peaks(images, settings):

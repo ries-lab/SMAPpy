@@ -238,6 +238,35 @@ def test_ome_tiff_reads_embedded_plane_coordinates(tmp_path):
     assert stacks[0].dz == pytest.approx(20)
 
 
+def test_a_bead_stack_stays_in_its_file_until_used_and_reads_back_what_it_holds(tmp_path, monkeypatch):
+    # 80 GB for a calibration of full-chip stacks, every one held whole (2026-10): now none is read
+    # until it is used, and then the planes asked for only
+    import json
+    import tifffile
+    from smappy.calibrate.input import Planes
+    rng = np.random.default_rng(1)
+    truth = rng.integers(0, 4000, (6, 12, 10)).astype(np.uint16)
+    path = tmp_path/'beads.ome.tif'
+    with tifffile.TiffWriter(path, ome=False) as writer:
+        for z in (3, 0, 5, 1, 4, 2):
+            md = json.dumps({'SliceIndex': z, 'FrameIndex': 0, 'ChannelIndex': 0,
+                             'PositionIndex': 0, 'ZPositionUm': 1+z*.05})
+            writer.write(truth[z], metadata=None, extratags=[(51123, 's', len(md)+1, md, False)])
+    read = []
+    original = tifffile.TiffPage.asarray
+    monkeypatch.setattr(tifffile.TiffPage, 'asarray', lambda self, *a, **k: read.append(1) or original(self, *a, **k))
+    stack, = read_bead_stacks(path)
+    assert isinstance(stack.images, Planes) and not read
+    assert stack.images.shape == truth.shape and stack.images.dtype == np.uint16
+    np.testing.assert_array_equal(stack.images[2], truth[2])
+    assert len(read) == 1
+    np.testing.assert_array_equal(np.asarray(stack.images), truth)
+    np.testing.assert_array_equal(stack.images[[4, 1], 3:7, ::2], truth[[4, 1], 3:7, ::2])
+    half = stack.images.crop(slice(None), slice(5, 10)).crop(slice(2, 9), slice(1, None))
+    np.testing.assert_array_equal(np.asarray(half), truth[:, 2:9, 6:10])
+    assert half.shape == (6, 7, 4)
+
+
 def test_ndtiff_preserves_interleaved_channels_and_repeats(tmp_path):
     import json
     import struct

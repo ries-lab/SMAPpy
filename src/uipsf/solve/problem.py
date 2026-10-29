@@ -73,6 +73,23 @@ def _squared_curvature(params, scope: str, g: torch.Tensor) -> torch.Tensor:
 # 32 GB M1 Pro (Problem.__init__).
 TANGENT_BUDGET = {"cpu": 2 ** 21, "mps": 2 ** 21}
 
+# On CUDA the budget is what the card has room for: a GPU's memory is its own, and 2²¹ took 9.4 GB for
+# Zenodo's 56 beads of 40 × 27² (one normal_equations on an M1 Pro: 2.3 GB whatever the chunk, then
+# ~4 kB per value of a chunk and ~0.5 kB per value of each tangent).  An 8 GB card on Windows does not
+# fail when it is full -- the driver moves the excess into system memory and the fit crawls -- so each
+# `Problem` takes half of what is free, at `CUDA_BYTES_PER_VALUE`, at most the 2²¹ of the other devices.
+CUDA_BYTES_PER_VALUE = 6000
+CUDA_SHARE = 0.5
+
+
+def _cuda_budget(device) -> int:
+    """Output values per batch that fit on the CUDA ``device`` (`CUDA_SHARE` of what is free, counting
+    what torch's allocator holds unused, which it hands out again), at most 2²¹."""
+    free, _ = torch.cuda.mem_get_info(device)
+    free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+    return int(max(1, min(2 ** 21, CUDA_SHARE * free // CUDA_BYTES_PER_VALUE)))
+
+
 # At most this many tangents per batch.  x86 CPUs (Linux, Windows) are fastest with few: on 4 cloud
 # cores (6 beads, one normal_equations, best of 3) 2 tangents 5.0 s, 4: 5.6 s, 8: 5.9 s, 16: 6.5 s; at
 # 20 beads flat within the noise (2: 20.9 s, 16: 21.8 s).  Apple's CPU and GPU are fastest with 8–16.
@@ -87,8 +104,8 @@ class Problem:
         the CPU; each chunk is moved to ``device`` (default: the batch's).
 
         Defaults: as many tangents as keep a chunk's tangent images under `TANGENT_BUDGET` values for
-        the device, at most 16 (`TANGENT_MAX` on the CPU); all emitters in one chunk unless even one
-        tangent would exceed it.
+        the device (on CUDA what the card has free, `_cuda_budget`), at most 16 (`TANGENT_MAX` on the
+        CPU); all emitters in one chunk unless even one tangent would exceed it.
         Measured on an M1 Pro (dim beads, 41 slices of 21², n_max 6, one `normal_equations`):
 
         ======  =========  ==================  ==================  =============================
@@ -106,8 +123,12 @@ class Problem:
         self.model, self.noise, self.batch = model, noise, batch
         self.device = batch.data.device if device is None else torch.device(device)
         per_emitter = batch.data[0].numel()
-        budget = TANGENT_BUDGET.get(self.device.type, 2 ** 21)
-        self.chunk_size = chunk_size or min(batch.n_emitters, max(1, budget // per_emitter))
+        budget = (_cuda_budget(self.device) if self.device.type == "cuda"
+                  else TANGENT_BUDGET.get(self.device.type, 2 ** 21))
+        fits = max(1, budget // per_emitter)
+        self.chunk_size = chunk_size or min(batch.n_emitters, fits)
+        if self.device.type == "cuda":      # a caller's chunk too (in situ's 256): what the card holds
+            self.chunk_size = min(self.chunk_size, fits)
         if tangents is None:
             cap = TANGENT_MAX if self.device.type == "cpu" else 16
             tangents = max(1, min(cap, budget // (min(self.chunk_size, batch.n_emitters) * per_emitter)))

@@ -191,7 +191,7 @@ class StackBrowser(QWidget):
         self.stack_box.blockSignals(False)
         k = min(self.stack_box.value() - 1, len(stacks) - 1)
         st = stacks[k]
-        images = np.asarray(st.images)
+        images = st.images                  # from files a `Planes`: only the plane shown is read
         self.plane_slider.blockSignals(True)
         if self.plane_slider.maximum() != len(images) - 1:
             self.plane_slider.setRange(0, len(images) - 1)

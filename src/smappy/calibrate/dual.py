@@ -820,7 +820,9 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         for ch, half in enumerate(order):
             region = [slice(None)]*3
             region[axis+1] = slices[half]
-            batches[ch].append(BeadStack(st.images[tuple(region)], st.z_nm, st.source, st.axes))
+            images = (st.images.crop(*region[1:]) if hasattr(st.images, 'crop')   # a `Planes`: still unread
+                      else st.images[tuple(region)])
+            batches[ch].append(BeadStack(images, st.z_nm, st.source, st.axes))
     base = CalibrationSettings(**{k: v for k, v in asdict(s).items() if k in CalibrationSettings.__dataclass_fields__})
     base.min_beads = 1
     channels = [collect_beads(batch, base, report) for batch in batches]

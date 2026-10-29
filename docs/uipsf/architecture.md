@@ -433,6 +433,9 @@ and the eager path identical to the bit):
 - *Tangent batches per device* (`TANGENT_BUDGET`): 2²¹ output values per batch, at most 16 tangents.
   The old 2¹⁹ gave one tangent at 20 beads; twice the new budget swaps on MPS (4.5 s instead of 1.6 s).
   The same budget is best on both devices; smaller chunks than all beads were never faster.
+  On CUDA the budget is what the card has room for, half of its free memory at 6 kB per value
+  (`_cuda_budget`), a caller's chunk size capped by it too: 2²¹ took 9.4 GB for 56 beads of 40 × 27²,
+  and a full 8 GB card on Windows spills into system memory and crawls instead of failing.
 - *`torch.compile` on MPS* for the per-tangent part (`device.compiled`; batches padded to the first one's
   width, so one shape compiles): 1.7× on that part after 4 s of compiling (1.7 s warm), 12 % off the
   normal equations at 20 beads.  On the CPU only 1.2× after 12 s and a C++ compiler, so off there.

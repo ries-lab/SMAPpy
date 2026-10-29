@@ -167,9 +167,8 @@ def pixel_size_nm(camera) -> tuple:
 def _saturation(stack, saturation_adu) -> Optional[float]:
     if saturation_adu is not None:
         return float(saturation_adu)
-    if np.issubdtype(np.asarray(stack.images).dtype, np.integer):
-        return float(np.iinfo(np.asarray(stack.images).dtype).max)
-    return None
+    dtype = getattr(stack.images, "dtype", None) or np.asarray(stack.images).dtype
+    return float(np.iinfo(dtype).max) if np.issubdtype(dtype, np.integer) else None
 
 
 def _cut(stacks, centres, roi_size, slices, camera, saturation_adu=None):
@@ -180,17 +179,26 @@ def _cut(stacks, centres, roi_size, slices, camera, saturation_adu=None):
     planes = [np.arange(len(st.z_nm))[slices] for st in stacks]
     nz = min(len(p) for p in planes)
     planes = [p[(len(p) - nz) // 2:(len(p) - nz) // 2 + nz] for p in planes]
-    data, saturated, z = [], [], []
     for s, x, y in centres:
-        st, kept = stacks[s], planes[s]
+        st = stacks[s]
         if not (half <= y < st.images.shape[-2] - half and half <= x < st.images.shape[-1] - half):
             raise ValueError(f"bead at ({x}, {y}) in {st.source}: its ROI leaves the image")
-        adu = np.asarray(st.images[kept, y - half:y - half + roi_size, x - half:x - half + roi_size])
+    data, saturated, z = [None] * len(centres), [None] * len(centres), [None] * len(centres)
+    # stack by stack, each read once for all its beads and released before the next: a stack from the
+    # files (`input.Planes`) is read whole by indexing, and once per bead it was read 40 times over
+    for s in sorted({c[0] for c in centres}):
+        st, kept = stacks[s], planes[s]
+        images = np.asarray(st.images[kept])
         limit = _saturation(st, saturation_adu)
-        saturated.append(adu >= limit if limit is not None else np.zeros(adu.shape, bool))
-        data.append(to_photons(adu, camera))
         objective = np.asarray(st.z_nm, float)[kept]
-        z.append(objective - objective.mean())          # about the middle: the nominal focus
+        for i, (_, x, y) in enumerate(centres):
+            if centres[i][0] != s:
+                continue
+            adu = images[:, y - half:y - half + roi_size, x - half:x - half + roi_size]
+            saturated[i] = adu >= limit if limit is not None else np.zeros(adu.shape, bool)
+            data[i] = to_photons(adu, camera)
+            z[i] = objective - objective.mean()         # about the middle: the nominal focus
+        del images
     return np.stack(data), np.stack(saturated), np.stack(z)
 
 
@@ -259,10 +267,11 @@ def single_rois(stacks, camera, settings: CalibrationSettings | None = None, sli
     if len(channels) > 1:
         raise ValueError("the acquisitions hold several channels; calibrate them one at a time")
     candidates = []
-    for st in stacks:
+    for st in stacks:                       # one stack in memory at a time (`input.Planes`)
         images = np.asarray(st.images, np.float32)
         yx, _, heights = find_peaks(images, settings)
         candidates.append(measure_peaks(images, yx, settings, saturation_of(st.images, settings), heights))
+        del images
     found = select_beads(candidates, settings)                   # isolated, over all stacks at once
     if not found:
         raise ValueError("no isolated beads found: review detection and the bead box")
