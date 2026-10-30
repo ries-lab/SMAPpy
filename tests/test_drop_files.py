@@ -183,8 +183,7 @@ def test_a_short_tiff_is_an_image_to_show_and_a_long_one_data_to_fit(tmp_path):
                                     frames=drops.MAX_IMAGE_FRAMES + 1)) == drops.STACK
 
 
-def test_a_dropped_image_is_opened_as_a_layer_after_the_tables(app, windows,
-                                                                 tmp_path):
+def test_a_dropped_image_is_opened_after_the_tables(app, windows, tmp_path):
     session, control, _ = windows
     opened = []
     control.open_image_path = lambda path: opened.append(
@@ -199,6 +198,21 @@ def test_a_dropped_image_is_opened_as_a_layer_after_the_tables(app, windows,
 
     # opened once the table was in, so the table did not replace it
     assert opened == [("wf.tif", ["a.hdf5"])]
+
+
+def test_an_opened_image_is_a_source_and_no_layer_shows_it_until_one_is_added(
+        app, windows, tmp_path):
+    session, control, _ = windows
+    layers = len(session.layers)
+    import tifffile
+    path = tmp_path / "wf.tif"                   # a pixel size, so nothing is asked
+    tifffile.imwrite(path, np.ones((32, 32), np.uint16), imagej=True,
+                     resolution=(10, 10), metadata={"unit": "um"})
+    control.open_image_path(path)
+    assert [im.name for im in session.images] == ["wf.tif"]
+    assert len(session.layers) == layers
+    layer = session.add_image()                  # + > image layer
+    assert layer.image is session.images[0]
 
 
 def test_an_unknown_file_is_refused_in_the_status_bar(app, windows, tmp_path):

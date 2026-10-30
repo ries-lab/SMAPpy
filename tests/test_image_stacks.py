@@ -157,3 +157,46 @@ def test_as_a_plane_a_zstack_shows_the_plane_at_the_pivots_height():
                                    None, fov)[1].weight[10, 10]
     assert at(300.0) > 0.95 and at(0.0) < 0.05
     assert at(700.0) == 0.0                                  # above the stack
+
+
+def _micromanager_tiff(path, roi="271-195-193-178", pixel_um=0.127, shape=(178, 193)):
+    """What Micro-Manager 2 writes: XResolution per centimetre
+    (ResolutionUnit 3) beside an ImageJ unit of "um", the ROI and the pixel
+    size in each image's own tags."""
+    import json
+    per_cm = round(1e4 / pixel_um)
+    tags = {"ROI": roi, "PixelSizeUm": pixel_um, "Binning": 1}
+    tifffile.imwrite(path, np.ones(shape, np.uint16), imagej=True,
+                     resolution=(per_cm, per_cm), resolutionunit="CENTIMETER",
+                     metadata={"unit": "um"},
+                     extratags=[(51123, "s", 0, json.dumps(tags), True)])
+
+
+def test_a_resolution_per_centimetre_is_read_as_such_whatever_imagejs_unit_says(tmp_path):
+    path = tmp_path / "cm.tif"
+    tifffile.imwrite(path, np.ones((4, 4), np.uint16), imagej=True,
+                     resolution=(78740, 78740), resolutionunit="CENTIMETER",
+                     metadata={"unit": "um"})
+    assert load_images(path)[0].pixelsize == pytest.approx(127.0, rel=1e-4)
+    # ImageJ's own files say "none" and the unit is ImageJ's
+    tifffile.imwrite(path, np.ones((4, 4), np.uint16), imagej=True,
+                     resolution=(10, 10), metadata={"unit": "um"})
+    assert load_images(path)[0].pixelsize == pytest.approx(100.0)
+
+
+def test_a_micromanager_image_takes_its_own_pixel_size_and_lies_where_its_roi_is(tmp_path):
+    from smappy.metadata import CameraMetadata
+    from smappy.rawframes import RawFrameKeeper
+    path = tmp_path / "wf_MMStack_Pos0.ome.tif"
+    _micromanager_tiff(path)
+    image = load_images(path)[0]
+    assert image.pixelsize == pytest.approx(127.0)
+    # exactly where the fitter puts a movie's frames taken with the same ROI
+    camera = CameraMetadata(pixelsize_um=0.127, roi=(271, 195, 193, 178),
+                            conversion=1.0, offset=0.0)
+    kept = RawFrameKeeper(keep=1)
+    kept.see(0, np.ones((1, 178, 193), np.float32))
+    raw = kept.image(camera)
+    assert (image.x0, image.y0) == pytest.approx((raw.x0, raw.y0))
+    assert (image.x0, image.y0) == pytest.approx((270.5 * 127, 194.5 * 127))
+    assert image.bounds == pytest.approx(raw.bounds)

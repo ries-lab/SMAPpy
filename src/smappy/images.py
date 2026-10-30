@@ -364,19 +364,28 @@ def load_images(path, pixelsize: Optional[float] = None, x0: float = 0.0,
     image with ``axes_unknown`` set, for `assign_axes` to split once someone
     has said what the pages are.
 
-    The pixel size comes from the TIFF resolution tags (ImageJ or plain), in
-    nm; pass ``pixelsize`` when the file has none.  RGB is turned to grey.
+    The pixel size comes from Micro-Manager's own where it has one, else the
+    TIFF resolution tags (ImageJ or plain), in nm; pass ``pixelsize`` when
+    the file has none.  A Micro-Manager image taken with a camera ROI is
+    placed where the fitter puts raw frames of that ROI, so it lies under
+    localizations fitted from a movie with the same ROI.  RGB is turned to
+    grey.
     """
     path = Path(path)
     meta: Dict = {}
     axes, z_step, dt = "", None, None
     try:
         import tifffile
+        from .io.tiff import _parse_roi
         with tifffile.TiffFile(path) as tf:
             series = tf.series[0]
             data, axes = series.asarray(), series.axes
             page = tf.pages[0]
-            found = _pixelsize_from_tags(page, tf)
+            mm = _micromanager_tags(tf)
+            found = _micromanager_pixelsize(mm) or _pixelsize_from_tags(page, tf)
+            roi = _parse_roi(mm.get("ROI"))
+            if roi is not None:
+                meta["camera_roi"] = roi
             if found:
                 meta["pixelsize_from_file"] = found
             if tf.imagej_metadata:
@@ -415,6 +424,12 @@ def load_images(path, pixelsize: Optional[float] = None, x0: float = 0.0,
         pixelsize = found
     if pixelsize is None:
         raise ValueError(f"{path.name} records no pixel size; pass pixelsize (nm)")
+    if "camera_roi" in meta and "x0" not in meta:
+        # where the fitter puts a movie's raw frames taken with the same
+        # ROI (`rawframes.RawFrames.image`): pixel 0 centred on chip column
+        # roi_x, as a localization's x_nm / pixel size is
+        rx, ry = meta["camera_roi"][:2]
+        meta["x0"], meta["y0"] = (rx - 0.5) * pixelsize, (ry - 0.5) * pixelsize
     data, axes = _standard_axes(data, axes)
     nt, nz, nc, ni = (data.shape[i] for i in range(4))
     base = ImageData(np.zeros((1, 1), np.float32), float(pixelsize),
@@ -535,8 +550,41 @@ def _ome_z_step(xml: str) -> Optional[float]:
     return float(m.group(1)) * (_unit_nm(unit.group(1) if unit else "µm") or 1e3)
 
 
+def _micromanager_tags(tf) -> Dict:
+    """Micro-Manager's summary with the first image's own tags over it, or {}.
+
+    The pixel size (``PixelSizeUm``; ``PixelSize_um`` in MM 1.4) and the
+    camera ROI are per image; an older file has them in the summary only.
+    """
+    if not tf.is_micromanager:
+        return {}
+    tags = dict((tf.micromanager_metadata or {}).get("Summary") or {})
+    page = tf.pages[0].tags.get("MicroManagerMetadata")
+    if page is not None and isinstance(page.value, dict):
+        tags.update(page.value)
+    return tags
+
+
+def _micromanager_pixelsize(tags: Dict) -> Optional[float]:
+    """nm per pixel from Micro-Manager's own pixel size; 0 is uncalibrated."""
+    for key in ("PixelSizeUm", "PixelSize_um"):
+        try:
+            value = float(tags.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value * 1e3
+    return None
+
+
 def _pixelsize_from_tags(page, tf) -> Optional[float]:
-    """nm per pixel from XResolution + the unit (ImageJ 'unit' or ResolutionUnit)."""
+    """nm per pixel from XResolution + its unit.
+
+    The TIFF's ResolutionUnit is the unit when it names one (inch, cm); the
+    ImageJ ``unit`` only when it is "none", which is how ImageJ writes it.
+    Micro-Manager writes XResolution per cm (ResolutionUnit 3) beside an
+    ImageJ unit of "um": read as µm, the pixel came out 1e4 too small.
+    """
     tag = page.tags.get("XResolution")
     if tag is None:
         return None
@@ -544,14 +592,11 @@ def _pixelsize_from_tags(page, tf) -> Optional[float]:
     if not num:
         return None
     per_unit = num / den                       # pixels per unit
-    unit = None
-    if tf.imagej_metadata and "unit" in tf.imagej_metadata:
-        unit = tf.imagej_metadata["unit"]
-    else:
-        ru = page.tags.get("ResolutionUnit")
-        unit = {2: "inch", 3: "cm"}.get(ru.value if ru else None)
-    to_nm = {"nm": 1.0, "um": 1e3, "µm": 1e3, "micron": 1e3, "mm": 1e6, "cm": 1e7,
-             "inch": 2.54e7, "m": 1e9}.get(unit)
+    ru = page.tags.get("ResolutionUnit")
+    unit = {2: "inch", 3: "cm"}.get(int(ru.value) if ru else None)
+    if unit is None and tf.imagej_metadata:
+        unit = tf.imagej_metadata.get("unit")
+    to_nm = _unit_nm(unit)
     if to_nm is None:
         return None
     return to_nm / per_unit

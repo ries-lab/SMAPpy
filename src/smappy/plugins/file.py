@@ -145,7 +145,8 @@ class Open(Plugin):
 
     description = ("Open: choose files and open them in place of the open ones; "
                    "Add: add them as more files.  Localization tables in any "
-                   "format Load from path reads; images as image layers")
+                   "format Load from path reads; images as sources an image "
+                   "layer can show")
     Settings = OpenSettings
     changes_locs = False          # a launcher: the window loads, not `run`
     version = "3"

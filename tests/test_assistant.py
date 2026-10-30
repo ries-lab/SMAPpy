@@ -268,10 +268,10 @@ def test_the_server_answers_initialize_list_and_call_as_mcp_says(tmp_path):
     assert server.handle_line(json.dumps(
         {"jsonrpc": "2.0", "method": "notifications/initialized"})) is None
     listed = _ask(server, "tools/list")["result"]["tools"]
-    # headless there is no view to move and no window: `show`,
-    # `open_plugin` and `open_window` are the GUI's
+    # headless there is no view to move, no window and no menu: `show`,
+    # `open_plugin`, `open_window` and the actions are the GUI's
     assert {t["name"] for t in listed} == set(Assistant.specs()) - {
-        "show", "open_plugin", "open_window"}
+        "show", "open_plugin", "open_window", "list_actions", "do_action"}
     called = _ask(server, "tools/call", {"name": "list_plugins",
                                          "arguments": {"prefix": "Analysis/Drift"}})
     assert not called["result"]["isError"]
@@ -371,3 +371,62 @@ def test_the_state_says_where_the_running_code_is_and_its_version(tmp_path):
     assert folder == Path(smappy.__file__).resolve().parent
     assert (folder / "plugins" / "drift_rcc.py").exists() and state["version"]
     assert str(folder) in source_note() and f"v{state['version']}" in source_note()
+
+
+# ------------------------------------------------------------ images and layers
+
+def _image_file(tmp_path, frames=1):
+    import numpy as np
+    import tifffile
+    path = tmp_path / "wf.tif"
+    tifffile.imwrite(path, np.arange(frames * 16, dtype=np.uint16).reshape(frames, 4, 4),
+                     imagej=True, resolution=(10, 10), metadata={"unit": "um"})
+    return path
+
+
+def test_load_opens_an_image_as_a_source_and_refuses_a_stack_as_raw_data(tmp_path):
+    a = simulated(tmp_path)
+    layers = len(a.session.layers)
+    answer = a.call("load", {"path": str(_image_file(tmp_path))})
+    assert [im["pixel_nm"] for im in answer["images"]] == [100.0]
+    assert len(a.session.layers) == layers                 # a source, in no layer
+    assert "wf.tif" in [im["name"] for im in a.call("session_state")["images"]]
+    many = tmp_path / "movie"
+    many.mkdir()
+    with pytest.raises(ToolError, match="raw camera data"):
+        a.call("load", {"path": str(_image_file(many, frames=60))})
+
+
+def test_set_layer_shows_an_image_in_a_new_layer_in_green_and_sets_render_settings(tmp_path):
+    a = simulated(tmp_path)
+    a.call("load", {"path": str(_image_file(tmp_path))})
+    n = len(a.session.layers)
+    answer = a.call("set_layer", {"layer": n, "image": "wf.tif", "lut": "green",
+                                  "contrast": 2})
+    layer = a.session.layers[n]
+    assert answer["layer"] == n and layer.is_image and layer.image.name == "wf.tif"
+    assert layer.display.lut == "green" and layer.display.contrast == 2.0
+    a.call("set_layer", {"layer": 0, "render": {"mode": "gauss", "sigma": 15,
+                                                "sigma_settings.factor": 1.5}})
+    settings = a.session.layers[0].state.settings
+    assert (settings.mode, settings.sigma, settings.sigma_settings.factor) == ("gauss", 15, 1.5)
+    with pytest.raises(ToolError, match="unknown LUT"):
+        a.call("set_layer", {"layer": 0, "lut": "purple"})
+    with pytest.raises(ToolError, match="has no 'nope'"):
+        a.call("set_layer", {"layer": 0, "render": {"nope": 1}})
+    with pytest.raises(ToolError, match="shows localizations"):
+        a.call("set_layer", {"layer": 0, "image": "wf.tif"})
+
+
+def test_in_suggest_mode_loading_an_image_and_colouring_a_layer_are_proposals(tmp_path):
+    a = simulated(tmp_path, mode="suggest")
+    path = str(_image_file(tmp_path))
+    a.call("load", {"path": path})
+    a.call("set_layer", {"layer": 0, "lut": "green"})
+    assert not any(im.name == "wf.tif" for im in a.session.images)
+    assert a.session.layers[0].get_display().lut != "green"
+    assert [p["tool"] for p in a.call("list_proposals")] == ["load", "set_layer"]
+    for proposal in a.proposals:                  # the user's yes makes them
+        a.carry_out(proposal.id)
+    assert any(im.name == "wf.tif" for im in a.session.images)
+    assert a.session.layers[0].get_display().lut == "green"

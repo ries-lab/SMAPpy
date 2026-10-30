@@ -17,7 +17,8 @@ user sets it, here with ``--mode`` and in the GUI with its pane's switch.
 
 **View changes in the running GUI.**  With the GUI attached (a ``viewer``),
 the changes to what is shown rather than to the data -- a filter, grouping,
-the 2D view moved by `show` -- are made in *suggest* mode too: the user sees
+a layer's display (`set_layer`), the 2D view moved by `show` -- are made
+in *suggest* mode too: the user sees
 them at once, and a proposal to look somewhere would be a click to make a
 click.  Headless there is nobody looking, and they stay proposals.
 
@@ -42,6 +43,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from ..images import load_images
+from ..lut import get as lut_table, names as lut_names
+from ..render import MODES as RENDER_MODES
 from . import index, knowledge
 
 MODES = ("suggest", "act")
@@ -127,6 +131,32 @@ class ToolError(Exception):
 
 
 @dataclass
+class Action:
+    """One thing the GUI does at a click -- a menu item, a button -- offered
+    to the assistant by name (`Assistant.do_action`).
+
+    ``run(**arguments)`` does it, without a dialog: what the click would ask
+    for (a file, a layer) is an argument here, described in ``arguments``
+    as a JSON schema property each.  ``shows`` marks one that changes only
+    what is shown and where -- a window, a tab, a layer selected -- which is
+    made in suggest mode too, as `set_filter` is; anything else is a
+    proposal there.  The GUI makes them (`gui/assistant_actions.py`); here
+    is only what a model is told and how a call is checked.
+    """
+    name: str                                  # "File/Open", "Render/Add image layer"
+    description: str
+    run: Callable[..., Any]
+    arguments: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    required: Sequence[str] = ()
+    shows: bool = False
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "does": self.description,
+                "arguments": self.arguments, "required": list(self.required),
+                "changes": "only what is shown" if self.shows else "the session"}
+
+
+@dataclass
 class Proposal:
     id: str
     tool: str
@@ -157,6 +187,40 @@ class Kept:
 def _plain(value):
     from ..batch import json_safe
     return json_safe(value)
+
+
+def _replaced(settings, values: Dict[str, Any], what: str):
+    """``settings`` (a dataclass) with ``values`` -- dotted names into its
+    parts -- put in; a `ToolError` naming the fields for one it lacks."""
+    changes: Dict[str, Any] = {}
+    nested: Dict[str, Dict[str, Any]] = {}
+    names = {f.name: f for f in dataclasses.fields(settings)}
+    for key, value in values.items():
+        head, _, rest = str(key).partition(".")
+        if head not in names:
+            raise ToolError(f"{what} has no {head!r}; it has {', '.join(names)}")
+        current = getattr(settings, head)
+        if rest:
+            if not dataclasses.is_dataclass(current):
+                raise ToolError(f"{what}.{head} has no parts")
+            nested.setdefault(head, {})[rest] = value
+        elif dataclasses.is_dataclass(current) and isinstance(value, dict):
+            nested.setdefault(head, {}).update(value)
+        else:
+            if isinstance(value, list):
+                value = tuple(value)
+            elif isinstance(current, bool) and not isinstance(value, bool):
+                raise ToolError(f"{what}.{head} is true or false")
+            elif (isinstance(current, (int, float)) and not isinstance(current, bool)
+                  and value is not None):
+                try:
+                    value = type(current)(value)
+                except (TypeError, ValueError):
+                    raise ToolError(f"{what}.{head} is a number") from None
+            changes[head] = value
+    for head, inner in nested.items():
+        changes[head] = _replaced(getattr(settings, head), inner, f"{what}.{head}")
+    return dataclasses.replace(settings, **changes)
 
 
 def _pick(name: str, value: str, options: Sequence) -> str:
@@ -223,11 +287,14 @@ class Assistant:
     makes an applied run in the GUI through the plugin's own panel --
     shown, filled in, its Run pressed -- ``runner(path, cls, settings)`` ->
     a `Later` of the result, or None where it cannot; None headless.
+    ``actions`` what the GUI's menus and buttons do, ``actions()`` -> a
+    mapping of name to `Action`, asked at each call so that it follows the
+    window; None headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
                  knowledge_folder=None, viewer=None, panels=None,
-                 missing_tools=None, windows=None):
+                 missing_tools=None, windows=None, actions=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -240,6 +307,7 @@ class Assistant:
         self.viewer = viewer
         self.panels = panels
         self.windows = windows
+        self.actions = actions
         self.runner = None
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
@@ -494,6 +562,38 @@ class Assistant:
             raise ToolError(f"no layer {layer}; there are {len(layers)} (0..{len(layers) - 1})")
         return layers[layer]
 
+    def _image(self, image):
+        """An opened image by its index in session_state's 'images' or its name."""
+        images = self.session.images
+        if isinstance(image, int) or str(image).strip().isdigit():
+            i = int(image)
+            if not 0 <= i < len(images):
+                raise ToolError(f"no image {i}; there are {len(images)}")
+            return images[i]
+        found = [im for im in images if im.name == image]
+        if not found:
+            names = ", ".join(repr(im.name) for im in images) or "none: load one"
+            raise ToolError(f"no image {image!r}; there are {names}")
+        return found[0]
+
+    def _image_entry(self, image) -> Dict[str, Any]:
+        x0, y0, x1, y1 = image.bounds
+        return {"index": next((i for i, im in enumerate(self.session.images)
+                               if im is image), None),
+                "name": image.name, "kind": image.kind, "frames": image.n_frames,
+                "pixel_nm": round(float(image.pixelsize), 3),
+                "bounds_nm": [round(float(v), 1) for v in (x0, y0, x1, y1)]}
+
+    def _layer_entry(self, layer) -> Dict[str, Any]:
+        """A layer's name and how it is shown, as set_layer takes it."""
+        out = {"name": layer.name, "visible": bool(layer.visible),
+               "display": _plain(dataclasses.asdict(layer.get_display()))}
+        if layer.is_image:
+            out["image"] = layer.image.name if not layer.image.is_empty else None
+        else:
+            out["render"] = _plain(dataclasses.asdict(layer.state.settings))
+        return out
+
     # ------------------------------------------------------------------ reading
     @tool("What is open: the files, the table's columns, where the data lie "
           "(extent_nm) and, in the GUI, what the 2D view shows, each layer's "
@@ -506,12 +606,12 @@ class Assistant:
         layers = []
         for i, layer in enumerate(s.layers):
             if layer.is_image:
-                layers.append({"index": i, "name": layer.name, "image": True})
+                layers.append({"index": i, "kind": "image", **self._layer_entry(layer)})
                 continue
-            layers.append({"index": i, "name": layer.name, "grouped": layer.grouped,
+            layers.append({"index": i, "grouped": layer.grouped,
                            "files": layer.files, "filter": {
                                k: list(v) for k, v in layer.ranges.items()},
-                           **self._shown(i)})
+                           **self._layer_entry(layer), **self._shown(i)})
         rois = getattr(s, "_rois", None)
         extent = None
         if len(locs):
@@ -534,6 +634,7 @@ class Assistant:
             "extent_nm": extent,
             **({"view": view} if view is not None else {}),
             "layers": layers,
+            "images": [self._image_entry(im) for im in s.images if not im.is_empty],
             "rois": len(rois.rois) if rois is not None and hasattr(rois, "rois") else 0,
             "undo": s.undo_labels()[-5:],
             "results": [{"result": k.id, "plugin": k.path, "applied": k.applied}
@@ -855,21 +956,128 @@ class Assistant:
                                        time.perf_counter() - started), result)
 
     # ----------------------------------------------------------------- changing
-    @tool("Open a localization file (or images) into the session.  "
-          "append=true adds it to what is open.",
+    @tool("Open a file into the session, as File > Open does: a localization "
+          "table is opened (append=true adds it to what is open); an image of "
+          "a few frames (a widefield snapshot, a few channels, a z-stack) is "
+          "opened as image sources, one per channel, which no layer shows "
+          "until set_layer puts one in a layer.  A long TIFF stack is raw "
+          "camera data, for a fitter (Localize/...), not opened here.",
           path={"type": "string", "description": "the file"},
-          append={"type": "boolean", "description": "add rather than replace"},
+          append={"type": "boolean", "description": "a table: add rather than replace"},
+          pixel_nm={"type": "number",
+                    "description": "an image's pixel size, where the file has none"},
           reason={"type": "string", "description": "why, for the user (a proposal)"})
-    def load(self, path: str, append: bool = False, reason: str = "") -> Dict[str, Any]:
-        if not Path(path).expanduser().exists():
+    def load(self, path: str, append: bool = False, pixel_nm: Optional[float] = None,
+             reason: str = "") -> Dict[str, Any]:
+        from ..gui.drops import IMAGE, LOCS, MAX_IMAGE_FRAMES, STACK, kind_of
+        target = Path(path).expanduser()
+        if not target.exists():
             raise ToolError(f"no file {path}")
+        kind = kind_of(target)
+        if kind == STACK:
+            raise ToolError(
+                f"{target.name} is raw camera data (more than {MAX_IMAGE_FRAMES} "
+                "frames, or an acquisition folder): fit it with a fitter -- "
+                "list_plugins('Localize'), its source.path set to this file -- "
+                "rather than opening it")
+        if kind is None:
+            raise ToolError(f"{target.name} is neither a localization table nor an "
+                            "image SMAPpy reads")
         if not self._changing():
-            return self._propose("load", {"path": path, "append": append}, reason)
+            arguments = {"path": path, "append": append}
+            if pixel_nm is not None:
+                arguments["pixel_nm"] = pixel_nm
+            return self._propose("load", arguments, reason)
+        if kind == IMAGE:
+            try:
+                images = load_images(target, pixel_nm)
+            except Exception as error:
+                raise ToolError(f"could not open {path}: {type(error).__name__}: "
+                                f"{error}") from None
+            for image in images:
+                self.session.add_source(image)
+            return {"images": [self._image_entry(im) for im in images],
+                    "note": "opened as image sources; set_layer(layer=..., image=...) "
+                            "shows one -- a layer number one past the last makes a "
+                            "new image layer"}
+        assert kind == LOCS
         try:
-            info = self.session.load(Path(path).expanduser(), append=append)
+            info = self.session.load(target, append=append)
         except Exception as error:
             raise ToolError(f"could not open {path}: {type(error).__name__}: {error}") from None
         return {"loaded": info.name, "n": info.n, "state": self.session_state()}
+
+    @tool("Set how a layer is shown -- anything the Render tab sets.  "
+          "session_state lists each layer's 'display' (lut, contrast, gamma, "
+          "invert, absolute, maximum, ...) and a localization layer's 'render' "
+          "(mode, sigma, sigma_settings.factor, color_field, color_range, ...), "
+          "and the opened 'images'.  Give only what changes, nested names "
+          "dotted.  image= puts an opened image in an image layer; a layer "
+          "number one past the last makes a new image layer for it.  Changes "
+          "no data, so with the GUI attached it is made in suggest mode too.",
+          layer={"type": "integer", "description": "default 0"},
+          image={"type": ["string", "integer"],
+                 "description": "an opened image: its name or its index in 'images'"},
+          lut={"type": "string", "description": "the colour map: " + ", ".join(lut_names())},
+          contrast={"type": "number",
+                    "description": "saturate 10^-contrast of the pixels: higher, darker"},
+          visible={"type": "boolean"},
+          name={"type": "string", "description": "the layer's name"},
+          display={"type": "object", "description": "other display settings, by name"},
+          render={"type": "object", "description": "a localization layer's render "
+                                                   "settings, dotted names"},
+          reason={"type": "string", "description": "why, for the user (a proposal)"})
+    def set_layer(self, layer: int = 0, image=None, lut: Optional[str] = None,
+                  contrast: Optional[float] = None, visible: Optional[bool] = None,
+                  name: Optional[str] = None, display: Optional[Dict[str, Any]] = None,
+                  render: Optional[Dict[str, Any]] = None,
+                  reason: str = "") -> Dict[str, Any]:
+        from ..render import DisplaySettings
+        layers = self.session.layers
+        new = layer == len(layers) and image is not None
+        target = None if new else self._layer(layer)
+        chosen = None if image is None else self._image(image)
+        if target is not None and chosen is not None and not target.is_image:
+            raise ToolError(f"layer {layer} shows localizations; an image goes in an "
+                            f"image layer, or in a new one: layer={len(layers)}")
+        if render and (new or target.is_image):
+            raise ToolError("render settings are a localization layer's; an image "
+                            "layer has only display settings")
+        shown = dict(display or {})
+        if lut is not None:
+            shown["lut"] = lut
+        if contrast is not None:
+            shown["contrast"] = contrast
+        if "lut" in shown:
+            try:
+                lut_table(shown["lut"])
+            except KeyError as error:
+                raise ToolError(str(error.args[0])) from None
+        base_display = DisplaySettings(lut="gray") if new else target.get_display()
+        new_display = _replaced(base_display, shown, "display")
+        new_render = (None if not render else
+                      _replaced(target.state.settings, render, "render"))
+        if new_render is not None and new_render.mode not in RENDER_MODES:
+            raise ToolError(f"render.mode is one of {', '.join(RENDER_MODES)}")
+        if not self._viewing():
+            arguments = {k: v for k, v in (
+                ("layer", layer), ("image", image), ("lut", lut), ("contrast", contrast),
+                ("visible", visible), ("name", name), ("display", display),
+                ("render", render)) if v is not None}
+            return self._propose("set_layer", arguments, reason)
+        if new:
+            target = self.session.add_image(chosen, name)
+        elif chosen is not None:
+            target.show_image(chosen, 0)
+        target.set_display(new_display)
+        if new_render is not None:
+            target.state.settings = new_render
+        if visible is not None:
+            target.visible = bool(visible)
+        if name:
+            target.name = name
+        self.session.changed("layers" if new else "layer")
+        return {"layer": self.session.layers.index(target), **self._layer_entry(target)}
 
     @tool("Set a layer's filter on a column: keep lo <= value <= hi; null for "
           "no bound.  remove=true takes the column's filter away.",
@@ -993,6 +1201,49 @@ class Assistant:
             roi_id = found.id
         self.windows[chosen](roi_id)
         return {"opened": chosen, **({"roi": roi} if roi is not None else {})}
+
+    @tool("What SMAPpy's menus and buttons do, by name -- File/Open, File/Add "
+          "(the Load plugin's buttons), the Render tab's layer buttons, the "
+          "tabs, View, Edit -- each with what it does and its arguments: "
+          "what a click would ask for (a file, a layer) is an argument.  "
+          "do_action does one.  A prefix narrows it: 'File', 'Render'.",
+          needs="actions",
+          prefix={"type": "string", "description": "the start of a name"})
+    def list_actions(self, prefix: str = "") -> List[Dict[str, Any]]:
+        low = prefix.strip().lower()
+        return [action.as_dict() for name, action in self.actions().items()
+                if name.lower().startswith(low)]
+
+    @tool("Do what a menu item or a button of SMAPpy does, by its name in "
+          "list_actions, with its arguments -- as the user would click it, "
+          "but asking nothing.  One that changes only what is shown is made "
+          "in suggest mode too; any other is a proposal there.",
+          needs="actions",
+          name={"type": "string", "description": "e.g. 'File/Add'"},
+          arguments={"type": "object", "description": "as list_actions gives them"},
+          reason={"type": "string", "description": "why, for the user (a proposal)"})
+    def do_action(self, name: str, arguments: Optional[Dict[str, Any]] = None,
+                  reason: str = "") -> Dict[str, Any]:
+        actions = self.actions()
+        chosen = actions[_pick("name", name, [(n, n) for n in actions])]
+        arguments = dict(arguments or {})
+        unknown = sorted(set(arguments) - set(chosen.arguments))
+        if unknown:
+            raise ToolError(f"{chosen.name} has no argument {', '.join(unknown)}; it "
+                            f"takes {', '.join(chosen.arguments) or 'none'}")
+        missing = [a for a in chosen.required if a not in arguments]
+        if missing:
+            raise ToolError(f"{chosen.name} needs {', '.join(missing)}")
+        if not (self._viewing() if chosen.shows else self._changing()):
+            return self._propose("do_action", {"name": chosen.name,
+                                               "arguments": arguments}, reason)
+        try:
+            answer = chosen.run(**arguments)
+        except ToolError:
+            raise
+        except Exception as error:
+            raise ToolError(f"{chosen.name} failed: {type(error).__name__}: {error}") from None
+        return {"done": chosen.name, **({"answer": _plain(answer)} if answer else {})}
 
     @tool("Undo the last changes to the table.",
           steps={"type": "integer", "description": "how many, default 1"},
@@ -1120,6 +1371,11 @@ How to work:
   again in the GUI and over many files with smappy-batch.
 * recall before deciding what the user may have decided already; remember
   and save_chain only when the user has agreed to keep it.
+* load opens a table, or an image as sources; set_layer shows an image in
+  a layer and sets any layer's colours, contrast and render settings.
+* In the GUI, what a user clicks -- a menu item, the Load plugin's Add, the
+  Render tab's + image layer, a tab -- is an action: list_actions, then
+  do_action with what the click would have asked for as arguments.
 * In suggest mode changes become proposals: explain each one to the user.
 * A detour because no tool does what was asked: after helping, offer in one
   sentence to note the missing tool (note_missing_tool), and only on a yes.

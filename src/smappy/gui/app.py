@@ -304,7 +304,8 @@ class ControlWindow(QMainWindow):
                 ("Reset", self.load_default_gui,
                  "the shipped workspace, now and at the next start"),
                 (None, None, None),
-                ("From data file...", self.restore_state_from_file,
+                # a lambda: `triggered`'s checked would arrive as the path
+                ("From data file...", lambda: self.restore_state_from_file(),
                  "the workspace a localization file was saved with")):
             if text is None:
                 self.workspace_menu.addSeparator()
@@ -559,6 +560,9 @@ class ControlWindow(QMainWindow):
                 load=lambda paths, append: self.load_paths(paths, append=append),
                 beside=self.render_window)
             server.assistant.windows = self._assistant_windows()
+            # the menus' and buttons' clicks, asked for at each call
+            from .assistant_actions import actions_of
+            server.assistant.actions = lambda: actions_of(self)
             controls.find_panel = self._assistant_panel
             controls.saved_bounds = self.saved_terminal
             controls.changed.connect(
@@ -839,30 +843,37 @@ class ControlWindow(QMainWindow):
         state.pop("windows", None)
         return state
 
-    def restore_state_from_file(self) -> None:
-        """Take the tabs and their parameters from a file that carries them.
+    def restore_state_from_file(self, path=None) -> Optional[list]:
+        """Take the tabs and their parameters from a file that carries them;
+        ``path`` None asks for it.  The plugins it names that are not
+        installed here, or None if nothing was restored.
 
         Not done automatically on open: rearranging someone's tabs because they
         looked at a colleague's dataset would be a surprise.  What is restored
         has no file of its own, so *Workspace > Save* asks where to put it.
         """
         from ..io.hdf5 import load_gui_state
-        start = str(self.session.path) if self.session.path else folders.start()
-        path, _ = QFileDialog.getOpenFileName(self, "Workspace from data file",
-                                              start, name_filter())
-        if not path:
-            return
+        asked = path is None
+        if asked:
+            start = str(self.session.path) if self.session.path else folders.start()
+            path, _ = QFileDialog.getOpenFileName(self, "Workspace from data file",
+                                                  start, name_filter())
+            if not path:
+                return None
         state = load_gui_state(path)
         if not state:
+            if not asked:                  # the assistant's call: an answer, no box
+                raise ValueError(f"{Path(path).name} carries no workspace")
             QMessageBox.information(self, "Workspace from data file",
                                     "that file carries no workspace")
-            return
+            return None
         missing = self.apply_workspace_state(state, f"from {Path(path).name}")
-        if missing:
+        if missing and asked:
             QMessageBox.information(
                 self, "Workspace from data file",
                 "restored, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
+        return missing
 
     def apply_workspace_state(self, state: dict, label: str) -> list:
         """The tabs and values of a file's `gui` group in place of these;
@@ -2032,17 +2043,23 @@ class ControlWindow(QMainWindow):
             self.open_image_path(path)
 
     def open_image_path(self, path) -> None:
-        """An image as a layer of its own -- a layer per channel -- asking its
-        pixel size and what its planes are if the file does not say.  An image already read -- an `.msr`'s -- is kept
-        as a source, for an image layer to choose, without a layer."""
+        """An image kept as a source -- each channel one -- for an image
+        layer to choose, asking its pixel size and what its planes are if the
+        file does not say.  It is not shown: opening a widefield picture beside
+        a fit is not a decision about the layers, which *+ > image layer* and
+        the layer's *source* are.  An image already read -- an `.msr`'s -- the same."""
         from ..images import ImageData
         if isinstance(path, ImageData):
             self.session.add_source(path)
             return
         from .dialogs import read_image_file
         images = read_image_file(str(path), parent=self)
+        for image in images or ():
+            self.session.add_source(image)
         if images:
-            self.session.open_images(images)
+            self.statusBar().showMessage(
+                f"{Path(str(path)).name} opened as an image: on the Render tab, "
+                "+ > image layer and its source show it", 10000)
 
     def save(self) -> None:
         from ..io.formats import writer_for

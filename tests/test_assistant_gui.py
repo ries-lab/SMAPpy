@@ -694,6 +694,85 @@ def test_open_window_opens_the_roi_manager_on_an_roi_and_the_3d_view(app, tmp_pa
         window.close()
 
 
+# ------------------------------------------------------ the menus' actions
+
+def _control_window(tmp_path):
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    session = Session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    a = control._assistant().server.assistant
+    a.knowledge = tmp_path / "kb"
+    simulate(control._assistant().server)
+    return control, render, a
+
+
+def test_every_menu_item_is_an_action_or_left_out_with_a_reason(app, tmp_path):
+    """What a user can click, the assistant can do -- or someone decided it
+    should not and said why (`assistant_actions.LEFT_OUT`)."""
+    from smappy.gui.assistant_actions import LEFT_OUT, actions_of, menu_items
+    control, render, a = _control_window(tmp_path)
+    actions = actions_of(control)
+    items = menu_items(control)
+    assert "File/Open" in items and "Render/Add image layer" in actions
+    assert sorted(set(items) - set(actions) - set(LEFT_OUT)) == []
+    assert sorted(set(LEFT_OUT) - set(items)) == []           # nothing stale
+    assert {"list_actions", "do_action"} <= set(a.tools())
+    for window in (render, control):
+        window.close()
+
+
+def test_every_plugins_window_button_is_an_action_or_a_window_the_assistant_opens():
+    from smappy import plugins
+    from smappy.gui.assistant_actions import WINDOW_BUTTONS
+    named = set()
+    for path, ref in plugins.refs().items():
+        if ref.root != "builtin":
+            continue
+        cls = plugins.get(path)
+        if getattr(cls, "window", None):
+            named.add(cls.window)
+        named.update(opener for _, opener in getattr(cls, "window_buttons", ()) or ())
+    assert "add files" in named
+    assert sorted(named - set(WINDOW_BUTTONS)) == []
+
+
+def test_the_assistant_adds_an_image_and_shows_it_in_a_new_green_layer(app, tmp_path):
+    """File > Add, + > image layer, its LUT: the clicks the assistant could not
+    make (2026-10-30), made as actions."""
+    import numpy as np
+    import tifffile
+    control, render, a = _control_window(tmp_path)
+    session = control.session
+    path = tmp_path / "wf.tif"
+    tifffile.imwrite(path, np.ones((32, 32), np.uint16), imagej=True,
+                     resolution=(10, 10), metadata={"unit": "um"})
+    a.mode = "suggest"
+    proposed = a.call("do_action", {"name": "File/Add", "arguments": {"path": str(path)}})
+    assert proposed["proposed"]["tool"] == "do_action"
+    assert not any(im.name == "wf.tif" for im in session.images)
+    # what only changes the view is done in suggest mode too
+    assert a.call("do_action", {"name": "View/Tab", "arguments": {"name": "Render"}})
+    assert control.tabs.tabText(control.tabs.currentIndex()) == "Render"
+    a.mode = "act"
+    a.call("do_action", {"name": "File/Add", "arguments": {"path": str(path)}})
+    layers = len(session.layers)
+    assert [im.name for im in session.images if im.name == "wf.tif"] == ["wf.tif"]
+    added = a.call("do_action", {"name": "render/add image layer",
+                                 "arguments": {"image": "wf.tif"}})
+    assert added["answer"] == {"layer": layers, "image": "wf.tif"}
+    a.call("set_layer", {"layer": layers, "lut": "green"})
+    assert session.layers[layers].get_display().lut == "green"
+    with pytest.raises(Exception, match="no argument colour"):
+        a.call("do_action", {"name": "Render/Add image layer",
+                             "arguments": {"colour": "green"}})
+    with pytest.raises(Exception, match="no file"):
+        a.call("do_action", {"name": "File/Add", "arguments": {"path": "nowhere.tif"}})
+    for window in (render, control):
+        window.close()
+
+
 # ------------------------------------------------- act mode through the panels
 
 def test_in_act_mode_a_run_goes_through_its_panel_and_is_answered_when_it_ends(controls):

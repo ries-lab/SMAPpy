@@ -15,9 +15,14 @@ localizations.  The assistant runs in its own program, with your own
 account; SMAPpy has no model and no key of its own, and nothing leaves the
 computer through SMAPpy.
 
-Connected to the open session, it looks at and changes what you see.
-Nothing can connect until connections are allowed, and only programs
-running as your user on this computer can.
+Connected to the open session, it looks at and changes what you see.  It
+does not click: what the menus and buttons do -- *File > Open* and *Add*,
+the Render tab's *+ > image layer* and a layer's colours, a tab brought to
+the front, a window opened -- it asks SMAPpy to do by name, giving what a
+click would ask you for (a file, a layer) itself.  A few items it leaves to
+you: the dialogs that are yours (*Preferences*), saving over your file, and
+quitting.  Nothing can connect until connections are allowed, and only
+programs running as your user on this computer can.
 
 ### What to ask it for
 

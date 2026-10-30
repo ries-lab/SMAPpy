@@ -144,8 +144,16 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   session (`Session.scratch`) and hands back its text, numbers and figures,
   changing nothing; `scan` does it over a list of values of one field.
 * **changing** -- `run_plugin` with `apply=true`, `run_chain`, `load`,
-  `set_filter`, `set_grouped`, `undo`, `save`, `save_chain` (a workflow kept
-  where the plugin tree, the GUI and `smappy-batch` find it).
+  `set_filter`, `set_grouped`, `set_layer`, `undo`, `save`, `save_chain` (a
+  workflow kept where the plugin tree, the GUI and `smappy-batch` find it).
+  `load` sorts a file as File > Open does (`gui/drops.kind_of`): a table is
+  opened, an image of a few frames is opened as sources, which no layer
+  shows yet, and a long stack is refused as raw data for a fitter.
+  `set_layer` is the Render tab's settings of one layer: an image put in an
+  image layer (one past the last makes a new one), its display -- LUT,
+  contrast and the rest of `DisplaySettings` -- and a localization layer's
+  `RenderSettings`, by dotted name as a plugin's settings are given;
+  `session_state` lists each layer's.
 * **remembering** -- `remember`, `recall`, `forget`: the knowledge base below.
 * `list_proposals` -- what *suggest* mode proposed, and what became of it.
 * `open_window` -- the GUI only (`needs="windows"`): one of SMAPpy's own
@@ -160,6 +168,19 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   the model in a sentence after a detour), and zipped into *Save a bug
   report*.  The tools are written by hand, through review; this is how a
   conversation's gap reaches whoever writes them.
+* `list_actions`, `do_action` -- the GUI only (`needs="actions"`): what
+  the menus and buttons do, by name -- *File/Open*, *File/Add* (the Load
+  plugin's buttons), the Render tab's *+ > image layer* and layer buttons,
+  the tabs, *View*, *Edit* -- each done by the method its click calls, with
+  what the click would ask for (a file, a layer) as an argument, so that no
+  dialog holds the queue (`gui/assistant_actions.py`, `tools.Action`).  One
+  that changes only what is shown is made in suggest mode with the GUI
+  attached; any other is a proposal.  Every menu item is an action or in
+  `LEFT_OUT` with its reason (a modal dialog, a file written outside the
+  output folder, the assistant's own connection), and a plugin's window
+  button is in `WINDOW_BUTTONS`: the GUI tests walk the real menus and the
+  shipped plugins, so a new item that is neither fails there.  Before them
+  "add this image and show it in a layer" had no way in but the screen.
 * `show` -- the GUI only (a tool `needs="viewer"`, not listed headless):
   moves the user's 2D view onto a point, an ROI or everything.
 * `open_plugin` -- the GUI only (`needs="panels"`): opens a plugin's window
@@ -179,7 +200,8 @@ One switch, `mode`:
   recorded as a proposal (`proposals`), which the GUI shows with the
   plugin's panel filled in for the user to run.  Exports, which write files
   even on a copy, are proposals too.  In the GUI the changes to what is
-  shown rather than to the data -- `set_filter`, `set_grouped`, `show` --
+  shown rather than to the data -- `set_filter`, `set_grouped`,
+  `set_layer`, `show`, an action that only shows --
   are made at once: the user sees them, and a proposal to look somewhere
   would be a click to make a click.  Headless they stay proposals.
 * **act** -- changes are made.  A file is written only under the allowed

@@ -27,7 +27,10 @@ starts the user's client through `assistant/launch.py`, reached by
 the design and the plan are `docs/ai-integration.md`.
 A tool's description is what a model reads, so a change to a plugin's
 interface that a tool describes (`run_plugin`'s settings, `INSTRUCTIONS`)
-updates it too.
+updates it too.  What the menus and buttons do is the assistant's through
+`gui/assistant_actions.py` (`list_actions`, `do_action`): a new menu item
+or plugin window button is added there as an action, or to `LEFT_OUT` with
+the reason -- `tests/test_assistant_gui.py` fails until it is.
 
 ## Before you edit anything
 

@@ -15,8 +15,9 @@ Any table that [Load from path](plugin:File/Load/Auto) reads can be chosen:
 this program's HDF5, SMAP, Picasso, DECODE, MINFLUX and text tables.  A text
 table whose columns are not recognised, and that no saved conversion fits,
 asks for its columns in a dialog first.  An image (a TIFF of a few frames, a
-PNG) is added as an image layer beside the localizations, with either
-button, and a long TIFF stack, raw data to fit, goes to the fitter on the
+PNG) is opened with either button but not shown: it joins the images an
+image layer can show, and the Render tab's *+ > image layer* and the layer's
+*source* show it.  A long TIFF stack, raw data to fit, goes to the fitter on the
 Localize tab -- as when the file is dropped on the window.
 
 It is a button for the window only.  A chain or a batch, which has no one

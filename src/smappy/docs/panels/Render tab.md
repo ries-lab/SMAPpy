@@ -91,9 +91,10 @@ and their colours added.
 
 An image file with several pages is a **stack**, and what its pages are is
 read from the file where it says: a z-stack (the planes at heights a step
-apart), a time series, or several channels.  Each channel becomes an image
-layer of its own, in its own colour, as two channels of localizations are two
-layers.  A file that does not say -- a plain multi-page TIFF -- is asked
+apart), a time series, or several channels.  Each channel becomes an image of
+its own, a *source* an image layer can show, as two channels of
+localizations are two layers.  Opening an image shows nothing yet: add an
+image layer and choose it as its source.  A file that does not say -- a plain multi-page TIFF -- is asked
 about when it is opened: how many channels, in which order, and whether the
 rest are z-slices or time frames, with the step between them.  A stack layer
 shows one plane, or the planes of a range taken together: their maximum
@@ -718,7 +719,10 @@ What the layer shows.  The list has the camera frames each open file kept
 spaced over the acquisition, in photons), every image opened, and *open
 file...* for another TIFF or PNG.  The kept frames are placed by the camera's
 pixel size and ROI, so they lie under the localizations without adjusting
-anything.  Saving the localizations keeps the kept frames and every image a
+anything.  So is a Micro-Manager image taken with a camera ROI: its pixel
+size is Micro-Manager's own, and its ROI places it where a movie taken with
+the same ROI puts its localizations.  Any other file is placed by what it
+records (its resolution tags, an ImageJ *x0*), else at 0, 0.  Saving the localizations keeps the kept frames and every image a
 layer shows in the file, with their pixel size and position, and opening it
 again offers them here.
 

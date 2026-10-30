@@ -96,6 +96,13 @@ def _name_of(path) -> str:
     return (ref.name if ref is not None and ref.name else None) or str(path)
 
 
+def _is_table(path) -> bool:
+    """A localization table, for the window's own loader; an image goes
+    through the tool, which opens it as sources."""
+    from .drops import LOCS, kind_of
+    return kind_of(path) == LOCS
+
+
 def describe(proposal) -> str:
     """A proposal in a line, as the user reads it."""
     a = proposal.arguments
@@ -120,6 +127,12 @@ def describe(proposal) -> str:
                 f"Filter {a.get('column')} to {a.get('lo')} .. {a.get('hi')}")
     if proposal.tool == "set_grouped":
         return f"Show layer {a.get('layer', 0)} {'grouped' if a.get('on') else 'ungrouped'}"
+    if proposal.tool == "do_action":
+        given = ", ".join(f"{k} = {v}" for k, v in (a.get("arguments") or {}).items())
+        return f"{a.get('name')}" + (f": {given}" if given else "")
+    if proposal.tool == "set_layer":
+        shown = ", ".join(f"{k} = {v}" for k, v in a.items() if k != "layer")
+        return f"Layer {a.get('layer', 0)}: {shown}"
     return f"{proposal.tool}({a})"
 
 
@@ -403,7 +416,8 @@ class AssistantControls(QObject):
     def do_proposal(self, ident: str) -> None:
         proposal = self.server.assistant.proposal(ident)
         try:
-            if proposal.tool == "load" and self.load is not None:
+            if (proposal.tool == "load" and self.load is not None
+                    and _is_table(proposal.arguments["path"])):
                 # the window's own loader: in the background, the view reset
                 self.load([proposal.arguments["path"]], bool(proposal.arguments.get("append")))
                 proposal.status = "done"
