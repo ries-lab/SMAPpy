@@ -515,11 +515,54 @@ measures it from the model at that n_s.  Another field of view in the same sampl
 coverslips, finds the focus again and refits D with the last value as its prior (the gap varies over
 millimetres); another sample repeats the in situ step with its own measured n_s and D.
 
-**n_s, checked by the data.**  It cannot come from beads on coverslip 1, so it is measured and held.
-*4Pi z*'s `refine_period` measures the phase's slope against the envelope's z; a wrong n_s makes them
-disagree, since the envelope's z scale and the fringe's depend differently on the index.  The refined
-period is reported as an implied n_s beside the measured one, not fitted, unless the sample spans
-several µm in h.
+**n_s and D from beads on both coverslips.**  Beads on coverslip 1 alone cannot give n_s: the stage
+moves the whole sandwich, so a stack changes only the immersion's paths.  With beads on both coverslips,
+a stack around each and the stage offset Δs between the two stacks recorded, they can:
+- **The aberration measures one number.**  After refocusing, the gap's and the index's aberrations in
+  the far arm have nearly the same shape (correlation −0.985 at n_s 1.36, −0.998 at 1.38, −0.9999 at
+  1.40): +0.001 of index looks like −390 nm of gap at 1.36 (−490 nm at 1.38).  So the stacks measure the
+  optical mismatch, about D·(n_s − n_imm).
+- **The stage travel measures the rest.**  Moving from one coverslip's beads into focus to the other's
+  takes Δs = D + c(D, n_s), c the focal shift through the sample: about 11.1 µm for D = 10 µm at n_s
+  1.36.  Along the direction the aberration cannot see (+0.001 of index with +390 nm of gap) Δs moves by
+  about 400 nm.
+- **Together** (n_s 1.36, D = 10 µm, the far arm's aberration to ±0.01 rad, Δs to ±20 nm): n_s to about
+  ±0.0002 and D to about ±20 nm.  At 1.38–1.40 the aberration weakens but Δs keeps its lever.  At a
+  matched index nothing separates them, and nothing in the PSF needs to; only the phase's z scale
+  (∝ n_s) does, which the refined period or a refractometer gives.
+
+The joint fit, in this model: coverslip-1 beads at h = 0 (arm 1 sees no sample, arm 2 sees D),
+coverslip-2 beads at h = D (the other way round), so each pupil is seen once clean and once behind the
+layer, which separates the instrument from the layer too.  Free and shared: both pupils, the blur, the
+channels, Δ, the coherences, D and n_s (k_z,med then computed from a parameter, not read from the grid).
+Held: n_imm, NA, the beads' λ and Δs.  Each coverslip's coverslip thickness acts alike on both bead sets
+in its arm and stays in that arm's pupil.
+
+- **The focus is the model's, not a criterion's.**  With 1–1.5 rad of spherical in the far arm, peak
+  intensity, the sharpest image and the least-squares focus differ by tens to a hundred nm, the size of
+  the lever.  So Δs is the recorded offset between the two stacks, each bead's z coming from the joint
+  fit; a focus found beforehand by eye or autofocus enters only as a prior of about ±100 nm.
+- **Each coverslip's beads lie on one plane**, a height and a tilt per coverslip, not a free z per bead:
+  free z would take up Δs and lose the lever.
+- **The stage's scale over the offset** is the other systematic (0.1 % of 10 µm is 10 nm).  Each stack's
+  fringe calibrates the piezo locally (2 k_z,imm per nm of stage, λ and n_imm known); its linearity
+  across the offset needs the stage's specification or a check.
+- The cavity phase between the two sets would give the optical thickness to a fraction of a fringe, but
+  across about 75 fringes and with the cavity drifting between the stacks; left out.
+- **What it measures** is the index of the medium the beads sit in, and D at that position.  Inside a
+  cell the index differs (1.36–1.39, unevenly), so this value is the in situ prior, not the answer.
+
+**n_s, checked by the data.**  In situ, *4Pi z*'s `refine_period` measures the phase's slope against the
+envelope's z.  If the model's index is off by a fraction ε, the envelope reads h·(1 + ε) and the phase
+h/(1 + ε) (paraxially: the envelope's defocus goes as 1/(n_s λ), the fringe as n_s/λ), so the slope is
+off by about 2ε while λ cancels; no known height is needed.  0.005 of index at 1.36 is 0.74 % of slope,
+and the refined period came within 0.3 % on M3's 5000 simulated molecules: about ±0.002 in n_s from the
+statistics.  The limit is the bead model's own consistency: on the M5 beads, in a matched medium, the
+envelope's z runs 1.016 and the phase's 1.007 per nm of stage, a 0.9 % gap that would read as about 0.006
+of index.  So the bead model's two scales are put on one ruler first (the fringe, through a free stage
+scale, `geometry.z_scale`), and what bends the envelope is found (§8's open shared pattern).  The refined
+period is reported as an implied n_s beside the measured one, not fitted, unless the sample spans several
+µm in h.
 
 **Not covered:** the pupils changing over the field.
 
@@ -597,7 +640,10 @@ says, in this order:
 - each arm its own depth in `FourPiModel` (h, D − h), with `fourpi.gap`,
   `fourpi.cover` and `geometry.focus`; a matched index gives today's model;
 - a simulation study of what can be told apart: n_s against D, `cover`
-  against D, Δz;
+  against D, Δz; and the joint fit of beads on both coverslips with the
+  stage offset between the stacks;
+- the bead model's envelope and phase z scales made to agree (§8: 1.016
+  against 1.007), before any n_s is read from the refined period;
 - the 4Pi depth spline for a given geometry, and the fitter's *sample index*,
   *gap* and *focus* (auto), as Spline 3D's *focus*;
 - the implied n_s from the refined period, in *4Pi z*.
