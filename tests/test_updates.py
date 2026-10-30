@@ -314,6 +314,30 @@ def test_the_failure_window_quotes_uvs_error_and_its_cause(own_config):
     assert updates.log_error() == ""
 
 
+@pytest.mark.parametrize("output, advice", [
+    # a user's uv, October 2026
+    ("error: unexpected argument '--refresh-package' found\n"
+     "  tip: a similar argument exists: '--prerelease-package'\n", "uv self update"),
+    ("error: failed to remove file `C:\\uv\\tools\\smappy-smlm\\Scripts\\python.exe`\n"
+     "  Caused by: The process cannot access the file (os error 32)\n", "Close every SMAPpy window"),
+    ("ERROR: Could not install packages due to an OSError: [WinError 5] Access is denied\n",
+     "Close every SMAPpy window"),
+    ("error: Failed to fetch: `https://pypi.org/simple/smappy-smlm/`\n"
+     "  Caused by: dns error: No such host is known\n", "HTTPS_PROXY"),
+    ("error: something nobody has seen\n", ""),
+])
+def test_a_known_failure_says_what_to_do_about_it(own_config, output, advice):
+    updates.log_file().write_text(
+        f"SMAPpy update\n\n$ C:\\Users\\x\\.local\\bin\\uv.EXE tool upgrade smappy-smlm\n{output}"
+        "\nthe update failed\n")
+    found = updates.failure_advice()
+    assert advice in found if advice else found == ""
+
+
+def test_an_update_that_ran_but_changed_nothing_says_why_it_might_have(own_config):
+    assert "ten minutes" in updates.failure_advice(ok=True)
+
+
 def test_the_next_start_says_the_update_worked_and_reads_the_result_once(own_config, monkeypatch):
     _app()
     from PySide6.QtWidgets import QMainWindow
@@ -340,7 +364,8 @@ def test_a_failed_update_is_shown_with_pips_output(own_config, monkeypatch):
     Updates(window).report_last_update()
     assert shown and shown[0][0].startswith("The update failed")
     assert "Access is denied" in shown[0][1]
-    assert shown[0][2].startswith("ERROR: Could not install packages")
+    assert shown[0][2].startswith("A file of SMAPpy was still in use")     # what to do first
+    assert "ERROR: Could not install packages" in shown[0][2]            # then why
     window.deleteLater()
 
 

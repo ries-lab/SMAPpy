@@ -209,10 +209,12 @@ class Updates(QObject):
                     if done.get("ok") else "The update failed; this is still SMAPpy " + now)
             box = QMessageBox(QMessageBox.Warning, "Update and restart",
                               f"{what}.", QMessageBox.Close, self.window)
-            error = "" if done.get("ok") else updates.log_error()
-            box.setInformativeText((f"{error}\n\n" if error else "") +
-                                   f"The whole output is in {done.get('log')}. To try "
-                                   f"by hand, close SMAPpy and run:\n{updates.update_command()}")
+            # what to do first, then what the installer said, then the log
+            ok = bool(done.get("ok"))
+            parts = [updates.failure_advice(ok), "" if ok else updates.log_error(),
+                     f"The whole output is in {done.get('log')}. To try by hand, close "
+                     f"SMAPpy and run:\n{updates.update_command()}"]
+            box.setInformativeText("\n\n".join(part for part in parts if part))
             box.setDetailedText(updates.log_tail())
             box.exec()
         except Exception as error:      # a timer's slot must not raise

@@ -278,3 +278,46 @@ def log_error() -> str:
             break
         found.append(line.strip())
     return "\n".join(found)
+
+
+# What the install's output says, turned into what to do about it: the
+# failures seen or expected, each a test on the log's text, lowercased.
+UV_UPDATE = ("uv self update (if uv came from its installer; otherwise as it was "
+             "installed: pip install -U uv, winget upgrade astral-sh.uv, brew upgrade uv)")
+_ADVICE = (
+    (lambda log: "uv" in log and "unexpected argument" in log,
+     "The uv on this computer is too old for this update. Update uv with\n"
+     f"{UV_UPDATE}\nand then use Update and restart again."),
+    (lambda log: any(text in log for text in (
+        "os error 32", "being used by another process", "access is denied",
+        "winerror 5", "winerror 32", "permission denied", "permissionerror")),
+     "A file of SMAPpy was still in use. Close every SMAPpy window, and anything "
+     "else run from SMAPpy's Python (a notebook, a script), then run the command "
+     "below by hand."),
+    (lambda log: any(text in log for text in (
+        "failed to fetch", "could not fetch", "dns error", "error sending request",
+        "connection refused", "connection reset", "timed out", "proxyerror",
+        "newconnectionerror", "certificate verify failed", "invalid peer certificate")),
+     "PyPI could not be reached. Check the internet connection; behind a proxy, "
+     "set HTTPS_PROXY (and, for a company certificate, UV_NATIVE_TLS=1 for uv) "
+     "before running the command below."),
+)
+
+
+def failure_advice(ok: bool = False) -> str:
+    """What to do about the last *Update and restart*, in a sentence or two
+    a user can act on, from what its log says; empty where the failure is
+    not one of the known ones -- the error line and the log say the rest.
+    ``ok``: the install said it worked, but this is still the old version."""
+    if ok:
+        return ("PyPI may not have offered the new release yet; try again in ten "
+                f"minutes. Or the new release needs a newer Python than this one "
+                f"({sys.version.split()[0]}).")
+    try:
+        log = log_file().read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return ""
+    for matches, advice in _ADVICE:
+        if matches(log):
+            return advice
+    return ""
