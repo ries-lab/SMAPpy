@@ -420,6 +420,109 @@ unchanged.
 **The loader also reads v1's `psfmodel_*_4pi.h5`.**  It renormalises, and
 reorders A, B, I into I, A, B.
 
+### D9. The sample between the coverslips: what to hold and what to free (proposed, 2026-10-30)
+
+**The problem.**  In a 4Pi the sample is a sandwich: coverslip 1, a layer of sample (index n_s, gap D,
+often about 10 µm) and coverslip 2.  An emitter at height h above coverslip 1 is seen by objective 1
+through h of sample and by objective 2 through D − h.  Beads lie on one coverslip, so in a bead
+calibration objective 2 alone looks through the whole layer.  Where the sample's index differs from the
+immersion's, the layer adds an aberration to that arm.  How far today's Zernikes can take it up (NA 1.35,
+silicone 1.406, 600 nm, 10 µm, after refocusing; radial Zernikes fitted to the rest):
+
+| sample index | aberration | left beyond n ≤ 6 | beyond n ≤ 8 | beyond n ≤ 12 |
+|---|---|---|---|---|
+| 1.406 (matched) | 0 | 0 | 0 | 0 |
+| 1.39 | 0.35 rad rms | 0.12 | 0.08 | 0.05 |
+| 1.38 | 0.64 | 0.23 | 0.15 | 0.09 |
+| 1.37 | 1.00 | 0.39 | 0.26 | 0.15 |
+| 1.36 | 1.49 | 0.64 | 0.43 | 0.25 |
+
+The aberration is steepest at the pupil's edge, where low orders fail; bead fits resolve a few
+hundredths of a radian.  With water (1.33) the light above NA 1.33 does not cross 10 µm at all
+(3 % of the aperture's area), so the far arm works at a lower NA than the near one and the two
+interfere only inside it; Zernike magnitudes cannot make that edge.  A deformable mirror correcting the
+spherical removes the smooth part, not the edge and not the lost light, and it is set for one depth.
+For molecules the layers change with h, in opposite directions in the two arms.  So the layers are
+modelled, and the Zernikes keep the instrument and the DM.
+
+**How much each uncertainty matters**, as the wavefront moves after refocusing (the rule: above about
+0.05 rad it is known or fitted, below it is held):
+
+| uncertainty | 2 µm of sample | 10 µm of sample |
+|---|---|---|
+| index +0.005, n_s 1.36 | 0.05 rad | 0.27 rad |
+| index +0.005, n_s 1.38 | 0.03 | 0.15 |
+| index +0.005, n_s 1.406 | 0.02 | 0.09 |
+| thickness +1 µm, n_s 1.36 / 1.38 | 0.15 / 0.06 | the same |
+| thickness +100 nm, n_s 1.36 | 0.015 | the same |
+
+The index matters mostly in the far arm; the gap must be known to about 0.3 µm when the index is
+mismatched; 100 nm never matters.  The index also sets the phase's z scale: 0.005 is 0.4 % of z.
+
+**The model.**  Each arm's wave is the in situ one (`InSituGeometry`: the height through the sample's
+k_z, the focus through the immersion's):
+
+    arm 1:  exp 2πi [k_z,med·h − k_z,imm·f]
+    arm 2:  exp 2πi [k_z,med·(D − h) − k_z,imm·(D_imm − f)],  mirrored as now
+
+f is the common focus, what a stage movement changes; the arms' foci stay Δz apart (`fourpi.offset`).
+For beads (h = 0, the stage moving the whole sandwich) arm 1 is today's model and arm 2 carries one
+constant layer D_bead; with a matched index it vanishes and today's `FourPiModel` is the special case,
+which is the regression test.  uiPSF has the pieces: `VectorPSF`'s depth term, `InSituGeometry`'s focus,
+`optics/layers.py` for a coverslip's index and thickness.
+
+**The parameters, and where each is held or free:**
+
+| parameter | what it is | beads | sample, in situ | SMLM fit |
+|---|---|---|---|---|
+| n_s (`Optics.n_med`) | sample index | held, measured | held, measured; checked by the period | held |
+| `fourpi.gap` D | sample between the coverslips | held, measured | free, prior from measurement (±1 µm), per field of view | held |
+| `geometry.focus` f | focus above coverslip 1 | none (h = 0, stage z) | free, from the lowest heights | held; its drift is z drift |
+| `fourpi.cover` (2) | each arm's coverslip against the beads' sample | held at 0 | arm 1 free with a prior (±5 µm); arm 2 inside D | held |
+| `fourpi.offset` Δ | arms' misalignment | free | Δz free with a prior (realigned per sample); Δx, Δy held | held |
+| coherence α_c | per channel | free | free | in the spline |
+| pupils, blur, channel offsets | the instrument | free | held | in the spline |
+
+**Why this split.**
+- **Beads learn the instrument only.**  With the layers held, the pupils are the objectives' and the
+  DM's.  An index-matched bead sample makes D_bead drop out.  Mismatched, n_bead and D_bead are held at
+  measured values: fitted, they trade with the lower pupil's spherical, D and n acting almost as one
+  scalar, D·(k_med − k_imm).  Beads on both coverslips (or a second sample, flipped) separate them
+  cleanly: each arm then sees the gap in turn.
+- **Per sample, a layer is one scalar of known shape, not free Zernikes.**  Arm 2's constant term is
+  k_med·D: one number times an exact shape, freed on top of held pupils.  Freeing Z11 or Z22 instead
+  would let the pupil absorb anything spherical.  A coverslip off the beads' thickness has a similar
+  shape, (k_cov − k_imm); in arm 2 it cannot be told from D and is part of an effective D, in arm 1 it is
+  the only constant term and is freed there.  For silicone objectives that is the term their correction
+  collars exist for (±5 µm of glass), and a collar setting falls into it.
+- **The heights make the sample identifiable.**  Molecules at many h see k_med·h, which pins n_s and f
+  together; the lowest give f, as `calibrate.depth.auto_focus` does for Spline 3D.  Molecules on
+  coverslip 2 too (an upper membrane) would give D from their edge.
+- **The DM is part of the instrument.**  A setting that differs between beads and sample enters as the
+  commanded difference, held (`ZernikePupil`'s held modes), the commands kept in the metadata.  Learnt
+  from the sample it would trade with D.
+- **Δ is realigned with every sample.**  Its lateral direction was not stable even from beads (§8;
+  the single-step models put it along three directions), so Δx and Δy are held; Δz, which realigning
+  for the best interference moves, is free with a prior.
+- **The coherence stays free in situ**: it is what changes most with the sample (scattering, depth,
+  the cavity drifting during an exposure).
+
+**Fitting molecules.**  The fitter keeps x, y, z, N, Φ and the backgrounds.  The geometry enters through
+the spline: the export samples I, A and B as functions of h for given (n_s, D, f, Δz, cover), z the
+height above coverslip 1 -- a 4Pi depth spline, as `calibrate.depth.depth_spline` is for Spline 3D.  The
+fringe follows k_med·(2h − D), so its period, about λ/(2 n_s cos θ), is the same at every h; the export
+measures it from the model at that n_s.  Another field of view in the same sample keeps n_s and the
+coverslips, finds the focus again and refits D with the last value as its prior (the gap varies over
+millimetres); another sample repeats the in situ step with its own measured n_s and D.
+
+**n_s, checked by the data.**  It cannot come from beads on coverslip 1, so it is measured and held.
+*4Pi z*'s `refine_period` measures the phase's slope against the envelope's z; a wrong n_s makes them
+disagree, since the envelope's z scale and the fringe's depend differently on the index.  The refined
+period is reported as an implied n_s beside the measured one, not fitted, unless the sample spans
+several µm in h.
+
+**Not covered:** the pupils changing over the field.
+
 ## 4. Plan
 
 The milestones are ordered so that a fitter exists early, on v1's ready-made
@@ -489,7 +592,15 @@ models, and the risky refactor happens behind tests.
 
 **M6. uiPSF v2 4Pi in situ** on the Nup96 data, compared with v1's in-situ
 result files.  This comes after the bead model, and after the in-situ learning
-work in progress elsewhere, which it builds on.
+work in progress elsewhere, which it builds on.  It holds and frees what D9
+says, in this order:
+- each arm its own depth in `FourPiModel` (h, D − h), with `fourpi.gap`,
+  `fourpi.cover` and `geometry.focus`; a matched index gives today's model;
+- a simulation study of what can be told apart: n_s against D, `cover`
+  against D, Δz;
+- the 4Pi depth spline for a given geometry, and the fitter's *sample index*,
+  *gap* and *focus* (auto), as Spline 3D's *focus*;
+- the implied n_s from the refined period, in *4Pi z*.
 
 **M7. Later, as needed**
 - The uiPSF 4Pi model made vectorial: dipole fields and the s and p
