@@ -209,11 +209,28 @@ def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it():
     from smappy import updater
     py = "/env/bin/python"
     assert updater.commands("pip", py) == [[py, "-m", "pip", "install", "--upgrade", "smappy-smlm"]]
-    assert updater.commands("uv tool", py, uv="/bin/uv") == [["/bin/uv", "tool", "upgrade", "--refresh-package", "smappy-smlm", "smappy-smlm"]]
+    assert updater.commands("uv tool", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "tool", "upgrade"]
     assert updater.commands("uv", py, uv="/bin/uv")[0][:3] == ["/bin/uv", "pip", "install"]
     assert updater.commands("uv tool", py, uv="") is None          # no uv on the PATH
     assert updater.commands("checkout", py) is None                # git pull is the user's
     assert updater.commands("uvx", py) is None
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="the stand-in uv is a shell script")
+def test_a_uv_whose_tool_upgrade_has_no_refresh_package_gets_no_cache_instead(tmp_path):
+    from smappy import updater
+    new, old = tmp_path / "new" / "uv", tmp_path / "old" / "uv"
+    for uv, help in ((new, "--refresh-package <PKG>  Refresh cached data"),
+                     (old, "--prerelease-package <PKG>")):
+        uv.parent.mkdir()
+        uv.write_text(f"#!/bin/sh\necho '{help}'\n")
+        uv.chmod(0o755)
+    assert updater.commands("uv tool", "py", uv=str(new)) == [
+        [str(new), "tool", "upgrade", "--refresh-package", "smappy-smlm", "smappy-smlm"]]
+    # an older uv refused --refresh-package and the update failed before it began
+    assert updater.commands("uv tool", "py", uv=str(old)) == [
+        [str(old), "tool", "upgrade", "--no-cache", "smappy-smlm"]]
+    assert updater.refresh_args(str(tmp_path / "missing")) == ["--no-cache"]
 
 
 def _python(code):

@@ -18,6 +18,7 @@ process let go of a moment late.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import shutil
@@ -46,11 +47,29 @@ def commands(kind: str, python: str, uv: Optional[str] = None) -> Optional[List[
     # an update just after a release found nothing new (0.5.7, October
     # 2026); pip asks again for every list on its own
     if kind == "uv tool" and uv:
-        return [[uv, "tool", "upgrade", "--refresh-package", DISTRIBUTION, DISTRIBUTION]]
+        return [[uv, "tool", "upgrade", *refresh_args(uv), DISTRIBUTION]]
     if kind == "uv" and uv:
         return [[uv, "pip", "install", "--upgrade", "--refresh-package", DISTRIBUTION,
                  "--python", python, DISTRIBUTION]]
     return None
+
+
+@functools.lru_cache(maxsize=None)
+def refresh_args(uv: str) -> List[str]:
+    """How this uv's ``tool upgrade`` asks PyPI afresh: ``--refresh-package``
+    where it knows it, else the global ``--no-cache``, which every uv has.
+    An older uv's ``tool upgrade`` refuses ``--refresh-package`` outright,
+    so the update failed before it began (a user's uv, October 2026); asked
+    once per uv, from its own help."""
+    try:
+        text = subprocess.run([uv, "tool", "upgrade", "--help"], capture_output=True,
+                              text=True, errors="replace", stdin=subprocess.DEVNULL,
+                              timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        text = ""
+    if "--refresh-package" in text:
+        return ["--refresh-package", DISTRIBUTION]
+    return ["--no-cache"]
 
 
 def relaunch_command(python: str) -> List[str]:

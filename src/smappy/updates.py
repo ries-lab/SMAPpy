@@ -165,9 +165,13 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
             "git pull", f"{run} -m pip install -e ."]
         return ("; " if windows else " && ").join(steps)
     if kind == "uv tool":
-        # --refresh-package: uv's copy of PyPI's list may predate the release
-        # (`smappy.updater.commands`)
-        return f"uv tool upgrade --refresh-package {DISTRIBUTION} {DISTRIBUTION}"
+        # uv's copy of PyPI's list may predate the release, and how to ask
+        # afresh depends on the uv (`smappy.updater.refresh_args`)
+        import shutil
+        from .updater import refresh_args
+        uv = shutil.which("uv")
+        refresh = refresh_args(uv) if uv else ["--refresh-package", DISTRIBUTION]
+        return f"uv tool upgrade {' '.join(refresh)} {DISTRIBUTION}"
     if kind == "uvx":
         return f"uvx --from {DISTRIBUTION}@latest smappy-gui"
     if kind == "uv":
