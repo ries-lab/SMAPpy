@@ -960,26 +960,38 @@ class Assistant:
           "table is opened (append=true adds it to what is open); an image of "
           "a few frames (a widefield snapshot, a few channels, a z-stack) is "
           "opened as image sources, one per channel, which no layer shows "
-          "until set_layer puts one in a layer.  A long TIFF stack is raw "
-          "camera data, for a fitter (Localize/...), not opened here.",
+          "until set_layer puts one in a layer.  A long TIFF stack (more than "
+          "50 frames) is taken for raw camera data, for a fitter, and not "
+          "opened here; open_as='image' opens any TIFF as an image -- a "
+          "time-lapse, a z-stack of many planes.",
           path={"type": "string", "description": "the file"},
           append={"type": "boolean", "description": "a table: add rather than replace"},
+          open_as={"type": "string", "enum": ["auto", "image"],
+                   "description": "a TIFF: by its frames (auto), or an image whatever "
+                                  "its frames"},
           pixel_nm={"type": "number",
                     "description": "an image's pixel size, where the file has none"},
           reason={"type": "string", "description": "why, for the user (a proposal)"})
     def load(self, path: str, append: bool = False, pixel_nm: Optional[float] = None,
-             reason: str = "") -> Dict[str, Any]:
-        from ..gui.drops import IMAGE, LOCS, MAX_IMAGE_FRAMES, STACK, kind_of
+             open_as: str = "auto", reason: str = "") -> Dict[str, Any]:
+        from ..gui.drops import IMAGE, LOCS, MAX_IMAGE_FRAMES, STACK, kind_of, undecided
         target = Path(path).expanduser()
         if not target.exists():
             raise ToolError(f"no file {path}")
-        kind = kind_of(target)
+        if open_as not in ("auto", "image"):
+            raise ToolError("open_as is 'auto' or 'image'; raw data to fit goes to a "
+                            "fitter: do_action('Localize/Fit file') in the GUI, or "
+                            "run_plugin of a Localize/ fitter with source.path")
+        kind = kind_of(target, open_as)
         if kind == STACK:
+            frames = undecided(target)
             raise ToolError(
-                f"{target.name} is raw camera data (more than {MAX_IMAGE_FRAMES} "
-                "frames, or an acquisition folder): fit it with a fitter -- "
-                "list_plugins('Localize'), its source.path set to this file -- "
-                "rather than opening it")
+                f"{target.name} is taken for raw camera data (more than "
+                f"{MAX_IMAGE_FRAMES} frames, or an acquisition folder): fit it with "
+                "a fitter -- list_plugins('Localize'), its source.path set to this "
+                "file -- rather than opening it"
+                + (f".  With {frames} frames it may be an image (a time-lapse, a "
+                   "z-stack): open_as='image' opens it as one" if frames else ""))
         if kind is None:
             raise ToolError(f"{target.name} is neither a localization table nor an "
                             "image SMAPpy reads")
@@ -987,6 +999,8 @@ class Assistant:
             arguments = {"path": path, "append": append}
             if pixel_nm is not None:
                 arguments["pixel_nm"] = pixel_nm
+            if open_as != "auto":
+                arguments["open_as"] = open_as
             return self._propose("load", arguments, reason)
         if kind == IMAGE:
             try:

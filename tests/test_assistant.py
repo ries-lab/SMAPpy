@@ -380,7 +380,8 @@ def _image_file(tmp_path, frames=1):
     import tifffile
     path = tmp_path / "wf.tif"
     tifffile.imwrite(path, np.arange(frames * 16, dtype=np.uint16).reshape(frames, 4, 4),
-                     imagej=True, resolution=(10, 10), metadata={"unit": "um"})
+                     imagej=True, resolution=(10, 10),
+                     metadata={"unit": "um", "axes": "TYX"})
     return path
 
 
@@ -393,8 +394,12 @@ def test_load_opens_an_image_as_a_source_and_refuses_a_stack_as_raw_data(tmp_pat
     assert "wf.tif" in [im["name"] for im in a.call("session_state")["images"]]
     many = tmp_path / "movie"
     many.mkdir()
-    with pytest.raises(ToolError, match="raw camera data"):
-        a.call("load", {"path": str(_image_file(many, frames=60))})
+    timelapse = str(_image_file(many, frames=60))
+    with pytest.raises(ToolError, match="raw camera data.*open_as='image'"):
+        a.call("load", {"path": timelapse})
+    # said to be an image, it is one, whatever its frames
+    answer = a.call("load", {"path": timelapse, "open_as": "image"})
+    assert [im["frames"] for im in answer["images"]] == [60]
 
 
 def test_set_layer_shows_an_image_in_a_new_layer_in_green_and_sets_render_settings(tmp_path):

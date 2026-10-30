@@ -120,7 +120,7 @@ def test_nothing_is_asked_when_no_table_is_open(app, windows, tmp_path, monkeypa
     assert control.replace_or_add([path]) is False
 
 
-def _write_tif(path, frames=60):
+def _write_tif(path, frames=501):          # above `drops.ASK_FRAMES`: nothing asked
     import tifffile
     tifffile.imwrite(path, np.full((frames, 32, 32), 100, np.uint16),
                      photometric="minisblack")
@@ -181,6 +181,42 @@ def test_a_short_tiff_is_an_image_to_show_and_a_long_one_data_to_fit(tmp_path):
                                     frames=drops.MAX_IMAGE_FRAMES)) == drops.IMAGE
     assert drops.kind_of(_write_tif(tmp_path / "raw.tif",
                                     frames=drops.MAX_IMAGE_FRAMES + 1)) == drops.STACK
+
+
+def test_a_tiff_is_what_open_as_says_whatever_its_frames(tmp_path):
+    from smappy.gui import drops
+    lo, hi = drops.ASK_FRAMES
+    short, mid = _write_tif(tmp_path / "a.tif", frames=1), _write_tif(tmp_path / "b.tif",
+                                                                      frames=100)
+    assert drops.kind_of(short, "stack") == drops.STACK
+    assert drops.kind_of(mid, "image") == drops.IMAGE
+    assert drops.undecided(mid) == 100 and drops.undecided(short) is None
+    assert drops.undecided(_write_tif(tmp_path / "c.tif", frames=hi + 1)) is None
+    with pytest.raises(ValueError, match="open_as"):
+        drops.kind_of(mid, "movie")
+
+
+def test_a_tiff_that_could_be_either_is_asked_about_and_the_answer_followed(
+        app, windows, tmp_path, monkeypatch):
+    """A widefield time-lapse of a hundred frames is not raw data to fit, and
+    a raw movie of thirty is not a picture: the count cannot tell, so it asks."""
+    session, control, _ = windows
+    path = _write_tif(tmp_path / "timelapse.tif", frames=100)
+    asked, answers = [], iter(["image", "stack", None])
+    monkeypatch.setattr(control, "image_or_stack",
+                        lambda p, n: asked.append((p.name, n)) or next(answers))
+    opened, fitted = [], []
+    monkeypatch.setattr(control, "open_image_path", lambda p: opened.append(p.name))
+    monkeypatch.setattr(control, "fit_file", lambda p: fitted.append(p.name))
+    for _ in range(3):
+        control.open_dropped([path])
+    assert asked == [("timelapse.tif", 100)] * 3
+    assert opened == ["timelapse.tif"] and fitted == ["timelapse.tif"]   # cancel: neither
+    # said, it is not asked; unasked (the assistant), the count decides and says so
+    control.open_dropped([path], open_as="image")
+    decided = control.open_dropped([path], ask=False)
+    assert len(asked) == 3 and opened == ["timelapse.tif"] * 2
+    assert fitted == ["timelapse.tif"] * 2 and "100 frames" in decided[0]
 
 
 def test_a_dropped_image_is_opened_after_the_tables(app, windows, tmp_path):

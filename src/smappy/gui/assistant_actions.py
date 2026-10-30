@@ -25,6 +25,10 @@ PATH = {"type": "string", "description": "the file"}
 PATHS = {"type": ["string", "array"], "items": {"type": "string"},
          "description": "a file, or several"}
 LAYER = {"type": "integer", "description": "a layer's index, as session_state lists it"}
+OPEN_AS = {"type": "string", "enum": ["auto", "image", "stack"],
+           "description": "what a TIFF is: by its frames (auto, the default: more "
+                          "than 50 is raw data to fit), an image to show, or a "
+                          "stack to fit -- whatever its frames"}
 
 #: The menu items that are not actions, and why: a modal dialog with no
 #: version that asks nothing, a file written outside the output folder, the
@@ -110,12 +114,18 @@ def actions_of(window) -> Dict[str, Action]:
     """The actions of one control window (`ControlWindow`), by name."""
     session = window.session
 
-    def opened(paths, append):
-        window.open_dropped(_paths(paths), append=bool(append))
-        return ("tables load in the background: session_state shows them when "
+    def opened(paths, append, open_as="auto"):
+        # no question: the call says, or the count decides and the answer says so
+        decided = window.open_dropped(_paths(paths), append=bool(append),
+                                      open_as=open_as, ask=False)
+        note = ("tables load in the background: session_state shows them when "
                 "they are in.  An image is opened as a source, shown by no "
-                "layer until Render/Add image layer or set_layer; a long stack "
+                "layer until Render/Add image layer or set_layer; raw data "
                 "goes to a fitter's file on the Localize tab")
+        if decided:
+            note += (".  Decided by the frame count, which leaves it open -- "
+                     "open_as says otherwise: " + "; ".join(decided))
+        return note
 
     def restore_open():
         path = session.path
@@ -208,11 +218,14 @@ def actions_of(window) -> Dict[str, Action]:
         Action("File/Open", "File > Open with these files: localization tables "
                "replace what is open (append=true adds them); an image of a few "
                "frames becomes a source no layer shows yet; a long stack goes to "
-               "a fitter's file.  The Load plugin's Open.", opened,
-               {"path": PATHS, "append": {"type": "boolean"}}, ("path",)),
+               "a fitter's file.  The Load plugin's Open.",
+               lambda path, append=False, open_as="auto": opened(path, append, open_as),
+               {"path": PATHS, "append": {"type": "boolean"}, "open_as": OPEN_AS},
+               ("path",)),
         Action("File/Add", "The Load plugin's Add: these files added to what is "
                "open -- tables as more files, images as sources.",
-               lambda path: opened(path, True), {"path": PATHS}, ("path",)),
+               lambda path, open_as="auto": opened(path, True, open_as),
+               {"path": PATHS, "open_as": OPEN_AS}, ("path",)),
         Action("File/Open and restore", "Open a smappy HDF5 file in place of what "
                "is open and bring back the session it was saved with: tabs, "
                "layers, views, windows.", lambda path: window.open_and_restore(

@@ -20,6 +20,16 @@ IMAGE = "image"            # a picture to render with the localizations: an imag
 #: runs to thousands of frames, so the line is not a fine one.
 MAX_IMAGE_FRAMES = 50
 
+#: Between these (inclusive) a TIFF could well be either -- a widefield
+#: time-lapse or a z-stack of a hundred planes, a short raw movie -- and
+#: File > Open and a drop ask which (`ControlWindow.open_dropped`); outside
+#: them the count decides.  Asked of a person only: the assistant says which
+#: (`OPEN_AS`) or takes the count's answer, and is told it did.
+ASK_FRAMES = (20, 500)
+
+#: How a file may be said to be opened: by the rule, or as one or the other.
+OPEN_AS = ("auto", "image", "stack")
+
 
 def accepts(mime) -> bool:
     """A drag worth taking: URLs, and every one of them a local file or folder.
@@ -45,9 +55,11 @@ def local_paths(mime) -> List[Path]:
     return paths
 
 
-def kind_of(path) -> Optional[str]:
+def kind_of(path, open_as: str = "auto") -> Optional[str]:
     """`LOCS`, `IMAGE`, `STACK`, or None for something neither File > Open,
-    *Open* nor a fitter could take.
+    *Open* nor a fitter could take.  ``open_as`` "image" or "stack" says
+    which a single TIFF is, whatever its frames; a table stays a table and
+    a folder an acquisition.
 
     A file is asked of the localization readers first, by the same
     `reader_for` that *Load/Auto* uses -- the extension, then a look inside
@@ -59,6 +71,8 @@ def kind_of(path) -> Optional[str]:
     from ..io.formats import reader_for
     from ..io.tiff import is_image_stack
 
+    if open_as not in OPEN_AS:
+        raise ValueError(f"open_as is one of {', '.join(OPEN_AS)}, not {open_as!r}")
     path = Path(path)
     if not path.is_dir():
         try:
@@ -71,10 +85,25 @@ def kind_of(path) -> Optional[str]:
     if not is_image_stack(path):
         return None
     if path.is_file() and path.suffix.lower() in (".tif", ".tiff"):
+        if open_as != "auto":
+            return IMAGE if open_as == "image" else STACK
         frames = frame_count(path)
         if frames is not None and frames <= MAX_IMAGE_FRAMES:
             return IMAGE
     return STACK
+
+
+def undecided(path) -> Optional[int]:
+    """The frames of a single TIFF whose count leaves open what it is
+    (`ASK_FRAMES`), else None: the question File > Open puts."""
+    path = Path(path)
+    if path.is_dir() or path.suffix.lower() not in (".tif", ".tiff"):
+        return None
+    if kind_of(path) not in (IMAGE, STACK):
+        return None
+    frames = frame_count(path)
+    lo, hi = ASK_FRAMES
+    return frames if frames is not None and lo <= frames <= hi else None
 
 
 def frame_count(path) -> Optional[int]:

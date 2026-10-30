@@ -769,6 +769,18 @@ def test_the_assistant_adds_an_image_and_shows_it_in_a_new_green_layer(app, tmp_
                              "arguments": {"colour": "green"}})
     with pytest.raises(Exception, match="no file"):
         a.call("do_action", {"name": "File/Add", "arguments": {"path": "nowhere.tif"}})
+    # a count that leaves it open is never asked of the assistant: the count
+    # decides and the answer says so, or open_as says which
+    timelapse = tmp_path / "timelapse.tif"
+    tifffile.imwrite(timelapse, np.ones((100, 8, 8), np.uint16), imagej=True,
+                     resolution=(10, 10), metadata={"unit": "um", "axes": "TYX"})
+    control.image_or_stack = lambda *_: pytest.fail("a dialog for the assistant")
+    control.fit_file = lambda path: True
+    told = a.call("do_action", {"name": "File/Add", "arguments": {"path": str(timelapse)}})
+    assert "100 frames, taken as raw data to fit" in told["answer"]
+    a.call("do_action", {"name": "File/Add",
+                         "arguments": {"path": str(timelapse), "open_as": "image"}})
+    assert [im.n_frames for im in session.images if im.name == "timelapse.tif"] == [100]
     for window in (render, control):
         window.close()
 

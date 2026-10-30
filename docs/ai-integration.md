@@ -148,7 +148,12 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   workflow kept where the plugin tree, the GUI and `smappy-batch` find it).
   `load` sorts a file as File > Open does (`gui/drops.kind_of`): a table is
   opened, an image of a few frames is opened as sources, which no layer
-  shows yet, and a long stack is refused as raw data for a fitter.
+  shows yet, and a long stack is refused as raw data for a fitter.  Where
+  the count leaves it open (`drops.ASK_FRAMES`, 20 to 500 frames) the GUI
+  asks a person; the assistant is never asked -- `load` and the actions
+  *File/Open*, *File/Add* take `open_as` ("image", "stack"), and without it
+  the count decides and the answer says that it did, so the model can say
+  otherwise.
   `set_layer` is the Render tab's settings of one layer: an image put in an
   image layer (one past the last makes a new one), its display -- LUT,
   contrast and the rest of `DisplaySettings` -- and a localization layer's

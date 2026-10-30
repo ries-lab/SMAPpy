@@ -14,11 +14,17 @@ which of the two when localizations are already open.
 Any table that [Load from path](plugin:File/Load/Auto) reads can be chosen:
 this program's HDF5, SMAP, Picasso, DECODE, MINFLUX and text tables.  A text
 table whose columns are not recognised, and that no saved conversion fits,
-asks for its columns in a dialog first.  An image (a TIFF of a few frames, a
-PNG) is opened with either button but not shown: it joins the images an
-image layer can show, and the Render tab's *+ > image layer* and the layer's
-*source* show it.  A long TIFF stack, raw data to fit, goes to the fitter on the
-Localize tab -- as when the file is dropped on the window.
+asks for its columns in a dialog first.
+
+A TIFF is either an image to show or raw data to fit, and its number of
+frames says which: up to 50 frames is an image -- a widefield picture, a
+few channels, a z-stack -- and more is a movie of blinking molecules.
+Between 20 and 500 frames it could be either (a long time-lapse, a short
+raw movie), so you are asked, with the count's answer as the default.  An
+image (or a PNG) is opened with either button but not shown: it joins the
+images an image layer can show, and the Render tab's *+ > image layer* and
+the layer's *source* show it.  Raw data goes to the fitter on the Localize
+tab.  A file dropped on the window is sorted the same way.
 
 It is a button for the window only.  A chain or a batch, which has no one
 to choose files, reads a file through *Load from path*, with the file's path

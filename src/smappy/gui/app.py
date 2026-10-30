@@ -1870,20 +1870,35 @@ class ControlWindow(QMainWindow):
     def dropEvent(self, event) -> None:
         _drop(event, self.open_dropped)
 
-    def open_dropped(self, paths, append: Optional[bool] = None) -> None:
+    def open_dropped(self, paths, append: Optional[bool] = None,
+                     open_as: str = "auto", ask: bool = True) -> List[str]:
         """Files dropped on either main window, sorted by `drops.kind_of`.
 
         Localization files go to `load_paths` together, which is *File >
         Open* with all of them chosen at once: the first replaces the table,
         the rest are added to it.  A short TIFF (`drops.MAX_IMAGE_FRAMES`
-        frames or fewer) or a PNG is an image layer, added to what is open.  A
+        frames or fewer) or a PNG is an image, a source for an image layer.  A
         long stack goes into a fitter's *file* (`fit_file`); only one can, so
-        the first.  Anything else is refused in
-        the status bar -- a dialog for a stray file would be out of proportion.
+        the first.  A TIFF whose count could mean either (`drops.ASK_FRAMES`)
+        is asked about, with ``ask`` (`image_or_stack`); without it -- the
+        assistant, which cannot answer a dialog -- the count decides.
+        ``open_as`` says which a TIFF is and nothing is asked.  Anything else
+        is refused in the status bar -- a dialog for a stray file would be out
+        of proportion.  Returns what the count decided unasked, a line per file.
         """
         tables, images, stacks, refused = [], [], [], []
+        decided: List[str] = []
         for path in map(Path, paths):
-            kind = drops.kind_of(path)
+            chosen = open_as
+            frames = drops.undecided(path) if open_as == "auto" else None
+            if frames is not None and ask:
+                chosen = self.image_or_stack(path, frames)
+                if chosen is None:                       # cancelled: this file only
+                    continue
+            kind = drops.kind_of(path, chosen)
+            if frames is not None and not ask:
+                decided.append(f"{path.name}: {frames} frames, taken as "
+                               f"{'an image' if kind == drops.IMAGE else 'raw data to fit'}")
             (tables if kind == drops.LOCS else images if kind == drops.IMAGE else
              stacks if kind == drops.STACK else refused).append(path)
         if stacks:
@@ -1909,6 +1924,25 @@ class ControlWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"cannot open {refused[0].name}: not a localization file or an "
                 f"image stack{more}", 8000)
+        return decided
+
+    def image_or_stack(self, path: Path, frames: int) -> Optional[str]:
+        """Ask whether a TIFF of ``frames`` frames is an image to show or raw
+        data to fit: "image", "stack", or None if cancelled.  The default is
+        what the count alone would say (`drops.MAX_IMAGE_FRAMES`)."""
+        box = QMessageBox(QMessageBox.Question, "Image or raw data?",
+                          f"{path.name} has {frames} frames.", parent=self)
+        box.setInformativeText(
+            "An image is shown beside the localizations -- a widefield picture, "
+            "a time-lapse, a z-stack.  Raw data is a movie of blinking "
+            "molecules, for a fitter to localize.")
+        image = box.addButton("Image", QMessageBox.AcceptRole)
+        stack = box.addButton("Raw data to fit", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(image if frames <= drops.MAX_IMAGE_FRAMES else stack)
+        box.exec()
+        clicked = box.clickedButton()
+        return "image" if clicked is image else "stack" if clicked is stack else None
 
     def replace_or_add(self, paths) -> Optional[bool]:
         """Whether tables opened now join the open ones (True), replace them
