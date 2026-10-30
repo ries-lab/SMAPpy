@@ -552,6 +552,41 @@ in its arm and stays in that arm's pupil.
 - **What it measures** is the index of the medium the beads sit in, and D at that position.  Inside a
   cell the index differs (1.36–1.39, unevenly), so this value is the in situ prior, not the answer.
 
+**A cheaper scheme: the stage travel from dirt, beads on one coverslip.**  The travel between the two
+coverslips' inner surfaces is focused on dirt, and beads lie on coverslip 1 only.  Two things change: Δs
+comes from a focus criterion instead of the fit, and arm 2's pupil is never seen without the layer, so
+its Zernikes take up the layer's low orders and only the steep remainder at the pupil's edge still
+measures the index.  Idealised (the layer's shape the only unknown, 10 µm gap, the far arm's aberration
+to the rms given):
+
+| scheme | n_s 1.36: σ(n_s), σ(D) | n_s 1.38: σ(n_s), σ(D) |
+|---|---|---|
+| beads on both coverslips, Δs from the fit (±20 nm) | 0.0002, 20 nm | 0.0003, 21 nm |
+| dirt focus ±50 nm, beads on one coverslip | 0.0003, 48 nm | 0.0008, 53 nm |
+| dirt focus ±100 nm, beads on one coverslip | 0.0004, 95 nm | 0.0009, 100 nm |
+| dirt focus ±200 nm, beads on one coverslip | 0.0005, 187 nm | 0.0009, 198 nm |
+| dirt ±100 nm, one coverslip, pupil to n ≤ 8 | 0.0005, 95 nm | 0.0014, 103 nm |
+| dirt ±100 nm, one coverslip, aberration to ±0.03 rad | 0.0010, 99 nm | 0.0025, 114 nm |
+| dirt focus alone, no aberration | not determined | not determined |
+
+On paper 2–3× worse in the index, and the gap as good as the dirt focus; the index stays well below the
+0.005 that matters.  In practice it is worse than the table:
+- **The index rests on the pupil's edge**, where sampling, apodisation and the magnitude model are least
+  sure.  At ±0.03 rad there the index is 0.001–0.0025; more Zernikes make it worse, absorbing more of
+  the edge.
+- **The dirt focus is biased, not only scattered**: through 1–1.5 rad of spherical the sharpest image sits
+  tens to a hundred nm from the model's focus, differently for reflected, scattered or fluorescent dirt.
+  At about 400 nm of travel per 0.001 of index, 100 nm of bias is 0.00025.  The criterion could be
+  modelled, at the cost of an assumption about how the dirt is imaged.  The travel enters as a prior of
+  honest width, never held, and the dirt must be on the sample side of each coverslip.
+- **Instrument and layer stay mixed in arm 2**: its pupil holds what the gap and index got wrong, carried
+  to a sample of another gap at the wrong scale.
+
+So: beads on both coverslips once, as the instrument's reference (arm 2's pupil clean, and a check of the
+dirt focus's bias); dirt and beads on one coverslip for routine samples after that.  These numbers come
+from the radial model of the layer alone; the joint fit of simulated stacks is the check, once the model
+exists.
+
 **n_s, checked by the data.**  In situ, *4Pi z*'s `refine_period` measures the phase's slope against the
 envelope's z.  If the model's index is off by a fraction ε, the envelope reads h·(1 + ε) and the phase
 h/(1 + ε) (paraxially: the envelope's defocus goes as 1/(n_s λ), the fringe as n_s/λ), so the slope is
