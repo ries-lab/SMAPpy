@@ -1,0 +1,10568 @@
+{
+ "20261029_600_100nm_match_50ms_2D_1": {
+  "kept": [
+   [
+    0,
+    73,
+    164
+   ],
+   [
+    0,
+    245,
+    168
+   ],
+   [
+    0,
+    250,
+    271
+   ],
+   [
+    0,
+    205,
+    289
+   ],
+   [
+    1,
+    85,
+    210
+   ],
+   [
+    1,
+    163,
+    231
+   ],
+   [
+    1,
+    166,
+    291
+   ],
+   [
+    2,
+    100,
+    183
+   ],
+   [
+    2,
+    56,
+    199
+   ],
+   [
+    2,
+    95,
+    250
+   ],
+   [
+    3,
+    149,
+    97
+   ],
+   [
+    3,
+    188,
+    170
+   ],
+   [
+    3,
+    127,
+    172
+   ],
+   [
+    3,
+    103,
+    187
+   ],
+   [
+    3,
+    207,
+    198
+   ],
+   [
+    3,
+    86,
+    250
+   ],
+   [
+    3,
+    131,
+    293
+   ],
+   [
+    4,
+    252,
+    124
+   ],
+   [
+    4,
+    97,
+    157
+   ],
+   [
+    4,
+    260,
+    243
+   ],
+   [
+    4,
+    132,
+    244
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 191,
+    "y": 93,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 140,
+    "y": 96,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 198,
+    "y": 96,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 185,
+    "y": 102,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 221,
+    "y": 110,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 140,
+    "y": 111,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 126,
+    "y": 114,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 180,
+    "y": 118,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 220,
+    "y": 121,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 191,
+    "y": 123,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 184,
+    "y": 126,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 228,
+    "y": 126,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 240,
+    "y": 129,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 147,
+    "y": 130,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 254,
+    "y": 130,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 137,
+    "y": 132,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 205,
+    "y": 132,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 228,
+    "y": 133,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 170,
+    "y": 136,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 179,
+    "y": 138,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 144,
+    "y": 140,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 160,
+    "y": 142,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 255,
+    "y": 142,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 134,
+    "y": 143,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 216,
+    "y": 144,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 143,
+    "y": 147,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 194,
+    "y": 147,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 128,
+    "y": 148,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 265,
+    "y": 151,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 126,
+    "y": 153,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 280,
+    "y": 156,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 162,
+    "y": 159,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 149,
+    "y": 160,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 158,
+    "y": 161,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 282,
+    "y": 162,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 189,
+    "y": 163,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 145,
+    "y": 165,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 167,
+    "y": 165,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 161,
+    "y": 170,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 177,
+    "y": 174,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 190,
+    "y": 181,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 51,
+    "y": 188,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 188,
+    "y": 188,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 288,
+    "y": 189,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 69,
+    "y": 190,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 139,
+    "y": 191,
+    "why": "photons 2.73 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 207,
+    "y": 191,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 215,
+    "y": 191,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 169,
+    "y": 193,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 75,
+    "y": 195,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 62,
+    "y": 196,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 234,
+    "y": 197,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 272,
+    "y": 203,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 229,
+    "y": 204,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 264,
+    "y": 208,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 287,
+    "y": 209,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 53,
+    "y": 210,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 207,
+    "y": 210,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 272,
+    "y": 212,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 65,
+    "y": 216,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 254,
+    "y": 216,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 136,
+    "y": 220,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 288,
+    "y": 222,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 48,
+    "y": 225,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 208,
+    "y": 227,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 63,
+    "y": 229,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 134,
+    "y": 229,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 212,
+    "y": 232,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 49,
+    "y": 238,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 66,
+    "y": 238,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 278,
+    "y": 239,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 248,
+    "y": 240,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 48,
+    "y": 243,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 224,
+    "y": 243,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 57,
+    "y": 244,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 137,
+    "y": 249,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 201,
+    "y": 253,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 62,
+    "y": 254,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 86,
+    "y": 256,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 229,
+    "y": 256,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 281,
+    "y": 257,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 98,
+    "y": 259,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 49,
+    "y": 261,
+    "why": "clutter 0.17 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 169,
+    "y": 262,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 135,
+    "y": 264,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 181,
+    "y": 264,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 280,
+    "y": 264,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 154,
+    "y": 266,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 217,
+    "y": 266,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 142,
+    "y": 269,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 132,
+    "y": 273,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 171,
+    "y": 273,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 127,
+    "y": 280,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 108,
+    "y": 282,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 157,
+    "y": 286,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 109,
+    "y": 288,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 235,
+    "y": 296,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 231,
+    "y": 302,
+    "why": "clutter 0.13 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 244,
+    "y": 304,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 179,
+    "y": 308,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 136,
+    "y": 312,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 186,
+    "y": 314,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 236,
+    "y": 314,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 115,
+    "y": 318,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 202,
+    "y": 319,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 149,
+    "y": 320,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 211,
+    "y": 325,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 192,
+    "y": 334,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 129,
+    "y": 336,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 200,
+    "y": 94,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 179,
+    "y": 97,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 98,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 222,
+    "y": 100,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 162,
+    "y": 108,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 233,
+    "y": 108,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 105,
+    "y": 109,
+    "why": "photons 2.90 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 157,
+    "y": 110,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 194,
+    "y": 112,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 200,
+    "y": 113,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 136,
+    "y": 118,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 144,
+    "y": 120,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 152,
+    "y": 120,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 198,
+    "y": 133,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 207,
+    "y": 134,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 128,
+    "y": 135,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 136,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 235,
+    "y": 136,
+    "why": "photons 2.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 133,
+    "y": 142,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 190,
+    "y": 142,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 144,
+    "y": 143,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 262,
+    "y": 145,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 121,
+    "y": 146,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 189,
+    "y": 147,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 107,
+    "y": 149,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 85,
+    "y": 150,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 180,
+    "y": 150,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 274,
+    "y": 150,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 151,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 174,
+    "y": 151,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 89,
+    "y": 152,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 121,
+    "y": 157,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 213,
+    "y": 157,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 193,
+    "y": 159,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 247,
+    "y": 159,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 180,
+    "y": 162,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 102,
+    "y": 164,
+    "why": "photons 0.29 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 164,
+    "y": 164,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 278,
+    "y": 167,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 238,
+    "y": 168,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 142,
+    "y": 169,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 127,
+    "y": 170,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 185,
+    "y": 170,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 263,
+    "y": 170,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 86,
+    "y": 174,
+    "why": "clutter -0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 69,
+    "y": 175,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 238,
+    "y": 175,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 281,
+    "y": 176,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 167,
+    "y": 178,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 182,
+    "y": 178,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 247,
+    "y": 178,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 217,
+    "y": 179,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 148,
+    "y": 180,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 159,
+    "y": 185,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 181,
+    "y": 187,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 209,
+    "y": 188,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 273,
+    "y": 191,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 243,
+    "y": 192,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 171,
+    "y": 193,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 145,
+    "y": 198,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 195,
+    "y": 200,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 238,
+    "y": 200,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 286,
+    "y": 200,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 171,
+    "y": 201,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 203,
+    "y": 201,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 174,
+    "y": 204,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 209,
+    "y": 204,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 147,
+    "y": 205,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 230,
+    "y": 205,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 280,
+    "y": 206,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 193,
+    "y": 208,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 270,
+    "y": 208,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 214,
+    "y": 209,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 288,
+    "y": 211,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 187,
+    "y": 215,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 229,
+    "y": 217,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 209,
+    "y": 218,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 293,
+    "y": 219,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 262,
+    "y": 222,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 227,
+    "y": 224,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 271,
+    "y": 224,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 282,
+    "y": 226,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 289,
+    "y": 226,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 199,
+    "y": 227,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 55,
+    "y": 233,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 287,
+    "y": 233,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 221,
+    "y": 234,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 232,
+    "y": 234,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 275,
+    "y": 234,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 83,
+    "y": 237,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 93,
+    "y": 237,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 201,
+    "y": 237,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 267,
+    "y": 241,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 283,
+    "y": 241,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 221,
+    "y": 242,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 260,
+    "y": 242,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 64,
+    "y": 243,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 78,
+    "y": 243,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 188,
+    "y": 244,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 205,
+    "y": 244,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 281,
+    "y": 245,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 88,
+    "y": 246,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 254,
+    "y": 248,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 269,
+    "y": 249,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 242,
+    "y": 254,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 279,
+    "y": 254,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 75,
+    "y": 255,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 191,
+    "y": 256,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 225,
+    "y": 256,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 197,
+    "y": 257,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 272,
+    "y": 257,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 243,
+    "y": 259,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 279,
+    "y": 262,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 235,
+    "y": 266,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 224,
+    "y": 267,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 230,
+    "y": 268,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 76,
+    "y": 269,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 275,
+    "y": 269,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 92,
+    "y": 270,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 257,
+    "y": 270,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 238,
+    "y": 271,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 190,
+    "y": 276,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 99,
+    "y": 277,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 96,
+    "y": 280,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 242,
+    "y": 280,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 271,
+    "y": 282,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 261,
+    "y": 286,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 236,
+    "y": 287,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 236,
+    "y": 294,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 249,
+    "y": 294,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 138,
+    "y": 298,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 104,
+    "y": 300,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 91,
+    "y": 301,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 95,
+    "y": 307,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 309,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 216,
+    "y": 309,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 104,
+    "y": 313,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 160,
+    "y": 316,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 146,
+    "y": 318,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 132,
+    "y": 319,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 133,
+    "y": 324,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 154,
+    "y": 325,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 124,
+    "y": 329,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 154,
+    "y": 333,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 161,
+    "y": 335,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 151,
+    "y": 87,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 157,
+    "y": 88,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 202,
+    "y": 92,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 182,
+    "y": 102,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 193,
+    "y": 102,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 164,
+    "y": 105,
+    "why": "clutter 0.11 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 146,
+    "y": 107,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 186,
+    "y": 108,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 151,
+    "y": 109,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 160,
+    "y": 111,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 98,
+    "y": 116,
+    "why": "photons 2.49 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 159,
+    "y": 119,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 123,
+    "y": 121,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 227,
+    "y": 121,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 137,
+    "y": 122,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 163,
+    "y": 127,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 148,
+    "y": 128,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 253,
+    "y": 129,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 219,
+    "y": 131,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 125,
+    "y": 132,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 168,
+    "y": 134,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 119,
+    "y": 141,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 193,
+    "y": 141,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 141,
+    "y": 142,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 224,
+    "y": 143,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 243,
+    "y": 143,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 151,
+    "y": 145,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 212,
+    "y": 145,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 167,
+    "y": 147,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 200,
+    "y": 148,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 273,
+    "y": 148,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 154,
+    "y": 150,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 146,
+    "y": 151,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 208,
+    "y": 155,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 167,
+    "y": 156,
+    "why": "clutter 0.13 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 184,
+    "y": 156,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 192,
+    "y": 157,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 198,
+    "y": 158,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 229,
+    "y": 162,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 147,
+    "y": 163,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 273,
+    "y": 163,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 78,
+    "y": 167,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 238,
+    "y": 170,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 66,
+    "y": 171,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 194,
+    "y": 171,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 205,
+    "y": 171,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 211,
+    "y": 171,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 254,
+    "y": 173,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 242,
+    "y": 175,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 127,
+    "y": 178,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 162,
+    "y": 180,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 175,
+    "y": 181,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 175,
+    "y": 183,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 187,
+    "y": 185,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 137,
+    "y": 186,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 154,
+    "y": 186,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 235,
+    "y": 186,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 251,
+    "y": 187,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 164,
+    "y": 190,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 174,
+    "y": 193,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 288,
+    "y": 197,
+    "why": "photons 2.43 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 165,
+    "y": 200,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 137,
+    "y": 204,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 101,
+    "y": 208,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 129,
+    "y": 208,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 250,
+    "y": 208,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 125,
+    "y": 213,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 141,
+    "y": 214,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 150,
+    "y": 216,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 237,
+    "y": 216,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 97,
+    "y": 218,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 257,
+    "y": 220,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 112,
+    "y": 221,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 248,
+    "y": 222,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 289,
+    "y": 223,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 74,
+    "y": 224,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 124,
+    "y": 224,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 139,
+    "y": 225,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 255,
+    "y": 225,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 239,
+    "y": 227,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 157,
+    "y": 228,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 132,
+    "y": 229,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 259,
+    "y": 231,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 279,
+    "y": 231,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 249,
+    "y": 234,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 69,
+    "y": 236,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 150,
+    "y": 236,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 132,
+    "y": 239,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 245,
+    "y": 241,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 152,
+    "y": 242,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 271,
+    "y": 243,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 258,
+    "y": 244,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 141,
+    "y": 246,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 156,
+    "y": 247,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 128,
+    "y": 250,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 235,
+    "y": 250,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 68,
+    "y": 252,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 140,
+    "y": 255,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 267,
+    "y": 255,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 279,
+    "y": 258,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 65,
+    "y": 259,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 244,
+    "y": 263,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 266,
+    "y": 264,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 274,
+    "y": 264,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 212,
+    "y": 267,
+    "why": "photons 2.22 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 272,
+    "y": 275,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 112,
+    "y": 284,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 238,
+    "y": 287,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 266,
+    "y": 288,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 163,
+    "y": 291,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 233,
+    "y": 291,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 244,
+    "y": 294,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 256,
+    "y": 295,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 95,
+    "y": 296,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 113,
+    "y": 298,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 126,
+    "y": 298,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 180,
+    "y": 298,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 218,
+    "y": 299,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 88,
+    "y": 302,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 134,
+    "y": 305,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 100,
+    "y": 306,
+    "why": "clutter 0.11 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 159,
+    "y": 307,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 138,
+    "y": 310,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 225,
+    "y": 311,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 95,
+    "y": 312,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 145,
+    "y": 314,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 159,
+    "y": 314,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 119,
+    "y": 315,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 220,
+    "y": 315,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 190,
+    "y": 319,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 214,
+    "y": 319,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 220,
+    "y": 323,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 123,
+    "y": 325,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 205,
+    "y": 327,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 157,
+    "y": 331,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 173,
+    "y": 331,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 214,
+    "y": 102,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 203,
+    "y": 107,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 101,
+    "y": 109,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 113,
+    "y": 109,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 91,
+    "y": 114,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 194,
+    "y": 114,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 211,
+    "y": 116,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 166,
+    "y": 117,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 116,
+    "y": 121,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 136,
+    "y": 122,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 188,
+    "y": 124,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 179,
+    "y": 125,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 252,
+    "y": 127,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 95,
+    "y": 128,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 162,
+    "y": 128,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 196,
+    "y": 128,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 151,
+    "y": 129,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 87,
+    "y": 130,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 205,
+    "y": 130,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 118,
+    "y": 132,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 126,
+    "y": 132,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 240,
+    "y": 133,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 166,
+    "y": 134,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 190,
+    "y": 138,
+    "why": "clutter -0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 202,
+    "y": 138,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 143,
+    "y": 139,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 89,
+    "y": 141,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 207,
+    "y": 142,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 96,
+    "y": 143,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 156,
+    "y": 143,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 136,
+    "y": 144,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 172,
+    "y": 144,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 272,
+    "y": 144,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 265,
+    "y": 145,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 115,
+    "y": 147,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 163,
+    "y": 147,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 85,
+    "y": 148,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 251,
+    "y": 148,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 271,
+    "y": 150,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 90,
+    "y": 151,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 238,
+    "y": 151,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 259,
+    "y": 157,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 90,
+    "y": 158,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 101,
+    "y": 158,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 277,
+    "y": 159,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 236,
+    "y": 162,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 55,
+    "y": 163,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 239,
+    "y": 165,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 248,
+    "y": 165,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 158,
+    "y": 166,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 273,
+    "y": 166,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 162,
+    "y": 170,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 75,
+    "y": 172,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 213,
+    "y": 172,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 256,
+    "y": 173,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 223,
+    "y": 175,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 271,
+    "y": 175,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 71,
+    "y": 176,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 280,
+    "y": 176,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 157,
+    "y": 177,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 64,
+    "y": 178,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 245,
+    "y": 178,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 257,
+    "y": 184,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 232,
+    "y": 187,
+    "why": "clutter -0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 151,
+    "y": 188,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 145,
+    "y": 193,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 155,
+    "y": 193,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 261,
+    "y": 193,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 270,
+    "y": 193,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 238,
+    "y": 195,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 73,
+    "y": 196,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 179,
+    "y": 197,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 293,
+    "y": 200,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 253,
+    "y": 201,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 124,
+    "y": 204,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 139,
+    "y": 204,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 48,
+    "y": 207,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 75,
+    "y": 207,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 146,
+    "y": 207,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 235,
+    "y": 207,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 252,
+    "y": 209,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 274,
+    "y": 209,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 90,
+    "y": 211,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 155,
+    "y": 211,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 81,
+    "y": 212,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 232,
+    "y": 212,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 257,
+    "y": 214,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 263,
+    "y": 215,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 288,
+    "y": 215,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 244,
+    "y": 216,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 276,
+    "y": 216,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 108,
+    "y": 220,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 225,
+    "y": 220,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 259,
+    "y": 221,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 294,
+    "y": 223,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 214,
+    "y": 224,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 101,
+    "y": 225,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 247,
+    "y": 225,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 270,
+    "y": 225,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 189,
+    "y": 228,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 284,
+    "y": 229,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 253,
+    "y": 233,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 63,
+    "y": 235,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 286,
+    "y": 237,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 175,
+    "y": 238,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 52,
+    "y": 239,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 202,
+    "y": 239,
+    "why": "clutter 0.16 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 219,
+    "y": 239,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 143,
+    "y": 240,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 173,
+    "y": 244,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 119,
+    "y": 245,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 215,
+    "y": 245,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 251,
+    "y": 245,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 267,
+    "y": 245,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 165,
+    "y": 247,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 151,
+    "y": 248,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 271,
+    "y": 248,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 232,
+    "y": 249,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 135,
+    "y": 250,
+    "why": "clutter 0.13 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 55,
+    "y": 251,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 117,
+    "y": 252,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 246,
+    "y": 252,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 263,
+    "y": 252,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 129,
+    "y": 256,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 164,
+    "y": 256,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 152,
+    "y": 257,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 172,
+    "y": 257,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 269,
+    "y": 257,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 253,
+    "y": 258,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 216,
+    "y": 259,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 279,
+    "y": 260,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 226,
+    "y": 261,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 156,
+    "y": 262,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 245,
+    "y": 264,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 254,
+    "y": 264,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 264,
+    "y": 266,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 221,
+    "y": 267,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 138,
+    "y": 268,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 170,
+    "y": 272,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 188,
+    "y": 272,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 226,
+    "y": 272,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 263,
+    "y": 272,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 61,
+    "y": 273,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 215,
+    "y": 274,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 81,
+    "y": 275,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 111,
+    "y": 275,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 154,
+    "y": 276,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 255,
+    "y": 276,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 273,
+    "y": 276,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 179,
+    "y": 278,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 162,
+    "y": 280,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 166,
+    "y": 281,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 174,
+    "y": 282,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 258,
+    "y": 283,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 156,
+    "y": 284,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 181,
+    "y": 285,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 265,
+    "y": 285,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 202,
+    "y": 287,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 249,
+    "y": 287,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 191,
+    "y": 288,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 95,
+    "y": 289,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 213,
+    "y": 289,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 233,
+    "y": 289,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 222,
+    "y": 291,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 159,
+    "y": 292,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 99,
+    "y": 293,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 81,
+    "y": 296,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 190,
+    "y": 296,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 87,
+    "y": 300,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 230,
+    "y": 300,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 256,
+    "y": 301,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 217,
+    "y": 302,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 250,
+    "y": 303,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 190,
+    "y": 304,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 239,
+    "y": 305,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 186,
+    "y": 308,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 222,
+    "y": 309,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 97,
+    "y": 310,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 161,
+    "y": 311,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 210,
+    "y": 311,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 200,
+    "y": 312,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 152,
+    "y": 314,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 233,
+    "y": 314,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 102,
+    "y": 317,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 227,
+    "y": 317,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 136,
+    "y": 318,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 110,
+    "y": 319,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 185,
+    "y": 320,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 217,
+    "y": 322,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 118,
+    "y": 323,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 160,
+    "y": 323,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 149,
+    "y": 326,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 173,
+    "y": 326,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 207,
+    "y": 326,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 144,
+    "y": 327,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 126,
+    "y": 329,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 134,
+    "y": 333,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 159,
+    "y": 87,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 138,
+    "y": 90,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 190,
+    "y": 95,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 194,
+    "y": 97,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 150,
+    "y": 99,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 183,
+    "y": 100,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 221,
+    "y": 100,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 214,
+    "y": 102,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 161,
+    "y": 104,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 176,
+    "y": 109,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 188,
+    "y": 113,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 214,
+    "y": 113,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 228,
+    "y": 115,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 194,
+    "y": 120,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 216,
+    "y": 120,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 165,
+    "y": 122,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 82,
+    "y": 124,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 125,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 136,
+    "y": 127,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 197,
+    "y": 127,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 184,
+    "y": 128,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 175,
+    "y": 132,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 135,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 120,
+    "y": 136,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 76,
+    "y": 143,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 183,
+    "y": 144,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 127,
+    "y": 145,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 223,
+    "y": 147,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 275,
+    "y": 147,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 257,
+    "y": 150,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 217,
+    "y": 152,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 66,
+    "y": 156,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 71,
+    "y": 158,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 220,
+    "y": 159,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 125,
+    "y": 166,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 246,
+    "y": 166,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 276,
+    "y": 167,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 142,
+    "y": 169,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 66,
+    "y": 170,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 128,
+    "y": 172,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 151,
+    "y": 172,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 186,
+    "y": 173,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 156,
+    "y": 175,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 74,
+    "y": 178,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 170,
+    "y": 178,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 165,
+    "y": 181,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 66,
+    "y": 182,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 107,
+    "y": 182,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 154,
+    "y": 182,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 215,
+    "y": 184,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 123,
+    "y": 185,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 281,
+    "y": 185,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 188,
+    "y": 186,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 86,
+    "y": 187,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 142,
+    "y": 187,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 151,
+    "y": 188,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 212,
+    "y": 189,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 90,
+    "y": 192,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 275,
+    "y": 192,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 194,
+    "y": 193,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 218,
+    "y": 193,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 145,
+    "y": 194,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 206,
+    "y": 194,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 113,
+    "y": 197,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 133,
+    "y": 198,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 214,
+    "y": 198,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 225,
+    "y": 198,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 147,
+    "y": 199,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 251,
+    "y": 201,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 119,
+    "y": 202,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 205,
+    "y": 205,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 217,
+    "y": 205,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 230,
+    "y": 206,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 277,
+    "y": 206,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 208,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 263,
+    "y": 209,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 107,
+    "y": 211,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 279,
+    "y": 212,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 115,
+    "y": 214,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 257,
+    "y": 214,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 229,
+    "y": 216,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 130,
+    "y": 217,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 271,
+    "y": 217,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 195,
+    "y": 218,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 293,
+    "y": 218,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 219,
+    "y": 219,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 250,
+    "y": 219,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 106,
+    "y": 221,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 221,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 237,
+    "y": 222,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 204,
+    "y": 225,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 192,
+    "y": 229,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 106,
+    "y": 230,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 231,
+    "y": 230,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 291,
+    "y": 230,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 284,
+    "y": 232,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 217,
+    "y": 233,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 233,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 56,
+    "y": 238,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 61,
+    "y": 238,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 184,
+    "y": 239,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 231,
+    "y": 241,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 195,
+    "y": 242,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 104,
+    "y": 245,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 97,
+    "y": 248,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 92,
+    "y": 249,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 160,
+    "y": 250,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 166,
+    "y": 251,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 70,
+    "y": 252,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 182,
+    "y": 252,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 105,
+    "y": 257,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 152,
+    "y": 260,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 163,
+    "y": 262,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 69,
+    "y": 266,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 188,
+    "y": 268,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 196,
+    "y": 268,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 152,
+    "y": 269,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 254,
+    "y": 269,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 273,
+    "y": 269,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 85,
+    "y": 270,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 142,
+    "y": 273,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 240,
+    "y": 273,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 186,
+    "y": 274,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 252,
+    "y": 274,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 77,
+    "y": 276,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 89,
+    "y": 279,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 157,
+    "y": 279,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 197,
+    "y": 279,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 228,
+    "y": 280,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 68,
+    "y": 281,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 189,
+    "y": 284,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 268,
+    "y": 286,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 200,
+    "y": 287,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 226,
+    "y": 289,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 75,
+    "y": 290,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 92,
+    "y": 293,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 161,
+    "y": 296,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 230,
+    "y": 298,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 124,
+    "y": 300,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 127,
+    "y": 302,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 166,
+    "y": 304,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 248,
+    "y": 305,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 220,
+    "y": 307,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 100,
+    "y": 310,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 156,
+    "y": 311,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 159,
+    "y": 313,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 151,
+    "y": 319,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 181,
+    "y": 320,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 214,
+    "y": 327,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 176,
+    "y": 328,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 121,
+    "y": 329,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 134,
+    "y": 330,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 155,
+    "y": 330,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 181,
+    "y": 331,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 208,
+    "y": 331,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 196,
+    "y": 332,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 170,
+    "y": 334,
+    "why": "clutter 0.03 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 7.1653,
+    "photons": 1.146
+   }
+  }
+ },
+ "20261029_600_100nm_match_50ms_3D_1": {
+  "kept": [
+   [
+    0,
+    134,
+    113
+   ],
+   [
+    0,
+    202,
+    127
+   ],
+   [
+    0,
+    83,
+    141
+   ],
+   [
+    0,
+    194,
+    180
+   ],
+   [
+    0,
+    219,
+    183
+   ],
+   [
+    0,
+    201,
+    222
+   ],
+   [
+    0,
+    236,
+    257
+   ],
+   [
+    1,
+    229,
+    132
+   ],
+   [
+    1,
+    182,
+    193
+   ],
+   [
+    1,
+    98,
+    201
+   ],
+   [
+    2,
+    254,
+    147
+   ],
+   [
+    2,
+    179,
+    149
+   ],
+   [
+    2,
+    178,
+    219
+   ],
+   [
+    6,
+    122,
+    145
+   ],
+   [
+    6,
+    207,
+    243
+   ],
+   [
+    6,
+    168,
+    311
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 131,
+    "y": 87,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 185,
+    "y": 88,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 206,
+    "y": 97,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 187,
+    "y": 102,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 176,
+    "y": 105,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 228,
+    "y": 116,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 238,
+    "y": 121,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 169,
+    "y": 131,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 264,
+    "y": 139,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 149,
+    "y": 142,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 172,
+    "y": 152,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 217,
+    "y": 156,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 268,
+    "y": 166,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 167,
+    "y": 172,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 272,
+    "y": 177,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 35,
+    "y": 179,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 169,
+    "y": 184,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 93,
+    "y": 186,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 157,
+    "y": 191,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 156,
+    "y": 199,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 99,
+    "y": 200,
+    "why": "clutter 0.12 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 227,
+    "y": 208,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 175,
+    "y": 217,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 112,
+    "y": 218,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 103,
+    "y": 219,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 272,
+    "y": 231,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 230,
+    "y": 232,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 57,
+    "y": 234,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 120,
+    "y": 256,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 263,
+    "y": 257,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 263,
+    "y": 263,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 60,
+    "y": 266,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 100,
+    "y": 268,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 107,
+    "y": 268,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 205,
+    "y": 270,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 123,
+    "y": 273,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 113,
+    "y": 274,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 69,
+    "y": 276,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 91,
+    "y": 280,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 212,
+    "y": 281,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 248,
+    "y": 283,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 69,
+    "y": 288,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 117,
+    "y": 305,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 162,
+    "y": 319,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 131,
+    "y": 324,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 150,
+    "y": 326,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 140,
+    "y": 329,
+    "why": "out of focus"
+   },
+   {
+    "stack": 1,
+    "x": 173,
+    "y": 83,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 159,
+    "y": 86,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 90,
+    "why": "clutter 0.11 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 97,
+    "y": 96,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 146,
+    "y": 97,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 163,
+    "y": 97,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 218,
+    "y": 98,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 104,
+    "y": 100,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 97,
+    "y": 105,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 214,
+    "y": 108,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 134,
+    "y": 113,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 109,
+    "y": 115,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 138,
+    "y": 120,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 108,
+    "y": 123,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 254,
+    "y": 126,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 255,
+    "y": 129,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 77,
+    "y": 136,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 90,
+    "y": 139,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 142,
+    "y": 140,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 132,
+    "y": 143,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 262,
+    "y": 146,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 250,
+    "y": 147,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 177,
+    "y": 150,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 68,
+    "y": 154,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 82,
+    "y": 154,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 142,
+    "y": 156,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 255,
+    "y": 156,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 218,
+    "y": 160,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 210,
+    "y": 162,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 250,
+    "y": 164,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 68,
+    "y": 166,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 261,
+    "y": 166,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 148,
+    "y": 168,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 176,
+    "y": 168,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 136,
+    "y": 169,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 238,
+    "y": 169,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 161,
+    "y": 171,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 89,
+    "y": 172,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 262,
+    "y": 173,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 201,
+    "y": 176,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 154,
+    "y": 177,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 209,
+    "y": 178,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 83,
+    "y": 179,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 267,
+    "y": 186,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 72,
+    "y": 190,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 127,
+    "y": 201,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 213,
+    "y": 210,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 44,
+    "y": 211,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 250,
+    "y": 211,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 51,
+    "y": 212,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 260,
+    "y": 212,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 233,
+    "y": 216,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 78,
+    "y": 217,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 219,
+    "y": 217,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 204,
+    "y": 218,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 242,
+    "y": 218,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 126,
+    "y": 221,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 81,
+    "y": 222,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 182,
+    "y": 222,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 196,
+    "y": 222,
+    "why": "clutter -0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 225,
+    "y": 224,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 257,
+    "y": 224,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 108,
+    "y": 226,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 189,
+    "y": 229,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 44,
+    "y": 231,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 91,
+    "y": 231,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 242,
+    "y": 232,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 249,
+    "y": 233,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 84,
+    "y": 235,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 239,
+    "y": 236,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 39,
+    "y": 241,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 253,
+    "y": 242,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 194,
+    "y": 243,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 240,
+    "y": 246,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 249,
+    "y": 247,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 59,
+    "y": 248,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 230,
+    "y": 251,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 190,
+    "y": 252,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 251,
+    "y": 252,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 240,
+    "y": 253,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 49,
+    "y": 254,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 182,
+    "y": 257,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 243,
+    "y": 260,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 78,
+    "y": 261,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 262,
+    "y": 262,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 97,
+    "y": 263,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 191,
+    "y": 267,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 250,
+    "y": 268,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 87,
+    "y": 270,
+    "why": "clutter 0.15 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 101,
+    "y": 272,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 131,
+    "y": 273,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 248,
+    "y": 278,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 144,
+    "y": 279,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 99,
+    "y": 281,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 243,
+    "y": 288,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 224,
+    "y": 300,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 215,
+    "y": 311,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 178,
+    "y": 312,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 131,
+    "y": 313,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 167,
+    "y": 313,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 183,
+    "y": 313,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 104,
+    "y": 316,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 166,
+    "y": 316,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 157,
+    "y": 317,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 193,
+    "y": 318,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 130,
+    "y": 319,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 111,
+    "y": 323,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 121,
+    "y": 323,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 180,
+    "y": 325,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 159,
+    "y": 329,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 153,
+    "y": 90,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 134,
+    "y": 115,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 228,
+    "y": 115,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 218,
+    "y": 116,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 180,
+    "y": 117,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 189,
+    "y": 118,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 92,
+    "y": 121,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 117,
+    "y": 125,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 138,
+    "y": 125,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 129,
+    "y": 131,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 66,
+    "y": 134,
+    "why": "photons 0.40 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 125,
+    "y": 137,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 119,
+    "y": 142,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 140,
+    "y": 143,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 221,
+    "y": 143,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 138,
+    "y": 148,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 149,
+    "y": 152,
+    "why": "clutter -0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 65,
+    "y": 159,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 135,
+    "y": 161,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 202,
+    "y": 163,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 57,
+    "y": 164,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 156,
+    "y": 165,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 131,
+    "y": 167,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 142,
+    "y": 167,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 212,
+    "y": 168,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 236,
+    "y": 170,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 154,
+    "y": 171,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 205,
+    "y": 171,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 225,
+    "y": 171,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 275,
+    "y": 173,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 222,
+    "y": 174,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 266,
+    "y": 174,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 177,
+    "y": 176,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 258,
+    "y": 176,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 122,
+    "y": 179,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 213,
+    "y": 182,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 78,
+    "y": 186,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 264,
+    "y": 186,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 119,
+    "y": 187,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 130,
+    "y": 187,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 52,
+    "y": 189,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 214,
+    "y": 189,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 56,
+    "y": 191,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 73,
+    "y": 194,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 67,
+    "y": 195,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 279,
+    "y": 200,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 202,
+    "y": 201,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 209,
+    "y": 201,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 253,
+    "y": 201,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 66,
+    "y": 202,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 245,
+    "y": 203,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 76,
+    "y": 208,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 209,
+    "y": 210,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 261,
+    "y": 210,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 99,
+    "y": 212,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 203,
+    "y": 215,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 217,
+    "y": 216,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 53,
+    "y": 218,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 265,
+    "y": 223,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 277,
+    "y": 223,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 125,
+    "y": 228,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 261,
+    "y": 230,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 48,
+    "y": 233,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 202,
+    "y": 234,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 270,
+    "y": 234,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 253,
+    "y": 236,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 105,
+    "y": 239,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 116,
+    "y": 240,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 208,
+    "y": 240,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 109,
+    "y": 246,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 204,
+    "y": 248,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 252,
+    "y": 248,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 249,
+    "y": 249,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 239,
+    "y": 250,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 78,
+    "y": 252,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 194,
+    "y": 252,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 214,
+    "y": 252,
+    "why": "clutter 0.10 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 248,
+    "y": 253,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 226,
+    "y": 256,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 119,
+    "y": 259,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 126,
+    "y": 259,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 85,
+    "y": 262,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 219,
+    "y": 263,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 264,
+    "y": 264,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 87,
+    "y": 266,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 135,
+    "y": 266,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 187,
+    "y": 266,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 244,
+    "y": 266,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 114,
+    "y": 267,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 209,
+    "y": 269,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 200,
+    "y": 272,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 190,
+    "y": 274,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 65,
+    "y": 276,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 243,
+    "y": 276,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 218,
+    "y": 279,
+    "why": "clutter 0.08 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 227,
+    "y": 283,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 252,
+    "y": 284,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 218,
+    "y": 298,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 152,
+    "y": 304,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 141,
+    "y": 306,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 203,
+    "y": 306,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 122,
+    "y": 308,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 149,
+    "y": 309,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 179,
+    "y": 310,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 185,
+    "y": 316,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 203,
+    "y": 318,
+    "why": "out of focus"
+   },
+   {
+    "stack": 2,
+    "x": 193,
+    "y": 322,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 60,
+    "y": 126,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 253,
+    "y": 126,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 129,
+    "y": 137,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 186,
+    "y": 137,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 113,
+    "y": 161,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 66,
+    "y": 174,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 157,
+    "y": 181,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 96,
+    "y": 195,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 38,
+    "y": 209,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 44,
+    "y": 218,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 264,
+    "y": 267,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 111,
+    "y": 294,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 108,
+    "y": 95,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 224,
+    "y": 116,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 216,
+    "y": 125,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 249,
+    "y": 132,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 205,
+    "y": 138,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 248,
+    "y": 139,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 247,
+    "y": 143,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 78,
+    "y": 148,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 267,
+    "y": 160,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 191,
+    "y": 168,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 95,
+    "y": 171,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 215,
+    "y": 181,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 259,
+    "y": 189,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 281,
+    "y": 197,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 267,
+    "y": 207,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 62,
+    "y": 208,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 249,
+    "y": 208,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 90,
+    "y": 212,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 253,
+    "y": 234,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 216,
+    "y": 243,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 233,
+    "y": 253,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 145,
+    "y": 259,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 186,
+    "y": 282,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 220,
+    "y": 292,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 131,
+    "y": 304,
+    "why": "out of focus"
+   },
+   {
+    "stack": 4,
+    "x": 103,
+    "y": 305,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 199,
+    "y": 79,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 5,
+    "x": 155,
+    "y": 87,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 235,
+    "y": 158,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 153,
+    "y": 162,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 262,
+    "y": 173,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 109,
+    "y": 200,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 223,
+    "y": 210,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 192,
+    "y": 250,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 96,
+    "y": 279,
+    "why": "out of focus"
+   },
+   {
+    "stack": 5,
+    "x": 178,
+    "y": 296,
+    "why": "out of focus"
+   },
+   {
+    "stack": 6,
+    "x": 151,
+    "y": 86,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 132,
+    "y": 93,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 63,
+    "y": 119,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 235,
+    "y": 120,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 228,
+    "y": 126,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 253,
+    "y": 149,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 216,
+    "y": 152,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 220,
+    "y": 156,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 38,
+    "y": 157,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 258,
+    "y": 161,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 243,
+    "y": 168,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 274,
+    "y": 169,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 140,
+    "y": 172,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 58,
+    "y": 174,
+    "why": "photons 3.87 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 182,
+    "y": 194,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 134,
+    "y": 198,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 205,
+    "y": 201,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 39,
+    "y": 205,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 58,
+    "y": 209,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 189,
+    "y": 214,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 186,
+    "y": 221,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 42,
+    "y": 225,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 54,
+    "y": 229,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 176,
+    "y": 231,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 142,
+    "y": 234,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 59,
+    "y": 235,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 151,
+    "y": 235,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 257,
+    "y": 240,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 246,
+    "y": 243,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 232,
+    "y": 250,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 57,
+    "y": 252,
+    "why": "clutter 0.07 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 257,
+    "y": 253,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 70,
+    "y": 259,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 232,
+    "y": 264,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 226,
+    "y": 274,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 245,
+    "y": 275,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 184,
+    "y": 276,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 225,
+    "y": 281,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 240,
+    "y": 281,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 143,
+    "y": 292,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 95,
+    "y": 302,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 115,
+    "y": 312,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 98,
+    "y": 316,
+    "why": "clutter 0.05 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 5.7085,
+    "photons": 0.7422
+   }
+  }
+ },
+ "20261029_600_100nm_mismatch_50ms_2D_1": {
+  "kept": [
+   [
+    0,
+    197,
+    100
+   ],
+   [
+    0,
+    158,
+    130
+   ],
+   [
+    0,
+    147,
+    187
+   ],
+   [
+    0,
+    80,
+    220
+   ],
+   [
+    0,
+    291,
+    233
+   ],
+   [
+    0,
+    101,
+    310
+   ],
+   [
+    0,
+    125,
+    326
+   ],
+   [
+    1,
+    182,
+    108
+   ],
+   [
+    1,
+    149,
+    127
+   ],
+   [
+    1,
+    114,
+    129
+   ],
+   [
+    1,
+    252,
+    157
+   ],
+   [
+    1,
+    172,
+    176
+   ],
+   [
+    1,
+    107,
+    237
+   ],
+   [
+    1,
+    277,
+    244
+   ],
+   [
+    1,
+    272,
+    269
+   ],
+   [
+    1,
+    196,
+    290
+   ],
+   [
+    1,
+    100,
+    291
+   ],
+   [
+    2,
+    135,
+    111
+   ],
+   [
+    2,
+    158,
+    127
+   ],
+   [
+    2,
+    90,
+    130
+   ],
+   [
+    2,
+    120,
+    152
+   ],
+   [
+    2,
+    99,
+    182
+   ],
+   [
+    2,
+    252,
+    191
+   ],
+   [
+    2,
+    80,
+    251
+   ],
+   [
+    2,
+    221,
+    255
+   ],
+   [
+    2,
+    252,
+    286
+   ],
+   [
+    2,
+    183,
+    302
+   ],
+   [
+    2,
+    150,
+    308
+   ],
+   [
+    3,
+    210,
+    111
+   ],
+   [
+    3,
+    249,
+    134
+   ],
+   [
+    3,
+    107,
+    135
+   ],
+   [
+    3,
+    121,
+    165
+   ],
+   [
+    3,
+    212,
+    173
+   ],
+   [
+    3,
+    165,
+    182
+   ],
+   [
+    3,
+    141,
+    196
+   ],
+   [
+    3,
+    116,
+    197
+   ],
+   [
+    3,
+    110,
+    228
+   ],
+   [
+    3,
+    283,
+    241
+   ],
+   [
+    3,
+    226,
+    281
+   ],
+   [
+    3,
+    137,
+    312
+   ],
+   [
+    4,
+    199,
+    120
+   ],
+   [
+    4,
+    169,
+    181
+   ],
+   [
+    4,
+    50,
+    194
+   ],
+   [
+    4,
+    157,
+    224
+   ],
+   [
+    4,
+    216,
+    250
+   ],
+   [
+    4,
+    167,
+    277
+   ],
+   [
+    4,
+    193,
+    283
+   ],
+   [
+    4,
+    87,
+    302
+   ],
+   [
+    4,
+    176,
+    332
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 47,
+    "y": 234,
+    "why": "deviance 13.1 > 8.21"
+   },
+   {
+    "stack": 0,
+    "x": 94,
+    "y": 241,
+    "why": "deviance 10.4 > 8.21"
+   },
+   {
+    "stack": 1,
+    "x": 209,
+    "y": 208,
+    "why": "photons 2.49 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 201,
+    "y": 326,
+    "why": "photons 2.66 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 164,
+    "y": 99,
+    "why": "deviance 35.2 > 8.21"
+   },
+   {
+    "stack": 3,
+    "x": 242,
+    "y": 222,
+    "why": "photons 2.58 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 165,
+    "y": 246,
+    "why": "photons 2.57 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 110,
+    "y": 323,
+    "why": "deviance 9.77 > 8.21"
+   },
+   {
+    "stack": 4,
+    "x": 248,
+    "y": 205,
+    "why": "photons 2.13 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 213,
+    "y": 321,
+    "why": "deviance 9.16 > 8.21"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 8.2109,
+    "photons": 0.7941
+   }
+  }
+ },
+ "20261029_600_100nm_mismatch_50ms_3D_1": {
+  "kept": [
+   [
+    0,
+    187,
+    88
+   ],
+   [
+    0,
+    147,
+    119
+   ],
+   [
+    0,
+    136,
+    177
+   ],
+   [
+    0,
+    68,
+    211
+   ],
+   [
+    0,
+    280,
+    223
+   ],
+   [
+    0,
+    90,
+    303
+   ],
+   [
+    0,
+    113,
+    318
+   ],
+   [
+    1,
+    174,
+    99
+   ],
+   [
+    1,
+    141,
+    117
+   ],
+   [
+    1,
+    106,
+    120
+   ],
+   [
+    1,
+    244,
+    148
+   ],
+   [
+    1,
+    164,
+    168
+   ],
+   [
+    1,
+    98,
+    230
+   ],
+   [
+    1,
+    269,
+    236
+   ],
+   [
+    1,
+    263,
+    261
+   ],
+   [
+    1,
+    187,
+    284
+   ],
+   [
+    1,
+    90,
+    285
+   ],
+   [
+    2,
+    152,
+    87
+   ],
+   [
+    2,
+    122,
+    99
+   ],
+   [
+    2,
+    145,
+    116
+   ],
+   [
+    2,
+    78,
+    119
+   ],
+   [
+    2,
+    86,
+    171
+   ],
+   [
+    2,
+    239,
+    180
+   ],
+   [
+    2,
+    67,
+    242
+   ],
+   [
+    2,
+    209,
+    245
+   ],
+   [
+    2,
+    239,
+    277
+   ],
+   [
+    2,
+    170,
+    293
+   ],
+   [
+    2,
+    137,
+    299
+   ],
+   [
+    3,
+    201,
+    101
+   ],
+   [
+    3,
+    240,
+    125
+   ],
+   [
+    3,
+    97,
+    126
+   ],
+   [
+    3,
+    111,
+    157
+   ],
+   [
+    3,
+    155,
+    174
+   ],
+   [
+    3,
+    100,
+    221
+   ],
+   [
+    3,
+    273,
+    233
+   ],
+   [
+    3,
+    215,
+    274
+   ],
+   [
+    3,
+    127,
+    306
+   ],
+   [
+    4,
+    189,
+    110
+   ],
+   [
+    4,
+    158,
+    172
+   ],
+   [
+    4,
+    39,
+    186
+   ],
+   [
+    4,
+    146,
+    216
+   ],
+   [
+    4,
+    205,
+    242
+   ],
+   [
+    4,
+    156,
+    270
+   ],
+   [
+    4,
+    181,
+    276
+   ],
+   [
+    4,
+    75,
+    295
+   ],
+   [
+    4,
+    164,
+    325
+   ],
+   [
+    5,
+    180,
+    91
+   ],
+   [
+    5,
+    208,
+    101
+   ],
+   [
+    5,
+    229,
+    134
+   ],
+   [
+    5,
+    66,
+    150
+   ],
+   [
+    5,
+    236,
+    160
+   ],
+   [
+    5,
+    139,
+    190
+   ],
+   [
+    5,
+    283,
+    215
+   ],
+   [
+    6,
+    112,
+    103
+   ],
+   [
+    6,
+    218,
+    136
+   ],
+   [
+    6,
+    39,
+    190
+   ],
+   [
+    6,
+    186,
+    232
+   ],
+   [
+    6,
+    110,
+    239
+   ],
+   [
+    6,
+    203,
+    260
+   ],
+   [
+    6,
+    98,
+    288
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 35,
+    "y": 225,
+    "why": "photons 2.08 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 83,
+    "y": 232,
+    "why": "deviance 7.16 > 6.71"
+   },
+   {
+    "stack": 1,
+    "x": 200,
+    "y": 200,
+    "why": "photons 2.60 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 192,
+    "y": 320,
+    "why": "photons 2.16 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 232,
+    "y": 214,
+    "why": "photons 2.61 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 154,
+    "y": 239,
+    "why": "photons 2.93 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 99,
+    "y": 318,
+    "why": "photons 2.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 237,
+    "y": 196,
+    "why": "photons 2.37 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 202,
+    "y": 314,
+    "why": "deviance 7.5 > 6.71"
+   },
+   {
+    "stack": 5,
+    "x": 114,
+    "y": 251,
+    "why": "photons 2.62 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 147,
+    "y": 75,
+    "why": "clutter 0.25 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 143,
+    "y": 103,
+    "why": "photons 2.70 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 91,
+    "y": 144,
+    "why": "photons 4.23 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 205,
+    "y": 211,
+    "why": "photons 2.16 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 253,
+    "y": 214,
+    "why": "clutter 0.02 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 6.7102,
+    "photons": 0.8463
+   }
+  }
+ },
+ "20261029_676_100nm_match_50ms_2D_1": {
+  "kept": [
+   [
+    0,
+    66,
+    162
+   ],
+   [
+    0,
+    198,
+    286
+   ],
+   [
+    1,
+    233,
+    134
+   ],
+   [
+    1,
+    83,
+    207
+   ],
+   [
+    1,
+    161,
+    228
+   ],
+   [
+    2,
+    95,
+    110
+   ],
+   [
+    2,
+    96,
+    178
+   ],
+   [
+    2,
+    52,
+    194
+   ],
+   [
+    2,
+    92,
+    244
+   ],
+   [
+    3,
+    137,
+    93
+   ],
+   [
+    3,
+    176,
+    166
+   ],
+   [
+    3,
+    115,
+    168
+   ],
+   [
+    3,
+    92,
+    182
+   ],
+   [
+    3,
+    195,
+    194
+   ],
+   [
+    3,
+    74,
+    246
+   ],
+   [
+    3,
+    119,
+    289
+   ],
+   [
+    4,
+    241,
+    119
+   ],
+   [
+    4,
+    87,
+    152
+   ],
+   [
+    4,
+    249,
+    238
+   ],
+   [
+    4,
+    122,
+    239
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 103,
+    "y": 105,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 128,
+    "y": 138,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 116,
+    "y": 153,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 105,
+    "y": 168,
+    "why": "out of focus"
+   },
+   {
+    "stack": 0,
+    "x": 82,
+    "y": 182,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 132,
+    "y": 189,
+    "why": "photons 2.19 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 173,
+    "y": 192,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 159,
+    "y": 196,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 84,
+    "y": 219,
+    "why": "photons 2.48 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 197,
+    "y": 224,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 112,
+    "y": 227,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 52,
+    "y": 235,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 214,
+    "y": 241,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 233,
+    "y": 246,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 65,
+    "y": 251,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 194,
+    "y": 252,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 183,
+    "y": 255,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 141,
+    "y": 258,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 269,
+    "y": 268,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 243,
+    "y": 269,
+    "why": "deviance 19.3 > 5.61"
+   },
+   {
+    "stack": 0,
+    "x": 267,
+    "y": 279,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 229,
+    "y": 292,
+    "why": "deviance 23.6 > 5.61"
+   },
+   {
+    "stack": 0,
+    "x": 238,
+    "y": 309,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 216,
+    "y": 315,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 130,
+    "y": 94,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 103,
+    "y": 107,
+    "why": "photons 4.28 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 79,
+    "y": 124,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 107,
+    "y": 135,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 87,
+    "y": 137,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 107,
+    "y": 152,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 236,
+    "y": 162,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 104,
+    "y": 166,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 89,
+    "y": 170,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 74,
+    "y": 174,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 91,
+    "y": 180,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 148,
+    "y": 183,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 60,
+    "y": 192,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 68,
+    "y": 229,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 188,
+    "y": 233,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 119,
+    "y": 239,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 202,
+    "y": 245,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 118,
+    "y": 255,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 191,
+    "y": 285,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 198,
+    "y": 290,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 135,
+    "y": 297,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 189,
+    "y": 305,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 127,
+    "y": 306,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 179,
+    "y": 316,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 99,
+    "y": 137,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 269,
+    "y": 159,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 174,
+    "y": 171,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 186,
+    "y": 171,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 180,
+    "y": 182,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 284,
+    "y": 192,
+    "why": "photons 2.39 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 256,
+    "y": 196,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 250,
+    "y": 206,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 261,
+    "y": 215,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 230,
+    "y": 220,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 226,
+    "y": 232,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 219,
+    "y": 238,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 208,
+    "y": 262,
+    "why": "photons 2.55 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 204,
+    "y": 297,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 217,
+    "y": 298,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 142,
+    "y": 154,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 91,
+    "y": 155,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 202,
+    "y": 167,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 141,
+    "y": 176,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 61,
+    "y": 164,
+    "why": "clutter 0.02 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 5.6149,
+    "photons": 0.8016
+   }
+  }
+ },
+ "20261029_676_100nm_match_50ms_3D_1": {
+  "kept": [
+   [
+    0,
+    71,
+    121
+   ],
+   [
+    0,
+    280,
+    191
+   ],
+   [
+    0,
+    177,
+    266
+   ],
+   [
+    1,
+    215,
+    111
+   ],
+   [
+    2,
+    70,
+    159
+   ],
+   [
+    2,
+    183,
+    174
+   ],
+   [
+    2,
+    182,
+    243
+   ],
+   [
+    3,
+    150,
+    150
+   ],
+   [
+    3,
+    89,
+    152
+   ],
+   [
+    3,
+    65,
+    168
+   ],
+   [
+    3,
+    169,
+    179
+   ],
+   [
+    3,
+    48,
+    232
+   ],
+   [
+    4,
+    214,
+    101
+   ],
+   [
+    4,
+    59,
+    135
+   ],
+   [
+    4,
+    221,
+    222
+   ],
+   [
+    4,
+    93,
+    224
+   ],
+   [
+    5,
+    199,
+    148
+   ],
+   [
+    5,
+    138,
+    150
+   ],
+   [
+    5,
+    114,
+    165
+   ],
+   [
+    5,
+    218,
+    177
+   ],
+   [
+    6,
+    178,
+    103
+   ],
+   [
+    6,
+    195,
+    151
+   ],
+   [
+    6,
+    61,
+    156
+   ],
+   [
+    6,
+    72,
+    213
+   ],
+   [
+    6,
+    145,
+    227
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 99,
+    "y": 135,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 111,
+    "y": 167,
+    "why": "photons 2.45 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 84,
+    "y": 179,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 62,
+    "y": 198,
+    "why": "deviance 5.46 > 4.03"
+   },
+   {
+    "stack": 0,
+    "x": 89,
+    "y": 200,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 176,
+    "y": 203,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 162,
+    "y": 235,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 222,
+    "y": 248,
+    "why": "deviance 13.1 > 4.03"
+   },
+   {
+    "stack": 0,
+    "x": 208,
+    "y": 272,
+    "why": "photons 0.44 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 213,
+    "y": 297,
+    "why": "clutter 0.00 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 174,
+    "y": 326,
+    "why": "deviance 15.1 > 4.03"
+   },
+   {
+    "stack": 1,
+    "x": 41,
+    "y": 170,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 64,
+    "y": 187,
+    "why": "deviance 4.66 > 4.03"
+   },
+   {
+    "stack": 1,
+    "x": 142,
+    "y": 208,
+    "why": "clutter 0.21 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 49,
+    "y": 209,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 88,
+    "y": 216,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 153,
+    "y": 216,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 99,
+    "y": 235,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 171,
+    "y": 250,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 108,
+    "y": 261,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 117,
+    "y": 280,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 258,
+    "y": 172,
+    "why": "photons 3.23 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 230,
+    "y": 176,
+    "why": "clutter 0.03 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 157,
+    "y": 194,
+    "why": "photons 0.49 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 261,
+    "y": 201,
+    "why": "clutter 0.02 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 81,
+    "y": 217,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 65,
+    "y": 226,
+    "why": "photons 0.29 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 137,
+    "y": 125,
+    "why": "out of focus"
+   },
+   {
+    "stack": 3,
+    "x": 64,
+    "y": 140,
+    "why": "clutter 0.04 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 92,
+    "y": 276,
+    "why": "photons 0.45 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 235,
+    "y": 243,
+    "why": "clutter 0.01 \u00d7 median"
+   },
+   {
+    "stack": 5,
+    "x": 160,
+    "y": 74,
+    "why": "clutter 0.15 \u00d7 median"
+   },
+   {
+    "stack": 5,
+    "x": 113,
+    "y": 137,
+    "why": "clutter 0.05 \u00d7 median"
+   },
+   {
+    "stack": 5,
+    "x": 96,
+    "y": 230,
+    "why": "photons 0.38 \u00d7 median"
+   },
+   {
+    "stack": 5,
+    "x": 141,
+    "y": 274,
+    "why": "photons 0.38 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 148,
+    "y": 127,
+    "why": "photons 0.39 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 198,
+    "y": 313,
+    "why": "deviance 4.97 > 4.03"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 4.0292,
+    "photons": 1.036
+   }
+  }
+ },
+ "20261029_676_100nm_mismatch_50ms_2D_1": {
+  "kept": [
+   [
+    0,
+    184,
+    132
+   ],
+   [
+    0,
+    70,
+    150
+   ],
+   [
+    0,
+    162,
+    166
+   ],
+   [
+    0,
+    255,
+    236
+   ],
+   [
+    0,
+    151,
+    243
+   ],
+   [
+    0,
+    282,
+    259
+   ],
+   [
+    1,
+    130,
+    94
+   ],
+   [
+    1,
+    256,
+    133
+   ],
+   [
+    1,
+    229,
+    150
+   ],
+   [
+    1,
+    76,
+    155
+   ],
+   [
+    1,
+    284,
+    180
+   ],
+   [
+    1,
+    221,
+    191
+   ],
+   [
+    1,
+    60,
+    222
+   ],
+   [
+    1,
+    198,
+    230
+   ],
+   [
+    1,
+    178,
+    269
+   ],
+   [
+    1,
+    143,
+    286
+   ],
+   [
+    1,
+    164,
+    316
+   ],
+   [
+    2,
+    301,
+    212
+   ],
+   [
+    2,
+    131,
+    225
+   ],
+   [
+    2,
+    206,
+    307
+   ],
+   [
+    2,
+    122,
+    330
+   ],
+   [
+    3,
+    73,
+    148
+   ],
+   [
+    3,
+    59,
+    170
+   ],
+   [
+    3,
+    111,
+    204
+   ],
+   [
+    3,
+    280,
+    210
+   ],
+   [
+    3,
+    67,
+    215
+   ],
+   [
+    3,
+    121,
+    255
+   ],
+   [
+    3,
+    189,
+    301
+   ],
+   [
+    3,
+    118,
+    302
+   ],
+   [
+    4,
+    115,
+    99
+   ],
+   [
+    4,
+    213,
+    115
+   ],
+   [
+    4,
+    135,
+    125
+   ],
+   [
+    4,
+    169,
+    126
+   ],
+   [
+    4,
+    146,
+    149
+   ],
+   [
+    4,
+    223,
+    166
+   ],
+   [
+    4,
+    149,
+    184
+   ],
+   [
+    4,
+    291,
+    212
+   ],
+   [
+    4,
+    220,
+    213
+   ],
+   [
+    4,
+    171,
+    225
+   ],
+   [
+    4,
+    102,
+    242
+   ],
+   [
+    4,
+    158,
+    250
+   ],
+   [
+    4,
+    141,
+    269
+   ],
+   [
+    4,
+    230,
+    283
+   ],
+   [
+    4,
+    78,
+    296
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 211,
+    "y": 229,
+    "why": "photons 2.21 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 112,
+    "y": 318,
+    "why": "deviance 39.4 > 6.47"
+   },
+   {
+    "stack": 0,
+    "x": 185,
+    "y": 334,
+    "why": "deviance 7.3 > 6.47"
+   },
+   {
+    "stack": 1,
+    "x": 266,
+    "y": 231,
+    "why": "photons 2.16 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 246,
+    "y": 296,
+    "why": "photons 2.43 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 228,
+    "y": 237,
+    "why": "photons 0.50 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 163,
+    "y": 326,
+    "why": "deviance 15.3 > 6.47"
+   },
+   {
+    "stack": 3,
+    "x": 44,
+    "y": 238,
+    "why": "clutter 0.17 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 218,
+    "y": 271,
+    "why": "deviance 53.1 > 6.47"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 6.4734,
+    "photons": 1.0915
+   }
+  }
+ },
+ "20261029_676_100nm_mismatch_50ms_3D_1": {
+  "kept": [
+   [
+    0,
+    53,
+    143
+   ],
+   [
+    0,
+    145,
+    158
+   ],
+   [
+    0,
+    194,
+    222
+   ],
+   [
+    0,
+    238,
+    229
+   ],
+   [
+    0,
+    133,
+    237
+   ],
+   [
+    0,
+    264,
+    252
+   ],
+   [
+    0,
+    43,
+    256
+   ],
+   [
+    0,
+    167,
+    329
+   ],
+   [
+    1,
+    117,
+    85
+   ],
+   [
+    1,
+    216,
+    142
+   ],
+   [
+    1,
+    62,
+    148
+   ],
+   [
+    1,
+    270,
+    172
+   ],
+   [
+    1,
+    208,
+    183
+   ],
+   [
+    1,
+    45,
+    216
+   ],
+   [
+    1,
+    184,
+    224
+   ],
+   [
+    1,
+    164,
+    263
+   ],
+   [
+    1,
+    129,
+    281
+   ],
+   [
+    1,
+    150,
+    310
+   ],
+   [
+    2,
+    287,
+    197
+   ],
+   [
+    2,
+    117,
+    211
+   ],
+   [
+    2,
+    214,
+    223
+   ],
+   [
+    2,
+    260,
+    271
+   ],
+   [
+    2,
+    192,
+    294
+   ],
+   [
+    2,
+    107,
+    318
+   ],
+   [
+    3,
+    42,
+    160
+   ],
+   [
+    3,
+    94,
+    195
+   ],
+   [
+    3,
+    263,
+    200
+   ],
+   [
+    3,
+    50,
+    206
+   ],
+   [
+    3,
+    104,
+    246
+   ],
+   [
+    3,
+    172,
+    293
+   ],
+   [
+    3,
+    101,
+    294
+   ],
+   [
+    4,
+    194,
+    102
+   ],
+   [
+    4,
+    115,
+    112
+   ],
+   [
+    4,
+    150,
+    114
+   ],
+   [
+    4,
+    127,
+    137
+   ],
+   [
+    4,
+    204,
+    154
+   ],
+   [
+    4,
+    129,
+    172
+   ],
+   [
+    4,
+    201,
+    201
+   ],
+   [
+    4,
+    272,
+    201
+   ],
+   [
+    4,
+    152,
+    214
+   ],
+   [
+    4,
+    82,
+    231
+   ],
+   [
+    4,
+    210,
+    273
+   ],
+   [
+    5,
+    113,
+    105
+   ],
+   [
+    5,
+    164,
+    115
+   ],
+   [
+    5,
+    52,
+    221
+   ],
+   [
+    5,
+    195,
+    250
+   ],
+   [
+    5,
+    79,
+    262
+   ],
+   [
+    5,
+    204,
+    303
+   ],
+   [
+    6,
+    184,
+    91
+   ],
+   [
+    6,
+    144,
+    122
+   ],
+   [
+    6,
+    133,
+    179
+   ],
+   [
+    6,
+    277,
+    225
+   ],
+   [
+    6,
+    33,
+    228
+   ],
+   [
+    6,
+    87,
+    305
+   ],
+   [
+    6,
+    111,
+    321
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 245,
+    "y": 116,
+    "why": "deviance 23.4 > 5.18"
+   },
+   {
+    "stack": 0,
+    "x": 167,
+    "y": 124,
+    "why": "photons 0.49 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 270,
+    "y": 152,
+    "why": "deviance 6.39 > 5.18"
+   },
+   {
+    "stack": 0,
+    "x": 94,
+    "y": 313,
+    "why": "deviance 9.49 > 5.18"
+   },
+   {
+    "stack": 1,
+    "x": 243,
+    "y": 124,
+    "why": "photons 2.13 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 252,
+    "y": 224,
+    "why": "photons 2.22 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 232,
+    "y": 290,
+    "why": "photons 2.40 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 222,
+    "y": 103,
+    "why": "deviance 28 > 5.18"
+   },
+   {
+    "stack": 2,
+    "x": 45,
+    "y": 273,
+    "why": "clutter 0.13 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 246,
+    "y": 292,
+    "why": "deviance 7.16 > 5.18"
+   },
+   {
+    "stack": 2,
+    "x": 149,
+    "y": 313,
+    "why": "deviance 10.9 > 5.18"
+   },
+   {
+    "stack": 3,
+    "x": 56,
+    "y": 138,
+    "why": "photons 0.39 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 287,
+    "y": 224,
+    "why": "clutter 0.06 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 201,
+    "y": 262,
+    "why": "deviance 48.6 > 5.18"
+   },
+   {
+    "stack": 5,
+    "x": 138,
+    "y": 177,
+    "why": "photons 2.14 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.5,
+    2.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 5.1817,
+    "photons": 0.7927
+   }
+  }
+ },
+ "40nm_match_2D_0.05um": {
+  "kept": [
+   [
+    0,
+    245,
+    105
+   ],
+   [
+    0,
+    214,
+    118
+   ],
+   [
+    0,
+    258,
+    161
+   ],
+   [
+    0,
+    224,
+    165
+   ],
+   [
+    0,
+    190,
+    185
+   ],
+   [
+    0,
+    59,
+    186
+   ],
+   [
+    0,
+    154,
+    204
+   ],
+   [
+    0,
+    188,
+    248
+   ],
+   [
+    0,
+    131,
+    249
+   ],
+   [
+    1,
+    98,
+    91
+   ],
+   [
+    1,
+    60,
+    135
+   ],
+   [
+    1,
+    190,
+    158
+   ],
+   [
+    1,
+    52,
+    213
+   ],
+   [
+    1,
+    144,
+    246
+   ],
+   [
+    2,
+    173,
+    86
+   ],
+   [
+    2,
+    185,
+    134
+   ],
+   [
+    2,
+    59,
+    138
+   ],
+   [
+    2,
+    231,
+    157
+   ],
+   [
+    2,
+    74,
+    165
+   ],
+   [
+    2,
+    89,
+    219
+   ],
+   [
+    3,
+    234,
+    128
+   ],
+   [
+    3,
+    152,
+    165
+   ],
+   [
+    4,
+    196,
+    59
+   ],
+   [
+    4,
+    213,
+    94
+   ],
+   [
+    4,
+    190,
+    111
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 102,
+    "y": 84,
+    "why": "photons 3.69 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 230,
+    "y": 126,
+    "why": "deviance 48.1 > 16.1"
+   },
+   {
+    "stack": 3,
+    "x": 119,
+    "y": 126,
+    "why": "deviance 52.7 > 16.1"
+   },
+   {
+    "stack": 3,
+    "x": 108,
+    "y": 138,
+    "why": "deviance 52.4 > 16.1"
+   },
+   {
+    "stack": 4,
+    "x": 123,
+    "y": 143,
+    "why": "deviance 69.7 > 16.1"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 16.0667,
+    "photons": 1.4175
+   }
+  }
+ },
+ "40nm_match_3D_0.05um": {
+  "kept": [
+   [
+    0,
+    127,
+    56
+   ],
+   [
+    0,
+    152,
+    89
+   ],
+   [
+    0,
+    148,
+    117
+   ],
+   [
+    0,
+    247,
+    143
+   ],
+   [
+    0,
+    248,
+    172
+   ],
+   [
+    1,
+    88,
+    114
+   ],
+   [
+    1,
+    163,
+    143
+   ],
+   [
+    1,
+    205,
+    223
+   ],
+   [
+    2,
+    196,
+    83
+   ],
+   [
+    2,
+    77,
+    112
+   ],
+   [
+    2,
+    266,
+    125
+   ],
+   [
+    2,
+    245,
+    164
+   ],
+   [
+    3,
+    80,
+    115
+   ],
+   [
+    3,
+    144,
+    216
+   ],
+   [
+    3,
+    188,
+    231
+   ],
+   [
+    4,
+    180,
+    165
+   ],
+   [
+    4,
+    154,
+    166
+   ],
+   [
+    4,
+    154,
+    196
+   ],
+   [
+    5,
+    189,
+    26
+   ],
+   [
+    5,
+    98,
+    83
+   ],
+   [
+    5,
+    47,
+    157
+   ],
+   [
+    5,
+    219,
+    190
+   ],
+   [
+    6,
+    133,
+    121
+   ],
+   [
+    6,
+    113,
+    178
+   ],
+   [
+    6,
+    147,
+    208
+   ],
+   [
+    7,
+    222,
+    196
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 106,
+    "y": 87,
+    "why": "deviance 18.6 > 16.3"
+   },
+   {
+    "stack": 0,
+    "x": 145,
+    "y": 89,
+    "why": "clutter 0.26 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 186,
+    "y": 196,
+    "why": "photons 4.17 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 161,
+    "y": 233,
+    "why": "deviance 31.1 > 16.3"
+   },
+   {
+    "stack": 5,
+    "x": 156,
+    "y": 176,
+    "why": "deviance 39.2 > 16.3"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 16.3275,
+    "photons": 1.37
+   }
+  }
+ },
+ "40nm_mismatch_2D_0.05um": {
+  "kept": [
+   [
+    0,
+    155,
+    104
+   ],
+   [
+    0,
+    164,
+    139
+   ],
+   [
+    0,
+    182,
+    164
+   ],
+   [
+    0,
+    63,
+    176
+   ],
+   [
+    0,
+    190,
+    224
+   ],
+   [
+    0,
+    63,
+    253
+   ],
+   [
+    1,
+    187,
+    152
+   ],
+   [
+    1,
+    155,
+    158
+   ],
+   [
+    1,
+    70,
+    191
+   ],
+   [
+    1,
+    187,
+    239
+   ],
+   [
+    1,
+    78,
+    281
+   ],
+   [
+    2,
+    153,
+    99
+   ],
+   [
+    2,
+    162,
+    133
+   ],
+   [
+    2,
+    181,
+    159
+   ],
+   [
+    2,
+    62,
+    170
+   ],
+   [
+    2,
+    189,
+    218
+   ],
+   [
+    3,
+    194,
+    185
+   ],
+   [
+    3,
+    131,
+    255
+   ],
+   [
+    4,
+    103,
+    70
+   ],
+   [
+    4,
+    125,
+    123
+   ],
+   [
+    4,
+    67,
+    132
+   ],
+   [
+    5,
+    131,
+    78
+   ],
+   [
+    5,
+    187,
+    92
+   ],
+   [
+    5,
+    55,
+    102
+   ],
+   [
+    5,
+    213,
+    126
+   ],
+   [
+    5,
+    165,
+    129
+   ],
+   [
+    5,
+    75,
+    168
+   ],
+   [
+    5,
+    213,
+    216
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 3,
+    "x": 89,
+    "y": 102,
+    "why": "deviance 23.5 > 23.5"
+   },
+   {
+    "stack": 4,
+    "x": 257,
+    "y": 191,
+    "why": "deviance 28.7 > 23.5"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 23.516,
+    "photons": 1.2067
+   }
+  }
+ },
+ "40nm_mismatch_3D_0.05um": {
+  "kept": [
+   [
+    0,
+    148,
+    156
+   ],
+   [
+    0,
+    232,
+    202
+   ],
+   [
+    0,
+    55,
+    214
+   ],
+   [
+    1,
+    93,
+    47
+   ],
+   [
+    1,
+    210,
+    95
+   ],
+   [
+    1,
+    236,
+    184
+   ],
+   [
+    1,
+    224,
+    210
+   ],
+   [
+    2,
+    69,
+    72
+   ],
+   [
+    2,
+    207,
+    219
+   ],
+   [
+    3,
+    194,
+    96
+   ],
+   [
+    3,
+    168,
+    233
+   ],
+   [
+    4,
+    75,
+    249
+   ],
+   [
+    4,
+    181,
+    250
+   ],
+   [
+    5,
+    132,
+    68
+   ],
+   [
+    5,
+    165,
+    92
+   ],
+   [
+    5,
+    180,
+    235
+   ],
+   [
+    6,
+    160,
+    121
+   ],
+   [
+    6,
+    227,
+    176
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 2,
+    "x": 41,
+    "y": 99,
+    "why": "deviance 59.6 > 38.6"
+   },
+   {
+    "stack": 2,
+    "x": 114,
+    "y": 100,
+    "why": "deviance 63.9 > 38.6"
+   },
+   {
+    "stack": 2,
+    "x": 42,
+    "y": 124,
+    "why": "photons 5.32 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 112,
+    "y": 128,
+    "why": "photons 4.36 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 104,
+    "y": 232,
+    "why": "deviance 90.5 > 38.6"
+   },
+   {
+    "stack": 3,
+    "x": 147,
+    "y": 120,
+    "why": "photons 3.66 \u00d7 median"
+   },
+   {
+    "stack": 3,
+    "x": 165,
+    "y": 140,
+    "why": "deviance 106 > 38.6"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 38.5546,
+    "photons": 0.8004
+   }
+  }
+ },
+ "40nm_match_2D_0.1um": {
+  "kept": [
+   [
+    0,
+    258,
+    161
+   ],
+   [
+    0,
+    224,
+    165
+   ],
+   [
+    0,
+    59,
+    186
+   ],
+   [
+    0,
+    154,
+    203
+   ],
+   [
+    0,
+    188,
+    248
+   ],
+   [
+    0,
+    130,
+    249
+   ],
+   [
+    1,
+    150,
+    117
+   ],
+   [
+    1,
+    98,
+    122
+   ],
+   [
+    1,
+    199,
+    124
+   ],
+   [
+    1,
+    218,
+    145
+   ],
+   [
+    1,
+    244,
+    169
+   ],
+   [
+    1,
+    192,
+    215
+   ],
+   [
+    1,
+    141,
+    217
+   ],
+   [
+    1,
+    141,
+    245
+   ],
+   [
+    1,
+    241,
+    246
+   ],
+   [
+    1,
+    200,
+    272
+   ],
+   [
+    2,
+    175,
+    137
+   ],
+   [
+    2,
+    71,
+    164
+   ],
+   [
+    2,
+    120,
+    199
+   ],
+   [
+    2,
+    150,
+    208
+   ],
+   [
+    2,
+    200,
+    235
+   ],
+   [
+    2,
+    242,
+    268
+   ],
+   [
+    2,
+    195,
+    277
+   ],
+   [
+    3,
+    217,
+    63
+   ],
+   [
+    3,
+    183,
+    98
+   ],
+   [
+    3,
+    149,
+    185
+   ],
+   [
+    3,
+    89,
+    203
+   ],
+   [
+    3,
+    223,
+    206
+   ],
+   [
+    3,
+    144,
+    264
+   ],
+   [
+    4,
+    167,
+    85
+   ],
+   [
+    4,
+    109,
+    112
+   ],
+   [
+    4,
+    113,
+    151
+   ],
+   [
+    4,
+    61,
+    166
+   ],
+   [
+    4,
+    82,
+    228
+   ],
+   [
+    5,
+    178,
+    93
+   ],
+   [
+    5,
+    243,
+    157
+   ],
+   [
+    5,
+    116,
+    168
+   ],
+   [
+    5,
+    209,
+    172
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 102,
+    "y": 84,
+    "why": "photons 4.33 \u00d7 median"
+   },
+   {
+    "stack": 0,
+    "x": 245,
+    "y": 105,
+    "why": "photons 3.13 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 264,
+    "y": 256,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 2,
+    "x": 83,
+    "y": 260,
+    "why": "clutter 0.27 \u00d7 median"
+   },
+   {
+    "stack": 4,
+    "x": 131,
+    "y": 213,
+    "why": "deviance 48.5 > 10.4"
+   },
+   {
+    "stack": 5,
+    "x": 97,
+    "y": 205,
+    "why": "deviance 44.5 > 10.4"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 10.3753,
+    "photons": 1.1673
+   }
+  }
+ },
+ "40nm_match_3D_0.1um": {
+  "kept": [
+   [
+    0,
+    135,
+    125
+   ],
+   [
+    0,
+    180,
+    126
+   ],
+   [
+    0,
+    211,
+    154
+   ],
+   [
+    0,
+    166,
+    185
+   ],
+   [
+    1,
+    98,
+    94
+   ],
+   [
+    1,
+    175,
+    128
+   ],
+   [
+    1,
+    231,
+    195
+   ],
+   [
+    1,
+    142,
+    202
+   ],
+   [
+    2,
+    87,
+    54
+   ],
+   [
+    2,
+    134,
+    91
+   ],
+   [
+    2,
+    176,
+    166
+   ],
+   [
+    2,
+    128,
+    197
+   ],
+   [
+    2,
+    167,
+    246
+   ],
+   [
+    3,
+    194,
+    99
+   ],
+   [
+    3,
+    223,
+    107
+   ],
+   [
+    3,
+    270,
+    144
+   ],
+   [
+    4,
+    189,
+    50
+   ],
+   [
+    4,
+    170,
+    80
+   ],
+   [
+    4,
+    118,
+    264
+   ],
+   [
+    5,
+    195,
+    194
+   ],
+   [
+    5,
+    263,
+    199
+   ],
+   [
+    5,
+    232,
+    239
+   ],
+   [
+    6,
+    208,
+    113
+   ],
+   [
+    6,
+    157,
+    206
+   ],
+   [
+    6,
+    178,
+    224
+   ],
+   [
+    7,
+    143,
+    47
+   ],
+   [
+    7,
+    63,
+    126
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 157,
+    "y": 137,
+    "why": "clutter 0.09 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 177,
+    "y": 25,
+    "why": "photons 4.73 \u00d7 median"
+   },
+   {
+    "stack": 1,
+    "x": 161,
+    "y": 155,
+    "why": "deviance 25.8 > 12.1"
+   },
+   {
+    "stack": 2,
+    "x": 236,
+    "y": 48,
+    "why": "deviance 15.3 > 12.1"
+   },
+   {
+    "stack": 5,
+    "x": 262,
+    "y": 138,
+    "why": "photons 4.66 \u00d7 median"
+   },
+   {
+    "stack": 7,
+    "x": 80,
+    "y": 196,
+    "why": "deviance 57.9 > 12.1"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 12.0952,
+    "photons": 1.4184
+   }
+  }
+ },
+ "40nm_mismatch_2D_0.1um": {
+  "kept": [
+   [
+    0,
+    170,
+    79
+   ],
+   [
+    0,
+    94,
+    103
+   ],
+   [
+    0,
+    204,
+    130
+   ],
+   [
+    0,
+    114,
+    169
+   ],
+   [
+    1,
+    131,
+    114
+   ],
+   [
+    1,
+    88,
+    188
+   ],
+   [
+    1,
+    251,
+    199
+   ],
+   [
+    1,
+    124,
+    224
+   ],
+   [
+    1,
+    144,
+    247
+   ],
+   [
+    2,
+    209,
+    133
+   ],
+   [
+    2,
+    185,
+    158
+   ],
+   [
+    2,
+    172,
+    202
+   ],
+   [
+    3,
+    155,
+    86
+   ],
+   [
+    3,
+    115,
+    165
+   ],
+   [
+    3,
+    144,
+    166
+   ],
+   [
+    3,
+    89,
+    238
+   ],
+   [
+    4,
+    164,
+    125
+   ],
+   [
+    4,
+    106,
+    130
+   ],
+   [
+    4,
+    162,
+    161
+   ],
+   [
+    4,
+    88,
+    168
+   ],
+   [
+    4,
+    62,
+    172
+   ],
+   [
+    5,
+    168,
+    107
+   ],
+   [
+    5,
+    181,
+    158
+   ],
+   [
+    5,
+    203,
+    235
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 51,
+    "y": 188,
+    "why": "deviance 85.9 > 25.5"
+   },
+   {
+    "stack": 0,
+    "x": 60,
+    "y": 262,
+    "why": "deviance 53.5 > 25.5"
+   },
+   {
+    "stack": 2,
+    "x": 59,
+    "y": 179,
+    "why": "photons 4.60 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 25.5429,
+    "photons": 1.2297
+   }
+  }
+ },
+ "40nm_mismatch_3D_0.1um": {
+  "kept": [
+   [
+    0,
+    156,
+    98
+   ],
+   [
+    0,
+    169,
+    149
+   ],
+   [
+    0,
+    190,
+    228
+   ],
+   [
+    1,
+    109,
+    51
+   ],
+   [
+    1,
+    74,
+    68
+   ],
+   [
+    1,
+    147,
+    212
+   ],
+   [
+    1,
+    54,
+    270
+   ],
+   [
+    2,
+    99,
+    81
+   ],
+   [
+    2,
+    226,
+    129
+   ],
+   [
+    2,
+    99,
+    160
+   ],
+   [
+    2,
+    136,
+    235
+   ],
+   [
+    2,
+    64,
+    240
+   ],
+   [
+    3,
+    117,
+    63
+   ],
+   [
+    3,
+    46,
+    212
+   ],
+   [
+    3,
+    158,
+    217
+   ],
+   [
+    4,
+    44,
+    168
+   ],
+   [
+    4,
+    156,
+    174
+   ],
+   [
+    5,
+    76,
+    123
+   ],
+   [
+    5,
+    227,
+    172
+   ],
+   [
+    5,
+    164,
+    275
+   ],
+   [
+    6,
+    235,
+    144
+   ],
+   [
+    6,
+    142,
+    193
+   ],
+   [
+    6,
+    115,
+    208
+   ],
+   [
+    6,
+    138,
+    282
+   ]
+  ],
+  "rejected": [
+   {
+    "stack": 0,
+    "x": 79,
+    "y": 130,
+    "why": "deviance 54.5 > 25.9"
+   },
+   {
+    "stack": 6,
+    "x": 136,
+    "y": 57,
+    "why": "deviance 27.8 > 25.9"
+   },
+   {
+    "stack": 6,
+    "x": 131,
+    "y": 98,
+    "why": "photons 4.01 \u00d7 median"
+   },
+   {
+    "stack": 6,
+    "x": 39,
+    "y": 231,
+    "why": "clutter 0.08 \u00d7 median"
+   }
+  ],
+  "rule": {
+   "focus_nm": 1000,
+   "bright": [
+    0.33,
+    3.0
+   ],
+   "k": 3.0,
+   "thresholds": {
+    "xy_offset_px": 3.0,
+    "masked": 0.01,
+    "deviance": 25.8879,
+    "photons": 1.4454
+   }
+  }
+ }
+}

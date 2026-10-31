@@ -212,7 +212,7 @@ def main():
         if path not in cache:
             _, _, files, _ = acquisition(path)
             rois = bead_rois(files, camera_for(files[0]), dual=False)
-            keep, focus, cut = select(rois)
+            keep, focus, cut = select(rois, acquisition(path)[0])
             shape = tifffile.TiffFile(files[0]).pages[0].shape[-2:]
             inner = central(rois, keep, args.centre, shape)
             cut = dict(cut, central=len(inner), image_px=list(shape))

@@ -53,7 +53,7 @@ def learn(args):
         name, cond, files, bead_nm = acquisition(path)
         radial_magnitude.BEAD_NM = bead_nm             # the "… bead …" variants' ring, as `edge_pupil` builds them
         rois = bead_rois(files, camera_for(files[0]), dual=False)
-        keep, focus, _ = select(rois)
+        keep, focus, _ = select(rois, name)
         rois = subset(rois, keep, focus, args.window)
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=104.7, pixel_y_nm=106.4)

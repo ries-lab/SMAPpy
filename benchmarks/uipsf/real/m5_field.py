@@ -105,7 +105,7 @@ def main():
         name, cond, files, bead_nm = acquisition(path)
         lam = WAVELENGTH[cond["colour"]]
         rois = bead_rois(files, camera_for(files[0]), dual=False)
-        keep, focus, cut = select(rois)
+        keep, focus, cut = select(rois, name)
         rois = subset(rois, keep, focus, args.window)
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=lam, n_immersion=N_IMM, n_medium=N_MED[cond["medium"]],
                                 pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])

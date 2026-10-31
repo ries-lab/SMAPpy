@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import functools
 import glob
+import json
 import math
 import os
 import re
@@ -75,8 +76,13 @@ def acquisition(path: str) -> tuple[str, dict, list, float]:
     return base, dict(condition(path), bead_nm=BEAD_NM), sorted(glob.glob(os.path.join(path, "*.ome.tif"))), BEAD_NM
 
 
-def select(rois) -> tuple[list, dict]:
-    """The bright beads in focus near the stack's centre: indices and what was cut."""
+#: the beads every M5 study uses, chosen once by `m5_beads.py`: {acquisition: {"kept": [[stack, x, y], ...], ...}}
+BEADSET = os.path.join(HERE, "..", "results", "m5_beadset.json")
+
+
+def measure_beads(rois) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Each bead's focus slice, its photons in a `APERTURE_PX` aperture there, and whether the focus lies within
+    `FOCUS_NM` of the stack's centre."""
     data = rois.batch.data[:, 0].double().numpy()                      # [E, K, Y, X] photons
     z = rois.batch.z_nm.numpy()
     z = z if z.ndim == 1 else z[0]
@@ -88,11 +94,25 @@ def select(rois) -> tuple[list, dict]:
     core = s[..., Y // 2 - 1:Y // 2 + 2, X // 2 - 1:X // 2 + 2].sum((-1, -2))
     focus = np.array([np.convolve(c, np.ones(3) / 3, "same").argmax() for c in core])
     photons = (s * aperture).sum((-1, -2))[np.arange(E), focus]
+    return focus, photons, np.abs(z[focus] - z.mean()) <= FOCUS_NM
+
+
+def select(rois, name: str | None = None) -> tuple[list, dict]:
+    """The beads to learn from: indices, each bead's focus slice, and what was cut.  ``name`` (the
+    acquisition's, `acquisition`) takes the consensus bead set where `BEADSET` has one; else, or without
+    a name, the bright beads in focus near the stack's centre."""
+    focus, photons, near = measure_beads(rois)
+    E = len(focus)
+    chosen = json.load(open(BEADSET)).get(name) if name and os.path.exists(BEADSET) else None
+    if chosen is not None:
+        kept = {tuple(int(v) for v in b) for b in chosen["kept"]}
+        keep = [i for i, r in enumerate(rois.records) if (int(r["stack"]), int(r["x_px"]), int(r["y_px"])) in kept]
+        return keep, focus, dict(found=E, beadset=len(kept), kept=len(keep),
+                                 photons_median=round(float(np.median(photons[keep])), 0))
     bright = photons >= BRIGHT * np.median(np.sort(photons)[-20:])
-    near = np.abs(z[focus] - z.mean()) <= FOCUS_NM
     keep = [int(i) for i in np.flatnonzero(bright & near)]
     return keep, focus, dict(found=E, dim=int((~bright).sum()), off_focus=int((bright & ~near).sum()), kept=len(keep),
-                      photons_median=round(float(np.median(photons[keep])), 0))
+                             photons_median=round(float(np.median(photons[keep])), 0))
 
 
 def subset(rois, keep, focus, window_nm=WINDOW_NM):
@@ -189,7 +209,7 @@ def main():
         cond = condition(acquisition)
         files = sorted(glob.glob(os.path.join(acquisition, "*.ome.tif")))
         rois = bead_rois(files, camera_for(files[0]), dual=False)
-        keep, focus, cut = select(rois)
+        keep, focus, cut = select(rois, os.path.basename(os.path.normpath(acquisition)))
         rois = subset(rois, keep, focus, args.window)
         decisions = {i: "include" for i in range(len(keep))}
         for pixel in pixels:
