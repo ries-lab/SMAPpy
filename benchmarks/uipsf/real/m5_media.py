@@ -1,7 +1,7 @@
 """M5's beads of 2026-10-29: two colours, index-matched or not, with and without the cylindrical lens.
 
     python benchmarks/uipsf/real/m5_media.py ACQUISITION [...] [--variants zernike "cos bead na asym"] \\
-        [--pixel 104.7 106.4] [--window 1000] [--dz 50] [--grid-na 1.50] [--chunk 1] \\
+        [--pixel 104.7 106.4] [--window 1000] [--dz 50] [--grid-na 1.50] [--chunk 1] [--memory 0.5] \\
         [--out benchmarks/uipsf/results/m5_media.jsonl]
 
 One microscope, one day, eight conditions that each change one thing: the emission (600 nm, TetraSpeck's
@@ -22,8 +22,10 @@ bead is included (no rejection), so variants of one acquisition compare in nats.
 Variants (`edge_magnitude.use_pupil`): *zernike*, every magnitude mode to order 8; *cos bead na asym*, the
 bead physics: cos θ_imm^γ, a 100 nm sphere's supercritical ring (none when matched) and a learnt NA cutoff,
 with the m ≠ 0 Zernikes.  The grid's NA (``--grid-na``) is by default `GRID_NA`, the nominal one, so the
-cutoff can only find an effective NA below it: at 1.51 the pupil needs 208 samples for ±1 µm, which a 32 GB
-Mac's GPU does not fit even one bead at a time (1.50: 144).
+cutoff can only find an effective NA below it.  Memory on a 32 GB Mac (M1 Max, ``--chunk 1 --memory 0.5``,
+2026-10-31): the grid at 1.51 for ±1 µm (208 samples; 1.50: 144) fits; ±2 µm (240) fits the 600 nm sets at
+50 nm slices but not 676 nm in oil, and every set at ``--dz 100``, which gives the same model.  The results
+and what they say: `docs/uipsf/m5-media.md`, tabulated by `m5_media_table.py`.
 """
 from __future__ import annotations
 
@@ -99,7 +101,10 @@ def subset(rois, keep, focus, window_nm=WINDOW_NM):
                          # (`calibrate_beads`), and every bead's z is learnt anyway
                          mask=b.mask.transpose(1, 2)[rows, index].transpose(1, 2),
                          z_nm=z[index] - z[index[:, half:half + 1]])
-    rois.records = [dict(rois.records[i], id=n) for n, i in enumerate(keep)]
+    # each focus in its window's z, for the slice fits' bends (`measure`): a window that slid inwards, or the
+    # whole stack about its centre, is not centred on the focus
+    rois.records = [dict(rois.records[i], id=n, focus_nm=float(z[focus[i]] - z[f + half]))
+                    for n, (i, f) in enumerate(zip(keep, first, strict=True))]
     return rois
 
 
@@ -148,7 +153,8 @@ def main():
                     help="each bead's slices, ± this about its focus; 2000: the whole stack, about its centre")
     ap.add_argument("--grid-na", type=float, default=GRID_NA, help="the pupil grid's edge, ρ = 1")
     ap.add_argument("--dz", type=float, default=50.0, help="the slices' largest spacing in learning, nm")
-    ap.add_argument("--chunk", type=int, default=4, help="emitters per solver chunk: M5's 128-sample pupil")
+    ap.add_argument("--chunk", type=int, default=4,
+                    help="emitters per solver chunk; M5's pupil at NA 1.50 needs 1 on a 32 GB Mac")
     ap.add_argument("--memory", type=float, default=0.5, help="MPS memory fraction")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -187,7 +193,8 @@ def main():
                            window_nm=args.window, dz_nm=args.dz, n_med=N_MED[cond["medium"]],
                            wavelength_nm=WAVELENGTH[cond["colour"]], beads=cut)
                 row.update(summary(run, variant, pixel, cond, args.grid_na))
-                row.update(measure(run, args.z_range))
+                row.update(measure(run, args.z_range,
+                                   centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used]))
                 row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
                 emit(row, args.out)
 

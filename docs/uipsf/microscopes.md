@@ -47,6 +47,10 @@ own `CONVERSION FACTOR COEFF`.  The pixel: the database fixes 102 × 103 nm, the
 used (the user's choice for now).  The beads are astigmatic here too (x and y focus 360 nm apart in the
 median).
 
+The eight acquisitions of 2026-10-29 (100 nm beads at 600 and 676 nm, in oil and in buffer, with and
+without the 3D lens) are in `m5-media.md`.  There, the likelihood prefers a 104.7 × 106.4 nm pixel, and
+the objective's effective NA in matched oil is 1.49–1.52, its nominal 1.50.
+
 ## What the database lacks
 
 - **Read noise**, for every camera (`plan.md` §8: proposed as `read_noise_e` per readout state).

@@ -39,8 +39,12 @@ def emit(row, out):
             f.write(json.dumps(row) + "\n")
 
 
-def measure(run, z_range: float) -> dict:
-    """The slice fits of the used beads against the stack fit: systematic curve and scatter, nm."""
+def measure(run, z_range: float, centre_nm=None) -> dict:
+    """The slice fits of the used beads against the stack fit: systematic curve and scatter, nm.
+
+    Each bead's z is taken about the median of its slices, which is its focus when its window is centred on
+    it; ``centre_nm`` (one per used bead, in the batch's z) names the focus instead, for windows that are
+    not -- a whole stack, whose focus drifted up to a micrometre from its centre (m5_media.py)."""
     from uipsf.workflows.beads import MAX_DZ_NM
     from uipsf.workflows.scoring import slice_fits
     cal = run.cal
@@ -51,12 +55,32 @@ def measure(run, z_range: float) -> dict:
     # the stack fit's rows are the used beads already (`learn_beads`)
     found, crlb, where = slice_fits(cal.model, cal.shared(), batch, run.rois.noise, stack)
     d = found - where                                                   # [E, K, 3]
-    z = where[..., 2] - np.median(where[..., 2], axis=1, keepdims=True)  # each bead's own z, centred
+    if centre_nm is None:
+        z = where[..., 2] - np.median(where[..., 2], axis=1, keepdims=True)  # each bead's own z, centred
+    else:
+        # the stack fit's z at the slice nearest each bead's focus: its own z0 and the stage's sign carried
+        stage = batch.z_nm.cpu().double().numpy()
+        stage = np.broadcast_to(stage, where.shape[:2])
+        k = np.abs(stage - np.asarray(centre_nm, float)[:, None]).argmin(1)
+        z = where[..., 2] - where[np.arange(len(k)), k, 2][:, None]
     near = np.abs(z) <= z_range
     d = np.where(near[..., None] & np.isfinite(d), d, np.nan)
     d = d - np.nanmedian(d, axis=1, keepdims=True)                       # each bead's own offset out
-    curve = np.nanmedian(d, axis=0)                                      # [K, 3] the systematic error
-    rest = (d - curve[None]) / crlb
+    if centre_nm is None:
+        curve = np.nanmedian(d, axis=0)                                  # [K, 3] the systematic error
+        rest = (d - curve[None]) / crlb
+        curve_z = np.nanmedian(np.where(near, z, np.nan), axis=0)
+    else:
+        # foci at different slices: one slice index is a different z for each bead, so the curve is the median
+        # in bins of z about the focus, one slice step wide (a median per index mixed beads a micrometre apart
+        # on whole stacks, and its edge bins held one bead each)
+        step = float(np.median(np.abs(np.diff(stage, axis=1))))
+        b = np.where(near, np.round(z / step), np.nan)
+        bins = np.unique(b[np.isfinite(b)])
+        curve = np.stack([np.nanmedian(d[b == v], axis=0) for v in bins])         # [bins, 3]
+        at = np.where(np.isfinite(b), np.searchsorted(bins, np.nan_to_num(b)), 0)
+        rest = (d - np.where(np.isfinite(b)[..., None], curve[at], np.nan)) / crlb
+        curve_z = bins * step
     out = {}
     for a, name in enumerate("xyz"):
         c = curve[:, a][np.isfinite(curve[:, a])]
@@ -66,7 +90,7 @@ def measure(run, z_range: float) -> dict:
         out[f"{name}_scatter_over_crlb"] = round(float(1.4826 * np.median(np.abs(r - np.median(r)))), 3)
         out[f"{name}_crlb_median_nm"] = round(float(np.nanmedian(np.where(near, crlb[..., a], np.nan))), 2)
     out["slices"] = int(near.sum())
-    out["curve_z_nm"] = np.nanmedian(np.where(near, z, np.nan), axis=0).round(0)
+    out["curve_z_nm"] = np.round(curve_z, 0)
     out["curve_nm"] = curve.round(1)
     return out
 
