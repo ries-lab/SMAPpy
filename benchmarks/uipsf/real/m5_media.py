@@ -62,6 +62,19 @@ def condition(acquisition: str) -> dict:
     return dict(colour=m[1], medium=m[2], lens=m[3])
 
 
+def acquisition(path: str) -> tuple[str, dict, list, float]:
+    """Name, condition, stack files and bead diameter (nm) of an acquisition.  Two layouts: a folder of stacks,
+    the 100 nm beads of 2026-10-29 (``20261029_600_100nm_mismatch_50ms_2D_1``); or a folder of positions, one
+    stack each, the 40 nm beads of 2026-10-31, all at 600 nm (``40nm_beads_stack/mismatch_2D_0.05um``, the
+    last part the z step: two acquisitions of each condition)."""
+    base = os.path.basename(os.path.normpath(path))
+    m = re.fullmatch(r"(match|mismatch)_(2D|3D)_([\d.]+)um", base)
+    if m:
+        return (f"40nm_{base}", dict(colour="600", medium=m[1], lens=m[2], bead_nm=40.0),
+                sorted(glob.glob(os.path.join(path, "*", "*.ome.tif"))), 40.0)
+    return base, dict(condition(path), bead_nm=BEAD_NM), sorted(glob.glob(os.path.join(path, "*.ome.tif"))), BEAD_NM
+
+
 def select(rois) -> tuple[list, dict]:
     """The bright beads in focus near the stack's centre: indices and what was cut."""
     data = rois.batch.data[:, 0].double().numpy()                      # [E, K, Y, X] photons

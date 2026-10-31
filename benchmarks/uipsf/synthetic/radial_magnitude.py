@@ -29,6 +29,7 @@ import json
 import math
 import os
 import time
+from dataclasses import replace
 
 import numpy as np
 import torch
@@ -121,13 +122,19 @@ class EdgePupil(uipsf.ZernikePupil):
     exp(−2πκh + 4π²κ²σ²): the intensity averaged over the heights, square-rooted, to second order.
     ``ring="layer"``: the dye uniform over h₀ … h₀ + L instead, exactly √(e^(−4πκh₀)(1 − e^(−x))/x) with
     x = 4πκL, positive and monotone for every h₀, L (the second order grows without bound at large κσ);
-    ``ring="bead"``: a sphere of `BEAD_NM` on the glass, no parameter,
-    √(6(u − 2 + (u + 2)e^(−u))/u³) with u = 4πκd."""
+    ``ring="bead"``: a sphere of ``bead_nm`` (`BEAD_NM` unless told) on the glass, no parameter,
+    √(6(u − 2 + (u + 2)e^(−u))/u³) with u = 4πκd.
+
+    Held, for a model whose objective's part is fixed (`real/m5_consensus.py`): ``asym_modes`` names the m ≠ 0
+    modes kept (instead of every one to ``asym_order``), ``held_magnitude`` holds some at given values
+    ({Noll: value}, `ZernikePupil`), and ``hold`` holds any of this pupil's own parameters ({"pupil.centre_g":
+    0.4, "pupil.edge_rho": 0.993}), which are then neither learnt nor counted."""
 
     def __init__(self, grid, n_max: int, centre=(4,), edge: str = "logistic", quartic: bool = False,
                  asymmetric: bool = False, saf: bool = False, saf_step: bool = False, saf_sd: bool = False,
                  ring: str = "height", asym_order: int | None = None, steps: bool = False,
-                 signed: bool = False):
+                 signed: bool = False, asym_modes=None, held_magnitude: dict | None = None,
+                 hold: dict | None = None, bead_nm: float | None = None):
         every = zernike_modes(n_max, exclude=("piston",))
         self.mono = centre in ("mono", "cos", "steps")
         self.cos = centre == "cos"
@@ -135,9 +142,11 @@ class EdgePupil(uipsf.ZernikePupil):
         self.signed = signed
         keep = () if self.mono else tuple(centre)
         top = n_max if asym_order is None else asym_order
-        modes = [j for j in every if (asymmetric and noll_to_nm(j)[1] != 0 and noll_to_nm(j)[0] <= top)
-                 or j in keep]
-        super().__init__(grid, n_max=n_max, magnitude_modes=modes)
+        modes = [j for j in every if (asymmetric and noll_to_nm(j)[1] != 0 and noll_to_nm(j)[0] <= top
+                                      and (asym_modes is None or j in asym_modes)) or j in keep]
+        super().__init__(grid, n_max=n_max, magnitude_modes=modes, held_magnitude=held_magnitude)
+        self.hold = dict(hold or {})
+        self.bead_nm = BEAD_NM if bead_nm is None else float(bead_nm)
         self.edge, self.quartic, self.saf, self.saf_step, self.saf_sd = edge, quartic, saf, saf_step, saf_sd
         self.ring = ring
         o = grid.optics
@@ -153,7 +162,7 @@ class EdgePupil(uipsf.ZernikePupil):
         out = object.__new__(EdgePupil)
         out.__dict__.update(new.__dict__)
         for k in ("edge", "quartic", "mono", "cos", "steps", "signed", "rho", "hat_basis", "saf", "saf_step", "saf_sd",
-                  "saf_scale", "n_imm", "ring", "cut_w"):
+                  "saf_scale", "n_imm", "ring", "cut_w", "hold", "bead_nm"):
             setattr(out, k, getattr(self, k))
         return out
 
@@ -186,7 +195,8 @@ class EdgePupil(uipsf.ZernikePupil):
                       ParamSpec("pupil.edge_width", (), init=0.03, transform=Bounded(0.005, 0.1))]
             if self.edge == "richards":
                 extra.append(ParamSpec("pupil.edge_nu", (), init=1.0, transform=Bounded(0.1, 10.0)))
-        return super().specs() + extra
+        return [replace(s, init=self.hold[s.name], fixed=True) if s.name in self.hold else s
+                for s in super().specs() + extra]
 
     def symmetric(self, p, rho):
         """The symmetric factor at ``rho`` (the hats added separately): centre × edge."""
@@ -207,7 +217,7 @@ class EdgePupil(uipsf.ZernikePupil):
                 x = 4 * math.pi * kappa * p["pupil.saf_l"][..., None, None]
                 mean = torch.exp(-4 * math.pi * kappa * p["pupil.saf_h"][..., None, None]) * _expm1_ratio(x)
             else:
-                u = 4 * math.pi * kappa * BEAD_NM
+                u = 4 * math.pi * kappa * self.bead_nm
                 mean = _sphere_mean(u)
             out = out * torch.sqrt(mean)
         elif self.saf:

@@ -175,6 +175,57 @@ def bends(rows, window, out):
     fig.savefig(os.path.join(out, "bend_window.png"), dpi=150)
 
 
+ASYM = [2, 3, 5, 6, 7, 8, 9, 10, 16, 17, 24, 29]
+
+
+def asym_rows(rows, studio, na151, lab):
+    """(label, magnitude dict) for every free-Zernike run: this study, the Studio's windows and grid, and the
+    earlier lab beads (M5 and M2, in buffer at 676 nm), each in Noll's index."""
+    out = []
+    for name, src, pick in [("±1 µm", rows, lambda r: True),
+                            ("±0.5 µm", studio, lambda r: r["window_nm"] == 500),
+                            ("±2 µm", studio, lambda r: r["window_nm"] == 2000 and r["dz_nm"] == 100),
+                            ("grid 1.51", na151, lambda r: True)]:
+        for k in ORDER:
+            r = next((r for r in src if key(r) == k and r["variant"] == "zernike" and pick(r)), None)
+            if r:
+                out.append((f"{title(k)}  {name}", {int(j): c for j, c in r["magnitude"].items()}))
+    for r in lab:
+        out.append((f"{r['microscope']} {r['acquisition'][:6]}  (lab)",
+                    dict(zip(r["magnitude_modes"], r["magnitude"], strict=True))))
+    return out
+
+
+def asymmetric(rows, studio, na151, lab, out):
+    from uipsf.optics.zernike import zernike, zernike_name
+    data = asym_rows(rows, studio, na151, lab)
+    table = [[m.get(j, np.nan) for j in ASYM] for _, m in data]
+    heat(table, [n for n, _ in data], [f"{j}\n{zernike_name(j)}" for j in ASYM], os.path.join(out, "asym_modes.png"),
+         "m ≠ 0 magnitude coefficients (Noll, unit rms over the pupil)", vmax=0.06, fmt="{:+.3f}")
+
+    # the m ≠ 0 magnitude as a map over the pupil, for the eight conditions (±1 µm) and the earlier beads
+    n = 101
+    y, x = np.mgrid[-1:1:n * 1j, -1:1:n * 1j]
+    rho, phi = np.hypot(x, y), np.arctan2(y, x)
+    picks = [d for d in data if d[0].endswith("±1 µm") or "(lab)" in d[0]]
+    cols = 6
+    fig, axes = plt.subplots(-(-len(picks) // cols), cols, figsize=(2.0 * cols, 2.15 * -(-len(picks) // cols)))
+    for ax in axes.ravel():
+        ax.axis("off")
+    for ax, (name, m) in zip(axes.ravel(), picks, strict=False):
+        a = sum(c * zernike(j, rho, phi) for j, c in m.items() if noll_to_nm_(j)[1] != 0)
+        a = np.where(rho <= 1, a, np.nan)
+        im = ax.imshow(a, cmap="RdBu_r", vmin=-0.25, vmax=0.25, origin="lower")
+        ax.set_title(name.replace("  ", "\n"), fontsize=7.5, color=INK)
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6, label="m ≠ 0 magnitude (relative)")
+    fig.savefig(os.path.join(out, "asym_maps.png"), dpi=140)
+
+
+def noll_to_nm_(j):
+    from uipsf.optics.zernike import noll_to_nm
+    return noll_to_nm(int(j))
+
+
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
@@ -184,6 +235,8 @@ def main():
     phases(rows, out)
     likelihoods(rows, out)
     bends(rows, window, out)
+    asymmetric(rows, load("m5_media_window_studio.jsonl"), load("m5_media_na151_studio.jsonl"),
+               load("lab_beads.jsonl"), out)
     json.dump({"sigma": sigma(rows, out)}, open(os.path.join(out, "tables.json"), "w"))
 
 
