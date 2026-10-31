@@ -54,6 +54,19 @@ FITS = ("flat", "zernike", "spline", "spline c11", "logistic", "logistic c11", "
         "mono b nu")
 
 
+#: the free monotone profile's steps: exp(−Σ d_k S((ρ − k/STEPS)·STEPS)), d_k ≥ 0, S the smoothstep
+STEPS = 8
+
+
+def _smooth_steps(rho: torch.Tensor) -> torch.Tensor:
+    """[STEPS, ...] smoothsteps 3t² − 2t³ rising over each of `STEPS` equal intervals of ρ in [0, 1]: with
+    non-negative weights their sum rises monotonically and smoothly (C¹), so exp(−sum) is any smooth,
+    monotone fall from the centre, the edge's sharp parts (the ring, the cutoff) left to their own terms."""
+    t = torch.clamp(rho[None] * STEPS - torch.arange(STEPS, dtype=rho.dtype, device=rho.device).reshape(
+        (STEPS,) + (1,) * rho.dim()), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
 def hats(rho: torch.Tensor) -> torch.Tensor:
     """[K, P, P]: piecewise-linear hats at `KNOTS`, the first rising from `INNER`, the last ending at 1."""
     edges = (INNER, *KNOTS, KNOTS[-1] + (KNOTS[-1] - KNOTS[-2]))
@@ -99,7 +112,12 @@ class EdgePupil(uipsf.ZernikePupil):
     exp(−aρ²) and nothing else: the user's model (October 2026), everything that falls fast confined to the
     supercritical ring, which emitters deeper than its decay length never light.  ``centre="cos"``: the
     subcritical bend cos θ_imm^γ instead (γ ≥ 0), the shape an apodisation error has, steepening towards the
-    edge where exp(−aρ²) does not.  ``saf_sd``: the spread of the dye's heights, the second cumulant,
+    edge where exp(−aρ²) does not.  ``centre="steps"``: any smooth, monotone fall, exp(−Σ d_k S_k(ρ)) over
+    `STEPS` smoothsteps, d_k ≥ 0 (`_smooth_steps`): what cos θ^γ is checked against (the user's, October
+    2026); ``steps`` puts that fall on top of cos θ^γ as a correction ("cos steps …"), which holds either
+    alone (d = 0, or γ = 0) and stays monotone (both factors fall), so its gain over cos θ^γ is what the
+    apodisation's shape misses; ``signed`` ("cos signed …") lets the steps go either way, a smooth correction
+    that may rise.  ``saf_sd``: the spread of the dye's heights, the second cumulant,
     exp(−2πκh + 4π²κ²σ²): the intensity averaged over the heights, square-rooted, to second order.
     ``ring="layer"``: the dye uniform over h₀ … h₀ + L instead, exactly √(e^(−4πκh₀)(1 − e^(−x))/x) with
     x = 4πκL, positive and monotone for every h₀, L (the second order grows without bound at large κσ);
@@ -108,10 +126,13 @@ class EdgePupil(uipsf.ZernikePupil):
 
     def __init__(self, grid, n_max: int, centre=(4,), edge: str = "logistic", quartic: bool = False,
                  asymmetric: bool = False, saf: bool = False, saf_step: bool = False, saf_sd: bool = False,
-                 ring: str = "height", asym_order: int | None = None):
+                 ring: str = "height", asym_order: int | None = None, steps: bool = False,
+                 signed: bool = False):
         every = zernike_modes(n_max, exclude=("piston",))
-        self.mono = centre in ("mono", "cos")
+        self.mono = centre in ("mono", "cos", "steps")
         self.cos = centre == "cos"
+        self.steps = centre == "steps" or steps or signed
+        self.signed = signed
         keep = () if self.mono else tuple(centre)
         top = n_max if asym_order is None else asym_order
         modes = [j for j in every if (asymmetric and noll_to_nm(j)[1] != 0 and noll_to_nm(j)[0] <= top)
@@ -131,8 +152,8 @@ class EdgePupil(uipsf.ZernikePupil):
         new = super().truncated(n_max)
         out = object.__new__(EdgePupil)
         out.__dict__.update(new.__dict__)
-        for k in ("edge", "quartic", "mono", "cos", "rho", "hat_basis", "saf", "saf_step", "saf_sd", "saf_scale",
-                  "n_imm", "ring", "cut_w"):
+        for k in ("edge", "quartic", "mono", "cos", "steps", "signed", "rho", "hat_basis", "saf", "saf_step", "saf_sd",
+                  "saf_scale", "n_imm", "ring", "cut_w"):
             setattr(out, k, getattr(self, k))
         return out
 
@@ -140,7 +161,11 @@ class EdgePupil(uipsf.ZernikePupil):
         extra = []
         if self.cos:
             extra.append(ParamSpec("pupil.centre_g", (), init=0.05, transform=Bounded(0.0, 2.0)))
-        elif self.mono:
+        if self.steps:
+            # monotone: every step falls; signed: a correction either way, smooth but no longer monotone
+            low, init = (-3.0, 0.0) if self.signed else (0.0, 0.02)
+            extra.append(ParamSpec("pupil.centre_d", (STEPS,), init=init, transform=Bounded(low, 3.0)))
+        if self.mono and not (self.cos or self.steps):
             extra.append(ParamSpec("pupil.centre_a", (), init=0.05, transform=Bounded(0.0, 2.0)))
             if self.quartic:
                 extra.append(ParamSpec("pupil.centre_b", (), init=0.02, transform=Bounded(0.0, 2.0)))
@@ -167,10 +192,12 @@ class EdgePupil(uipsf.ZernikePupil):
         """The symmetric factor at ``rho`` (the hats added separately): centre × edge."""
         out = torch.ones_like(rho)
         NA, n_med, lam = self.saf_scale
+        if self.steps:
+            out = out * torch.exp(-torch.tensordot(p["pupil.centre_d"], _smooth_steps(rho), dims=([-1], [0])))
         if self.cos:
             cos_imm = torch.sqrt(torch.clamp(1 - (rho * NA / self.n_imm) ** 2, min=1e-6))
             out = out * cos_imm ** p["pupil.centre_g"][..., None, None]
-        elif self.mono:
+        if self.mono and not (self.cos or self.steps):
             a = p["pupil.centre_a"][..., None, None]
             b = p["pupil.centre_b"][..., None, None] if self.quartic else 0.0
             out = out * torch.exp(-a * rho ** 2 - b * rho ** 4)
@@ -224,7 +251,9 @@ class EdgePupil(uipsf.ZernikePupil):
     def edge_values(self, p) -> dict:
         return {k.split(".", 1)[1]: round(float(v), 4) for k, v in p.items()
                 if k in ("pupil.centre_a", "pupil.centre_b", "pupil.edge_rho", "pupil.edge_width", "pupil.edge_nu",
-                         "pupil.saf_h", "pupil.saf_s", "pupil.saf_sd", "pupil.saf_l", "pupil.centre_g")}
+                         "pupil.saf_h", "pupil.saf_s", "pupil.saf_sd", "pupil.saf_l", "pupil.centre_g")} | (
+            {"centre_d": [round(float(v), 4) for v in p["pupil.centre_d"].reshape(-1)]}
+            if "pupil.centre_d" in p else {})
 
 
 def edge_pupil(grid, n_max: int, fit: str) -> EdgePupil:
@@ -236,9 +265,10 @@ def edge_pupil(grid, n_max: int, fit: str) -> EdgePupil:
     words = fit.split()
     order = next((int(w[4:]) for w in words if w.startswith("asym") and w[4:].isdigit()), None)
     asym, saf = "asym" in words or order is not None, "saf" in words
-    if words[0] in ("flat", "cos"):
+    if words[0] in ("flat", "cos", "steps"):
         ring = "layer" if "layer" in words else "bead" if "bead" in words else "height"
-        return EdgePupil(grid, n_max, centre="mono" if words[0] == "flat" else "cos",
+        return EdgePupil(grid, n_max, centre={"flat": "mono"}.get(words[0], words[0]), steps="steps" in words,
+                         signed="signed" in words,
                          edge="hard" if "na" in words else "none", asymmetric=asym, saf=saf or ring != "height",
                          saf_step="s" in words, saf_sd="sd" in words, ring=ring, asym_order=order)
     if words[0] == "mono":
