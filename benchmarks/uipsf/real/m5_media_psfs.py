@@ -28,6 +28,8 @@ from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, sele
 PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
 #: the residual's colour range, a fraction of the bead average's peak
 RESIDUAL = 0.05
+#: the sections' residual range, % of each plane's own peak
+SECTION_RESIDUAL = 10.0
 LABEL = {"zernike": "free Zernikes", "symmetric": "Zernikes, m = 0 only", "cos bead na asym": "cos θ^γ + m ≠ 0",
          "cos bead na": "cos θ^γ, symmetric", "cos signed bead na asym": "cos θ^γ × two-way + m ≠ 0",
          "cos steps bead na asym": "cos θ^γ × monotone + m ≠ 0",
@@ -107,11 +109,14 @@ def draw(folder):
         fig, axes = plt.subplots(n, len(planes), figsize=(1.7 * len(planes) + 1.6, 1.7 * n))
         rows = [("bead average", data, "magma", (0, top))]
         for v in order:
-            m = runs[v]["model"]
+            # each model on the bead average's planes: the planes every used bead reaches can differ by one
+            at = [int(np.argmin(np.abs(runs[v]["z_nm"] - z[k]))) for k in range(len(z))]
+            m = runs[v]["model"][at]
+            own = runs[v]["data"][at]
             dn = float(runs[v]["objective"]) - best
             title = f"{variant_label(v)}\n(+{dn:,.0f} nats)" if dn else f"{variant_label(v)}\n(best)"
             rows.append((title, m, "magma", (0, top)))
-            rows.append(("model − data", m - data, "RdBu_r", (-RESIDUAL * top, RESIDUAL * top)))
+            rows.append(("model − data", m - own, "RdBu_r", (-RESIDUAL * top, RESIDUAL * top)))
         for r, (label, vol, cmap, lim) in enumerate(rows):
             for c, k in enumerate(planes):
                 ax = axes[r, c]
@@ -137,6 +142,66 @@ def draw(folder):
         print(os.path.join(folder, f"{name}.png"))
 
 
+def draw_sections(folder):
+    """The PSFs through z: XZ and YZ sections through the bead's centre, the bead average and each model on a
+    cube root, the residual as a fraction of each plane's own peak (±`SECTION_RESIDUAL`) so that the defocused
+    planes show their misfit beside the focus."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    found = sorted(glob.glob(os.path.join(folder, "*.npz")))
+    for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
+        runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
+                if os.path.basename(f).startswith(name + "__")}
+        order = [v for v in runs if v.partition('+')[0] in LABEL]
+        first = runs[order[0]]
+        z, data = first["z_nm"], first["data"]
+        cy, cx = np.unravel_index(np.nanargmax(np.nansum(data, 0)), data.shape[1:])
+        top = float(np.nanmax(data))
+        px = 105.5                                        # nm, the mean pixel: sections drawn to scale
+        Y, X = data.shape[1:]
+        extent_x = [-(X // 2) * px, (X - X // 2) * px, z.min(), z.max()]
+
+        def sections(vol, cy=cy, cx=cx):
+            return vol[:, cy, :], vol[:, :, cx]           # [z, x], [z, y]
+
+        rows = [("bead average", data, None)]
+        best = min(float(runs[v]["objective"]) for v in order)
+        for v in order:
+            at = [int(np.argmin(np.abs(runs[v]["z_nm"] - zk))) for zk in z]
+            m, own = runs[v]["model"][at], runs[v]["data"][at]
+            dn = float(runs[v]["objective"]) - best
+            rows.append((f"{variant_label(v)}\n(+{dn:,.0f} nats)" if dn else f"{variant_label(v)}\n(best)", m, None))
+            peak = np.nanmax(own, axis=(1, 2), keepdims=True)
+            rows.append(("model − data,\n% of the plane's peak", (m - own) / peak * 100, "residual"))
+        fig, axes = plt.subplots(len(rows), 2, figsize=(6.4, 2.0 * len(rows)), squeeze=False)
+        for r, (label, vol, kind) in enumerate(rows):
+            for c, (sec, axis) in enumerate(zip(sections(vol), ("x", "y"), strict=True)):
+                ax = axes[r, c]
+                if kind is None:
+                    img = np.cbrt(np.clip(sec, 0, None) / top)
+                    ax.imshow(img, cmap="magma", vmin=0, vmax=1, origin="lower", aspect="auto", extent=extent_x)
+                else:
+                    ax.imshow(sec, cmap="RdBu_r", vmin=-SECTION_RESIDUAL, vmax=SECTION_RESIDUAL, origin="lower",
+                              aspect="auto", extent=extent_x)
+                ax.set_xticks([-1000, 0, 1000])
+                ax.tick_params(labelsize=6)
+                if r == 0:
+                    ax.set_title(f"{axis}z section", fontsize=8)
+                if r == len(rows) - 1:
+                    ax.set_xlabel(f"{axis} (nm)", fontsize=7)
+                if c == 0:
+                    ax.set_ylabel(f"{label}\nz (nm)", fontsize=6.5)
+        cond = (f"{first['colour']} nm, {'oil' if str(first['medium']) == 'match' else 'buffer'}, {first['lens']}"
+                + (f", {float(first['bead_nm']):.0f} nm beads" if "bead_nm" in first else ""))
+        fig.suptitle(f"{cond}: through z (cube root; residual ±{SECTION_RESIDUAL:.0f} % of each plane's peak)",
+                     fontsize=8)
+        fig.tight_layout()
+        fig.savefig(os.path.join(folder, f"{name}_sections.png"), dpi=130)
+        plt.close(fig)
+        print(os.path.join(folder, f"{name}_sections.png"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("acquisitions", nargs="*")
@@ -153,6 +218,7 @@ def main():
     args = ap.parse_args()
     if args.draw:
         draw(args.draw)
+        draw_sections(args.draw)
     else:
         learn(args)
 

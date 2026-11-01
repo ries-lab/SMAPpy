@@ -14,7 +14,12 @@ order 8 and σx, σy free, on the consensus beads:
 1. *reference*, every pixel of the ROI;
 2. *masked*: only the pixels within ``--radii`` pixels of the ROI's centre count in the likelihood
    (`Batch.mask`), the model drawn as before -- if the wings set the shape, the core comes back;
-3. *probes* on the reference (`diagnostics.probe_terms`): a planar background per bead, a z scale and a
+3. *floor*: every pixel, with a variance floor ε² added to the read noise's (``batch.s``), ε² measured on
+   the reference as the variance its background-dominated pixels have beyond μ + s (`wing_variance`): a
+   soft mask the data choose (the user's, 1 November 2026) -- a pixel of the core, μ in the thousands, keeps
+   its weight 1/(μ + s); a background pixel's falls to 1/(μ + s + ε²); in between, in between, so the
+   defocused slices' wings lose weight where they are weak and the likelihood stays a likelihood;
+4. *probes* on the reference (`diagnostics.probe_terms`): a planar background per bead, a z scale and a
    photon factor per slice shared by the beads, each refitted from the fit, its gain in nats and its values.
 
 Per fit: σ, the objective, the bends (`bead_slices.measure`), the core -- model minus bead average at the
@@ -66,6 +71,40 @@ def core_and_rings(views) -> dict:
     return out
 
 
+def wing_variance(cal, batch, noise, share: float = 1.0) -> dict:
+    """ε², the variance the background-dominated pixels have beyond the noise model's μ + s (photons²): the
+    pixels whose PSF part is below ``share`` of the background (1: no more PSF than background -- at M5's
+    5 photons of background a tenth of it left 0.1 % of the pixels), on the fit's own expected image.  With a right
+    model it is 0; a background, haze or offset off by a few photons per pixel makes it the square of that.
+    Also the share of the signal-weighted information, Σ(μ − b)²/(μ + s), that a floor of ε² keeps."""
+    from uipsf.solve import Problem
+    problem = Problem(cal.model, noise, batch, chunk_size=1)
+    with torch.no_grad():
+        mu = problem.expected(cal.result.params).cpu().double()
+        b = batch.to(problem.device)
+        p = {k: v.to(problem.device) for k, v in cal.result.params.physical().items()}
+        bg = torch.as_tensor(cal.model.background(p, b)).cpu().double().expand_as(mu)
+    d = batch.data.cpu().double()
+    s = torch.as_tensor(batch.s if batch.s is not None else 0.0).cpu().double().expand_as(mu)
+    valid = batch.mask.cpu().expand_as(mu) if batch.mask is not None else torch.ones_like(mu, dtype=torch.bool)
+    wings = valid & ((mu - bg) < share * bg)
+    eps2 = float(((d - mu) ** 2 - mu - s)[wings].mean())
+    signal = (mu - bg).clamp(min=0)
+    full = float((signal ** 2 / (mu + s))[valid].sum())
+    kept = float((signal ** 2 / (mu + s + max(eps2, 0.0)))[valid].sum())
+    # where the excess lives: (d − μ)² − μ − s in bins of μ, so that a misfit near the core (a systematic, not
+    # a variance) is told from extra variance in the background
+    excess = ((d - mu) ** 2 - mu - s)[valid]
+    m = mu[valid]
+    edges = torch.quantile(m.float(), torch.tensor([0.0, 0.5, 0.8, 0.95, 0.99, 1.0])).double()
+    by_mu = [dict(mu=round(float(m[(m >= lo) & (m <= hi)].mean()), 2),
+                  excess=round(float(excess[(m >= lo) & (m <= hi)].mean()), 2))
+             for lo, hi in zip(edges[:-1], edges[1:], strict=True)]
+    return dict(wing_excess_var=round(eps2, 3), wing_pixels=round(float(wings.sum() / valid.sum()), 3),
+                excess_by_mu=by_mu,
+                background_median=round(float(bg[valid].median()), 2), floor_keeps_info=round(kept / full, 4))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("acquisitions", nargs="+")
@@ -106,12 +145,20 @@ def main():
         model = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free", blur_nm=30.0, bead_diameter_nm=bead_nm)
         Y, X = rois.batch.data.shape[-2:]
         yy, xx = np.mgrid[:Y, :X]
-        for radius in [None] + list(args.radii):
-            fit = "reference" if radius is None else f"mask r{radius:g}"
+        fits = [("reference", None)] + [(f"mask r{r:g}", r) for r in args.radii] + [("floor", None)]
+        for fit, radius in fits:
             if (name, fit) in have:
                 continue
             t0 = time.perf_counter()
             r = copy.copy(rois)
+            if fit == "floor":
+                ref = next((x for x in done if x["acquisition"] == name and x["fit"] == "reference"), None)
+                eps2 = ref.get("wing_excess_var") if ref else None
+                if eps2 is None or eps2 <= 0:
+                    print(name, "floor: no excess variance in the wings, nothing to add", flush=True)
+                    continue
+                s0 = r.batch.s if r.batch.s is not None else torch.zeros((), dtype=r.batch.data.dtype)
+                r.batch = dataclasses.replace(r.batch, s=s0 + eps2)
             if radius is not None:
                 keep_px = torch.as_tensor(np.hypot(yy - Y // 2, xx - X // 2) <= radius)
                 base = r.batch.mask if r.batch.mask is not None else torch.ones_like(r.batch.data, dtype=torch.bool)
@@ -121,20 +168,25 @@ def main():
             cal = run.cal
             p = cal.result.params.physical()
             row = dict(acquisition=name, **cond, fit=fit, radius_px=radius, roi_px=[Y, X], used=len(cal.beads.used),
+                       floor_var=eps2 if fit == "floor" else None,
                        objective=round(float(cal.result.objective), 1),
                        sigma_nm=p["psf.sigma"].detach().cpu().double().numpy().round(2).tolist(),
                        atlas_mean_deviance=round(float(cal.atlas.mean_deviance), 3))
             row.update(core_and_rings(pupil_views(run)))
             row.update(measure(run, 600.0, centre_nm=[rois.records[i]["focus_nm"] for i in cal.beads.used]))
-            if radius is None and not args.no_probes:
+            if fit == "reference":
                 batch = on_model_device(rois.batch.thinned(args.dz), cal.model).subset(torch.tensor(cal.beads.used))
+                row.update(wing_variance(cal, batch, rois.noise))
+            if fit == "reference" and not args.no_probes:
                 found = probes.probe_terms(cal.model, cal.result.params, batch, rois.noise)
                 row["probes"] = {q.term: dict(gain=round(float(q.gain), 1), threshold=round(q.threshold, 1),
                                               values={k: v.cpu().double().numpy().round(4).tolist()
                                                       for k, v in q.values.items()}) for q in found}
             row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
             emit(row, args.out)
-            print(name, fit, "σ", row["sigma_nm"], "core", row["core_pct"], "wings", row["wings_pct"],
+            done.append(json.loads(json.dumps(row, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))))
+            eps = row.get("wing_excess_var", row.get("floor_var"))
+            print(name, fit, "ε²", eps, "σ", row["sigma_nm"], "core", row["core_pct"], "wings", row["wings_pct"],
                   {k: v["gain"] for k, v in row.get("probes", {}).items()}, f"{row['minutes']} min", flush=True)
 
 
