@@ -274,7 +274,7 @@ def draw_bends(folder, axis: int = 2, lim: float = 60.0):
             if r == 0:
                 ax.set_title(variant_label(v), fontsize=6.5)
             if c == 0:
-                short = n.replace("20261029_", "").replace("_50ms", "").replace("_1", "")
+                short = n.replace("20261029_", "").replace("_50ms", "").removesuffix("_1")
                 ax.set_ylabel(f"{short}\n{'xyz'[axis]} error (nm)", fontsize=6.5)
             if r == len(names) - 1:
                 ax.set_xlabel("z about focus (nm)", fontsize=6.5)
@@ -282,6 +282,39 @@ def draw_bends(folder, axis: int = 2, lim: float = 60.0):
                  "median black", fontsize=8)
     fig.tight_layout()
     out = os.path.join(folder, f"bends_{'xyz'[axis]}.png")
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    print(out)
+
+
+def draw_fields(folder):
+    """The beads on the chip per acquisition (rows) and model (columns): `m5_bends.field_map`."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from m5_bends import field_map
+    found = sorted(glob.glob(os.path.join(folder, "*.npz")))
+    names = sorted({os.path.basename(f).split("__")[0] for f in found})
+    variants = list(dict.fromkeys(os.path.basename(f).split("__")[1][:-4].replace("_", " ") for f in found))
+    variants = [v for v in variants if all(os.path.exists(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
+                                           for n in names)]
+    if not names or not variants or "bead_z" not in np.load(found[0]).files:
+        return
+    fig, axes = plt.subplots(len(names), len(variants), figsize=(2.8 * len(variants), 2.7 * len(names)),
+                             squeeze=False)
+    pts = None
+    for r, n in enumerate(names):
+        for c, v in enumerate(variants):
+            d = np.load(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
+            pts = field_map(axes[r, c], d["bead_x_px"], d["bead_y_px"], d["bead_error"], d["bead_z"])
+            if r == 0:
+                axes[r, c].set_title(variant_label(v), fontsize=6.5)
+            if c == 0:
+                axes[r, c].set_ylabel(n.replace("20261029_", "").replace("_50ms", "").removesuffix("_1"), fontsize=6.5)
+    fig.colorbar(pts, ax=axes.ravel().tolist(), shrink=0.4, label="z scale − 1 (%)")
+    fig.suptitle("each bead through focus on the chip: arrow, lateral slope (20 px = 20 nm/µm); colour, z scale; "
+                 "size, z error about its line", fontsize=8)
+    out = os.path.join(folder, "field.png")
     fig.savefig(out, dpi=130)
     plt.close(fig)
     print(out)
@@ -306,6 +339,7 @@ def main():
         draw_sections(args.draw)
         for axis in (2, 0, 1):
             draw_bends(args.draw, axis, 60.0 if axis == 2 else 20.0)
+        draw_fields(args.draw)
     else:
         learn(args)
 
