@@ -200,8 +200,10 @@ and excitation (the donuts of MINFLUX and STED, above).
   stratified in the field too; splines at other depths; stage tilt (`FocalSurface`).
 - **Field dependence:** `NodalPolynomial` (the NAT term table, Droste et al. 2025), a B-spline residual, the
   axis centre and the focal surface; Zenodo `1ch_FD_bead`.  The study and the choice of representation and fitter:
-  `docs/uipsf/field-dependence.md` (a nodal polynomial plus a gridded residual; splines on a 5 × 5 to 7 × 7
-  grid, blended bilinearly per spot).  (uiPSF v1's map export to FD-DeepLoc is
+  `docs/uipsf/field-dependence.md`.  **Done in part (November 2026):** beads, one channel: astigmatism and
+  coma as polynomials of the chip position (`FieldPolynomial`), its report, node splines over the chip
+  blended per spot in Spline 3D (`docs/uipsf/architecture.md`, "Field dependence").  Next: the gridded
+  residual, two channels, in situ, the focal surface for large fields.  (uiPSF v1's map export to FD-DeepLoc is
   misregistered by n/(n−1), review §E.)
 
 ### Physics (M8 and this session's studies)

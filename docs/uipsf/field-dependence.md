@@ -2,7 +2,7 @@
 
 A study, November 2026: the literature, the options for uipsf's coefficient field (`plan.md` §3, the slot
 `NodalPolynomial` + `BSplineResidual` + `FocalSurface`) and for SMAPpy's fitter (`plan.md` §7.3), and
-measurements on synthetic data that decide between them.  Nothing here is implemented yet.
+measurements on synthetic data that decide between them.  What v1 built of it is §8.
 
 **In short.**
 - *Representation in uipsf:* the Zernike coefficients as a nodal-aberration-theory polynomial of the field
@@ -208,8 +208,23 @@ visible only where absolute z across the field matters.  Two places where it doe
 grid cannot take a focal surface: grid PSFs shifted in z do not blend into a shifted PSF; a z offset map,
 applied to the fitted z, is exact and costs nothing.  So it is left out until fields grow or in situ needs it.
 
-## 8. Open
+## 8. What is built (v1, November 2026)
 
-- The C++ blend's speed.
-- Whether the residual's prior keeps a bead calibration of 20–50 beads stable.
+Decided with the user: beads only, one channel, no gridded residual and no focal surface yet; *field
+dependence* is a tick in the PSF calibration window, and the run reports whether the field is real.
+
+- **Learning:** `FieldPolynomial` (`src/uipsf/model/field.py`) -- not NAT's coupled form but a polynomial of
+  each mode: astigmatism to second order, coma to first, 14 coefficients.  NAT's form is exact only in the
+  frame where the pupil's axes and the field's agree in handedness; a mirror in the detection path
+  conjugates one against the other, and the polynomial holds NAT's terms in any frame.
+- **The report:** `diagnostics.field_report`, a Wald test of the coefficients and each mode's largest change
+  over the beads, in the window's summary.
+- **Export and fitting:** node splines on the smallest grid that keeps the blend within 0.5 % of the PSF's
+  peak (one node when the field is flat), blended per spot in C++, 1.7× the time of one spline.
+
+`docs/uipsf/architecture.md`, "Field dependence", has the details and the measurements.
+
+## 9. Open
+
+- Whether the residual's prior keeps a bead calibration of 20–50 beads stable (the residual is not built).
 - Whether a larger field (Zenodo `1ch_FD_bead`) needs the quadratic terms, coma or 7 × 7.

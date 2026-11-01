@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 
 namespace smappy {
@@ -274,6 +275,62 @@ struct CSpline {
         theta[3] = std::max(theta[3], 0.01f);
         theta[4] = std::max(theta[4], 0.0f);
         theta[4] = std::min(theta[4], static_cast<float>(nz));
+    }
+};
+
+// Cubic spline PSF that varies over the field of view: the splines of a grid of
+// field positions ("nodes"), blended per ROI with the bilinear weights of its
+// chip position (`smappy.field_splines`).  A spline is linear in its
+// coefficients, so the blend of the four nodes' coefficients is exactly the
+// spline of the blended PSFs (docs/uipsf/field-dependence.md, section 5).
+// coeff is (G, 64, nz, ny, nx); `use(node, weight)` before each fit names the
+// up to four nodes and their weights; theta and everything else as CSpline.
+struct CSplineField : CSpline {
+    int n_used = 0;
+    const float* used[4] = {nullptr, nullptr, nullptr, nullptr};
+    float weight[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    const float* nodes_all;     // every node's coefficients; `coeff` points at the heaviest used
+    std::ptrdiff_t node_size;
+
+    CSplineField(const float* c, int nx_, int ny_, int nz_, float z0)
+        : CSpline(c, nx_, ny_, nz_, z0), nodes_all(c),
+          node_size(static_cast<std::ptrdiff_t>(64) * nx_ * ny_ * nz_) {}
+
+    // Nodes with no weight are skipped: a ROI on a node costs what CSpline does.
+    void use(const int* nodes, const float* weights) {
+        n_used = 0;
+        for (int k = 0; k < 4; ++k) {
+            if (weights[k] == 0.0f) continue;
+            used[n_used] = nodes_all + nodes[k] * node_size;
+            weight[n_used] = weights[k];
+            ++n_used;
+        }
+        // init reads the spline's centre through `coeff`: the first used node's
+        coeff = n_used ? used[0] : nodes_all;
+    }
+
+    void value(int ix, int iy, const float* theta, float* dudt, float* model) const {
+        int xc = std::min(std::max(ix + xstart + off_x, 0), nx - 1);
+        int yc = std::min(std::max(iy + ystart + off_y, 0), ny - 1);
+        int zc = std::min(std::max(zstart, 0), nz - 1);
+
+        const int base = (zc * ny + yc) * nx + xc;
+        const int stride = nx * ny * nz;
+        float temp = 0.0f, dx = 0.0f, dy = 0.0f, dz = 0.0f;
+        for (int i = 0; i < 64; ++i) {
+            float c = 0.0f;
+            for (int k = 0; k < n_used; ++k) c += weight[k] * used[k][i * stride + base];
+            temp += delta_f[i] * c;
+            dx += delta_dx[i] * c;
+            dy += delta_dy[i] * c;
+            dz += delta_dz[i] * c;
+        }
+        dudt[0] = -theta[2] * dx;
+        dudt[1] = -theta[2] * dy;
+        dudt[4] = theta[2] * dz;
+        dudt[2] = temp;
+        dudt[3] = 1.0f;
+        *model = theta[3] + theta[2] * temp;
     }
 };
 

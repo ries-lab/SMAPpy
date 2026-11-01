@@ -1,6 +1,6 @@
 ---
 version: "6"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil]
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear]
 ---
 
 ## What it does
@@ -362,7 +362,19 @@ above, at the learnt focus.  It is kept in the configuration directory's
 would take it for a bead calibration), and the run fits with it as
 *as calibrated*, so the history names the file.
 
-**Compared with the paper.****Compared with the paper.**  The method is that of
+**A PSF that varies over the field.**  A calibration learnt with *field
+dependence* in the [PSF calibration](plugin:Panels/PSF calibration) holds one
+spline per point of a grid over the chip, as many as its learnt astigmatism
+and coma need: one when the field is flat.  Each spot is then fitted with the
+four splines around its place on the chip, blended in proportion to how near
+each is (bilinearly).  A spline is linear in its coefficients, so the blend is
+exactly the spline of the blended PSFs.  A spot outside the grid takes its
+edge's splines.  With four splines a fit takes about 1.7 times as long as
+with one.  A *focus* in the sample draws every spline of the grid at that
+depth.  The study behind it, with the bias it removes,
+is in the repository's `docs/uipsf/field-dependence.md`.
+
+**Compared with the paper.**  The method is that of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661); what the code does
 differently (the first two concern the Bead calibration tool; a SMAP
 calibration brings its own coefficients):

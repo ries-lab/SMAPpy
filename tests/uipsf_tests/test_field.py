@@ -143,3 +143,56 @@ def test_a_model_file_keeps_the_field_and_draws_the_psf_where_it_is_asked(tmp_pa
     far = learned.psf(xyz, roi_px=11, field_xy=(1000.0, 500.0))
     assert not torch.allclose(centre, far, atol=1e-4)
     assert torch.allclose(far, cal.psf(xyz, roi_px=11, field_xy=(1000.0, 500.0)), atol=1e-6)
+
+
+@pytest.mark.slow
+def test_a_learnt_field_becomes_node_splines_that_fit_spots_at_the_edge_without_bias():
+    import numpy as np
+    from smappy.calibrate.pupil import spline_calibration
+    from smappy.psf import SplinePSF
+
+    from uipsf.workflows import learn_beads
+    model, truth, batch = field_beads(truth_field={(6, 1, 0): 0.4, (5, 0, 1): 0.3, (8, 1, 0): 0.15},
+                                      dtype=torch.float32)
+    cal = learn_beads(model, batch, first_order=None)
+    spline = spline_calibration(cal, 20.0, 600.0, 15)
+    field = spline.field_splines
+    assert field is not None and field.shape[0] >= 3
+    # spots simulated with the true model near a corner of the beads' span, fitted with and without the field
+    xy = np.asarray(cal.beads_field_xy())
+    corner = xy.max(0) - 20
+    rng = np.random.default_rng(0)
+    n = 1500
+    xyz = np.c_[rng.uniform(-50, 50, (n, 2)), rng.uniform(-400, 400, n)]
+    from uipsf.export import sample_psf
+    true = {k: v for k, v in truth.physical().items() if truth.specs[k].scope == "shared"}
+    mu = sample_psf(model, true, xyz, roi_px=11, field_xy=tuple(corner)).double().numpy()
+    rois = rng.poisson(mu * 5000 + 10).astype(np.float32)
+    psf = SplinePSF(spline)
+    fielded = psf.unpack(psf.fit(rois, 50, 2, chip_xy=np.tile(corner, (n, 1))))
+    plain = psf.unpack(psf.fit(rois, 50, 2))
+    bins = np.digitize(xyz[:, 2], np.arange(-400, 401, 100))
+
+    def bias(r):
+        e = r["z_nm"] - xyz[:, 2]
+        return np.sqrt(np.mean([np.median(e[bins == q]) ** 2 for q in np.unique(bins)]))
+    assert bias(fielded) < 6 and bias(plain) > 2 * bias(fielded), (bias(fielded), bias(plain))
+
+
+def test_a_spline_drawn_at_a_depth_in_the_sample_keeps_its_field_nodes():
+    from smappy.calibrate.depth import depth_spline
+    from smappy.calibrate.pupil import spline_calibration
+
+    from uipsf.export import LearnedPSF, describe
+    model, truth, _ = field_beads(n=2, truth_field={(6, 1, 0): 0.5}, dtype=torch.float32)
+    shared = {k: v for k, v in truth.physical().items() if truth.specs[k].scope == "shared"}
+    beads = [{"state": "used", "field_x": x, "field_y": y} for x, y in ((0.0, 0.0), (1000.0, 1000.0))]
+    learned = LearnedPSF(model, shared, {}, describe(model), beads=beads)
+    spline = spline_calibration(learned, 50.0, 500.0, 11)
+    assert spline.field_splines is not None
+    deep = depth_spline(spline, 2000.0, learned=learned)
+    assert deep.field_splines.shape == spline.field_splines.shape
+    assert deep.field_splines.coeff.shape[2:] == deep.coeff.shape[1:]
+    # the nodes differ from each other at depth too: the field is still there
+    nodes = torch.as_tensor(deep.field_splines.coeff)
+    assert not torch.allclose(nodes[0], nodes[-1])

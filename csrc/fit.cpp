@@ -41,8 +41,16 @@ std::pair<py::ssize_t, int> check_rois(const Array& rois) {
     return {rois.shape(0), static_cast<int>(rois.shape(1))};
 }
 
-template <class Model>
-Output run(const Model& model, const Array& rois, int iterations, int n_threads) {
+struct NoSetup {
+    template <class Model>
+    void operator()(Model&, py::ssize_t) const {}
+};
+
+// ``setup(model, i)`` prepares the thread's copy of the model for ROI i (a
+// field-dependent spline's nodes and weights); by default nothing.
+template <class Model, class Setup = NoSetup>
+Output run(const Model& model, const Array& rois, int iterations, int n_threads,
+           Setup setup = Setup()) {
     constexpr int NV = Model::NV;
     // (structured bindings cannot be captured by a lambda in C++17)
     const auto dims = check_rois(rois);
@@ -67,9 +75,11 @@ Output run(const Model& model, const Array& rois, int iterations, int n_threads)
     auto worker = [&](py::ssize_t begin, py::ssize_t end) {
         // each fit is independent: no shared state, no synchronisation
         Model local = model;  // per-thread copy (the spline keeps scratch space)
-        for (py::ssize_t i = begin; i < end; ++i)
+        for (py::ssize_t i = begin; i < end; ++i) {
+            setup(local, i);
             lm_fit(local, data + i * sz * sz, sz, iterations, theta + i * NV,
                    crlb + i * NV, logl + i, iters + i);
+        }
     };
 
     {
@@ -115,6 +125,33 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
     const int nx = static_cast<int>(coeff.shape(3));
     smappy::CSpline model(coeff.data(), nx, ny, nz, z_start);
     return as_tuple(run(model, rois, iterations, n_threads));
+}
+
+// A field-dependent spline: coeff (G, 64, nz, ny, nx), the splines of G field
+// positions; nodes (n, 4) int32 and weights (n, 4) per ROI, the nodes blended
+// for it and their weights (`smappy.field_splines.bilinear`).
+py::tuple fit_cspline_field(const Array& rois, const Array& coeff,
+                            const py::array_t<int, py::array::c_style | py::array::forcecast>& nodes,
+                            const Array& weights, float z_start, int iterations, int n_threads) {
+    if (coeff.ndim() != 5 || coeff.shape(1) != 64)
+        throw std::invalid_argument(
+            "field spline coefficients must have shape (G, 64, nz, ny, nx)");
+    const auto n = check_rois(rois).first;
+    if (nodes.ndim() != 2 || nodes.shape(0) != n || nodes.shape(1) != 4 ||
+        weights.ndim() != 2 || weights.shape(0) != n || weights.shape(1) != 4)
+        throw std::invalid_argument("nodes and weights must have shape (n, 4), one row per ROI");
+    const int G = static_cast<int>(coeff.shape(0));
+    const int* nd = nodes.data();
+    for (py::ssize_t i = 0; i < 4 * n; ++i)
+        if (nd[i] < 0 || nd[i] >= G)
+            throw std::invalid_argument("a node index is outside the spline grid");
+    const int nz = static_cast<int>(coeff.shape(2));
+    const int ny = static_cast<int>(coeff.shape(3));
+    const int nx = static_cast<int>(coeff.shape(4));
+    smappy::CSplineField model(coeff.data(), nx, ny, nz, z_start);
+    const float* w = weights.data();
+    auto setup = [nd, w](smappy::CSplineField& m, py::ssize_t i) { m.use(nd + 4 * i, w + 4 * i); };
+    return as_tuple(run(model, rois, iterations, n_threads, setup));
 }
 
 // Global (multi-channel) fits.  One emitter, one ROI per channel, with the
@@ -578,6 +615,10 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("z_start"), py::arg("iterations") = 50, py::arg("n_threads") = 0,
           "Fit (x, y, photons, background, z) with a cubic-spline PSF.");
 
+    m.def("fit_cspline_field", &fit_cspline_field, py::arg("rois"), py::arg("coeff"),
+          py::arg("nodes"), py::arg("weights"), py::arg("z_start") = 0.0f,
+          py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          "Fit (x, y, N, bg, z) with splines blended per ROI over the field.");
     m.def("fit_cspline_global", &fit_cspline_global, py::arg("rois"),
           py::arg("coeff"), py::arg("link"), py::arg("shared"), py::arg("z_start"),
           py::arg("iterations") = 50, py::arg("n_threads") = 0,

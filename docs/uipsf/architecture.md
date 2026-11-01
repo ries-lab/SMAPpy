@@ -2239,3 +2239,31 @@ count per observation learn in 0.5 min (5.0 by JVPs).  The results, against v1's
 symmetric point where it has no curvature, so the learning reaches one optimum or its swap, whatever the
 rounding.  The window's vectorial model learns a rotationally symmetric magnitude (`magnitude_modes`,
 `optics.zernike.symmetric_modes`): free in every mode it had three optima on v1's beads.
+
+## Field dependence (November 2026; `model/field.py`, `smappy/field_splines.py`)
+
+The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
+
+- **`model.field.FieldPolynomial`**, a channel's coefficient field (`Channel(field=…)`): astigmatism (Noll 5, 6)
+  to second order and coma (7, 8) to first in (u, v), the sample-plane distance from ``centre_px`` in units
+  of 50 µm, each mode a polynomial of its own, ``field.phase`` [14].  `ForwardModel.channel_params` hands
+  each channel's PSF ``pupil.phase`` as [E, n], one pupil per emitter; the pupil and emitter
+  linearisations read it the same way, so the solver's field columns come from `pupil_linearisation`
+  (`test_field.py` checks them against the Jacobian).  Bead learning only: in situ sets it off.
+- **The report**, `diagnostics.field_report`: per mode the largest change across the used beads with its
+  CRLB, and a Wald test of the 14 coefficients against zero, ½ c·C⁻¹·c in nats against ½ χ²(10⁻⁶): no
+  refit.  The PSF calibration window's summary prints it when *field dependence* is ticked.
+- **The model file**, version 4 for a field (the channel's ``field`` entry); `sample_psf(…, field_xy=)`
+  draws the PSF at a chip position, the field's centre by default.
+- **SMAPpy's splines**: `calibrate.pupil.field_splines` samples the model on the smallest grid of
+  `field_splines.GRIDS` over the used beads' span whose bilinear blend stays within 0.5 % of the PSF's peak
+  (`field_splines.grid_size`), every node normalised by the centre's scale; one node means no field
+  splines.  The calibration file keeps them in an optional ``/field`` group; ``coeff`` is the centre's.
+  `depth.depth_spline` redraws every node at a focus in the sample.
+- **The fitter**, `fit_cspline_field` (`csrc/models.hpp`, `CSplineField`): per ROI its four nodes and
+  bilinear weights, the coefficients blended before the tricubic evaluation; `SplinePSF.fit(…, chip_xy=)`
+  and the localisation engine pass each ROI's chip centre (candidate + camera ROI offset).  Speed on four
+  cores, 13 px ROIs: one spline 14 800 fits/s, the field with one node 17 900, with four 8 600 (1.7×).
+- **Measured**: beads simulated with a field give it back within 0.02 rad; a learnt strong field (0.4 rad
+  of astigmatism per 50 µm over a 110 µm span) became a 9 × 9 grid, and spots near the span's corner fitted
+  with it had a z bias of 3 nm against 144 nm with the centre's spline alone.

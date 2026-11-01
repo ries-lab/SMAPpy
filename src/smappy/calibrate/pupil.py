@@ -369,14 +369,15 @@ def z_grid(dz_nm: float, z_range_nm: float) -> tuple[np.ndarray, float]:
 
 
 def sample(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int | None = UPSAMPLE,
-           channel: int = 0) -> np.ndarray:
+           channel: int = 0, field_xy=None) -> np.ndarray:
     """The learnt PSF of ``channel`` as a voxel stack [z, y, x] for a point emitter on the central pixel,
     each pixel as the model sees it (`UPSAMPLE`): what a bead average is, without its noise.  ``learned`` is a uipsf
     `Calibration` or `LearnedPSF`; the bead's size is left out, the learnt blur kept, the channel's
     photon share and defocus offset included (`uipsf.export.sample_psf`)."""
     z, _ = z_grid(dz_nm, z_range_nm)
     xyz = np.c_[np.zeros((len(z), 2)), z]
-    return learned.psf(xyz, roi_px=roi_size, upsample=upsample, channel=channel).double().numpy()
+    where = {} if field_xy is None else dict(field_xy=field_xy)      # a field-dependent model: where on the chip
+    return learned.psf(xyz, roi_px=roi_size, upsample=upsample, channel=channel, **where).double().numpy()
 
 
 def _zernikes(learned) -> list:
@@ -424,17 +425,65 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
         raise ValueError("a model of several channels makes a dual calibration (`dual_calibration`)")
     _, z0 = z_grid(dz_nm, z_range_nm)
     psf = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample), 0)
-    psf /= float(psf.sum(axis=(1, 2)).max())
+    scale = float(psf.sum(axis=(1, 2)).max())
+    psf /= scale
+    field = field_splines(learned, dz_nm, z_range_nm, roi_size, upsample, scale)
     parameters = dict(_record(learned, dz_nm, z_range_nm, roi_size, upsample),
                       normalization="maximum plane sum = 1")
     psf = psf.astype(np.float32)
     if getattr(camera, "microscope", None):
         parameters["microscope"] = dict(camera.microscope)
+    if field is not None:
+        # ``psf`` is the field's centre, the middle of the beads' span and so of the grid: the spline a
+        # reader that ignores the field fits with
+        parameters["field_grid"] = list(field.shape)
     return SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
                              em_on=None if camera is None else bool(camera.is_em),
                              pixelsize_um=None if camera is None or camera.pixelsize_um is None
                              else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
-                             parameters=parameters)
+                             parameters=parameters, field_splines=field)
+
+
+def field_extent(learned):
+    """((x, y) lowest, (x, y) highest) chip pixels of the beads a field-dependent model was learnt on: where
+    its field is known, and so the span of its spline grid; None without a field or bead positions."""
+    if all(getattr(ch, "field", None) is None for ch in learned.model.channels):
+        return None
+    if callable(getattr(learned, "beads_field_xy", None)):
+        xy = learned.beads_field_xy()
+    else:                                       # a loaded model file: its bead table
+        xy = [[b["field_x"], b["field_y"]] for b in learned.beads
+              if b.get("state") == "used" and "field_x" in b]
+    if not xy:
+        return None
+    xy = np.asarray(xy, float)
+    return xy.min(0), xy.max(0)
+
+
+def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsample, scale: float):
+    """The node splines of a field-dependent model (`smappy.field_splines`), on the smallest grid over the
+    beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the centre's
+    ``scale`` so that the blend is one; None without a field, or when one spline is enough."""
+    from ..field_splines import FieldSplines, grid_nodes, grid_size
+    from .core import spline_coefficients
+    extent = field_extent(learned)
+    if extent is None:
+        return None
+    lo, hi = extent
+    cache = {}
+
+    def psf_at(x, y):
+        key = (round(float(x), 3), round(float(y), 3))
+        if key not in cache:
+            cache[key] = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, field_xy=key), 0) / scale
+        return cache[key]
+
+    n = grid_size(psf_at, lo, hi)
+    if n == 1:
+        return None
+    xs, ys = grid_nodes(lo[0], hi[0], n), grid_nodes(lo[1], hi[1], n)
+    coeff = np.stack([spline_coefficients(psf_at(x, y).astype(np.float32)) for y in ys for x in xs])
+    return FieldSplines(coeff, xs, ys)
 
 
 def _transform(learned) -> np.ndarray:
