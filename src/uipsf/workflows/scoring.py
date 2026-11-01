@@ -100,7 +100,9 @@ def slice_fits(model, shared: dict, batch, noise, stack_fit: Params, photons: bo
                      batch.mask.expand_as(batch.data).transpose(1, 2).reshape(E * K, C, 1, Y, X),
                      s=batch.s if not isinstance(batch.s, torch.Tensor) or batch.s.dim() == 0 else
                      batch.s.expand_as(batch.data).transpose(1, 2).reshape(E * K, C, 1, Y, X),
-                     field_xy=None, stack_id=None, frame=None,
+                     # each slice keeps its bead's chip position: a field-dependent pupil reads it
+                     field_xy=None if batch.field_xy is None else batch.field_xy.repeat_interleave(K, 0),
+                     stack_id=None, frame=None,
                      roi_xy=None if batch.roi_xy is None else batch.roi_xy.repeat_interleave(K, 0))
     phys = stack_fit.physical()
     N = model.intensity(phys, batch).detach().reshape(-1)

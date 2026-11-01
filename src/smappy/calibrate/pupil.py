@@ -91,6 +91,10 @@ class BeadSettings:
     fit_tilt: bool = param(False, label="learn coverslip tilt",
                            help="learn the coverslip's tilt against the optical axis, mostly a coma: in situ, "
                                 "or beads seen through a coverslip of another index than the immersion's")
+    # docs/uipsf/field-dependence.md: astigmatism and coma varying over the chip, as a polynomial each
+    field_dependence: bool = param(False, label="field dependence",
+                                   help="learn astigmatism and coma that vary over the field of view; the spline "
+                                        "is then one per point of a grid over the chip, blended per spot")
 
     def __post_init__(self):
         if self.magnitude not in dict(MAGNITUDES):
@@ -722,6 +726,15 @@ PASSES_PER_PARAMETER = 2.0
 TIMED_PASSES = 3
 
 
+def field_centre(batch) -> tuple | None:
+    """Where a field-dependent model's field is centred: the middle of the beads' chip positions (their
+    span's, not their mean, so that a cluster of beads does not move it)."""
+    if batch.field_xy is None:
+        return None
+    xy = batch.field_xy.detach().cpu().double().numpy()
+    return tuple(float(v) for v in (xy.min(0) + xy.max(0)) / 2)
+
+
 def learns_tilt(model: BeadSettings, optics) -> BeadSettings:
     """``model`` as a bead run learns it with ``optics`` (`uipsf.Optics`, one per channel): *learn coverslip
     tilt* dropped where the coverslip is the immersion (oil): beads on it see no tilt at all, and the window
@@ -749,7 +762,8 @@ def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings
     channels = batch.data.shape[1]
     found = optics.optics(rois.camera, channels, main_half(rois))
     learnt = bead_model(found, learns_tilt(model, found), tuple(batch.data.shape[-2:]),
-                        [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()))
+                        [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()),
+                        field_centre_px=field_centre(batch))
     one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
     start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
     values = start.physical()

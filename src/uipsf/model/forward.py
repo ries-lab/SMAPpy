@@ -75,7 +75,7 @@ class ForwardModel:
         is and how bright: the solver differentiates the latter through `emitter_linearisation`.  The
         coverslip's tilt enters the PSFs, but `emitter_linearisation` carries its columns when the
         geometry fits it; freed otherwise, it is differentiated through the whole model."""
-        names = {prefix(c) + s.name for c, ch in enumerate(self.channels) for s in ch.psf.specs()}
+        names = {prefix(c) + s.name for c, ch in enumerate(self.channels) for s in ch.psf.specs() + _field_specs(ch)}
         return names if self._tilt_linear() else names | {"geometry.tilt"}
 
     def _tilt_linear(self) -> bool:
@@ -106,6 +106,14 @@ class ForwardModel:
     def _z_step(self, psf, batch):
         return batch.z_step_nm if psf.bead_radius_nm > 0 else None
 
+    def channel_params(self, p, batch, c: int) -> dict:
+        """``p`` as channel ``c``'s PSF reads it (`channels.view`), with one pupil per emitter where the channel
+        has a coefficient field (`model.field`)."""
+        pc = view(p, c)
+        ch = self.channels[c]
+        field = getattr(ch, "field", None)
+        return pc if field is None else field.apply(pc, ch.psf.pupil, batch.field_xy)
+
     def __call__(self, p: dict[str, torch.Tensor], batch) -> torch.Tensor:
         """μ, [E, C, K, Y, X] photons."""
         C = self.n_channels
@@ -116,7 +124,7 @@ class ForwardModel:
         mu = []
         for c, ch in enumerate(self.channels):
             pos, depth = _split(self.positions(p, batch, xyz, c))
-            I = ch.psf(view(p, c), pos, depth, z_step_nm=self._z_step(ch.psf, batch))
+            I = ch.psf(self.channel_params(p, batch, c), pos, depth, z_step_nm=self._z_step(ch.psf, batch))
             mu.append(self.share(p, c) * N * I)
         return torch.stack(mu, 1) + self.background(p, batch)
 
@@ -129,12 +137,12 @@ class ForwardModel:
         N = self.intensity(p, batch)[..., None, None]
         groups = []
         for c, ch in enumerate(self.channels):
-            pc = view(p, c)
+            pc = self.channel_params(p, batch, c)
             pos, depth = _split(self.positions(p, batch, xyz, c))
             f = ch.psf.pupil_linearisation(pc, pos, depth, z_step_nm=self._z_step(ch.psf, batch))
             Nc = self.share(p, c) * N
-            names = [prefix(c) + s.name for s in ch.psf.pupil.specs()]
-            groups.append((c, names, lambda q, c=c, ch=ch: ch.psf.pupil_field(view(q, c)),
+            names = [prefix(c) + s.name for s in ch.psf.pupil.specs() + _field_specs(ch)]
+            groups.append((c, names, lambda q, c=c, ch=ch: ch.psf.pupil_field(self.channel_params(q, batch, c)),
                            lambda dA, f=f, Nc=Nc: Nc * f(dA)))
         return groups
 
@@ -168,7 +176,7 @@ class ForwardModel:
             xyz = self.geometry(p, batch)
             Is, dIs = [], []
             for c, ch in enumerate(self.channels):
-                pc, z_step = view(p, c), self._z_step(ch.psf, batch)
+                pc, z_step = self.channel_params(p, batch, c), self._z_step(ch.psf, batch)
                 xyz_c, depth = _split(self.positions(p, batch, xyz, c))
                 g = ch.psf.grid
                 Is.append(ch.psf(pc, xyz_c, depth, z_step_nm=z_step))
@@ -207,6 +215,12 @@ class ForwardModel:
             return pos, Nc, self.background(q, batch)
 
         return I, dI, parts
+
+
+def _field_specs(channel) -> list:
+    """A channel's coefficient field's parameters, unprefixed (none without a field)."""
+    field = getattr(channel, "field", None)
+    return [] if field is None else field.specs()
 
 
 def _split(positions):

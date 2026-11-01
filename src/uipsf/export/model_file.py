@@ -29,7 +29,9 @@ calibrations, which its global fitter reads: each channel sampled with
 channel's share), the secondary's spline in the camera's orientation, and
 `LearnedPSF.transform(1)` as its ``transformation``.
 
-**Versions.**  3: a layered model, written only when the model needs it --
+**Versions.**  4: a field-dependent pupil (a channel's ``field`` entry, `model.field`, and its
+coefficients ``field.phase``), so that an older reader refuses a model whose PSF it would draw the same
+everywhere.  3: a layered model, written only when the model needs it --
 a coverslip tilt (``geometry.tilt``, its settings in the geometry's entry)
 or a coverslip off its design thickness (``d_cov_nm``, ``d_cov_design_nm``
 in the optics) -- so that an older reader refuses a PSF it would compute
@@ -66,6 +68,7 @@ import torch
 from ..model import (
     Bleaching,
     Constant,
+    FieldPolynomial,
     ForwardModel,
     PerObservation,
     PerSliceFactor,
@@ -79,7 +82,7 @@ from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
-VERSION = 3
+VERSION = 4
 #: the coverslip's entries of the optics, left out where they are the defaults so that a version-2 reader
 #: still builds the optics of a model that does not need them
 _COVERSLIP = {"d_cov_nm": 170_000.0, "d_cov_design_nm": 170_000.0}
@@ -106,7 +109,8 @@ def _describe_channel(ch: Channel) -> dict:
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
                          sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma,
                          round_sigma=psf.round_sigma),
-                transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform)
+                transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform,
+                **({} if getattr(ch, "field", None) is None else dict(field=ch.field.config())))
 
 
 def describe(model: ForwardModel) -> dict:
@@ -148,8 +152,9 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
                     fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False))
+    field = None if config.get("field") is None else FieldPolynomial.from_config(config["field"])
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
-                   name=config.get("name"), fit_transform=config.get("fit_transform", True))
+                   name=config.get("name"), fit_transform=config.get("fit_transform", True), field=field)
 
 
 def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
@@ -177,7 +182,7 @@ SAMPLE_CHUNK = 256
 
 
 def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=None, include_bead=False,
-               upsample: int | None = None, channel: int = 0) -> torch.Tensor:
+               upsample: int | None = None, channel: int = 0, field_xy=None) -> torch.Tensor:
     """The learned PSF of ``channel`` at positions ``xyz_nm`` [N, 3]: [N, Y, X] expected photons per pixel
     for one photon of the emitter, on the CPU.
 
@@ -194,7 +199,8 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     integrated by summing ``upsample``² sub-samples (default the model's); sample the light at more
     of them for a spline that must not inherit the sampling's error.  ``roi_px`` is the region,
     an int or (Y, X), default the model's.  ``depth_nm``, the emitter's height in the sample (in situ,
-    `InSituGeometry`), is one value or one per position.
+    `InSituGeometry`), is one value or one per position.  ``field_xy`` (x, y), chip pixels, is where on
+    the chip a field-dependent model (`model.field`) is drawn; default the field's centre.
     """
     base = model.channels[channel].psf
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
@@ -205,6 +211,10 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     xyz = torch.as_tensor(xyz_nm, dtype=dt, device=dev).reshape(1, -1, 3)
     shared = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}
     p = view(shared, channel)
+    field = getattr(model.channels[channel], "field", None)
+    if field is not None:
+        where = field.centre_px if field_xy is None else field_xy
+        p = field.apply(p, base.pupil, torch.as_tensor(where, dtype=dt, device=dev).reshape(1, 2))
     if channel > 0:
         xyz = xyz + torch.stack([torch.zeros((), dtype=dt, device=dev)] * 2 + [p[prefix(channel) + "dz"].to(dt)])
     step = None
@@ -263,9 +273,10 @@ class LearnedPSF:
     halves: object = None                           # diagnostics.HalfSplits, if the file has them
 
     def psf(self, xyz_nm, roi_px=None, depth_nm=None, include_bead=False, upsample=None,
-            channel: int = 0) -> torch.Tensor:
+            channel: int = 0, field_xy=None) -> torch.Tensor:
         """`sample_psf` on this model."""
-        return sample_psf(self.model, self.shared, xyz_nm, roi_px, depth_nm, include_bead, upsample, channel)
+        return sample_psf(self.model, self.shared, xyz_nm, roi_px, depth_nm, include_bead, upsample, channel,
+                          field_xy)
 
     @property
     def n_channels(self) -> int:
@@ -331,7 +342,8 @@ def save_model(cal, path) -> None:
     res = cal.result
     params = res.params
     with h5py.File(path, "w") as f:
-        f.attrs.update(format=FORMAT, version=VERSION if _layered(cal) else 2, conventions=CONVENTIONS,
+        version = 4 if _field_dependent(cal.model) else 3 if _layered(cal) else 2
+        f.attrs.update(format=FORMAT, version=version, conventions=CONVENTIONS,
                        uipsf=__version__)
         m = f.create_group("model")
         m.attrs["config"] = _json(describe(cal.model))
@@ -371,6 +383,10 @@ def save_model(cal, path) -> None:
         dg.attrs["atlas"] = _json(_atlas(cal.atlas))
         rep = cal.heldout_report
         dg.attrs["heldout"] = _json(None if rep is None else dict(dataclasses.asdict(rep), summary=rep.summary()))
+
+
+def _field_dependent(model) -> bool:
+    return any(getattr(ch, "field", None) is not None for ch in model.channels)
 
 
 def _layered(cal) -> bool:
