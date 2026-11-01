@@ -238,6 +238,15 @@ def draw_sections(folder):
         print(os.path.join(folder, f"{name}_sections.png"))
 
 
+def row_order(name: str) -> tuple:
+    """Acquisitions in rows that pair oil with buffer: by bead size, colour and step, oil first."""
+    import re
+    bead = 40 if name.startswith("40nm") else 100
+    colour = re.search(r"_(600|676)_", name)
+    step = re.search(r"_(0\.\d+)um", name)
+    return (bead, colour[1] if colour else "600", step[1] if step else "", "mismatch" in name, name)
+
+
 def draw_bends(folder, axis: int = 2, lim: float = 60.0):
     """Each bead's error through z, fitted minus expected (``axis``: 0 x, 1 y, 2 z), against its z about its
     own focus: a row per acquisition, a column per model, a line per bead coloured by its x on the chip and
@@ -246,7 +255,7 @@ def draw_bends(folder, axis: int = 2, lim: float = 60.0):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     found = sorted(glob.glob(os.path.join(folder, "*.npz")))
-    names = sorted({os.path.basename(f).split("__")[0] for f in found})
+    names = sorted({os.path.basename(f).split("__")[0] for f in found}, key=row_order)
     variants = list(dict.fromkeys(os.path.basename(f).split("__")[1][:-4].replace("_", " ") for f in found))
     variants = [v for v in variants if all(os.path.exists(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
                                            for n in names)]
@@ -294,7 +303,7 @@ def draw_fields(folder):
     import matplotlib.pyplot as plt
     from m5_bends import field_map
     found = sorted(glob.glob(os.path.join(folder, "*.npz")))
-    names = sorted({os.path.basename(f).split("__")[0] for f in found})
+    names = sorted({os.path.basename(f).split("__")[0] for f in found}, key=row_order)
     variants = list(dict.fromkeys(os.path.basename(f).split("__")[1][:-4].replace("_", " ") for f in found))
     variants = [v for v in variants if all(os.path.exists(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
                                            for n in names)]
