@@ -24,6 +24,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "synthetic")]
 from bead_slices import measure  # noqa: E402,I001
+from m5_bends import per_bead  # noqa: E402
 from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, subset  # noqa: E402
 
 PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
@@ -107,12 +108,18 @@ def learn(args):
                                   decisions={i: "include" for i in range(len(keep))})
             v = pupil_views(run)
             # the bends, each slice localised alone on the model (`bead_slices.measure`), over ±600 nm
-            bends = measure(run, 600.0, centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used])
+            used = list(run.cal.beads.used)
+            bends = measure(run, 600.0, centre_nm=[rois.records[i]["focus_nm"] for i in used])
+            # and every bead's own: the slice fits against its stack fit, its z about its focus, its place
+            each = per_bead(run, [rois.records[i]["focus_nm"] for i in used])
             np.savez_compressed(os.path.join(args.out, f"{name}__{variant.replace(' ', '_')}.npz"),
                                 z_nm=v.z_nm, data=v.data[0], model=v.model[0],
                                 objective=float(run.cal.result.objective), window_nm=args.window,
                                 used=len(run.cal.beads.used), curve_z_nm=np.asarray(bends["curve_z_nm"], float),
                                 curve_nm=np.asarray(bends["curve_nm"], float),
+                                bead_error=each["error"], bead_crlb=each["crlb"], bead_z=each["z"],
+                                bead_x_px=np.array([rois.records[i]["x_px"] for i in used]),
+                                bead_y_px=np.array([rois.records[i]["y_px"] for i in used]),
                                 sigma_nm=run.cal.result.params.physical()["psf.sigma"].detach().cpu().numpy(),
                                 **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm",
                                                          "z_systematic_rms_nm", "z_scatter_over_crlb")}, **cond)
@@ -231,6 +238,55 @@ def draw_sections(folder):
         print(os.path.join(folder, f"{name}_sections.png"))
 
 
+def draw_bends(folder, axis: int = 2, lim: float = 60.0):
+    """Each bead's error through z, fitted minus expected (``axis``: 0 x, 1 y, 2 z), against its z about its
+    own focus: a row per acquisition, a column per model, a line per bead coloured by its x on the chip and
+    the median black.  All beads bent alike is the model's z dependence; a fan ordered by colour is the field."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    found = sorted(glob.glob(os.path.join(folder, "*.npz")))
+    names = sorted({os.path.basename(f).split("__")[0] for f in found})
+    variants = list(dict.fromkeys(os.path.basename(f).split("__")[1][:-4].replace("_", " ") for f in found))
+    variants = [v for v in variants if all(os.path.exists(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
+                                           for n in names)]
+    if not names or not variants or "bead_z" not in np.load(found[0]).files:
+        return
+    fig, axes = plt.subplots(len(names), len(variants), figsize=(2.7 * len(variants), 2.3 * len(names)),
+                             sharex=True, sharey=True, squeeze=False)
+    cmap = plt.get_cmap("viridis")
+    grid = np.arange(-1000, 1001, 100.0)
+    for r, n in enumerate(names):
+        for c, v in enumerate(variants):
+            d = np.load(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
+            z, err, x = d["bead_z"], d["bead_error"][..., axis], d["bead_x_px"]
+            err = err - np.nanmedian(np.where(np.abs(z) <= 600, err, np.nan), axis=1, keepdims=True)
+            span = (x - x.min()) / max(np.ptp(x), 1)
+            ax = axes[r, c]
+            for e in range(len(z)):
+                o = np.argsort(z[e])
+                ax.plot(z[e][o], err[e][o], color=cmap(span[e]), lw=0.6, alpha=0.7)
+            med = [np.nanmedian(err[np.abs(z - g) <= 50]) if np.any(np.abs(z - g) <= 50) else np.nan for g in grid]
+            ax.plot(grid, med, color="black", lw=1.8)
+            ax.axhline(0, color="#999999", lw=0.6)
+            ax.set_ylim(-lim, lim)
+            ax.tick_params(labelsize=6)
+            if r == 0:
+                ax.set_title(variant_label(v), fontsize=6.5)
+            if c == 0:
+                short = n.replace("20261029_", "").replace("_50ms", "").replace("_1", "")
+                ax.set_ylabel(f"{short}\n{'xyz'[axis]} error (nm)", fontsize=6.5)
+            if r == len(names) - 1:
+                ax.set_xlabel("z about focus (nm)", fontsize=6.5)
+    fig.suptitle(f"{'xyz'[axis]}: each slice fitted alone minus the stack fit, per bead (colour: x on the chip), "
+                 "median black", fontsize=8)
+    fig.tight_layout()
+    out = os.path.join(folder, f"bends_{'xyz'[axis]}.png")
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    print(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("acquisitions", nargs="*")
@@ -248,6 +304,8 @@ def main():
     if args.draw:
         draw(args.draw)
         draw_sections(args.draw)
+        for axis in (2, 0, 1):
+            draw_bends(args.draw, axis, 60.0 if axis == 2 else 20.0)
     else:
         learn(args)
 
