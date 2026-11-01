@@ -1,7 +1,8 @@
 """A minimal M5 model with the objective's part held at a consensus of the conditions, and what it costs.
 
     python benchmarks/uipsf/real/m5_consensus.py ACQUISITION [...] [--forms height "bead s"] \\
-        [--consensus-forms height] [--asym-modes 2 3 5 6 8 16] [--centre 0.5] [--dz 100] [--chunk 1] [--memory 0.5] \\
+        [--consensus-forms height] [--mode-sets x6] [--estimators median weighted joint] [--centre 0.5] \\
+        [--dz 100] [--chunk 1] [--memory 0.5] \\
         [--out benchmarks/uipsf/results/m5_consensus.jsonl]
 
 The user's minimal model (31 October 2026), one pupil grid at NA 1.51 with the aperture held at the nominal
@@ -64,6 +65,14 @@ NA, GRID_NA = 1.50, 1.51
 #: a condition with fewer central beads than this does not vote in the consensus
 MIN_BEADS = 6
 ESTIMATORS = ("median", "weighted", "joint")
+#: the m ≠ 0 magnitude modes the minimal model learns, by name: "x6" the first choice (above 0.01 in every run,
+#: but coma and secondary coma in x only, so a drift in y through focus went unexplained); "xy8" every pair in
+#: x and y (tilt 2/3, astigmatism 5/6, coma 7/8, secondary coma 16/17); "-<pair>" xy8 without that pair, to see
+#: which pairs are needed (the user's, 1 November 2026)
+PAIRS = {"tilt": (2, 3), "astig": (5, 6), "coma": (7, 8), "coma2": (16, 17)}
+XY8 = (2, 3, 5, 6, 7, 8, 16, 17)
+MODE_SETS = {"x6": (2, 3, 5, 6, 8, 16), "xy8": XY8} | {
+    f"-{name}": tuple(j for j in XY8 if j not in pair) for name, pair in PAIRS.items()}
 
 
 def central(rois, keep, fraction: float, shape) -> list:
@@ -183,7 +192,9 @@ def main():
                     help="the ring forms held at the consensus; the free fits run every --forms")
     ap.add_argument("--blurs", nargs="+", default=["fixed", "free", "zero"], choices=("fixed", "zero", "round", "free"),
                     help="the minimal model's blur: held at the pixel's, held at 0, one σ, or σx and σy")
-    ap.add_argument("--asym-modes", type=int, nargs="+", default=[2, 3, 5, 6, 8, 16])
+    ap.add_argument("--mode-sets", nargs="+", default=["x6"], choices=list(MODE_SETS),
+                    help="the m ≠ 0 modes learnt, by name (MODE_SETS); each gets its own fits and consensus")
+    ap.add_argument("--estimators", nargs="+", default=list(ESTIMATORS), choices=ESTIMATORS)
     ap.add_argument("--centre", type=float, default=0.5, help="the central fraction of the width and height")
     ap.add_argument("--z-range", type=float, default=600.0)
     ap.add_argument("--window", type=float, default=1000.0)
@@ -206,7 +217,8 @@ def main():
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
 
     done = [json.loads(line) for line in open(args.out)] if os.path.exists(args.out) else []
-    key = lambda r: (r["acquisition"], r["stage"], r["form"], r.get("estimator"), r.get("blur"))  # noqa: E731
+    key = lambda r: (r["acquisition"], r["stage"], r["form"], r.get("estimator"), r.get("blur"),  # noqa: E731
+                     r.get("modes", "x6"))
     have = {key(r) for r in done}
     sigma = float(np.mean(PIXEL)) / math.sqrt(12)                     # the pixel's own blur, both axes
     cache = {}
@@ -222,9 +234,9 @@ def main():
             cache[path] = (files, subset(rois, inner, focus, args.window), cut)
         return cache[path]
 
-    def fit(path, stage, form, estimator, magnitude, blur, extra):
+    def fit(path, stage, form, estimator, magnitude, blur, extra, modes="x6"):
         name, cond, _, bead_nm = acquisition(path)
-        if (name, stage, form, estimator, blur) in have:
+        if (name, stage, form, estimator, blur, modes) in have:
             return
         files, rois, cut = prepared(path)
         if cut["central"] < 2:
@@ -239,14 +251,14 @@ def main():
                               decisions={i: "include" for i in range(len(rois.records))})
         row = dict(acquisition=name, **cond, stage=stage, form=form, estimator=estimator, blur=blur, beads=cut,
                    grid_na=GRID_NA, na=NA, window_nm=args.window, dz_nm=args.dz, centre=args.centre,
-                   asym_modes=args.asym_modes, **extra)
+                   modes=modes, asym_modes=list(MODE_SETS[modes]), **extra)
         row.update(summary(run, cond))
         row.update(measure(run, args.z_range, centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used]))
         row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
         emit(row, args.out)
         done.append(json.loads(json.dumps(row, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))))
-        have.add((name, stage, form, estimator, blur))
-        print(name, stage, form, estimator or "", blur, f"{row['minutes']} min", flush=True)
+        have.add((name, stage, form, estimator, blur, modes))
+        print(name, stage, modes, form, estimator or "", blur, f"{row['minutes']} min", flush=True)
 
     # 1 and 2: the references and the free minimal model, for every condition before any consensus
     for path in args.acquisitions:
@@ -254,21 +266,23 @@ def main():
         ring = cond["medium"] == "mismatch"
         fit(path, "zernike", "none", None, use_pupil("zernike"), "free", {})
         fit(path, "zernike fixed σ", "none", None, use_pupil("zernike"), "fixed", {})
-        for blur in args.blurs:
+        for modes, blur in itertools.product(args.mode_sets, args.blurs):
             for form in (args.forms if ring else ["none"]):
-                fit(path, "free", form, None, minimal(form, ring, args.asym_modes, {}, {}, bead_nm), blur, {})
+                fit(path, "free", form, None, minimal(form, ring, MODE_SETS[modes], {}, {}, bead_nm), blur, {},
+                    modes)
     # 3: γ and the asymmetric modes held at the others' consensus
     for path in args.acquisitions:
         name, cond, _, bead_nm = acquisition(path)
         ring = cond["medium"] == "mismatch"
-        for blur, form, estimator in itertools.product(args.blurs, args.consensus_forms, ESTIMATORS):
-            pool = [r for r in done if r.get("blur") == blur]
+        for modes, blur, form, estimator in itertools.product(args.mode_sets, args.blurs, args.consensus_forms,
+                                                              args.estimators):
+            pool = [r for r in done if r.get("blur") == blur and r.get("modes", "x6") == modes]
             if not [r for r in pool if r["stage"] == "free" and r["acquisition"] != name]:
                 continue                                        # nothing else to agree with
-            hold, held = consensus(pool, form, estimator, name, args.asym_modes)
-            fit(path, "consensus", form, estimator, minimal(form, ring, args.asym_modes, hold, held, bead_nm), blur,
+            hold, held = consensus(pool, form, estimator, name, MODE_SETS[modes])
+            fit(path, "consensus", form, estimator, minimal(form, ring, MODE_SETS[modes], hold, held, bead_nm), blur,
                 dict(held_gamma=round(hold["pupil.centre_g"], 4),
-                     held_magnitude={j: round(v, 4) for j, v in held.items()}))
+                     held_magnitude={j: round(v, 4) for j, v in held.items()}), modes)
 
 
 if __name__ == "__main__":
