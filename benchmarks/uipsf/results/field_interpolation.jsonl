@@ -1,0 +1,32 @@
+{"method": "one central PSF", "mean": 28.9968060390916, "p95": 83.56576776865057, "max": 197.01872934155892, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "tiles 9x9, nearest", "mean": 0.6854247529431192, "p95": 2.1152001317773688, "max": 3.9877444871351626, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "tiles 20x20, nearest", "mean": 0.16769326592818476, "p95": 0.4876304324761288, "max": 1.150694821330091, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 3x3, PSFs bilinear", "mean": 1.026803258266646, "p95": 2.7589075396644196, "max": 6.364206996619921, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 3x3, Zernikes bilinear", "worst_zernike_rad": 0.03711980581283569, "mean": 0.39274650562295227, "p95": 1.6765193313794804, "max": 3.9229384815595307, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 5x5, PSFs bilinear", "mean": 0.05909701668382715, "p95": 0.17690221327380207, "max": 0.38940937828696476, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 5x5, Zernikes bilinear", "worst_zernike_rad": 0.008787870407104492, "mean": 0.02234929300641425, "p95": 0.09187274264395674, "max": 0.21297013781084825, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 7x7, PSFs bilinear", "mean": 0.011649897274469832, "p95": 0.034419165579814545, "max": 0.06920234075106188, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 7x7, Zernikes bilinear", "worst_zernike_rad": 0.003981292247772217, "mean": 0.004278745740910038, "p95": 0.019613248271463962, "max": 0.044730139730317045, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 9x9, PSFs bilinear", "mean": 0.0038545183438120413, "p95": 0.011409516741838235, "max": 0.027618340293793734, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 9x9, Zernikes bilinear", "worst_zernike_rad": 0.0023220181465148926, "mean": 0.0013423083121760688, "p95": 0.005539994784997812, "max": 0.014945376520064953, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=2", "mean": 10.263716068592638, "p95": 27.048945445393763, "max": 47.234998048403156, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=4", "mean": 0.7135513971769765, "p95": 1.406606799403754, "max": 7.522460066402415, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=6", "mean": 0.18276936121466095, "p95": 0.6878566658213681, "max": 1.20544263914441, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=8", "mean": 0.05309939178649771, "p95": 0.19794231214012825, "max": 0.3972637761639274, "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA variance shares", "shares": [0.3812109988091196, 0.32664717287813744, 0.1465007703437242, 0.11956189085162314, 0.017911164244245208, 0.0029220045824250775, 0.002828749218652433, 0.001012663042754028], "scale": 1.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "one central PSF", "mean": 113.85905256158819, "p95": 325.7502479701138, "max": 716.1335201618492, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "tiles 9x9, nearest", "mean": 2.685550232303596, "p95": 8.168344625496001, "max": 17.763325869902452, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "tiles 20x20, nearest", "mean": 0.6560070192060168, "p95": 1.930517712268938, "max": 4.0972013571466555, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 3x3, PSFs bilinear", "mean": 10.163944172438315, "p95": 26.09205093136035, "max": 38.07586236766818, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 3x3, Zernikes bilinear", "worst_zernike_rad": 0.07423949241638184, "mean": 1.5455394520817336, "p95": 6.647840779832239, "max": 15.019740664866191, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 5x5, PSFs bilinear", "mean": 0.6518689942790553, "p95": 1.9809603286862876, "max": 4.4066115929702105, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 5x5, Zernikes bilinear", "worst_zernike_rad": 0.017575860023498535, "mean": 0.08840019062720067, "p95": 0.36874816396329396, "max": 0.8510729284817982, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 7x7, PSFs bilinear", "mean": 0.1309412979311507, "p95": 0.40579132390386347, "max": 0.8537854444023483, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 7x7, Zernikes bilinear", "worst_zernike_rad": 0.007962584495544434, "mean": 0.016872647448700807, "p95": 0.07731661596437811, "max": 0.16849868820734692, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 9x9, PSFs bilinear", "mean": 0.04476903174611939, "p95": 0.15676236829101742, "max": 0.3705882150751018, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "grid 9x9, Zernikes bilinear", "worst_zernike_rad": 0.00464397668838501, "mean": 0.005316197522224323, "p95": 0.021634790355603343, "max": 0.06024222868038963, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=2", "mean": 45.063241349826214, "p95": 111.46667611881273, "max": 207.28305011474023, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=4", "mean": 9.817718382797876, "p95": 21.96110222182243, "max": 78.74517929198592, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=6", "mean": 2.72607030332644, "p95": 9.78058038594096, "max": 16.119409236704726, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA of the 9x9 grid, K=8", "mean": 0.9827792291908795, "p95": 3.3748493267271327, "max": 7.026321371556017, "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
+{"method": "PCA variance shares", "shares": [0.326833683840365, 0.32281201561766576, 0.15166646857886462, 0.10885400266284247, 0.05782838307379122, 0.011067108087308253, 0.010104283397771563, 0.0038732198150519953], "scale": 2.0, "photons": 5000.0, "background": 20.0, "roi": 13}
