@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE]
+sys.path[:0] = [HERE, os.path.join(HERE, "..", "synthetic")]
 from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, subset  # noqa: E402
 
 PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
@@ -30,7 +30,16 @@ PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
 RESIDUAL = 0.05
 LABEL = {"zernike": "free Zernikes", "symmetric": "Zernikes, m = 0 only", "cos bead na asym": "cos θ^γ + m ≠ 0",
          "cos bead na": "cos θ^γ, symmetric", "cos signed bead na asym": "cos θ^γ × two-way + m ≠ 0",
-         "cos steps bead na asym": "cos θ^γ × monotone + m ≠ 0"}
+         "cos steps bead na asym": "cos θ^γ × monotone + m ≠ 0",
+         "minimal": "minimal: cos θ^γ, NA 1.50, ring height, 6 m ≠ 0"}
+#: a variant's blur, after a "+" ("zernike+zpixel"): (σ(z), `BeadSettings.blur`); none: σx and σy learnt
+BLURS = {"sigma": (False, "round"), "pixel": (False, "fixed"), "zpixel": (True, "fixed"), "z": (True, "round")}
+BLUR_LABEL = {"sigma": "σ", "pixel": "σ = pixel", "zpixel": "σ(z), σ₀ = pixel", "z": "σ(z)"}
+
+
+def variant_label(variant: str) -> str:
+    pupil, _, blur = variant.partition("+")
+    return LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "")
 
 
 def learn(args):
@@ -40,6 +49,7 @@ def learn(args):
     from edge_magnitude import use_pupil
     from smappy.calibrate.model_views import pupil_views
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from z_blur import use_z_blur
 
     import uipsf.workflows.beads as beads
     import uipsf.workflows.calibrate as calibrate
@@ -55,10 +65,19 @@ def learn(args):
         rois = bead_rois(files, camera_for(files[0]), dual=False)
         keep, focus, _ = select(rois, name)
         rois = subset(rois, keep, focus, args.window)
-        optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
+        optics = OpticsSettings(NA=args.grid_na, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=104.7, pixel_y_nm=106.4)
         for variant in args.variants:
-            model = BeadSettings(zernike_order=ORDER, magnitude=use_pupil(variant), blur="free", blur_nm=30.0,
+            pupil, _, blur = variant.partition("+")
+            zblur, kind = BLURS.get(blur, (False, "free"))
+            use_z_blur(zblur)
+            if pupil == "minimal":                     # the user's minimal model, as `m5_consensus.py` learns it
+                from m5_consensus import minimal
+                magnitude = minimal("height", cond["medium"] == "mismatch", [2, 3, 5, 6, 8, 16], {}, {}, bead_nm)
+            else:
+                magnitude = use_pupil(pupil)
+            model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
+                                 blur_nm=float(np.mean((104.7, 106.4))) / np.sqrt(12) if kind == "fixed" else 30.0,
                                  bead_diameter_nm=bead_nm)
             run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
@@ -77,7 +96,7 @@ def draw(folder):
     for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
         runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
                 if os.path.basename(f).startswith(name + "__")}
-        order = [v for v in LABEL if v in runs]
+        order = [v for v in runs if v.partition('+')[0] in LABEL]
         first = runs[order[0]]
         z = first["z_nm"]
         planes = [int(np.argmin(np.abs(z - p))) for p in PLANES_NM]
@@ -90,7 +109,8 @@ def draw(folder):
         for v in order:
             m = runs[v]["model"]
             dn = float(runs[v]["objective"]) - best
-            rows.append((f"{LABEL[v]}\n(+{dn:,.0f} nats)" if dn else f"{LABEL[v]}\n(best)", m, "magma", (0, top)))
+            title = f"{variant_label(v)}\n(+{dn:,.0f} nats)" if dn else f"{variant_label(v)}\n(best)"
+            rows.append((title, m, "magma", (0, top)))
             rows.append(("model − data", m - data, "RdBu_r", (-RESIDUAL * top, RESIDUAL * top)))
         for r, (label, vol, cmap, lim) in enumerate(rows):
             for c, k in enumerate(planes):
@@ -125,6 +145,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--draw", default=None)
     ap.add_argument("--window", type=float, default=1000.0)
+    ap.add_argument("--grid-na", type=float, default=GRID_NA,
+                    help="the pupil grid's edge; 1.51 with the minimal model, whose aperture is held at 1.50")
     ap.add_argument("--dz", type=float, default=100.0)
     ap.add_argument("--chunk", type=int, default=1)
     ap.add_argument("--memory", type=float, default=0.7)
