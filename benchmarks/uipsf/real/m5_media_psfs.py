@@ -108,7 +108,9 @@ def learn(args):
                 # modes, the physical symmetric magnitude alone
                 from m5_consensus import minimal
                 modes = [2, 3, 5, 6, 8, 16] if pupil == "minimal" else []
-                magnitude = minimal("height", cond["medium"] == "mismatch", modes, {}, {}, bead_nm)
+                # the aperture at NA 1.50 on whatever grid this is (it was held at 1.50/1.51 of the grid, so at
+                # 1.49 on a grid at 1.50)
+                magnitude = minimal("height", cond["medium"] == "mismatch", modes, {}, {}, bead_nm, args.grid_na)
             else:
                 magnitude = use_pupil(pupil)
             model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
@@ -276,7 +278,9 @@ def draw_bends(folder, axis: int = 2, lim: float = 60.0):
     fig, axes = plt.subplots(len(names), len(variants), figsize=(2.7 * len(variants), 2.3 * len(names)),
                              sharex=True, sharey=True, squeeze=False)
     cmap = plt.get_cmap("viridis")
-    grid = np.arange(-1000, 1001, 100.0)
+    reach = max(np.nanmax(np.abs(np.load(f)["bead_z"])) for f in found)
+    grid = np.arange(-np.ceil(reach / 100) * 100, np.ceil(reach / 100) * 100 + 1, 100.0)
+    lim = lim * 2 if reach > 1200 else lim                  # whole stacks: the far slices err more
     for r, n in enumerate(names):
         for c, v in enumerate(variants):
             d = np.load(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))

@@ -74,7 +74,8 @@ def central(rois, keep, fraction: float, shape) -> list:
     return [i for i in keep if lo_x <= rois.records[i]["x_px"] <= hi_x and lo_y <= rois.records[i]["y_px"] <= hi_y]
 
 
-def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead_nm: float):
+def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead_nm: float,
+            grid_na: float = GRID_NA):
     """Make `bead_model` build the minimal pupil (module docstring)."""
     import uipsf.workflows.calibrate as calibrate
     from uipsf.model.pupil import ZernikePupil
@@ -85,7 +86,7 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
             return EdgePupil(grid, n_max, centre="cos", edge="hard", asymmetric=True, asym_modes=tuple(modes),
                              saf=ring, ring="bead" if form == "bead s" else "height",
                              saf_step=ring and form == "bead s",
-                             held_magnitude=held_magnitude, hold={"pupil.edge_rho": NA / GRID_NA} | hold,
+                             held_magnitude=held_magnitude, hold={"pupil.edge_rho": NA / grid_na} | hold,
                              bead_nm=bead_nm)
     calibrate.ZernikePupil = Build
     return "free"
