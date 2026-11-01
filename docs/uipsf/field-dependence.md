@@ -175,9 +175,41 @@ before the usual tricubic evaluation, so an estimate is 1.5–2× today's fit, n
 without the field's tilt and defocus; the spline calibration holds them with the grid's geometry, the focal
 surface and the distortion map.
 
-## 7. Open
+## 7. Our data: M5 beads
 
-- Real fields: how strong is the field dependence on our microscopes?  Fields are small at present, so mild.
+`benchmarks/uipsf/real/m5_field_map.py`, from results already kept (`results/m5_field.jsonl`, each bead's own
+phase to order 6; `results/m5_modes/*__zernike_free.npz`, every slice localised alone with the shared model).
+The beads span about 240 px, 25 µm, of the field.
+
+**Aberrations.**  One field term is clear and the same in all three acquisitions: *linear astigmatism*,
+Noll 6 growing along x and Noll 5 along y, 6–9 nm of path per half-field -- about 0.09 rad at 600 nm, 0.13 rad
+in a corner.  That is NAT's misalignment term (b·H), not the quadratic one.  Coma and spherical aberration show
+no consistent gradient (≤ 2.5 nm per half-field where the acquisition is clean).  What the plane leaves, 1–5 nm
+from bead to bead (the CRLBs are 0.1–0.2 nm), is scatter, not a field.
+
+**Localisation with one model.**  The part of each bead's slice error that is a plane over the field is
+1–4 nm laterally and 3–10 nm in z (rms over the beads within ±600 nm); a plane fitted to the same errors with the
+beads' positions shuffled gives 1–3 and 2–12 nm.  The field is detectable (p < 0.05 in about half the
+acquisitions and axes), not large: the slope at the edge of the half-field is 1–6 nm laterally and 4–13 nm in z,
+while the beads scatter by 7–35 nm in z for reasons that have nothing to do with where they are.  One outlier,
+`40nm_match_3D_0.05um`, scatters by 57 nm in z, a property of that acquisition, not of the field.
+
+**A grid for this field.**  Linear astigmatism of 0.09 rad per half-field, `field_interpolation.py`'s measure:
+one PSF 7.4 / 26 (mean / max excess χ²), 2 × 2 nodes blended 0.11 / 0.33, 3 × 3 0.007 / 0.022, 5 × 5 below
+0.001.  A 3 × 3 grid is the exact model for M5's present fields.
+
+**Defocus over the field** -- field curvature and a tilted focal plane -- cannot be read from these results:
+each bead's z is fitted, so it absorbs both.  Which is the point for learning: with beads, a focal surface costs
+nothing and needs no model.  In the fitted localisations a tilt of the focal plane is a shear of z over the
+field, z' = z + a·x + b·y: harmless for structure (distances along the coverslip change by 1 − cos of the tilt),
+visible only where absolute z across the field matters.  Two places where it does: a depth-dependent PSF
+(in situ with an index mismatch), whose depth is then off by the tilt times the distance -- 0.1° over 25 µm is
+44 nm, well below what changes the PSF; a degree is 440 nm and starts to -- and a z range near its end.  A finer
+grid cannot take a focal surface: grid PSFs shifted in z do not blend into a shifted PSF; a z offset map,
+applied to the fitted z, is exact and costs nothing.  So it is left out until fields grow or in situ needs it.
+
+## 8. Open
+
 - The C++ blend's speed.
 - Whether the residual's prior keeps a bead calibration of 20–50 beads stable.
-- Whether a real objective's corners need 9 × 9.
+- Whether a larger field (Zenodo `1ch_FD_bead`) needs the quadratic terms, coma or 7 × 7.
