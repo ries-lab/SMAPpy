@@ -34,7 +34,8 @@ SECTION_RESIDUAL = 10.0
 LABEL = {"zernike": "free Zernikes", "symmetric": "Zernikes, m = 0 only", "cos bead na asym": "cos θ^γ + m ≠ 0",
          "cos bead na": "cos θ^γ, symmetric", "cos signed bead na asym": "cos θ^γ × two-way + m ≠ 0",
          "cos steps bead na asym": "cos θ^γ × monotone + m ≠ 0",
-         "minimal": "minimal: cos θ^γ, NA 1.50, ring height, 6 m ≠ 0"}
+         "minimal": "minimal: cos θ^γ, NA 1.50, ring height, 6 m ≠ 0",
+         "minimal0": "minimal, symmetric: cos θ^γ, NA 1.50, ring height"}
 #: a variant's blur, after a "+" ("zernike+zpixel"): (σ(z), `BeadSettings.blur`); none: σx and σy learnt
 BLURS = {"sigma": (False, "round"), "pixel": (False, "fixed"), "zpixel": (True, "fixed"), "z": (True, "round")}
 BLUR_LABEL = {"sigma": "σ", "pixel": "σ = pixel", "zpixel": "σ(z), σ₀ = pixel", "z": "σ(z)"}
@@ -91,9 +92,12 @@ def learn(args):
             calibrate.ForwardModel = functools.partial(ForwardModel, intensity=INTENSITY[photons]())
             zblur, kind = BLURS.get(blur, (False, "free"))
             use_z_blur(zblur)
-            if pupil == "minimal":                     # the user's minimal model, as `m5_consensus.py` learns it
+            if pupil in ("minimal", "minimal0"):
+                # the user's minimal model, as `m5_consensus.py` learns it; "minimal0" without the six m ≠ 0
+                # modes, the physical symmetric magnitude alone
                 from m5_consensus import minimal
-                magnitude = minimal("height", cond["medium"] == "mismatch", [2, 3, 5, 6, 8, 16], {}, {}, bead_nm)
+                modes = [2, 3, 5, 6, 8, 16] if pupil == "minimal" else []
+                magnitude = minimal("height", cond["medium"] == "mismatch", modes, {}, {}, bead_nm)
             else:
                 magnitude = use_pupil(pupil)
             model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
