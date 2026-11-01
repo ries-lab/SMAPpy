@@ -272,7 +272,7 @@ def draw_bends(folder, axis: int = 2, lim: float = 60.0):
             ax.set_ylim(-lim, lim)
             ax.tick_params(labelsize=6)
             if r == 0:
-                ax.set_title(variant_label(v), fontsize=6.5)
+                ax.set_title(v, fontsize=7)                     # the short name: five columns of full labels overlap
             if c == 0:
                 short = n.replace("20261029_", "").replace("_50ms", "").removesuffix("_1")
                 ax.set_ylabel(f"{short}\n{'xyz'[axis]} error (nm)", fontsize=6.5)
@@ -308,7 +308,7 @@ def draw_fields(folder):
             d = np.load(os.path.join(folder, f"{n}__{v.replace(' ', '_')}.npz"))
             pts = field_map(axes[r, c], d["bead_x_px"], d["bead_y_px"], d["bead_error"], d["bead_z"])
             if r == 0:
-                axes[r, c].set_title(variant_label(v), fontsize=6.5)
+                axes[r, c].set_title(v, fontsize=7)
             if c == 0:
                 axes[r, c].set_ylabel(n.replace("20261029_", "").replace("_50ms", "").removesuffix("_1"), fontsize=6.5)
     fig.colorbar(pts, ax=axes.ravel().tolist(), shrink=0.4, label="z scale − 1 (%)")
