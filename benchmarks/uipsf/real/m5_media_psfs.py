@@ -18,6 +18,7 @@ import dataclasses
 import functools
 import glob
 import os
+import re
 import sys
 
 import numpy as np
@@ -48,7 +49,7 @@ PHOTON_LABEL = {"frame": "photons × factor per frame", "obs": "photons free per
 
 def variant_label(variant: str) -> str:
     rest, _, extra = variant.partition("~")
-    extra = {"zscale": ", z scale learnt", "na": ", NA learnt"}.get(extra, f", n_imm {extra[1:]}" if extra else "")
+    extra = {"zscale": ", z scale learnt", "na": ", NA learnt", "": ""}.get(extra, f", n_imm {extra[1:]}")
     rest, _, photons = rest.partition("@")
     pupil, _, blur = rest.partition("+")
     return (LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
@@ -96,8 +97,8 @@ def learn(args):
             rest, _, photons = rest.partition("@")
             pupil, _, blur = rest.partition("+")
             calibrate.BeadStackGeometry = functools.partial(BeadStackGeometry, z_scale=extra == "zscale")
-            run_optics = (dataclasses.replace(optics, n_immersion=float(extra[1:])) if extra.startswith("n")
-                          else optics)
+            index = re.fullmatch(r"n(\d+\.\d+)", extra)            # "~n1.515"; "~na" is the aperture
+            run_optics = dataclasses.replace(optics, n_immersion=float(index[1])) if index else optics
             # the photons of each bead and slice: the default smooth curve per bead, that times a free factor per
             # camera frame of each stack (the laser), or a free count per bead and slice -- whether the pixels'
             # biases along z are the photons' and not the PSF's (the user's)
