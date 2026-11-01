@@ -23,6 +23,7 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "synthetic")]
+from bead_slices import measure  # noqa: E402,I001
 from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, subset  # noqa: E402
 
 PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
@@ -84,10 +85,17 @@ def learn(args):
             run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
             v = pupil_views(run)
+            # the bends, each slice localised alone on the model (`bead_slices.measure`), over ±600 nm
+            bends = measure(run, 600.0, centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used])
             np.savez_compressed(os.path.join(args.out, f"{name}__{variant.replace(' ', '_')}.npz"),
                                 z_nm=v.z_nm, data=v.data[0], model=v.model[0],
-                                objective=float(run.cal.result.objective), **cond)
-            print(name, variant, "done", flush=True)
+                                objective=float(run.cal.result.objective), window_nm=args.window,
+                                used=len(run.cal.beads.used), curve_z_nm=np.asarray(bends["curve_z_nm"], float),
+                                curve_nm=np.asarray(bends["curve_nm"], float),
+                                sigma_nm=run.cal.result.params.physical()["psf.sigma"].detach().cpu().numpy(),
+                                **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm",
+                                                         "z_systematic_rms_nm", "z_scatter_over_crlb")}, **cond)
+            print(name, variant, "z bend", bends["z_systematic_rms_nm"], flush=True)
 
 
 def draw(folder):
