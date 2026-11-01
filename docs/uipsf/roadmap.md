@@ -199,7 +199,9 @@ and excitation (the donuts of MINFLUX and STED, above).
   (double helix, tetrapod: Zenodo `1ch_smlm_TP`); the number of emitters per bin from the CRLB; selection
   stratified in the field too; splines at other depths; stage tilt (`FocalSurface`).
 - **Field dependence:** `NodalPolynomial` (the NAT term table, Droste et al. 2025), a B-spline residual, the
-  axis centre and the focal surface; Zenodo `1ch_FD_bead`.  (uiPSF v1's map export to FD-DeepLoc is
+  axis centre and the focal surface; Zenodo `1ch_FD_bead`.  The study and the choice of representation and fitter:
+  `docs/uipsf/field-dependence.md` (a nodal polynomial plus a gridded residual; splines on a 5 × 5 to 7 × 7
+  grid, blended bilinearly per spot).  (uiPSF v1's map export to FD-DeepLoc is
   misregistered by n/(n−1), review §E.)
 
 ### Physics (M8 and this session's studies)
