@@ -40,9 +40,18 @@ BLURS = {"sigma": (False, "round"), "pixel": (False, "fixed"), "zpixel": (True, 
 BLUR_LABEL = {"sigma": "σ", "pixel": "σ = pixel", "zpixel": "σ(z), σ₀ = pixel", "z": "σ(z)"}
 
 
+PHOTON_LABEL = {"frame": "photons × factor per frame", "obs": "photons free per slice"}
+
+
 def variant_label(variant: str) -> str:
-    pupil, _, blur = variant.partition("+")
-    return LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "")
+    rest, _, photons = variant.partition("@")
+    pupil, _, blur = rest.partition("+")
+    return LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
+
+
+def _intensities():
+    from uipsf.model import Bleaching, PerFrameFactor, PerObservation
+    return {"": Bleaching, "frame": PerFrameFactor, "obs": PerObservation}
 
 
 def learn(args):
@@ -62,6 +71,9 @@ def learn(args):
     scoring.localise = functools.partial(scoring.localise, chunk_size=int(2 * args.window // args.dz + 1) * args.chunk)
     os.makedirs(args.out, exist_ok=True)
     import radial_magnitude
+
+    from uipsf.model import ForwardModel
+    INTENSITY = _intensities()
     for path in args.acquisitions:
         name, cond, files, bead_nm = acquisition(path)
         radial_magnitude.BEAD_NM = bead_nm             # the "… bead …" variants' ring, as `edge_pupil` builds them
@@ -71,7 +83,12 @@ def learn(args):
         optics = OpticsSettings(NA=args.grid_na, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=104.7, pixel_y_nm=106.4)
         for variant in args.variants:
-            pupil, _, blur = variant.partition("+")
+            rest, _, photons = variant.partition("@")
+            pupil, _, blur = rest.partition("+")
+            # the photons of each bead and slice: the default smooth curve per bead, that times a free factor per
+            # camera frame of each stack (the laser), or a free count per bead and slice -- whether the pixels'
+            # biases along z are the photons' and not the PSF's (the user's)
+            calibrate.ForwardModel = functools.partial(ForwardModel, intensity=INTENSITY[photons]())
             zblur, kind = BLURS.get(blur, (False, "free"))
             use_z_blur(zblur)
             if pupil == "minimal":                     # the user's minimal model, as `m5_consensus.py` learns it
@@ -106,7 +123,7 @@ def draw(folder):
     for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
         runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
                 if os.path.basename(f).startswith(name + "__")}
-        order = [v for v in runs if v.partition('+')[0] in LABEL]
+        order = [v for v in runs if v.partition('@')[0].partition('+')[0] in LABEL]
         first = runs[order[0]]
         z = first["z_nm"]
         planes = [int(np.argmin(np.abs(z - p))) for p in PLANES_NM]
@@ -161,7 +178,7 @@ def draw_sections(folder):
     for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
         runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
                 if os.path.basename(f).startswith(name + "__")}
-        order = [v for v in runs if v.partition('+')[0] in LABEL]
+        order = [v for v in runs if v.partition('@')[0].partition('+')[0] in LABEL]
         first = runs[order[0]]
         z, data = first["z_nm"], first["data"]
         cy, cx = np.unravel_index(np.nanargmax(np.nansum(data, 0)), data.shape[1:])

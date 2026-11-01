@@ -129,7 +129,11 @@ def subset(rois, keep, focus, window_nm=WINDOW_NM):
     first = [min(max(int(focus[i]) - half, 0), K - 2 * half - 1) for i in keep]
     index = torch.stack([torch.arange(f, f + 2 * half + 1) for f in first])            # [E, K']
     rows = torch.arange(len(keep))[:, None]
-    rois.batch = replace(b, data=b.data.transpose(1, 2)[rows, index].transpose(1, 2),
+    # each observation's camera frame, by stack: beads of one stack share a frame at different slice indices of
+    # their windows (`PerFrameFactor`); numbered densely from 0
+    stacks = (b.stack_id if b.stack_id is not None else torch.tensor([int(rois.records[i]["stack"]) for i in keep]))
+    _, frame = torch.unique(stacks.to(index.device)[:, None] * K + index, return_inverse=True)
+    rois.batch = replace(b, frame=frame, data=b.data.transpose(1, 2)[rows, index].transpose(1, 2),
                          # each window about its own middle: the pupil is sized by the batch's largest |z|
                          # (`calibrate_beads`), and every bead's z is learnt anyway
                          mask=b.mask.transpose(1, 2)[rows, index].transpose(1, 2),

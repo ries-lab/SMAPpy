@@ -3,7 +3,16 @@ import dataclasses
 import torch
 
 import uipsf
-from uipsf.model import BeadStackGeometry, Bleaching, Constant, PerObservation, PerSliceFactor, Planar, rough_start
+from uipsf.model import (
+    BeadStackGeometry,
+    Bleaching,
+    Constant,
+    PerFrameFactor,
+    PerObservation,
+    PerSliceFactor,
+    Planar,
+    rough_start,
+)
 from uipsf.model.start import BACKGROUND_FLOOR
 from uipsf.simulate import parameters, template
 from uipsf_tests.conftest import small_beads
@@ -71,6 +80,24 @@ def test_a_per_slice_factor_scales_every_bead_in_that_slice_and_has_a_prior():
     N = model(p.physical(), batch)
     assert torch.allclose(N, torch.tensor([[10.0, 5.0, 20.0], [20.0, 10.0, 40.0]], dtype=f64))
     assert p.prior_penalty() > 0
+
+
+def test_a_frame_factor_scales_the_beads_imaged_in_that_frame_whatever_their_slice_index():
+    # two beads of one stack, windows starting one frame apart, and a bead of another stack
+    batch = template(3, torch.zeros(3), (3, 3), dtype=f64)
+    batch = dataclasses.replace(batch, frame=torch.tensor([[0, 1, 2], [1, 2, 3], [4, 5, 6]]))
+    model = PerFrameFactor(order=0)
+    specs = model.specs(batch, {"photons": torch.tensor([10.0, 20.0, 30.0])})
+    f = torch.tensor([1.0, 0.5, 2.0, 1.0, 1.0, 1.0, 3.0], dtype=f64)
+    p = uipsf.Params(specs, 3, dtype=f64, values={"intensity.frame_factor": f})
+    N = model(p.physical(), batch)
+    assert torch.allclose(N, torch.tensor([[10.0, 5.0, 20.0], [10.0, 40.0, 20.0], [30.0, 30.0, 90.0]], dtype=f64))
+    assert p.prior_penalty() > 0
+    # a subset of the beads and every other slice (25 nm steps thinned to 50) keep each observation's frame
+    stack = template(3, torch.linspace(0, 100, 5), (3, 3), dtype=f64)
+    stack = dataclasses.replace(stack, frame=torch.arange(15).reshape(3, 5))
+    sub = stack.subset(torch.tensor([1, 2])).thinned(50.0)
+    assert sub.frame.tolist() == [[5, 7, 9], [10, 12, 14]]
 
 
 def test_a_free_count_per_observation_is_a_block_of_the_emitter():

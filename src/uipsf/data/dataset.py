@@ -31,6 +31,8 @@ class Batch:
     stack_id: torch.Tensor | None = None     # [E] which stack each emitter came from
     roi_xy: torch.Tensor | None = None       # [E, C, 2] each channel's ROI centre in chip pixels (x, y);
                                              # needed with several channels (`model.channels`)
+    frame: torch.Tensor | None = None        # [E, K] long: each observation's camera frame, numbered so that equal
+                                             # numbers are the same frame of the same stack (`PerFrameFactor`)
     start: dict | None = None                # each emitter's start (`model.start.rough_start`'s keys) when the
                                              # data's rough one will not do (`model.astig.gaussian_start`)
 
@@ -63,7 +65,7 @@ class Batch:
             for k, v in self.start.items()}
         return replace(self, data=self.data[index], z_nm=z, s=pick(self.s), mask=pick(self.mask),
                        field_xy=rows(self.field_xy), stack_id=rows(self.stack_id), roi_xy=rows(self.roi_xy),
-                       start=start)
+                       frame=rows(self.frame), start=start)
 
     def thinned(self, max_dz_nm: float | None) -> Batch:
         """Every n-th slice, n the largest whole number with n·Δz ≤ ``max_dz_nm`` (None: every slice).
@@ -89,7 +91,8 @@ class Batch:
                 return t.index_select(2, idx)
             return t
         return replace(self, data=self.data.index_select(2, idx), z_nm=self.z_nm.index_select(-1, idx.to(
-            self.z_nm.device)), s=along_k(self.s), mask=along_k(self.mask))
+            self.z_nm.device)), s=along_k(self.s), mask=along_k(self.mask),
+            frame=None if self.frame is None else self.frame.index_select(-1, idx.to(self.frame.device)))
 
     def to(self, device=None, dtype=None) -> Batch:
         def move(t, keep_dtype=False):
@@ -101,4 +104,5 @@ class Batch:
         roi = None if self.roi_xy is None else self.roi_xy.to(device=data.device, dtype=data.dtype)
         start = None if self.start is None else {k: move(v) for k, v in self.start.items()}
         return replace(self, data=data, z_nm=move(self.z_nm), s=move(self.s),
-                       mask=move(self.mask, keep_dtype=True), roi_xy=roi, start=start)
+                       mask=move(self.mask, keep_dtype=True), frame=move(self.frame, keep_dtype=True), roi_xy=roi,
+                       start=start)

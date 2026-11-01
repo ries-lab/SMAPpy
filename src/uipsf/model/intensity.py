@@ -9,6 +9,11 @@
 - `PerSliceFactor`: the same, times a factor f_k shared by all beads in a
   frame, for an unstable laser.  A prior f ~ N(1, 0.2) pins the factors'
   mean, otherwise exactly degenerate with the beads' photons.
+- `PerFrameFactor`: the same, times a free factor per camera frame of each stack (`Batch.frame`), for laser
+  power that fluctuates from frame to frame: every bead imaged in that frame shares it, beads of other stacks
+  do not, and neighbouring frames are not tied.  Beads cut on windows about their own foci share a frame
+  at different slice indices, which a factor per slice index (`PerSliceFactor`) cannot express.  The same
+  prior pins each stack's scale, otherwise degenerate with its beads' photons.
 - `PerObservation`: a free count per bead and slice (v1's ``var_photon``),
   for excitation that changes per bead and frame, such as speckle.
 
@@ -61,6 +66,22 @@ class PerSliceFactor(Bleaching):
 
     def __call__(self, p, batch) -> torch.Tensor:
         return super().__call__(p, batch) * p["intensity.slice_factor"]
+
+
+class PerFrameFactor(Bleaching):
+    def __init__(self, order: int = 1, prior_sigma: float = 0.2):
+        super().__init__(order)
+        self.prior_sigma = float(prior_sigma)
+
+    def specs(self, batch, start) -> list[ParamSpec]:
+        if batch.frame is None:
+            raise ValueError("a factor per frame needs each observation's frame (Batch.frame)")
+        return super().specs(batch, start) + [
+            ParamSpec("intensity.frame_factor", (int(batch.frame.max()) + 1,), init=1.0, transform=Exp(),
+                      prior=Gaussian(1.0, self.prior_sigma))]
+
+    def __call__(self, p, batch) -> torch.Tensor:
+        return super().__call__(p, batch) * p["intensity.frame_factor"][batch.frame]
 
 
 class PerObservation:

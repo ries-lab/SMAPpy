@@ -83,7 +83,8 @@ src/uipsf/
 │                     Batch.z_from_objective(objective_nm): SMAPpy's z sign, written once
 ├── model/
 │   ├── geometry.py   BeadStackGeometry(drift=False, z_scale=False): xyz[e, k] = xyz_e + (δx_k, δy_k, s·z_k + δz_k)
-│   ├── intensity.py  Bleaching(order=1) (default), PerSliceFactor(order, prior_sigma), PerObservation()
+│   ├── intensity.py  Bleaching(order=1) (default), PerSliceFactor(order, prior_sigma),
+│   │                 PerFrameFactor(order, prior_sigma) (a factor per frame of each stack, `Batch.frame`), PerObservation()
 │   ├── background.py Constant() (default), Planar(pixel_size_nm)
 │   ├── start.py      rough_start(batch, pixel_size_nm): position, photons, background from the data
 │   └── forward.py    ForwardModel(psf, geometry, intensity, background)
