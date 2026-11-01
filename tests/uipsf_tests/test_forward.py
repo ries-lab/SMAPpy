@@ -1,5 +1,6 @@
 import dataclasses
 
+import numpy as np
 import torch
 
 import uipsf
@@ -161,3 +162,16 @@ def test_a_simulation_is_the_model_plus_poisson_noise(optics):
     r = (batch.data - mu) / mu.sqrt()
     assert abs(r.mean().item()) < 0.02 and abs(r.std().item() - 1) < 0.02
     assert parameters(model, batch, {}).n_emitters == 20
+
+
+def test_slice_fits_carry_each_slices_frame_and_give_the_same_positions(optics):
+    # each slice becomes an emitter of its own (E·K of them); a frame per observation must follow it, or the
+    # solver's chunks index past the batch (found on M5's beads, November 2026)
+    from uipsf.workflows.scoring import slice_fits
+    model, truth, batch = small_beads(optics, n=2, dtype=torch.float32, roi=(11, 11), photons=20000.0, background=20.0)
+    shared = {k: v for k, v in truth.physical().items() if truth.specs[k].scope == "shared"}
+    framed = dataclasses.replace(batch, frame=torch.arange(batch.data.shape[0] * batch.data.shape[2]).reshape(
+        batch.data.shape[0], batch.data.shape[2]))
+    a, _, _ = slice_fits(model, shared, batch, uipsf.noise.Poisson(), truth)
+    b, _, _ = slice_fits(model, shared, framed, uipsf.noise.Poisson(), truth)
+    assert np.allclose(a, b)
