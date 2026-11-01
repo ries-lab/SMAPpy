@@ -14,6 +14,7 @@ top, each model below it and its residual against the data.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import glob
 import os
@@ -46,9 +47,12 @@ PHOTON_LABEL = {"frame": "photons × factor per frame", "obs": "photons free per
 
 
 def variant_label(variant: str) -> str:
-    rest, _, photons = variant.partition("@")
+    rest, _, extra = variant.partition("~")
+    extra = {"zscale": ", z scale learnt"}.get(extra, f", n_imm {extra[1:]}" if extra else "")
+    rest, _, photons = rest.partition("@")
     pupil, _, blur = rest.partition("+")
-    return LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
+    return (LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
+            + extra)
 
 
 def _intensities():
@@ -74,7 +78,7 @@ def learn(args):
     os.makedirs(args.out, exist_ok=True)
     import radial_magnitude
 
-    from uipsf.model import ForwardModel
+    from uipsf.model import BeadStackGeometry, ForwardModel
     INTENSITY = _intensities()
     for path in args.acquisitions:
         name, cond, files, bead_nm = acquisition(path)
@@ -85,8 +89,14 @@ def learn(args):
         optics = OpticsSettings(NA=args.grid_na, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=104.7, pixel_y_nm=106.4)
         for variant in args.variants:
-            rest, _, photons = variant.partition("@")
+            # "~zscale": the stage's z scale learnt; "~n1.515": another immersion index (the user's: is the shared z
+            # bend a z scale, or oil a few degrees off its index?)
+            rest, _, extra = variant.partition("~")
+            rest, _, photons = rest.partition("@")
             pupil, _, blur = rest.partition("+")
+            calibrate.BeadStackGeometry = functools.partial(BeadStackGeometry, z_scale=extra == "zscale")
+            run_optics = (dataclasses.replace(optics, n_immersion=float(extra[1:])) if extra.startswith("n")
+                          else optics)
             # the photons of each bead and slice: the default smooth curve per bead, that times a free factor per
             # camera frame of each stack (the laser), or a free count per bead and slice -- whether the pixels'
             # biases along z are the photons' and not the PSF's (the user's)
@@ -104,7 +114,7 @@ def learn(args):
             model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
                                  blur_nm=float(np.mean((104.7, 106.4))) / np.sqrt(12) if kind == "fixed" else 30.0,
                                  bead_diameter_nm=bead_nm)
-            run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
+            run = run_calibration(files, False, run_optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
             v = pupil_views(run)
             # the bends, each slice localised alone on the model (`bead_slices.measure`), over ±600 nm
@@ -121,6 +131,8 @@ def learn(args):
                                 bead_x_px=np.array([rois.records[i]["x_px"] for i in used]),
                                 bead_y_px=np.array([rois.records[i]["y_px"] for i in used]),
                                 sigma_nm=run.cal.result.params.physical()["psf.sigma"].detach().cpu().numpy(),
+                                z_scale=float(run.cal.result.params.physical()["geometry.z_scale"]),
+                                n_immersion=run_optics.n_immersion,
                                 **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm",
                                                          "z_systematic_rms_nm", "z_scatter_over_crlb")}, **cond)
             print(name, variant, "z bend", bends["z_systematic_rms_nm"], flush=True)
@@ -134,7 +146,7 @@ def draw(folder):
     for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
         runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
                 if os.path.basename(f).startswith(name + "__")}
-        order = [v for v in runs if v.partition('@')[0].partition('+')[0] in LABEL]
+        order = [v for v in runs if v.partition('~')[0].partition('@')[0].partition('+')[0] in LABEL]
         first = runs[order[0]]
         z = first["z_nm"]
         planes = [int(np.argmin(np.abs(z - p))) for p in PLANES_NM]
@@ -189,7 +201,7 @@ def draw_sections(folder):
     for name in sorted({os.path.basename(f).split("__")[0] for f in found}):
         runs = {os.path.basename(f).split("__")[1][:-4].replace("_", " "): np.load(f) for f in found
                 if os.path.basename(f).startswith(name + "__")}
-        order = [v for v in runs if v.partition('@')[0].partition('+')[0] in LABEL]
+        order = [v for v in runs if v.partition('~')[0].partition('@')[0].partition('+')[0] in LABEL]
         first = runs[order[0]]
         z, data = first["z_nm"], first["data"]
         cy, cx = np.unravel_index(np.nanargmax(np.nansum(data, 0)), data.shape[1:])
