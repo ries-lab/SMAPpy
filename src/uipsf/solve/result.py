@@ -35,7 +35,10 @@ def covariance(ne):
     S = A - torch.einsum("eij,ejk->ik", B, Ci_Bt)
     Ps = S.shape[0]
     Si = torch.linalg.inv(S + ridge * torch.eye(Ps, dtype=S.dtype)) if Ps else S
-    cond = float(torch.linalg.cond(S)) if Ps else 1.0
+    # S is symmetric: its eigenvalues, not an SVD -- `linalg.cond`'s SVD failed to converge on a finite S
+    # whose many prior-only rows (frame factors of slices thinned away) repeat one singular value
+    ev = torch.linalg.eigvalsh(0.5 * (S + S.T)).abs() if Ps else None
+    cond = float(ev.max() / ev.min()) if Ps and ev.min() > 0 else (1.0 if not Ps else float("inf"))
     cov_e = Ci + Ci_Bt @ Si @ Ci_Bt.transpose(1, 2)
     cov_s = Si / (d_s[:, None] * d_s[None, :])
     cov_e = cov_e / (d_e[:, :, None] * d_e[:, None, :])
