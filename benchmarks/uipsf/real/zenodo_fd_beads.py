@@ -1,5 +1,5 @@
 """Field dependence on Zenodo `1ch_FD_bead`: a pupil learnt with and without *field dependence*, and what it
-changes for localisation.  `docs/uipsf/field-dependence.md`, §10.
+changes for localisation.  `docs/uipsf/field-dependence.md`, §9.
 
     python scripts/uipsf/fetch_zenodo.py 1ch_FD_bead/ results/1ch_FD_bead/
     python benchmarks/uipsf/real/zenodo_fd_beads.py detect
@@ -10,7 +10,8 @@ changes for localisation.  `docs/uipsf/field-dependence.md`, §10.
 Two stacks of astigmatic beads over a 1608 × 1608 Prime 95B chip, 10 nm steps over 2 µm.  The optics are v1's,
 from its result file's ``params``: NA 1.5, 680 nm, immersion 1.515, medium 1.406, 110 nm pixels.  The camera's
 conversion is not in the files (Micro-Manager records the offset, 100, and a 62 000 e⁻ full well): 0.47 e⁻/ADU,
-v1's, is what the residuals' photon transfer gives once the field is modelled (slope 1.08; `noise_transfer`).
+v1's.  The residuals' photon transfer (`noise_transfer`) does not pin it: 2.4 at 1 e⁻/ADU without the field, then
+1.08 and 0.62 with it on two sets of beads.
 Read noise 1.6 e⁻.
 
 *detect* finds the beads once (the PSF calibration window's `bead_rois`) and keeps them in ``--work``.  *fit*

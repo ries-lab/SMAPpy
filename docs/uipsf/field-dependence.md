@@ -2,7 +2,7 @@
 
 A study, November 2026: the literature, the options for uipsf's coefficient field (`plan.md` §3, the slot
 `NodalPolynomial` + `BSplineResidual` + `FocalSurface`) and for SMAPpy's fitter (`plan.md` §7.3), and
-measurements on synthetic data that decide between them.  What v1 built of it is §8.
+measurements on synthetic data that decide between them.  What v1 built of it is §8, and the first real field §9.
 
 **In short.**
 - *Representation in uipsf:* the Zernike coefficients as a nodal-aberration-theory polynomial of the field
@@ -224,7 +224,46 @@ dependence* is a tick in the PSF calibration window, and the run reports whether
 
 `docs/uipsf/architecture.md`, "Field dependence", has the details and the measurements.
 
-## 9. Open
+## 9. Zenodo `1ch_FD_bead` (November 2026)
+
+`benchmarks/uipsf/real/zenodo_fd_beads.py`, `results/zenodo_fd.json`.  Two stacks of astigmatic beads over a
+1608 × 1608 px Prime 95B chip (177 µm), 10 nm steps over 2 µm; 239 beads found.  v1's optics (NA 1.5, 680 nm,
+immersion 1.515, medium 1.406, 110 nm pixels) and conversion, 0.47 e⁻/ADU: the files do not record it; the
+residuals' photon transfer gave 1.08 with the field on a first set of beads and 0.62 on the second, so it is
+not well pinned.  60 beads spread over the chip were learnt from, in chunks of 8 (60 at once took more than
+15 GB: the window's run passes no chunk size, to fix for large fields).
+
+| | without field | with field |
+|---|---|---|
+| beads used | 52 of 60 | 51 of 60 |
+| deviance per pixel | 2.30 | 1.36 |
+| blur σ (x, y) | 93, 117 nm | 75, 102 nm |
+| time (4 cores) | 12.6 min | 30.9 min |
+
+The report: significant, 935 000 nats over 14 coefficients (threshold 27); over the beads' 170 µm astigmatism
+changes by up to 1.4 rad (Noll 5) and 0.7 rad (Noll 6), coma by 0.3 rad.  **The learnt field is NAT's,
+unconstrained:** centred on the chip (808, 809 px), the linear terms vanish, Noll 6 = 0.27 u² − 0.22 v² and
+Noll 5 = 0.51 uv, astigmatism ≈ 0.26 H² with a real coefficient; Noll 8 = 0.18 u and Noll 7 = 0.16 v, coma
+≈ 0.17 H (rad, u and v in units of 50 µm).  v1's per-bead maps of the same data show the same pattern.  The
+export made a 9 × 9 grid, the largest of `GRIDS`.
+
+**Localisation**: every slice within ±600 nm of every bead, the 188 not learnt from included; z error rms per
+bead after its own height, median, nm:
+
+| spline | all | 0–40 µm from the centre | 40–70 µm | 70–120 µm |
+|---|---|---|---|---|
+| field (node splines) | **36** | **25** | **27** | **51** |
+| the field model's centre spline | 92 | 29 | 66 | 160 |
+| learnt without the field | 97 | 35 | 76 | 137 |
+
+What is left at the edges is the model, not the grid: in a first run (whose beads missed the chip's right side)
+a spline drawn exactly at each far bead did no better than the 9 × 9 blend (86 against 85 nm), though the blend
+misses the PSF by 2.7 % of its peak at 9 × 9 (1.3 % at 13 × 13), above `TOLERANCE`; the export should say so
+when it stops at the largest grid.  Candidates: second-order terms (Droste's), a field-dependent magnitude
+(vignetting), the conversion.
+
+## 10. Open
 
 - Whether the residual's prior keeps a bead calibration of 20–50 beads stable (the residual is not built).
-- Whether a larger field (Zenodo `1ch_FD_bead`) needs the quadratic terms, coma or 7 × 7.
+- What limits the edges of a 177 µm field (§9): second-order terms, a field-dependent magnitude.
+- Chunks in the window's run for many beads, and a warning when the grid stops at its largest.
