@@ -70,9 +70,9 @@ def spread(xy, n):
 
 def fit(work, kind, n_beads):
     import torch
+    from smappy.calibrate.pupil import BeadSettings, field_centre, spline_calibration
 
     import uipsf
-    from smappy.calibrate.pupil import BeadSettings, field_centre, spline_calibration
     from uipsf.diagnostics import field_report, noise_transfer
     from uipsf.workflows import learn_beads
     from uipsf.workflows.beads import MAX_DZ_NM
