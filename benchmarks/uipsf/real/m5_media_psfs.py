@@ -48,7 +48,7 @@ PHOTON_LABEL = {"frame": "photons × factor per frame", "obs": "photons free per
 
 def variant_label(variant: str) -> str:
     rest, _, extra = variant.partition("~")
-    extra = {"zscale": ", z scale learnt"}.get(extra, f", n_imm {extra[1:]}" if extra else "")
+    extra = {"zscale": ", z scale learnt", "na": ", NA learnt"}.get(extra, f", n_imm {extra[1:]}" if extra else "")
     rest, _, photons = rest.partition("@")
     pupil, _, blur = rest.partition("+")
     return (LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
@@ -89,8 +89,9 @@ def learn(args):
         optics = OpticsSettings(NA=args.grid_na, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=104.7, pixel_y_nm=106.4)
         for variant in args.variants:
-            # "~zscale": the stage's z scale learnt; "~n1.515": another immersion index (the user's: is the shared z
-            # bend a z scale, or oil a few degrees off its index?)
+            # "~zscale": the stage's z scale learnt; "~n1.515": another immersion index; "~na": the minimal models'
+            # aperture learnt (the user's: is the shared z bend a z scale, oil a few degrees off its index, or
+            # the NA?)
             rest, _, extra = variant.partition("~")
             rest, _, photons = rest.partition("@")
             pupil, _, blur = rest.partition("+")
@@ -110,7 +111,8 @@ def learn(args):
                 modes = [2, 3, 5, 6, 8, 16] if pupil == "minimal" else []
                 # the aperture at NA 1.50 on whatever grid this is (it was held at 1.50/1.51 of the grid, so at
                 # 1.49 on a grid at 1.50)
-                magnitude = minimal("height", cond["medium"] == "mismatch", modes, {}, {}, bead_nm, args.grid_na)
+                magnitude = minimal("height", cond["medium"] == "mismatch", modes, {}, {}, bead_nm, args.grid_na,
+                                    free_na=extra == "na")
             else:
                 magnitude = use_pupil(pupil)
             model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
@@ -135,6 +137,8 @@ def learn(args):
                                 sigma_nm=run.cal.result.params.physical()["psf.sigma"].detach().cpu().numpy(),
                                 z_scale=float(run.cal.result.params.physical()["geometry.z_scale"]),
                                 n_immersion=run_optics.n_immersion,
+                                effective_na=float(run.cal.result.params.physical().get(
+                                    "pupil.edge_rho", torch.tensor(np.nan))) * args.grid_na,
                                 **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm",
                                                          "z_systematic_rms_nm", "z_scatter_over_crlb")}, **cond)
             print(name, variant, "z bend", bends["z_systematic_rms_nm"], flush=True)

@@ -75,8 +75,9 @@ def central(rois, keep, fraction: float, shape) -> list:
 
 
 def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead_nm: float,
-            grid_na: float = GRID_NA):
-    """Make `bead_model` build the minimal pupil (module docstring)."""
+            grid_na: float = GRID_NA, free_na: bool = False):
+    """Make `bead_model` build the minimal pupil (module docstring); ``free_na`` learns the aperture's cutoff
+    instead of holding it at `NA` (ρ 0.85 … 1.05 of the grid's NA)."""
     import uipsf.workflows.calibrate as calibrate
     from uipsf.model.pupil import ZernikePupil
 
@@ -86,7 +87,8 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
             return EdgePupil(grid, n_max, centre="cos", edge="hard", asymmetric=True, asym_modes=tuple(modes),
                              saf=ring, ring="bead" if form == "bead s" else "height",
                              saf_step=ring and form == "bead s",
-                             held_magnitude=held_magnitude, hold={"pupil.edge_rho": NA / grid_na} | hold,
+                             held_magnitude=held_magnitude,
+                             hold=({} if free_na else {"pupil.edge_rho": NA / grid_na}) | hold,
                              bead_nm=bead_nm)
     calibrate.ZernikePupil = Build
     return "free"
