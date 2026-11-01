@@ -195,6 +195,8 @@ def main():
     ap.add_argument("--mode-sets", nargs="+", default=["x6"], choices=list(MODE_SETS),
                     help="the m ≠ 0 modes learnt, by name (MODE_SETS); each gets its own fits and consensus")
     ap.add_argument("--estimators", nargs="+", default=list(ESTIMATORS), choices=ESTIMATORS)
+    ap.add_argument("--npz-dir", default=None,
+                    help="also keep each fit's images, slice fits and bends for `m5_scorecard.py` and the figures")
     ap.add_argument("--centre", type=float, default=0.5, help="the central fraction of the width and height")
     ap.add_argument("--z-range", type=float, default=600.0)
     ap.add_argument("--window", type=float, default=1000.0)
@@ -251,10 +253,17 @@ def main():
                               decisions={i: "include" for i in range(len(rois.records))})
         row = dict(acquisition=name, **cond, stage=stage, form=form, estimator=estimator, blur=blur, beads=cut,
                    grid_na=GRID_NA, na=NA, window_nm=args.window, dz_nm=args.dz, centre=args.centre,
-                   modes=modes, asym_modes=list(MODE_SETS[modes]), **extra)
+                   modes=modes, asym_modes=list(MODE_SETS.get(modes, ())), **extra)
         row.update(summary(run, cond))
         row.update(measure(run, args.z_range, centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used]))
         row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
+        if args.npz_dir:
+            from m5_media_psfs import fit_record
+            os.makedirs(args.npz_dir, exist_ok=True)
+            tag = "_".join(t for t in (stage, modes if modes != "none" else "", form if form != "none" else "",
+                                        estimator or "", blur) if t)
+            np.savez_compressed(os.path.join(args.npz_dir, f"{name}__{tag.replace(' ', '_')}.npz"),
+                                **fit_record(run, rois), window_nm=args.window, grid_na=GRID_NA, **cond)
         emit(row, args.out)
         done.append(json.loads(json.dumps(row, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))))
         have.add((name, stage, form, estimator, blur, modes))
@@ -264,8 +273,9 @@ def main():
     for path in args.acquisitions:
         _, cond, _, bead_nm = acquisition(path)
         ring = cond["medium"] == "mismatch"
-        fit(path, "zernike", "none", None, use_pupil("zernike"), "free", {})
-        fit(path, "zernike fixed σ", "none", None, use_pupil("zernike"), "fixed", {})
+        # the references learn no minimal modes: "none" in their key and their file's name
+        fit(path, "zernike", "none", None, use_pupil("zernike"), "free", {}, "none")
+        fit(path, "zernike fixed σ", "none", None, use_pupil("zernike"), "fixed", {}, "none")
         for modes, blur in itertools.product(args.mode_sets, args.blurs):
             for form in (args.forms if ring else ["none"]):
                 fit(path, "free", form, None, minimal(form, ring, MODE_SETS[modes], {}, {}, bead_nm), blur, {},

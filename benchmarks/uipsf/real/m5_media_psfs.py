@@ -61,12 +61,40 @@ def _intensities():
     return {"": Bleaching, "frame": PerFrameFactor, "obs": PerObservation}
 
 
+def fit_record(run, rois) -> dict:
+    """What a fit leaves for its figures and its scorecard (`m5_scorecard.py`): the bead average and the model on
+    common planes (`model_views.pupil_views`), the residual's standard error over beads (whether the averaged
+    residual is noise), every bead's slice fits against its stack fit, the median bends, σ, the learnt z scale
+    and aperture, and the deviance."""
+    import torch
+    from smappy.calibrate.model_views import pupil_views
+    v = pupil_views(run)
+    used = list(run.cal.beads.used)
+    res = np.stack([np.asarray(v.beads[b][1][0]) - np.asarray(v.beads[b][0][0]) for b in used if b in v.beads])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        se = np.nanstd(res, 0) / np.sqrt(np.sum(np.isfinite(res), 0))
+    centres = [rois.records[i]["focus_nm"] for i in used]
+    bends = measure(run, 600.0, centre_nm=centres)
+    each = per_bead(run, centres)
+    p = run.cal.result.params.physical()
+    return dict(z_nm=v.z_nm, data=v.data[0], model=v.model[0], resid_se=se,
+                objective=float(run.cal.result.objective), used=len(used),
+                atlas_mean_deviance=float(run.cal.atlas.mean_deviance),
+                curve_z_nm=np.asarray(bends["curve_z_nm"], float), curve_nm=np.asarray(bends["curve_nm"], float),
+                bead_error=each["error"], bead_crlb=each["crlb"], bead_z=each["z"],
+                bead_x_px=np.array([rois.records[i]["x_px"] for i in used]),
+                bead_y_px=np.array([rois.records[i]["y_px"] for i in used]),
+                sigma_nm=p["psf.sigma"].detach().cpu().numpy(), z_scale=float(p["geometry.z_scale"]),
+                edge_rho=float(p.get("pupil.edge_rho", torch.tensor(np.nan))),
+                **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm", "z_systematic_rms_nm",
+                                         "z_scatter_over_crlb")})
+
+
 def learn(args):
     import torch
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     from edge_magnitude import use_pupil
-    from smappy.calibrate.model_views import pupil_views
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
     from z_blur import use_z_blur
 
@@ -121,28 +149,11 @@ def learn(args):
                                  bead_diameter_nm=bead_nm)
             run = run_calibration(files, False, run_optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
-            v = pupil_views(run)
-            # the bends, each slice localised alone on the model (`bead_slices.measure`), over ±600 nm
-            used = list(run.cal.beads.used)
-            bends = measure(run, 600.0, centre_nm=[rois.records[i]["focus_nm"] for i in used])
-            # and every bead's own: the slice fits against its stack fit, its z about its focus, its place
-            each = per_bead(run, [rois.records[i]["focus_nm"] for i in used])
-            np.savez_compressed(os.path.join(args.out, f"{name}__{variant.replace(' ', '_')}.npz"),
-                                z_nm=v.z_nm, data=v.data[0], model=v.model[0],
-                                objective=float(run.cal.result.objective), window_nm=args.window,
-                                used=len(run.cal.beads.used), curve_z_nm=np.asarray(bends["curve_z_nm"], float),
-                                curve_nm=np.asarray(bends["curve_nm"], float),
-                                bead_error=each["error"], bead_crlb=each["crlb"], bead_z=each["z"],
-                                bead_x_px=np.array([rois.records[i]["x_px"] for i in used]),
-                                bead_y_px=np.array([rois.records[i]["y_px"] for i in used]),
-                                sigma_nm=run.cal.result.params.physical()["psf.sigma"].detach().cpu().numpy(),
-                                z_scale=float(run.cal.result.params.physical()["geometry.z_scale"]),
-                                n_immersion=run_optics.n_immersion,
-                                effective_na=float(run.cal.result.params.physical().get(
-                                    "pupil.edge_rho", torch.tensor(np.nan))) * args.grid_na,
-                                **{k: bends[k] for k in ("x_systematic_rms_nm", "y_systematic_rms_nm",
-                                                         "z_systematic_rms_nm", "z_scatter_over_crlb")}, **cond)
-            print(name, variant, "z bend", bends["z_systematic_rms_nm"], flush=True)
+            record = fit_record(run, rois)
+            np.savez_compressed(os.path.join(args.out, f"{name}__{variant.replace(' ', '_')}.npz"), **record,
+                                window_nm=args.window, n_immersion=run_optics.n_immersion,
+                                effective_na=record["edge_rho"] * args.grid_na, **cond)
+            print(name, variant, "z bend", record["z_systematic_rms_nm"], flush=True)
 
 
 def draw(folder):
