@@ -102,17 +102,19 @@ def inverse_map(H: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
 
 class Channel:
     def __init__(self, psf, transform=None, share: float | None = None, dz_nm: float | None = None,
-                 name: str | None = None, fit_transform: bool = True):
+                 name: str | None = None, fit_transform: bool = True, field=None):
         """``psf`` the channel's `VectorPSF`; ``transform`` its 3×3 map to the main channel's chip pixels
         (ignored for the main channel; default the identity); ``share`` and ``dz_nm`` the starting photon
         share and defocus offset, from the data when None (`model.start.rough_start`).
-        ``fit_transform=False`` keeps the transform fixed (fewer than four pairs cannot fix eight entries)."""
+        ``fit_transform=False`` keeps the transform fixed (fewer than four pairs cannot fix eight entries).
+        ``field``, a coefficient field (`model.field`), makes the pupil depend on the emitter's chip position."""
         self.psf = psf
         self.transform = normalised(np.eye(3) if transform is None else transform)
         self.share = None if share is None else float(share)
         self.dz_nm = None if dz_nm is None else float(dz_nm)
         self.name = name
         self.fit_transform = bool(fit_transform)
+        self.field = field
 
     @property
     def pixel_size_nm(self) -> tuple[float, float]:
@@ -122,6 +124,8 @@ class Channel:
         """Channel ``c``'s parameters: its PSF's (prefixed) and, for c ≥ 1, transform, share and offset."""
         pre = prefix(c)
         specs = [replace(s, name=pre + s.name) for s in self.psf.specs()]
+        if getattr(self, "field", None) is not None:
+            specs += [replace(s, name=pre + s.name) for s in self.field.specs()]
         if c == 0:
             return specs
         start = start or {}

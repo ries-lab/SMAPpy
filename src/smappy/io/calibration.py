@@ -51,6 +51,9 @@ class SplineCalibration:
     pixelsize_um: Optional[np.ndarray] = None
     source: Optional[Path] = None
     parameters: dict = field(default_factory=dict)  # raw calibration parameters
+    # a field-dependent calibration: the splines of a grid over the chip (`smappy.field_splines`); then
+    # ``coeff`` is the spline at the grid's centre, what a reader that ignores the field fits with
+    field_splines: Optional[object] = None
 
     @property
     def shape(self) -> tuple:
@@ -396,6 +399,14 @@ def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
                 f.create_dataset('psf', data=cal.psf, compression='gzip')
             f.create_dataset('parameters_json',
                              data=json.dumps(cal.parameters, default=_jsonable))
+            fs = getattr(cal, 'field_splines', None)
+            if fs is not None:
+                # optional, so the version stays: a reader that does not know it fits with ``coeff``,
+                # the grid's centre, as with any calibration of one spline
+                g = f.create_group('field')
+                g.create_dataset('coeff', data=fs.coeff, compression='gzip')
+                g.create_dataset('xs', data=fs.xs)
+                g.create_dataset('ys', data=fs.ys)
             g = f.create_group('diagnostics')
             for key, value in (diagnostics or {}).items():
                 if key.endswith('_json'):
@@ -442,6 +453,9 @@ def _load_native_calibration(path):
             source=Path(path),
             em_on=bool(f.attrs['em_on']) if 'em_on' in f.attrs else None,
             parameters=json.loads(f['parameters_json'][()]))
+        if 'field' in f:
+            from ..field_splines import FieldSplines
+            cal.field_splines = FieldSplines(f['field/coeff'][...], f['field/xs'][...], f['field/ys'][...])
         # written by versions that kept a mirrored spline as it was
         mirrored = bool(f.attrs.get('em_mirror', False))
     _validate_native_calibration(cal)

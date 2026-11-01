@@ -157,11 +157,19 @@ class Calibration:
     def shared(self) -> dict:
         return shared_values(self.result.params)
 
-    def psf(self, xyz_nm, roi_px=None, depth_nm=None, include_bead=False, upsample=None, channel: int = 0):
+    def beads_field_xy(self):
+        """The used beads' chip positions [E, 2] (pixels), in the order of ``beads.used``; None if not known."""
+        rows = {r.bead: r for r in self.beads.rows}
+        xy = [rows[b].field_xy for b in self.beads.used]
+        return None if any(v is None for v in xy) else [list(v) for v in xy]
+
+    def psf(self, xyz_nm, roi_px=None, depth_nm=None, include_bead=False, upsample=None, channel: int = 0,
+            field_xy=None):
         """The learned PSF of ``channel`` at ``xyz_nm`` [N, 3]: [N, Y, X] photons per photon of the emitter
-        (`export.sample_psf`)."""
+        (`export.sample_psf`); ``field_xy`` where on the chip, for a field-dependent model."""
         from ..export import sample_psf  # export builds on workflows, not the other way round
-        return sample_psf(self.model, self.shared(), xyz_nm, roi_px, depth_nm, include_bead, upsample, channel)
+        return sample_psf(self.model, self.shared(), xyz_nm, roi_px, depth_nm, include_bead, upsample, channel,
+                          field_xy)
 
 
 def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_start: Calibration | None = None,

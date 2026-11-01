@@ -119,15 +119,16 @@ def with_medium(learned, n_med: Optional[float]):
     return build(config, device=torch.device("cpu"), dtype=torch.float64), learned.shared
 
 
-def draw(model, shared, focus_nm: float, heights_nm, roi_px: int) -> np.ndarray:
+def draw(model, shared, focus_nm: float, heights_nm, roi_px: int, field_xy=None) -> np.ndarray:
     """The PSF [N, Y, X] of emitters on the central pixel at ``heights_nm`` above the coverslip, the focus
     ``focus_nm`` into the sample as the objective was moved; the bead's size left out, the learnt blur kept.
-    A negative height is in the glass: an emitter at the coverslip with the focus that much farther."""
+    A negative height is in the glass: an emitter at the coverslip with the focus that much farther.
+    ``field_xy``: where on the chip, for a field-dependent model (its centre if None)."""
     from uipsf.export import sample_psf
     h = np.asarray(heights_nm, float)
     xyz = np.zeros((len(h), 3))
     xyz[:, 2] = -float(focus_nm) + np.minimum(h, 0.0)
-    psf = sample_psf(model, shared, xyz, roi_px, depth_nm=np.maximum(h, 0.0))
+    psf = sample_psf(model, shared, xyz, roi_px, depth_nm=np.maximum(h, 0.0), field_xy=field_xy)
     return psf.double().numpy()
 
 
@@ -168,8 +169,15 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
     n = int(np.ceil((high - max(focus - half, -BELOW_NM)) / dz))
     heights = high - np.arange(n + 1) * dz                    # plane 0 the highest, as in a bead stack
     psf = np.maximum(draw(model, shared, focus_nm, heights, roi), 0)
-    psf /= float(psf.sum(axis=(1, 2)).max())
-    psf = psf.astype(np.float32)
+    scale = float(psf.sum(axis=(1, 2)).max())
+    psf = (psf / scale).astype(np.float32)
+    field = getattr(cal, "field_splines", None)
+    if field is not None:
+        # the same nodes, drawn at this depth and normalised by the centre's scale, so the blend stays one
+        from ..field_splines import FieldSplines
+        nodes = [np.maximum(draw(model, shared, focus_nm, heights, roi, field_xy=(float(x), float(y))), 0) / scale
+                 for y in field.ys for x in field.xs]
+        field = FieldSplines(np.stack([spline_coefficients(n.astype(np.float32)) for n in nodes]), field.xs, field.ys)
     parameters = dict(cal.parameters or {})
     parameters.update({
         "sample_depth": {"focus_nm": float(focus_nm), "n_med": medium(learned) if n_med is None else float(n_med),
@@ -177,7 +185,8 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
         "z_reference": "the coverslip: z is the height above it",
         "z_convention": "emitter_nm = -(index-z0)*dz"})
     return SplineCalibration(spline_coefficients(psf), dz, high / dz, x0=(roi - 1) / 2, psf=psf, em_on=cal.em_on,
-                             pixelsize_um=cal.pixelsize_um, source=cal.source, parameters=parameters)
+                             pixelsize_um=cal.pixelsize_um, source=cal.source, parameters=parameters,
+                             field_splines=field)
 
 
 _DRAWN: dict = {}

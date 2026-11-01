@@ -512,9 +512,24 @@ class SplinePSF(PSFModel):
     def is_3d(self) -> bool:
         return True
 
+    @property
+    def field_dependent(self) -> bool:
+        """Whether the PSF depends on where on the chip a spot is: then `fit`
+        wants each ROI's chip position (`smappy.field_splines`)."""
+        return getattr(self.calibration, "field_splines", None) is not None
+
     def fit(self, rois: np.ndarray, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, chip_xy: Optional[np.ndarray] = None) -> FitResult:
+        """``chip_xy`` (n, 2), each ROI's centre on the camera chip in pixels:
+        with a field-dependent calibration each ROI is fitted with the splines
+        blended there; without it, with the grid's centre."""
         z_start = float(self.calibration.z_nm_to_index(self.z_start_nm))
+        field = getattr(self.calibration, "field_splines", None)
+        if field is not None and chip_xy is not None:
+            from .field_splines import bilinear
+            nodes, weights = bilinear(field, chip_xy)
+            return FitResult(*_fit3d.fit_cspline_field(
+                rois, field.coeff, nodes, weights, z_start, int(iterations), int(n_threads)))
         return FitResult(*_fit3d.fit_cspline(rois, self.calibration.coeff,
                                              z_start, int(iterations),
                                              int(n_threads)))

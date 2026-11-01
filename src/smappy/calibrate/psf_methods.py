@@ -526,9 +526,13 @@ class PupilModel:
         cal = run.result.cal
         if cal.result.stop_reason == "cancelled":
             return "stopped, nothing saved"
+        from uipsf.diagnostics import field_report
         from uipsf.diagnostics.figures import tilt_text
         tilt = tilt_text(cal)
-        return f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f", {tilt}" if tilt else "")
+        # with *field dependence*: how much astigmatism and coma vary over the beads, and whether it is real
+        field = field_report(cal)
+        return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f", {tilt}" if tilt else "")
+                + ("" if field is None else f"; {field.summary()}"))
 
 
 class InSitu:

@@ -116,9 +116,14 @@ class LocalizationEngine:
         stack = ROIStack(images, candidates, self.settings.roisize)
         t0 = time.perf_counter()
         variance = self.camera.readout_variance
+        extra = {}
+        if getattr(self.model, "field_dependent", False):
+            # each ROI's centre on the chip, for a PSF that varies over it
+            ox, oy = self.camera.roi_offset
+            extra["chip_xy"] = np.stack([stack.candidates.x + ox, stack.candidates.y + oy], 1)
         result = self.model.fit(with_readout(stack.images, variance),
                                 iterations=self.settings.iterations,
-                                n_threads=self.settings.n_threads)
+                                n_threads=self.settings.n_threads, **extra)
         without_readout(result, self.model, variance)
         self.stats["fit_seconds"] += time.perf_counter() - t0
         self.stats["rois"] += len(stack)

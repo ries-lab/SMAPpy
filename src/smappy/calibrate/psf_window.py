@@ -551,7 +551,10 @@ class PSFCalibrationWindow(QMainWindow):
                                                    and self.optics_camera.is_em)})
         # the tilt: always in situ, where molecules above the glass see it; for beads only through a coverslip
         # of another index (a water or silicone objective) -- with oil, beads on the coverslip see none
-        self.model_form.set_shown({"fit_tilt": self.method.sections.get("in situ", False) or layered})
+        in_situ = self.method.sections.get("in situ", False)
+        self.model_form.set_shown({"fit_tilt": in_situ or layered,
+                                   # beads of one channel only, for now (docs/uipsf/field-dependence.md)
+                                   "field_dependence": not in_situ and not self.is_dual})
 
     def _coverslip_matters(self) -> bool:
         """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""

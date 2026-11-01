@@ -44,7 +44,7 @@ import torch
 # The choices live in smappy, torch-free, so its window builds the form without torch installed.
 from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings  # noqa: F401
 
-from ..model import BeadStackGeometry, Channel, ForwardModel, VectorPSF, ZernikePupil
+from ..model import BeadStackGeometry, Channel, FieldPolynomial, ForwardModel, VectorPSF, ZernikePupil
 from ..model.channels import prefix
 from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
@@ -89,7 +89,7 @@ def magnitude_modes(n_max: int, kind: str) -> list[int]:
 
 def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max_nm: float = 0.0,
                device=None, dtype=torch.float32, held_phase: dict | None = None,
-               held_magnitude: dict | None = None) -> ForwardModel:
+               held_magnitude: dict | None = None, field_centre_px=None) -> ForwardModel:
     """The model a bead calibration learns: one channel per `Optics` in ``optics`` (one, or a list, the
     main channel first), each with its own pupil, started at ``transforms`` (secondary → main chip
     pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to ``z_max_nm`` from
@@ -110,7 +110,13 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
         psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
                         sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur != "fixed",
                         round_sigma=settings.blur == "round")
-        channels.append(Channel(psf, transform=H))
+        field = None
+        # getattr: settings saved before field dependence was a choice; the main channel only, for now
+        if getattr(settings, "field_dependence", False) and not channels:
+            if field_centre_px is None:
+                raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
+            field = FieldPolynomial(field_centre_px, o.pixel_size_nm)
+        channels.append(Channel(psf, transform=H, field=field))
     # getattr: settings of a model saved before the tilt was a choice
     return ForwardModel(channels, geometry=BeadStackGeometry(fit_tilt=getattr(settings, "fit_tilt", False)))
 
@@ -130,7 +136,9 @@ def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_m
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, InSituGeometry
-    beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0), roi_shape, z_max_nm=z_max_nm,
+    # field dependence is for beads, for now: in situ data are not yet spread over the field (study §6)
+    beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0, field_dependence=False), roi_shape,
+                       z_max_nm=z_max_nm,
                        device=device, dtype=dtype, held_phase=held_phase, held_magnitude=held_magnitude)
     return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
@@ -192,7 +200,9 @@ def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, tran
         model = warm_start.model
     else:
         z_max = float(batch.z_nm.abs().max()) if batch.z_nm.numel() else 0.0
-        model = bead_model(optics, settings, tuple(batch.data.shape[-2:]), transforms, z_max, device, dtype)
+        from smappy.calibrate.pupil import field_centre
+        model = bead_model(optics, settings, tuple(batch.data.shape[-2:]), transforms, z_max, device, dtype,
+                           field_centre_px=field_centre(batch))
     if model.n_channels != batch.data.shape[1]:
         raise ValueError(f"{model.n_channels} channels of optics for a batch of {batch.data.shape[1]}")
     found = {}

@@ -642,6 +642,23 @@ immersion's.  Tick it when the coma of the result differs between samples
 mounted on different days, or in situ when molecules lie well above the
 coverslip.  Off, the tilt is 0.
 
+### field dependence
+Learns astigmatism and coma that change over the field of view, beside the
+pupil at the field's centre: each a smooth polynomial of where the bead is on
+the chip, astigmatism up to the square of the distance, coma in proportion to
+it, as nodal aberration theory says an objective's aberrations vary.  The
+spline is then one per point of a grid over the beads' span, as fine as the
+learnt field needs (one spline when it is flat), and Spline 3D fits each spot
+with the splines around it blended.  Offered for beads of one channel.  Tick
+it for a field of view of more than about 50 µm, or when beads at the edges
+fit worse than in the middle.  After the run the summary says whether the
+field is real -- a test of its coefficients against none, in nats beside its
+threshold -- and the largest change of each mode across the beads; when it is
+not significant, calibrate without it.  On M5's fields of about 25 µm the
+astigmatism changed by 0.09 rad from the centre to the edge, and a spline
+for the whole field put spots there 4–13 nm off in z
+([the study](https://github.com/ries-lab/SMAPpy/blob/main/docs/uipsf/field-dependence.md)).
+
 ### beads
 How beads are found, and for the bead average how they are aligned and
 averaged: the bead calibration's settings, which its
