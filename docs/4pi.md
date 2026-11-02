@@ -1,10 +1,10 @@
 # 4Pi in SMAPpy: what exists, what is wrong with it, and a plan
 
-Status, 2026-10-28: M0-M5 are done (§6-§8, §11, §14): the fitter, the channel
+Status, 2026-11-02: M0-M5 are done (§6-§8, §11, §14): the fitter, the channel
 layer (§9), real DCIMG data (§10), learning from beads in uiPSF v2 and the
 bead average, both in the PSF calibration window, live DCIMG and simulated 4Pi
 cameras (§16).  Of M7 the vectorial model is in and the window's default
-(§17, §19), with a start that reaches one optimum (§20); the locked refit, multicolour and two cameras are not started.  M6
+(§17, §19), with a start that reaches one optimum (§20), and the window learns one objective's minimal pupil (§23); the locked refit, multicolour and two cameras are not started.  M6
 (in situ) waits on the in-situ learning; dual colour on the layer (M8) is
 planned, not started.
 
@@ -1867,3 +1867,69 @@ Left free, the two objectives learnt nearly the same magnitude (−0.166 / −0.
 I, and would read better, but would not interpolate better: a cubic spline is linear in its knots, so the
 spline of the rotated knots is the rotated spline, with the same error.  What is steep is the PSF across
 the pixels, which only finer knots in x and y would follow.
+
+
+## 23. The minimal pupil, and the objective's effective NA (2026-11-02)
+
+The form's PSF model is now one objective's (`PSFModelSettings`, `docs/uipsf/architecture.md` "The minimal
+model"): cos θ^γ, one γ for both objectives under *same magnitude* (on by default), σ round over the pixel's
+blur.  The sample is index-matched, so there is no supercritical ring and no SAF damping; the *magnitude
+modes* are shown only for a Zernike magnitude (`fourpi_beads.fourpi_shown`).  The export keeps both arms'
+described pupils (`parameters["pupils"]`, `VectorPSF.describe`).
+
+**A bug on the way.**  `FourPiModel` took ``pixel_blur`` and blurred by the learnt σ alone (`blur(p)`, not
+`image_sigma(p)`), so "σ over the pixel's blur" was not true for 4Pi; fixed, with a test that the image with σ
+over the pixel equals the image of their sum without it.  Models learnt without the pixel blur -- the old
+default -- were not affected.
+
+**Simulated** (`test_minimal_4pi_beads_give_back_their_gamma_sigma_pupils_and_phases`, long tier): six beads
+drawn with the minimal model (γ 0.35, σ 35 nm over the pixel, astigmatism of opposite sign, coma, spherical, a
+misalignment), learnt from the window's start.  Three noise draws: γ 0.343-0.352 (CRLB 0.007), σ 34.6-35.6
+nm (0.3), every phase mode of both pupils, Δ and each bead's phase within 2 CRLB, the z-scores spread as a
+unit normal's.
+
+**Real** (`benchmarks/uipsf/real/zenodo_4pi_minimal.py`, `results/fourpi_minimal.jsonl`): uiPSF v1's 18
+beads of Zenodo `4pi_40nm_bead`, through `fourpi_beads.learn`, vectorial, order 6, a photon count per
+observation, Apple's GPU; each model exported and fitted back with `Global4PiPSF` -- z from the phase and from
+the envelope against the stage, over the scan's middle 15 slices, and the envelope's bias against the
+phase's z (median over beads per slice).  The beads have ~35 000 photons: *4Pi z* chose the right fringe
+for every frame with every model, so its behaviour on beads says nothing between them; the envelope's bias is
+what moves it for dim molecules, and at 2-4 nm against a 265 nm fringe it does not.
+
+| model | NA (aperture) | objective | shared parameters | γ | σ (nm) | Δ (nm) | phase z rms / CRLB (nm) | envelope z rms / CRLB (nm) | envelope bias rms (max) (nm) |
+|---|---|---|---|---|---|---|---|---|---|
+| symmetric Zernike per objective, σ 60, no pixel blur (old default) | 1.35 | 916 143 | 98 | | 55.4 | (−18, −13, 142) | 2.21 / 0.67 | 6.77 / 2.63 | 1.97 (4.6) |
+| symmetric Zernike shared, pixel blur | 1.35 | 916 509 | 95 | | 41.0 | (−17, −13, 141) | 2.20 / 0.67 | 6.76 / 2.63 | 2.00 (4.7) |
+| minimal, γ per objective | 1.35 | 925 889 | 94 | 0.400, 0.405 | 41.1 | (−19, −15, 157) | 2.20 / 0.67 | 7.24 / 2.56 | 3.43 (8.9) |
+| minimal, one γ (new default) | 1.35 | 925 889 | 93 | 0.403 | 41.1 | (−19, −15, 157) | 2.20 / 0.67 | 7.25 / 2.56 | 3.43 (8.9) |
+| minimal, one γ | 1.33 | 913 057 | 93 | 0.304 | 42.1 | (−23, −13, 127) | 2.20 / 0.67 | 6.84 / 2.62 | 2.27 (5.4) |
+| minimal, one γ | 1.32 | 911 215 | 93 | 0.240 | 42.8 | (−24, −13, 121) | 2.20 / 0.67 | 6.66 / 2.65 | 1.75 (3.7) |
+| minimal, one γ | 1.31 | 913 129 | 93 | 0.173 | 43.4 | (−26, −14, 113) | 2.21 / 0.67 | 6.66 / 2.69 | 1.93 (4.3) |
+| minimal, one γ | 1.29 | 929 199 | 93 | 0.031 | 44.7 | (−32, −16, 95) | 2.23 / 0.67 | 6.56 / 2.77 | 4.43 (9.8) |
+| minimal, one γ | 1.26 | 1 012 371 | 93 | 0 (bound) | 45.9 | (3, 0, −67) | 2.22 / 0.66 | 6.34 / 2.95 | 12.6 (23.6) |
+| symmetric Zernike shared, pixel blur | 1.32 | 910 379 | 95 | | 41.7 | (−20, −13, 141) | 2.19 / 0.67 | 6.80 / 2.64 | 1.85 (4.1) |
+| minimal, one γ, aperture learnt (prototype) | 1.311 | 912 642 | 94 | 0.230 | 42.7 | (−25, −14, 107) | 2.21 / 0.67 | 6.62 / 2.65 | 1.77 (3.9) |
+
+The fringe period of every export is 264.6-265.1 nm (the beads' own, §14, 251 nm), the phase's z runs at 0.99 of
+the stage, and the coherence is 0.76-0.82 in every row.
+
+- **One γ costs nothing**: 925 889 with one γ or two (0.400 and 0.405).  The pixel's blur and a shared
+  magnitude cost the symmetric Zernikes 366 nats.
+- **At the nominal NA the minimal pupil is 9 700 nats behind** the old default, and its envelope bends twice
+  as much (3.4 nm rms, 8.9 nm at most).  The old fit's magnitude says why: normalised to the centre it falls
+  to 0.79 by ρ 0.5, stays there to 0.8, then drops to 0.67 at 0.9 and 0.2-0.3 at the rim -- an edge inside
+  the nominal aperture, which cos θ^γ (0.6 at the rim for γ 0.40) cannot make.  γ rises to imitate it.
+- **With the aperture at an effective NA of ~1.32 the minimal pupil is 4 900 nats ahead of the old default**
+  with five shared parameters fewer, within 840 nats of the symmetric Zernikes at the same aperture, and bends z
+  as little (1.75 nm rms).  γ falls to 0.24.  The symmetric Zernikes gain from the lower aperture too
+  (5 800 nats), their coefficients shrinking to a third: the nominal aperture was wrong for both models.
+- **The effective NA is 0.97-0.98 of the nominal one**, as on one objective's beads (1.40 against 1.43,
+  `docs/uipsf/architecture.md`, "The bead's physics with an effective NA").  A parabola through 1.31-1.33 puts
+  it at 1.318; learnt (a prototype in the benchmark, `pupil.na_ratio` in the cutoff's place, one for both
+  objectives) it came out at 1.311.  Neighbouring fixed apertures differ by ~2 000 nats where a parabola would
+  have them nearly equal, so the solver's stopping point is worth ~1-2 000 nats on these beads.
+- **Phase z does not care**: 2.20-2.23 nm rms everywhere (3.3× its CRLB: the beads' own motion and the stage),
+  the envelope's z 6.3-7.3 nm (2.4-2.8×).
+
+Open: whether the effective NA is learnt (the minimal pupil's aperture a parameter, for one objective too) or
+typed under *microscope*; the user's decision (the question was put on 2026-11-02).

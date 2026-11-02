@@ -251,7 +251,7 @@ class FourPiModel:
             lr, li = h_lo[..., 0, :], h_lo[..., 1, :]
             parts = torch.stack([ur * ur + ui * ui, lr * lr + li * li, ur * lr + ui * li, ur * li - ui * lr], 1)
             parts = parts.sum(3) * up.norm                         # [E, 4, K, uY, uX]
-            return up._image(parts, up.blur(p), pad, dz)
+            return up._image(parts, up.image_sigma(p), pad, dz)
         u = analysed(h_up, *PLATES[self.plates][0][polarisation])  # [E, K, 3, uY, uX] complex, per dipole
         lo_field = analysed(h_lo, *PLATES[self.plates][1][polarisation])
         lo_field = lo_field * lo_field.new_tensor([1.0, 1.0, self.axial_sign])[:, None, None]   # μ_z seen from below
@@ -259,7 +259,7 @@ class FourPiModel:
         # ×2: one polarisation of an unpolarised emitter is half its light, and the shares f_c count a
         # channel's light as if it had it all, as the scalar model does
         parts = torch.stack([(u.abs() ** 2).sum(2), (lo_field.abs() ** 2).sum(2), cross.real, cross.imag], 1)
-        return up._image(parts * (2 * up.norm), up.blur(p), pad, dz)
+        return up._image(parts * (2 * up.norm), up.image_sigma(p), pad, dz)
 
     # ------------------------------------------------------------------ the model
 
@@ -418,7 +418,7 @@ class FourPiModel:
             psi = self.phases(p, p["emitter.phase"])
             cos, sin = torch.cos(psi), torch.sin(psi)
             N = self.intensity(p, batch).reshape(xyz.shape[0], J, M)
-            sigma = self.psf_up.blur(p)
+            sigma = self.psf_up.image_sigma(p)
             pad, dz, fields, t_up, t_lo = self._arms(p, batch, xyz, step)
 
         def apply_for(arm):
@@ -490,7 +490,7 @@ class FourPiModel:
             cos, sin = torch.cos(psi), torch.sin(psi)
             ones = torch.ones(xyz.shape[0], J, M, dtype=xyz.dtype, device=xyz.device)
             one, zero = torch.ones_like(r), torch.zeros_like(r)
-            sigma = self.psf_up.blur(p)
+            sigma = self.psf_up.image_sigma(p)
             g = self.grid
             two_pi_i = 2j * math.pi
             kx = (-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm)
@@ -586,6 +586,9 @@ def swapped(model: FourPiModel, shared: dict) -> dict:
         out[f"pupil.{which}"] = sign * parity * b
         if f"{LOWER}pupil.{which}" in shared:
             out[f"{LOWER}pupil.{which}"] = sign * parity * a
+    for name in ("pupil.gamma", "pupil.ring_h"):                            # minimal pupils' own numbers
+        if LOWER + name in shared:
+            out[name], out[LOWER + name] = shared[LOWER + name], shared[name]
     out["fourpi.offset"] = -torch.as_tensor(shared["fourpi.offset"])
     out["fourpi.balance"] = 1 - torch.as_tensor(shared["fourpi.balance"])
     return out

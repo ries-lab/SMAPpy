@@ -412,9 +412,14 @@ class PSFCalibrationWindow(QMainWindow):
         self._update_buttons()
 
     def _show_fourpi(self) -> None:
-        """The typed corners only while the channels are typed."""
-        typed = self.fourpi_form.value().layout == "typed"
-        self.fourpi_form.set_shown({n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")})
+        """The typed corners only while the channels are typed, the magnitude modes only for a Zernike
+        magnitude, no SAF damping (`fourpi_beads.fourpi_shown`)."""
+        from .fourpi_beads import fourpi_shown
+        try:
+            settings = self.fourpi_form.value()
+        except ValueError:                           # a field that does not read: leave the form as it is
+            return
+        self.fourpi_form.set_shown(fourpi_shown(settings))
 
     def _forget(self, message: str) -> None:
         """A change of method or mode makes the result another calibration's: dropped, settings kept."""
@@ -572,7 +577,7 @@ class PSFCalibrationWindow(QMainWindow):
         layered = self.method.sections.get("microscope", False) and self._coverslip_matters()
         self.model_form.set_shown(model_shown("insitu" if in_situ else "beads", magnitude, self.is_dual, layered,
                                               ring))
-        self.fourpi_form.set_shown({"psf.saf_damping": False})
+        self._show_fourpi()
 
     def _coverslip_matters(self) -> bool:
         """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""

@@ -409,3 +409,89 @@ def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sum
     for a, b in zip(fast, slow, strict=True):
         scale = b.abs().flatten(1).amax(1).clamp_min(1e-12)[:, None, None] if b.dim() == 3 else b.abs().max()
         assert float(((a - b).abs() / scale).max()) < 2e-3
+
+
+def _minimal_model(grid, same_magnitude=True, **kw):
+    """A 4Pi model of two minimal pupils (`model.build.make_pupil`), on the grid a minimal pupil needs."""
+    from types import SimpleNamespace
+
+    from uipsf.model import make_pupil, pupil_grid
+    spec = SimpleNamespace(order=4, magnitude="minimal", saf_damping=True)
+    g = pupil_grid(grid.optics, spec, size=64, device="cpu")
+    pupils = [make_pupil(grid.optics, spec, grid=g) for _ in range(2)]
+    return FourPiModel(g, (R, R), n_max=4, pupils=pupils, same_magnitude=same_magnitude, **kw)
+
+
+@pytest.mark.parametrize("kind, same", [("vector", True), ("vector", False), ("scalar", True)])
+def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same):
+    """Minimal pupils in a 4Pi model: one γ for both objectives under ``same_magnitude`` (`MAGNITUDE`), each its
+    own otherwise; no ring, the sample being index-matched; the solver's linearised columns -- γ's the sum over
+    both arms when shared -- equal the JVPs', with the pixel's blur under the learnt one."""
+    from uipsf.noise import ShiftedPoisson
+    from uipsf.solve.problem import Problem
+    _, batch, truth = beads
+    model = _minimal_model(beads[0].grid, same_magnitude=same, kind=kind, pixel_blur=True, round_sigma=True)
+    start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
+             "background": truth["emitter.background"]}
+    specs = model.specs(batch, start)
+    names = {s.name for s in specs}
+    assert "pupil.gamma" in names and ("lo.pupil.gamma" in names) != same
+    assert not any("ring_h" in n for n in names)
+    values = {k: v for k, v in truth.items() if "magnitude" not in k}
+    values["psf.sigma"] = torch.tensor([30.0])
+    values["pupil.gamma"] = torch.tensor(0.3)
+    if not same:
+        values["lo.pupil.gamma"] = torch.tensor(0.2)
+    p = Params(specs, E, values=values)
+    sub, pc = batch.subset(slice(0, 3)), p.subset(slice(0, 3))
+    fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
+    slow = Problem(model, ShiftedPoisson(), sub, tangents=4, linearise=False)._jacobians(pc, sub)
+    for a, b in zip(fast, slow, strict=True):
+        scale = b.abs().flatten(1).amax(1).clamp_min(1e-12)[:, None, None] if b.dim() == 3 else b.abs().max()
+        assert float(((a - b).abs() / scale).max()) < 2e-3
+
+
+@pytest.mark.long
+def test_minimal_4pi_beads_give_back_their_gamma_sigma_pupils_and_phases(grid):
+    """Simulated 4Pi bead stacks drawn with the form's model -- minimal pupils, one γ, σ round over the pixel's
+    blur, vectorial -- learnt from the window's start (`learn_fourpi`): γ, σ, both pupils' phase, the misalignment
+    and every bead's phase within 4 CRLB of the truth (or of its swap, the arms' labels being a gauge)."""
+    from uipsf.workflows.fourpi import learn_fourpi
+    truth_model = _minimal_model(grid, pixel_blur=True, round_sigma=True, steps_rad=[0.0] + STEPS[1:])
+    z = -np.arange(-(J // 2), J // 2 + 1) * 100.0
+    roi_xy = np.random.default_rng(0).uniform(20, 180, (E, 1, 2)).repeat(C, 1)
+    batch = uipsf.Batch(data=torch.zeros(E, C, J * M, R, R), z_nm=torch.tensor(np.repeat(z, M), dtype=torch.float32),
+                        roi_xy=torch.tensor(roi_xy, dtype=torch.float32))
+    truth = {k: v for k, v in _truth(truth_model).items() if "magnitude" not in k}
+    truth.update({"pupil.gamma": torch.tensor(0.35), "psf.sigma": torch.tensor([35.0])})
+    start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
+             "background": truth["emitter.background"]}
+    p = Params(truth_model.specs(batch, start), E, values=truth)
+    data = simulate(truth_model, p, batch, seed=3)
+    truth = p.physical()
+    fresh = _minimal_model(grid, pixel_blur=True, round_sigma=True, steps_rad=[2, 0, -2])
+    fit = learn_fourpi(fresh, data)
+    got, std = fit.shared(), fit.result.std
+    candidates = [truth, swapped(truth_model, truth)]
+    want = min(candidates, key=lambda t: float((t["pupil.phase"] - got["pupil.phase"]).abs().sum()))
+    for name in ("pupil.gamma", "psf.sigma", "pupil.phase", "lo.pupil.phase", "fourpi.offset", "fourpi.coherence"):
+        d = got[name] - want[name]
+        assert torch.all(d.abs() < 4 * std[name] + 1e-3), (name, got[name], want[name], std[name])
+    d = np.angle(np.exp(1j * (fit.result.params.physical()["emitter.phase"] - want["emitter.phase"]).numpy()))
+    assert np.all(np.abs(d) < 4 * std["emitter.phase"].numpy())
+
+
+def test_the_pixels_blur_is_under_the_learnt_one_in_both_arms(grid):
+    """``pixel_blur``: the image with σ over the pixel's own blur is the image of their sum in quadrature without
+    it -- the 4Pi model had taken the setting and blurred by σ alone."""
+    batch = uipsf.Batch(data=torch.zeros(1, C, 3, R, R), z_nm=torch.zeros(3), roi_xy=torch.zeros(1, C, 2))
+    start = {"xyz": torch.zeros(1, 3), "photons": torch.ones(1), "background": torch.zeros(1, C)}
+    xyz = torch.tensor([[0.0, 0.0, -150.0], [10.0, 0.0, 0.0], [0.0, -20.0, 150.0]])
+    images = []
+    pixel = 129 / math.sqrt(12)
+    for pixel_blur, sigma in ((True, 40.0), (False, math.hypot(40.0, pixel))):
+        model = FourPiModel(grid, (R, R), n_phases=3, n_max=4, round_sigma=True, sigma_nm=(sigma, sigma),
+                            pixel_blur=pixel_blur)
+        values = Params(model.specs(batch, start), 1).physical()
+        images.append(model.channel_images(values, xyz, torch.zeros(3)))
+    assert torch.allclose(images[0], images[1], atol=1e-6 * float(images[1].max()))

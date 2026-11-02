@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 from ..device import to_cpu64
-from ..model.fourpi import LOWER, FourPiModel
+from ..model.fourpi import LOWER, FourPiModel, lower_view
 from ..noise import ShiftedPoisson
 from ..params import Params
 from ..solve import FitResult, GaussNewtonLBFGS, Problem
@@ -199,11 +199,19 @@ def calibration(fit, z_range_nm: float = 600.0, dz_nm: float = 20.0, roi_px: int
               "coherence": to_cpu64(shared["fourpi.coherence"]).tolist(),
               "arms": np.stack([a, b], 1).tolist(), "modulation": (m / (a + b)).tolist(),
               "offset_nm": to_cpu64(shared["fourpi.offset"]).tolist(),
-              "sigma_nm": to_cpu64(shared["psf.sigma"]).tolist()}
+              "sigma_nm": to_cpu64(shared["psf.sigma"]).tolist(), "pupils": describe_pupils(model, shared)}
     params.update(kwargs.pop("parameters", {}))
     return fourpi.from_volumes(I, D.real, -D.imag, dz=float(dz_nm), z0=float(n), period_nm=2 * math.pi / abs(k),
                                phase_per_nm=k, transforms=transforms, pixelsize_nm=model.pixel_size_nm,
                                parameters=params, **kwargs)
+
+
+def describe_pupils(model: FourPiModel, shared: dict) -> list[dict]:
+    """Each objective's PSF as the hand-over describes one (`VectorPSF.describe`): kind, phase in nm, γ or
+    the magnitude's modes, σ -- the upper's, then the lower's in its own frame."""
+    p = {k: torch.as_tensor(v) for k, v in shared.items()}
+    with torch.no_grad():
+        return [model.psf_up.describe(p), model.psf_lo.describe(lower_view(p))]
 
 
 def _transform(h) -> np.ndarray:

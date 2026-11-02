@@ -116,24 +116,26 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
           steps_rad=(2.0, 0.0, -2.0), spec=None, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
           kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None, magnitude_modes=None,
-          same_magnitude: bool = False):
+          same_magnitude: bool = True):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
-    ``spec`` the PSF model's choices (`PSFModelSettings`, default the 4Pi form's: `FourPiBeadSettings.psf`),
-    both pupils built by uipsf's builder (`uipsf.model.build`) on one grid -- a minimal pupil's reaching
-    beyond the NA as one objective's does.
+    ``spec`` the PSF model's choices (`PSFModelSettings`, default the 4Pi form's: `FourPiBeadSettings.psf`,
+    the minimal model), both pupils built by uipsf's builder (`uipsf.model.build`) on one grid -- a minimal
+    pupil's reaching beyond the NA as one objective's does.  The sample is index-matched (n_med = n_imm), so
+    a minimal pupil has no supercritical ring.
     A free photon count per observation by default: on the example beads it took the mean deviance from
     1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
     arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
     fitted uiPSF's beads and movie better than "scalar", at no more time.  Its pupils' magnitude is
-    rotationally symmetric (the form's default), the objectives' apodisation alone:
-    free in every mode it found three optima on uiPSF v1's beads by where the learning started (907 711 to
-    922 288), symmetric one, 914 132, from every start, with the phase and z scatter as small (docs/4pi.md
-    §20).  The scalar model keeps every mode: it needs them, 1 060 569 against 1 107 108.  ``warm``: shared
-    values to start from, another model's of the same beads (`learn_fourpi`'s ``values``).
-    ``magnitude_modes`` the pupils' magnitude modes (Noll), the spec's if None; ``same_magnitude``
-    one magnitude for both objectives (`FourPiModel`): one γ for minimal pupils.  The blur is one σ
-    for x and y by default (*round*): an x and a y σ apart are astigmatism, which the pupils should hold."""
+    rotationally symmetric, the objectives' apodisation alone: free in every mode it found three optima on
+    uiPSF v1's beads by where the learning started (907 711 to 922 288), symmetric one, 914 132, from every
+    start, with the phase and z scatter as small (docs/4pi.md §20); the minimal pupil's cos θ^γ is the same
+    shape in one number (§23).  A scalar model with symmetric Zernikes keeps every mode: it needs them,
+    1 060 569 against 1 107 108.  ``warm``: shared values to start from, another model's of the same beads
+    (`learn_fourpi`'s ``values``).  ``magnitude_modes`` a Zernike magnitude's modes (Noll), the spec's if
+    None; ``same_magnitude`` one magnitude for both objectives (`FourPiModel`): one γ for minimal pupils.
+    The blur is the spec's: one σ for x and y by default (*round*), an x and a y σ apart being astigmatism,
+    which the pupils should hold, over the pixel's own blur."""
     from dataclasses import replace
 
     import uipsf
@@ -186,13 +188,6 @@ LAYOUTS = (("file", "as the file lays them out"), ("microscope", "the microscope
            ("typed", "typed corners"), ("yale", "4Pi-SMS (Bewersdorf lab)"))
 
 
-def _fourpi_psf():
-    """The 4Pi form's PSF model (`PSFModelSettings`): its choices as they were learnt and checked on uiPSF's
-    beads (docs/4pi.md §20) -- symmetric Zernikes, a round blur from 60 nm, no pixel blur -- until the minimal
-    model is tried on them (`docs/uipsf/roadmap.md`).  No SAF damping: the sample is index-matched."""
-    return PSFModelSettings(magnitude="symmetric", blur_nm=60.0, pixel_blur=False, saf_damping=False)
-
-
 @dataclass
 class FourPiBeadSettings:
     """The *4Pi beads* section of the PSF calibration window: the PSF model a section of its own
@@ -224,7 +219,9 @@ class FourPiBeadSettings:
     bead_diameter_nm: float = param(40.0, label="bead diameter", unit="nm", min=0.0,
                                     help="the beads' size, taken out of the pupil model: its dyes, spread over "
                                          "its height, average the fringe; 0: point-like")
-    psf: PSFModelSettings = param(default_factory=_fourpi_psf, label="PSF model")
+    # the minimal model, as one objective's (the user's, November 2026; docs/4pi.md §23): γ, σ round over the
+    # pixel's blur; the sample is index-matched, so there is no supercritical ring and no SAF damping to learn
+    psf: PSFModelSettings = param(default_factory=PSFModelSettings, label="PSF model")
     vectorial: bool = param(True, label="vectorial", advanced=True,
                             help="the pupil model follows each arm's dipole fields through the quarter-wave "
                                  "plates and the polarising split: keep it on.  Off: uiPSF v1's scalar "
@@ -233,7 +230,8 @@ class FourPiBeadSettings:
                                  help="a Zernike magnitude's modes, Noll indices comma-separated (4, 11); auto: "
                                       "as the PSF model's magnitude says (symmetric: every one with a scalar "
                                       "model); empty or none: a flat magnitude")
-    same_magnitude: bool = param(False, label="same magnitude", advanced=True,
+    # on by default: one γ for twin objectives (the user's, November 2026)
+    same_magnitude: bool = param(True, label="same magnitude", advanced=True,
                                  help="both objectives one magnitude shape (one γ), as twin objectives have; how "
                                       "much light each brings stays free")
     photons_per_observation: bool = param(True, label="photons per frame", advanced=True,
@@ -242,6 +240,19 @@ class FourPiBeadSettings:
                                     help="+- this: the z range the saved model covers")
     model_dz_nm: float = param(20.0, label="model z step", unit="nm", min=5.0, advanced=True,
                                help="the saved model's z step")
+
+
+def fourpi_shown(settings: FourPiBeadSettings) -> dict:
+    """Which of the 4Pi form's fields it shows (`FormState.shown`, dotted for the PSF part): the typed corners
+    only while the channels are typed; the PSF model's as the bead form's (`pupil.model_shown`), the sample
+    index-matched, so never the SAF damping; the *magnitude modes* only for a Zernike magnitude, whose modes
+    they are."""
+    from .pupil import model_shown
+    typed = settings.layout == "typed"
+    shown = {n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")}
+    shown["psf.saf_damping"] = model_shown("beads", settings.psf.magnitude, ring=False)["psf.saf_damping"]
+    shown["magnitude_modes"] = settings.psf.magnitude in ("free", "symmetric")
+    return shown
 
 
 def scan_layout(settings: FourPiBeadSettings, source, camera=None):
