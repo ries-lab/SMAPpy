@@ -231,7 +231,8 @@ dependence* is a tick in the PSF calibration window, and the run reports whether
 immersion 1.515, medium 1.406, 110 nm pixels) and conversion, 0.47 e⁻/ADU: the files do not record it; the
 residuals' photon transfer gave 1.08 with the field on a first set of beads and 0.62 on the second, so it is
 not well pinned.  60 beads spread over the chip were learnt from, in chunks of 8 (60 at once took more than
-15 GB: the window's run passes no chunk size, to fix for large fields).
+15 GB: the solver's chunks were sized for speed, not memory -- since capped by the memory available on
+every system, `solve.problem._host_chunk_values`).
 
 | | without field | with field |
 |---|---|---|
@@ -258,12 +259,12 @@ bead after its own height, median, nm:
 
 What is left at the edges is the model, not the grid: in a first run (whose beads missed the chip's right side)
 a spline drawn exactly at each far bead did no better than the 9 × 9 blend (86 against 85 nm), though the blend
-misses the PSF by 2.7 % of its peak at 9 × 9 (1.3 % at 13 × 13), above `TOLERANCE`; the export should say so
-when it stops at the largest grid.  Candidates: second-order terms (Droste's), a field-dependent magnitude
+misses the PSF by 2.7 % of its peak at 9 × 9 (1.3 % at 13 × 13), above `TOLERANCE`; the export now says so when it
+stops at the largest grid (`field_splines.limit_warning`, kept as the calibration's ``field_warning``).
+Candidates: second-order terms (Droste's), a field-dependent magnitude
 (vignetting), the conversion.
 
 ## 10. Open
 
 - Whether the residual's prior keeps a bead calibration of 20–50 beads stable (the residual is not built).
 - What limits the edges of a 177 µm field (§9): second-order terms, a field-dependent magnitude.
-- Chunks in the window's run for many beads, and a warning when the grid stops at its largest.

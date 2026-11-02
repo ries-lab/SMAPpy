@@ -2293,3 +2293,17 @@ The study and the choices: `docs/uipsf/field-dependence.md`.  What is built:
 - **Measured**: beads simulated with a field give it back within 0.02 rad; a learnt strong field (0.4 rad
   of astigmatism per 50 µm over a 110 µm span) became a 9 × 9 grid, and spots near the span's corner fitted
   with it had a z bias of 3 nm against 144 nm with the centre's spline alone.
+
+## Chunks capped by the memory available (November 2026; `solve/problem.py`, `device.available_memory_bytes`)
+
+`Problem` computes the emitters in chunks; their size was the tangent budget's (2²¹ output values per batch of
+Jacobian columns, set for speed), so all beads of a calibration went into one chunk up to 2²¹ // values per
+bead -- 71 beads of 40 × 27².  A chunk's own images grow with every value in it (~4 kB per value, plus the
+2.3 GB a `normal_equations` takes whatever the chunk), and 60 such beads were killed on a 16 GB machine
+(Zenodo `1ch_FD_bead`).  On CUDA the chunk was already capped by the card's free memory; now the CPU and MPS
+cap it the same way: `HOST_SHARE` (0.5) of the available memory at `HOST_BYTES_PER_VALUE` (16 000) per value,
+a caller's chunk too: measured on the CPU, one `normal_equations` of the field model's 60 beads took 0.45 GB
+per bead of 40 × 27² (15.5 kB per value; chunks of 8: 4.3 GB, 108 s; of 29: 13.8 GB, 141 s), `slice_fits`
+about 11 kB per value.  Available memory is psutil's where installed, else ``MemAvailable`` on Linux,
+``GlobalMemoryStatusEx`` on Windows and the reclaimable pages of ``vm_stat`` on macOS, asked at most every
+5 s; unknown, the chunk stays as before.  The sums do not depend on the chunk (`test_memory.py`).

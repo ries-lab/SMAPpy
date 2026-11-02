@@ -7,6 +7,7 @@ CPU in float64 (`to_cpu64`).  Gradient checks run in float64 on the CPU.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import warnings
 
@@ -92,3 +93,87 @@ def on_model_device(batch, model):
     device = model.psf.grid.rho.device
     return batch if batch.data.device == device else batch.to(device)
 
+
+
+_AVAILABLE: list = [None, -1e9]          # (bytes, when): one answer per few seconds, `available_memory_bytes`
+AVAILABLE_SECONDS = 5.0
+
+
+def available_memory_bytes() -> int | None:
+    """`_available_memory`, asked at most once per `AVAILABLE_SECONDS`: a `Problem` is made per fit and per
+    localisation, and on macOS asking runs ``vm_stat``."""
+    import time
+    now = time.monotonic()
+    if now - _AVAILABLE[1] > AVAILABLE_SECONDS:
+        _AVAILABLE[:] = [_available_memory(), now]
+    return _AVAILABLE[0]
+
+
+def _available_memory() -> int | None:
+    """The memory a new allocation can have without swapping, bytes; None if the system does not say.
+
+    psutil's ``available`` where it is installed (it is no dependency); else the system's own count:
+    ``MemAvailable`` of /proc/meminfo on Linux (free plus what the page cache gives back -- ``MemFree`` alone
+    is near zero on a machine that has been reading files), ``GlobalMemoryStatusEx``'s ``ullAvailPhys`` on
+    Windows, and on macOS, whose free count is small by design (the rest is cache it reclaims), the pages
+    free, inactive, speculative and purgeable that ``vm_stat`` counts (half the physical memory if it cannot
+    be run)."""
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:      # noqa: BLE001 -- not installed, or a sandbox that hides the counters
+        pass
+    try:
+        if os.name == "nt":
+            return _windows_available()
+        if os.path.exists("/proc/meminfo"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        if hasattr(os, "sysconf") and "SC_PHYS_PAGES" in os.sysconf_names:
+            return _macos_available() or int(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")) // 2
+    except Exception:      # noqa: BLE001 -- any failure means "unknown", never an error in a fit
+        return None
+    return None
+
+
+class _MemoryStatusEx(ctypes.Structure):
+    """Windows' MEMORYSTATUSEX, 64 bytes, for `GlobalMemoryStatusEx`."""
+    _fields_ = [("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32),   # DWORDs: 4 bytes on every system
+                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+
+def _windows_available() -> int | None:
+    status = _MemoryStatusEx()
+    status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    return int(status.ullAvailPhys)
+
+
+def _macos_available() -> int | None:
+    """The reclaimable pages ``vm_stat`` counts, bytes (macOS only); None elsewhere."""
+    import subprocess
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _vm_stat_available(out, int(os.sysconf("SC_PAGE_SIZE")))
+
+
+def _vm_stat_available(out: str, page: int) -> int | None:
+    """Bytes in the pages ``vm_stat``'s output ``out`` counts as free, inactive, speculative or purgeable."""
+    pages = {}
+    for line in out.splitlines()[1:]:
+        name, _, value = line.partition(":")
+        value = value.strip().rstrip(".")
+        if value.isdigit():
+            pages[name.strip()] = int(value)
+    if "Pages free" not in pages:
+        return None
+    kinds = ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
+    return sum(pages.get(k, 0) for k in kinds) * page

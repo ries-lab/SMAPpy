@@ -197,3 +197,19 @@ def test_a_spline_drawn_at_a_depth_in_the_sample_keeps_its_field_nodes():
     # the nodes differ from each other at depth too: the field is still there
     nodes = torch.as_tensor(deep.field_splines.coeff)
     assert not torch.allclose(nodes[0], nodes[-1])
+
+
+def test_a_spline_calibration_keeps_the_grid_limit_warning(monkeypatch):
+    import smappy.field_splines as fs
+    from smappy.calibrate.pupil import spline_calibration
+
+    from uipsf.export import LearnedPSF, describe
+    model, truth, _ = field_beads(n=2, truth_field={(6, 1, 0): 0.5}, dtype=torch.float32)
+    shared = {k: v for k, v in truth.physical().items() if truth.specs[k].scope == "shared"}
+    beads = [{"state": "used", "field_x": x, "field_y": y} for x, y in ((0.0, 0.0), (1000.0, 1000.0))]
+    learned = LearnedPSF(model, shared, {}, describe(model), beads=beads)
+    monkeypatch.setattr(fs, "GRIDS", (1, 2))      # the largest grid 2 × 2: too coarse for 0.5 rad per 50 µm
+    with pytest.warns(UserWarning, match="grid of splines"):
+        spline = spline_calibration(learned, 50.0, 500.0, 11)
+    assert spline.field_splines.shape == (2, 2)
+    assert "2 × 2" in spline.parameters["field_warning"] and spline.parameters["field_blend_error"] > 1e-6

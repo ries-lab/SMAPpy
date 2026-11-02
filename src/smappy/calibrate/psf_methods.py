@@ -532,8 +532,11 @@ class PupilModel:
         numbers = model_text(cal)
         # with *field dependence*: how much astigmatism and coma vary over the beads, and whether it is real
         field = field_report(cal)
+        # and when the saved spline grid is too coarse for the field (`field_splines.limit_warning`)
+        spline = getattr(run.result, "calibration", None)
+        limit = (getattr(spline, "parameters", None) or {}).get("field_warning")
         return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f"; {numbers}" if numbers else "")
-                + ("" if field is None else f"; {field.summary()}"))
+                + ("" if field is None else f"; {field.summary()}") + ("" if limit is None else f"; {limit}"))
 
 
 class InSitu:
