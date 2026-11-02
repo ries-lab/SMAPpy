@@ -2275,7 +2275,7 @@ Jacobian columns, set for speed), so all beads of a calibration went into one ch
 bead -- 71 beads of 40 × 27².  A chunk's own images grow with every value in it (~4 kB per value, plus the
 2.3 GB a `normal_equations` takes whatever the chunk), and 60 such beads were killed on a 16 GB machine
 (Zenodo `1ch_FD_bead`).  On CUDA the chunk was already capped by the card's free memory; now the CPU and MPS
-cap it the same way: `HOST_SHARE` (0.5) of the available memory at `CUDA_BYTES_PER_VALUE` (6000) per value,
-a caller's chunk too.  Available memory is psutil's where installed, else ``MemAvailable`` on Linux,
+cap it the same way: `HOST_SHARE` (0.5) of the available memory at `HOST_BYTES_PER_VALUE` (9000) per value,
+a caller's chunk too (at CUDA's 6000 the 60 beads ran in chunks of 45 and peaked at 13.6 of 15.8 GB).  Available memory is psutil's where installed, else ``MemAvailable`` on Linux,
 ``GlobalMemoryStatusEx`` on Windows and the reclaimable pages of ``vm_stat`` on macOS, asked at most every
 5 s; unknown, the chunk stays as before.  The sums do not depend on the chunk (`test_memory.py`).

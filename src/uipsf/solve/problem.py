@@ -87,15 +87,19 @@ CUDA_SHARE = 0.5
 # budget above sizes a batch of Jacobian columns for speed, not the chunk's own images, which grow with every
 # value in it.  Uncapped, 60 beads of 40 × 27² went into one chunk (2²¹ // 29 160 = 71) and a 16 GB machine
 # killed the fit (Zenodo `1ch_FD_bead`, docs/uipsf/field-dependence.md §9); in chunks of 8 it took 3.5 GB.
+# A value costs more on the CPU than CUDA's 6000 bytes: at 6000, those 60 beads went into chunks of 45 and the
+# process peaked at 13.6 GB of the 15.8 GB available (`calibrate_beads`, field dependence on, 33 min) --
+# about 8.5 kB per value of the chunk beyond the fixed part.
 HOST_SHARE = 0.5
+HOST_BYTES_PER_VALUE = 9000
 
 
 def _host_chunk_values(device) -> int | None:
     """Values one chunk may hold on the CPU or MPS (`HOST_SHARE` of the available memory at
-    `CUDA_BYTES_PER_VALUE`); None when the system does not say how much is available."""
+    `HOST_BYTES_PER_VALUE`); None when the system does not say how much is available."""
     from ..device import available_memory_bytes
     free = available_memory_bytes()
-    return None if free is None else int(max(1, HOST_SHARE * free // CUDA_BYTES_PER_VALUE))
+    return None if free is None else int(max(1, HOST_SHARE * free // HOST_BYTES_PER_VALUE))
 
 
 def _cuda_budget(device) -> int:

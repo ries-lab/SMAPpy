@@ -46,7 +46,7 @@ def test_little_memory_splits_the_beads_into_chunks_and_changes_no_sum(monkeypat
     per_bead = batch.data[0].numel()
     # room for two beads' worth of values at the solver's bytes per value, times the share
     from uipsf.solve import problem
-    room = int(2.5 * per_bead * problem.CUDA_BYTES_PER_VALUE / problem.HOST_SHARE)
+    room = int(2.5 * per_bead * problem.HOST_BYTES_PER_VALUE / problem.HOST_SHARE)
     monkeypatch.setattr(device, "available_memory_bytes", lambda: room)
     small = Problem(model, Poisson(), batch)
     assert small.chunk_size == 2
