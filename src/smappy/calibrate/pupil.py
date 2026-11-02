@@ -168,12 +168,13 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     that there is supercritical light to damp.
 
     In situ decides the magnitude by its *hold* (a bead model's γ held, or γ learnt) and never learns the
-    NA (a held γ brings a bead model's learnt one along), the SAF damping, the bead's size or the stage's drift, which are the beads'; field dependence is for one
-    channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in situ, where molecules
-    above the glass see it; for beads only through a coverslip of another index."""
+    SAF damping, the bead's size or the stage's drift, which are the beads'.  *learn NA* is offered in every
+    method for a minimal magnitude; in situ holding a bead model's γ holds its learnt NA too.  Field
+    dependence is for one channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in
+    situ, where molecules above the glass see it; for beads only through a coverslip of another index."""
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
-            "psf.learn_na": beads and magnitude == "minimal",
+            "psf.learn_na": magnitude == "minimal",
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
             "fit_tilt": not beads or layered}
 

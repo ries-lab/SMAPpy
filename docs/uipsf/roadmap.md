@@ -76,7 +76,8 @@ when a milestone lands or an item moves.
    round blur is the default there too.  4Pi learns the minimal pupil, one γ for both objectives (`docs/4pi.md` §23):
    as good as the symmetric Zernikes with an effective NA (0.976 of nominal), 9 700 nats behind at the nominal
    one; the NA is typed by default, *learn NA* (`MinimalPupil.learn_na`) an option, and why the aperture is
-   that small is open -- next, learning the sample's index (n_med) as its cause.  Next: in situ's full minimal workflow; field
+   that small is open: learning the sample's index (n_med) does not explain it (ries-lab/SMAPpy#135), and on
+   M5 the learnt NA ran to the grid's edge, so it is no fixed ratio.  Next: in situ's full minimal workflow; field
    dependence built through the builder; why M5's 40 nm beads learn a lower γ than its 100 nm beads.
    To revisit: γ is learnt per channel in a dual calibration and kept per colour -- if the channels' γ come
    out alike, one shared γ; in situ's blur round by default, *free* kept as an option until in situ is

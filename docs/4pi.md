@@ -1930,13 +1930,12 @@ the stage, and the coherence is 0.76-0.82 in every row.
 - **Phase z does not care**: 2.20-2.23 nm rms everywhere (3.3× its CRLB: the beads' own motion and the stage),
   the envelope's z 6.3-7.3 nm (2.4-2.8×).
 
-**Decided (the user, 2026-11-02)**: the nominal NA stays the default and the effective one is typed under
-*microscope* for now; *learn NA* (`PSFModelSettings.learn_na`, `pupil.na` between 0.8 and 1.05 of the typed NA)
-is offered beside it, and the symmetric Zernikes remain a choice of *pupil magnitude*.  A drop to 0.97 of the
-NA is not what an objective should do, so the cause is open.  The next suspect is the buffer's index: the 4Pi
-model takes the sample as index-matched (`fourpi_beads.learn` sets n_med = n_imm), but the user says it is not
-always so -- the immersion's index is known (the oil is bought), the buffer's can be as low as water's, and is
-measured only when it is matched.  A buffer of lower index cuts the light of beads far from the glass at n_med,
-which would look like an aperture at ~1.31-1.33 (water 1.33).  Learning n_med
-needs the medium's maps (`PupilGrid.kz_med`, `cos_med`, the Fresnel factors, the dipole fields) as functions of
-a parameter, and would show itself in the fringe period too (§14: the model's 265 nm against the beads' 251 nm).
+**Decided (the user, 2026-11-02)**: the NA stays typed by default everywhere, 4Pi included, and the minimal
+pupil stays 4Pi's default at the typed NA; learning it is an option, *learn NA* (`PSFModelSettings.learn_na`,
+`pupil.na`, started at the typed NA, bounded to 0.8-1.05 of it), offered in every method. Plainly: **on the
+Zenodo 4Pi beads the typed 1.35 fits 9 700 nats worse than a learnt 1.31.** The remedy is to learn the NA once
+with *learn NA* and then type the learnt value under *microscope*. It is not a universal ratio: on M5's
+one-objective beads the learnt NA ran to the grid's edge, 1.51 behind a typed 1.50 (ries-lab/SMAPpy#135). The
+symmetric Zernikes remain a choice of *pupil magnitude*. Why the aperture is smaller is open; the buffer's index
+does not explain it (ries-lab/SMAPpy#135, learnt beside the NA it moved to 1.397 for 106 nats). The sample's
+index n_med stays typed by default too.

@@ -137,7 +137,7 @@ def test_a_learnt_na_cuts_where_a_held_one_would_and_travels_with_the_model():
                         z_max_nm=1000, device="cpu")
     pupil = learnt.psf.pupil
     spec = {s.name: s for s in pupil.specs()}["pupil.na"]
-    assert pupil.learn_na and float(spec.init) == pytest.approx(0.98 * 1.5)
+    assert pupil.learn_na and float(spec.init) == pytest.approx(1.5)                     # the typed NA
     held = make_pupil(replace(MATCHED, NA=1.45), PSFModelSettings(zernike_order=4), grid=pupil.grid)
     p = {"pupil.phase": torch.zeros(len(pupil.phase_modes)), "pupil.magnitude": torch.zeros(0),
          "pupil.gamma": torch.tensor(0.3), "pupil.na": torch.tensor(1.45)}
@@ -156,13 +156,15 @@ def test_a_learnt_na_cuts_where_a_held_one_would_and_travels_with_the_model():
 
 @pytest.mark.slow
 def test_a_calibration_learns_an_effective_na_below_the_objectives():
-    """Beads drawn with the aperture at 1.42 behind a typed 1.5 give the 1.42 back with *learn NA*."""
+    """Beads drawn with the aperture at 1.42 behind a typed 1.5 give the 1.42 back with *learn NA*, and γ, within
+    three CRLBs."""
     settings = BeadSettings(psf=PSFModelSettings(zernike_order=4, learn_na=True))
     model = bead_model(MATCHED, settings, ROI, z_max_nm=1000, device="cpu")
     beads = simulated(model, extra={"pupil.gamma": torch.tensor(GAMMA), "pupil.na": torch.tensor(1.42)})
-    shared = calibrate_beads(beads, MATCHED, settings, device="cpu").shared()
-    assert float(shared["pupil.na"]) == pytest.approx(1.42, abs=0.01)
-    assert float(shared["pupil.gamma"]) == pytest.approx(GAMMA, abs=0.05)
+    cal = calibrate_beads(beads, MATCHED, settings, device="cpu")
+    shared, crlb = cal.shared(), cal.result.std
+    assert abs(float(shared["pupil.na"]) - 1.42) < 3 * float(crlb["pupil.na"])
+    assert abs(float(shared["pupil.gamma"]) - GAMMA) < 3 * float(crlb["pupil.gamma"])
 
 
 def test_the_minimal_pupil_survives_the_first_stages_truncation():

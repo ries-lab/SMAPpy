@@ -278,6 +278,22 @@ def test_in_situ_holds_a_minimal_models_gamma_and_its_phase_above_the_order():
     assert not pupil.ring                                                # in situ never learns SAF damping
 
 
+def test_in_situ_holding_a_bead_models_gamma_holds_its_learnt_na_too():
+    """A bead model learnt with *learn NA* hands its NA over with γ: in situ cuts there and learns neither,
+    *learn NA* ticked or not; without a learnt NA in the description, in situ learns it when ticked."""
+    from smappy.calibrate.insitu_run import held_pupil
+    held = held_pupil(None, KEPT_MINIMAL | {"na": 1.38}, 6, 580.0)
+    assert held.na == 1.38 and held.gamma == 0.37
+    o = OPTICS_SETTINGS.optics(CAMERA, 1)[0]
+    for learn in (False, True):
+        model = small_model(o, small(magnitude=held.kind, learn_na=learn).psf, (15, 15), 600.0, held=held)
+        names = {s.name for s in model.psf.specs()}
+        assert model.psf.pupil.na == pytest.approx(1.38) and not model.psf.pupil.learn_na
+        assert not names & {"pupil.na", "pupil.gamma"}
+    free = small_model(o, small(learn_na=True).psf, (15, 15), 600.0)
+    assert "pupil.na" in {s.name for s in free.psf.specs()}
+
+
 def test_a_start_model_s_pupil_is_held_whole_its_own_held_modes_included():
     from types import SimpleNamespace
 
