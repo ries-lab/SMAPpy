@@ -172,3 +172,14 @@ def test_beads_give_their_sample_index_back_within_its_crlb(truth):
     print(f"n_med {n:.4f} ± {s:.4f} (truth {truth}), γ {float(shared['pupil.gamma']):.3f}")
     assert abs(n - truth) < 3 * s and s < 0.02, (n, s)
     assert abs(float(shared["pupil.gamma"]) - GAMMA) < 3 * float(std["pupil.gamma"]) + 0.01
+
+
+def test_the_models_line_says_the_learnt_index(optics):
+    from types import SimpleNamespace
+
+    from uipsf.diagnostics.figures import model_text
+    model, truth, batch = _beads(optics)
+    shared = {"psf.sigma": torch.tensor([30.0]), "optics.n_med": torch.tensor(1.3612)}
+    source = SimpleNamespace(model=model, shared=shared,
+                             result=SimpleNamespace(std={"optics.n_med": torch.tensor(0.0011)}))
+    assert "sample index 1.3612 ± 0.0011" in model_text(source)

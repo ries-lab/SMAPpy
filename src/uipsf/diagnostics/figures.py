@@ -146,8 +146,8 @@ def drift_text(source) -> str:
 
 def model_text(source, channel: int = 0) -> str:
     """The model's few physical numbers in a line, with their CRLBs: the minimal pupil's γ and ring height,
-    the blur (beyond the pixel's where the model has it under σ), the stage's drift and the coverslip's tilt,
-    each where the model has it."""
+    the blur (beyond the pixel's where the model has it under σ), a learnt sample index, the stage's drift and the
+    coverslip's tilt, each where the model has it."""
     psf = source.model.channels[channel].psf
     pre = prefix(channel)
     parts = []
@@ -166,6 +166,9 @@ def model_text(source, channel: int = 0) -> str:
     if sigma is not None:
         parts.append("blur σ " + "/".join(_pm(v, e, "{:.1f}") for v, e in zip(*sigma, strict=True)) + " nm"
                      + (" beyond the pixel" if getattr(psf, "pixel_blur", False) else ""))
+    n_med = _learnt(source, "optics.n_med")                         # one for every channel (`channels.SHARED`)
+    if n_med is not None:
+        parts.append("sample index " + _pm(n_med[0][0], n_med[1][0], "{:.4f}"))
     parts += [t for t in (drift_text(source), tilt_text(source)) if t]
     return "; ".join(parts)
 

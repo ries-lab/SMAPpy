@@ -16,7 +16,8 @@ order 6, a free photon count per observation, point-like beads.  The variants (`
 - **minimal-na**: *minimal* with the aperture's NA learnt;
 - **minimal-water**, **minimal-water-point**: the buffer typed at water's 1.33, below the NA, its supercritical
   ring damped by a learnt h or a point's on the glass;
-- **minimal-nmed**, **minimal-nmed-water**: the buffer's index learnt from the immersion's or from water's.
+- **minimal-nmed**, **minimal-nmed-water**: the buffer's index learnt from the immersion's or from water's;
+- **minimal-na-nmed**: the aperture and the index learnt together.
 
 Each is exported (`workflows.fourpi.calibration`) and fits the beads back with Spline 4Pi's `Global4PiPSF`
 (`bead_z`): z of the envelope and of the phase against the stage, their scatter against the CRLB, the
@@ -56,6 +57,9 @@ VARIANTS = {
     "minimal-nmed": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_n_med=True),
     "minimal-nmed-water": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, n_med=1.33,
                                learn_n_med=True),
+    # both: does the index move once the aperture is free?
+    "minimal-na-nmed": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_na=True,
+                            learn_n_med=True),
 }
 
 
