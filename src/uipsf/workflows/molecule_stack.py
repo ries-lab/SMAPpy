@@ -130,6 +130,12 @@ class StackRound:
     calibration: Calibration
     check: ZCheck | None
     moved: float = float("inf")
+    shared: dict | None = None         # its shared values and their standard errors, copied when it ended:
+    std: dict | None = None            # the next round's start and what `_moved` compares
+
+
+def _copied(values: dict) -> dict:
+    return {k: v.detach().clone() for k, v in values.items()}
 
 
 @dataclass
@@ -165,18 +171,20 @@ def learn_molecule_stack(model, batch, defocus_nm, noise=None, settings: StackRo
             tell(dict(entry, round=index))
         kwargs = dict(rejection=s.rejection, first_order=s.first_order, chunk_size=chunk, max_dz_nm=None,
                       progress=tagged, cancel=cancel)
+        # each round from copies of the last one's values: on the GPU a round's values were seen to change
+        # when the next learnt from them (two rounds identical to 7 digits, 2 November 2026)
         if previous is None:
             cal = learn_beads(model, sub, noise, start=start, start_stage1=start is not None, **kwargs)
         else:
-            cal = learn_beads(model, sub, noise, start=previous.calibration.shared(), **kwargs)
+            cal = learn_beads(model, sub, noise, start=_copied(previous.shared), **kwargs)
+        shared, std = _copied(cal.shared()), _copied(cal.result.std)
         if cal.result.stop_reason == "cancelled":
-            run.rounds.append(StackRound(index, ids, cal, None))
+            run.rounds.append(StackRound(index, ids, cal, None, shared=shared, std=std))
             return run
         tell({"message": f"round {index}: the z check", "round": index})
         check = z_check(cal, sub, defocus[ids], noise, chunk, s.z_reject_nm)
-        moved = (float("inf") if previous is None else
-                 _moved(cal.shared(), previous.calibration.shared(), cal.result.std, previous.calibration.result.std))
-        this = StackRound(index, ids, cal, check, moved)
+        moved = float("inf") if previous is None else _moved(shared, previous.shared, std, previous.std)
+        this = StackRound(index, ids, cal, check, moved, shared, std)
         run.rounds.append(this)
         if moved < s.stop_sd:
             break

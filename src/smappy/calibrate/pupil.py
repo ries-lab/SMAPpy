@@ -170,7 +170,7 @@ class BeadSettings:
 def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, layered: bool = False,
                 ring: bool = True) -> dict:
     """Which of `BeadSettings`' fields a method's form shows (`FormState.shown`, dotted for the PSF part):
-    ``method`` "beads" or "insitu"; ``magnitude`` the chosen one; ``dual`` two channels; ``layered`` a
+    ``method`` "beads", "insitu" or "molecules"; ``magnitude`` the chosen one; ``dual`` two channels; ``layered`` a
     coverslip of another index than the immersion's; ``ring`` whether the sample's index is below the NA, so
     that there is supercritical light to damp.
 
@@ -179,12 +179,20 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     SAF damping, the bead's size or the stage's drift, which are the beads'.  *learn NA* is offered in every
     method for a minimal magnitude; in situ holding a bead model's γ holds its learnt NA too.  Field
     dependence is for one channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in
-    situ, where molecules above the glass see it; for beads only through a coverslip of another index."""
+    situ, where molecules above the glass see it; for beads only through a coverslip of another index.
+    Molecules on the coverslip in z sweeps choose the magnitude as beads do, but have no SAF damping of their
+    own -- their common height damps the ring physically (`uipsf.model.CoverslipStackGeometry`) -- no bead,
+    no drift (each molecule is one frame), no field dependence and no tilt (a point at the glass sees none
+    through oil), and nothing held out."""
+    if method == "molecules":
+        return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude == "minimal",
+                "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": False,
+                "fit_tilt": False, "heldout": False}
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
             "psf.learn_na": magnitude == "minimal", "psf.learn_n_med": True,
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
-            "fit_tilt": not beads or layered}
+            "fit_tilt": not beads or layered, "heldout": True}
 
 
 @dataclass
@@ -449,14 +457,17 @@ def z_grid(dz_nm: float, z_range_nm: float) -> tuple[np.ndarray, float]:
 
 
 def sample(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int | None = UPSAMPLE,
-           channel: int = 0, field_xy=None) -> np.ndarray:
+           channel: int = 0, field_xy=None, depth_nm: float | None = None) -> np.ndarray:
     """The learnt PSF of ``channel`` as a voxel stack [z, y, x] for a point emitter on the central pixel,
     each pixel as the model sees it (`UPSAMPLE`): what a bead average is, without its noise.  ``learned`` is a uipsf
     `Calibration` or `LearnedPSF`; the bead's size is left out, the learnt blur kept, the channel's
-    photon share and defocus offset included (`uipsf.export.sample_psf`)."""
+    photon share and defocus offset included (`uipsf.export.sample_psf`).  ``depth_nm``, the emitter's height
+    above the glass (molecules on the coverslip, `molecule_stack_run`); a point at the glass without."""
     z, _ = z_grid(dz_nm, z_range_nm)
     xyz = np.c_[np.zeros((len(z), 2)), z]
     where = {} if field_xy is None else dict(field_xy=field_xy)      # a field-dependent model: where on the chip
+    if depth_nm is not None:
+        where["depth_nm"] = float(depth_nm)
     return learned.psf(xyz, roi_px=roi_size, upsample=upsample, channel=channel, **where).double().numpy()
 
 
@@ -494,17 +505,17 @@ def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
 
 
 def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int | None = UPSAMPLE,
-                       camera=None):
+                       camera=None, depth_nm: float | None = None):
     """smappy's `SplineCalibration` of a one-channel uipsf model, normalised as the bead average's
     (`core._single_model`: clipped at zero, the brightest plane summing to one, no smoothing, since a
     model has no noise to smooth), so that Spline 3D reads either alike.  ``camera`` records its EM
-    state and pixel size, as the bead average does."""
+    state and pixel size, as the bead average does.  ``depth_nm`` as `sample`'s."""
     from ..io.calibration import SplineCalibration
     from .core import spline_coefficients
     if learned.model.n_channels != 1:
         raise ValueError("a model of several channels makes a dual calibration (`dual_calibration`)")
     _, z0 = z_grid(dz_nm, z_range_nm)
-    psf = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample), 0)
+    psf = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, depth_nm=depth_nm), 0)
     scale = float(psf.sum(axis=(1, 2)).max())
     psf /= scale
     field = field_splines(learned, dz_nm, z_range_nm, roi_size, upsample, scale)
