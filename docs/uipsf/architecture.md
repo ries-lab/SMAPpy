@@ -2261,7 +2261,7 @@ the beads' ring damping for molecules.  Now there is one of each:
 
 The user's decisions behind it: γ per channel in a dual calibration, and per colour in the microscope
 database -- to revisit: if the channels' γ come out alike, one shared γ; σ round by default everywhere, in situ
-included (*free* stays an option until in situ is optimised); 4Pi gets one γ for both objectives under *same
+included (*free* stays an option; in situ measured on it, "In situ on the minimal model": round stays); 4Pi gets one γ for both objectives under *same
 magnitude* (`fourpi.MAGNITUDE`) and the same grid margin as one objective; no legacy for the old kept pupils.
 
 **4Pi on the minimal pupil** (`docs/4pi.md` §23): the form's default since November 2026.  On uiPSF v1's 18
@@ -2315,6 +2315,105 @@ typed cuts the light at its own index.
   sample index in situ", above), so there it is offered as a check, not expected to be determined.
 
 On real beads: `docs/4pi.md` §24.
+
+## In situ on the minimal model (November 2026; `benchmarks/uipsf/{real,synthetic}/insitu_minimal.py`)
+
+In situ as the window runs it since #133: the minimal pupil, order 6, γ and the phase above the order held from
+the bead model (or the microscope), no SAF damping, the blur round, the focus learnt with the coverslip's edge.
+Results `insitu_minimal.jsonl` (real) and `insitu_minimal_sim.jsonl` (simulated); molecules found once at 25 px
+(`~/.cache/uipsf/insitu_{jan,2ch,tub}/rois_r25.pkl`), every run on the CPU (3–4 threads, 14–37 min).
+
+**Where γ comes from.**  Without a start model in situ holds the microscope's γ (`microscope_db.gamma_of`: the
+entry's ``gamma``, or a minimal pupil kept under any state of the 3D lens, nearest in emission, with the NA it
+learnt if it did, since the two trade): γ is the objective's apodisation and nothing else's (the user's decision).  Only with none a nominal 0.36
+(`build.NOMINAL_GAMMA`, M5's 100 nm beads), with a warning -- see below for why it must not pass silently.
+
+**Simulated** (`synthetic/insitu_minimal.py`: M2's optics, January's bead phase, γ 0.36, 1500 frames, molecules
+0–1300 nm, a tenth on the coverslip, focus 430 nm started at 580; ~1400 learnt, ~350 held out; Δnats per held-out
+molecule against the truth's model):
+
+| truth σ (nm) | learnt | start | Noll 6 error (rad) | σ (nm) | focus error (nm) | Δnats / molecule | twin |
+|---|---|---|---|---|---|---|---|
+| 55 round | round | truth / cold | +0.002 / +0.002 | 55.0 / 55.0 | 0.0 / 0.2 | 0.002 / 0.003 | +761 / +752 |
+| 55 round | free | truth / cold | +0.002 / +0.002 | 54.7 × 55.4 / 54.8 × 55.2 | 0.0 / 0.3 | 0.001 / 0.002 | +738 / +745 |
+| 50 × 65 | round | truth / cold | −0.011 / −0.012 | 55.9 / 55.9 | 0.1 / 0.3 | 0.080 / 0.079 | +795 / +779 |
+| 50 × 65 | free | truth / cold | +0.004 / +0.005 | 49.5 × 64.2 / 49.1 × 64.1 | 2.5 / 1.5 | 0.009 / 0.010 | +678 / +685 |
+
+The cold start (Noll 6 −0.5, every other mode 0) ends where the truth's does in every case; the coverslip edge
+takes the focus from 580 to within 3 nm in two rounds (edge 27–40 nm, then ≤ 3); every phase mode within 3σ.  A
+round blur on an anisotropic truth costs 0.01 rad of astigmatism and 0.08 nats per molecule: the 0.2–0.3 rad of
+October's 15 px runs is not what a round σ does on the minimal model at 25 px.
+
+**M2's matched pairs** (`real/insitu_minimal.py`; the beads learnt again with the minimal model, round σ, order 8:
+January γ 0.078, σ 66.8, Noll 6 −0.696; dual-channel's right half γ 0.159, σ 60.3, Noll 6 +0.655; dual-channel
+learnt with haze ≤ 1.5, which 25 px needs there).  Δnats per held-out molecule against the pair's best run:
+
+| pair | σ | start | Noll 6 (beads) | Noll 12 | σ (nm) | focus (nm) | last edge (nm) | Δnats / molecule |
+|---|---|---|---|---|---|---|---|---|
+| January | round | bead / cold | −0.750 / −0.727 (−0.696) | −0.106 / −0.092 | 50.7 / 50.6 | 457 / 450 | −13 / −16 | 0.41 / 0.11 |
+| January | free | bead / cold | −0.738 / −0.726 | −0.098 / −0.091 | 47.5 × 55.2 / 47.3 × 54.8 | 449 / 443 | −22 / −27 | 0.39 / 0.41 |
+| dual | round | bead / cold | +0.679 / +0.678 (+0.655) | +0.033 / +0.037 | 48.3 / 47.0 | 660 / 650 | −45 / −73 | 0 / 1.02 |
+| dual | free | bead / cold | +0.628 / +0.672 | −0.004 / +0.029 | 65.9 × 34.3 / 62.5 × 35.4 | 583 / 613 | −11 / −41 | 0.58 / 1.06 |
+
+- *A round σ holds at 25 px.*  Both pairs land within 0.03–0.05 rad of their beads' astigmatism from both starts,
+  round or free; October's 15 px solution B (−0.96 … −1.05 on January) does not appear with the beads' γ held.
+- *A free σ buys nothing measurable*: on January it is 8 nm stronger along y and scores as round does; on the dual
+  channel it doubles along x (66 × 34), moves the astigmatism by up to 0.05 rad between starts, and scores worse.
+  The spread between starts (0.3–1 nat per molecule) is as large as anything σ changes.
+- *The dual channel's focus still does not settle* at 25 px (583–660 nm, the edge 10–73 nm off after four
+  rounds), round or free -- the high, uneven background of October's section.
+
+**γ decides the astigmatism, not σ.**  January held at the nominal 0.36 instead of its beads' 0.078: Noll 6
+−0.935, Noll 12 −0.170 -- solution B -- and the best held-out score of all (0.11–0.41 nats per molecule ahead).
+Learnt from the molecules (*hold* nothing, the focus from the coverslip) γ comes out 0.361, with Noll 6 −0.972
+and Noll 12 −0.171.  So January's molecules want γ ≈ 0.36 and 0.25 rad more astigmatism; its beads want γ 0.08
+and their own.  The dual channel does not: held at 0.36 its astigmatism stays (+0.675 against +0.679) and the
+held-out molecules score 2.1 nats per molecule worse than with its beads' 0.159.  On January the A/B ambiguity of
+October is the magnitude's: holding the beads' γ is what gives in situ the beads' astigmatism.  Which γ is the microscope's is the open question.  On M2's beads it is not the
+aperture -- *learn NA* gives 1.434 (January) and 1.4225 (dual), γ 0.075 and 0.162, 20 and 66 nats over 21 and 16
+beads -- nor the blur: σ held at the pixel's own makes γ smaller (0.000 and 0.058) and the fit 31 k and 274 k
+nats worse, the astigmatism within 0.01.  M5's 100 nm beads learnt 0.32–0.41 on another objective; M2's
+molecules ask for that, M2's beads for a fifth of it.  To find out: a sample of known geometry on M2, or M2's
+beads of 40 nm.
+
+**Depth, n_med and spherical aberration with γ held** (simulated, the true index 1.37, round σ; focus error,
+the heights' slope against the truth and their median error, Noll 11's error):
+
+| fitted n_med | γ | start | focus error (nm) | γ learnt | slope | median height error (nm) | Noll 11 (rad) | σ (nm, true 55) | Δnats / molecule |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.37 | held | truth / cold | 3.7 / 3.8 | – | 0.985 | 0.1 / 0.0 | +0.006 | 55.1 | 0.001 |
+| 1.37 | learnt | truth / cold | 4.8 / 5.5 | 0.381 / 0.380 | 0.990 | 1.0 / 1.5 | +0.005 | 55.0 | 0.000 |
+| 1.33 | held | truth / cold | 12.1 / 11.9 | – | 0.953 | −21 | +0.041 | 48.6 | 0.043 |
+| 1.33 | learnt | truth / cold | 20.5 / 20.3 | 0.486 / 0.484 | 0.977 | −13 | +0.036 | 48.4 | 0.019 |
+
+With the right index the focus is found to 4–6 nm either way: the coverslip edge, not γ, fixes it.  With the
+index 0.04 low, a held γ puts the mismatch into σ (−6 nm), Noll 11 (+0.04 rad) and the z scale (−5 %); a learnt γ
+takes part of it (0.36 → 0.49) and fits better (0.02 nats per molecule), the focus 8 nm farther off.  So holding γ
+does not determine the focus better when the edge is there; it keeps γ a property of the objective, which a wrong
+index otherwise moves by a third.  Two starts end within 2 nm in every case.
+
+**The twin test and the coverslip edge on the minimal pupil**: the twin agreed on every simulated run (+678 …
++795 nats) and on both M2 pairs (+375 … +4449, January held at 0.36: +18 973); the edge brought the simulated
+focus from 580 nm to within 3 nm and January's to within 16 nm of the bead start's.
+
+**Zenodo `1ch_smlm_tubulin`** (no beads: the nominal γ held, as a microscope with none would; v1's optics, NA 1.35
+silicone, 1.406, 670 nm, 108 nm; no coverslip edge, the focus from 1500 nm; three rounds; started from 0.85 and
+0.5 rad of Noll 6): every run -- round or free, either start -- ends at Noll 6 1.005, Noll 5 0.118, focus 1466–1467
+nm, the four within 0.016 nats per held-out molecule.  σ 70.9 round, 69 × 73 free: the round blur loses nothing.
+v1 (its magnitude fixed, γ = 0 in effect) has 0.852, October's v2 with a fixed magnitude 0.901: more γ, more
+astigmatism, as on January.  The twin test is undecided as matched indices make it (−86 … +5 nats over ~1800
+molecules), and with −86 the run warns.
+
+**Spline 3D's *focus in situ*** (`calibrate.depth.insitu_focus`, every aberration of a minimal bead model held: the
+January beads learnt with the window's defaults, the January movie, 1000 molecules, two rounds) from no start
+(its own estimate), 300 and 900 nm: focus 530, 524 and 535 nm, each ± 4 nm, half of the edge's window on the
+coverslip, the blur 53–54 nm, the heights' 5 / 50 / 95 % at −40 / 670 / 1820 nm; 4 min each.  Stable to 12 nm and
+sensible; ~80 nm above in situ's own 443–457 nm, which learns the low orders the focus run holds at the beads'.
+
+**Settled**: σ stays round in situ, the default (free costs nothing on a round truth and gains nothing on real
+data); γ the microscope's, never learnt by default.  **Open**: which γ M2's objective has -- its January beads' 0.08, its
+August beads' 0.16 (the same objective and colour, another camera: γ is not as fixed as decided) or what its
+January molecules ask for, 0.36; the dual channel's focus at 25 px.
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

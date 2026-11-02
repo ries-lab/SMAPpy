@@ -484,6 +484,12 @@ Decided with Jonas:
   every Zernike of phase (nm) and magnitude and the blur, from *Add to microscope...* after a pupil model
   or in situ run; in situ starts from it without *start from*, its Noll 6 over `astigmatism_nm`.  We do
   not swap objectives, so one per entry.
+* **γ, the objective's apodisation** (`gamma_of`; the user's decision, November 2026): a property of the
+  objective, perhaps a little of the colour, and of nothing else.  In situ without *start from* holds the
+  entry's `gamma` parameter (a value, or one following the emission filter), else the γ of a minimal pupil
+  kept under any state of the 3D lens, nearest in emission, with its learnt NA; only failing both a nominal
+  0.36, with a warning.  M2's minimal bead models learnt 0.08 (Evolve, January 2026) and 0.16 (iXon, August
+  2026), M5's 0.32–0.41 (`docs/uipsf/architecture.md`, "In situ on the minimal model").
 
 ## Next
 

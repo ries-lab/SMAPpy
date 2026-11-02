@@ -721,6 +721,41 @@ def pupil_of(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return entry.pupil_for(summary.get("states") or {})
 
 
+def gamma_of(summary: Optional[Dict[str, Any]],
+             wavelength_nm: Optional[float] = None) -> Tuple[Optional[float], Optional[float], str]:
+    """(the minimal pupil's γ for a file's microscope, the NA learnt with it or None, where they came from),
+    or (None, None, "").
+
+    γ is the objective's apodisation: it belongs to the microscope, perhaps a little to the colour, and to
+    nothing else -- not the 3D lens, not the sample (the user's decision, November 2026).  So it is read,
+    in order, from the entry's ``gamma`` parameter (a bare value, or one following the emission filter:
+    a value per colour, resolved with the file like any parameter), else from the minimal pupils kept with
+    the entry under any state of its 3D lens, the one whose emission is nearest ``wavelength_nm``, with the NA
+    it learnt, if it did: γ and the aperture trade (on 4Pi beads 0.40 at NA 1.35, 0.24 at a learnt 1.31), so
+    one is held with the other."""
+    if not summary or not summary.get("name"):
+        return None, None, ""
+    name = str(summary["name"])
+    value = (summary.get("values") or {}).get("gamma")
+    if value is not None:
+        return float(value), None, f"{name}'s entry"
+    entry = database().get(name)
+    if entry is None:
+        return None, None, ""
+    until = read_date(summary.get("version")) if summary.get("version") else None
+    if until is not None:
+        entry = entry.as_of(until - _dt.timedelta(days=1))
+    kept = [p for p in entry.pupils.values() if p.get("kind") == "minimal" and p.get("gamma") is not None]
+    if not kept:
+        return None, None, ""
+    if wavelength_nm is not None:
+        kept.sort(key=lambda p: abs(float(p.get("wavelength_nm") or wavelength_nm) - float(wavelength_nm)))
+    found = kept[0]
+    at = f" at {float(found['wavelength_nm']):g} nm" if found.get("wavelength_nm") else ""
+    na = found.get("na")
+    return float(found["gamma"]), None if na is None else float(na), f"{name}'s kept pupil{at}"
+
+
 def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tuple:
     """Keep ``pupil`` with the microscope ``summary`` names, for the state of its 3D lens, in the
     user's file (`save_microscope`: the entry before kept as a dated version).  Returns (the key, the

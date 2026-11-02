@@ -367,6 +367,41 @@ def test_in_situ_from_a_minimal_bead_model_holds_its_gamma(movie_file, monkeypat
 
 
 @pytest.mark.slow
+def test_without_a_bead_model_in_situ_holds_the_microscope_s_gamma_else_a_nominal_one_with_a_warning(
+        movie_file, monkeypatch):
+    # γ is the objective's: without a start model the microscope's entry gives it, and with nothing there a
+    # nominal one is held, with a warning, rather than learnt (where it traded with the focus)
+    import smappy.microscope_db as db
+    from smappy.calibrate.insitu_run import run_insitu
+    from smappy.calibrate.pupil import RunSettings
+
+    import uipsf.model
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    from uipsf.model.build import NOMINAL_GAMMA
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    monkeypatch.setattr(db, "pupil_of", lambda scope: None)
+    path, _ = movie_file
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
+    pupil = result.model.psf.pupil
+    assert isinstance(pupil, uipsf.model.MinimalPupil) and pupil.held_gamma == NOMINAL_GAMMA
+    assert not pupil.ring and pupil.held_phase == {}
+    assert result.model.geometry.fit_focus and "nominal" in result.messages[0]
+    assert any(m.startswith("warning: the microscope gives no γ") for m in result.messages)
+    # the microscope's γ, when its entry has one: no warning
+    monkeypatch.setattr(db, "gamma_of", lambda scope, wavelength: (0.2, 1.41, "M9's entry"))
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
+    pupil = result.model.psf.pupil
+    assert pupil.held_gamma == 0.2 and pupil.na == pytest.approx(1.41) and "M9's entry" in result.messages[0]
+    assert not any(m.startswith("warning") for m in result.messages)
+
+
+@pytest.mark.slow
 def test_in_situ_holding_every_aberration_learns_only_the_focus_and_finds_it(movie_file, monkeypatch):
     # the movie's own pupil kept with the microscope, every mode of it held: nothing of the pupil is learnt, no
     # twin test, and the focus comes from the molecules
