@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "synthetic")]
 from bead_slices import measure  # noqa: E402,I001
 from m5_bends import per_bead  # noqa: E402
-from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, subset  # noqa: E402
+from m5_media import GRID_NA, N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, stage_drift, subset  # noqa: E402
 
 PLANES_NM = (-600.0, -300.0, 0.0, 300.0, 600.0)
 #: the residual's colour range, a fraction of the bead average's peak
@@ -49,7 +49,8 @@ PHOTON_LABEL = {"frame": "photons × factor per frame", "obs": "photons free per
 
 def variant_label(variant: str) -> str:
     rest, _, extra = variant.partition("~")
-    extra = {"zscale": ", z scale learnt", "na": ", NA learnt", "": ""}.get(extra, f", n_imm {extra[1:]}")
+    extra = {"zscale": ", z scale learnt", "na": ", NA learnt", "drift": ", lateral drift learnt", "": ""}.get(
+        extra, f", n_imm {extra[1:]}")
     rest, _, photons = rest.partition("@")
     pupil, _, blur = rest.partition("+")
     return (LABEL[pupil] + (f", {BLUR_LABEL[blur]}" if blur else "") + (f", {PHOTON_LABEL[photons]}" if photons else "")
@@ -126,7 +127,9 @@ def learn(args):
             rest, _, extra = variant.partition("~")
             rest, _, photons = rest.partition("@")
             pupil, _, blur = rest.partition("+")
-            calibrate.BeadStackGeometry = functools.partial(BeadStackGeometry, z_scale=extra == "zscale")
+            # "~drift": a lateral drift per defocus (`m5_media.stage_drift`), the stage's shear kept out of coma
+            calibrate.BeadStackGeometry = (functools.partial(stage_drift, "xy") if extra == "drift" else
+                                           functools.partial(BeadStackGeometry, z_scale=extra == "zscale"))
             index = re.fullmatch(r"n(\d+\.\d+)", extra)            # "~n1.515"; "~na" is the aperture
             run_optics = dataclasses.replace(optics, n_immersion=float(index[1])) if index else optics
             # the photons of each bead and slice: the default smooth curve per bead, that times a free factor per

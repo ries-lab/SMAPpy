@@ -145,6 +145,33 @@ def subset(rois, keep, focus, window_nm=WINDOW_NM):
     return rois
 
 
+def stage_drift(axes: str = "xy", **kwargs):
+    """A `BeadStackGeometry` that learns a drift per slice of the window along ``axes`` ("xy", "xyz") only.
+
+    `subset` cuts each bead's window about its own focus, so slice k of every window is the same defocus: the
+    drift is a shift as a function of defocus, shared by all beads -- what a stage that moves sideways as it
+    steps does.  Without it the fit puts that shift into coma, which also moves the image through focus; the
+    drift leaves coma to the PSF's shape.  On minimal0 over all sixteen stacks (2 November 2026) "xy" moved
+    coma by the same +0.5…+2.6 nm (Noll 7) and +3.4…+5.3 nm (Noll 8) in every acquisition of a day and colour,
+    gained 4-51 k nats and took the lateral bias from 2.5-14 nm to about 1 nm, but left the coma that differs
+    between conditions (lens, sample, colour) and worsened the z bend by 1-3 nm.  A z drift would absorb the
+    shared z bend by construction, so "xy" is the default."""
+    from uipsf.model import BeadStackGeometry
+
+    class StageDrift(BeadStackGeometry):
+        def __init__(self, **kw):
+            super().__init__(drift=True, **kw)
+            self.axes = axes
+
+        def __call__(self, p, batch):
+            # the axes not learnt are held at zero: their entries stay in the parameters, pinned by the prior
+            drift = p["geometry.drift"]
+            keep = torch.tensor([a in self.axes for a in "xyz"], dtype=drift.dtype, device=drift.device)
+            return super().__call__(p, batch) - drift + drift * keep
+
+    return StageDrift(**kwargs)
+
+
 def summary(run, variant, pixel, cond, grid_na) -> dict:
     from uipsf.optics.zernike import noll_to_nm
     cal = run.cal

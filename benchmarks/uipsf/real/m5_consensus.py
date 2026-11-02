@@ -37,6 +37,9 @@ beads of 2026-10-31 (600 nm only, each condition twice, at 50 and 100 nm steps),
 diameter in the model and in the ring.  The consensus pools them all: γ and the asymmetric modes are the
 objective's, whatever the bead.
 
+``--drift xy`` learns a lateral drift per defocus (`m5_media.stage_drift`): the stage's shear, which the fit
+otherwise puts into coma; its rows and files are named apart, and a consensus pools only its own kind.
+
 Restartable: a row already in ``--out`` is not run again.  `bead_slices.measure` gives each fit's bends.
 """
 from __future__ import annotations
@@ -57,7 +60,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE]
 from bead_slices import emit, measure  # noqa: E402,I001
 from edge_magnitude import use_pupil  # noqa: E402
-from m5_media import N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, subset  # noqa: E402
+from m5_media import N_IMM, N_MED, ORDER, WAVELENGTH, acquisition, select, stage_drift, subset  # noqa: E402
 from radial_magnitude import EdgePupil  # noqa: E402
 
 PIXEL = (104.7, 106.4)
@@ -198,6 +201,8 @@ def main():
     ap.add_argument("--npz-dir", default=None,
                     help="also keep each fit's images, slice fits and bends for `m5_scorecard.py` and the figures")
     ap.add_argument("--free-only", action="store_true", help="the free minimal fits alone: no references, no consensus")
+    ap.add_argument("--drift", default="none", choices=("none", "xy", "xyz"),
+                    help="a drift per defocus learnt along these axes (`m5_media.stage_drift`)")
     ap.add_argument("--centre", type=float, default=0.5, help="the central fraction of the width and height")
     ap.add_argument("--z-range", type=float, default=600.0)
     ap.add_argument("--window", type=float, default=1000.0)
@@ -218,10 +223,12 @@ def main():
     scoring.localise = functools.partial(scoring.localise,
                                          chunk_size=int(2 * args.window // args.dz + 1) * args.chunk)
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    if args.drift != "none":
+        calibrate.BeadStackGeometry = functools.partial(stage_drift, args.drift)
 
     done = [json.loads(line) for line in open(args.out)] if os.path.exists(args.out) else []
     key = lambda r: (r["acquisition"], r["stage"], r["form"], r.get("estimator"), r.get("blur"),  # noqa: E731
-                     r.get("modes", "x6"))
+                     r.get("modes", "x6"), r.get("drift", "none"))
     have = {key(r) for r in done}
     sigma = float(np.mean(PIXEL)) / math.sqrt(12)                     # the pixel's own blur, both axes
     cache = {}
@@ -239,7 +246,7 @@ def main():
 
     def fit(path, stage, form, estimator, magnitude, blur, extra, modes="x6"):
         name, cond, _, bead_nm = acquisition(path)
-        if (name, stage, form, estimator, blur, modes) in have:
+        if (name, stage, form, estimator, blur, modes, args.drift) in have:
             return
         files, rois, cut = prepared(path)
         if cut["central"] < 2:
@@ -254,7 +261,7 @@ def main():
                               decisions={i: "include" for i in range(len(rois.records))})
         row = dict(acquisition=name, **cond, stage=stage, form=form, estimator=estimator, blur=blur, beads=cut,
                    grid_na=GRID_NA, na=NA, window_nm=args.window, dz_nm=args.dz, centre=args.centre,
-                   modes=modes, asym_modes=list(MODE_SETS.get(modes, ())), **extra)
+                   modes=modes, asym_modes=list(MODE_SETS.get(modes, ())), drift=args.drift, **extra)
         row.update(summary(run, cond))
         row.update(measure(run, args.z_range, centre_nm=[rois.records[i]["focus_nm"] for i in run.cal.beads.used]))
         row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
@@ -262,12 +269,13 @@ def main():
             from m5_media_psfs import fit_record
             os.makedirs(args.npz_dir, exist_ok=True)
             tag = "_".join(t for t in (stage, modes if modes != "none" else "", form if form != "none" else "",
-                                        estimator or "", blur) if t)
+                                        estimator or "", blur, f"drift{args.drift}" if args.drift != "none" else "")
+                           if t)
             np.savez_compressed(os.path.join(args.npz_dir, f"{name}__{tag.replace(' ', '_')}.npz"),
                                 **fit_record(run, rois), window_nm=args.window, grid_na=GRID_NA, **cond)
         emit(row, args.out)
         done.append(json.loads(json.dumps(row, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))))
-        have.add((name, stage, form, estimator, blur, modes))
+        have.add((name, stage, form, estimator, blur, modes, args.drift))
         print(name, stage, modes, form, estimator or "", blur, f"{row['minutes']} min", flush=True)
 
     # 1 and 2: the references and the free minimal model, for every condition before any consensus
@@ -288,7 +296,8 @@ def main():
         ring = cond["medium"] == "mismatch"
         for modes, blur, form, estimator in itertools.product(args.mode_sets, args.blurs, args.consensus_forms,
                                                               args.estimators):
-            pool = [r for r in done if r.get("blur") == blur and r.get("modes", "x6") == modes]
+            pool = [r for r in done if r.get("blur") == blur and r.get("modes", "x6") == modes
+                    and r.get("drift", "none") == args.drift]
             if not [r for r in pool if r["stage"] == "free" and r["acquisition"] != name]:
                 continue                                        # nothing else to agree with
             hold, held = consensus(pool, form, estimator, name, MODE_SETS[modes])
