@@ -243,6 +243,12 @@ and excitation (the donuts of MINFLUX and STED, above).
   the PSF calibration window, in situ and (through another glass) for beads.  Next: the coverslip over the
   field (`FocalSurface`).
 - Polychromatic emission (5–11 nm of σ measured).
+- Single molecules on the coverslip as the objective's calibration (November 2026,
+  `benchmarks/uipsf/real/m5_molecules.py`): the physics alone describes their supercritical light, and beads
+  of the same day take their γ with an effective height of 70 nm (`m5_transfer.py`), but not their phase
+  (Z5, Z8, Z11, Z22 differ by 4–10 nm; not the field).  To try: stricter shape and z filters after round 1,
+  a third round if needed, then the transfer again; and the dyes' emission (photoselection by polarised
+  excitation, flat-lying dipoles) as the reason the phases differ.
 - The aperture edge done properly: anti-aliased, or a fitted soft cut-off.
 - Saturation I/(1 + I/I_sat); a per-slice background; exact EMCCD noise.
 - A one-sided charge-transfer kernel for EMCCDs.
