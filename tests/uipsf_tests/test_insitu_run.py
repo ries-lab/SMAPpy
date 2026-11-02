@@ -367,7 +367,7 @@ def test_in_situ_from_a_minimal_bead_model_holds_its_gamma(movie_file, monkeypat
 
 
 @pytest.mark.slow
-def test_without_a_bead_model_in_situ_holds_a_nominal_gamma_and_learns_the_focus(movie_file, monkeypatch):
+def test_without_a_bead_model_in_situ_holds_the_microscope_s_gamma_else_a_nominal_one_with_a_warning(movie_file, monkeypatch):
     # no start model and nothing kept with the microscope: γ is the objective's, so a nominal one is held
     # rather than learnt (where it traded with the focus, which then had to be pinned)
     import smappy.microscope_db as db
@@ -389,6 +389,14 @@ def test_without_a_bead_model_in_situ_holds_a_nominal_gamma_and_learns_the_focus
     assert isinstance(pupil, uipsf.model.MinimalPupil) and pupil.held_gamma == NOMINAL_GAMMA
     assert not pupil.ring and pupil.held_phase == {}
     assert result.model.geometry.fit_focus and "nominal" in result.messages[0]
+    assert any(m.startswith("warning: the microscope gives no γ") for m in result.messages)
+    # the microscope's γ, when its entry has one: no warning
+    monkeypatch.setattr(db, "gamma_of", lambda scope, wavelength: (0.2, "M9's entry"))
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
+    assert result.model.psf.pupil.held_gamma == 0.2 and "M9's entry" in result.messages[0]
+    assert not any(m.startswith("warning") for m in result.messages)
 
 
 @pytest.mark.slow

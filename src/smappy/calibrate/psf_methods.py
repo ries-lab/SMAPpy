@@ -577,7 +577,12 @@ class InSitu:
                           inputs["spline"], inputs["run"], camera=inputs.get("camera"), rois=rois,
                           progress=progress, cancel=cancel,
                           save_to=previous.saved if previous is not None else None)
-        return Run(done, False, done.saved)
+        run = Run(done, False, done.saved)
+        # what must not be missed -- a nominal γ held for want of the microscope's -- in the window's warning line
+        warnings = [m.removeprefix("warning: ") for m in done.messages if m.startswith("warning: ")]
+        if warnings:
+            run.extra["warning"] = "; ".join(warnings)
+        return run
 
     def finish(self, run: Run, progress=None) -> Run:
         """The model against the data per height, kept with the run; nothing after a stopped run."""

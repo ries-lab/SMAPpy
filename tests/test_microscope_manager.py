@@ -347,6 +347,26 @@ def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_surviv
     manager.close()
 
 
+def test_gamma_is_the_microscope_s_whatever_its_3d_lens_and_from_its_nearest_colour(app, tmp_path, config):
+    # the user's decision (November 2026): γ is the objective's apodisation, so a movie with the lens out takes
+    # it from a pupil kept with the lens in, and of two colours the nearer; a typed ``gamma`` comes first
+    from smappy.io.tiff import open_stack
+    from smappy.plugins.fit import CameraSettings
+
+    def scope(tags, name):
+        return CameraSettings().resolve(open_stack(a_tiff(tmp_path / f"{name}_MMStack.ome.tif", tags)),
+                                        require=False).microscope
+    beads, movie = scope(M2_BEADS, "beads"), scope(M2_MOVIE, "movie")
+    assert microscope_db.gamma_of(movie, 676.0) == (None, "")
+    microscope_db.keep_pupil(beads, PUPIL)
+    assert microscope_db.pupil_of(movie) is None                       # its pupil follows the lens, γ not
+    assert microscope_db.gamma_of(movie, 680.0) == (0.36, "M2's kept pupil at 676 nm")
+    entry = microscope_db.database().get("M2")
+    entry.pupils["other"] = dict(PUPIL, gamma=0.2, wavelength_nm=580.0)
+    assert microscope_db.gamma_of(movie, 600.0)[0] == 0.2 and microscope_db.gamma_of(movie, 670.0)[0] == 0.36
+    assert microscope_db.gamma_of(dict(movie, values={"gamma": 0.1}), 670.0) == (0.1, "M2's entry")
+
+
 def test_a_pupil_is_kept_only_for_a_recognised_microscope_in_its_current_setup(config):
     with pytest.raises(ValueError, match="no microscope recognised"):
         microscope_db.keep_pupil({}, PUPIL)

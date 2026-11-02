@@ -57,7 +57,7 @@ class InSituModelSettings:
                                                  "not used with start from")
     hold: str = param("start", label="hold", choices=HOLDS,
                       help="the start's: γ (a Zernike model's symmetric magnitude) and the phase above the "
-                           "order held from start from or the microscope's pupil, else a nominal γ; every "
+                           "order held from start from or the microscope's pupil, else the microscope's γ; every "
                            "aberration: the start "
                            "model's whole pupil, only the focus and the blur learnt; nothing: γ learnt, the "
                            "focus then pinned")
@@ -313,9 +313,10 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     ``pupil``, a description (`uipsf.VectorPSF.describe`), stands in for the one kept with the microscope:
     what is held and started from without a start model.
 
-    With no start model and no pupil to hold, *hold* the start's holds a nominal γ (`NOMINAL_GAMMA`) rather
-    than learning it: the magnitude learnt from molecules trades with the focus, and γ is the objective's,
-    0.32–0.41 on every bead set measured."""
+    With no start model and no pupil to hold, *hold* the start's holds the microscope's γ
+    (`microscope_db.gamma_of`: its entry's ``gamma``, or a minimal pupil kept with it) rather than learning
+    it, since γ learnt from molecules trades with the focus; with none, a nominal γ (`NOMINAL_GAMMA`), with
+    a warning: on M2 holding 0.36 instead of the beads' 0.08 moved the learnt astigmatism by 0.24 rad."""
     import torch
 
     from uipsf.workflows import insitu_model
@@ -367,10 +368,17 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
             held.phase = {j: held.phase.get(j, 0.0) for j in sorted(set(zernike_modes(top)) | set(held.phase))}
             spec = replace(spec, zernike_order=top)
         if not held.source and spec.magnitude == "minimal":
-            from uipsf.model.build import NOMINAL_GAMMA
-            held = Held(gamma=NOMINAL_GAMMA, source="a nominal value")
-            messages.append(f"no start model and no pupil kept with the microscope: γ held at the nominal "
-                            f"{NOMINAL_GAMMA}, the phase learnt from the astigmatism typed")
+            # γ is the microscope's (its objective's apodisation), not the sample's: from its entry, and only
+            # as a last resort a nominal value, which can move the learnt astigmatism by tenths of a radian
+            from ..microscope_db import gamma_of
+            gamma, where = gamma_of(getattr(rois.camera, "microscope", None), o.wavelength_nm)
+            if gamma is None:
+                from uipsf.model.build import NOMINAL_GAMMA
+                gamma, where = NOMINAL_GAMMA, "a nominal value"
+                messages.append(f"warning: the microscope gives no γ -- held at the nominal {NOMINAL_GAMMA}, "
+                                f"which can bias the astigmatism; learn a bead model of this microscope and "
+                                f"add it to the microscope, or type its gamma in the entry")
+            held = Held(gamma=gamma, source=where)
         elif not held.source:
             messages.append("nothing to hold: no start model and no pupil kept with the microscope; the "
                             "magnitude is learnt and the focus pinned")
