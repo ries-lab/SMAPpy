@@ -36,7 +36,6 @@ def test_a_file_without_a_stage_z_needs_the_step_typed(tmp_path):
     assert np.allclose(f.z_um, [0, 0.05, 0.1, 0, 0.05, 0.1]) and f.sweep.tolist() == [0, 0, 0, 1, 1, 1]
 
 
-@pytest.mark.slow
 def test_the_molecules_are_found_at_each_files_focus_and_drawn_evenly_over_the_defocus(tmp_path):
     truth = write_sweeps(tmp_path, OPTICS, files=2, sweeps=2, focus_um=(50.0, 50.3))
     rois = molecule_rois(truth["paths"], MoleculeStackSettings(molecules=150), CAMERA)
@@ -87,7 +86,6 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     assert (result.saved.parent / "cal.uipsf.h5").exists()
 
 
-@pytest.mark.slow
 def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecules(tmp_path, monkeypatch):
     import time
 
@@ -129,6 +127,7 @@ def test_dual_colour_pairs_the_halves_molecules_and_learns_both_channels_with_th
     from smappy.calibrate.molecule_dual import dual_molecule_rois
     from smappy.calibrate.molecule_stack_run import run_molecule_stack
     from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, RunSettings
+
     from uipsf_tests.molecule_sweeps import DUAL_SHIFT_PX, write_dual_sweeps
     truth = write_dual_sweeps(tmp_path, OPTICS)
     settings = MoleculeStackSettings(molecules=50, roi_px=15, max_rounds=1)
@@ -151,3 +150,21 @@ def test_dual_colour_pairs_the_halves_molecules_and_learns_both_channels_with_th
         assert all(abs(nm[j] - v) < 6.0 for j, v in PHASE_NM.items()), (prefix, nm)
     cal = load_dual_color_calibration(result.saved)
     assert cal.main.parameters["sample"] == "molecules on the coverslip in a z stack"
+
+
+def test_the_elliptical_gaussian_from_molecules_gives_back_their_z(tmp_path):
+    from smappy.astigmatic_z import z_from_widths
+    from smappy.calibrate.elliptical import EllipticalCalibrationSettings, calibrate_widths
+    from smappy.calibrate.molecule_stack import molecule_widths
+    truth = write_sweeps(tmp_path, OPTICS, files=1, sweeps=3, per_frame=6, step_nm=100.0, span_nm=600.0,
+                         focus_um=(50.0,))
+    rois = molecule_rois(truth["paths"], MoleculeStackSettings(molecules=200), CAMERA)
+    widths = molecule_widths(rois, (110.0, 110.0), EllipticalCalibrationSettings())
+    cal = calibrate_widths(widths, higher_orders=True)
+    z = widths.z_nm[:, 0]
+    found = z_from_widths(widths.sx_nm[:, 0], widths.sy_nm[:, 0], cal, widths.sx_err_nm[:, 0],
+                          widths.sy_err_nm[:, 0])
+    found = found.z_nm
+    inside = np.abs(z) < 500
+    # each molecule's z back from its widths, about the stage's (the sweeps' own foci scatter ±20 nm)
+    assert np.nanmedian(np.abs(np.asarray(found)[inside] - z[inside])) < 40
