@@ -195,3 +195,11 @@ def test_the_form_shows_what_each_method_reads():
     situ = model_shown("insitu")
     assert situ["fit_tilt"] and not any(situ[k] for k in ("psf.magnitude", "psf.saf_damping", "bead_diameter_nm",
                                                            "drift", "field_dependence"))
+
+
+def test_the_form_keeps_the_blur_under_more_and_the_pixel_blur_out():
+    from dataclasses import fields
+    info = {f.name: f.metadata["smappy"] for f in fields(PSFModelSettings)}
+    assert info["blur"].advanced and info["blur_nm"].advanced         # learnt round; the output page reports it
+    assert info["pixel_blur"].hidden and PSFModelSettings().pixel_blur  # always on in the form, a script's choice
+    assert not info["zernike_order"].advanced and not info["magnitude"].advanced

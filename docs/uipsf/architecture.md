@@ -2235,6 +2235,8 @@ the beads' ring damping for molecules.  Now there is one of each:
   on: one γ for both objectives; `docs/4pi.md` §23).  Each workflow keeps only its own fields
   beside it; the form shows what a method reads (`model_shown`: in situ hides the magnitude, the SAF damping,
   the bead's size, the drift and field dependence; the SAF damping only for a minimal magnitude below the NA).
+  The form's main rows are the order and the magnitude; the blur and its σ are under *more*, and the pixel
+  blur is not in the form at all (always on; `pixel_blur=False` for scripts that reproduce older models).
   A model file keeps the options nested (``psf``), version 6.
 - **One builder**: `pupil_grid` (the grid, `GRID_MARGIN` beyond the NA for a minimal pupil), `make_pupil`
   (minimal or Zernike, with what it holds) and `make_psf` (the blur, the pixel's under it).  `bead_model`,

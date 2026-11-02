@@ -85,15 +85,17 @@ class PSFModelSettings:
              "Zernike: every mode up to the order; symmetric: the rotationally symmetric ones; "
              "fixed: uniform, the apodisation only")
     # round by default everywhere, in situ too (the user's, November 2026): free took up astigmatism the pupil
-    # should hold; to revisit for in situ once it is optimised
-    blur: str = param("round", label="blur", choices=BLURS,
-                      help="an extra Gaussian blur of the image, learnt (round: one σ for x and y) or held "
-                           "at its value")
-    blur_nm: float = param(20.0, label="blur σ", unit="nm", min=0.0,
-                           help="its start when learnt, its value when fixed; on top of the pixel's own "
-                                "with *pixel blur*")
-    # the pixel's blur under the learnt one: the model is drawn at pixel centres (`VectorPSF.pixel_blur`)
-    pixel_blur: bool = param(True, label="pixel blur", advanced=True,
+    # should hold; to revisit for in situ once it is optimised.  Under *more*: learnt round is right almost
+    # always, and the output page reports what it came to
+    blur: str = param("round", label="blur", choices=BLURS, advanced=True,
+                      help="a Gaussian blur of the image beyond the pixel's own, learnt (round: one σ for x "
+                           "and y) or held at its value")
+    blur_nm: float = param(20.0, label="blur σ", unit="nm", min=0.0, advanced=True,
+                           help="the blur beyond the pixel's: its start when learnt, its value when fixed")
+    # the pixel's blur under the learnt one: the model is drawn at pixel centres (`VectorPSF.pixel_blur`), the
+    # camera integrates over the pixel.  Not in the form (the user's, November 2026: no case for off); kept
+    # for scripts that reproduce models learnt without it
+    pixel_blur: bool = param(True, label="pixel blur", hidden=True,
                              help="the pixel's own blur, its size / √12, under the learnt one, so that σ is "
                                   "what blurs the image beyond the pixel")
     # the minimal magnitude's supercritical-angle ring damped by a learnt exp(−2πκh) (`MinimalPupil`): the
