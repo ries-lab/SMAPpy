@@ -259,12 +259,12 @@ bead after its own height, median, nm:
 
 What is left at the edges is the model, not the grid: in a first run (whose beads missed the chip's right side)
 a spline drawn exactly at each far bead did no better than the 9 × 9 blend (86 against 85 nm), though the blend
-misses the PSF by 2.7 % of its peak at 9 × 9 (1.3 % at 13 × 13), above `TOLERANCE`; the export should say so
-when it stops at the largest grid.  Candidates: second-order terms (Droste's), a field-dependent magnitude
+misses the PSF by 2.7 % of its peak at 9 × 9 (1.3 % at 13 × 13), above `TOLERANCE`; the export now says so when it
+stops at the largest grid (`field_splines.limit_warning`, kept as the calibration's ``field_warning``).
+Candidates: second-order terms (Droste's), a field-dependent magnitude
 (vignetting), the conversion.
 
 ## 10. Open
 
 - Whether the residual's prior keeps a bead calibration of 20–50 beads stable (the residual is not built).
 - What limits the edges of a 177 µm field (§9): second-order terms, a field-dependent magnitude.
-- A warning when the export's grid stops at its largest with the blend above its tolerance.

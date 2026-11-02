@@ -108,3 +108,13 @@ def test_the_grid_is_the_smallest_whose_blend_keeps_to_the_tolerance():
 def test_the_nodes_must_fill_the_grid():
     with pytest.raises(ValueError, match="grid"):
         FieldSplines(np.zeros((3, 64, 2, 2, 2), np.float32), [0.0, 1.0], [0.0, 1.0])
+
+
+def test_the_largest_grid_says_when_it_is_still_too_coarse_for_the_field():
+    from smappy.field_splines import GRIDS, choose_grid, limit_warning
+    steep = lambda x, y: astigmatic(-0.6 + 1.2 * ((x / 1000) ** 2 + (y / 1000) ** 2))   # noqa: E731
+    n, error = choose_grid(steep, (0, 0), (1000, 1000), tolerance=1e-6)
+    assert n == GRIDS[-1] and error > 1e-6
+    assert "9 × 9" in limit_warning(n, error, tolerance=1e-6)
+    assert limit_warning(n, 1e-7, tolerance=1e-6) is None           # within the tolerance
+    assert limit_warning(5, error, tolerance=1e-6) is None          # a smaller grid was enough

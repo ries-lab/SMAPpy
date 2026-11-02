@@ -29,6 +29,7 @@ class FieldSplines:
     coeff: np.ndarray       # (G, 64, nz, ny, nx) float32, node g = j * len(xs) + i
     xs: np.ndarray          # (gx,) the nodes' chip x, pixels, increasing
     ys: np.ndarray          # (gy,) the nodes' chip y
+    blend_error: float = float("nan")   # the grid's largest blend error, of the PSF's peak (`choose_grid`)
 
     def __post_init__(self):
         self.coeff = np.ascontiguousarray(self.coeff, dtype=np.float32)
@@ -115,9 +116,30 @@ TOLERANCE = 0.005
 GRIDS = (1, 2, 3, 5, 7, 9)
 
 
+def choose_grid(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> tuple:
+    """(n, its blend error): the smallest grid of `GRIDS` whose blend stays within ``tolerance`` of the model
+    over the field, or the largest with its error above it -- which `limit_warning` then says."""
+    for n in GRIDS:
+        error = blend_error(psf_at, lo_xy, hi_xy, n)
+        if error <= tolerance:
+            return n, error
+    return GRIDS[-1], error
+
+
 def grid_size(psf_at, lo_xy, hi_xy, tolerance: float = TOLERANCE) -> int:
     """The smallest grid of `GRIDS` whose blend stays within ``tolerance`` of the model over the field."""
-    for n in GRIDS:
-        if blend_error(psf_at, lo_xy, hi_xy, n) <= tolerance:
-            return n
-    return GRIDS[-1]
+    return choose_grid(psf_at, lo_xy, hi_xy, tolerance)[0]
+
+
+def limit_warning(n: int, error: float, tolerance: float = TOLERANCE) -> str | None:
+    """What to say when the largest grid still misses the model by more than ``tolerance``; None otherwise.
+
+    The cap is memory (81 splines of a 27 px box at 20 nm planes are about 2 GB) and the time to make them.
+    Over Zenodo's 177 µm field (about 1.4 rad of astigmatism across it) 9 × 9 left 2.7 % of the peak, yet
+    a spline drawn exactly at each bead fitted no better than the blend (`docs/uipsf/field-dependence.md`,
+    §9): the warning says the grid is coarse for the field, not that the fit is wrong."""
+    if n < GRIDS[-1] or error <= tolerance:
+        return None
+    return (f"the field changes the PSF faster than a {n} × {n} grid of splines follows: between the nodes the "
+            f"blended PSF differs from the model by up to {100 * error:.1f} % of its peak (tolerance "
+            f"{100 * tolerance:.1f} %); spots far from the field's centre may be fitted slightly less well")

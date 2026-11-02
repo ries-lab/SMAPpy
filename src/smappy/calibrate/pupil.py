@@ -437,6 +437,14 @@ def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int =
         # ``psf`` is the field's centre, the middle of the beads' span and so of the grid: the spline a
         # reader that ignores the field fits with
         parameters["field_grid"] = list(field.shape)
+        parameters["field_blend_error"] = float(field.blend_error)
+        from ..field_splines import limit_warning
+        warning = limit_warning(field.shape[0], field.blend_error)
+        if warning is not None:
+            # kept with the calibration, so the window's summary and a later reader see it too
+            parameters["field_warning"] = warning
+            import warnings
+            warnings.warn(warning, stacklevel=2)
     return SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
                              em_on=None if camera is None else bool(camera.is_em),
                              pixelsize_um=None if camera is None or camera.pixelsize_um is None
@@ -464,7 +472,7 @@ def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsam
     """The node splines of a field-dependent model (`smappy.field_splines`), on the smallest grid over the
     beads' span whose blend keeps to `field_splines.TOLERANCE`, every node normalised by the centre's
     ``scale`` so that the blend is one; None without a field, or when one spline is enough."""
-    from ..field_splines import FieldSplines, grid_nodes, grid_size
+    from ..field_splines import FieldSplines, choose_grid, grid_nodes
     from .core import spline_coefficients
     extent = field_extent(learned)
     if extent is None:
@@ -478,12 +486,12 @@ def field_splines(learned, dz_nm: float, z_range_nm: float, roi_size: int, upsam
             cache[key] = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample, field_xy=key), 0) / scale
         return cache[key]
 
-    n = grid_size(psf_at, lo, hi)
+    n, error = choose_grid(psf_at, lo, hi)
     if n == 1:
         return None
     xs, ys = grid_nodes(lo[0], hi[0], n), grid_nodes(lo[1], hi[1], n)
     coeff = np.stack([spline_coefficients(psf_at(x, y).astype(np.float32)) for y in ys for x in xs])
-    return FieldSplines(coeff, xs, ys)
+    return FieldSplines(coeff, xs, ys, blend_error=error)
 
 
 def _transform(learned) -> np.ndarray:
