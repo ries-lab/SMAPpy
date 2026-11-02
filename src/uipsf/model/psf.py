@@ -41,12 +41,15 @@ from ..params import Magnitude, ParamSpec
 class VectorPSF:
     def __init__(self, grid: PupilGrid, pupil, roi_shape: tuple[int, int], *, upsample: int = 1,
                  kind: str = "vector", analyser: str | None = "unpolarised", bead_radius_nm: float = 0.0,
-                 sigma_nm: tuple[float, float] = (0.0, 0.0), fit_sigma: bool = True, round_sigma: bool = False):
+                 sigma_nm: tuple[float, float] = (0.0, 0.0), fit_sigma: bool = True, round_sigma: bool = False,
+                 pixel_blur: bool = False):
         """``roi_shape`` is (Y, X) camera pixels; ``kind`` "vector" or "scalar"; ``analyser``
         "unpolarised" (the default, also None), "x" or "y" (a channel behind a polariser); ``sigma_nm``
         the blur's starting value, or its value with ``fit_sigma=False``; ``round_sigma`` makes it one value
         for x and y (``psf.sigma`` [1]): free, the blur took up 0.1-0.4 rad of in situ astigmatism (M2, October
-        2026, docs/uipsf/architecture.md).
+        2026, docs/uipsf/architecture.md).  ``pixel_blur`` puts the pixel's own blur under it, σ_px = p/√12 per
+        axis added in quadrature (`image_sigma`): the model is sampled at pixel centres, and a learnt σ took the
+        pixel's width up too, so with it σ is what blurs the image beyond the pixel.
 
         Unpolarised is the default and is said so: v1 put every two-channel vector fit behind an x and
         a y polariser unless told otherwise, so biplane and ratiometric data were fitted with the
@@ -65,7 +68,9 @@ class VectorPSF:
         # Fixable while it is unclear whether σ is physical or a sink for mismatch (plan §10, 3).
         self.fit_sigma = bool(fit_sigma)
         self.round_sigma = bool(round_sigma)
+        self.pixel_blur = bool(pixel_blur)
         px, py = grid.optics.pixel_size_nm
+        self.pixel_sigma = (px / math.sqrt(12), py / math.sqrt(12)) if self.pixel_blur else (0.0, 0.0)
         self.spacing = (px / self.upsample, py / self.upsample)
         Y, X = self.roi_shape
         self.dft = MatrixDFT(grid, (Y * self.upsample, X * self.upsample), self.spacing)
@@ -93,6 +98,13 @@ class VectorPSF:
         """The blur's σ (x, y) nm: a round one's single value twice."""
         s = p["psf.sigma"]
         return s.expand(*s.shape[:-1], 2) if s.shape[-1] == 1 else s
+
+    def image_sigma(self, p) -> torch.Tensor:
+        """The blur the image gets, (x, y) nm: the learnt one with the pixel's under it (``pixel_blur``)."""
+        s = self.blur(p)
+        if not self.pixel_blur:
+            return s
+        return torch.sqrt(s ** 2 + s.new_tensor(self.pixel_sigma) ** 2)
 
     def pupil_field(self, p: dict[str, torch.Tensor]) -> torch.Tensor:
         """The complex pupil without the fields, magnitude rescaled to the reference energy; [..., P, P]."""
@@ -133,7 +145,7 @@ class VectorPSF:
         continuing from the end planes.
         """
         xyz, pad, dz = self._stack(xyz, z_step_nm, depth_nm)
-        return self._image(self.intensity(p, xyz, depth_nm), self.blur(p), pad, dz)
+        return self._image(self.intensity(p, xyz, depth_nm), self.image_sigma(p), pad, dz)
 
     def pupil_linearisation(self, p, xyz: torch.Tensor, depth_nm: torch.Tensor | None = None,
                             z_step_nm: float | None = None):
@@ -155,7 +167,7 @@ class VectorPSF:
         to powers of two so that few shapes are compiled: 12 % off the normal equations at 20 beads.
         """
         xyz, pad_z, dz = self._stack(xyz, z_step_nm, depth_nm)
-        sigma = self.blur(p)
+        sigma = self.image_sigma(p)
         with torch.no_grad():
             per_emitter = self.pupil_field(p).dim() == 3
             h, By, Bx = self._image_field(p, xyz, depth_nm)                    # [E, K, F, Y, 2, X]

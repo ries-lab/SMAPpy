@@ -18,11 +18,13 @@ molecule sets (`docs/uipsf/architecture.md`, "In situ on matched M2 pairs").
 """
 from __future__ import annotations
 
+import math
+
 import torch
 
 from ..optics.grid import PupilGrid
 from ..optics.zernike import noll_to_nm, zernike_basis, zernike_modes
-from ..params import ParamSpec
+from ..params import Bounded, ParamSpec
 
 
 class ZernikePupil:
@@ -101,6 +103,98 @@ class ZernikePupil:
         magnitude = (1 + torch.tensordot(p["pupil.magnitude"], self.magnitude_basis, dims=([-1], [0]))
                      + self.held_magnitude_map)
         return magnitude, phase
+
+
+#: how far beyond the objective's NA a minimal pupil's grid reaches: 1.51 for NA 1.50, M5's.  On a grid at the
+#: nominal NA the grid's own edge cut light the beads wanted (`docs/uipsf/m5-media.md`); the aperture is then
+#: the pupil's own cutoff, inside the grid
+GRID_MARGIN = 1.51 / 1.50
+
+
+def minimal_grid_optics(optics):
+    """The optics a minimal pupil's grid is built on: the NA `GRID_MARGIN` beyond the objective's, short of
+    the immersion index, which no NA reaches."""
+    import dataclasses
+    na = min(optics.NA * GRID_MARGIN, optics.n_imm - 0.005)
+    return dataclasses.replace(optics, NA=na)
+
+
+class MinimalPupil(ZernikePupil):
+    """The minimal pupil (the user's model, decided November 2026 on M5's beads): the phase in Zernikes, the
+    magnitude rotationally symmetric and physical, cos θ_imm^γ × the supercritical ring × the aperture.
+
+    - **cos θ_imm^γ**, γ ≥ 0 learnt: the shape an apodisation error has, falling towards the edge.  It was
+      0.32-0.41 on M5's 100 nm beads in both colours, media and with and without the 3D lens; 40 nm beads
+      learnt 0.13-0.26 beside a larger blur, which is not settled (`benchmarks/uipsf/real/m5_consensus.py`).
+    - **the ring**, only where the sample's index is below the NA (else there is no supercritical light):
+      exp(−2πκh), κ = √((ρ·NA)² − n_med²)/λ, h ≥ 0 the emitter's height above the glass, which the bead
+      model puts at the glass; one parameter, learnt with ``saf_damping`` (the default).  It belongs to the beads,
+      as their size does: a spline for single molecules is drawn with h = 0 (`export.sample_psf`), their light
+      beyond the critical angle following the physics of their own depth.
+    - **the aperture**, held: a cutoff at the objective's ``na`` of the width of a pupil sample, on a grid
+      reaching `GRID_MARGIN` beyond it (`minimal_grid_optics`), so the aperture is not the grid's edge.
+
+    No m ≠ 0 magnitude: free, the asymmetric modes won nats on every M5 set, but held at the other sets'
+    consensus they cost 2-36 k nats each -- they follow the acquisition, not the objective.  The parameters
+    are physical, so a model is read by its numbers: γ (``pupil.gamma``) and h (``pupil.ring_h``, nm).
+    Taken over from `benchmarks/uipsf/synthetic/radial_magnitude.EdgePupil` ``centre="cos", edge="hard",
+    saf=True``, with the cutoff held; its rows are the studies'."""
+
+    def __init__(self, grid: PupilGrid, n_max: int = 6, na: float | None = None, held_phase: dict | None = None,
+                 phase_modes: list[int] | None = None, saf_damping: bool = True):
+        super().__init__(grid, n_max=n_max, phase_modes=phase_modes, magnitude_modes=[], held_phase=held_phase)
+        o = grid.optics
+        self.na = float(o.NA / GRID_MARGIN if na is None else na)
+        self.n_imm, self.n_med, self.wavelength_nm, self.grid_na = o.n_imm, o.n_med, o.wavelength_nm, o.NA
+        # without ``saf_damping`` the ring is a point's at the glass: the physics alone, no height learnt
+        self.saf_damping = bool(saf_damping)
+        self.ring = self.saf_damping and o.n_med < self.na
+        rho = grid.rho.real if grid.rho.is_complex() else grid.rho
+        self._extras(rho, grid.size)
+
+    def _extras(self, rho, size):
+        """The fixed maps: cos θ_imm, κ and the aperture."""
+        s = rho * self.grid_na                                        # n·sin θ
+        self.cos_imm = torch.sqrt(torch.clamp(1 - (s / self.n_imm) ** 2, min=1e-6))
+        self.kappa = torch.sqrt(torch.clamp(s ** 2 - self.n_med ** 2, min=0.0)) / self.wavelength_nm
+        # half a pupil sample at least, so the samples it crosses are partly lit (EdgePupil's `cut_w`)
+        width = max(0.01, 1.0 / size)
+        self.cutoff = torch.sigmoid((self.na / self.grid_na - rho) / width)
+
+    def specs(self) -> list[ParamSpec]:
+        extra = [ParamSpec("pupil.gamma", (), init=0.05, transform=Bounded(0.0, 2.0))]
+        if self.ring:
+            extra.append(ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0)))
+        return super().specs() + extra
+
+    def truncated(self, n_max: int) -> MinimalPupil:
+        new = super().truncated(n_max)
+        out = object.__new__(MinimalPupil)
+        out.__dict__.update(new.__dict__)
+        for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "saf_damping", "ring", "cos_imm", "kappa",
+                  "cutoff"):
+            setattr(out, k, getattr(self, k))
+        return out
+
+    def symmetric(self, p, cos_imm=None, kappa=None, cutoff=None) -> torch.Tensor:
+        """The magnitude's factor, [..., P, P] (or at given maps' points, for a profile)."""
+        cos_imm = self.cos_imm if cos_imm is None else cos_imm
+        out = cos_imm ** p["pupil.gamma"][..., None, None]
+        if self.ring:
+            k = self.kappa if kappa is None else kappa
+            out = out * torch.exp(-2 * math.pi * k * p["pupil.ring_h"][..., None, None])
+        return out * (self.cutoff if cutoff is None else cutoff)
+
+    def __call__(self, p):
+        magnitude, phase = super().__call__(p)
+        return magnitude * self.symmetric(p), phase
+
+    def values(self, p) -> dict:
+        """γ and, with a ring, h (nm): the magnitude's numbers."""
+        out = {"gamma": float(p["pupil.gamma"])}
+        if self.ring:
+            out["ring_h_nm"] = float(p["pupil.ring_h"])
+        return out
 
 
 class PixelPupil:

@@ -20,7 +20,8 @@ SIGMA = 40.0
 def beads():
     """Ten bright beads through ±1 µm, aberrated, blurred by σ = 40 nm, with a uniform pupil magnitude."""
     n, roi, K = 10, (13, 13), 21
-    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed"), roi, z_max_nm=1000, device="cpu")
+    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False), roi,
+                       z_max_nm=1000, device="cpu")
     g = torch.Generator().manual_seed(1)
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[:4] = PHASE
@@ -35,7 +36,7 @@ def beads():
 @pytest.fixture(scope="module")
 def symmetric_fixed(beads):
     return calibrate_beads(beads, OPTICS, BeadSettings(zernike_order=4, magnitude="symmetric", blur="fixed",
-                                                         blur_nm=SIGMA), device="cpu")
+                                                         blur_nm=SIGMA, pixel_blur=False), device="cpu")
 
 
 def test_the_magnitude_choices_give_every_mode_the_symmetric_ones_or_none():
@@ -55,7 +56,8 @@ def test_settings_refuse_a_choice_they_do_not_have():
 
 @pytest.mark.slow
 def test_a_calibration_recovers_the_aberrations_and_the_blur_with_everything_free(beads):
-    cal = calibrate_beads(beads, OPTICS, BeadSettings(zernike_order=4), device="cpu")
+    cal = calibrate_beads(beads, OPTICS, BeadSettings(zernike_order=4, magnitude="free", blur="free", pixel_blur=False),
+                          device="cpu")
     shared = cal.shared()
     assert torch.allclose(shared["pupil.phase"][:4].cpu(), PHASE, atol=0.01)
     assert shared["pupil.phase"][4:].abs().max() < 0.01
@@ -78,7 +80,8 @@ def test_a_fixed_blur_stays_at_its_value_and_the_model_file_records_the_choices(
 
 
 def test_a_previous_model_starts_a_higher_order_by_its_noll_modes(symmetric_fixed):
-    model = bead_model(OPTICS, BeadSettings(zernike_order=6), (13, 13), device="cpu")
+    model = bead_model(OPTICS, BeadSettings(zernike_order=6, magnitude="free", blur="free", pixel_blur=False), (13, 13),
+                       device="cpu")
     values = start_values(model, symmetric_fixed)
     new = model.psf.pupil
     assert len(values["pupil.phase"]) == len(new.phase_modes)

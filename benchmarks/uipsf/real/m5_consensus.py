@@ -255,7 +255,9 @@ def main():
         t0 = time.perf_counter()
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])
-        model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur="fixed" if blur == "zero" else blur,
+        # the pixel's blur inside σ, as these studies learnt it: "fixed" holds σ at the pixel's own
+        model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude,
+                             blur="fixed" if blur == "zero" else blur,
                              blur_nm={"fixed": sigma, "zero": 0.0}.get(blur, 30.0), bead_diameter_nm=bead_nm)
         run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                               decisions={i: "include" for i in range(len(rois.records))})

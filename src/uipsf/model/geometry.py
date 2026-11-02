@@ -19,6 +19,13 @@ that keeps it sane where the data say nothing (a single frame).
 The drift has a prior of 5 nm per slice and per axis, which also pins its
 mean, otherwise exactly degenerate with the beads' positions.
 
+**The drift's forms** (``drift``): ``"free"``, the δ per slice above; ``"linear"``, a lateral drift
+growing linearly through each stack, (δx, δy) = r_s·z_k with a rate r_s (nm per µm of the stage's
+travel) of the stack s the bead came from (`Batch.stack_id`) -- a stage drifting steadily while it
+steps, which on M5's beads took the lateral bias from 2.4-7.2 nm to 1.3-2.5 nm with two numbers per
+stack, against the dozens of a drift per slice (November 2026).  ``drift_axes`` "xy" leaves z out:
+a z drift absorbs the z bend shared by the beads by construction.
+
 **The tilt** of the coverslip, ``geometry.tilt`` = (t_x, t_y) in radians, is shared by every emitter
 and read by the PSF, not by the positions: it bends the layers' phase (`optics.layers`).  Both
 geometries declare it only when asked -- ``fit_tilt``, or a held value ``tilt_rad`` -- so that a model
@@ -60,21 +67,36 @@ class _Tilted:
         return tilt_spec(self.fit_tilt, self.tilt_rad, self.tilt_prior_rad)
 
 
+#: the drift's forms (module docstring); "none" learns none
+DRIFTS = ("none", "free", "linear")
+#: the linear drift's prior, nm per µm of the stage's travel: loose, M5's stacks drifted 5-54
+DRIFT_RATE_PRIOR = 100.0
+
+
 class BeadStackGeometry(_Tilted):
-    def __init__(self, drift: bool = False, drift_prior_nm: float = 5.0, z_scale: bool = False,
+    def __init__(self, drift: str = "none", drift_prior_nm: float = 5.0, z_scale: bool = False,
                  z_scale_prior: float = 0.1, fit_tilt: bool = False, tilt_rad=None,
-                 tilt_prior_rad: float | None = TILT_PRIOR_RAD):
-        self.drift, self.drift_prior_nm, self.z_scale = drift, float(drift_prior_nm), z_scale
+                 tilt_prior_rad: float | None = TILT_PRIOR_RAD, drift_axes: str = "xy"):
+        if drift not in DRIFTS:
+            raise ValueError(f"drift must be one of {DRIFTS}, got {drift!r}")
+        self.drift, self.drift_axes = drift, drift_axes
+        if self.drift == "linear" and "z" in self.drift_axes:
+            raise ValueError("the linear drift is lateral: drift_axes 'xy'")
+        self.drift_prior_nm, self.z_scale = float(drift_prior_nm), z_scale
         self.z_scale_prior = float(z_scale_prior)
         self._tilt_settings(fit_tilt, tilt_rad, tilt_prior_rad)
 
     def specs(self, batch, start) -> list[ParamSpec]:
         K = batch.data.shape[2]
-        return [ParamSpec("emitter.xyz", (3,), "emitter", init=start["xyz"]),
-                ParamSpec("geometry.drift", (K, 3), init=0.0, prior=Gaussian(0.0, self.drift_prior_nm),
-                          fixed=not self.drift),
-                ParamSpec("geometry.z_scale", (), init=1.0, prior=Gaussian(1.0, self.z_scale_prior),
-                          fixed=not self.z_scale)] + self._tilt_specs()
+        out = [ParamSpec("emitter.xyz", (3,), "emitter", init=start["xyz"]),
+               ParamSpec("geometry.drift", (K, 3), init=0.0, prior=Gaussian(0.0, self.drift_prior_nm),
+                         fixed=self.drift != "free"),
+               ParamSpec("geometry.z_scale", (), init=1.0, prior=Gaussian(1.0, self.z_scale_prior),
+                         fixed=not self.z_scale)]
+        if self.drift == "linear":
+            stacks = 1 if batch.stack_id is None else int(batch.stack_id.max()) + 1
+            out.append(ParamSpec("geometry.drift_rate", (stacks, 2), init=0.0, prior=Gaussian(0.0, DRIFT_RATE_PRIOR)))
+        return out + self._tilt_specs()
 
     def __call__(self, p, batch) -> torch.Tensor:
         """[E, K, 3] nm."""
@@ -82,7 +104,17 @@ class BeadStackGeometry(_Tilted):
         z_k = batch.z_nm.to(xyz.dtype)
         z_k = z_k[None] if z_k.dim() == 1 else z_k                        # [1|E, K]
         stage = torch.stack([torch.zeros_like(z_k), torch.zeros_like(z_k), p["geometry.z_scale"] * z_k], -1)
-        return xyz + stage + p["geometry.drift"]
+        drift = p["geometry.drift"]
+        if self.drift == "free" and self.drift_axes != "xyz":
+            drift = drift * drift.new_tensor([float(a in self.drift_axes) for a in "xyz"])
+        out = xyz + stage + drift
+        if self.drift == "linear":
+            rate = p["geometry.drift_rate"]                                # [S, 2] nm per µm
+            stack = (torch.zeros(xyz.shape[0], dtype=torch.long, device=rate.device) if batch.stack_id is None
+                     else batch.stack_id.to(rate.device))
+            lateral = rate[stack][:, None, :] * (z_k / 1000.0)[..., None]  # [E, K, 2]
+            out = out + torch.nn.functional.pad(lateral, (0, 1))
+        return out
 
 
 class InSituGeometry(_Tilted):

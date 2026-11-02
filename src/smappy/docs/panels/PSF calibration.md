@@ -109,8 +109,8 @@ Press *Calibrate* again to apply the marks.  A bead excluded (or included) by
 hand stays so through every later *Calibrate* until its mark is withdrawn, as
 long as the beads are not detected again.
 
-**Learning** fits one model to all beads at once: the pupil's Zernike modes
-(shared), an extra blur of the image (shared), and each bead's position,
+**Learning** fits one model to all beads at once: the pupil's phase as Zernike
+modes and its magnitude (shared), an extra blur of the image (shared), and each bead's position,
 brightness and background.  It runs in two stages, the low orders first, then
 all of them.  With *start from*, a previous model of the microscope starts
 the first stage: its low orders move with the beads before the higher ones are
@@ -165,9 +165,10 @@ calibration names them, and the calibration goes to the fitter.
 The model is vectorial and high-NA: the pupil field carries the dipole
 emission's polarisation through the immersion, coverslip and sample media
 given under *microscope*, and the image is taken at each camera pixel's
-centre: the pixel's width ends up in the learnt blur, which is therefore a
-little wider than the optics' own (about 30 nm added in quadrature for 110 nm
-pixels).
+centre.  The pixel's width blurs the image too, by its size / √12 (30 nm for
+105 nm pixels); with *pixel blur* (the default) the model adds it under the
+learnt blur, so that *blur σ* is what blurs the image beyond the pixel.
+Without it the learnt blur takes the pixel's width up as well.
 **The coverslip.**  Between the sample and the immersion lies the coverslip,
 with its own refractive index (*coverslip index*) and thickness (*coverslip
 thickness*).  The objective is corrected for one thickness, its design
@@ -215,12 +216,42 @@ factor 2.  Slices closer than 50 nm are thinned for learning.  The first
 stage frees the modes up to radial order 4 and stops early; the second frees
 all of them up to *Zernike order* (auto: 6).
 
-The pupil magnitude is 1 plus Zernike modes: all of them up to the order
-(*free*), only the rotationally symmetric ones (*symmetric*: Noll 4, 11, 22,
-...), or none, so that only the apodisation of the objective remains
-(*fixed*).  The blur is a Gaussian, σ for x and y, learnt (*free*) or held at
-*blur σ* (*fixed*).  Which of these choices are right for which data is under
-investigation; they are offered so that their effect can be seen.
+The pupil magnitude is by default the *minimal* model: rotationally
+symmetric and physical, a few numbers that mean something.  It is
+cos θ^γ -- θ the angle of the ray in the immersion, γ learnt, the shape an
+apodisation that falls towards the edge of the pupil has -- times, when the
+sample's index is below the NA, the light beyond the critical angle damped as
+from an emitter a height h above the glass, exp(−2πκh) with
+κ = √((ρ·NA)² − n²)/λ (h learnt, in nm, with *SAF damping*; the spline for
+single molecules is drawn with h = 0), times the aperture, a cutoff at the
+objective's NA.  The pupil is sampled a little beyond the NA (1.51 for 1.50),
+so that the aperture is this cutoff and not the edge of the sampling, which
+on M5's beads cut light the data wanted.  On M5's 100 nm beads γ was 0.32–0.41
+in both colours, both media and with and without the 3D lens.  An asymmetric
+magnitude is left out: learnt freely it gains likelihood on every set, but
+held at what the other sets learnt it costs as much as it gained -- it
+follows the acquisition, not the objective.
+
+The magnitude can instead be 1 plus Zernike modes: all of them up to the
+order (*Zernike*), only the rotationally symmetric ones (*symmetric Zernike*:
+Noll 4, 11, 22, ...), or none, so that only the apodisation of the objective
+remains (*fixed*).  The blur is a Gaussian, one σ (*round*, the default) or
+σ for x and y (*free*), learnt, or held at *blur σ* (*fixed*); held at 0 with
+*pixel blur*, the image is blurred by the pixel alone.
+
+**The stage's drift** (*drift*, under *more*): a lateral drift of the stage
+through each stack, *linear per stack* -- the beads of a stack shifted by a
+rate (nm per µm of the stage's travel) times the slice's z, a rate per stack
+-- or *free per slice*, a shift of every slice shared by all beads.  Unmodelled,
+a steady drift reads as coma, which also moves the image through focus.  On
+M5's beads every stack drifted the same way, 5–54 nm per µm, and a linear
+drift per stack took the beads' lateral bias from 2.4–7.2 nm to 1.3–2.5 nm
+with two numbers per stack.  The drift follows the time since the stack
+began, not the stage's z (stacks starting at different heights drift alike
+from their start), and bends where it settles; a free drift per frame follows
+that, but the PSF it gives is the linear one's -- coma within 0.5 nm, σ
+within 0.1 nm, γ within 0.01 -- where no drift biased the coma by up to 5 nm.
+So *linear per stack* is the default.
 
 Bead rejection scores each bead from the learning fit itself: its mean
 deviance per pixel (about 1 where the model is right), |log| of its photons
@@ -236,7 +267,7 @@ each pixel sampled as in learning, at its centre, with z steps of *spline z step
 range).  One channel: clipped at zero and scaled so that the brightest plane
 sums to 1.  Two channels: both sampled on one z grid and scaled together, so
 that each channel's share of the light is the learnt one.  The pixels are not
-integrated again: the learnt blur already holds them, and integrating once more
+integrated again: the model's blur already holds them, and integrating once more
 widened the spline's PSF, which pulled Spline 3D's z in by 1 % and bent it by
 up to 7 nm against the model's own localisation of the same beads.
 
@@ -616,8 +647,9 @@ The highest radial order of the pupil's modes.  Higher orders describe finer
 aberrations and cost more time and more beads.
 
 ### pupil magnitude
-*free*, *symmetric* or *fixed* (the apodisation only).  Not shown for *in
-situ*, which decides it by its *hold*.
+*minimal* (cos θ^γ, the ring beyond the critical angle and the aperture),
+*Zernike*, *symmetric Zernike* or *fixed* (the apodisation only); *In detail*
+says what each is.  Not shown for *in situ*, which decides it by its *hold*.
 
 ### blur
 Whether the extra blur is learnt or held at *blur σ*.  *free* learns it
@@ -629,7 +661,29 @@ take the beads' blur over: there the molecules wanted 60 nm, the beads
 76 nm.
 
 ### blur σ
-The blur's start, or its value when held.
+The blur's start, or its value when held: with *pixel blur* on, the blur
+beyond the pixel's own, so 0 holds the image at the pixel's blur.
+
+### SAF damping
+On by default, for *minimal* only.  The supercritical-angle ring -- the light
+beyond the critical angle, present when the sample's index is below the NA --
+is damped by exp(−2πκh) with h learnt: the beads sit on the coverslip, yet
+their ring is weaker than a point's there (their dye is spread over the bead,
+and the bead model takes them as points).  Off, the ring is a point's on the
+coverslip.  The damping belongs to the beads, as their size does: the spline
+for single molecules is drawn without it, their supercritical light following
+the physics of their own depth.
+
+### pixel blur
+On by default.  Off, the learnt blur includes the pixel's width, as models
+learnt before November 2026 did; their *blur σ* was larger by about the
+pixel's 30 nm in quadrature.  A *start from* model of the other kind is
+converted, the image's blur kept.
+
+### drift
+*linear per stack* by default, two numbers per stack; *free per slice* two per
+slice, kept small (5 nm) where the data say nothing; *none* for stacks without
+drift.  Offered for beads, not in situ.
 
 ### bead diameter
 The beads' size, so that it is taken out of the model: a 100 nm bead is not a
@@ -952,13 +1006,17 @@ The bead average's other pages are the bead calibration's (*Overview*,
 *Transformation* for dual colour, *Fit quality*, *Field diagnostics*, *Bead
 diagnostics*), explained on its page.  The pupil model's:
 
-- **Pupil and Zernikes**: on the left the learnt phase and magnitude over the
+- **Pupil and Zernikes**: above, the model's few numbers with their CRLBs, each
+  where it was learnt -- the minimal pupil's γ and ring height h, the blur σ (beyond
+  the pixel's with *pixel blur*), the stage's drift (*linear per stack*: the rate
+  per stack, nm per µm; *free per slice*: its rms) and the coverslip's tilt; the
+  summary line under the run says the same.  On the left the learnt phase and magnitude over the
   pupil, the phase in the *units* chosen above the page: nm of wavefront,
   the first and the one shown, waves times the *emission* wavelength; waves,
   radians / 2π; or radians, as the model is fitted.  An aberration's size in
   nm reads the same at any wavelength.  (Maréchal's criterion for a near-perfect PSF is an
-  rms wavefront error below 1/14 of a wave.)  The phase of an astigmatic PSF is a saddle; the
-  magnitude should be close to 1.  On the right every mode's coefficient with
+  rms wavefront error below 1/14 of a wave.)  The phase of an astigmatic PSF is a saddle; a
+  Zernike magnitude should be close to 1, and the minimal one falls towards the edge as cos θ^γ.  On the right every mode's coefficient with
   its uncertainty as an error bar, beside the *start from* model's when
   there is one.  The error bar is one standard deviation of the
   coefficient's Cramér-Rao lower bound (CRLB; [Glossary](plugin:Panels/Glossary)):

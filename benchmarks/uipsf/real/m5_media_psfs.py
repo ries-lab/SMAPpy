@@ -149,7 +149,7 @@ def learn(args):
                                     free_na=extra == "na")
             else:
                 magnitude = use_pupil(pupil)
-            model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur=kind,
+            model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude, blur=kind,
                                  blur_nm=float(np.mean((104.7, 106.4))) / np.sqrt(12) if kind == "fixed" else 30.0,
                                  bead_diameter_nm=bead_nm)
             run = run_calibration(files, False, run_optics, model, run=RunSettings(save_model=False), rois=rois,

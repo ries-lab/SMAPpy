@@ -67,8 +67,11 @@ when a milestone lands or an item moves.
 5. **Drift per stack and file** in the bead model (plan §10, 7): a block per file.
 6. **Explain the blur σ** (report: 40–83 nm on M2, 0–32 on M5, cause open): where a blur-free model misses
    (core, wings, rings); a one-sided transfer trail on EMCCDs; at M2, beads at several clock settings.
-7. **Model the magnitude physically:** an effective NA plus supercritical transmission instead of free
-   Zernikes, after a back-focal-plane image or beads in index-matched medium separate the two.
+7. **Model the magnitude physically:** done for beads (November 2026): the minimal pupil, cos θ^γ, the
+   supercritical ring from a height h and the aperture held at the NA (`model.MinimalPupil`), with the
+   pixel's blur under a round σ, is the bead calibration's default (architecture, "The minimal model").
+   Next: the same default for field-dependent and in situ learning, in situ holding γ from beads; why
+   M5's 40 nm beads learn a lower γ than its 100 nm beads.
 8. **The z slope of 1.011** against the stage on Zenodo 1ch: model or stage.
 9. **In situ (M5), designed** (plan §9, M5, with a review of v1's): inclusive detection at several widths
    on absolute significance; an elliptical Gaussian on every candidate for photons and a z proxy; overlaps

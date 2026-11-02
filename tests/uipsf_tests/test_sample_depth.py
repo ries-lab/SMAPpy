@@ -18,8 +18,9 @@ ROI, BOX = 17, 13
 @pytest.fixture(scope="module")
 def learned():
     """An astigmatic pupil as a bead calibration would have learnt it, wrapped as its model file loads."""
-    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed"), (ROI, ROI), z_max_nm=1500,
-                       device="cpu", dtype=torch.float64)
+    # σ the whole blur, the pixel's in it, as the test's numbers were set
+    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False),
+                       (ROI, ROI), z_max_nm=1500, device="cpu", dtype=torch.float64)
     phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=torch.float64)
     phase[:4] = torch.tensor([0.8, -0.2, 0.15, 0.1])
     shared = {"pupil.phase": phase, "psf.sigma": torch.tensor([35.0, 35.0], dtype=torch.float64),

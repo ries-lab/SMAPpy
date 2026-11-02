@@ -42,7 +42,7 @@ calibration window without torch installed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Optional
 
@@ -61,8 +61,12 @@ DESIGN_COVERSLIP_UM = 170.0
 #: the order a calibration learns up to unless told: n_max 6, with 8 the held-out check (plan §10)
 AUTO_ORDER = 6
 
-MAGNITUDES = (("free", "free"), ("symmetric", "symmetric"), ("fixed", "fixed (apodisation)"))
+MAGNITUDES = (("minimal", "minimal (cos θ^γ)"), ("free", "Zernike"), ("symmetric", "symmetric Zernike"),
+              ("fixed", "fixed (apodisation)"))
 BLURS = (("free", "free"), ("round", "round"), ("fixed", "fixed"))
+#: the stage's drift through a stack (`uipsf.model.geometry`): none, a lateral one growing linearly through
+#: each stack, or a free one per slice
+DRIFTS = (("none", "none"), ("linear", "linear per stack"), ("free", "free per slice"))
 
 
 @dataclass
@@ -71,14 +75,23 @@ class BeadSettings:
     zernike_order: int | None = param(
         None, label="Zernike order", min=2, max=12,
         help=f"the highest radial order of the pupil's modes; auto: {AUTO_ORDER}")
+    # the minimal model by default (the user's, November 2026, on M5's beads: `uipsf.model.MinimalPupil`)
     magnitude: str = param(
-        "free", label="pupil magnitude", choices=MAGNITUDES,
-        help="free: every mode up to the order; symmetric: the rotationally symmetric ones; "
+        "minimal", label="pupil magnitude", choices=MAGNITUDES,
+        help="minimal: cos θ^γ, the ring beyond the critical angle and the NA, a few physical numbers; "
+             "Zernike: every mode up to the order; symmetric: the rotationally symmetric ones; "
              "fixed: uniform, the apodisation only")
-    blur: str = param("free", label="blur", choices=BLURS,
-                      help="an extra Gaussian blur of the image, learnt or held at its value")
-    blur_nm: float = param(30.0, label="blur σ", unit="nm", min=0.0,
-                           help="its start when free, its value when fixed")
+    # the minimal magnitude's supercritical-angle ring damped by a learnt exp(−2πκh) (`MinimalPupil`): the
+    # beads' ring is weaker than a point's on the coverslip; a spline for single molecules is drawn without it
+    saf_damping: bool = param(True, label="SAF damping", advanced=True,
+                              help="minimal magnitude: learn a damping of the supercritical-angle ring, the "
+                                   "light beyond the critical angle; off: the ring of a point on the coverslip")
+    blur: str = param("round", label="blur", choices=BLURS,
+                      help="an extra Gaussian blur of the image, learnt (round: one σ for x and y) or held "
+                           "at its value")
+    blur_nm: float = param(20.0, label="blur σ", unit="nm", min=0.0,
+                           help="its start when learnt, its value when fixed; on top of the pixel's own "
+                                "with *pixel blur*")
     bead_diameter_nm: float = param(0.0, label="bead diameter", unit="nm", min=0.0,
                                     help="the beads' size, taken out of the model; 0: point-like")
     rejection_k: float = param(3.0, label="rejection (k)", min=1.0, advanced=True,
@@ -87,8 +100,17 @@ class BeadSettings:
     heldout: float = param(0.0, label="held out", min=0.0, max=0.5, advanced=True,
                            help="the fraction of beads kept out of learning and localised for the "
                                 "held-out report")
+    # the pixel's blur under the learnt one: the model is drawn at pixel centres (`VectorPSF.pixel_blur`)
+    pixel_blur: bool = param(True, label="pixel blur", advanced=True,
+                             help="the pixel's own blur, its size / √12, under the learnt one, so that σ is "
+                                  "what blurs the image beyond the pixel")
+    # linear by default (November 2026): on M5's sixteen sets it gave the PSF a free drift per frame gives, coma
+    # within 0.5 nm, σ 0.1 nm, γ 0.01, where none biased the coma by up to 5 nm
+    drift: str = param("linear", label="drift", choices=DRIFTS, advanced=True,
+                       help="a lateral drift of the stage through each stack, learnt: linear per stack, or "
+                            "free per slice")
     # offered for beads only through a coverslip of another index (`learns_tilt`), always in situ
-    fit_tilt: bool = param(False, label="learn coverslip tilt",
+    fit_tilt: bool = param(False, label="learn coverslip tilt", advanced=True,
                            help="learn the coverslip's tilt against the optical axis, mostly a coma: in situ, "
                                 "or beads seen through a coverslip of another index than the immersion's")
     # docs/uipsf/field-dependence.md: astigmatism and coma varying over the chip, as a polynomial each
@@ -101,6 +123,14 @@ class BeadSettings:
             raise ValueError(f"magnitude must be one of {[k for k, _ in MAGNITUDES]}, got {self.magnitude!r}")
         if self.blur not in dict(BLURS):
             raise ValueError(f"blur must be one of {[k for k, _ in BLURS]}, got {self.blur!r}")
+        if self.drift not in dict(DRIFTS):
+            raise ValueError(f"drift must be one of {[k for k, _ in DRIFTS]}, got {self.drift!r}")
+
+    @classmethod
+    def from_options(cls, options: dict) -> "BeadSettings":
+        """The settings a model file kept (`Calibration.options`), the fields this version has."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in (options or {}).items() if k in known})
 
     @property
     def order(self) -> int:
@@ -541,15 +571,21 @@ def objective_pupil(cal, source: str = "") -> dict:
     # every mode, the held ones among them (`ZernikePupil.coefficients`): a pupil held from the microscope's
     # and kept again is the whole pupil, not its learnt part
     phase = psf.pupil.coefficients(shared, "phase")
+    # a minimal pupil's grid reaches beyond the objective's NA (`MinimalPupil`): the objective's is its own
+    na = float(getattr(psf.pupil, "na", optics.NA))
     out = {"phase_nm": {str(j): round(float(v) * wavelength / (2 * math.pi), 3) for j, v in phase.items()},
-           "magnitude": {}, "wavelength_nm": wavelength, "NA": float(optics.NA),
+           "magnitude": {}, "wavelength_nm": wavelength, "NA": na,
            "n_immersion": float(optics.n_imm), "source": str(source),
            "date": _dt.date.today().isoformat()}
     if "pupil.magnitude" in shared:
         out["magnitude"] = {str(j): round(float(v), 5)
                             for j, v in psf.pupil.coefficients(shared, "magnitude").items()}
+    if hasattr(psf.pupil, "values"):                 # the minimal pupil's γ and ring height
+        out["minimal"] = {k: round(v, 4) for k, v in psf.pupil.values(shared).items()}
     if "psf.sigma" in shared:
         out["sigma_nm"] = [round(float(v), 2) for v in np.asarray(shared["psf.sigma"].detach().cpu()).ravel()]
+        if getattr(psf, "pixel_blur", False):
+            out["pixel_blur"] = True                  # σ is beyond the pixel's own blur
     return out
 
 

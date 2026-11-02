@@ -29,15 +29,14 @@ calibrations, which its global fitter reads: each channel sampled with
 channel's share), the secondary's spline in the camera's orientation, and
 `LearnedPSF.transform(1)` as its ``transformation``.
 
-**Versions.**  4: a field-dependent pupil (a channel's ``field`` entry, `model.field`, and its
-coefficients ``field.phase``), so that an older reader refuses a model whose PSF it would draw the same
-everywhere.  3: a layered model, written only when the model needs it --
-a coverslip tilt (``geometry.tilt``, its settings in the geometry's entry)
-or a coverslip off its design thickness (``d_cov_nm``, ``d_cov_design_nm``
-in the optics) -- so that an older reader refuses a PSF it would compute
-without them; any other model is still written as 2.  2 (M4): the
-``channels`` list and the geometry.  1: one channel, its optics, pupil and
-PSF at the top of the description; still read.
+**Versions.**  A file is written as `VERSION`, and read up to it.  5: the minimal pupil
+(`model.MinimalPupil`: a pupil entry ``kind = "minimal"`` with the objective's ``na``, the parameters
+``pupil.gamma`` and ``pupil.ring_h``), the PSF's ``pixel_blur``, and the geometry's drift by name
+(``drift``, ``drift_axes``, ``geometry.drift_rate``).  4: a field-dependent pupil (a channel's ``field``
+entry, `model.field`, and its coefficients ``field.phase``).  3: a coverslip tilt (``geometry.tilt``, its
+settings in the geometry's entry) or a coverslip off its design thickness (``d_cov_nm``,
+``d_cov_design_nm`` in the optics).  2 (M4): the ``channels`` list and the geometry.  1: one channel, its
+optics, pupil and PSF at the top of the description; still read.
 - ``/fit``: objective, stop reason, iterations, condition, the history
   (JSON), the shared covariance with its layout, and the used beads' own
   parameters and CRLBs (``/fit/emitters/<name>``).
@@ -70,6 +69,7 @@ from ..model import (
     Constant,
     FieldPolynomial,
     ForwardModel,
+    MinimalPupil,
     PerObservation,
     PerSliceFactor,
     PixelPupil,
@@ -82,7 +82,7 @@ from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
-VERSION = 4
+VERSION = 5
 #: the coverslip's entries of the optics, left out where they are the defaults so that a version-2 reader
 #: still builds the optics of a model that does not need them
 _COVERSLIP = {"d_cov_nm": 170_000.0, "d_cov_design_nm": 170_000.0}
@@ -91,7 +91,11 @@ CONVENTIONS = 1          # docs/uipsf/conventions.md: axes, signs and units of t
 
 def _describe_channel(ch: Channel) -> dict:
     psf, pupil = ch.psf, ch.psf.pupil
-    if isinstance(pupil, ZernikePupil):
+    if isinstance(pupil, MinimalPupil):
+        pup = dict(kind="minimal", phase_modes=list(pupil.phase_modes), na=pupil.na, saf_damping=pupil.saf_damping)
+        if pupil.held_phase:
+            pup["held_phase"] = {str(j): v for j, v in pupil.held_phase.items()}
+    elif isinstance(pupil, ZernikePupil):
         pup = dict(kind="zernike", phase_modes=list(pupil.phase_modes),
                    magnitude_modes=list(pupil.magnitude_modes), high_na=bool(pupil.high_na))
         # held modes are part of the model, not parameters: written here, absent in older files
@@ -108,7 +112,7 @@ def _describe_channel(ch: Channel) -> dict:
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
                          sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma,
-                         round_sigma=psf.round_sigma),
+                         round_sigma=psf.round_sigma, pixel_blur=psf.pixel_blur),
                 transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform,
                 **({} if getattr(ch, "field", None) is None else dict(field=ch.field.config())))
 
@@ -119,8 +123,8 @@ def describe(model: ForwardModel) -> dict:
     if isinstance(g, InSituGeometry):
         geometry = dict(kind="in situ", focus_nm=g.focus_nm, focus_prior_nm=g.focus_prior_nm, fit_focus=g.fit_focus)
     else:
-        geometry = dict(kind="bead stack", drift=g.drift, drift_prior_nm=g.drift_prior_nm, z_scale=g.z_scale,
-                        z_scale_prior=g.z_scale_prior)
+        geometry = dict(kind="bead stack", drift=g.drift, drift_axes=g.drift_axes, drift_prior_nm=g.drift_prior_nm,
+                        z_scale=g.z_scale, z_scale_prior=g.z_scale_prior)
     if g.fit_tilt or g.tilt_rad is not None:            # absent in older files: no tilt
         geometry.update(fit_tilt=g.fit_tilt, tilt_rad=g.tilt_rad, tilt_prior_rad=g.tilt_prior_rad)
     i = model.intensity
@@ -142,7 +146,10 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     o["pixel_size_nm"] = tuple(o["pixel_size_nm"])
     grid = PupilGrid.build(Optics(**o), config["pupil_size"], device=device, dtype=dtype)
     pup = config["pupil"]
-    if pup["kind"] == "zernike":
+    if pup["kind"] == "minimal":
+        pupil = MinimalPupil(grid, phase_modes=pup["phase_modes"], na=pup["na"], held_phase=pup.get("held_phase"),
+                             saf_damping=pup["saf_damping"])
+    elif pup["kind"] == "zernike":
         pupil = ZernikePupil(grid, phase_modes=pup["phase_modes"], magnitude_modes=pup["magnitude_modes"],
                              high_na=pup["high_na"], held_phase=pup.get("held_phase"),
                              held_magnitude=pup.get("held_magnitude"))
@@ -151,7 +158,8 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     s = config["psf"]
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
-                    fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False))
+                    fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False),
+                    pixel_blur=s["pixel_blur"])
     field = None if config.get("field") is None else FieldPolynomial.from_config(config["field"])
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
                    name=config.get("name"), fit_transform=config.get("fit_transform", True), field=field)
@@ -167,7 +175,8 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     if g.get("kind") == "in situ":
         geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"], **tilt)
     else:
-        geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt)
+        geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt,
+                                     drift_axes=g["drift_axes"])
     i = config["intensity"]
     intensity = {"bleaching": lambda: Bleaching(i["order"]),
                  "per-slice factor": lambda: PerSliceFactor(i["order"], i["prior_sigma"]),
@@ -193,9 +202,10 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     photon share is included, so the channels together hold the emitter's photon, as SMAPpy's
     `positive_pair_models` normalises a pair jointly; with one channel the share is 1.
 
-    The blur is the learned one; the bead's size, part of the bead stacks and not of a point emitter,
-    is left out unless ``include_bead`` (then ``xyz_nm`` must be one stack of equal z steps).  The
-    stage's z scale is not applied: z is the emitter's, not an objective position.  Pixels are
+    The blur is the learned one (with the pixel's under it where the model has it); the bead's size, part of
+    the bead stacks and not of a point emitter, is left out unless ``include_bead`` (then ``xyz_nm`` must be
+    one stack of equal z steps), and so is a minimal pupil's ring height (`MinimalPupil`: the beads' dye above
+    the glass).  The stage's z scale is not applied: z is the emitter's, not an objective position.  Pixels are
     integrated by summing ``upsample``² sub-samples (default the model's); sample the light at more
     of them for a spline that must not inherit the sampling's error.  ``roi_px`` is the region,
     an int or (Y, X), default the model's.  ``depth_nm``, the emitter's height in the sample (in situ,
@@ -206,11 +216,15 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
     up = base.upsample if upsample is None else int(upsample)
     psf = VectorPSF(base.grid, base.pupil, roi, upsample=up, kind=base.kind, analyser=base.analyser,
-                    bead_radius_nm=base.bead_radius_nm if include_bead else 0.0)
+                    bead_radius_nm=base.bead_radius_nm if include_bead else 0.0, pixel_blur=base.pixel_blur)
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     xyz = torch.as_tensor(xyz_nm, dtype=dt, device=dev).reshape(1, -1, 3)
     shared = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}
     p = view(shared, channel)
+    if not include_bead and "pupil.ring_h" in p:
+        # the minimal pupil's ring height is the beads' dye above the glass; a point emitter's light beyond the
+        # critical angle follows the physics of its own depth (``depth_nm``, the vector model), so h is 0
+        p = dict(p, **{"pupil.ring_h": torch.zeros_like(p["pupil.ring_h"])})
     field = getattr(model.channels[channel], "field", None)
     if field is not None:
         where = field.centre_px if field_xy is None else field_xy
@@ -342,7 +356,7 @@ def save_model(cal, path) -> None:
     res = cal.result
     params = res.params
     with h5py.File(path, "w") as f:
-        version = 4 if _field_dependent(cal.model) else 3 if _layered(cal) else 2
+        version = VERSION
         f.attrs.update(format=FORMAT, version=version, conventions=CONVENTIONS,
                        uipsf=__version__)
         m = f.create_group("model")

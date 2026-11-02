@@ -129,10 +129,10 @@ VARIANTS = {
     "order8_bleach2_from_base": dict(settings=dict(zernike_order=8), intensity="bleach2", from_base=True),
     "order8_z_scale_free_from_order8": dict(settings=dict(zernike_order=8), geometry=dict(z_scale=True),
                                             start_from="order8"),
-    "drift_shared_from_base": dict(geometry=dict(drift=True), from_base=True),
+    "drift_shared_from_base": dict(geometry=dict(drift="free", drift_axes="xyz"), from_base=True),
     "drift_bead_from_base": dict(geometry="bead", from_base=True),
     # does a drift take the blur?  uipsf's shared one, and one per bead
-    "drift_shared": dict(geometry=dict(drift=True)),
+    "drift_shared": dict(geometry=dict(drift="free", drift_axes="xyz")),
     "drift_bead": dict(geometry="bead"),
     "drift_bead_blur_fixed_20": dict(geometry="bead", settings=dict(blur="fixed", blur_nm=20.0)),
 }

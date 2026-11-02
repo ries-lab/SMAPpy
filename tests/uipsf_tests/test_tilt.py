@@ -8,6 +8,7 @@ import torch
 
 import uipsf
 from uipsf.export import build, describe, load_model, save_model
+from uipsf.export.model_file import VERSION
 from uipsf.model import BeadStackGeometry, Bleaching, InSituGeometry
 from uipsf.noise import Poisson
 from uipsf.optics import layers
@@ -216,7 +217,7 @@ def test_the_tilt_and_the_coverslip_go_into_the_description_and_older_files_have
     assert old_model.geometry.fit_tilt is False and old_model.psf.grid.optics.d_cov_nm == 170_000.0
 
 
-def test_a_saved_tilted_model_is_version_3_and_loads_to_the_same_psf(tmp_path):
+def test_a_saved_tilted_model_loads_to_the_same_psf(tmp_path):
     from uipsf.workflows import learn_beads
     model, _, batch = beads(WATER, n=4, tilt=(0.01, 0.0), fit_tilt=True, P=16, roi=(7, 7), K=5)
     model = build(describe(model), device="cpu")           # float32, as the workflows make it
@@ -225,7 +226,7 @@ def test_a_saved_tilted_model_is_version_3_and_loads_to_the_same_psf(tmp_path):
     path = tmp_path / "tilted.uipsf.h5"
     save_model(cal, path)
     with h5py.File(path) as f:
-        assert f.attrs["version"] == 3
+        assert f.attrs["version"] == VERSION
     m = load_model(path, device="cpu")
     assert torch.equal(m.shared["geometry.tilt"].cpu(), cal.shared()["geometry.tilt"].detach().cpu())
     xyz = torch.tensor([[0.0, 0.0, 0.0], [30.0, -20.0, 250.0]])

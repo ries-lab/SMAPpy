@@ -5,6 +5,7 @@ import torch
 
 import uipsf
 from uipsf.export import build, describe, load_model, sample_psf, save_model
+from uipsf.export.model_file import VERSION
 from uipsf.model import PerSliceFactor, Planar
 from uipsf.model.geometry import BeadStackGeometry
 from uipsf.workflows import learn_beads
@@ -23,7 +24,7 @@ def test_a_saved_model_file_loads_to_the_same_psf_and_record(calibration, tmp_pa
     path = tmp_path / "psf.uipsf.h5"
     save_model(cal, path)
     with h5py.File(path) as f:
-        assert f.attrs["format"] == "uipsf-model" and f.attrs["version"] == 2
+        assert f.attrs["format"] == "uipsf-model" and f.attrs["version"] == VERSION
     m = load_model(path)
     for n, v in cal.shared().items():
         assert torch.equal(m.shared[n].cpu(), v.detach().cpu()), n
@@ -44,7 +45,8 @@ def test_the_description_builds_the_same_model_whatever_its_components(calibrati
     cal, batch = calibration
     psf = cal.model.psf
     for model in (cal.model,
-                  uipsf.ForwardModel(psf, BeadStackGeometry(drift=True, z_scale=True), PerSliceFactor(2, 0.1),
+                  uipsf.ForwardModel(psf, BeadStackGeometry(drift="free", drift_axes="xyz", z_scale=True),
+                                     PerSliceFactor(2, 0.1),
                                      Planar(psf.grid.optics.pixel_size_nm))):
         again = build(describe(model), device=batch.data.device)
         assert describe(again) == describe(model)

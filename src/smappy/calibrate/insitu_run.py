@@ -381,6 +381,11 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
         if not source:
             messages.append("nothing to hold: no start model and no pupil kept with the microscope; the "
                             "symmetric magnitude is learnt and the focus pinned")
+        elif not held_magnitude:
+            # a minimal bead model (cos θ^γ) has no Zernike magnitude to hold; holding its γ in situ is the
+            # next step (November 2026)
+            messages.append("the start's pupil has no Zernike magnitude (a minimal model?): the magnitude is "
+                            "held uniform")
     model = replace(model, magnitude="fixed" if source else "symmetric")
     focus_fit = insitu.focus_fit
     if not source and focus_fit == "learnt":

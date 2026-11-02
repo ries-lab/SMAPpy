@@ -553,6 +553,8 @@ class PSFCalibrationWindow(QMainWindow):
         # of another index (a water or silicone objective) -- with oil, beads on the coverslip see none
         in_situ = self.method.sections.get("in situ", False)
         self.model_form.set_shown({"fit_tilt": in_situ or layered,
+                                   # the stage's drift through a stack: beads only
+                                   "drift": not in_situ,
                                    # beads of one channel only, for now (docs/uipsf/field-dependence.md)
                                    "field_dependence": not in_situ and not self.is_dual})
 

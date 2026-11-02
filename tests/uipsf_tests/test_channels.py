@@ -64,7 +64,8 @@ def test_each_emitter_sees_only_its_own_parameters_in_every_channel(optics):
 def test_the_linearised_jacobians_are_the_jvps_in_every_channel(optics, case):
     # The M7 speed paths per channel: pupil columns, emitter columns, and the transform, share and offset
     # from the emitter linearisation; with a bead kernel the drift is not stack-uniform and falls back.
-    kw = {"plain": {}, "bead kernel, drift": dict(bead_radius_nm=50.0, geometry=BeadStackGeometry(drift=True)),
+    kw = {"plain": {}, "bead kernel, drift": dict(bead_radius_nm=50.0,
+                                                  geometry=BeadStackGeometry(drift="free", drift_axes="xyz")),
           "mirrored, planar": dict(mirrored=True)}[case]
     model, truth, batch = two_channel_beads(optics, n=3, **kw)
     if case == "mirrored, planar":

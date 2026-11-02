@@ -98,6 +98,73 @@ def tilt_text(source) -> str:
     return f"coverslip tilt x {one(tx, ex)}, y {one(ty, ey)}"
 
 
+def _learnt(source, name):
+    """(values, CRLBs) of the shared parameter ``name``, as float arrays; None when the model has none, NaN
+    CRLBs where it was held."""
+    shared = _shared(source)
+    if name not in shared:
+        return None
+    values = torch.as_tensor(shared[name]).detach().cpu().double().numpy().reshape(-1)
+    std = source.result.std if hasattr(source, "result") else source.crlb
+    crlb = (torch.as_tensor(std[name]).detach().cpu().double().numpy().reshape(-1) if name in std
+            else np.full(values.shape, np.nan))
+    return values, crlb
+
+
+def _pm(v, e, fmt) -> str:
+    return fmt.format(v) + ("" if not np.isfinite(e) else " ± " + fmt.format(e))
+
+
+def drift_text(source) -> str:
+    """The stage's drift in a line where the model learnt one (`model.geometry`): a linear one's rate per
+    stack, nm per µm of the stage's travel, or a free one's rms over the slices; empty without."""
+    g = source.model.geometry
+    kind = getattr(g, "drift", "none")
+    if kind == "linear":
+        found = _learnt(source, "geometry.drift_rate")
+        if found is None:
+            return ""
+        rate, err = (a.reshape(-1, 2) for a in found)
+        stacks = "; ".join(f"x {_pm(r[0], e[0], '{:.0f}')}, y {_pm(r[1], e[1], '{:.0f}')}"
+                           for r, e in zip(rate, err, strict=True))
+        if len(rate) > 4:                   # many stacks: their spread, not each
+            stacks = (f"x {rate[:, 0].mean():.0f} ({rate[:, 0].min():.0f} … {rate[:, 0].max():.0f}), "
+                      f"y {rate[:, 1].mean():.0f} ({rate[:, 1].min():.0f} … {rate[:, 1].max():.0f}) "
+                      f"over {len(rate)} stacks")
+        return f"drift nm/µm {stacks}"
+    if kind == "free":
+        found = _learnt(source, "geometry.drift")
+        if found is None:
+            return ""
+        d = found[0].reshape(-1, 3)
+        d = d - d.mean(0)
+        axes = [a for a in "xyz" if a in getattr(g, "drift_axes", "xyz")]
+        rms = ", ".join(f"{a} {np.sqrt(np.mean(d[:, 'xyz'.index(a)] ** 2)):.1f}" for a in axes)
+        return f"drift rms nm {rms} over {len(d)} slices"
+    return ""
+
+
+def model_text(source, channel: int = 0) -> str:
+    """The model's few physical numbers in a line, with their CRLBs: the minimal pupil's γ and ring height,
+    the blur (beyond the pixel's where the model has it under σ), the stage's drift and the coverslip's tilt,
+    each where the model has it."""
+    psf = source.model.channels[channel].psf
+    pre = prefix(channel)
+    parts = []
+    gamma = _learnt(source, pre + "pupil.gamma")
+    if gamma is not None:
+        parts.append("γ " + _pm(gamma[0][0], gamma[1][0], "{:.3f}"))
+        ring = _learnt(source, pre + "pupil.ring_h")
+        if ring is not None:
+            parts.append("ring h " + _pm(ring[0][0], ring[1][0], "{:.0f}") + " nm")
+    sigma = _learnt(source, pre + "psf.sigma")
+    if sigma is not None:
+        parts.append("blur σ " + "/".join(_pm(v, e, "{:.1f}") for v, e in zip(*sigma, strict=True)) + " nm"
+                     + (" beyond the pixel" if getattr(psf, "pixel_blur", False) else ""))
+    parts += [t for t in (drift_text(source), tilt_text(source)) if t]
+    return "; ".join(parts)
+
+
 def phase_scale(source, channel: int = 0, units: str | None = None) -> tuple[float, str]:
     """`phase_factor` at the channel's own λ."""
     return phase_factor(source.model.channels[channel].psf.grid.optics.wavelength_nm, units)
@@ -227,9 +294,10 @@ def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, refer
     left, right = fig.subfigures(1, 2, width_ratios=[1, 2.4])
     draw_pupil(left, source, channel, vertical=True, units=units)
     draw_zernikes(right, source, channel, reference, reference_label, units=units, halves=halves)
-    tilt = tilt_text(source)                 # the coverslip's, learnt beside the Zernikes: its coma is not theirs
-    if tilt:
-        fig.suptitle(tilt, fontsize="small")
+    # the numbers beside the Zernikes: γ, the ring, σ, the drift, the coverslip's tilt (whose coma is not theirs)
+    text = model_text(source, channel)
+    if text:
+        fig.suptitle(text, fontsize="small", wrap=True)
 
 
 def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[tuple], list]:
