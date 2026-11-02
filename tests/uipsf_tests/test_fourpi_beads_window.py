@@ -89,11 +89,12 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
     form.set(FourPiBeadSettings(layout="typed", psf=PSFModelSettings(magnitude="symmetric")))
     window._show_fourpi()
     assert modes_row()
-    # in situ has no 4Pi mode yet: choosing it goes back to one channel
-    window.method_box.setCurrentText("in situ (blinking molecules)")
+    # in situ has no 4Pi mode yet: its sample offers one channel only
+    window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
     assert window.mode_box.currentText() == "Single channel" and window.sections["4Pi"].isHidden()
-    # and the 4Pi mode, chosen with in situ, takes the pupil model
-    window.mode_box.setCurrentText("4Pi")
+    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel"]
+    # and back to beads, the pupil model in the 4Pi mode
+    window.choose("beads in a z stack", "pupil", "4Pi")
     assert window.method.key == "fourpi_pupil"
     assert window.method_box.currentText() == "pupil model (uiPSF)"
     window.close()

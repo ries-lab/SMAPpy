@@ -85,3 +85,69 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     assert cal.parameters["sample"] == "molecules on the coverslip in a z stack"
     assert abs(cal.parameters["height_nm"] - result.height_nm()) < 1e-6
     assert (result.saved.parent / "cal.uipsf.h5").exists()
+
+
+@pytest.mark.slow
+def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecules(tmp_path, monkeypatch):
+    import time
+
+    from smappy.calibrate import molecule_stack as module
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from smappy.gui import make_app
+    app = make_app()
+    truth = write_sweeps(tmp_path, OPTICS, files=1, sweeps=2, per_frame=4, focus_um=(50.0,))
+    original = module.molecule_rois
+    monkeypatch.setattr(module, "molecule_rois", lambda paths, s, camera=None, progress=None:
+                        original(paths, s, CAMERA, progress))
+    window = PSFCalibrationWindow(truth["paths"])
+    window.sample_box.setCurrentText("molecules on the coverslip in a z stack")
+    methods = [window.method_box.itemText(i) for i in range(window.method_box.count())]
+    assert methods == ["pupil model (uiPSF)", "elliptical Gaussian"]
+    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel"]
+    shown = {k: v.isVisibleTo(window) for k, v in window.sections.items()}
+    assert shown["molecules"] and shown["model"] and not shown["beads"] and not shown["in situ"]
+    assert window.detect_button.text() == "Detect molecules"
+    form = window.model_form
+    assert not form.row_layouts["bead_diameter_nm"].isRowVisible(form.fields["bead_diameter_nm"])
+    window.optics_form.set_values(dict(NA=1.45, wavelength_nm=680.0, n_immersion=1.518, n_medium=1.334,
+                                       pixel_x_nm=110.0, pixel_y_nm=110.0))
+    window.molecule_form.set_values(dict(molecules=60))
+    window.detect()
+    start = time.time()
+    while window.busy and time.time() - start < 60:
+        app.processEvents()
+        time.sleep(0.02)
+    states = [window.bead_table.item(r, 0).text() for r in range(window.bead_table.rowCount())]
+    assert states[0] == "used" and "learning takes about" in window.found_label.text()
+    assert window.stack_browser.movie and window.stack_browser.positions
+    window.close()
+
+
+@pytest.mark.slow
+def test_dual_colour_pairs_the_halves_molecules_and_learns_both_channels_with_their_map(tmp_path):
+    from smappy.calibrate.dual import load_dual_color_calibration
+    from smappy.calibrate.molecule_dual import dual_molecule_rois
+    from smappy.calibrate.molecule_stack_run import run_molecule_stack
+    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, RunSettings
+    from uipsf_tests.molecule_sweeps import DUAL_SHIFT_PX, write_dual_sweeps
+    truth = write_dual_sweeps(tmp_path, OPTICS)
+    settings = MoleculeStackSettings(molecules=50, roi_px=15, max_rounds=1)
+    rois = dual_molecule_rois(truth["paths"], settings, CAMERA, transform=truth["transform"])
+    used = rois.ids("used")
+    assert rois.n_channels == 2 and len(used) == 50
+    # each pair's secondary region where the map puts its main one
+    gap = rois.roi_xy[used, 1] - rois.roi_xy[used, 0]
+    assert np.allclose(np.median(gap, 0), (128 + DUAL_SHIFT_PX[0], DUAL_SHIFT_PX[1]), atol=1)
+    optics = OpticsSettings(NA=1.45, wavelength_nm=680.0, wavelength2_nm=680.0, n_immersion=1.518, n_medium=1.334,
+                            pixel_x_nm=110.0, pixel_y_nm=110.0)
+    result = run_molecule_stack(truth["paths"], optics, BeadSettings(psf=PSFModelSettings(zernike_order=4)),
+                                settings, run=RunSettings(save_model=True), camera=CAMERA, rois=rois,
+                                save_to=tmp_path / "dual.h5", device="cpu")
+    shared = result.cal.shared()
+    for prefix in ("", "ch1."):
+        pupil = result.cal.model.channels[0 if not prefix else 1].psf.pupil
+        nm = {int(j): float(v) * OPTICS.wavelength_nm / (2 * np.pi)
+              for j, v in zip(pupil.phase_modes, shared[prefix + "pupil.phase"].detach().cpu(), strict=True)}
+        assert all(abs(nm[j] - v) < 6.0 for j, v in PHASE_NM.items()), (prefix, nm)
+    cal = load_dual_color_calibration(result.saved)
+    assert cal.main.parameters["sample"] == "molecules on the coverslip in a z stack"

@@ -64,23 +64,36 @@ def model_for(rois: MoleculeStackROIs, optics, model, stack: MoleculeStackSettin
     import torch
 
     from uipsf.workflows.calibrate import molecule_stack_model
-    o = optics.optics(rois.camera, 1)[0]
+    C = rois.n_channels
+    o = optics.optics(rois.camera, C, _main_half(rois))
     roi = int(rois.units.regions.shape[-1])
-    Y, X = rois.shape
     span = float(np.nanmax(np.abs(rois.defocus_nm))) if len(rois.defocus_nm) else 1000.0
-    return molecule_stack_model(o, model.psf, (roi, roi), rois.sweeps, np.zeros(rois.sweeps),
-                                ((X - 1) / 2, (Y - 1) / 2), height_nm=stack.height_nm, z_max_nm=span + 100.0,
-                                device=device, dtype=dtype or torch.float32)
+    transforms = None if C == 1 else [None, _unit(rois.transform.transformation)]
+    return molecule_stack_model(o if C > 1 else o[0], model.psf, (roi, roi), rois.sweeps, np.zeros(rois.sweeps),
+                                rois.field_centre(), height_nm=stack.height_nm, transforms=transforms,
+                                z_max_nm=span + 100.0, device=device, dtype=dtype or torch.float32)
+
+
+def _main_half(rois) -> Optional[str]:
+    """A split chip's main half (`pupil.main_half`'s): the registration's."""
+    return None if rois.transform is None else (rois.transform.geometry or {}).get("main_channel")
+
+
+def _unit(h) -> np.ndarray:
+    h = np.asarray(h, float)
+    return h / h[2, 2]
 
 
 def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None = None, spline=None, run=None,
                        camera=None, rois: MoleculeStackROIs | None = None, save_to=None, progress=None,
-                       cancel=None, device=None, chunk_size: int | None = None) -> MoleculeStackResult:
+                       cancel=None, device=None, chunk_size: int | None = None,
+                       dual: bool = False) -> MoleculeStackResult:
     """Z-sweep files to a learnt model and, with *save model*, its spline on disk (module docstring).
     ``optics`` an `OpticsSettings`, ``model`` a `BeadSettings` (its PSF model and *rejection (k)*; the beads'
     size, drift, field dependence and held-out share are not read: `pupil.model_shown`); ``rois``, the molecules found already (*Detect*), skips finding them;
     ``device`` where it is learnt (default the fastest); ``chunk_size`` molecules at once (default from the
-    memory available, `uipsf.workflows.molecule_stack.molecule_chunk`)."""
+    memory available, `uipsf.workflows.molecule_stack.molecule_chunk`).  ``dual``: a chip split in two colours
+    (`molecule_dual`), saved as a dual calibration for Spline 3D 2C."""
     from uipsf.workflows.calibrate import start_values
     from uipsf.workflows.molecule_stack import StackRoundSettings, learn_molecule_stack
 
@@ -88,7 +101,10 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
     stack = stack or MoleculeStackSettings()
     spline = spline or SplineSettings()
     run = run or RunSettings()
-    if rois is None:
+    if rois is None and dual:
+        from .molecule_dual import dual_molecule_rois
+        rois = dual_molecule_rois(paths, stack, camera, progress=progress)
+    elif rois is None:
         rois = molecule_rois(paths, stack, camera, progress)
     used = rois.ids("used")
     if not len(used):
@@ -107,6 +123,8 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
     result = MoleculeStackResult(rois, learned, learnt, previous)
     cal = result.cal
     cal.options = model                    # kept with the model file, as a bead model's
+    if rois.transform is not None:         # the split, which the dual calibration and its model file keep
+        cal.geometry = dict(rois.transform.geometry)
     check = result.check
     if check is not None:
         h = result.height_nm()
@@ -117,7 +135,7 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
             result.messages.append("warning: the height ran to its bound: hold it (more) at what the sample has")
     if run.save_model and cal.result.stop_reason != "cancelled":
         result.calibration = calibration_of(result, spline)
-        path = Path(save_to) if save_to else default_save_path(paths, False)
+        path = Path(save_to) if save_to else default_save_path(paths, rois.n_channels == 2)
         result.saved, _ = save(path, cal, result.calibration, overwrite=bool(save_to))
     return result
 
@@ -151,12 +169,19 @@ def calibration_of(result: MoleculeStackResult, spline=None):
     """The run's spline: the saved one, else sampled now as saving would -- a molecule at the learnt height,
     at the sweeps' step, over `spline_range`."""
     if result.calibration is None:
-        from .pupil import spline_calibration
+        from .pupil import dual_calibration, spline_calibration
         dz = (spline.dz_nm if spline is not None and spline.dz_nm else None) or result.rois.step_nm
         span = (spline.z_range_nm if spline is not None and spline.z_range_nm else None) or spline_range(result, dz)
         roi = int(result.rois.units.regions.shape[-1])
-        result.calibration = spline_calibration(result.cal, dz, span, roi, camera=result.rois.camera,
-                                                depth_nm=result.height_nm())
+        if result.rois.n_channels == 2:
+            from ..io.calibration import keep_microscope
+            result.calibration = dual_calibration(result.cal, dz, span, roi, depth_nm=result.height_nm())
+            for channel in (result.calibration.main, result.calibration.secondary):
+                keep_microscope(channel, result.rois.camera)
+                channel.parameters.update(stack_record(result))
+        else:
+            result.calibration = spline_calibration(result.cal, dz, span, roi, camera=result.rois.camera,
+                                                    depth_nm=result.height_nm())
         result.calibration.parameters.update(stack_record(result))
     return result.calibration
 

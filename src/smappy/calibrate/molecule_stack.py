@@ -85,6 +85,10 @@ class MoleculeStackSettings:
                                             "from the metadata")
     sweep_frames: Optional[int] = param(None, label="frames per sweep", min=2, advanced=True,
                                         help="with a typed z step: the frames of one sweep, all upwards")
+    registration: str = param("", label="registration", kind="open_file",
+                              file_filter="Registration or dual calibration (*.h5);;All files (*)",
+                              help="dual colour: the halves' map, a dual bead calibration or a registration "
+                                   "file; empty: measured from the molecules")
     max_rounds: int = param(3, label="rounds", min=1, hidden=True,
                             help="learn, check z, drop what fails, learn again: at most this many times")
     width_tol: float = param(0.3, label="width tolerance", min=0.0, hidden=True,
@@ -487,6 +491,26 @@ class MoleculeStackROIs(InSituROIs):
     radius_px: float = float("nan")
     shape: tuple = ()                # the images' (Y, X)
     step_nm: float = 50.0            # the sweeps' step
+    # a split chip (`molecule_dual`): both channels' regions and masks [U, C, R, R], each one's centre on the
+    # chip [U, C, 2], the registration and each half's width curve; the field's centre on the chip (the main
+    # half's), where the focal plane's slope is measured from
+    channel_regions: np.ndarray = None
+    channel_masks: np.ndarray = None
+    roi_xy: np.ndarray = None
+    transform: object = None
+    curves: list = None
+    centre_px: tuple = None
+
+    @property
+    def n_channels(self) -> int:
+        return 1 if self.channel_regions is None else int(self.channel_regions.shape[1])
+
+    def field_centre(self) -> tuple:
+        """(x, y) chip pixels: the field's centre, the image's for one channel."""
+        if self.centre_px is not None:
+            return self.centre_px
+        Y, X = self.shape
+        return (X - 1) / 2, (Y - 1) / 2
 
     def batch(self, state: str = "used", ids=None):
         """(`uipsf.Batch`, its noise) of the units in ``state`` (or ``ids``): their regions, masks, each
@@ -505,10 +529,18 @@ class MoleculeStackROIs(InSituROIs):
                  "photons": torch.tensor(np.nan_to_num(g["photons"], nan=1000.0), dtype=torch.float32),
                  "background": torch.tensor(np.maximum(np.nan_to_num(g["background"], nan=1.0), 1.0),
                                             dtype=torch.float32)}
-        batch = Batch(data=torch.tensor(u.regions[ids][:, None, None], dtype=torch.float32),
+        if self.channel_regions is None:
+            data, mask, roi_xy = u.regions[ids][:, None, None], u.masks[ids][:, None, None], None
+            field = u.centre[ids].astype(float)
+        else:                       # a split chip: [E, C, 1, R, R], each channel about its own place
+            data, mask = self.channel_regions[ids][:, :, None], self.channel_masks[ids][:, :, None]
+            roi_xy = torch.tensor(self.roi_xy[ids], dtype=torch.float32)
+            field = self.roi_xy[ids][:, 0]
+            start["background"] = start["background"][:, None].expand(-1, self.n_channels).clone()
+        batch = Batch(data=torch.tensor(data, dtype=torch.float32),
                       z_nm=torch.tensor(self.z_nm[ids][:, None], dtype=torch.float32),
-                      s=float(self.read_noise_var), mask=torch.tensor(u.masks[ids][:, None, None]),
-                      field_xy=torch.tensor(u.centre[ids].astype(float), dtype=torch.float32),
+                      s=float(self.read_noise_var), mask=torch.tensor(mask),
+                      field_xy=torch.tensor(field, dtype=torch.float32), roi_xy=roi_xy,
                       stack_id=torch.tensor(self.sweep[ids], dtype=torch.long), start=start)
         return batch, ShiftedPoisson(float(self.excess_noise))
 

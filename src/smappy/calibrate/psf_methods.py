@@ -1113,11 +1113,13 @@ class MoleculeStack:
     finds = "molecules"
 
     def detect(self, paths, dual, inputs, progress=None) -> Detected:
-        from .molecule_stack import molecule_rois
         from .molecule_stack_run import estimate_seconds
         if dual:
-            raise ValueError("molecules in z sweeps are one channel only, for now")
-        rois = molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
+            from .molecule_dual import dual_molecule_rois
+            rois = dual_molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
+        else:
+            from .molecule_stack import molecule_rois
+            rois = molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
         (progress or (lambda entry: None))({"message": "timing the model on a few molecules", "fraction": 0.95})
         seconds = estimate_seconds(rois, inputs["optics"], inputs["model"], inputs["molecules"])
         used = len(rois.ids("used"))
@@ -1134,8 +1136,9 @@ class MoleculeStack:
         rois = detected.found if detected is not None else (previous.result.rois if previous is not None else None)
         done = run_molecule_stack(paths, inputs["optics"], inputs["model"], inputs["molecules"], inputs["spline"],
                                   inputs["run"], camera=inputs.get("camera"), rois=rois, progress=progress,
-                                  cancel=cancel, save_to=previous.saved if previous is not None else None)
-        run = Run(done, False, done.saved)
+                                  cancel=cancel, save_to=previous.saved if previous is not None else None,
+                                  dual=dual)
+        run = Run(done, dual, done.saved)
         warnings = [m.removeprefix("warning: ") for m in done.messages if m.startswith("warning: ")]
         if warnings:
             run.extra["warning"] = "; ".join(warnings)
@@ -1325,7 +1328,7 @@ SAMPLE_METHODS = {SAMPLES[0]: ("average", "pupil", "elliptical"),
 FOURPI = {"average": FourPiAverage(), "pupil": FourPiPupil()}
 
 #: the methods that run in one channel only
-ONE_CHANNEL = ("insitu", "elliptical", "molecules", "molecules elliptical")
+ONE_CHANNEL = ("insitu", "elliptical", "molecules elliptical")
 
 
 def by_key(key: str):

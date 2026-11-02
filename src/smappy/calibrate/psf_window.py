@@ -391,6 +391,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.sections["in situ"].setVisible(insitu)
         molecules = reads.get("molecules", False)
         self.sections["molecules"].setVisible(molecules)
+        self.molecule_form.set_shown({"registration": self.is_dual})
         self.sections["elliptical"].setVisible(reads.get("elliptical", False))
         fourpi = reads.get("4Pi", False)
         self.sections["4Pi"].setVisible(fourpi)

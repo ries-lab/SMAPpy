@@ -88,3 +88,60 @@ def write_sweeps(folder, optics, files: int = 2, sweeps: int = 3, step_nm: float
                          metadata={"axes": "TZCYX", "Plane": planes})
         paths.append(str(path))
     return dict(paths=paths, foci_nm=np.asarray(foci), model=model, shared=shared, height_nm=height_nm, gamma=gamma)
+
+
+#: the simulated split chip: two halves side by side, the secondary shifted by (3, −2) px, unmirrored
+DUAL_SHIFT_PX = (3.0, -2.0)
+
+
+def dual_transform(height: int = 128, width: int = 128):
+    """The `dual.ChannelTransform` of `write_dual_sweeps`' chip: secondary (right) chip pixels onto the main
+    (left) half's."""
+    from smappy.calibrate.dual import ChannelTransform
+    H = np.array([[1.0, 0.0, -width - DUAL_SHIFT_PX[0]], [0.0, 1.0, -DUAL_SHIFT_PX[1]], [0.0, 0.0, 1.0]])
+    geometry = {"image_shape": [height, 2 * width], "coordinate_system": "roi-local", "split_position": width,
+                "layout": "right-left", "main_channel": "left", "mirror_axis_xy": None, "sources": []}
+    return ChannelTransform(H, geometry, {})
+
+
+def write_dual_sweeps(folder, optics, sweeps: int = 2, step_nm: float = 100.0, span_nm: float = 700.0,
+                      per_frame: int = 5, size: int = 128, share: float = 0.6, background: float = 20.0,
+                      focus_um: float = 50.0, sweep_jitter_nm: float = 20.0, height_nm: float = 10.0,
+                      gamma: float = 0.5, seed: int = 0):
+    """One OME-TIFF of a split chip, [T, size, 2·size]: each molecule in the left half and, ``share`` of its
+    light the other way round, in the right one where `dual_transform` puts it, the same pupil in both
+    (`truth_model`).  Returns the truth as `write_sweeps` does, with the transform."""
+    from pathlib import Path
+
+    import tifffile
+    import torch
+
+    from uipsf.export import sample_psf
+    rng = np.random.default_rng(seed)
+    model, shared = truth_model(optics, height_nm, gamma)
+    transform = dual_transform(size, size)
+    roi, h = 25, 12
+    px = np.asarray(optics.pixel_size_nm, float)
+    frames, z_um, foci = [], [], []
+    for _ in range(sweeps):
+        jitter = float(rng.uniform(-sweep_jitter_nm, sweep_jitter_nm))
+        foci.append(jitter)
+        for zk in np.arange(-span_nm, span_nm + 1, step_nm):
+            image = np.full((size, 2 * size), background)
+            for _ in range(per_frame):
+                x, y = rng.uniform(h + 6, size - h - 6, 2)
+                d = zk + jitter
+                N = rng.uniform(4000.0, 8000.0)
+                for at, part in (((x, y), share), (tuple(transform.to_secondary(np.array([[x, y]]))[0]), 1 - share)):
+                    xi, yi = int(round(at[0])), int(round(at[1]))
+                    xyz = torch.tensor([[(at[0] - xi) * px[0], (at[1] - yi) * px[1], -d]], dtype=torch.float64)
+                    spot = sample_psf(model, shared, xyz, roi, torch.tensor([height_nm], dtype=torch.float64))[0]
+                    image[yi - h:yi + h + 1, xi - h:xi + h + 1] += N * part * spot.numpy()
+            frames.append(rng.poisson(image) / CAMERA.conversion + CAMERA.offset)
+            z_um.append(focus_um + zk / 1000)
+    path = Path(folder) / "dual_sweeps.ome.tif"
+    tifffile.imwrite(path, np.asarray(frames, np.uint16)[:, None, None], ome=True,
+                     metadata={"axes": "TZCYX", "Plane": {"PositionZ": [float(z) for z in z_um],
+                                                          "PositionZUnit": ["µm"] * len(z_um)}})
+    return dict(paths=[str(path)], foci_nm=np.asarray(foci), model=model, shared=shared, height_nm=height_nm,
+                gamma=gamma, transform=transform)

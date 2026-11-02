@@ -102,7 +102,7 @@ def test_the_window_offers_the_tilt_in_situ_and_for_beads_only_through_another_g
     window._show_optics()
     assert _shown(window.model_form, "fit_tilt") and window.optics_form._shown("coverslip_um")
     window.optics_form.set(OIL)
-    window.method_box.setCurrentText("in situ (blinking molecules)")
+    window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
     assert _shown(window.model_form, "fit_tilt") and not window.optics_form._shown("coverslip_um")
     window.close()
 

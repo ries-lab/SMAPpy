@@ -209,7 +209,7 @@ def test_the_window_offers_in_situ_with_its_own_section_and_finds_molecules_in_a
     monkeypatch.setattr(run_module, "movie_rois", lambda paths, s, camera=None, progress=None:
                         original(paths, s, CAMERA, progress))
     window = PSFCalibrationWindow([path])
-    window.method_box.setCurrentText("in situ (blinking molecules)")
+    window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
     shown = {k: v.isVisibleTo(window) for k, v in window.sections.items()}
     assert shown["in situ"] and not shown["beads"] and window.detect_button.text() == "Detect molecules"
     assert window.files_section.button.text() == "movies" and window.mode_box.currentText() == "Single channel"

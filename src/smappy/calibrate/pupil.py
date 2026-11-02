@@ -593,18 +593,19 @@ def _transform(learned) -> np.ndarray:
 
 
 def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27,
-                     upsample: int | None = UPSAMPLE):
+                     upsample: int | None = UPSAMPLE, depth_nm: float | None = None):
     """smappy's `DualColorCalibration` of a two-channel uipsf model: both channels sampled on one z grid
     (a biplane offset is in the PSFs), normalised jointly by `positive_pair_models`, so each channel's
     `photon_normalization` is its learnt photon share; the model's transform and the split it was
-    learnt on.  Spline 3D 2C reads it as one of its own (tests/uipsf_tests/test_smappy_dual.py)."""
+    learnt on.  Spline 3D 2C reads it as one of its own (tests/uipsf_tests/test_smappy_dual.py).  ``depth_nm``
+    as `sample`'s."""
     from .core import positive_pair_models
     from .dual import DualColorCalibration
     if learned.model.n_channels != 2:
         raise ValueError("a dual calibration needs a model of two channels")
     if learned.geometry is None:
         raise ValueError("the model does not say how the chip was split; learn it from dual_rois")
-    raw = np.stack([sample(learned, dz_nm, z_range_nm, roi_size, upsample, c) for c in range(2)])
+    raw = np.stack([sample(learned, dz_nm, z_range_nm, roi_size, upsample, c, depth_nm=depth_nm) for c in range(2)])
     settings = CalibrationSettings(roi_size=roi_size, smooth_z_nm=0.0, smooth_xy_px=0.0)
     (main, secondary), _ = positive_pair_models(raw, dz_nm, settings)
     record = _record(learned, dz_nm, z_range_nm, roi_size, upsample)
