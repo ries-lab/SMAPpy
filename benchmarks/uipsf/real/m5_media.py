@@ -157,19 +157,8 @@ def stage_drift(axes: str = "xy", **kwargs):
     between conditions (lens, sample, colour) and worsened the z bend by 1-3 nm.  A z drift would absorb the
     shared z bend by construction, so "xy" is the default."""
     from uipsf.model import BeadStackGeometry
-
-    class StageDrift(BeadStackGeometry):
-        def __init__(self, **kw):
-            super().__init__(drift=True, **kw)
-            self.axes = axes
-
-        def __call__(self, p, batch):
-            # the axes not learnt are held at zero: their entries stay in the parameters, pinned by the prior
-            drift = p["geometry.drift"]
-            keep = torch.tensor([a in self.axes for a in "xyz"], dtype=drift.dtype, device=drift.device)
-            return super().__call__(p, batch) - drift + drift * keep
-
-    return StageDrift(**kwargs)
+    kwargs.pop("drift", None)                     # the bead model's own choice, replaced by this one
+    return BeadStackGeometry(drift="free", drift_axes=axes, **kwargs)
 
 
 def summary(run, variant, pixel, cond, grid_na) -> dict:
@@ -249,7 +238,8 @@ def main():
             for variant in args.variants:
                 t0 = time.perf_counter()
                 magnitude = use_pupil(variant)
-                model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur="free", blur_nm=30.0,
+                model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude, blur="free",
+                                     blur_nm=30.0,
                                      bead_diameter_nm=BEAD_NM)
                 run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                       decisions=decisions)

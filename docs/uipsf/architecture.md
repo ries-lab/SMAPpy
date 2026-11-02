@@ -2195,6 +2195,32 @@ with it, its rms grows to 0.06–0.11), not all.  NA_eff, γ and the order of th
 So the elliptical σ stays, as the camera's term rather than the optics' (an EMCCD's transfer along one axis, the
 open question of roadmap item 6), and the magnitude findings above do not depend on it.
 
+## The minimal model (November 2026; `model.MinimalPupil`, the bead calibration's default)
+
+What M5's sixteen bead stacks (`docs/uipsf/m5-media.md`, `benchmarks/uipsf/real/m5_consensus.py`)
+decided, as the user's choices:
+
+- **Phase**: every Zernike to the order, learnt.
+- **Magnitude**: rotationally symmetric and physical.  cos θ_imm^γ, γ learnt (0.32–0.41 on the 100 nm beads
+  in two colours, oil and buffer, with and without the 3D lens); times, where n_med < NA, the ring
+  exp(−2πκh), h learnt; times the aperture, a cutoff of a pupil sample's width at the objective's NA on a
+  grid reaching 1.51 for NA 1.50 (`GRID_MARGIN`): at the nominal NA the grid's edge cut light the beads
+  wanted.  No m ≠ 0 magnitude: free, x6 or xy8 won 0.2–80 k nats per set, but held at the other sets'
+  joint estimate they cost 2–36 k each -- they follow the acquisition, not the objective.  They also move
+  γ: the magnitude tilt (Noll 2, 3) raised it by 0.03, the rest barely.
+- **Blur**: one σ, learnt, on top of the pixel's own p/√12 (`VectorPSF.pixel_blur`), which the model
+  needs because it is drawn at pixel centres; held at the pixel's alone is *fixed* at 0.
+- **Drift**: *linear per stack* (`BeadStackGeometry`), two numbers per stack.  On M5 every stack drifted in
+  x by 5–54 nm per µm, the same sign everywhere, and the drift follows the time since the stack began (the
+  40 nm stacks starting at different heights drift alike from their start), bending as it settles.  A free
+  drift per frame follows that (0.1–2.5 nm lateral bias against 1.3–4.7), but the PSF is the linear one's:
+  coma within 0.2/0.5 nm rms (Z7/Z8), σ 0.1 nm, γ 0.01; without drift the coma is off by up to 5 nm
+  and γ by 0.03.
+
+Open: the 40 nm beads learn γ 0.13–0.26 beside a σ of 45–50 nm where the 100 nm beads learn 0.28–0.41
+and 22–36 nm -- the magnitude is the objective's and cannot depend on the bead, so something else is
+read as both; whether σ should be learnt beside a field-dependent pupil; the magnitude tilt.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```

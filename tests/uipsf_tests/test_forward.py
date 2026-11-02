@@ -48,13 +48,14 @@ def test_the_stage_terms_are_declared_fixed_until_asked_for():
     start = {"xyz": torch.zeros(2, 3)}
     fixed = {s.name: s.fixed for s in BeadStackGeometry().specs(batch, start)}
     assert fixed == {"emitter.xyz": False, "geometry.drift": True, "geometry.z_scale": True}
-    free = {s.name: s.fixed for s in BeadStackGeometry(drift=True, z_scale=True).specs(batch, start)}
+    geometry = BeadStackGeometry(drift="free", drift_axes="xyz", z_scale=True)
+    free = {s.name: s.fixed for s in geometry.specs(batch, start)}
     assert not any(free.values())
 
 
 def test_the_drift_and_z_scale_move_every_bead_alike():
     batch = template(2, torch.tensor([100.0, 0.0, -100.0], dtype=f64), (5, 5), dtype=f64)
-    geo = BeadStackGeometry(drift=True, z_scale=True)
+    geo = BeadStackGeometry(drift="free", drift_axes="xyz", z_scale=True)
     p = uipsf.Params(geo.specs(batch, {"xyz": torch.tensor([[0.0, 0, 0], [10.0, 0, 5]])}), 2, dtype=f64,
                      values={"geometry.z_scale": 1.1}).physical()
     p["geometry.drift"] = torch.tensor([[1.0, 0, 0], [0, 2.0, 0], [0, 0, 3.0]], dtype=f64)

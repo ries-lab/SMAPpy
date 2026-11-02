@@ -527,11 +527,12 @@ class PupilModel:
         if cal.result.stop_reason == "cancelled":
             return "stopped, nothing saved"
         from uipsf.diagnostics import field_report
-        from uipsf.diagnostics.figures import tilt_text
-        tilt = tilt_text(cal)
+        from uipsf.diagnostics.figures import model_text
+        # γ, the ring, σ, the drift and the tilt, where the model has them
+        numbers = model_text(cal)
         # with *field dependence*: how much astigmatism and coma vary over the beads, and whether it is real
         field = field_report(cal)
-        return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f", {tilt}" if tilt else "")
+        return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f"; {numbers}" if numbers else "")
                 + ("" if field is None else f"; {field.summary()}"))
 
 
@@ -641,10 +642,10 @@ class InSitu:
             return "stopped, nothing saved"
         focus = float(result.cal.shared()["geometry.focus"])
         twin = result.run.final.twin
-        from uipsf.diagnostics.figures import tilt_text
-        tilt = tilt_text(result.cal)
+        from uipsf.diagnostics.figures import model_text
+        numbers = model_text(result.cal)            # σ and the tilt, where learnt
         text = (f"{len(result.cal.beads.used)} frames used, {len(result.run.rounds)} rounds, focus {focus:.0f} nm"
-                + (f", {tilt}" if tilt else "") + ("" if twin is None else f", twin test: {twin.verdict}"))
+                + (f", {numbers}" if numbers else "") + ("" if twin is None else f", twin test: {twin.verdict}"))
         return text + "".join(f"; {w}" for w in result.messages)
 
     def states(self, run: Run) -> dict:

@@ -7,10 +7,11 @@ from .fourpi import FourPiModel
 from .geometry import BeadStackGeometry, InSituGeometry
 from .intensity import Bleaching, PerFrameFactor, PerObservation, PerSliceFactor
 from .psf import VectorPSF
-from .pupil import PixelPupil, ZernikePupil
+from .pupil import MinimalPupil, PixelPupil, ZernikePupil, minimal_grid_optics
 from .start import rough_start
 
 __all__ = ["Channel", "FieldPolynomial",
-           "VectorPSF", "ZernikePupil", "PixelPupil", "ForwardModel", "FourPiModel", "BeadStackGeometry",
+           "VectorPSF", "ZernikePupil", "MinimalPupil", "minimal_grid_optics", "PixelPupil", "ForwardModel",
+           "FourPiModel", "BeadStackGeometry",
            "InSituGeometry", "Bleaching", "PerSliceFactor", "PerFrameFactor", "PerObservation", "Constant", "Planar",
            "rough_start"]

@@ -44,7 +44,16 @@ import torch
 # The choices live in smappy, torch-free, so its window builds the form without torch installed.
 from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings  # noqa: F401
 
-from ..model import BeadStackGeometry, Channel, FieldPolynomial, ForwardModel, VectorPSF, ZernikePupil
+from ..model import (
+    BeadStackGeometry,
+    Channel,
+    FieldPolynomial,
+    ForwardModel,
+    MinimalPupil,
+    VectorPSF,
+    ZernikePupil,
+    minimal_grid_optics,
+)
 from ..model.channels import prefix
 from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
@@ -82,8 +91,8 @@ def magnitude_modes(n_max: int, kind: str) -> list[int]:
         return every
     if kind == "symmetric":
         return [j for j in every if noll_to_nm(j)[1] == 0]
-    if kind == "fixed":
-        return []
+    if kind in ("fixed", "minimal"):
+        return []                      # the minimal pupil's magnitude is its own (`MinimalPupil`)
     raise ValueError(f"no magnitude choice {kind!r}")
 
 
@@ -94,7 +103,8 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     main channel first), each with its own pupil, started at ``transforms`` (secondary → main chip
     pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to ``z_max_nm`` from
     aliasing (`choose_pupil_size`, never below 64).  ``held_phase`` / ``held_magnitude``: modes held at
-    given values (`ZernikePupil`).  ``settings.fit_tilt`` learns the coverslip's tilt (`BeadStackGeometry`):
+    given values (`ZernikePupil`; the minimal pupil holds no magnitude modes, ``held_magnitude`` is ignored
+    there).  ``settings.fit_tilt`` learns the coverslip's tilt (`BeadStackGeometry`):
     seen by beads only through a coverslip of another index than the immersion's, a water or silicone
     objective's (`Optics.coverslip_matters`)."""
     optics = [optics] if not isinstance(optics, (list, tuple)) else list(optics)
@@ -104,12 +114,18 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     n_max = settings.order
     channels = []
     for o, H in zip(optics, transforms, strict=True):
-        grid = PupilGrid.build(o, choose_pupil_size(o, z_max_nm), device=device, dtype=dtype)
-        pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude),
-                             held_phase=held_phase, held_magnitude=held_magnitude)
+        if settings.magnitude == "minimal":
+            # the grid a little beyond the NA, the aperture the pupil's own cutoff (`MinimalPupil`)
+            g = minimal_grid_optics(o)
+            grid = PupilGrid.build(g, choose_pupil_size(g, z_max_nm), device=device, dtype=dtype)
+            pupil = MinimalPupil(grid, n_max=n_max, na=o.NA, held_phase=held_phase, saf_damping=settings.saf_damping)
+        else:
+            grid = PupilGrid.build(o, choose_pupil_size(o, z_max_nm), device=device, dtype=dtype)
+            pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude),
+                                 held_phase=held_phase, held_magnitude=held_magnitude)
         psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
                         sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur != "fixed",
-                        round_sigma=settings.blur == "round")
+                        round_sigma=settings.blur == "round", pixel_blur=settings.pixel_blur)
         field = None
         # getattr: settings saved before field dependence was a choice; the main channel only, for now
         if getattr(settings, "field_dependence", False) and not channels:
@@ -117,8 +133,7 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
                 raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
             field = FieldPolynomial(field_centre_px, o.pixel_size_nm)
         channels.append(Channel(psf, transform=H, field=field))
-    # getattr: settings of a model saved before the tilt was a choice
-    return ForwardModel(channels, geometry=BeadStackGeometry(fit_tilt=getattr(settings, "fit_tilt", False)))
+    return ForwardModel(channels, geometry=BeadStackGeometry(drift=settings.drift, fit_tilt=settings.fit_tilt))
 
 
 def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
@@ -147,9 +162,10 @@ def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_m
 def start_values(model: ForwardModel, previous) -> dict:
     """Shared start values for ``model`` from ``previous`` (a `LearnedPSF` or a `Calibration`).
 
-    Zernike coefficients go to the same Noll modes, zero where the previous model had none; the blur,
-    the channel transforms, shares and offsets are taken when the model fits them; anything else (a
-    fixed blur, the stage's terms) keeps the model's own start."""
+    Zernike coefficients go to the same Noll modes, zero where the previous model had none; the minimal
+    pupil's γ and h where both have them; the blur, the channel transforms, shares and offsets are taken when
+    the model fits them, the blur converted where one model has the pixel's under it and the other not (the
+    image's blur kept); anything else (a fixed blur, the stage's terms) keeps the model's own start."""
     shared = previous.shared() if callable(getattr(previous, "shared", None)) else previous.shared
     old_model = previous.model
     if old_model.n_channels != model.n_channels:
@@ -169,9 +185,14 @@ def start_values(model: ForwardModel, previous) -> dict:
                 if j in old_modes:
                     value[i] = coeff[old_modes.index(j)]
             out[name] = value
+        if isinstance(new.psf.pupil, MinimalPupil) and isinstance(old.psf.pupil, MinimalPupil):
+            for n in ("pupil.gamma", "pupil.ring_h"):
+                if pre + n in shared and (n != "pupil.ring_h" or new.psf.pupil.ring):
+                    out[pre + n] = shared[pre + n]
         if new.psf.fit_sigma and pre + "psf.sigma" in shared:
             # a round blur from a free one takes their mean, a free one from a round one its value twice
             s = torch.as_tensor(shared[pre + "psf.sigma"]).detach().cpu().double()
+            s = pixel_converted(VectorPSF.blur({"psf.sigma": s}), old.psf, new.psf)
             out[pre + "psf.sigma"] = s.mean().reshape(1) if new.psf.round_sigma else VectorPSF.blur({"psf.sigma": s})
         if c > 0:
             for n in ("share", "dz") + (("transform",) if new.fit_transform else ()):
@@ -180,6 +201,16 @@ def start_values(model: ForwardModel, previous) -> dict:
     if "geometry.tilt" in shared and getattr(model.geometry, "fit_tilt", False):
         out["geometry.tilt"] = shared["geometry.tilt"]       # the coverslip's, where this model learns one
     return {n: torch.as_tensor(v).detach().cpu() for n, v in out.items()}
+
+
+def pixel_converted(sigma, old, new):
+    """A learnt σ (x, y) of the PSF ``old`` as ``new`` learns it, the same blur of the image: the pixel's
+    taken out or put in where only one has it under the learnt one (`VectorPSF.pixel_blur`)."""
+    def px(psf):
+        return torch.tensor(psf.pixel_sigma, dtype=sigma.dtype)
+    total = sigma ** 2 + px(old) ** 2
+    # at least 1 nm: a learnt σ starting at 0 has no gradient through its magnitude transform
+    return torch.sqrt(torch.clamp(total - px(new) ** 2, min=1.0))
 
 
 def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, transforms=None,

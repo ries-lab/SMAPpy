@@ -4,6 +4,7 @@ import pytest
 import torch
 
 import uipsf
+from uipsf.export.model_file import VERSION
 from uipsf.model import Channel, FieldPolynomial
 from uipsf.model.field import monomials
 
@@ -134,7 +135,7 @@ def test_a_model_file_keeps_the_field_and_draws_the_psf_where_it_is_asked(tmp_pa
     save_model(cal, path)
     import h5py
     with h5py.File(path) as f:
-        assert int(f.attrs["version"]) == 4
+        assert int(f.attrs["version"]) == VERSION
     learned = load_model(path, device="cpu")
     assert learned.model.psf is learned.model.channels[0].psf and learned.model.channels[0].field is not None
     xyz = [[0.0, 0.0, 0.0]]

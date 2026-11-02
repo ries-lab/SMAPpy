@@ -123,8 +123,8 @@ def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
     from uipsf.workflows import BeadSettings, bead_model, calibrate_beads
     optics = uipsf.Optics(NA=1.43, wavelength_nm=660, n_imm=1.518, n_med=1.33, pixel_size_nm=(110.0, 110.0))
     roi, K, n = 15, 21, 8
-    model = bead_model(optics, BeadSettings(zernike_order=4, magnitude="fixed"), (roi, roi), z_max_nm=1000,
-                       device="cpu")
+    truth = BeadSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False)
+    model = bead_model(optics, truth, (roi, roi), z_max_nm=1000, device="cpu")
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[:4] = torch.tensor([0.6, -0.3, 0.2, 0.15])
     centres = [(30 + 40 * (i % 4), 30 + 40 * (i // 4)) for i in range(n)]       # whole pixels, 40 px apart

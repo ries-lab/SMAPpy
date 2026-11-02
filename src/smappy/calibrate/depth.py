@@ -343,12 +343,13 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
                          "method: its model is the start")
     learned = load(path)
     o = learned.model.channels[0].psf.grid.optics
-    optics = OpticsSettings(NA=o.NA, wavelength_nm=o.wavelength_nm, n_immersion=o.n_imm,
+    # the objective's NA: a minimal pupil's grid reaches beyond it (`MinimalPupil`)
+    na = float(getattr(learned.model.channels[0].psf.pupil, "na", o.NA))
+    optics = OpticsSettings(NA=na, wavelength_nm=o.wavelength_nm, n_immersion=o.n_imm,
                             n_medium=o.n_med if n_med is None else float(n_med), n_coverslip=o.n_cov,
                             coverslip_um=o.d_cov_nm / 1000, pixel_x_nm=o.pixel_size_nm[0],
                             pixel_y_nm=o.pixel_size_nm[1])
-    known = {f.name for f in fields(BeadSettings)}
-    model = BeadSettings(**{k: v for k, v in (learned.options or {}).items() if k in known})
+    model = BeadSettings.from_options(learned.options)
 
     from .psf_methods import LearningProgress, duration
     bar, last = LearningProgress(), [""]
