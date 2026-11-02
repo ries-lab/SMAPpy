@@ -17,11 +17,16 @@ shared phase, γ, h and σ held, in three ways:
 
 - *held*: nothing of the pupil learnt, only the bead's own position, photons and background;
 - *tilt*: the magnitude's tilt (Noll 2, 3) learnt as well;
-- *line*: a linear lateral drift of its own learnt instead, the reference for what a slope is worth.
+- *line*: a linear lateral drift of its own learnt instead, the reference for what a slope is worth;
+- *coma*: the bead's own coma (Noll 7, 8) learnt instead of the tilt, the rest of the shared phase held and the
+  magnitude's tilt at 0.  Coma also moves an image sideways with defocus, so a slope alone cannot tell a tilted
+  cone from an aberration of the bead's own; the likelihood of the whole stack can, both ways learning two numbers.
 
-Per bead and way: the slope on its own model (each slice localised alone, `scoring.slice_fits`), the objective,
-and the tilt with its CRLB.  If the cone's tilt is the cause, *tilt* takes the slope to about 0 and gains about
-what *line* gains, and the tilt follows the slope measured on the shared model.
+Per bead and way: the slope on its own model (each slice localised alone, `scoring.slice_fits`), the objective
+(½ deviance, nats up to a constant, so differences between ways are gains in nats), the tilt or the coma with its
+CRLB.  If the cone's tilt is the cause, *tilt* takes the slope to about 0 and gains about what *line* gains, the
+tilt follows the slope measured on the shared model, and *coma* gains less than *tilt*.
+``--ways`` picks the ways (``held tilt coma`` compares the two on one shared model).
 """
 from __future__ import annotations
 
@@ -65,6 +70,7 @@ def main():
     ap.add_argument("--window", type=float, default=1000.0)
     ap.add_argument("--dz", type=float, default=100.0)
     ap.add_argument("--memory", type=float, default=0.5)
+    ap.add_argument("--ways", nargs="+", default=["held", "tilt", "line"], choices=["held", "tilt", "line", "coma"])
     ap.add_argument("--out", default=os.path.join(HERE, "..", "results", "m5_beadtilt.jsonl"))
     args = ap.parse_args()
     if torch.backends.mps.is_available():
@@ -117,6 +123,10 @@ def main():
               slope_median=np.round(np.nanmedian(s0, 0), 2).tolist(),
               minutes=round((time.perf_counter() - t0) / 60, 2)), args.out)
     hold = {"pupil.centre_g": gamma} | ({"pupil.saf_h": h} if ring else {})
+    # coma: every shared phase mode held but 7 and 8, which are learnt per bead (from 0: phase modes start there)
+    coma = (7, 8)
+    ways = {"held": ((), "none", phase), "tilt": ((2, 3), "none", phase), "line": ((), "linear", phase),
+            "coma": ((), "none", {j: v for j, v in phase.items() if j not in coma})}
 
     # beads evenly over the x slope, the extremes included
     order = np.argsort(np.nan_to_num(s0[:, 0], nan=np.nanmedian(s0[:, 0])))
@@ -129,11 +139,12 @@ def main():
         rec = rois.records[i]
         row = dict(stage="bead", bead=int(i), stack=int(rec["stack"]), x_px=rec["x_px"], y_px=rec["y_px"],
                    shared_slope=np.round(s0[k], 2).tolist(), shared_slope_se=np.round(se0[k], 2).tolist())
-        for way, modes, drift in (("held", (), "none"), ("tilt", (2, 3), "none"), ("line", (), "linear")):
+        for way in args.ways:
+            modes, drift, held_phase = ways[way]
             t1 = time.perf_counter()
             try:
-                run = learn(one, minimal("height", ring, modes, hold, {}, 100.0, held_phase=phase), "fixed", sigma,
-                            drift)
+                run = learn(one, minimal("height", ring, modes, hold, {}, 100.0, held_phase=held_phase), "fixed",
+                            sigma, drift)
             except Exception as e:                      # a bead that will not fit is reported, not fatal
                 row[way] = dict(failed=str(e))
                 continue
@@ -145,6 +156,17 @@ def main():
                 entry["tilt"] = q["pupil.magnitude"].detach().cpu().double().numpy().round(4).tolist()
                 entry["tilt_crlb"] = (std["pupil.magnitude"].detach().cpu().double().numpy().round(4).tolist()
                                       if "pupil.magnitude" in std else None)
+            if way == "coma":
+                # nm of path, as the consensus reports phase; the shared model's coma beside it
+                nm = lam / (2 * np.pi)
+                bead_pupil = run.cal.model.channels[0].psf.pupil
+                learnt = bead_pupil.coefficients(q, "phase")
+                entry["coma_nm"] = [round(learnt[j] * nm, 2) for j in coma]
+                entry["shared_coma_nm"] = [round(phase.get(j, 0.0) * nm, 2) for j in coma]
+                if "pupil.phase" in std:
+                    e = dict(zip(bead_pupil.phase_modes, std["pupil.phase"].detach().cpu().double().numpy(),
+                                 strict=True))
+                    entry["coma_crlb_nm"] = [round(float(e[j]) * nm, 3) for j in coma]
             if drift == "linear":
                 entry["rate"] = q["geometry.drift_rate"].detach().cpu().double().numpy().round(2).tolist()
             row[way] = entry
