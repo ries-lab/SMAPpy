@@ -391,11 +391,12 @@ def test_without_a_bead_model_in_situ_holds_the_microscope_s_gamma_else_a_nomina
     assert result.model.geometry.fit_focus and "nominal" in result.messages[0]
     assert any(m.startswith("warning: the microscope gives no γ") for m in result.messages)
     # the microscope's γ, when its entry has one: no warning
-    monkeypatch.setattr(db, "gamma_of", lambda scope, wavelength: (0.2, "M9's entry"))
+    monkeypatch.setattr(db, "gamma_of", lambda scope, wavelength: (0.2, 1.41, "M9's entry"))
     result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
                         SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
-    assert result.model.psf.pupil.held_gamma == 0.2 and "M9's entry" in result.messages[0]
+    pupil = result.model.psf.pupil
+    assert pupil.held_gamma == 0.2 and pupil.na == pytest.approx(1.41) and "M9's entry" in result.messages[0]
     assert not any(m.startswith("warning") for m in result.messages)
 
 

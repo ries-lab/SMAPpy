@@ -357,14 +357,14 @@ def test_gamma_is_the_microscope_s_whatever_its_3d_lens_and_from_its_nearest_col
         return CameraSettings().resolve(open_stack(a_tiff(tmp_path / f"{name}_MMStack.ome.tif", tags)),
                                         require=False).microscope
     beads, movie = scope(M2_BEADS, "beads"), scope(M2_MOVIE, "movie")
-    assert microscope_db.gamma_of(movie, 676.0) == (None, "")
+    assert microscope_db.gamma_of(movie, 676.0) == (None, None, "")
     microscope_db.keep_pupil(beads, PUPIL)
     assert microscope_db.pupil_of(movie) is None                       # its pupil follows the lens, γ not
-    assert microscope_db.gamma_of(movie, 680.0) == (0.36, "M2's kept pupil at 676 nm")
+    assert microscope_db.gamma_of(movie, 680.0) == (0.36, None, "M2's kept pupil at 676 nm")
     entry = microscope_db.database().get("M2")
-    entry.pupils["other"] = dict(PUPIL, gamma=0.2, wavelength_nm=580.0)
-    assert microscope_db.gamma_of(movie, 600.0)[0] == 0.2 and microscope_db.gamma_of(movie, 670.0)[0] == 0.36
-    assert microscope_db.gamma_of(dict(movie, values={"gamma": 0.1}), 670.0) == (0.1, "M2's entry")
+    entry.pupils["other"] = dict(PUPIL, gamma=0.2, na=1.41, wavelength_nm=580.0)    # its NA learnt: held with it
+    assert microscope_db.gamma_of(movie, 600.0)[:2] == (0.2, 1.41) and microscope_db.gamma_of(movie, 670.0)[0] == 0.36
+    assert microscope_db.gamma_of(dict(movie, values={"gamma": 0.1}), 670.0) == (0.1, None, "M2's entry")
 
 
 def test_a_pupil_is_kept_only_for_a_recognised_microscope_in_its_current_setup(config):

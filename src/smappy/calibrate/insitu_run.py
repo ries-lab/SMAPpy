@@ -371,14 +371,14 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
             # γ is the microscope's (its objective's apodisation), not the sample's: from its entry, and only
             # as a last resort a nominal value, which can move the learnt astigmatism by tenths of a radian
             from ..microscope_db import gamma_of
-            gamma, where = gamma_of(getattr(rois.camera, "microscope", None), o.wavelength_nm)
+            gamma, na, where = gamma_of(getattr(rois.camera, "microscope", None), o.wavelength_nm)
             if gamma is None:
                 from uipsf.model.build import NOMINAL_GAMMA
                 gamma, where = NOMINAL_GAMMA, "a nominal value"
                 messages.append(f"warning: the microscope gives no γ -- held at the nominal {NOMINAL_GAMMA}, "
                                 f"which can bias the astigmatism; learn a bead model of this microscope and "
                                 f"add it to the microscope, or type its gamma in the entry")
-            held = Held(gamma=gamma, source=where)
+            held = Held(gamma=gamma, na=na, source=where)
         elif not held.source:
             messages.append("nothing to hold: no start model and no pupil kept with the microscope; the "
                             "magnitude is learnt and the focus pinned")

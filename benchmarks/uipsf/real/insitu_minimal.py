@@ -1,7 +1,8 @@
 """In situ on the minimal model, as the window runs it: γ held from a minimal bead model, no SAF damping, the
 phase above the order held, σ round or free (November 2026, roadmap item 9).
 
-    python benchmarks/uipsf/real/insitu_minimal.py beads BEAD_ACQUISITION --model M.uipsf.h5 [--region X Y W H]
+    python benchmarks/uipsf/real/insitu_minimal.py beads BEAD_ACQUISITION --model M.uipsf.h5 [--region X Y W H] \\
+        [--learn-na] [--blur fixed --blur-nm 0]
     python benchmarks/uipsf/real/insitu_minimal.py learn --rois R.pkl --model M.uipsf.h5 --blur round|free \\
         --start bead|cold [--max-haze 1.5] [--out results/insitu_minimal.jsonl]
     python benchmarks/uipsf/real/insitu_minimal.py score --rois R.pkl --runs TAG [TAG ...]
@@ -66,14 +67,16 @@ def beads(args):
     import uipsf
     files = sorted(glob.glob(os.path.join(args.acquisition, "*", "*.ome.tif")))
     t0 = time.perf_counter()
-    model = BeadSettings(psf=PSFModelSettings(zernike_order=BEAD_ORDER, blur=args.blur), bead_diameter_nm=BEAD_NM)
+    model = BeadSettings(psf=PSFModelSettings(zernike_order=BEAD_ORDER, blur=args.blur, blur_nm=args.blur_nm,
+                                              learn_na=args.learn_na), bead_diameter_nm=BEAD_NM)
     detection = CalibrationSettings(region=tuple(args.region)) if args.region else None
     run = run_calibration(files, False, optics(), model, detection=detection, run=RunSettings(save_model=False))
     cal = run.cal
     uipsf.save_model(cal, args.model)
     d = describe(args.model)
     emit(dict(step="beads", acquisition=os.path.basename(os.path.normpath(args.acquisition)), blur=args.blur,
-              used=len(cal.beads.used), gamma=d.get("gamma"), sigma_nm=d.get("sigma_nm"),
+              used=len(cal.beads.used), learn_na=args.learn_na, na=d.get("na"),
+              objective=round(float(cal.result.objective), 1), gamma=d.get("gamma"), sigma_nm=d.get("sigma_nm"),
               phase_rad={j: round(phase_rad(d, j), 4) for j in (5, 6, 11, 12, 22)},
               minutes=round((time.perf_counter() - t0) / 60, 2)), args.out)
 
@@ -186,7 +189,10 @@ def main():
     b = sub.add_parser("beads")
     b.add_argument("acquisition")
     b.add_argument("--model", required=True)
-    b.add_argument("--blur", choices=("round", "free"), default="round")
+    b.add_argument("--blur", choices=("round", "free", "fixed"), default="round")
+    b.add_argument("--blur-nm", type=float, default=20.0, help="the blur's start, or its value when fixed (0: the "
+                   "pixel's blur alone)")
+    b.add_argument("--learn-na", action="store_true", help="learn the aperture's NA too")
     b.add_argument("--region", type=int, nargs=4, default=None, metavar=("X", "Y", "W", "H"))
     le = sub.add_parser("learn")
     le.add_argument("--rois", required=True)
