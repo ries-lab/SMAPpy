@@ -101,7 +101,7 @@ def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecul
     window.sample_box.setCurrentText("molecules on the coverslip in a z stack")
     methods = [window.method_box.itemText(i) for i in range(window.method_box.count())]
     assert methods == ["pupil model (uiPSF)", "elliptical Gaussian"]
-    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel"]
+    assert [window.mode_box.itemText(i) for i in range(window.mode_box.count())] == ["Single channel", "Dual colour"]
     shown = {k: v.isVisibleTo(window) for k, v in window.sections.items()}
     assert shown["molecules"] and shown["model"] and not shown["beads"] and not shown["in situ"]
     assert window.detect_button.text() == "Detect molecules"
