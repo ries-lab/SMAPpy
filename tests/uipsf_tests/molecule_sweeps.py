@@ -5,7 +5,6 @@ over a flat background, Poisson, in ADU on the camera's offset."""
 from __future__ import annotations
 
 import numpy as np
-
 from smappy.camera import CameraMetadata
 
 CAMERA = CameraMetadata(conversion=1.0, offset=100.0, pixelsize_um=0.11, read_noise_e=1.0)
@@ -18,8 +17,8 @@ def truth_model(optics, height_nm: float = 10.0, gamma: float = 0.5, sigma_nm: f
     """(model, shared values): a minimal pupil of ``order`` with `PHASE_NM`, γ, σ and the molecules at
     ``height_nm`` above the glass, as `molecule_stack_model` builds it for one sweep."""
     import torch
-
     from smappy.calibrate.pupil import PSFModelSettings
+
     from uipsf.params import Params
     from uipsf.simulate import template
     from uipsf.workflows.calibrate import molecule_stack_model

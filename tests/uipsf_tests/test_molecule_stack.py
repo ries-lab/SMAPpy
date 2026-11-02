@@ -3,9 +3,9 @@
 (`molecule_stack_run`)."""
 import numpy as np
 import pytest
+from smappy.calibrate.molecule_stack import MoleculeStackSettings, molecule_rois, read_file, split_sweeps
 
 import uipsf
-from smappy.calibrate.molecule_stack import MoleculeStackSettings, molecule_rois, read_file, split_sweeps
 from uipsf_tests.molecule_sweeps import CAMERA, PHASE_NM, write_sweeps
 
 OPTICS = uipsf.Optics(NA=1.45, wavelength_nm=680.0, n_imm=1.518, n_med=1.334, pixel_size_nm=(110.0, 110.0))

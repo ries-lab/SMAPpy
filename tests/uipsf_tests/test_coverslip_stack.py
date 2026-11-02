@@ -104,7 +104,8 @@ def stack_molecules(sweeps=3, per_frame=6, step_nm=100.0, span_nm=900.0, height_
     values = {"pupil.phase": phase, "pupil.gamma": torch.tensor(gamma, dtype=dtype),
               "psf.sigma": torch.tensor([20.0], dtype=dtype),
               "geometry.focus": torch.tensor(foci[:sweeps], dtype=dtype),
-              "geometry.plane": torch.tensor(plane, dtype=dtype), "geometry.height": torch.tensor(height_nm, dtype=dtype),
+              "geometry.plane": torch.tensor(plane, dtype=dtype),
+              "geometry.height": torch.tensor(height_nm, dtype=dtype),
               "emitter.xyz": torch.cat([xy, torch.zeros(E, 1, dtype=dtype)], 1),
               "emitter.photons": torch.tensor(rng.uniform(3000, 6000, E), dtype=dtype),
               "emitter.background": torch.full((E,), 15.0, dtype=dtype)}

@@ -1,4 +1,6 @@
-"""Learning from single molecules on the coverslip through repeated z sweeps, in rounds (`docs/uipsf/molecule-stacks.md`).
+"""Learning from single molecules on the coverslip through repeated z sweeps, in rounds.
+
+`docs/uipsf/molecule-stacks.md` says what the sample is and what was found on it.
 
 Each detection is its own emitter, a molecule seen in one frame, with its z known: the stage's, less its
 sweep's focus and the focal plane at its place (`CoverslipStackGeometry`).  So this is a bead calibration
