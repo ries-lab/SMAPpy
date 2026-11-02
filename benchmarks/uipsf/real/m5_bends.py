@@ -31,17 +31,24 @@ PIXEL = (104.7, 106.4)
 
 
 def per_bead(run, centre_nm) -> dict:
-    """The slice fits against the stack fit, per bead: (found − where) [E, K, 3] nm, its CRLB, z about focus."""
+    """The slice fits against the stack fit, per bead: (found − where) [E, K, 3] nm, its CRLB, z about focus, and
+    where the stack fit puts each slice in its ROI (nm), whose remainder by the pixel is the bead's phase; each
+    slice's photons, and its camera frame (`Batch.frame`, one number per frame of each stack, so two beads in one
+    frame share it: their errors there share the stage's and the laser's) and stack."""
     from uipsf.workflows.beads import MAX_DZ_NM
     from uipsf.workflows.scoring import slice_fits
     cal = run.cal
     used = torch.as_tensor(np.asarray(cal.beads.used))
     batch = run.rois.batch.subset(used).thinned(MAX_DZ_NM)
-    found, crlb, where = slice_fits(cal.model, cal.shared(), batch, run.rois.noise, cal.result.params)
+    found, crlb, where, photons = slice_fits(cal.model, cal.shared(), batch, run.rois.noise, cal.result.params,
+                                             photons=True)
     stage = np.broadcast_to(batch.z_nm.cpu().double().numpy(), where.shape[:2])
     k = np.abs(stage - np.asarray(centre_nm, float)[:, None]).argmin(1)
     z = where[..., 2] - where[np.arange(len(k)), k, 2][:, None]        # each bead's z about its own focus
-    return dict(error=np.asarray(found - where), crlb=np.asarray(crlb), z=np.asarray(z))
+    frame = batch.frame.cpu().numpy() if batch.frame is not None else np.full(where.shape[:2], -1)
+    stack = batch.stack_id.cpu().numpy() if batch.stack_id is not None else np.full(len(k), -1)
+    return dict(error=np.asarray(found - where), crlb=np.asarray(crlb), z=np.asarray(z), where=np.asarray(where),
+                photons=np.asarray(photons), frame=frame, stack=stack)
 
 
 def learn(args):

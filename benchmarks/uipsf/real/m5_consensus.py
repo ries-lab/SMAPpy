@@ -68,10 +68,10 @@ ESTIMATORS = ("median", "weighted", "joint")
 #: the m ≠ 0 magnitude modes the minimal model learns, by name: "x6" the first choice (above 0.01 in every run,
 #: but coma and secondary coma in x only, so a drift in y through focus went unexplained); "xy8" every pair in
 #: x and y (tilt 2/3, astigmatism 5/6, coma 7/8, secondary coma 16/17); "-<pair>" xy8 without that pair, to see
-#: which pairs are needed (the user's, 1 November 2026)
+#: which pairs are needed (the user's, 1 November 2026); "m0" none, the minimal0 model of `m5_media_psfs.py`
 PAIRS = {"tilt": (2, 3), "astig": (5, 6), "coma": (7, 8), "coma2": (16, 17)}
 XY8 = (2, 3, 5, 6, 7, 8, 16, 17)
-MODE_SETS = {"x6": (2, 3, 5, 6, 8, 16), "xy8": XY8} | {
+MODE_SETS = {"m0": (), "x6": (2, 3, 5, 6, 8, 16), "xy8": XY8} | {
     f"-{name}": tuple(j for j in XY8 if j not in pair) for name, pair in PAIRS.items()}
 
 
@@ -93,7 +93,7 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
     class Build(ZernikePupil):
         # a class, not a function: the module also asks isinstance(pupil, ZernikePupil)
         def __new__(cls, grid, n_max, **kwargs):
-            return EdgePupil(grid, n_max, centre="cos", edge="hard", asymmetric=True, asym_modes=tuple(modes),
+            return EdgePupil(grid, n_max, centre="cos", edge="hard", asymmetric=bool(modes), asym_modes=tuple(modes),
                              saf=ring, ring="bead" if form == "bead s" else "height",
                              saf_step=ring and form == "bead s",
                              held_magnitude=held_magnitude,
@@ -197,6 +197,7 @@ def main():
     ap.add_argument("--estimators", nargs="+", default=list(ESTIMATORS), choices=ESTIMATORS)
     ap.add_argument("--npz-dir", default=None,
                     help="also keep each fit's images, slice fits and bends for `m5_scorecard.py` and the figures")
+    ap.add_argument("--free-only", action="store_true", help="the free minimal fits alone: no references, no consensus")
     ap.add_argument("--centre", type=float, default=0.5, help="the central fraction of the width and height")
     ap.add_argument("--z-range", type=float, default=600.0)
     ap.add_argument("--window", type=float, default=1000.0)
@@ -274,14 +275,15 @@ def main():
         _, cond, _, bead_nm = acquisition(path)
         ring = cond["medium"] == "mismatch"
         # the references learn no minimal modes: "none" in their key and their file's name
-        fit(path, "zernike", "none", None, use_pupil("zernike"), "free", {}, "none")
-        fit(path, "zernike fixed σ", "none", None, use_pupil("zernike"), "fixed", {}, "none")
+        if not args.free_only:
+            fit(path, "zernike", "none", None, use_pupil("zernike"), "free", {}, "none")
+            fit(path, "zernike fixed σ", "none", None, use_pupil("zernike"), "fixed", {}, "none")
         for modes, blur in itertools.product(args.mode_sets, args.blurs):
             for form in (args.forms if ring else ["none"]):
                 fit(path, "free", form, None, minimal(form, ring, MODE_SETS[modes], {}, {}, bead_nm), blur, {},
                     modes)
     # 3: γ and the asymmetric modes held at the others' consensus
-    for path in args.acquisitions:
+    for path in ([] if args.free_only else args.acquisitions):
         name, cond, _, bead_nm = acquisition(path)
         ring = cond["medium"] == "mismatch"
         for modes, blur, form, estimator in itertools.product(args.mode_sets, args.blurs, args.consensus_forms,
