@@ -33,9 +33,11 @@ from .pupil import MinimalPupil, ZernikePupil, minimal_grid_optics
 @dataclass
 class Held:
     """What a model holds from another's description (`held_from`): phase modes in radians of this model's
-    wavelength, a minimal pupil's γ, or Zernike magnitude modes; ``source`` says where they came from."""
+    wavelength, a minimal pupil's γ and learnt NA, or Zernike magnitude modes; ``source`` says where they came
+    from."""
     phase: dict[int, float] = field(default_factory=dict)
     gamma: float | None = None
+    na: float | None = None
     magnitude: dict[int, float] = field(default_factory=dict)
     source: str = ""
 
@@ -74,17 +76,18 @@ def make_pupil(optics, spec, held: Held | None = None, *, grid: PupilGrid | None
                magnitude_override: list[int] | None = None, z_max_nm: float = 0.0, device=None,
                dtype=torch.float32):
     """The pupil ``spec`` describes for the objective ``optics`` (its NA the aperture), on ``grid`` or a new
-    `pupil_grid`.  ``held`` holds phase modes and, by its kind, γ or magnitude modes; a spec whose magnitude
-    cannot hold them is refused, rather than the held part silently dropped.  ``magnitude_override`` replaces
-    a Zernike magnitude's modes (4Pi's typed ones)."""
+    `pupil_grid`.  ``held`` holds phase modes and, by its kind, γ (and a learnt NA) or magnitude modes; a spec
+    whose magnitude cannot hold them is refused, rather than the held part silently dropped.
+    ``magnitude_override`` replaces a Zernike magnitude's modes (4Pi's typed ones)."""
     held = held or Held()
     grid = grid if grid is not None else pupil_grid(optics, spec, z_max_nm, device=device, dtype=dtype)
     n_max = int(spec.order)
     if spec.magnitude == "minimal":
         if held.magnitude:
             raise ValueError("a minimal pupil cannot hold Zernike magnitude modes: hold a minimal model's γ")
-        return MinimalPupil(grid, n_max=n_max, na=optics.NA, held_phase=held.phase,
-                            saf_damping=spec.saf_damping, held_gamma=held.gamma)
+        return MinimalPupil(grid, n_max=n_max, na=optics.NA if held.na is None else held.na,
+                            held_phase=held.phase, saf_damping=spec.saf_damping, held_gamma=held.gamma,
+                            learn_na=bool(getattr(spec, "learn_na", False)) and held.na is None)
     if held.gamma is not None:
         raise ValueError("a Zernike pupil cannot hold a minimal model's γ: choose the minimal magnitude")
     modes = magnitude_override if magnitude_override is not None else magnitude_modes(n_max, spec.magnitude)
@@ -121,7 +124,8 @@ def held_from(description: dict | None, order: int, wavelength_nm: float, every:
     phase = {int(j): 2 * math.pi * float(nm) / float(wavelength_nm)
              for j, nm in (description.get("phase_nm") or {}).items() if every or noll_to_nm(int(j))[0] > order}
     if description.get("kind") == "minimal":
-        return Held(phase, gamma=float(description["gamma"]), source=source)
+        na = description.get("na")
+        return Held(phase, gamma=float(description["gamma"]), na=None if na is None else float(na), source=source)
     magnitude = {int(j): float(v) for j, v in (description.get("magnitude") or {}).items()
                  if int(j) > 1 and (every or noll_to_nm(int(j))[1] == 0)}
     return Held(phase, magnitude=magnitude, source=source)
@@ -141,6 +145,8 @@ def start_from(pupil, description: dict | None, wavelength_nm: float) -> dict:
     if isinstance(pupil, MinimalPupil):
         if pupil.held_gamma is None and description.get("gamma") is not None:
             out["pupil.gamma"] = torch.tensor(float(description["gamma"]), dtype=dtype)
+        if pupil.learn_na and description.get("na") is not None:
+            out["pupil.na"] = torch.tensor(float(description["na"]), dtype=dtype)
     elif pupil.magnitude_modes and description.get("magnitude"):
         out["pupil.magnitude"] = torch.tensor([float(description["magnitude"].get(str(j), 0.0))
                                                for j in pupil.magnitude_modes], dtype=dtype)

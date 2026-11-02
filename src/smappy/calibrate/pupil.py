@@ -102,6 +102,11 @@ class PSFModelSettings:
     saf_damping: bool = param(True, label="SAF damping", advanced=True,
                               help="minimal magnitude: learn a damping of the supercritical-angle ring, the "
                                    "light beyond the critical angle; off: the ring of a point on the coverslip")
+    # the aperture's NA learnt (`MinimalPupil.learn_na`): an option, not the default (the user's, November 2026) --
+    # the 4Pi beads wanted 0.97 of the objective's NA and one objective's 0.98, which is not yet understood
+    learn_na: bool = param(False, label="learn NA", advanced=True,
+                           help="minimal magnitude: learn the aperture's NA, an effective one at most 5 % above "
+                                "the objective's; off: the objective's NA as typed")
 
     def __post_init__(self):
         if self.magnitude not in dict(MAGNITUDES):
@@ -163,11 +168,12 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     that there is supercritical light to damp.
 
     In situ decides the magnitude by its *hold* (a bead model's γ held, or γ learnt) and never learns the
-    SAF damping, the bead's size or the stage's drift, which are the beads'; field dependence is for one
+    NA (a held γ brings a bead model's learnt one along), the SAF damping, the bead's size or the stage's drift, which are the beads'; field dependence is for one
     channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in situ, where molecules
     above the glass see it; for beads only through a coverslip of another index."""
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
+            "psf.learn_na": beads and magnitude == "minimal",
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
             "fit_tilt": not beads or layered}
 

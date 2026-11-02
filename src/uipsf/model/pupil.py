@@ -145,8 +145,12 @@ class MinimalPupil(ZernikePupil):
       model puts at the glass; one parameter, learnt with ``saf_damping`` (the default).  It belongs to the beads,
       as their size does: a spline for single molecules is drawn with h = 0 (`export.sample_psf`), their light
       beyond the critical angle following the physics of their own depth.
-    - **the aperture**, held: a cutoff at the objective's ``na`` of the width of a pupil sample, on a grid
-      reaching `GRID_MARGIN` beyond it (`minimal_grid_optics`), so the aperture is not the grid's edge.
+    - **the aperture**: a cutoff at the objective's ``na`` of the width of a pupil sample, on a grid
+      reaching `GRID_MARGIN` beyond it (`minimal_grid_optics`), so the aperture is not the grid's edge.  Held
+      by default; with ``learn_na`` the NA is a parameter, ``pupil.na``: the 4Pi beads of Zenodo wanted an
+      effective NA of 1.31-1.32 behind objectives of 1.35, one objective's beads 1.40 behind 1.43 -- 9 700
+      nats on the 4Pi beads (docs/4pi.md §23).  Why the aperture is smaller is not settled (a medium of
+      lower index than assumed would cut it at n_med), so it is an option, not the default.
 
     No m ≠ 0 magnitude: free, the asymmetric modes won nats on every M5 set, but held at the other sets'
     consensus they cost 2-36 k nats each -- they follow the acquisition, not the objective.  The parameters
@@ -156,10 +160,11 @@ class MinimalPupil(ZernikePupil):
 
     def __init__(self, grid: PupilGrid, n_max: int = 6, na: float | None = None, held_phase: dict | None = None,
                  phase_modes: list[int] | None = None, saf_damping: bool = True, held_gamma: float | None = None,
-                 held_ring_h: float | None = None):
+                 held_ring_h: float | None = None, learn_na: bool = False):
         """``held_gamma`` / ``held_ring_h`` hold γ and h at given values, as ``held_phase`` holds modes: no
         parameters then.  In situ holds a bead model's γ (`model.build.Held`): learnt from molecules the
-        magnitude trades with the focus, as the symmetric Zernikes did."""
+        magnitude trades with the focus, as the symmetric Zernikes did.  ``learn_na`` learns the aperture's NA
+        from ``na`` (`aperture`)."""
         super().__init__(grid, n_max=n_max, phase_modes=phase_modes, magnitude_modes=[], held_phase=held_phase)
         o = grid.optics
         self.na = float(o.NA / GRID_MARGIN if na is None else na)
@@ -169,6 +174,7 @@ class MinimalPupil(ZernikePupil):
         self.ring = self.saf_damping and o.n_med < self.na
         self.held_gamma = None if held_gamma is None else float(held_gamma)
         self.held_ring_h = None if held_ring_h is None else float(held_ring_h)
+        self.learn_na = bool(learn_na)
         rho = grid.rho.real if grid.rho.is_complex() else grid.rho
         self._extras(rho, grid.size)
 
@@ -181,12 +187,23 @@ class MinimalPupil(ZernikePupil):
         width = max(0.01, 1.0 / size)
         self.cutoff = torch.sigmoid((self.na / self.grid_na - rho) / width)
 
+    def _cutoff(self, na):
+        """The aperture at ``na`` (a tensor, [...]): the held one's sigmoid, [..., P, P]."""
+        rho = self.grid.rho.real if self.grid.rho.is_complex() else self.grid.rho
+        width = max(0.01, 1.0 / self.grid.size)
+        return torch.sigmoid((na[..., None, None] / self.grid_na - rho) / width)
+
     def specs(self) -> list[ParamSpec]:
         extra = []
         if self.held_gamma is None:
             extra.append(ParamSpec("pupil.gamma", (), init=0.05, transform=Bounded(0.0, 2.0)))
         if self.ring and self.held_ring_h is None:
             extra.append(ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0)))
+        if self.learn_na:
+            # from just below the objective's: an aperture started at its bound would not move; 5 % above it
+            # so that the data can say the nominal NA is right
+            extra.append(ParamSpec("pupil.na", (), init=0.98 * self.na,
+                                   transform=Bounded(0.8 * self.na, min(1.05 * self.na, self.grid_na))))
         return super().specs() + extra
 
     def gamma(self, p) -> torch.Tensor:
@@ -197,12 +214,16 @@ class MinimalPupil(ZernikePupil):
         """h, nm: the learnt one, or the held one."""
         return p["pupil.ring_h"] if self.held_ring_h is None else self.grid.rho.real.new_tensor(self.held_ring_h)
 
+    def aperture(self, p) -> torch.Tensor:
+        """The aperture's NA: the learnt one, or the objective's."""
+        return p["pupil.na"] if self.learn_na else self.grid.rho.real.new_tensor(self.na)
+
     def truncated(self, n_max: int) -> MinimalPupil:
         new = super().truncated(n_max)
         out = object.__new__(MinimalPupil)
         out.__dict__.update(new.__dict__)
         for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "saf_damping", "ring", "held_gamma",
-                  "held_ring_h", "cos_imm", "kappa", "cutoff"):
+                  "held_ring_h", "learn_na", "cos_imm", "kappa", "cutoff"):
             setattr(out, k, getattr(self, k))
         return out
 
@@ -213,7 +234,9 @@ class MinimalPupil(ZernikePupil):
         if self.ring:
             k = self.kappa if kappa is None else kappa
             out = out * torch.exp(-2 * math.pi * k * self.ring_h(p)[..., None, None])
-        return out * (self.cutoff if cutoff is None else cutoff)
+        if cutoff is None:
+            cutoff = self._cutoff(p["pupil.na"]) if self.learn_na else self.cutoff
+        return out * cutoff
 
     def __call__(self, p):
         magnitude, phase = super().__call__(p)
@@ -224,6 +247,8 @@ class MinimalPupil(ZernikePupil):
         out = {"gamma": float(self.gamma(p))}
         if self.ring:
             out["ring_h_nm"] = float(self.ring_h(p))
+        if self.learn_na:
+            out["na"] = float(self.aperture(p))
         return out
 
     def without_ring(self) -> MinimalPupil:
@@ -236,9 +261,13 @@ class MinimalPupil(ZernikePupil):
         return out
 
     def describe(self, p) -> dict:
-        """The pupil's hand-over description (`ZernikePupil.describe`): kind "minimal", the phase in nm and γ.
-        h is left out: it is the beads', and nothing downstream holds it."""
-        return dict(super().describe(p), kind="minimal", gamma=round(float(self.gamma(p)), 4))
+        """The pupil's hand-over description (`ZernikePupil.describe`): kind "minimal", the phase in nm, γ and
+        a learnt NA (``na``), which a model holding γ holds too (`model.build.held_from`): the objective's, as γ
+        is.  h is left out: it is the beads', and nothing downstream holds it."""
+        out = dict(super().describe(p), kind="minimal", gamma=round(float(self.gamma(p)), 4))
+        if self.learn_na:
+            out["na"] = round(float(self.aperture(p)), 4)
+        return out
 
 
 class PixelPupil:

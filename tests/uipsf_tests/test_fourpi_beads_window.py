@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from smappy import fourpi
 from smappy.calibrate.fourpi_beads import FourPiBeadSettings, bead_fits, scan_beads, scan_step_nm
+from smappy.calibrate.pupil import PSFModelSettings
 from smappy.channels import from_corners
 from smappy.metadata import CameraMetadata
 
@@ -80,6 +81,14 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
     window.fourpi_form.set(FourPiBeadSettings(layout="typed"))
     window._show_fourpi()
     assert window.fourpi_form.fields["x_corners"].isVisibleTo(window)
+    # the magnitude modes are a Zernike magnitude's: hidden for the minimal model, shown for Zernikes (a row
+    # under "more", folded, so its row's visibility is asked)
+    form = window.fourpi_form
+    modes_row = lambda: form.row_layouts["magnitude_modes"].isRowVisible(form.fields["magnitude_modes"])  # noqa: E731
+    assert not modes_row()
+    form.set(FourPiBeadSettings(layout="typed", psf=PSFModelSettings(magnitude="symmetric")))
+    window._show_fourpi()
+    assert modes_row()
     # in situ has no 4Pi mode yet: choosing it goes back to one channel
     window.method_box.setCurrentText("in situ (blinking molecules)")
     assert window.mode_box.currentText() == "Single channel" and window.sections["4Pi"].isHidden()
@@ -263,6 +272,20 @@ def test_a_bead_far_brighter_or_dimmer_than_the_median_is_an_outlier():
                         [{"brightness": b} for b in light])
     assert brightness_outliers(beads, 2.5) == [4, 5]
     assert brightness_outliers(beads, 0) == []
+
+
+def test_the_4pi_form_learns_the_minimal_model_with_one_gamma_and_shows_what_it_reads():
+    """The 4Pi form's PSF model is one objective's minimal model (docs/4pi.md §23): cos θ^γ, one γ for both
+    objectives, σ round over the pixel's blur; no SAF damping (index-matched), and magnitude modes only for a
+    Zernike magnitude."""
+    from smappy.calibrate.fourpi_beads import fourpi_shown
+    settings = FourPiBeadSettings()
+    assert settings.psf == PSFModelSettings() and settings.psf.magnitude == "minimal"
+    assert settings.psf.blur == "round" and settings.psf.pixel_blur and settings.same_magnitude
+    shown = fourpi_shown(settings)
+    assert not shown["psf.saf_damping"] and not shown["magnitude_modes"] and not shown["x_corners"]
+    for magnitude, modes in (("symmetric", True), ("free", True), ("fixed", False)):
+        assert fourpi_shown(FourPiBeadSettings(psf=PSFModelSettings(magnitude=magnitude)))["magnitude_modes"] is modes
 
 
 def test_the_magnitude_modes_are_read_as_noll_indices():

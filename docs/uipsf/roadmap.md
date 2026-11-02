@@ -73,8 +73,10 @@ when a milestone lands or an item moves.
    **One PSF model** (November 2026, architecture "One PSF model"): one settings section
    (`PSFModelSettings`), one builder (`model.build`), one point-emitter view (`VectorPSF.for_emitters`) and
    one hand-over (`VectorPSF.describe`); in situ holds a bead model's γ and the phase above the order, and a
-   round blur is the default there too.  Next: in situ's full minimal workflow; 4Pi learnt with the minimal
-   pupil and retested on Zenodo (wired: one γ under *same magnitude*, the builder's grid margin); field
+   round blur is the default there too.  4Pi learns the minimal pupil, one γ for both objectives (`docs/4pi.md` §23):
+   as good as the symmetric Zernikes with an effective NA (0.976 of nominal), 9 700 nats behind at the nominal
+   one; the NA is typed by default, *learn NA* (`MinimalPupil.learn_na`) an option, and why the aperture is
+   that small is open -- next, learning the sample's index (n_med) as its cause.  Next: in situ's full minimal workflow; field
    dependence built through the builder; why M5's 40 nm beads learn a lower γ than its 100 nm beads.
    To revisit: γ is learnt per channel in a dual calibration and kept per colour -- if the channels' γ come
    out alike, one shared γ; in situ's blur round by default, *free* kept as an option until in situ is

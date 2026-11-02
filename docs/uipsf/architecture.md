@@ -2231,8 +2231,8 @@ the beads' ring damping for molecules.  Now there is one of each:
 
 - **One description of the choices**: `smappy.calibrate.pupil.PSFModelSettings` (Zernike order, magnitude,
   blur, blur σ, pixel blur, SAF damping), a section of `BeadSettings` (one or two channels), of the window's in
-  situ run (which reads it from the same form) and of `FourPiBeadSettings` (its own defaults: symmetric
-  Zernikes, 60 nm, no pixel blur, the choices 4Pi was checked with).  Each workflow keeps only its own fields
+  situ run (which reads it from the same form) and of `FourPiBeadSettings` (the same defaults, *same magnitude*
+  on: one γ for both objectives; `docs/4pi.md` §23).  Each workflow keeps only its own fields
   beside it; the form shows what a method reads (`model_shown`: in situ hides the magnitude, the SAF damping,
   the bead's size, the drift and field dependence; the SAF damping only for a minimal magnitude below the NA).
   A model file keeps the options nested (``psf``), version 6.
@@ -2262,8 +2262,16 @@ the beads' ring damping for molecules.  Now there is one of each:
 The user's decisions behind it: γ per channel in a dual calibration, and per colour in the microscope
 database -- to revisit: if the channels' γ come out alike, one shared γ; σ round by default everywhere, in situ
 included (*free* stays an option until in situ is optimised); 4Pi gets one γ for both objectives under *same
-magnitude* (`fourpi.MAGNITUDE`) and the same grid margin as one objective, its learning with the minimal pupil
-left to a later session; no legacy for the old kept pupils.
+magnitude* (`fourpi.MAGNITUDE`) and the same grid margin as one objective; no legacy for the old kept pupils.
+
+**4Pi on the minimal pupil** (`docs/4pi.md` §23): the form's default since November 2026.  On uiPSF v1's 18
+Zenodo 4Pi beads it is 9 700 nats behind the symmetric Zernikes at the nominal NA (1.35) and 4 900 ahead with
+the aperture at 1.32, the effective NA 0.976 of the nominal one, as one objective's beads found (1.40 against
+1.43); one γ costs nothing against one per objective (0.400 / 0.405).  `FourPiModel` had ignored
+``pixel_blur`` since the builder came in (it blurred by `blur(p)`); it now blurs by `image_sigma(p)` as
+`VectorPSF` does.  The aperture can be learnt (`MinimalPupil(learn_na=True)`, *learn NA*; `pupil.na`, shared
+under *same magnitude* as γ is, described as ``na`` and held with γ by `held_from`), but the default is the typed
+NA: why the aperture is that small is open (§23 there).
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

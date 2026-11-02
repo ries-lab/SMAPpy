@@ -659,8 +659,13 @@ them.
 ### PSF model
 The PSF model's choices, one section wherever a model is learnt -- beads in
 one or two channels, in situ, 4Pi -- so that the same choices build the same
-model in each.  In the *4Pi* mode it starts on *symmetric Zernike* with a
-60 nm blur and no pixel blur, the choices 4Pi was checked with.
+model in each, the *4Pi* mode too: *minimal*, one γ for both objectives
+(*same magnitude*), a round blur over the pixel's own.  On uiPSF's 4Pi
+beads the minimal pupil fitted as well as the rotationally symmetric
+Zernikes, with fewer numbers, once the NA under *microscope* was the
+objective's effective one: 1.32 for its nominal 1.35.  At the nominal NA
+it fitted 1 % worse and bent the envelope's z by up to 9 nm, against 5 nm;
+an objective passes less light at its very edge than its NA promises.
 
 ### Zernike order
 The highest radial order of the pupil's modes.  Higher orders describe finer
@@ -705,6 +710,18 @@ On by default.  Off, the learnt blur includes the pixel's width, as models
 learnt before November 2026 did; their *blur σ* was larger by about the
 pixel's 30 nm in quadrature.  A *start from* model of the other kind is
 converted, the image's blur kept.
+
+### learn NA
+Off by default, for *minimal* only: the aperture then cuts at the NA under
+*microscope*.  On, the NA is learnt -- an effective NA, between 0.8 of the
+typed one and 5 % above it -- and saved with the model; an in situ model that
+holds the beads' γ holds their NA with it.  On uiPSF's 4Pi beads it came out
+at 1.31 behind objectives of 1.35, and M5's beads wanted 1.40 behind 1.43.
+Why an objective's aperture should be that much smaller is not understood
+yet -- a sample of lower index than assumed would cut the light at its own
+index too -- so typing the effective NA, or learning it here, are both
+offered; the rotationally symmetric Zernikes (*symmetric Zernike*) take an
+edge inside the aperture up by themselves.
 
 ### drift
 *linear per stack* by default, two numbers per stack; *free per slice* two per
@@ -786,8 +803,9 @@ one -- two beads stuck together, or a speck.  The marked beads stay in the
 table, and *Exclude / include* lets them in again.
 
 ### magnitude modes
+Shown for a Zernike *pupil magnitude* only: the minimal one has no modes.
 *auto* takes the modes the *PSF model*'s *pupil magnitude* says: on
-*symmetric Zernike*, its default here, the rotationally symmetric modes up to
+*symmetric Zernike* the rotationally symmetric modes up to
 the *Zernike order* -- Noll 4, 11 and 22 up to the 6th -- for the vectorial
 model, and every mode for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
 an empty field or *none* holds the magnitude flat.  On eight of uiPSF's
@@ -795,9 +813,10 @@ example beads, 4 and 11 alone fitted 1 % worse than *auto*, and a flat
 magnitude 11 % worse: the apodisation matters.
 
 ### same magnitude
-Both objectives get one magnitude shape, as twin objectives have -- with a
-*minimal* magnitude, one γ; how much light each arm brings is learnt apart
-either way.  On eight of uiPSF's
+On by default: both objectives get one magnitude shape, as twin objectives
+have -- with a *minimal* magnitude, one γ; how much light each arm brings is
+learnt apart either way.  On uiPSF's 18 example beads a γ per objective
+came out 0.400 and 0.405 and fitted no better.  On eight of uiPSF's
 example beads the two objectives, left free, learnt nearly the same
 magnitude, and one shared magnitude fitted as well (0.01 % apart) in two
 thirds of the time.
