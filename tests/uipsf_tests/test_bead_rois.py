@@ -120,10 +120,10 @@ def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
     learnt by `calibrate_beads`."""
     import uipsf
     from uipsf.simulate import parameters, template
-    from uipsf.workflows import BeadSettings, bead_model, calibrate_beads
+    from uipsf.workflows import BeadSettings, PSFModelSettings, bead_model, calibrate_beads
     optics = uipsf.Optics(NA=1.43, wavelength_nm=660, n_imm=1.518, n_med=1.33, pixel_size_nm=(110.0, 110.0))
     roi, K, n = 15, 21, 8
-    truth = BeadSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False)
+    truth = BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False))
     model = bead_model(optics, truth, (roi, roi), z_max_nm=1000, device="cpu")
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[:4] = torch.tensor([0.6, -0.3, 0.2, 0.15])
@@ -146,7 +146,8 @@ def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
                        slices=slice(None))
     found = np.array(sorted((r["x_px"], r["y_px"]) for r in rois.records))
     assert len(found) == n and np.abs(found - np.array(sorted(centres))).max() <= 1   # an aberrated spot
-    cal = calibrate_beads(rois.batch, optics, BeadSettings(zernike_order=4), noise=rois.noise, device="cpu")
+    cal = calibrate_beads(rois.batch, optics, BeadSettings(psf=PSFModelSettings(zernike_order=4)), noise=rois.noise,
+                          device="cpu")
     assert torch.allclose(cal.shared()["pupil.phase"][:4].cpu(), phase[:4], atol=0.02)
 
 

@@ -42,7 +42,7 @@ from __future__ import annotations
 import torch
 
 # The choices live in smappy, torch-free, so its window builds the form without torch installed.
-from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings  # noqa: F401
+from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings, PSFModelSettings  # noqa: F401
 
 from ..model import (
     BeadStackGeometry,
@@ -52,11 +52,9 @@ from ..model import (
     MinimalPupil,
     VectorPSF,
     ZernikePupil,
-    minimal_grid_optics,
 )
+from ..model.build import Held, magnitude_modes, make_psf  # noqa: F401  (magnitude_modes: callers import it here)
 from ..model.channels import prefix
-from ..optics import PupilGrid, choose_pupil_size
-from ..optics.zernike import noll_to_nm, zernike_modes
 from .beads import Calibration, learn_beads
 from .rejection import RejectionSettings
 
@@ -83,52 +81,29 @@ def gaussian_transforms(model, batch) -> dict:
             and g["transform_fit"][c]["rms_px"] <= GAUSS_MAX_RMS_PX}
 
 
-def magnitude_modes(n_max: int, kind: str) -> list[int]:
-    """The Noll modes of the pupil magnitude for ``kind`` (`MAGNITUDES`): no piston, which the PSF's
-    energy normalisation fixes (`model.pupil`)."""
-    every = zernike_modes(n_max, exclude=("piston",))
-    if kind == "free":
-        return every
-    if kind == "symmetric":
-        return [j for j in every if noll_to_nm(j)[1] == 0]
-    if kind in ("fixed", "minimal"):
-        return []                      # the minimal pupil's magnitude is its own (`MinimalPupil`)
-    raise ValueError(f"no magnitude choice {kind!r}")
-
-
 def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max_nm: float = 0.0,
-               device=None, dtype=torch.float32, held_phase: dict | None = None,
-               held_magnitude: dict | None = None, field_centre_px=None) -> ForwardModel:
+               device=None, dtype=torch.float32, held: Held | None = None, field_centre_px=None) -> ForwardModel:
     """The model a bead calibration learns: one channel per `Optics` in ``optics`` (one, or a list, the
-    main channel first), each with its own pupil, started at ``transforms`` (secondary → main chip
-    pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to ``z_max_nm`` from
-    aliasing (`choose_pupil_size`, never below 64).  ``held_phase`` / ``held_magnitude``: modes held at
-    given values (`ZernikePupil`; the minimal pupil holds no magnitude modes, ``held_magnitude`` is ignored
-    there).  ``settings.fit_tilt`` learns the coverslip's tilt (`BeadStackGeometry`):
-    seen by beads only through a coverslip of another index than the immersion's, a water or silicone
-    objective's (`Optics.coverslip_matters`)."""
+    main channel first), each with its own pupil and PSF as ``settings.psf`` describes them (`make_psf`: the
+    grid, its margin, the pixel's blur and the SAF damping are the builder's), started at ``transforms``
+    (secondary → main chip pixels; SMAPpy's dual calibration).  The pupil sampling keeps defocus up to
+    ``z_max_nm`` from aliasing.  ``held``: what each channel's pupil holds (`Held`).  ``settings.fit_tilt``
+    learns the coverslip's tilt (`BeadStackGeometry`): seen by beads only through a coverslip of another index
+    than the immersion's, a water or silicone objective's (`Optics.coverslip_matters`).
+
+    Each channel learns its own γ (the user's decision, November 2026): two colours pass the objective at
+    different angles near the edge.  To revisit: if the channels' γ come out alike, one shared γ is fewer
+    numbers to learn (`docs/uipsf/roadmap.md`)."""
     optics = [optics] if not isinstance(optics, (list, tuple)) else list(optics)
     transforms = list(transforms) if transforms is not None else [None] * len(optics)
     if len(transforms) != len(optics):
         raise ValueError(f"{len(optics)} channels but {len(transforms)} transforms")
-    n_max = settings.order
     channels = []
     for o, H in zip(optics, transforms, strict=True):
-        if settings.magnitude == "minimal":
-            # the grid a little beyond the NA, the aperture the pupil's own cutoff (`MinimalPupil`)
-            g = minimal_grid_optics(o)
-            grid = PupilGrid.build(g, choose_pupil_size(g, z_max_nm), device=device, dtype=dtype)
-            pupil = MinimalPupil(grid, n_max=n_max, na=o.NA, held_phase=held_phase, saf_damping=settings.saf_damping)
-        else:
-            grid = PupilGrid.build(o, choose_pupil_size(o, z_max_nm), device=device, dtype=dtype)
-            pupil = ZernikePupil(grid, n_max=n_max, magnitude_modes=magnitude_modes(n_max, settings.magnitude),
-                                 held_phase=held_phase, held_magnitude=held_magnitude)
-        psf = VectorPSF(grid, pupil, tuple(roi_shape), bead_radius_nm=settings.bead_diameter_nm / 2,
-                        sigma_nm=(settings.blur_nm, settings.blur_nm), fit_sigma=settings.blur != "fixed",
-                        round_sigma=settings.blur == "round", pixel_blur=settings.pixel_blur)
+        psf = make_psf(o, settings.psf, roi_shape, held=held, bead_radius_nm=settings.bead_diameter_nm / 2,
+                       z_max_nm=z_max_nm, device=device, dtype=dtype)
         field = None
-        # getattr: settings saved before field dependence was a choice; the main channel only, for now
-        if getattr(settings, "field_dependence", False) and not channels:
+        if settings.field_dependence and not channels:          # the main channel only, for now
             if field_centre_px is None:
                 raise ValueError("a field-dependent model needs the field's centre (the beads' chip positions)")
             field = FieldPolynomial(field_centre_px, o.pixel_size_nm)
@@ -136,26 +111,24 @@ def bead_model(optics, settings: BeadSettings, roi_shape, transforms=None, z_max
     return ForwardModel(channels, geometry=BeadStackGeometry(drift=settings.drift, fit_tilt=settings.fit_tilt))
 
 
-def insitu_model(optics, settings: BeadSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
-                 device=None, dtype=torch.float32, held_phase: dict | None = None,
-                 held_magnitude: dict | None = None, fit_focus: bool = True, fit_tilt: bool = False) -> ForwardModel:
-    """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as `bead_model`
-    makes them for a point (no bead's size), molecules in the sample seen through ``focus_nm``
-    (`InSituGeometry`; held there with ``fit_focus`` off, the coverslip's tilt learnt with ``fit_tilt``), one
-    photon count each.  ``held_phase`` /
-    ``held_magnitude`` hold modes at given values (`ZernikePupil`): a bead model's symmetric magnitude and
-    high orders.  The pupil sampling keeps defocus up to ``z_max_nm`` from
-    aliasing: the molecules' distance from the plane in focus, not their depth, since the depth's and the
-    focus's waves largely cancel there and the light beyond the critical angle decays rather than
-    aliases.  ±1 µm needs 64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work."""
+def insitu_model(optics, spec: PSFModelSettings, roi_shape, focus_nm: float, z_max_nm: float = 1000.0,
+                 device=None, dtype=torch.float32, held: Held | None = None, fit_focus: bool = True,
+                 fit_tilt: bool = False) -> ForwardModel:
+    """The model in situ learning learns (plan §9, M5): one channel, the pupil and blur as ``spec``
+    describes them for a point (`make_psf`; no bead's size, and no SAF damping, which is the beads': a
+    molecule's light beyond the critical angle follows its own depth), molecules in the sample seen through
+    ``focus_nm`` (`InSituGeometry`; held there with ``fit_focus`` off, the coverslip's tilt learnt with
+    ``fit_tilt``), one photon count each.  ``held``: a bead model's γ (or symmetric magnitude) and high
+    orders (`held_from`).  The pupil sampling keeps defocus up to ``z_max_nm`` from aliasing: the
+    molecules' distance from the plane in focus, not their depth, since the depth's and the focus's waves
+    largely cancel there and the light beyond the critical angle decays rather than aliases.  ±1 µm needs
+    64 samples at NA 1.43; 2 µm asked for 96, 2.25 times the work."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, InSituGeometry
-    # field dependence is for beads, for now: in situ data are not yet spread over the field (study §6)
-    beads = bead_model(optics, replaced(settings, bead_diameter_nm=0.0, field_dependence=False), roi_shape,
-                       z_max_nm=z_max_nm,
-                       device=device, dtype=dtype, held_phase=held_phase, held_magnitude=held_magnitude)
-    return ForwardModel(beads.channels, geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
+    psf = make_psf(optics, replaced(spec, saf_damping=False), roi_shape, held=held, z_max_nm=z_max_nm,
+                   device=device, dtype=dtype)
+    return ForwardModel([Channel(psf)], geometry=InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt),
                         intensity=Bleaching(order=0))
 
 
@@ -186,8 +159,9 @@ def start_values(model: ForwardModel, previous) -> dict:
                     value[i] = coeff[old_modes.index(j)]
             out[name] = value
         if isinstance(new.psf.pupil, MinimalPupil) and isinstance(old.psf.pupil, MinimalPupil):
+            learnt = {s.name for s in new.psf.pupil.specs()}          # not a held γ, nor h without a ring
             for n in ("pupil.gamma", "pupil.ring_h"):
-                if pre + n in shared and (n != "pupil.ring_h" or new.psf.pupil.ring):
+                if pre + n in shared and n in learnt:
                     out[pre + n] = shared[pre + n]
         if new.psf.fit_sigma and pre + "psf.sigma" in shared:
             # a round blur from a free one takes their mean, a free one from a round one its value twice

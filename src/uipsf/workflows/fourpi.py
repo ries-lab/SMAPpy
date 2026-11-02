@@ -147,15 +147,10 @@ def sample_iab(model: FourPiModel, shared: dict, z_nm, roi_px: int | None = None
     I + Re(Q e^{iφ}).  Sampled at three phases and demodulated (module docstring).  The emitter is a point:
     a model learnt with the beads' size (``bead_radius_nm``) is drawn without it -- and needs to be, its bead
     kernel works along a stack's slices, which a set of heights is not."""
-    if roi_px is not None or model.psf_up.bead_radius_nm > 0:
-        import copy
-        model = copy.copy(model)
-        for name in ("psf_up", "psf_lo"):
-            base = getattr(model, name)
-            roi = (roi_px, roi_px) if roi_px is not None else base.roi_shape
-            setattr(model, name, type(base)(base.grid, base.pupil, roi, upsample=base.upsample,
-                                            kind=base.kind, sigma_nm=base.sigma_init,
-                                            round_sigma=base.round_sigma))
+    import copy
+    model = copy.copy(model)
+    for name in ("psf_up", "psf_lo"):              # each arm's point-emitter view (`VectorPSF.for_emitters`)
+        setattr(model, name, getattr(model, name).for_emitters(roi_px))
     dev, dt = model.grid.rho.device, model.grid.rho.dtype
     p = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}
     z = torch.as_tensor(np.asarray(z_nm, float), dtype=dt, device=dev)

@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from smappy.calibrate.core import CalibrationSettings
 from smappy.calibrate.dual import DualColorSettings
-from smappy.calibrate.pupil import BeadSettings, bead_rois
+from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, bead_rois
 from smappy.metadata import CameraMetadata
 from zenodo_camera import CAMERA
 
@@ -149,7 +149,8 @@ def main():
         keep = np.sort(keep[np.argsort(-bright)[:args.max_beads]])
     batch = batch.subset(torch.tensor(keep))
     optics = [uipsf.Optics(**optics_kw) for _ in range(2 if dual else 1)]
-    model_settings = BeadSettings(magnitude=args.magnitude, bead_diameter_nm=bead, zernike_order=args.order)
+    model_settings = BeadSettings(psf=PSFModelSettings(magnitude=args.magnitude, zernike_order=args.order),
+                                  bead_diameter_nm=bead)
     cal = calibrate_beads(batch, optics, model_settings, transforms=[None, rois.transform] if dual else None,
                           geometry=rois.geometry, noise=rois.noise, device=args.device)
     xy = np.array([[rois.records[i]["x_px"], rois.records[i]["y_px"]] for i in keep])

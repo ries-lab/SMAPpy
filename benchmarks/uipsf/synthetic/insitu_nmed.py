@@ -58,10 +58,12 @@ def optics(n_med: float) -> uipsf.Optics:
 
 
 def model(n_med: float, roi: int, focus: float, z_max: float, device=None):
-    from smappy.calibrate.pupil import BeadSettings
-    settings = BeadSettings(zernike_order=ORDER, magnitude="fixed", blur="free", blur_nm=SIGMA)
-    return insitu_model(optics(n_med), settings, (roi, roi), focus, z_max_nm=z_max, device=device,
-                        held_magnitude=held_magnitude(None))
+    from smappy.calibrate.pupil import PSFModelSettings
+
+    from uipsf.model import Held
+    spec = PSFModelSettings(zernike_order=ORDER, magnitude="fixed", blur="free", blur_nm=SIGMA, pixel_blur=False)
+    return insitu_model(optics(n_med), spec, (roi, roi), focus, z_max_nm=z_max, device=device,
+                        held=Held(magnitude=held_magnitude(None)))
 
 
 def shared(m, focus: float) -> dict:

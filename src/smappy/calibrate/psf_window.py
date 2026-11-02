@@ -256,6 +256,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.optics_form.field_changed.connect(self._optics_changed)
         self.optics_camera = None
         self.model_form = SettingsForm(BeadSettings)
+        self.model_form.changed.connect(self._show_model)       # the magnitude decides the SAF damping's row
         model = QWidget()
         mlayout = QVBoxLayout(model)
         mlayout.setContentsMargins(0, 0, 0, 0)
@@ -341,7 +342,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.use_button.setToolTip("put the saved calibration into the fitter's calibration field")
         self.use_button.clicked.connect(self._use_in_fitter)
         self.keep_button = QPushButton("Add to microscope...")
-        self.keep_button.setToolTip("keep this model's pupil -- every Zernike of phase and magnitude -- with "
+        self.keep_button.setToolTip("keep this model's pupil -- its phase, γ or magnitude, and blur -- with "
                                     "the microscope, for the state of its 3D lens: in situ learning starts "
                                     "from it")
         self.keep_button.clicked.connect(self._keep_pupil)
@@ -381,10 +382,9 @@ class PSFCalibrationWindow(QMainWindow):
         fourpi = reads.get("4Pi", False)
         self.sections["4Pi"].setVisible(fourpi)
         self._show_fourpi()
+        self._show_model()
         # 4Pi finds its beads on channel 0 by itself, and its channels are its section's
         self.sections["beads"].setVisible(not insitu and not fourpi)
-        # in situ decides the magnitude itself, by its *hold*: held from the start, or symmetric and learnt
-        self.model_form.set_shown({"magnitude": not insitu})
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
         self.stack_browser.set_movie(getattr(self.method, "files", "") == "movies")
@@ -478,7 +478,7 @@ class PSFCalibrationWindow(QMainWindow):
         if name in ("microscope", "camera", "conversion", "offset", "emgain", "pixel_x_nm", "pixel_y_nm"):
             self._undetect("the microscope changed")
             self._show_optics()
-        elif name in ("n_immersion", "n_coverslip"):     # the coverslip's thickness and tilt shown or not
+        elif name in ("n_immersion", "n_coverslip", "NA", "n_medium"):   # the coverslip's rows, the SAF damping's
             self._show_optics()
 
     def _main_half(self):
@@ -549,14 +549,30 @@ class PSFCalibrationWindow(QMainWindow):
                                     "n_coverslip": optics, "coverslip_um": layered,
                                     "emgain": bool(self.optics_camera is not None
                                                    and self.optics_camera.is_em)})
-        # the tilt: always in situ, where molecules above the glass see it; for beads only through a coverslip
-        # of another index (a water or silicone objective) -- with oil, beads on the coverslip see none
+        self._show_model()
+
+    def _show_model(self) -> None:
+        """The model's fields the method reads, and only those (`pupil.model_shown`): in situ without the
+        beads' own, the SAF damping only for a minimal magnitude over a sample below the NA, the tilt only
+        where the coverslip is a layer of its own; 4Pi's sample is index-matched, so it has no SAF damping."""
+        from .pupil import model_shown
+        if not hasattr(self, "method") or not hasattr(self, "fourpi_form"):     # still being built
+            return
         in_situ = self.method.sections.get("in situ", False)
-        self.model_form.set_shown({"fit_tilt": in_situ or layered,
-                                   # the stage's drift through a stack: beads only
-                                   "drift": not in_situ,
-                                   # beads of one channel only, for now (docs/uipsf/field-dependence.md)
-                                   "field_dependence": not in_situ and not self.is_dual})
+        try:
+            optics = self.optics_form.value()
+            na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
+        except Exception:                            # no stacks, or values that do not read: the ring shown
+            optics, na = None, None
+        ring = optics is None or na is None or optics.n_medium < na
+        try:
+            magnitude = self.model_form.value().psf.magnitude
+        except ValueError:
+            magnitude = "minimal"
+        layered = self.method.sections.get("microscope", False) and self._coverslip_matters()
+        self.model_form.set_shown(model_shown("insitu" if in_situ else "beads", magnitude, self.is_dual, layered,
+                                              ring))
+        self.fourpi_form.set_shown({"psf.saf_damping": False})
 
     def _coverslip_matters(self) -> bool:
         """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""
@@ -658,9 +674,11 @@ class PSFCalibrationWindow(QMainWindow):
         entry = microscope_db.database().get(str(scope.get("name") or ""))
         key = entry.pupil_key(scope.get("states") or {}) if entry is not None else "?"
         before = entry.pupils.get(key) if entry is not None else None
+        magnitude = (f"γ {pupil['gamma']:.3f}" if pupil.get("kind") == "minimal"
+                     else f"{len(pupil.get('magnitude') or {})} magnitude Zernikes")
         text = (f"Keep this pupil with {scope.get('name') or 'no microscope'}, for {key}: "
-                f"{len(pupil['phase_nm'])} phase and {len(pupil['magnitude'])} magnitude Zernikes, "
-                f"learnt at {pupil['wavelength_nm']:g} nm.  In situ learning starts from it."
+                f"{len(pupil['phase_nm'])} phase Zernikes and {magnitude}, "
+                f"learnt at {pupil['wavelength_nm']:g} nm.  In situ learning holds and starts from it."
                 + (f"\n\nIt replaces the one from {before.get('source') or '?'} ({before.get('date')}), "
                    f"which is kept in a dated version of the entry." if before else ""))
         if self._confirm(text) != QMessageBox.Ok:

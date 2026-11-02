@@ -69,8 +69,17 @@ def main():
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     import tifffile
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
 
+    import uipsf.model.build as build
     import uipsf.workflows.beads as beads
     import uipsf.workflows.calibrate as calibrate
     import uipsf.workflows.scoring as scoring
@@ -78,7 +87,7 @@ def main():
     beads.MAX_DZ_NM = args.dz
     calibrate.learn_beads = functools.partial(calibrate.learn_beads, chunk_size=args.chunk, max_dz_nm=args.dz)
     scoring.localise = functools.partial(scoring.localise, chunk_size=int(2 * args.window // args.dz + 1) * args.chunk)
-    calibrate.ZernikePupil = ZernikePupil
+    build.ZernikePupil = ZernikePupil
     done = [json.loads(line) for line in open(args.out)] if os.path.exists(args.out) else []
     have = {(r["acquisition"], r["model"], r["centre"]) for r in done}
     pixel_sigma = float(np.mean(PIXEL)) / math.sqrt(12)
@@ -100,8 +109,9 @@ def main():
             zblur, blur = MODELS[m]
             t0 = time.perf_counter()
             use_z_blur(zblur)
-            model = BeadSettings(zernike_order=ORDER, magnitude="free", blur=blur,
-                                 blur_nm=pixel_sigma if blur == "fixed" else 30.0, bead_diameter_nm=bead_nm)
+            psf = PSFModelSettings(zernike_order=ORDER, magnitude="free", blur=blur,
+                                   blur_nm=pixel_sigma if blur == "fixed" else 30.0)
+            model = BeadSettings(psf=psf, bead_diameter_nm=bead_nm)
             run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
             cal = run.cal

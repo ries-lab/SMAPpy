@@ -5,7 +5,14 @@ import numpy as np
 import pytest
 import tifffile
 from smappy.calibrate.core import CalibrationSettings
-from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, model_path, run_calibration
+from smappy.calibrate.pupil import (
+    BeadSettings,
+    OpticsSettings,
+    PSFModelSettings,
+    RunSettings,
+    model_path,
+    run_calibration,
+)
 from smappy.metadata import CameraMetadata
 
 pytest.importorskip("PySide6")
@@ -13,7 +20,7 @@ pytest.importorskip("PySide6")
 CAMERA = CameraMetadata(conversion=2.0, offset=100.0, pixelsize_um=0.11, read_noise_e=1.6)
 OPTICS = OpticsSettings(NA=1.43, wavelength_nm=660.0, n_immersion=1.518)
 DETECTION = CalibrationSettings(roi_size=17, min_distance_px=20, dz_nm=50.0)
-MODEL = BeadSettings(zernike_order=4)
+MODEL = BeadSettings(psf=PSFModelSettings(zernike_order=4))
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +64,8 @@ def test_a_run_learns_saves_beside_the_stacks_and_recalculates_into_the_same_fil
     off = run_calibration([stack_file], False, OPTICS, MODEL, DETECTION, camera=CAMERA,
                           run=RunSettings(save_model=False))
     assert off.saved is None and off.calibration is None
-    started = run_calibration([stack_file], False, OPTICS, BeadSettings(zernike_order=6), DETECTION, camera=CAMERA,
+    started = run_calibration([stack_file], False, OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=6)),
+                              DETECTION, camera=CAMERA,
                               run=RunSettings(start_from=str(run.saved), save_model=False))
     assert started.start is not None and started.cal.first is not None          # its pupil started stage 1
 

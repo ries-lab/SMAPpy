@@ -10,11 +10,13 @@ It is not clipped at zero either; v1's clip had no gradient there.
 **Held coefficients.**  A Zernike pupil may hold some modes at given values
 (``held_phase``, ``held_magnitude``, {Noll index: value}): they are no
 parameters, only a fixed map added to the learnt modes' sum, so a mode is
-either learnt or held, never both.  In situ holds the objective's symmetric
-magnitude and the phase above the learnt order from a bead model of the
-microscope: learnt from the molecules, the symmetric magnitude trades with the
-focus, and the high orders gain little over the beads' while scattering between
-molecule sets (`docs/uipsf/architecture.md`, "In situ on matched M2 pairs").
+either learnt or held, never both; a minimal pupil holds its γ and h the same
+way (``held_gamma``, ``held_ring_h``).  In situ holds the objective's magnitude --
+a minimal model's γ, or a Zernike model's symmetric modes -- and the phase above
+the learnt order from a bead model of the microscope (`model.build.held_from`):
+learnt from the molecules, the magnitude trades with the focus, and the high
+orders gain little over the beads' while scattering between molecule sets
+(`docs/uipsf/architecture.md`, "In situ on matched M2 pairs").
 """
 from __future__ import annotations
 
@@ -73,6 +75,18 @@ class ZernikePupil:
     def specs(self) -> list[ParamSpec]:
         return [ParamSpec("pupil.phase", (len(self.phase_modes),)),
                 ParamSpec("pupil.magnitude", (len(self.magnitude_modes),))]
+
+    def describe(self, p) -> dict:
+        """The pupil's hand-over description, plain data (`model.build`, `docs/uipsf/architecture.md`, "One
+        PSF model"): ``kind`` "zernike", every phase mode in nm of wavefront (so that it holds at another
+        emission wavelength) and every magnitude mode, held ones included.  `MinimalPupil` gives γ instead."""
+        own = float(self.grid.optics.wavelength_nm)
+        out = {"kind": "zernike",
+               "phase_nm": {str(j): round(v * own / (2 * math.pi), 3)
+                            for j, v in self.coefficients(p, "phase").items()}}
+        if self.magnitude_modes or self.held_magnitude:
+            out["magnitude"] = {str(j): round(v, 5) for j, v in self.coefficients(p, "magnitude").items()}
+        return out
 
     def truncated(self, n_max: int) -> ZernikePupil:
         """The same pupil with only the modes of radial order ≤ ``n_max``: a fit's first stage."""
@@ -141,7 +155,11 @@ class MinimalPupil(ZernikePupil):
     saf=True``, with the cutoff held; its rows are the studies'."""
 
     def __init__(self, grid: PupilGrid, n_max: int = 6, na: float | None = None, held_phase: dict | None = None,
-                 phase_modes: list[int] | None = None, saf_damping: bool = True):
+                 phase_modes: list[int] | None = None, saf_damping: bool = True, held_gamma: float | None = None,
+                 held_ring_h: float | None = None):
+        """``held_gamma`` / ``held_ring_h`` hold γ and h at given values, as ``held_phase`` holds modes: no
+        parameters then.  In situ holds a bead model's γ (`model.build.Held`): learnt from molecules the
+        magnitude trades with the focus, as the symmetric Zernikes did."""
         super().__init__(grid, n_max=n_max, phase_modes=phase_modes, magnitude_modes=[], held_phase=held_phase)
         o = grid.optics
         self.na = float(o.NA / GRID_MARGIN if na is None else na)
@@ -149,6 +167,8 @@ class MinimalPupil(ZernikePupil):
         # without ``saf_damping`` the ring is a point's at the glass: the physics alone, no height learnt
         self.saf_damping = bool(saf_damping)
         self.ring = self.saf_damping and o.n_med < self.na
+        self.held_gamma = None if held_gamma is None else float(held_gamma)
+        self.held_ring_h = None if held_ring_h is None else float(held_ring_h)
         rho = grid.rho.real if grid.rho.is_complex() else grid.rho
         self._extras(rho, grid.size)
 
@@ -162,27 +182,37 @@ class MinimalPupil(ZernikePupil):
         self.cutoff = torch.sigmoid((self.na / self.grid_na - rho) / width)
 
     def specs(self) -> list[ParamSpec]:
-        extra = [ParamSpec("pupil.gamma", (), init=0.05, transform=Bounded(0.0, 2.0))]
-        if self.ring:
+        extra = []
+        if self.held_gamma is None:
+            extra.append(ParamSpec("pupil.gamma", (), init=0.05, transform=Bounded(0.0, 2.0)))
+        if self.ring and self.held_ring_h is None:
             extra.append(ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0)))
         return super().specs() + extra
+
+    def gamma(self, p) -> torch.Tensor:
+        """γ: the learnt one, or the held one."""
+        return p["pupil.gamma"] if self.held_gamma is None else self.grid.rho.real.new_tensor(self.held_gamma)
+
+    def ring_h(self, p) -> torch.Tensor:
+        """h, nm: the learnt one, or the held one."""
+        return p["pupil.ring_h"] if self.held_ring_h is None else self.grid.rho.real.new_tensor(self.held_ring_h)
 
     def truncated(self, n_max: int) -> MinimalPupil:
         new = super().truncated(n_max)
         out = object.__new__(MinimalPupil)
         out.__dict__.update(new.__dict__)
-        for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "saf_damping", "ring", "cos_imm", "kappa",
-                  "cutoff"):
+        for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "saf_damping", "ring", "held_gamma",
+                  "held_ring_h", "cos_imm", "kappa", "cutoff"):
             setattr(out, k, getattr(self, k))
         return out
 
     def symmetric(self, p, cos_imm=None, kappa=None, cutoff=None) -> torch.Tensor:
         """The magnitude's factor, [..., P, P] (or at given maps' points, for a profile)."""
         cos_imm = self.cos_imm if cos_imm is None else cos_imm
-        out = cos_imm ** p["pupil.gamma"][..., None, None]
+        out = cos_imm ** self.gamma(p)[..., None, None]
         if self.ring:
             k = self.kappa if kappa is None else kappa
-            out = out * torch.exp(-2 * math.pi * k * p["pupil.ring_h"][..., None, None])
+            out = out * torch.exp(-2 * math.pi * k * self.ring_h(p)[..., None, None])
         return out * (self.cutoff if cutoff is None else cutoff)
 
     def __call__(self, p):
@@ -190,11 +220,25 @@ class MinimalPupil(ZernikePupil):
         return magnitude * self.symmetric(p), phase
 
     def values(self, p) -> dict:
-        """γ and, with a ring, h (nm): the magnitude's numbers."""
-        out = {"gamma": float(p["pupil.gamma"])}
+        """γ and, with a ring, h (nm): the magnitude's numbers, learnt or held."""
+        out = {"gamma": float(self.gamma(p))}
         if self.ring:
-            out["ring_h_nm"] = float(p["pupil.ring_h"])
+            out["ring_h_nm"] = float(self.ring_h(p))
         return out
+
+    def without_ring(self) -> MinimalPupil:
+        """The same pupil for point emitters: no damping of the supercritical ring, which is the beads' (their
+        dye above the glass); a point's light beyond the critical angle follows the physics of its own depth.
+        A ring at h = 0 is exactly no ring, so the ring is switched off rather than h set to 0."""
+        out = object.__new__(MinimalPupil)
+        out.__dict__.update(self.__dict__)
+        out.ring, out.held_ring_h = False, None
+        return out
+
+    def describe(self, p) -> dict:
+        """The pupil's hand-over description (`ZernikePupil.describe`): kind "minimal", the phase in nm and γ.
+        h is left out: it is the beads', and nothing downstream holds it."""
+        return dict(super().describe(p), kind="minimal", gamma=round(float(self.gamma(p)), 4))
 
 
 class PixelPupil:

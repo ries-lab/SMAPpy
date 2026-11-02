@@ -90,7 +90,7 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
             grid_na: float = GRID_NA, free_na: bool = False):
     """Make `bead_model` build the minimal pupil (module docstring); ``free_na`` learns the aperture's cutoff
     instead of holding it at `NA` (ρ 0.85 … 1.05 of the grid's NA)."""
-    import uipsf.workflows.calibrate as calibrate
+    import uipsf.model.build as build
     from uipsf.model.pupil import ZernikePupil
 
     class Build(ZernikePupil):
@@ -102,7 +102,7 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
                              held_magnitude=held_magnitude,
                              hold=({} if free_na else {"pupil.edge_rho": NA / grid_na}) | hold,
                              bead_nm=bead_nm)
-    calibrate.ZernikePupil = Build
+    build.ZernikePupil = Build
     return "free"
 
 
@@ -222,7 +222,15 @@ def main():
     calibrate.learn_beads = functools.partial(calibrate.learn_beads, chunk_size=args.chunk, max_dz_nm=args.dz)
     scoring.localise = functools.partial(scoring.localise,
                                          chunk_size=int(2 * args.window // args.dz + 1) * args.chunk)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
     if args.drift != "none":
         calibrate.BeadStackGeometry = functools.partial(stage_drift, args.drift)
 
@@ -256,9 +264,10 @@ def main():
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])
         # the pixel's blur inside σ, as these studies learnt it: "fixed" holds σ at the pixel's own
-        model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude,
-                             blur="fixed" if blur == "zero" else blur,
-                             blur_nm={"fixed": sigma, "zero": 0.0}.get(blur, 30.0), bead_diameter_nm=bead_nm)
+        psf = PSFModelSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude,
+                               blur="fixed" if blur == "zero" else blur,
+                               blur_nm={"fixed": sigma, "zero": 0.0}.get(blur, 30.0))
+        model = BeadSettings(psf=psf, bead_diameter_nm=bead_nm)
         run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                               decisions={i: "include" for i in range(len(rois.records))})
         row = dict(acquisition=name, **cond, stage=stage, form=form, estimator=estimator, blur=blur, beads=cut,

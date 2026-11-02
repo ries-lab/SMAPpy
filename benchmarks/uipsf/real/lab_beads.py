@@ -5,7 +5,8 @@
 
 Each acquisition (a folder of Micro-Manager stacks, one bead field each) goes through SMAPpy's headless
 PSF calibration as the window runs it: `calibrate.pupil.run_calibration` with the camera `camera_for`
-resolves, beads found by `single_rois`, `BeadSettings(zernike_order=8, magnitude="free", blur="free")` and
+resolves, beads found by `single_rois`, `BeadSettings(psf=PSFModelSettings(zernike_order=8, magnitude="free",
+                                                                           blur="free"))` and
 100 nm beads, nothing saved; then `pupil.fit_quality` (every slice refitted by Spline 3D on the sampled
 spline) and the likelihood-ratio probe of a free piezo z scale on the used beads.
 
@@ -115,7 +116,14 @@ def main():
     args = ap.parse_args()
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, fit_quality, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        fit_quality,
+        run_calibration,
+    )
 
     from uipsf.diagnostics import probe_terms
     if args.chunk:
@@ -130,7 +138,7 @@ def main():
     pixel = tuple(args.pixel) if args.pixel else scope["pixel"]
     optics = OpticsSettings(NA=scope["NA"], wavelength_nm=WAVELENGTH_NM, n_immersion=scope["n_immersion"],
                             n_medium=N_MEDIUM, pixel_x_nm=pixel[0], pixel_y_nm=pixel[1])
-    model = BeadSettings(zernike_order=8, magnitude="free", blur="free", bead_diameter_nm=BEAD_NM)
+    model = BeadSettings(psf=PSFModelSettings(zernike_order=8, magnitude="free", blur="free"), bead_diameter_nm=BEAD_NM)
     for acq in args.acquisitions:
         files = sorted(glob.glob(os.path.join(acq, "*", "*.ome.tif")))
         t0 = time.perf_counter()

@@ -118,9 +118,18 @@ def main():
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     from smappy.calibrate.model_views import pupil_views
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
 
     import uipsf.diagnostics.probes as probes
+    import uipsf.model.build as build
     import uipsf.workflows.beads as beads
     import uipsf.workflows.calibrate as calibrate
     import uipsf.workflows.scoring as scoring
@@ -131,7 +140,7 @@ def main():
     calibrate.learn_beads = functools.partial(calibrate.learn_beads, chunk_size=1, max_dz_nm=args.dz)
     scoring.localise = functools.partial(scoring.localise, chunk_size=int(2 * args.window // args.dz + 1))
     probes.Problem = functools.partial(Problem, chunk_size=1)            # the probes' refits, one bead at a time
-    calibrate.ZernikePupil = ZernikePupil
+    build.ZernikePupil = ZernikePupil
     done = [json.loads(line) for line in open(args.out)] if os.path.exists(args.out) else []
     have = {(r["acquisition"], r["fit"]) for r in done}
 
@@ -142,7 +151,8 @@ def main():
         rois = subset(rois, keep, focus, args.window)
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])
-        model = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free", blur_nm=30.0, bead_diameter_nm=bead_nm)
+        model = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur="free", blur_nm=30.0),
+                             bead_diameter_nm=bead_nm)
         Y, X = rois.batch.data.shape[-2:]
         yy, xx = np.mgrid[:Y, :X]
         fits = [("reference", None)] + [(f"mask r{r:g}", r) for r in args.radii] + [("floor", None)]

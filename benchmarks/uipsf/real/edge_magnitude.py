@@ -42,17 +42,17 @@ VARIANTS = ("zernike", "symmetric", "logistic", "mono", "mono b", "mono nu", "mo
 
 def use_pupil(variant: str):
     """Make `bead_model` build ``variant``'s pupil (the Zernike variants are its own)."""
-    import uipsf.workflows.calibrate as calibrate
+    import uipsf.model.build as build
     from uipsf.model.pupil import ZernikePupil
     if variant in ("zernike", "symmetric"):
-        calibrate.ZernikePupil = ZernikePupil
+        build.ZernikePupil = ZernikePupil
         return "free" if variant == "zernike" else "symmetric"
 
     class Build(ZernikePupil):
         # a class, not a function: the module also asks isinstance(pupil, ZernikePupil)
         def __new__(cls, grid, n_max, **kwargs):
             return edge_pupil(grid, n_max, variant)
-    calibrate.ZernikePupil = Build
+    build.ZernikePupil = Build
     return "free"
 
 
@@ -70,7 +70,15 @@ def main():
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
     optics = OpticsSettings(NA=args.na, wavelength_nm=WAVELENGTH, n_immersion=N_IMM, n_medium=args.n_med,
                             pixel_x_nm=args.pixel[0], pixel_y_nm=args.pixel[1])
     for acquisition in args.acquisitions:
@@ -80,8 +88,8 @@ def main():
         for variant in args.variants:
             t0 = time.perf_counter()
             magnitude = use_pupil(variant)
-            model = BeadSettings(zernike_order=args.order, magnitude=magnitude, blur=args.blur, blur_nm=30.0,
-                                 bead_diameter_nm=BEAD_NM)
+            model = BeadSettings(psf=PSFModelSettings(zernike_order=args.order, magnitude=magnitude, blur=args.blur,
+                                                      blur_nm=30.0), bead_diameter_nm=BEAD_NM)
             run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions=decisions)
             p = run.cal.result.params.physical()

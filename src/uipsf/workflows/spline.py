@@ -21,8 +21,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from ..model import VectorPSF
-
 
 class SplineFrames:
     def __init__(self, dz_nm: float = 10.0, margin_px: int = 3, z_margin_nm: float = 500.0,
@@ -40,8 +38,9 @@ class SplineFrames:
             raise NotImplementedError("SplineFrames fits one channel; SMAPpy's dual fitter is not wired here")
         Y, X = (int(n) + 2 * self.margin_px for n in roi_shape)
         psf0 = model.psf
-        psf = VectorPSF(psf0.grid, psf0.pupil, (Y, X), upsample=psf0.upsample,
-                        bead_radius_nm=psf0.bead_radius_nm)
+        # the beads' own PSF, on the larger grid: the data are beads, so their size and their ring's damping
+        # stay (`VectorPSF.resized`, not `for_emitters`); the pixel's blur, kind and analyser are the model's
+        psf = psf0.resized((Y, X))
         lo, hi = z_range_nm[0] - self.z_margin_nm, z_range_nm[1] + self.z_margin_nm
         half = int(np.ceil(max(abs(lo), abs(hi)) / self.dz_nm))
         n = 2 * half + 1

@@ -222,7 +222,15 @@ def main():
     # the slice fits localise every slice as an emitter of its own, all at once unless told otherwise
     slices = int(2 * args.window // max(args.dz, 50.0)) + 1                      # one bead's, as learning sees it
     scoring.localise = functools.partial(scoring.localise, chunk_size=slices * args.chunk)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
     # the likelihood's choice on the 676 sets in buffer (results/m5_media_pixel.jsonl)
     pixels = args.pixel or [(104.7, 106.4)]
     for acquisition in args.acquisitions:
@@ -238,9 +246,8 @@ def main():
             for variant in args.variants:
                 t0 = time.perf_counter()
                 magnitude = use_pupil(variant)
-                model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude, blur="free",
-                                     blur_nm=30.0,
-                                     bead_diameter_nm=BEAD_NM)
+                model = BeadSettings(psf=PSFModelSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude,
+                                                          blur="free", blur_nm=30.0), bead_diameter_nm=BEAD_NM)
                 run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                                       decisions=decisions)
                 row = dict(acquisition=os.path.basename(os.path.normpath(acquisition)), **cond, grid_na=args.grid_na,

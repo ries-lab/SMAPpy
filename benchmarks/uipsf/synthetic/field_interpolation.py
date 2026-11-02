@@ -32,7 +32,7 @@ import torch
 
 import uipsf
 from uipsf.export import sample_psf
-from uipsf.workflows import BeadSettings, bead_model
+from uipsf.workflows import BeadSettings, PSFModelSettings, bead_model
 
 OPTICS = dict(NA=1.43, wavelength_nm=660, n_imm=1.518, n_med=1.33, pixel_size_nm=(110.0, 110.0))
 ROI, PHOTONS, BACKGROUND = 13, 5000.0, 20.0
@@ -40,7 +40,8 @@ Z = np.arange(-600, 601, 30.0)
 
 
 def make_model(roi: int = ROI):
-    return bead_model(uipsf.Optics(**OPTICS), BeadSettings(zernike_order=6, magnitude="fixed"), (roi, roi),
+    return bead_model(uipsf.Optics(**OPTICS), BeadSettings(psf=PSFModelSettings(zernike_order=6, magnitude="fixed")),
+                      (roi, roi),
                       z_max_nm=1500, device="cpu", dtype=torch.float32)
 
 

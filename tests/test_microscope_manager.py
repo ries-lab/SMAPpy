@@ -316,8 +316,8 @@ def test_the_astigmatism_field_shows_only_when_neither_the_entry_nor_a_start_mod
 
 # ------------------------------------------- the objective's pupil, kept with the microscope
 
-PUPIL = {"phase_nm": {"5": -2.0, "6": 58.0, "11": 21.0}, "magnitude": {"1": 0.0, "11": 0.12},
-         "wavelength_nm": 676.0, "source": "beads_3dcal.h5", "date": "2026-10-23"}
+PUPIL = {"kind": "minimal", "phase_nm": {"5": -2.0, "6": 58.0, "11": 21.0}, "gamma": 0.36, "sigma_nm": [24.0, 24.0],
+         "pixel_blur": True, "wavelength_nm": 676.0, "source": "beads_3dcal.h5", "date": "2026-10-23"}
 
 
 def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_survives_the_manager(
@@ -352,3 +352,19 @@ def test_a_pupil_is_kept_only_for_a_recognised_microscope_in_its_current_setup(c
         microscope_db.keep_pupil({}, PUPIL)
     with pytest.raises(ValueError, match="setup until 2026-07-15"):
         microscope_db.keep_pupil({"name": "M2", "version": "2026-07-15", "states": {}}, PUPIL)
+
+
+def test_a_pupil_without_its_kind_is_neither_kept_nor_found(app, tmp_path, config):
+    # the Zernike-magnitude dicts kept before pupils described themselves (November 2026): no legacy, the
+    # user keeps the pupil again from a new bead model
+    import copy
+
+    from smappy.io.tiff import open_stack
+    from smappy.plugins.fit import CameraSettings
+    beads = CameraSettings().resolve(open_stack(a_tiff(tmp_path / "beads_MMStack.ome.tif", M2_BEADS)), require=False)
+    old = {k: v for k, v in PUPIL.items() if k not in ("kind", "gamma")} | {"magnitude": {"11": 0.12}}
+    with pytest.raises(ValueError, match="kind"):
+        microscope_db.keep_pupil(beads.microscope, old)
+    entry = copy.deepcopy(microscope_db.database().get("M2"))           # not the cached database's
+    entry.pupils["3DA: on"] = old
+    assert entry.pupil_for({"3DA": "on"}) is None

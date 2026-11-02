@@ -45,7 +45,7 @@ COMMON_ORDER = 8
 
 def holding(held_phase: dict, held_magnitude: dict):
     """Make `bead_model` build a Zernike pupil that holds these modes (the rest as it asks)."""
-    import uipsf.workflows.calibrate as calibrate
+    import uipsf.model.build as build
     from uipsf.model.pupil import ZernikePupil
 
     class Build(ZernikePupil):
@@ -53,7 +53,7 @@ def holding(held_phase: dict, held_magnitude: dict):
         # ZernikePupil, so its __init__ is not run twice
         def __new__(cls, grid, n_max, **kwargs):
             return ZernikePupil(grid, n_max=n_max, **dict(kwargs, held_phase=held_phase, held_magnitude=held_magnitude))
-    calibrate.ZernikePupil = Build
+    build.ZernikePupil = Build
 
 
 def fitted(run, lam) -> dict:
@@ -88,8 +88,17 @@ def main():
     args = ap.parse_args()
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
 
+    import uipsf.model.build as build
     import uipsf.workflows.beads as beads
     import uipsf.workflows.calibrate as calibrate
     import uipsf.workflows.scoring as scoring
@@ -111,8 +120,8 @@ def main():
                                 pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])
 
         def learn(r, order, decisions, files=files, optics=optics, bead_nm=bead_nm):
-            model = BeadSettings(zernike_order=order, magnitude="free", blur="free", blur_nm=30.0,
-                                 bead_diameter_nm=bead_nm)
+            model = BeadSettings(psf=PSFModelSettings(zernike_order=order, magnitude="free", blur="free",
+                                                      blur_nm=30.0), bead_diameter_nm=bead_nm)
             return run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=r,
                                    decisions=decisions)
 
@@ -120,7 +129,7 @@ def main():
         common = next((r for r in done if r["acquisition"] == name and r["stage"] == "common"), None)
         if common is None:
             t0 = time.perf_counter()
-            calibrate.ZernikePupil = ZernikePupil
+            build.ZernikePupil = ZernikePupil
             run = learn(rois, COMMON_ORDER, {i: "include" for i in range(len(keep))})
             common = dict(base, stage="common", beads=cut, used=len(run.cal.beads.used), **fitted(run, lam),
                           minutes=round((time.perf_counter() - t0) / 60, 2))

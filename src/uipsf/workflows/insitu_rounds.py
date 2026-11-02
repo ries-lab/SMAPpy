@@ -247,11 +247,11 @@ def _with_focus_prior(model, mean: float, sd: float):
 
 
 def _moved(new: dict, old: dict, std_new: dict, std_old: dict) -> float:
-    """How far the Zernikes and the focus moved since the last round: the rms over them of each change
+    """How far the Zernikes, γ and the focus moved since the last round: the rms over them of each change
     in units of its standard error, √(σ_new² + σ_old²).  Not the largest: each round learns from other
     molecules, so the largest of some twenty changes is ~3 even when nothing moves but the noise."""
     z = []
-    for n in ("pupil.phase", "pupil.magnitude", "geometry.focus"):
+    for n in ("pupil.phase", "pupil.magnitude", "pupil.gamma", "geometry.focus"):
         if n in new and n in old and n in std_new and n in std_old:
             d = (torch.as_tensor(new[n]) - torch.as_tensor(old[n])).cpu().double().reshape(-1)
             sd = (std_new[n].cpu().double() ** 2 + std_old[n].cpu().double() ** 2).sqrt().reshape(-1)

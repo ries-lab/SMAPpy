@@ -9,7 +9,7 @@ from smappy.calibrate.pupil import spline_calibration
 
 import uipsf
 from uipsf.export import LearnedPSF, describe, sample_psf
-from uipsf.workflows import BeadSettings, bead_model
+from uipsf.workflows import BeadSettings, PSFModelSettings, bead_model
 
 OPTICS = uipsf.Optics(NA=1.43, wavelength_nm=660, n_imm=1.518, n_med=1.33, pixel_size_nm=(110.0, 110.0))
 ROI, BOX = 17, 13
@@ -19,7 +19,8 @@ ROI, BOX = 17, 13
 def learned():
     """An astigmatic pupil as a bead calibration would have learnt it, wrapped as its model file loads."""
     # σ the whole blur, the pixel's in it, as the test's numbers were set
-    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed", blur="free", pixel_blur=False),
+    model = bead_model(OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed", blur="free",
+                                                                 pixel_blur=False)),
                        (ROI, ROI), z_max_nm=1500, device="cpu", dtype=torch.float64)
     phase = torch.zeros(len(model.psf.pupil.phase_modes), dtype=torch.float64)
     phase[:4] = torch.tensor([0.8, -0.2, 0.15, 0.1])

@@ -508,14 +508,25 @@ eight bead calibrations of different days, cameras and colours, and it is what
 keeps a bead's z straight through focus.  Learnt from molecules, it trades
 with the focus, so that two starts end a hundred nanometres apart.  And the
 finest aberrations, above the *Zernike order*, gain little over a bead
-model's.  So with *hold* on *the start's*, in situ takes the symmetric
-magnitude and the phase above the order from *start from*, or else from the
-objective's pupil kept with the microscope (*Add to microscope...*), and learns
-the rest: the phase up to the order, the blur, the focus.  The magnitude's
-other modes are never learnt in situ: there they took over the astigmatism
-from the phase.  With *hold* on *nothing*, or when there is neither a start
-model nor a kept pupil, the symmetric magnitude is learnt, and the focus is
-then pinned (*focus fit*), since the two cannot both be learnt.
+model's.  So with *hold* on *the start's*, in situ takes the magnitude and the
+phase above the order from *start from*, or else from the objective's pupil
+kept with the microscope (*Add to microscope...*), and learns the rest: the
+phase up to the order, the blur, the focus.  From a *minimal* bead model the
+magnitude is its γ; from a Zernike one, its rotationally symmetric modes (the
+others are never learnt in situ: there they took over the astigmatism from the
+phase).  The beads' SAF damping is never taken over: it is the beads'.  With
+*hold* on *nothing*, or when there is neither a start model nor a kept pupil,
+γ is learnt, and the focus is then pinned (*focus fit*), since the two cannot
+both be learnt.
+
+**One model, handed on.**  Every method builds its model from the same
+choices, the *PSF model* section (*Zernike order*, *pupil magnitude*, *blur*,
+*blur σ*, and under *more* *pixel blur* and *SAF damping*), and a learnt
+model hands itself on in one form: its kind, its phase in nanometres of
+wavefront, γ or the magnitude's Zernikes, and its blur.  That is what *Add to
+microscope...* keeps, what in situ holds and starts from, and what Spline 3D's
+*focus in situ* holds of the bead model.  A pupil kept before November 2026,
+in the older form, is not used: keep it again from a new bead model.
 
 **The coverslip.**  The focus and all the heights can move together, changing
 the images only a little; the fit alone places the focus to some tens of
@@ -640,7 +651,16 @@ thickness; #1.5 coverslips are 170 ± 5 µm.  A collar set to it does the same
 in the microscope.
 
 ### model
-The choices of the model, explained under *In detail*.
+The choices of the model, explained under *In detail*.  The method's own
+fields (bead diameter, drift, field dependence, the coverslip's tilt, the
+rejection) sit beside the *PSF model* section; in situ shows only the tilt of
+them.
+
+### PSF model
+The PSF model's choices, one section wherever a model is learnt -- beads in
+one or two channels, in situ, 4Pi -- so that the same choices build the same
+model in each.  In the *4Pi* mode it starts on *symmetric Zernike* with a
+60 nm blur and no pixel blur, the choices 4Pi was checked with.
 
 ### Zernike order
 The highest radial order of the pupil's modes.  Higher orders describe finer
@@ -650,14 +670,19 @@ aberrations and cost more time and more beads.
 *minimal* (cos θ^γ, the ring beyond the critical angle and the aperture),
 *Zernike*, *symmetric Zernike* or *fixed* (the apodisation only); *In detail*
 says what each is.  Not shown for *in situ*, which decides it by its *hold*.
+With two channels each learns its own γ: two colours pass the objective's
+edge differently.  Should the two come out alike on real pairs, one shared γ
+would be fewer numbers to learn; that is to be revisited.
 
 ### blur
 Whether the extra blur is learnt or held at *blur σ*.  *free* learns it
-along x and y apart, *round* one value for both.  In situ, keep it free:
-on dSTORM data of clathrin the molecules wanted a blur 10 nm stronger
-along one axis than the other, which their beads did not show, and a
-round blur made up for it with an astigmatism 0.2 rad too strong.  Nor
-take the beads' blur over: there the molecules wanted 60 nm, the beads
+along x and y apart, *round* one value for both: the default everywhere, in
+situ too, since a free blur takes up astigmatism the pupil should hold.
+*free* stays as an option for in situ: on dSTORM data of clathrin the
+molecules wanted a blur 10 nm stronger along one axis than the other, which
+their beads did not show, and a round blur made up for it with an
+astigmatism 0.2 rad too strong.  Which in situ should use is still open.  Do
+not take the beads' blur over: there the molecules wanted 60 nm, the beads
 76 nm.
 
 ### blur σ
@@ -672,7 +697,8 @@ their ring is weaker than a point's there (their dye is spread over the bead,
 and the bead model takes them as points).  Off, the ring is a point's on the
 coverslip.  The damping belongs to the beads, as their size does: the spline
 for single molecules is drawn without it, their supercritical light following
-the physics of their own depth.
+the physics of their own depth, and in situ never learns it.  Shown only for
+the *minimal* magnitude over a sample whose index is below the NA.
 
 ### pixel blur
 On by default.  Off, the learnt blur includes the pixel's width, as models
@@ -760,16 +786,18 @@ one -- two beads stuck together, or a speck.  The marked beads stay in the
 table, and *Exclude / include* lets them in again.
 
 ### magnitude modes
-*auto* is the rotationally symmetric modes up to the *Zernike order* --
-Noll 4, 11 and 22 up to the 6th -- for the vectorial model, and every mode
-for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
+*auto* takes the modes the *PSF model*'s *pupil magnitude* says: on
+*symmetric Zernike*, its default here, the rotationally symmetric modes up to
+the *Zernike order* -- Noll 4, 11 and 22 up to the 6th -- for the vectorial
+model, and every mode for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
 an empty field or *none* holds the magnitude flat.  On eight of uiPSF's
 example beads, 4 and 11 alone fitted 1 % worse than *auto*, and a flat
 magnitude 11 % worse: the apodisation matters.
 
 ### same magnitude
-Both objectives get one magnitude shape, as twin objectives have; how much
-light each arm brings is learnt apart either way.  On eight of uiPSF's
+Both objectives get one magnitude shape, as twin objectives have -- with a
+*minimal* magnitude, one γ; how much light each arm brings is learnt apart
+either way.  On eight of uiPSF's
 example beads the two objectives, left free, learnt nearly the same
 magnitude, and one shared magnitude fitted as well (0.01 % apart) in two
 thirds of the time.

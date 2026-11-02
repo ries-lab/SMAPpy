@@ -2221,6 +2221,50 @@ Open: the 40 nm beads learn γ 0.13–0.26 beside a σ of 45–50 nm where the 1
 and 22–36 nm -- the magnitude is the objective's and cannot depend on the bead, so something else is
 read as both; whether σ should be learnt beside a field-dependent pupil; the magnitude tilt.
 
+## One PSF model (November 2026; `model/build.py`, `VectorPSF.for_emitters`, `VectorPSF.describe`)
+
+The minimal model was the bead calibration's default, but every other workflow built its pupil and PSF itself
+and kept its own copy of the choices that come with them.  The copies drifted: in situ handed pupils on as
+Zernike-magnitude dicts, so a minimal bead model gave it a flat magnitude (and Spline 3D's *focus in situ*
+regressed with it); `workflows/spline.py` and `movie.py` rebuilt the PSF and dropped the pixel's blur, and kept
+the beads' ring damping for molecules.  Now there is one of each:
+
+- **One description of the choices**: `smappy.calibrate.pupil.PSFModelSettings` (Zernike order, magnitude,
+  blur, blur σ, pixel blur, SAF damping), a section of `BeadSettings` (one or two channels), of the window's in
+  situ run (which reads it from the same form) and of `FourPiBeadSettings` (its own defaults: symmetric
+  Zernikes, 60 nm, no pixel blur, the choices 4Pi was checked with).  Each workflow keeps only its own fields
+  beside it; the form shows what a method reads (`model_shown`: in situ hides the magnitude, the SAF damping,
+  the bead's size, the drift and field dependence; the SAF damping only for a minimal magnitude below the NA).
+  A model file keeps the options nested (``psf``), version 6.
+- **One builder**: `pupil_grid` (the grid, `GRID_MARGIN` beyond the NA for a minimal pupil), `make_pupil`
+  (minimal or Zernike, with what it holds) and `make_psf` (the blur, the pixel's under it).  `bead_model`,
+  `insitu_model` (SAF damping always off: it is the beads') and `FourPiModel`'s own pupils go through them;
+  `fourpi_beads.learn` builds both objectives' pupils on one `pupil_grid`.  A spec that cannot hold what it is
+  given (a minimal pupil and Zernike magnitude modes, or the reverse) is refused, not silently half-held.
+- **One point-emitter view**: `VectorPSF.for_emitters(roi, upsample)` -- rebuilt from the settings
+  (`VectorPSF.resized`), no bead kernel, a minimal pupil's ring undamped (`MinimalPupil.without_ring`: a ring
+  at h = 0 is exactly no ring), the blur, its pixel part, kind and analyser kept.  `sample_psf`, `movie.render`
+  and `sample_iab` draw through it.  Bead scoring's spline (`SplineFrames`) fits beads, so it keeps the beads'
+  own PSF on its larger grid (`resized`), the pixel's blur now included.  `test_psf_model.py` compares a
+  movie's spot with `sample_psf` and the scoring spline with the model's forward pass; both failed on the old
+  rebuilds.
+- **One hand-over**: `VectorPSF.describe(p)`, plain data: ``kind`` (minimal, zernike), ``phase_nm`` (every
+  mode, held ones included, in nm of wavefront), ``gamma`` or ``magnitude`` (a Zernike pupil's modes),
+  ``sigma_nm`` and ``pixel_blur``, and the optics.  The beads' h is left out: nothing downstream holds it.
+  `held_from` makes what a model holds of it (`Held`: phase above the order, and γ or the symmetric magnitude
+  modes; `MinimalPupil(held_gamma=, held_ring_h=)` holds γ and h as `ZernikePupil` holds modes), `start_from`
+  its start.  *Add to microscope...* keeps the description (`objective_pupil`); `microscope_db.pupil_for`
+  finds only described pupils -- the older dicts are no longer used, and are kept again from a new bead model.
+  In situ (`insitu_run.held_pupil`) holds γ and the phase above the order and learns σ, the focus and the phase
+  up to it; *hold* every aberration holds γ and every phase mode, which is what Spline 3D's *focus in situ*
+  does with the bead model.
+
+The user's decisions behind it: γ per channel in a dual calibration, and per colour in the microscope
+database -- to revisit: if the channels' γ come out alike, one shared γ; σ round by default everywhere, in situ
+included (*free* stays an option until in situ is optimised); 4Pi gets one γ for both objectives under *same
+magnitude* (`fourpi.MAGNITUDE`) and the same grid margin as one objective, its learning with the minimal pupil
+left to a later session; no legacy for the old kept pupils.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```

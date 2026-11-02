@@ -15,7 +15,7 @@ from smappy.psf import SplinePSF
 
 import uipsf
 from uipsf.export import sample_psf
-from uipsf.workflows import BeadSettings, bead_model, calibrate_beads
+from uipsf.workflows import BeadSettings, PSFModelSettings, bead_model, calibrate_beads
 from uipsf.workflows.scoring import localise, slice_fits
 
 OPTICS = uipsf.Optics(NA=1.43, wavelength_nm=660, n_imm=1.518, n_med=1.33, pixel_size_nm=(110.0, 110.0))
@@ -24,7 +24,8 @@ ROI = 17
 
 
 def _truth():
-    model = bead_model(OPTICS, BeadSettings(zernike_order=4, magnitude="fixed"), (ROI, ROI), z_max_nm=1200,
+    model = bead_model(OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed")), (ROI, ROI),
+                       z_max_nm=1200,
                        device="cpu")
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[:4] = torch.tensor([0.8, -0.2, 0.15, 0.1])                   # astigmatic, for z
@@ -63,7 +64,8 @@ def _learn():
     stack = BeadStack(adu, objective, "sim", {}, (0, 0, 190, 150))
     settings = CalibrationSettings(roi_size=ROI, min_distance_px=20)
     rois = single_rois([stack], CAMERA, settings, slices=slice(None))
-    cal = calibrate_beads(rois.batch, OPTICS, BeadSettings(zernike_order=4), noise=rois.noise, device="cpu")
+    cal = calibrate_beads(rois.batch, OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=4)), noise=rois.noise,
+                          device="cpu")
     average = calibrate([stack], CalibrationSettings(roi_size=ROI, min_distance_px=20, smooth_z_nm=0.0))
     return model, shared, cal, average.calibration, rois
 

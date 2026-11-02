@@ -23,10 +23,11 @@ import time
 import numpy as np
 import torch
 from smappy.calibrate import insitu as selection
-from smappy.calibrate.pupil import BeadSettings
+from smappy.calibrate.pupil import PSFModelSettings
 from smappy.simulate import BlinkingSettings
 
 import uipsf
+from uipsf.model import Held
 from uipsf.movie import MovieSettings, render, simulate_movie
 from uipsf.workflows import insitu_model
 from uipsf.workflows.insitu_rounds import RoundSettings, calibrate_insitu
@@ -40,9 +41,9 @@ SIGMA, FOCUS = 55.0, 430.0
 
 
 def truth_model(roi: int, focus: float = FOCUS, device=None, dtype=torch.float32, held_magnitude=None):
-    settings = BeadSettings(zernike_order=ORDER, magnitude="fixed", blur="free", blur_nm=SIGMA)
-    return insitu_model(OPTICS, settings, (roi, roi), focus, z_max_nm=1300.0, device=device, dtype=dtype,
-                        held_magnitude=held_magnitude)
+    spec = PSFModelSettings(zernike_order=ORDER, magnitude="fixed", blur="free", blur_nm=SIGMA, pixel_blur=False)
+    return insitu_model(OPTICS, spec, (roi, roi), focus, z_max_nm=1300.0, device=device, dtype=dtype,
+                        held=Held(magnitude=held_magnitude or {}))
 
 
 def held_magnitude(model) -> dict:

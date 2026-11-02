@@ -294,8 +294,9 @@ class Microscope:
     channels: List[Channel] = field(default_factory=list)
     camera: str = ""
     versions: List[Dict[str, Any]] = field(default_factory=list)
-    #: the objective's pupil, learnt from beads, by the state of the 3D lens (`pupil_key`): the
-    #: Zernikes of phase (nm) and magnitude, what in situ learning starts from (`pupil_of`)
+    #: the objective's pupil, learnt from beads, by the state of the 3D lens (`pupil_key`): the PSF as a
+    #: bead model describes itself (`uipsf.VectorPSF.describe`: kind, phase in nm, γ or the magnitude's
+    #: Zernikes, σ), what in situ learning holds and starts from (`pupil_of`)
     pupils: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # ------------------------------------------------------------ identifying
@@ -499,7 +500,11 @@ class Microscope:
         return f"{device}: {states[device]}"
 
     def pupil_for(self, states: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return self.pupils.get(self.pupil_key(states)) or self.pupils.get("all")
+        """The pupil kept for ``states``, or for every state; one kept before pupils described their kind
+        (Zernike magnitude dicts, before November 2026) is none: no legacy, it is kept again from a new
+        bead model (`keep_pupil`)."""
+        found = self.pupils.get(self.pupil_key(states)) or self.pupils.get("all")
+        return found if found and found.get("kind") else None
 
 
 @dataclass
@@ -728,6 +733,8 @@ def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tup
     entry = database().get(str(summary["name"]))
     if entry is None:
         raise ValueError(f"{summary['name']} is not in the microscope database")
+    if not pupil.get("kind"):
+        raise ValueError("a pupil to keep describes its kind (`uipsf.VectorPSF.describe`)")
     entry = copy.deepcopy(entry)
     key = entry.pupil_key(summary.get("states") or {})
     entry.pupils[key] = dict(pupil)
