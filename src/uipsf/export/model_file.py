@@ -82,7 +82,7 @@ from ..model import (
     ZernikePupil,
 )
 from ..model.channels import Channel, prefix, unpack_transform, view
-from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
+from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, CoverslipStackGeometry, InSituGeometry
 from ..model.mask import config as mask_config
 from ..model.mask import make_mask
 from ..optics import Optics, PupilGrid
@@ -131,6 +131,10 @@ def describe(model: ForwardModel) -> dict:
     g = model.geometry
     if isinstance(g, InSituGeometry):
         geometry = dict(kind="in situ", focus_nm=g.focus_nm, focus_prior_nm=g.focus_prior_nm, fit_focus=g.fit_focus)
+    elif isinstance(g, CoverslipStackGeometry):
+        geometry = dict(kind="coverslip stack", sweeps=g.sweeps, focus_nm=g.focus_nm.tolist(),
+                        centre_px=list(g.centre_px), pixel_nm=list(g.pixel_nm), height_nm=g.height_nm,
+                        fit_plane=g.fit_plane, focus_prior_nm=g.focus_prior_nm, plane_prior=g.plane_prior)
     else:
         geometry = dict(kind="bead stack", drift=g.drift, drift_axes=g.drift_axes, drift_prior_nm=g.drift_prior_nm,
                         z_scale=g.z_scale, z_scale_prior=g.z_scale_prior)
@@ -187,6 +191,10 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
                 tilt_prior_rad=g.get("tilt_prior_rad", TILT_PRIOR_RAD))
     if g.get("kind") == "in situ":
         geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"], **tilt)
+    elif g.get("kind") == "coverslip stack":
+        geometry = CoverslipStackGeometry(g["sweeps"], g["focus_nm"], g["centre_px"], g["pixel_nm"], g["height_nm"],
+                                          g["fit_plane"], focus_prior_nm=g["focus_prior_nm"],
+                                          plane_prior=g["plane_prior"])
     else:
         geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt,
                                      drift_axes=g["drift_axes"])

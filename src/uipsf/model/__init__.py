@@ -5,7 +5,7 @@ from .channels import Channel
 from .field import FieldPolynomial
 from .forward import ForwardModel
 from .fourpi import FourPiModel
-from .geometry import BeadStackGeometry, InSituGeometry
+from .geometry import BeadStackGeometry, CoverslipStackGeometry, InSituGeometry
 from .intensity import Bleaching, PerFrameFactor, PerObservation, PerSliceFactor
 from .mask import MaskSpec, PhaseMask, make_mask
 from .psf import VectorPSF
@@ -14,6 +14,6 @@ from .start import rough_start
 
 __all__ = ["Channel", "FieldPolynomial", "Held", "held_from", "make_psf", "make_pupil", "pupil_grid", "start_from",
            "VectorPSF", "ZernikePupil", "MinimalPupil", "minimal_grid_optics", "PixelPupil", "ForwardModel",
-           "FourPiModel", "BeadStackGeometry",
+           "FourPiModel", "BeadStackGeometry", "CoverslipStackGeometry",
            "InSituGeometry", "Bleaching", "PerSliceFactor", "PerFrameFactor", "PerObservation", "Constant", "Planar",
            "rough_start", "MaskSpec", "PhaseMask", "make_mask"]
