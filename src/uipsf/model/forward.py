@@ -29,7 +29,7 @@ import torch
 from ..optics import layers
 from ..params import ParamSpec
 from .background import Constant
-from .channels import Channel, inverse_map, prefix, unpack_transform, view
+from .channels import SHARED, Channel, inverse_map, prefix, unpack_transform, view
 from .geometry import BeadStackGeometry
 from .intensity import Bleaching
 from .start import rough_start
@@ -75,7 +75,8 @@ class ForwardModel:
         is and how bright: the solver differentiates the latter through `emitter_linearisation`.  The
         coverslip's tilt enters the PSFs, but `emitter_linearisation` carries its columns when the
         geometry fits it; freed otherwise, it is differentiated through the whole model."""
-        names = {prefix(c) + s.name for c, ch in enumerate(self.channels) for s in ch.psf.specs() + _field_specs(ch)}
+        names = {("" if s.name in SHARED else prefix(c)) + s.name
+                 for c, ch in enumerate(self.channels) for s in ch.psf.specs() + _field_specs(ch)}
         return names if self._tilt_linear() else names | {"geometry.tilt"}
 
     def _tilt_linear(self) -> bool:
@@ -184,12 +185,13 @@ class ForwardModel:
                 two_pi_i = 2j * math.pi
                 factors = [(-two_pi_i * g.kx)[None, :].expand_as(g.kz_imm),
                            (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm), two_pi_i * g.kz_imm]
+                n_med = pc.get("optics.n_med")            # a learnt sample index (`VectorPSF.medium`)
                 if depth is not None:                     # in situ: the height in the sample, through k_z,med
-                    c_h = (layers.coefficients(g, p.get("geometry.tilt"))[0] if layers.layered(g, p)
-                           else g.kz_med)
+                    c_h = (layers.coefficients(g, p.get("geometry.tilt"), n_med=n_med)[0] if layers.layered(g, p)
+                           else ch.psf.medium(pc)[4])
                     factors.append(two_pi_i * c_h)
                 if tilted:
-                    dc_h, dc_0 = layers.derivatives(g, p["geometry.tilt"])           # [2, P, P] each
+                    dc_h, dc_0 = layers.derivatives(g, p["geometry.tilt"], n_med)    # [2, P, P] each
                     factors += [two_pi_i * dc_0[0], two_pi_i * dc_0[1]]
                     if depth is not None:
                         factors += [two_pi_i * dc_h[0], two_pi_i * dc_h[1]]

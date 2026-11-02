@@ -76,7 +76,8 @@ def _without_shift(c: torch.Tensor, grid) -> torch.Tensor:
     return c - a * grid.kx[None, :].to(c.dtype) - b * grid.ky[:, None].to(c.dtype)
 
 
-def coefficients(grid, tilt: torch.Tensor | None, centred: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+def coefficients(grid, tilt: torch.Tensor | None, centred: bool = True,
+                 n_med: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """(c_h, c_0), [P, P] complex, cycles: the wave's phase per nm of height in the sample,
     ``k_z,imm + [k_n,med(t) − k_n,imm]`` (the emitter's own k_z,imm·h and the layers'), and the coverslip's
     phase (module docstring).
@@ -85,17 +86,24 @@ def coefficients(grid, tilt: torch.Tensor | None, centred: bool = True) -> tuple
     fields are zero there, and the immersion's own k_z, imaginary at the corners, stays bounded.
 
     ``centred``: the part of each that is a lateral shift, a·k_x + b·k_y fitted over the aperture, is taken
-    out (module docstring).  At t = 0 there is none: both are even in k."""
+    out (module docstring).  At t = 0 there is none: both are even in k.
+
+    ``n_med``, a learnt sample index (a 0-d tensor), replaces the typed one (`optics.medium`)."""
     o = grid.optics
-    c_h = grid.kz_med
+    if n_med is None:
+        kz_med = grid.kz_med
+    else:
+        from .medium import maps
+        kz_med = maps(grid, n_med).kz_med
+    c_h = kz_med
     c_0 = ((grid.kz_cov - grid.kz_imm) * (o.d_cov_nm - o.d_cov_design_nm) if o.coverslip_matters
            else torch.zeros_like(grid.kz_imm))
     if tilt is None:
         return c_h, c_0
     # today's exact values and the change the tilt makes, the smoothed roots' at t less theirs at 0 (`_root`)
     t = tilt.to(grid.dtype)
-    h_t, cov_t = _tilted(grid, t)
-    h_0, cov_0 = _tilted(grid, torch.zeros_like(t))
+    h_t, cov_t = _tilted(grid, t, n_med)
+    h_0, cov_0 = _tilted(grid, torch.zeros_like(t), n_med)
     inside = grid.aperture > 0
     c_h = torch.where(inside, c_h + (h_t - h_0), c_h)
     if o.coverslip_matters:
@@ -103,11 +111,11 @@ def coefficients(grid, tilt: torch.Tensor | None, centred: bool = True) -> tuple
         if centred:
             c_0 = _without_shift(c_0, grid)
     if centred:
-        c_h = torch.where(inside, _without_shift(c_h, grid), grid.kz_med)
+        c_h = torch.where(inside, _without_shift(c_h, grid), kz_med)
     return c_h, c_0
 
 
-def _tilted(grid, t):
+def _tilted(grid, t, n_med=None):
     """k_n,med(t) − k_n,imm(t) and k_n,cov(t) − k_n,imm(t), [P, P] complex, with the smoothed root."""
     o = grid.optics
     cdtype = grid.kz_imm.dtype
@@ -122,17 +130,18 @@ def _tilted(grid, t):
     def k_normal(n):
         return _root((n * n - o.n_imm ** 2) / lam2 + kn * kn, eps) - kn.to(cdtype)
 
-    return k_normal(o.n_med), k_normal(o.n_cov) if o.coverslip_matters else None
+    return (k_normal(o.n_med if n_med is None else n_med.to(kn.dtype)),
+            k_normal(o.n_cov) if o.coverslip_matters else None)
 
 
-def derivatives(grid, tilt: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def derivatives(grid, tilt: torch.Tensor, n_med: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
     """(∂c_h/∂t, ∂c_0/∂t), [2, P, P] complex: what the solver's linearised Jacobian needs for the tilt
     (`ForwardModel.emitter_linearisation`).  Forward mode through the real and imaginary parts, so that
     no complex tangent is asked of any device."""
     t = tilt.detach().to(grid.dtype)
 
     def parts(v):
-        c_h, c_0 = coefficients(grid, v)
+        c_h, c_0 = coefficients(grid, v, n_med=None if n_med is None else n_med.detach())
         return torch.stack([c_h.real, c_h.imag, c_0.real, c_0.imag])
 
     eye = torch.eye(2, dtype=t.dtype, device=t.device)

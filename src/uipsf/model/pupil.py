@@ -24,6 +24,7 @@ import math
 
 import torch
 
+from ..optics import medium
 from ..optics.grid import PupilGrid
 from ..optics.zernike import noll_to_nm, zernike_basis, zernike_modes
 from ..params import Bounded, ParamSpec
@@ -142,9 +143,13 @@ class MinimalPupil(ZernikePupil):
       learnt 0.13-0.26 beside a larger blur, which is not settled (`benchmarks/uipsf/real/m5_consensus.py`).
     - **the ring**, only where the sample's index is below the NA (else there is no supercritical light):
       exp(−2πκh), κ = √((ρ·NA)² − n_med²)/λ, h ≥ 0 the emitter's height above the glass, which the bead
-      model puts at the glass; one parameter, learnt with ``saf_damping`` (the default).  It belongs to the beads,
-      as their size does: a spline for single molecules is drawn with h = 0 (`export.sample_psf`), their light
-      beyond the critical angle following the physics of their own depth.
+      model puts at the glass; one parameter, learnt with ``saf_damping`` (the default).  Whether there is a
+      ring is decided when the pupil is built, from the typed n_med: with a learnt one (``optics.n_med``,
+      `VectorPSF.learn_n_med`) κ follows it, through the critical angle's smoothed root (`optics.medium`), so
+      it stays differentiable as n_med crosses a sample of the pupil -- but a ring the typed index did not
+      give is not added, nor h with it, which the data could not fix while n_med stays above the NA.  It
+      belongs to the beads, as their size does: a spline for single molecules is drawn with h = 0
+      (`export.sample_psf`), their light beyond the critical angle following the physics of their own depth.
     - **the aperture**: a cutoff at the objective's ``na`` of the width of a pupil sample, on a grid
       reaching `GRID_MARGIN` beyond it (`minimal_grid_optics`), so the aperture is not the grid's edge.  Held
       by default; with ``learn_na`` the NA is a parameter, ``pupil.na``: the 4Pi beads of Zenodo wanted an
@@ -232,8 +237,9 @@ class MinimalPupil(ZernikePupil):
         cos_imm = self.cos_imm if cos_imm is None else cos_imm
         out = cos_imm ** self.gamma(p)[..., None, None]
         if self.ring:
-            k = self.kappa if kappa is None else kappa
-            out = out * torch.exp(-2 * math.pi * k * self.ring_h(p)[..., None, None])
+            if kappa is None:
+                kappa = self.kappa if "optics.n_med" not in p else medium.maps(self.grid, p["optics.n_med"]).kappa
+            out = out * torch.exp(-2 * math.pi * kappa * self.ring_h(p)[..., None, None])
         if cutoff is None:
             cutoff = self._cutoff(p["pupil.na"]) if self.learn_na else self.cutoff
         return out * cutoff

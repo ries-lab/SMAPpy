@@ -116,14 +116,17 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
           steps_rad=(2.0, 0.0, -2.0), spec=None, read_noise_var: float = 1.0, bead_radius_nm: float = 0.0,
           photons_per_observation: bool = True, device=None, progress=None, cancel=None,
           kind: str = "vector", plates: str = "aligned", warm: Optional[dict] = None, magnitude_modes=None,
-          same_magnitude: bool = True):
+          same_magnitude: bool = True, n_med: Optional[float] = None):
     """uiPSF's 4Pi model learnt from ``beads`` (`uipsf.workflows.fourpi.learn_fourpi`): a `FourPiFit`.
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     ``spec`` the PSF model's choices (`PSFModelSettings`, default the 4Pi form's: `FourPiBeadSettings.psf`,
     the minimal model), both pupils built by uipsf's builder (`uipsf.model.build`) on one grid -- a minimal
-    pupil's reaching beyond the NA as one objective's does.  The sample is taken as index-matched (n_med =
-    n_imm), so a minimal pupil has no supercritical ring -- an assumption: a 4Pi buffer can be as low as
-    water's, and is measured only when matched (the user, 2026-11-02; docs/4pi.md §23).
+    pupil's reaching beyond the NA as one objective's does.  ``n_med`` the buffer's index, the window's *sample
+    index*; None takes the sample as index-matched (n_med = n_imm), so a minimal pupil has no supercritical ring
+    -- an assumption: a 4Pi buffer can be as low as water's, and is measured only when matched (the user,
+    2026-11-02; docs/4pi.md §23).  Below the NA a minimal pupil has its ring, with one h for both objectives
+    under ``same_magnitude``; the spec's ``learn_n_med`` learns n_med from there, one for both objectives
+    (docs/4pi.md §24).
     A free photon count per observation by default: on the example beads it took the mean deviance from
     1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
     arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
@@ -147,7 +150,8 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     if kind == "scalar" and magnitude_modes is None and spec.magnitude == "symmetric":
         spec = replace(spec, magnitude="free")       # the scalar model needs every mode (above)
     px = (pixel_size_nm, pixel_size_nm) if np.isscalar(pixel_size_nm) else tuple(pixel_size_nm)
-    optics = uipsf.Optics(NA=NA, wavelength_nm=wavelength_nm, n_imm=n_imm, n_med=n_imm, pixel_size_nm=px)
+    optics = uipsf.Optics(NA=NA, wavelength_nm=wavelength_nm, n_imm=n_imm, n_med=n_imm if n_med is None else n_med,
+                          pixel_size_nm=px)
     grid = pupil_grid(optics, spec, size=64, device=device)
     pupils = [make_pupil(optics, spec, grid=grid, magnitude_override=magnitude_modes) for _ in range(2)]
     batch = beads.batch(read_noise_var)
@@ -157,7 +161,7 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
                         sigma_nm=(spec.blur_nm, spec.blur_nm), fit_sigma=spec.blur != "fixed",
                         intensity=PerObservation() if photons_per_observation else None, kind=kind, plates=plates,
                         round_sigma=spec.blur == "round", same_magnitude=same_magnitude,
-                        pixel_blur=spec.pixel_blur)
+                        pixel_blur=spec.pixel_blur, learn_n_med=bool(getattr(spec, "learn_n_med", False)))
     return learn_fourpi(model, batch, progress=progress, cancel=cancel, values=warm)
 
 
@@ -243,16 +247,17 @@ class FourPiBeadSettings:
                                help="the saved model's z step")
 
 
-def fourpi_shown(settings: FourPiBeadSettings) -> dict:
+def fourpi_shown(settings: FourPiBeadSettings, ring: bool = False) -> dict:
     """Which of the 4Pi form's fields it shows (`FormState.shown`, dotted for the PSF part): the typed corners
-    only while the channels are typed; the PSF model's as the bead form's (`pupil.model_shown`), the sample
-    taken as index-matched (`learn`), so never the SAF damping; the *magnitude modes* only for a Zernike
-    magnitude, whose modes they are."""
+    only while the channels are typed; the PSF model's as the bead form's (`pupil.model_shown`), the SAF damping
+    only with ``ring``, a buffer's index typed below the NA (on *auto* the sample is index-matched, `learn`);
+    *learn sample index* always; the *magnitude modes* only for a Zernike magnitude, whose modes they are."""
     from .pupil import model_shown
     typed = settings.layout == "typed"
     shown = {n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")}
-    beads = model_shown("beads", settings.psf.magnitude, ring=False)
-    shown["psf.saf_damping"], shown["psf.learn_na"] = beads["psf.saf_damping"], beads["psf.learn_na"]
+    beads = model_shown("beads", settings.psf.magnitude, ring=ring)
+    for name in ("psf.saf_damping", "psf.learn_na", "psf.learn_n_med"):
+        shown[name] = beads[name]
     shown["magnitude_modes"] = settings.psf.magnitude in ("free", "symmetric")
     return shown
 

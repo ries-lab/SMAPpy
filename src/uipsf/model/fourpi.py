@@ -99,7 +99,7 @@ class FourPiModel:
                  coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
                  pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None,
                  round_sigma: bool = False, same_magnitude: bool = False, pixel_blur: bool = False,
-                 fit_sigma: bool = True):
+                 fit_sigma: bool = True, learn_n_med: bool = False):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
@@ -118,7 +118,9 @@ class FourPiModel:
         magnitude's scale being the reference energy's.  The lower pupil then has no ``lo.pupil.magnitude``
         (nor, minimal pupils, ``lo.pupil.gamma``: one γ, `MAGNITUDE`) and reads the upper one's through
         `lower_view`.  ``pixel_blur`` puts the pixel's own blur under the learnt one, ``fit_sigma`` off holds
-        the blur at ``sigma_nm`` (`VectorPSF`).  Pupils made
+        the blur at ``sigma_nm`` (`VectorPSF`).  ``learn_n_med`` learns the buffer's index, ``optics.n_med``, one
+        for both objectives (the same sample), from the grid's typed one; its column is a JVP through the
+        model (`psf_names`).  Pupils made
         here are `model.build.make_pupil`'s, as ``pupils`` from outside should be."""
         if kind not in ("scalar", "vector"):
             raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
@@ -144,10 +146,10 @@ class FourPiModel:
                       for _ in range(2)]
         self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,
                                 bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma,
-                                pixel_blur=pixel_blur, fit_sigma=fit_sigma)
+                                pixel_blur=pixel_blur, fit_sigma=fit_sigma, learn_n_med=learn_n_med)
         self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind=kind,
                                 bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma,
-                                pixel_blur=pixel_blur, fit_sigma=fit_sigma)
+                                pixel_blur=pixel_blur, fit_sigma=fit_sigma, learn_n_med=learn_n_med)
         C, M = self.n_channels, self.n_phases
         steps = torch.zeros(M) if steps_rad is None else torch.as_tensor(steps_rad, dtype=torch.float32)
         self.steps_init = (steps - steps[0])[1:]

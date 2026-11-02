@@ -30,26 +30,36 @@ import math
 import torch
 
 from ..device import compiled
-from ..optics import layers
+from ..optics import layers, medium
 from ..optics.grid import PupilGrid
 from ..optics.kernels import bin_pixels, blur_bin_matrices, gaussian_otf, sphere_otf
 from ..optics.mdft import MatrixDFT, wide_product
 from ..optics.vectorial import dipole_fields, scalar_field
-from ..params import Magnitude, ParamSpec
+from ..params import Bounded, Magnitude, ParamSpec
+
+
+def n_med_spec(n_typed: float) -> ParamSpec:
+    """``optics.n_med``, the sample's refractive index, learnt from the typed one: between 1.2 (below any
+    aqueous buffer) and 1.7 (above any mounting medium), the typed value at least 0.1 inside either bound so
+    that the logistic does not start at its edge.  Shared by every channel and both objectives of a 4Pi: one
+    sample (`model.channels.SHARED`)."""
+    lo, hi = min(1.2, n_typed - 0.1), max(1.7, n_typed + 0.1)
+    return ParamSpec("optics.n_med", (), init=float(n_typed), transform=Bounded(lo, hi))
 
 
 class VectorPSF:
     def __init__(self, grid: PupilGrid, pupil, roi_shape: tuple[int, int], *, upsample: int = 1,
                  kind: str = "vector", analyser: str | None = "unpolarised", bead_radius_nm: float = 0.0,
                  sigma_nm: tuple[float, float] = (0.0, 0.0), fit_sigma: bool = True, round_sigma: bool = False,
-                 pixel_blur: bool = False):
+                 pixel_blur: bool = False, learn_n_med: bool = False):
         """``roi_shape`` is (Y, X) camera pixels; ``kind`` "vector" or "scalar"; ``analyser``
         "unpolarised" (the default, also None), "x" or "y" (a channel behind a polariser); ``sigma_nm``
         the blur's starting value, or its value with ``fit_sigma=False``; ``round_sigma`` makes it one value
         for x and y (``psf.sigma`` [1]): free, the blur took up 0.1-0.4 rad of in situ astigmatism (M2, October
         2026, docs/uipsf/architecture.md).  ``pixel_blur`` puts the pixel's own blur under it, σ_px = p/√12 per
         axis added in quadrature (`image_sigma`): the model is sampled at pixel centres, and a learnt σ took the
-        pixel's width up too, so with it σ is what blurs the image beyond the pixel.
+        pixel's width up too, so with it σ is what blurs the image beyond the pixel.  ``learn_n_med`` learns the
+        sample's refractive index, ``optics.n_med``, from the typed one (`medium`): a diagnostic, held by default.
 
         Unpolarised is the default and is said so: v1 put every two-channel vector fit behind an x and
         a y polariser unless told otherwise, so biplane and ratiometric data were fitted with the
@@ -69,6 +79,7 @@ class VectorPSF:
         self.fit_sigma = bool(fit_sigma)
         self.round_sigma = bool(round_sigma)
         self.pixel_blur = bool(pixel_blur)
+        self.learn_n_med = bool(learn_n_med)
         px, py = grid.optics.pixel_size_nm
         self.pixel_sigma = (px / math.sqrt(12), py / math.sqrt(12)) if self.pixel_blur else (0.0, 0.0)
         self.spacing = (px / self.upsample, py / self.upsample)
@@ -84,7 +95,9 @@ class VectorPSF:
         Ft = self.fields.permute(1, 0, 2)
         self._fields_re = torch.cat([Ft.real, Ft.imag], 0).contiguous()
         self._fields_im = torch.cat([-Ft.imag, Ft.real], 0).contiguous()
-        # |E|² · ΔxΔy integrates the image; E carries Δk² from the DFT, the pupil energy Δk² once.
+        # |E|² · ΔxΔy integrates the image; E carries Δk² from the DFT, the pupil energy Δk² once.  Held at the
+        # typed n_med when it is learnt: `pupil_field` rescales the pupil to this energy with the weight at the
+        # learnt one, so the image still integrates to one photon and the constant cancels
         self.norm = self.spacing[0] * self.spacing[1] / (self.energy * self.dft.scale)
 
     def resized(self, roi_shape=None, upsample: int | None = None, *, bead_radius_nm: float | None = None,
@@ -101,7 +114,7 @@ class VectorPSF:
                          analyser=self.analyser,
                          bead_radius_nm=self.bead_radius_nm if bead_radius_nm is None else bead_radius_nm,
                          sigma_nm=self.sigma_init, fit_sigma=self.fit_sigma, round_sigma=self.round_sigma,
-                         pixel_blur=self.pixel_blur)
+                         pixel_blur=self.pixel_blur, learn_n_med=self.learn_n_med)
 
     def for_emitters(self, roi_shape=None, upsample: int | None = None) -> VectorPSF:
         """The point-emitter view of a learnt PSF, the one way a model is drawn for single molecules (a
@@ -113,11 +126,14 @@ class VectorPSF:
 
     def describe(self, p) -> dict:
         """The PSF's hand-over description: the pupil's (`ZernikePupil.describe`) with the blur, ``sigma_nm``
-        (x, y), and whether it is beyond the pixel's own (``pixel_blur``), and the optics it was learnt with."""
+        (x, y), and whether it is beyond the pixel's own (``pixel_blur``), and the optics it was learnt with:
+        ``n_medium`` the sample's index, typed or learnt (``n_medium_learnt`` then True)."""
         o = self.grid.optics
         na = self.pupil.aperture(p) if hasattr(self.pupil, "aperture") else getattr(self.pupil, "na", o.NA)
         out = dict(self.pupil.describe(p), wavelength_nm=float(o.wavelength_nm), NA=float(na),
-                   n_immersion=float(o.n_imm))
+                   n_immersion=float(o.n_imm), n_medium=round(float(self.n_med(p)), 4))
+        if "optics.n_med" in p:
+            out["n_medium_learnt"] = True
         if "psf.sigma" in p:
             out["sigma_nm"] = [round(float(v), 2) for v in self.blur(p).detach().cpu().reshape(-1)]
             out["pixel_blur"] = self.pixel_blur
@@ -126,8 +142,27 @@ class VectorPSF:
     def specs(self) -> list[ParamSpec]:
         init = torch.tensor(self.sigma_init)
         init = init.mean().reshape(1) if self.round_sigma else init
-        return self.pupil.specs() + [ParamSpec("psf.sigma", tuple(init.shape), init=init,
-                                                   transform=Magnitude(), fixed=not self.fit_sigma)]
+        specs = self.pupil.specs() + [ParamSpec("psf.sigma", tuple(init.shape), init=init,
+                                                    transform=Magnitude(), fixed=not self.fit_sigma)]
+        if self.learn_n_med:
+            specs.append(n_med_spec(self.grid.optics.n_med))
+        return specs
+
+    def n_med(self, p) -> torch.Tensor:
+        """The sample's index: the learnt one, or the typed one."""
+        return p["optics.n_med"] if "optics.n_med" in p else self.grid.rho.new_tensor(self.grid.optics.n_med)
+
+    def medium(self, p):
+        """(fields, fields_re, fields_im, weight, kz_med): the maps that depend on the sample's index -- the
+        precomputed ones (`__init__`) unless ``optics.n_med`` is among the parameters, then recomputed from it
+        (`optics.medium`), differentiable.  ``kz_med`` [P, P] complex is the depth's wave number in situ."""
+        if "optics.n_med" not in p:
+            return self.fields, self._fields_re, self._fields_im, self.weight, self.grid.kz_med
+        n = p["optics.n_med"]
+        F = medium.fields(self.grid, n, self.kind, None if self.analyser == "unpolarised" else self.analyser)
+        Ft = F.permute(1, 0, 2)
+        return (F, torch.cat([Ft.real, Ft.imag], 0), torch.cat([-Ft.imag, Ft.real], 0), (F.abs() ** 2).sum(0),
+                medium.maps(self.grid, n).kz_med)
 
     @staticmethod
     def blur(p) -> torch.Tensor:
@@ -145,7 +180,8 @@ class VectorPSF:
     def pupil_field(self, p: dict[str, torch.Tensor]) -> torch.Tensor:
         """The complex pupil without the fields, magnitude rescaled to the reference energy; [..., P, P]."""
         magnitude, phase = self.pupil(p)
-        scale = torch.sqrt(self.energy / (self.weight * magnitude ** 2).sum((-2, -1), keepdim=True))
+        weight = self.medium(p)[3]
+        scale = torch.sqrt(self.energy / (weight * magnitude ** 2).sum((-2, -1), keepdim=True))
         # Not torch.polar(magnitude, phase): the magnitude 1 + Σ c_j Z_j dips below zero at the rim once its
         # coefficients grow, and polar's backward (torch 2.14) flips the gradient's sign there while its
         # forward mode does not, so value_and_grad disagreed with the Jacobian and L-BFGS's steps failed.
@@ -163,10 +199,11 @@ class VectorPSF:
         A = self.pupil_field(p)
         if A.dim() == 3:                                      # one pupil per emitter (field dependence)
             A = A[:, None]
+        _, fields_re, fields_im, _, _ = self.medium(p)
         a = (A * self._waves(p, xyz, depth_nm))[..., :, None, :]                       # [E, K, P_y, 1, P_x]
         a = torch.cat([a, a], -3)
         # Contiguous parts: strided .real/.imag views were 3.5× slower on MPS.
-        f = torch.addcmul(a.real.contiguous() * self._fields_re, a.imag.contiguous(), self._fields_im)
+        f = torch.addcmul(a.real.contiguous() * fields_re, a.imag.contiguous(), fields_im)
         By, Bx = self.dft.real_matrices(xyz[..., 0], xyz[..., 1])        # [E, K, 2uY, 2P], [E, K, 2P, 2uX]
         return self.dft.apply_wide(f, By, Bx), By, Bx
 
@@ -210,7 +247,7 @@ class VectorPSF:
             E2 = (2 * self.norm) * h[:, :, None]                               # [E, K, 1, F, Y, 2, X]
             # W·F as [Re; Im] along P_y, [E, K, 2P, 1, F, P]: Re dA multiplies [Re WF; Im WF], Im dA
             # multiplies [−Im WF; Re WF].  Multiplied out once: 15 % faster on MPS than per tangent.
-            WF = self._waves(p, xyz, depth_nm)[..., :, None, :] * self.fields.permute(1, 0, 2)
+            WF = self._waves(p, xyz, depth_nm)[..., :, None, :] * self.medium(p)[0].permute(1, 0, 2)
             WF_re = torch.cat([WF.real, WF.imag], 2)[:, :, :, None].contiguous()
             WF_im = torch.cat([-WF.imag, WF.real], 2)[:, :, :, None].contiguous()
             E2 = E2 * self.dft.scale
@@ -249,7 +286,7 @@ class VectorPSF:
         one wide matrix DFT."""
         with torch.no_grad():
             fields = [self._image_field(p, xyz, depth_nm) for xyz in xyzs]
-            WF = self._waves(p, xyzs[0], depth_nm)[..., :, None, :] * self.fields.permute(1, 0, 2)
+            WF = self._waves(p, xyzs[0], depth_nm)[..., :, None, :] * self.medium(p)[0].permute(1, 0, 2)
             WF_re = torch.cat([WF.real, WF.imag], 2)[:, :, :, None].contiguous()     # [E, K, 2P, 1, F, P]
             WF_im = torch.cat([-WF.imag, WF.real], 2)[:, :, :, None].contiguous()
 
@@ -268,12 +305,14 @@ class VectorPSF:
         the interfaces (``geometry.tilt``) or a coverslip off its design thickness the depth term and the
         coverslip's are the layered model's (`optics.layers`); without, the wave is the untilted one."""
         z = xyz[..., 2][..., None, None].to(self.grid.kz_imm.dtype)
+        n_med = p.get("optics.n_med")
         if not layers.layered(self.grid, p):
             wave = torch.exp(2j * math.pi * self.grid.kz_imm * z)
             if depth_nm is not None:
-                wave = wave * torch.exp(2j * math.pi * self.grid.kz_med * _depth(depth_nm, self.grid))
+                kz_med = self.grid.kz_med if n_med is None else medium.maps(self.grid, n_med).kz_med
+                wave = wave * torch.exp(2j * math.pi * kz_med * _depth(depth_nm, self.grid))
             return wave
-        c_h, c_0 = layers.coefficients(self.grid, p.get("geometry.tilt"))
+        c_h, c_0 = layers.coefficients(self.grid, p.get("geometry.tilt"), n_med=n_med)
         phase = self.grid.kz_imm * z + c_0
         if depth_nm is not None:
             phase = phase + c_h * _depth(depth_nm, self.grid)

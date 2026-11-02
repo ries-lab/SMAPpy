@@ -191,6 +191,7 @@ def test_the_form_shows_what_each_method_reads():
     assert not model_shown("beads", "free")["psf.saf_damping"]                # a minimal magnitude's only
     assert not model_shown("beads", "minimal", ring=False)["psf.saf_damping"]  # nothing beyond the critical angle
     assert not model_shown("beads", dual=True)["field_dependence"]
+    assert all(model_shown(m)["psf.learn_n_med"] for m in ("beads", "insitu"))   # a diagnostic everywhere
     situ = model_shown("insitu")
     assert situ["fit_tilt"] and not any(situ[k] for k in ("psf.magnitude", "psf.saf_damping", "bead_diameter_nm",
                                                            "drift", "field_dependence"))

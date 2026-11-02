@@ -8,7 +8,7 @@ dropped the pixel's blur).  Here they are made once:
 
 - **the spec** is SMAPpy's `PSFModelSettings` (`smappy.calibrate.pupil`, torch-free, the form's section) or
   anything with its attributes: ``order``, ``magnitude`` (minimal, free, symmetric, fixed), ``saf_damping``,
-  ``blur`` (free, round, fixed), ``blur_nm`` and ``pixel_blur``;
+  ``blur`` (free, round, fixed), ``blur_nm``, ``pixel_blur`` and ``learn_n_med`` (the sample's index learnt);
 - `pupil_grid` owns the grid (and its margin), `make_pupil` the pupil, `make_psf` the PSF;
 - **the hand-over** between models is the description a learnt PSF gives of itself
   (`VectorPSF.describe`, plain data, kept with a microscope by SMAPpy): ``kind``, the phase in nm, γ (a
@@ -100,13 +100,15 @@ def make_psf(optics, spec, roi_shape, *, held: Held | None = None, bead_radius_n
              grid: PupilGrid | None = None, pupil=None, magnitude_override: list[int] | None = None,
              z_max_nm: float = 0.0, device=None, dtype=torch.float32) -> VectorPSF:
     """The PSF ``spec`` describes: `make_pupil`'s pupil (or ``pupil``), the blur learnt round, free or held at
-    ``spec.blur_nm``, the pixel's own blur under it with ``spec.pixel_blur``."""
+    ``spec.blur_nm``, the pixel's own blur under it with ``spec.pixel_blur``, the sample's index learnt from the
+    optics' with ``spec.learn_n_med``."""
     if pupil is None:
         pupil = make_pupil(optics, spec, held, grid=grid, magnitude_override=magnitude_override, z_max_nm=z_max_nm,
                            device=device, dtype=dtype)
     return VectorPSF(pupil.grid, pupil, tuple(roi_shape), upsample=upsample, kind=kind, analyser=analyser,
                      bead_radius_nm=bead_radius_nm, sigma_nm=(spec.blur_nm, spec.blur_nm),
-                     fit_sigma=spec.blur != "fixed", round_sigma=spec.blur == "round", pixel_blur=spec.pixel_blur)
+                     fit_sigma=spec.blur != "fixed", round_sigma=spec.blur == "round", pixel_blur=spec.pixel_blur,
+                     learn_n_med=bool(getattr(spec, "learn_n_med", False)))
 
 
 def held_from(description: dict | None, order: int, wavelength_nm: float, every: bool = False,

@@ -286,6 +286,30 @@ def test_the_4pi_form_learns_the_minimal_model_with_one_gamma_and_shows_what_it_
     assert not shown["psf.saf_damping"] and not shown["magnitude_modes"] and not shown["x_corners"]
     for magnitude, modes in (("symmetric", True), ("free", True), ("fixed", False)):
         assert fourpi_shown(FourPiBeadSettings(psf=PSFModelSettings(magnitude=magnitude)))["magnitude_modes"] is modes
+    assert shown["psf.learn_n_med"] and fourpi_shown(settings, ring=True)["psf.saf_damping"]
+
+
+def test_the_4pi_buffer_is_index_matched_on_auto_and_typed_or_learnt_otherwise():
+    """The microscope's *sample index* on auto keeps each mode's assumption -- water for one objective, the
+    immersion's for 4Pi -- and typed it is the 4Pi buffer's, which *learn sample index* starts from, one for both
+    objectives (docs/4pi.md §24)."""
+    from types import SimpleNamespace
+
+    from smappy.calibrate.pupil import OpticsSettings
+
+    import uipsf
+    from uipsf.model import make_pupil, pupil_grid
+    from uipsf.model.fourpi import FourPiModel
+    assert OpticsSettings().sample_index() == 1.33 and OpticsSettings().sample_index(True, 1.406) == 1.406
+    assert OpticsSettings(n_medium=1.34).sample_index(True, 1.406) == 1.34
+    optics = uipsf.Optics(NA=1.35, wavelength_nm=600, n_imm=1.406, n_med=1.33, pixel_size_nm=(129, 129))
+    spec = SimpleNamespace(order=4, magnitude="minimal", saf_damping=True, learn_na=False)
+    g = pupil_grid(optics, spec, size=32, device="cpu")
+    pupils = [make_pupil(optics, spec, grid=g) for _ in range(2)]
+    model = FourPiModel(g, (11, 11), pupils=pupils, n_max=4, same_magnitude=True, learn_n_med=True)
+    names = [s.name for s in model.psf_up.specs()]
+    assert "optics.n_med" in names and "pupil.ring_h" in names and "optics.n_med" in model.psf_names()
+    assert float(next(s for s in model.psf_up.specs() if s.name == "optics.n_med").init) == 1.33
 
 
 def test_the_magnitude_modes_are_read_as_noll_indices():

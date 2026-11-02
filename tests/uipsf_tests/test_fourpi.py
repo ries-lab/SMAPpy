@@ -411,36 +411,44 @@ def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sum
         assert float(((a - b).abs() / scale).max()) < 2e-3
 
 
-def _minimal_model(grid, same_magnitude=True, learn_na=False, **kw):
-    """A 4Pi model of two minimal pupils (`model.build.make_pupil`), on the grid a minimal pupil needs."""
+def _minimal_model(grid, same_magnitude=True, learn_na=False, n_med=None, **kw):
+    """A 4Pi model of two minimal pupils (`model.build.make_pupil`), on the grid a minimal pupil needs; ``n_med``
+    the sample's typed index if not the grid's."""
+    import dataclasses
     from types import SimpleNamespace
 
     from uipsf.model import make_pupil, pupil_grid
     spec = SimpleNamespace(order=4, magnitude="minimal", saf_damping=True, learn_na=learn_na)
-    g = pupil_grid(grid.optics, spec, size=64, device="cpu")
-    pupils = [make_pupil(grid.optics, spec, grid=g) for _ in range(2)]
+    optics = grid.optics if n_med is None else dataclasses.replace(grid.optics, n_med=n_med)
+    g = pupil_grid(optics, spec, size=64, device="cpu")
+    pupils = [make_pupil(optics, spec, grid=g) for _ in range(2)]
     return FourPiModel(g, (R, R), n_max=4, pupils=pupils, same_magnitude=same_magnitude, **kw)
 
 
-@pytest.mark.parametrize("kind, same, na", [("vector", True, False), ("vector", False, False),
-                                             ("scalar", True, False), ("vector", True, True),
-                                             ("vector", False, True)])
-def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same, na):
+@pytest.mark.parametrize("kind, same, na, n_med", [("vector", True, False, None), ("vector", False, False, None),
+                                                    ("scalar", True, False, None), ("vector", True, True, None),
+                                                    ("vector", False, True, None), ("vector", True, False, 1.406),
+                                                    pytest.param("vector", True, False, 1.33, marks=pytest.mark.slow),
+                                                    pytest.param("scalar", False, True, 1.33, marks=pytest.mark.slow)])
+def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same, na, n_med):
     """Minimal pupils in a 4Pi model: one γ (and a learnt NA) for both objectives under ``same_magnitude``
-    (`MAGNITUDE`), each its own otherwise; no ring, the sample being index-matched; the solver's linearised
+    (`MAGNITUDE`), each its own otherwise; no ring when the sample is index-matched; the solver's linearised
     columns -- γ's the sum over both arms when shared -- equal the JVPs', with the pixel's blur under the learnt
-    one."""
+    one.  ``n_med`` learns the buffer's index from that typed value, one for both objectives: from 1.33, below the
+    NA, with the ring and its h."""
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve.problem import Problem
     _, batch, truth = beads
     model = _minimal_model(beads[0].grid, same_magnitude=same, learn_na=na, kind=kind, pixel_blur=True,
-                           round_sigma=True)
+                           round_sigma=True, n_med=n_med, learn_n_med=n_med is not None)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
     specs = model.specs(batch, start)
     names = {s.name for s in specs}
     assert "pupil.gamma" in names and ("lo.pupil.gamma" in names) != same
-    assert not any("ring_h" in n for n in names)
+    ring = n_med is not None and n_med < 1.35
+    assert ("pupil.ring_h" in names) == ring and ("lo.pupil.ring_h" in names) == (ring and not same)
+    assert ("optics.n_med" in names) == (n_med is not None) and not any(n.startswith("lo.optics") for n in names)
     assert ("pupil.na" in names) == na and ("lo.pupil.na" in names) == (na and not same)
     values = {k: v for k, v in truth.items() if "magnitude" not in k}
     if na:
@@ -451,6 +459,12 @@ def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvp
     values["pupil.gamma"] = torch.tensor(0.3)
     if not same:
         values["lo.pupil.gamma"] = torch.tensor(0.2)
+    if n_med is not None:
+        values["optics.n_med"] = torch.tensor(n_med - 0.02)
+    if ring:
+        values["pupil.ring_h"] = torch.tensor(40.0)
+        if not same:
+            values["lo.pupil.ring_h"] = torch.tensor(80.0)
     p = Params(specs, E, values=values)
     sub, pc = batch.subset(slice(0, 3)), p.subset(slice(0, 3))
     fast = Problem(model, ShiftedPoisson(), sub, tangents=4)._jacobians(pc, sub)
@@ -488,6 +502,34 @@ def test_minimal_4pi_beads_give_back_their_gamma_sigma_pupils_and_phases(grid):
         assert torch.all(d.abs() < 4 * std[name] + 1e-3), (name, got[name], want[name], std[name])
     d = np.angle(np.exp(1j * (fit.result.params.physical()["emitter.phase"] - want["emitter.phase"]).numpy()))
     assert np.all(np.abs(d) < 4 * std["emitter.phase"].numpy())
+
+
+@pytest.mark.long
+def test_4pi_beads_give_their_buffers_index_back_within_its_crlb(grid):
+    """Simulated 4Pi bead stacks with the buffer at 1.37 behind objectives typed index-matched (1.406), learnt with
+    *learn sample index* from the typed value: n_med within 3 CRLB of the truth, γ and σ beside it (docs/4pi.md
+    §24)."""
+    from uipsf.workflows.fourpi import learn_fourpi
+    truth_model = _minimal_model(grid, pixel_blur=True, round_sigma=True, steps_rad=[0.0] + STEPS[1:],
+                                 learn_n_med=True)
+    z = -np.arange(-(J // 2), J // 2 + 1) * 100.0
+    roi_xy = np.random.default_rng(0).uniform(20, 180, (E, 1, 2)).repeat(C, 1)
+    batch = uipsf.Batch(data=torch.zeros(E, C, J * M, R, R), z_nm=torch.tensor(np.repeat(z, M), dtype=torch.float32),
+                        roi_xy=torch.tensor(roi_xy, dtype=torch.float32))
+    truth = {k: v for k, v in _truth(truth_model).items() if "magnitude" not in k}
+    truth.update({"pupil.gamma": torch.tensor(0.35), "psf.sigma": torch.tensor([35.0]),
+                  "optics.n_med": torch.tensor(1.37)})
+    start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
+             "background": truth["emitter.background"]}
+    p = Params(truth_model.specs(batch, start), E, values=truth)
+    data = simulate(truth_model, p, batch, seed=3)
+    fresh = _minimal_model(grid, pixel_blur=True, round_sigma=True, steps_rad=[2, 0, -2], learn_n_med=True)
+    fit = learn_fourpi(fresh, data)
+    got, std = fit.shared(), fit.result.std
+    for name, want in (("optics.n_med", 1.37), ("pupil.gamma", 0.35), ("psf.sigma", 35.0)):
+        assert abs(float(got[name].reshape(-1)[0]) - want) < 3 * float(std[name].reshape(-1)[0]) + 1e-3, (
+            name, got[name], std[name])
+    assert float(std["optics.n_med"]) < 0.02
 
 
 def test_the_pixels_blur_is_under_the_learnt_one_in_both_arms(grid):

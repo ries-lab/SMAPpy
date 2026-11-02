@@ -2273,6 +2273,49 @@ the aperture at 1.32, the effective NA 0.976 of the nominal one, as one objectiv
 under *same magnitude* as γ is, described as ``na`` and held with γ by `held_from`), but the default is the typed
 NA: why the aperture is that small is open (§23 there).
 
+## The sample's index learnt (November 2026; `optics/medium.py`, `VectorPSF.learn_n_med`)
+
+A diagnostic for every model -- beads in one and two channels, in situ, 4Pi: the sample's refractive index
+``optics.n_med`` learnt from the typed one (*learn sample index*, `PSFModelSettings.learn_n_med`, off by default).
+It was asked for by the effective NA the minimal pupil wants (`docs/4pi.md` §23-24): a buffer of lower index than
+typed cuts the light at its own index.
+
+- **Held, nothing changes.**  `PupilGrid.build` precomputes k_z,med, cos θ_med, the Fresnel factors and the
+  apodisation once, in float64, and `VectorPSF.__init__` the dipole fields from them.  Without
+  ``optics.n_med`` among the parameters every path reads those (`VectorPSF.medium`); the spec exists only with
+  ``learn_n_med``.
+- **Learnt, the medium's maps are functions of a tensor** (`optics.medium`): `maps` (cos θ_med, sin θ_med,
+  k_z,med and κ = Im k_z,med) and `fields` (aperture × apodisation × dipole fields), on the device in its dtype.
+  Two choices make them differentiable: cos θ_med through `layers._root`'s smoothed root, ε a 64th of how far
+  1 − (ρ·NA/n)² moves between samples at the rim -- the same kink as a tilt's, the same remedy -- and
+  t_p·apodisation, t_s·apodisation formed with cos θ_med cancelled, finite at the critical angle where the grid's
+  separate factors are 0/0.  Away from the critical angle they equal the grid's to 10⁻⁹ (`test_medium.py`).
+- **What reads it**: the fields and their energy per pupil sample (`pupil_field`'s normalisation; the reference
+  energy and `norm` stay the typed index's, and cancel), the depth's wave in situ (k_z,med, and the layered
+  model's `coefficients` / `derivatives` with a tilt), and a minimal pupil's ring, κ = Im k_z,med.
+- **The ring is decided when the pupil is built**, from the typed n_med (`MinimalPupil`): with one, κ follows the
+  learnt index through the smoothed root, so n_med can cross a pupil sample, or the NA, and stay differentiable
+  (`test_the_index_is_differentiable_through_the_critical_angle`); without one -- a typed index above the NA --
+  none is added, nor h, which the data could not fix while n_med stays above the NA.
+- **The solver**: n_med is in `psf_names` but in no pupil group, so its column is a JVP through the whole model;
+  the pupil's and the emitters' linearised columns read the fields at the learnt index (`VectorPSF.medium` in
+  `pupil_linearisation` / `field_linearisation`, k_z,med in `emitter_linearisation`).  The linearised normal
+  equations equal the JVPs' for beads, a bead kernel, the minimal pupil's ring, two channels and in situ
+  (`test_medium.py`), and for 4Pi (`test_fourpi.py`, minimal pupils, matched and below the NA).
+- **One sample**: `channels.SHARED` -- a channel c ≥ 1 reads the main channel's ``optics.n_med`` under its plain
+  name, and both 4Pi objectives the same one.  4Pi's first stage holds it at the typed value
+  (`workflows.fourpi.HELD_FIRST`): free beside the pupils' gross shape it trades with the magnitude and Δz.
+- **Kept**: the model file's ``psf.learn_n_med`` and the learnt value among the shared parameters;
+  `VectorPSF.describe` gives ``n_medium`` (typed or learnt, ``n_medium_learnt``); `start_values` carries it.
+- **Recovered**: one objective's beads (NA 1.5, the minimal pupil with its ring) drawn at 1.36 and 1.40 give
+  1.3596 ± 0.0011 and 1.3998 ± 0.0009 from a typed 1.33 (`test_beads_give_their_sample_index_back_within_its_crlb`,
+  long tier); 4Pi beads drawn at 1.37 behind objectives typed index-matched give it back within 3 CRLB
+  (`test_4pi_beads_give_their_buffers_index_back_within_its_crlb`, long tier).
+- **In situ it says little**: a wrong index over 2 µm is taken up by the spherical modes, σ and the focus ("A wrong
+  sample index in situ", above), so there it is offered as a check, not expected to be determined.
+
+On real beads: `docs/4pi.md` §24.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```

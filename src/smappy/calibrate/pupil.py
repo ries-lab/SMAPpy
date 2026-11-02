@@ -107,6 +107,11 @@ class PSFModelSettings:
     learn_na: bool = param(False, label="learn NA", advanced=True,
                            help="minimal magnitude: learn the aperture's NA, an effective one at most 5 % above "
                                 "the objective's; off: the objective's NA as typed")
+    # the sample's index learnt (`uipsf.VectorPSF.learn_n_med`): a diagnostic, off by default -- a buffer's index is
+    # measured only when it is matched (docs/4pi.md §24)
+    learn_n_med: bool = param(False, label="learn sample index", advanced=True,
+                              help="learn the sample's refractive index from the microscope's *sample index*, "
+                                   "a diagnostic; off: as typed")
 
     def __post_init__(self):
         if self.magnitude not in dict(MAGNITUDES):
@@ -167,13 +172,14 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     coverslip of another index than the immersion's; ``ring`` whether the sample's index is below the NA, so
     that there is supercritical light to damp.
 
+    The sample's index is learnt on request in every method (*learn sample index*, a diagnostic).
     In situ decides the magnitude by its *hold* (a bead model's γ held, or γ learnt) and never learns the
     NA (a held γ brings a bead model's learnt one along), the SAF damping, the bead's size or the stage's drift, which are the beads'; field dependence is for one
     channel of beads, for now (docs/uipsf/field-dependence.md).  The tilt: always in situ, where molecules
     above the glass see it; for beads only through a coverslip of another index."""
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
-            "psf.learn_na": beads and magnitude == "minimal",
+            "psf.learn_na": beads and magnitude == "minimal", "psf.learn_n_med": True,
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
             "fit_tilt": not beads or layered}
 
@@ -638,6 +644,10 @@ def save(path, cal, calibration, overwrite: bool = False) -> tuple[Path, Path]:
 
 # ------------------------------------------------------------------ a whole run: what the window does
 
+#: the sample's index on *auto* for one objective (`OpticsSettings.sample_index`)
+WATER = 1.33
+
+
 @dataclass
 class OpticsSettings:
     """The microscope.  Each field on *auto* takes the microscope database's value for the file's
@@ -664,9 +674,12 @@ class OpticsSettings:
     n_immersion: Optional[float] = param(None, label="immersion index", min=1.0, max=2.0,
                                          help="the immersion medium's refractive index; auto: the "
                                               "microscope's, else oil's 1.518")
-    n_medium: float = param(1.33, label="sample index", min=1.0, max=2.0, advanced=True,
-                            help="the beads' medium: water 1.33, air 1.0, a mounting medium up to "
-                                 "the immersion's (index matched)")
+    # auto keeps each mode's own assumption: water for one objective, index-matched for 4Pi (`fourpi_beads.learn`);
+    # typed, it is every mode's, and *learn sample index* starts from it
+    n_medium: Optional[float] = param(None, label="sample index", min=1.0, max=2.0, advanced=True,
+                                      help="the beads' medium: water 1.33, air 1.0, a mounting medium up to "
+                                           "the immersion's (index matched); auto: water's, the immersion's for "
+                                           "4Pi")
     n_coverslip: Optional[float] = param(None, label="coverslip index", min=1.0, max=2.0, advanced=True,
                                          help="auto: the microscope's for its objective, else the immersion's")
     # the thickness is the sample's, not the objective's: the design thickness is the microscope's
@@ -749,10 +762,17 @@ class OpticsSettings:
         found = self.resolved(camera, channels, main)
         if found["pixel"] is None:
             pixel_size_nm(camera)                    # its error names what is missing
-        return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"], n_med=self.n_medium,
+        return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"], n_med=self.sample_index(),
                        pixel_size_nm=found["pixel"], n_cov=found["n_coverslip"],
                        d_cov_nm=found["coverslip_um"] * 1000, d_cov_design_nm=found["coverslip_design_um"] * 1000)
                 for w in found["wavelengths"]]
+
+    def sample_index(self, fourpi: bool = False, n_immersion: Optional[float] = None) -> float:
+        """The sample's index: as typed, else water's (`WATER`), or for 4Pi the immersion's ``n_immersion``, its
+        sample taken as index-matched."""
+        if self.n_medium is not None:
+            return float(self.n_medium)
+        return float(n_immersion) if fourpi and n_immersion else WATER
 
     def coverslip_matters(self, camera) -> bool:
         """Whether the coverslip is a layer of its own here, an index other than the immersion's (a water or
