@@ -87,11 +87,12 @@ CUDA_SHARE = 0.5
 # budget above sizes a batch of Jacobian columns for speed, not the chunk's own images, which grow with every
 # value in it.  Uncapped, 60 beads of 40 × 27² went into one chunk (2²¹ // 29 160 = 71) and a 16 GB machine
 # killed the fit (Zenodo `1ch_FD_bead`, docs/uipsf/field-dependence.md §9); in chunks of 8 it took 3.5 GB.
-# A value costs more on the CPU than CUDA's 6000 bytes: at 6000, those 60 beads went into chunks of 45 and the
-# process peaked at 13.6 GB of the 15.8 GB available (`calibrate_beads`, field dependence on, 33 min) --
-# about 8.5 kB per value of the chunk beyond the fixed part.
+# A value costs more on the CPU than CUDA's 6000 bytes.  Measured on 4 x86 cores, the field-dependent model of
+# those beads (one pupil per emitter), one `normal_equations` of 60 beads: chunks of 8 peaked at 4.3 GB and of
+# 29 at 13.8 GB, 0.45 GB per bead, 15.5 kB per value; `slice_fits` (every slice an emitter of 27² pixels) about
+# 11 kB per value.  Chunks of 8 were also faster than 29 (108 s against 141 s): a smaller chunk costs no speed.
 HOST_SHARE = 0.5
-HOST_BYTES_PER_VALUE = 9000
+HOST_BYTES_PER_VALUE = 16000
 
 
 def _host_chunk_values(device) -> int | None:
