@@ -4,7 +4,9 @@ The window (`psf_window`) shows one method at a time and knows none of them:
 each entry says which of the window's sections it reads (`sections`), how a
 run goes, its result pages, its bead table and how it
 saves.  A method added later -- in situ learning from blinking molecules, a
-field-dependent model -- is one more entry, not a branch through the window
+field-dependent model -- is one more entry, not a branch through the window;
+the window's *sample* only narrows which entries the method box lists
+(`SAMPLE_METHODS`)
 (`docs/uipsf/plan.md` §7.5).  No Qt here: a test or a script uses an entry
 as the window does.
 
@@ -14,6 +16,9 @@ as the window does.
 * **pupil model (uiPSF)**: `pupil.run_calibration` and uipsf's figures.
 * **in situ (blinking molecules)**: `insitu_run.run_insitu` on movies, uipsf's figures and the in situ
   pages (`insitu_views`); its table counts molecules by state, with no marks.
+* **molecules on the coverslip** (`MoleculeStack`, `MoleculeElliptical`): `molecule_stack_run.run_molecule_stack`
+  on z sweeps of molecules stuck to the glass, each detection at a known defocus; the pupil model's pages and
+  its own (`molecule_views`), the table counting molecules by state.
 * **elliptical Gaussian**: no PSF model at all, the curves of an elliptical Gaussian's widths in z
   (`elliptical`), for Astigmatic z rather than a fitter; saved as ``<name>_astigz.h5`` and never listed
   for the fitters' *auto*.

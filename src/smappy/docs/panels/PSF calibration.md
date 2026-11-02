@@ -1,26 +1,33 @@
 ---
 title: PSF calibration
-summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or, in the 4Pi mode, a 4Pi model for Spline 4Pi from 4Pi bead scans, and shows what each found and how well it fits.
+summary: Makes the PSF calibration the Spline 3D fitters read, from beads in a z stack, from single molecules on the coverslip in a z stack, or in situ from the blinking molecules of a measurement -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or, in the 4Pi mode, a 4Pi model for Spline 4Pi from 4Pi bead scans, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings, smappy.calibrate.psf_methods.MoleculeStack, smappy.calibrate.psf_methods.MoleculeElliptical, smappy.calibrate.psf_methods.methods_of, smappy.calibrate.molecule_stack.molecule_rois, smappy.calibrate.molecule_stack.read_file, smappy.calibrate.molecule_stack.stage_z_um, smappy.calibrate.molecule_stack.split_sweeps, smappy.calibrate.molecule_stack.width_curve, smappy.calibrate.molecule_stack.focus_of, smappy.calibrate.molecule_stack.detect, smappy.calibrate.molecule_stack.select, smappy.calibrate.molecule_stack.draw, smappy.calibrate.molecule_stack.illumination_radius, smappy.calibrate.molecule_stack.molecule_widths, smappy.calibrate.molecule_stack.MoleculeStackSettings, smappy.calibrate.molecule_dual.dual_molecule_rois, smappy.calibrate.molecule_dual.registration_from_molecules, smappy.calibrate.molecule_stack_run.run_molecule_stack, smappy.calibrate.molecule_stack_run.spline_range, smappy.calibrate.molecule_stack_run.estimate_seconds, smappy.calibrate.molecule_views.draw_selection, smappy.calibrate.molecule_views.draw_z_check, smappy.calibrate.molecule_views.draw_foci, smappy.calibrate.molecule_views.model_vs_data, uipsf.workflows.molecule_stack.learn_molecule_stack, uipsf.workflows.molecule_stack.z_check, uipsf.workflows.molecule_stack.molecule_chunk, uipsf.model.geometry.CoverslipStackGeometry]
 ---
 
 ## What it does
 
 A 3D fit needs to know what one molecule looks like at every height, the
-*point spread function* (PSF).  This window makes that calibration by one of
-three methods (*method*):
+*point spread function* (PSF).  This window makes that calibration from one of
+three samples (*sample*), each offering the methods that fit it (*method*):
 
-* **bead average**: the beads are aligned onto one another, averaged and
-  smoothed -- the [bead calibration](plugin:Panels/Bead calibration)'s
-  method, with its settings, pages and fit quality, explained on its page;
-* **pupil model (uiPSF)**: the PSF is learnt as a **model of the optics**,
-  explained here;
-* **in situ (blinking molecules)**: the same model learnt from the blinking
-  molecules of a measurement itself, with no beads (*In situ*, below).
+* **beads in a z stack**: fluorescent beads on the coverslip, imaged while the
+  objective steps through focus.  Methods: the **bead average** -- the beads
+  aligned onto one another, averaged and smoothed, the
+  [bead calibration](plugin:Panels/Bead calibration)'s method, explained on
+  its page -- the **pupil model (uiPSF)**, the PSF learnt as a **model of
+  the optics**, explained here, and the elliptical Gaussian;
+* **molecules on the coverslip in a z stack**: single dye molecules stuck to
+  the coverslip in blinking buffer, imaged through repeated z sweeps.  The
+  pupil model learnt from them, and the elliptical Gaussian (*Molecules on the
+  coverslip*, below);
+* **blinking molecules in the sample (in situ)**: the pupil model learnt from
+  the blinking molecules of a measurement itself, at one focus
+  (*pupil model (in situ)*: *In situ*, below).
 
-All three write the same kind of file and hand it to the same fitter, so they
-can be compared.  A fourth method makes no PSF at all:
+The pupil model writes the same kind of file from all three and hands it to
+the same fitter, so they can be compared; the in situ one is valid at the
+focus the data were imaged at.  One method makes no PSF at all:
 
 * **elliptical Gaussian**: how the two widths of an elliptical Gaussian fit
   change with z, for [Astigmatic z](plugin:Analysis/After fit/Astigmatic z),
@@ -457,6 +464,110 @@ the 4Pi-SMS example's microscope (660 nm, 100 nm pixels, against 600 nm and
 with its own, a coherence of 0.77–0.83.
 The bead average needs no check: its period is the beads'.
 
+## Molecules on the coverslip
+
+Beads are not single molecules.  A bead's dye sits in polystyrene up to its
+diameter above the glass, the bead's size blurs the PSF along z, and the
+light a molecule right at the glass sends beyond the critical angle -- the
+supercritical-angle fluorescence (SAF), part of a high-NA objective's
+image -- is a bead's only in part.  Molecules stuck to the coverslip have
+none of this: they are what a single-molecule fit sees.  With the sample
+*molecules on the coverslip in a z stack*, the pupil model is learnt from
+them: dye molecules (AF647 on M5, for instance) on a clean coverslip in
+blinking buffer, imaged while the stage sweeps through focus again and again
+-- 41 frames at 50 nm over ±1 µm, 10 to 15 sweeps per file, one frame per
+step.  A molecule blinks on for a frame or a few, so each detection is its
+own emitter, as in situ; but its height is known, as a bead's: it is on the
+glass, and the stage says where the focus was.
+
+**Reading.**  The stage's z of every frame comes from the files themselves:
+Micro-Manager's `ZPositionUm` (NDTiff, MMStack) or an OME-TIFF's
+`PositionZ`.  The frames are cut into sweeps where z turns back or jumps, so
+sweeps upwards, downwards or both in turn are each a sweep.  A file without
+a recorded z needs *z step* and *frames per sweep*.
+
+**What a molecule should look like.**  Every frame is searched with a
+difference of Gaussians and each spot fitted with an elliptical Gaussian.
+Each file's focus is where the spots are round (σx = σy, behind a
+cylindrical lens) or smallest (without one), and the median widths of the
+brighter half of each z step, against the distance from that focus, are the
+*width curve*: the spot each frame should show.
+
+**Finding them.**  Each frame is filtered with the spot of its own defocus --
+an elliptical Gaussian of the curve's widths, its mean subtracted so that a
+flat background cancels -- and a peak above *significance* robust standard
+deviations of the filtered frame is a candidate.  A spot 1 µm out of focus,
+dim at its peak, is found at its own size.  Only molecules inside the
+illuminated circle count (*illumination radius*): the illumination is a
+circle a little larger than the image's inscribed circle, and the corners
+are dark and full of false detections.
+
+**Choosing them**, stringently, since free and loosely bound dye images too:
+the spot's Gaussian centred in its region, its widths within 30 % of the
+curve's on both axes (*shape*), no neighbour within reach with a fifth of
+its light (weaker ones are masked), its photons from half the median of its
+200 nm defocus bin up to the bin's bulk (the brightest are overlaps), and
+then at most *molecules* drawn evenly over 100 nm bins of defocus, so that
+the far defocus, where fewer are found, keeps its share.  The table counts
+them by state and rule; the *Stacks* page rings each on its frame.
+
+**The geometry.**  A molecule found in frame k of sweep s, at (u, v) on the
+field, is at defocus
+
+$$d = z_k - f_s - (a u + b v)$$
+
+with z_k the stage's z, f_s a **focus per sweep** (the stage drifts between
+sweeps, about ten seconds apart) and (a, b) the **focal plane's slope** --
+the coverslip's tilt, shared by all sweeps.  All molecules sit at one
+**height** h above the glass, learnt: the dye's linker and whatever holds it.
+It is physics, not a fudge -- the SAF light decays as
+$e^{-2\pi\kappa h}$ above the glass, κ its decay rate, so the height is told
+by how bright the outermost ring of the pupil is.  It is the sample's, not
+the microscope's: the pupil saved is a point at the glass, and carries over
+to other samples.  If the learnt height runs off, hold it under *more*
+(*height*).
+
+**Learning, in rounds.**  The pupil, the foci, the plane and the height are
+learnt as from beads -- the low orders first, molecules judged by how well
+they fit, then every mode.  Then each molecule is localised again on the
+learnt model with its z free, the **z check**: how far it lands from where
+the plane puts it, against the precision the model promises (the
+[CRLB](plugin:Panels/Glossary)).  A molecule more than three CRLBs and
+100 nm off is not on the glass, or not one molecule, and the next round learns
+without it, from the last model.  The rounds stop when the pupil no longer
+moves by more than its noise, or after three.
+
+**What it gives.**  A spline as the pupil model's from beads -- the PSF of a
+molecule at the learnt height against defocus, z = 0 in focus -- for
+[Spline 3D](plugin:Localize/Spline 3D) on *auto*, and its model file beside
+it, which Spline 3D's focus model reads for data deeper in the sample.  The
+pages: *Selection* (the molecules by defocus and state), *z check* (the bend
+-- the median offset per 100 nm of defocus -- and the scatter, in CRLBs),
+*Foci and plane*, the pupil's pages as for beads, and *Model vs data* per
+defocus bin.  On M5's AF647 (November 2026) the bend was about 5 nm rms over
+±600 nm and the scatter 1.75 CRLB; the bins at +900 and +1000 nm break away,
+which the spline's range on *auto* leaves out (it reaches to the 2nd and 98th
+percentiles of the molecules' defocus).
+
+**Dual colour.**  On a chip split in two, each half gets its own width curve
+and detection, and the molecules are paired through the halves' map: a dual
+bead calibration or a registration file (*registration*), or, left empty,
+measured from the molecules themselves over the whole chip, as a movie's
+registration is.  A molecule seen in one half only keeps the region the map
+puts in the other.  One focus per sweep is shared by both channels; each
+channel learns its own pupil, and the map is refined.  It saves as a dual
+bead calibration does, for [Spline 3D 2C](plugin:Localize/Spline 3D 2C).
+
+**The elliptical Gaussian**, with this sample, fits each chosen molecule in
+the *fit box* with the elliptical Gaussian the data will be fitted with, its
+z the stage's from its file's focus, and fits the curves to all of them, for
+[Astigmatic z](plugin:Analysis/After fit/Astigmatic z).
+
+**Time.**  About 13 minutes for 4000 molecules over three rounds on a laptop's
+GPU (the first round most of it); *Detect molecules* says how long, from a
+timed pass of the model.  The memory a chunk of molecules takes is set from
+what the computer has free: about 120 MB per molecule of a 25-pixel region.
+
 ## In situ
 
 A PSF measured with beads on the coverslip is not quite the PSF of molecules
@@ -590,19 +701,25 @@ Empties the list.
 Whether *Add folder...*, and a folder dropped on the window, looks inside the
 folder's subfolders.
 
+### sample
+What the files show: *beads in a z stack*, *molecules on the coverslip in a z
+stack*, or *blinking molecules in the sample (in situ)*.  It decides which
+methods *method* offers.  Switching keeps the files and settings and clears
+the result.
+
 ### method
-*bead average*, *pupil model (uiPSF)*, *in situ (blinking molecules)* or
-*elliptical Gaussian*.  In the *4Pi* mode, the bead average and the pupil
-model.  The
-window shows only what the method reads.  Switching keeps the files and
-settings and clears the result.
+What the sample offers: for beads the *bead average*, the *pupil model
+(uiPSF)* and the *elliptical Gaussian*; for molecules on the coverslip the
+pupil model and the elliptical Gaussian; in situ, the *pupil model (in situ)*.
+The window shows only what the method reads.
 
 ### mode
 *Single channel*; *Dual colour* for a camera split into two halves, a PSF
 per half and the transformation between them; or *4Pi*, four phase images
 of a 4Pi microscope (*4Pi*).  The pupil model learns a pupil per channel,
-with the photon share and the focus offset.  In situ and the elliptical
-Gaussian are single-channel only: choosing them goes back to it.
+with the photon share and the focus offset.  Only the modes the method has
+are offered: in situ and the elliptical Gaussian are single-channel; the
+molecules on the coverslip single channel and dual colour.
 
 ### start from
 Pupil model only, under *model*.  A previous model of this microscope: its `.uipsf.h5` file, or the calibration
@@ -938,7 +1055,7 @@ the spot is sharpest, as for beads), or the height above the coverslip, so
 that Spline 3D reports where the molecule is in the sample.
 
 ### molecules
-Each frame of a blink counts as one: it is fitted as one.  About 2000 is
+In situ: each frame of a blink counts as one: it is fitted as one.  About 2000 is
 enough for the Zernikes up to the default order; more costs learning time in
 proportion.  Reading and finding them took about ten seconds per thousand
 frames of 128 × 128 pixels on a laptop.
@@ -960,7 +1077,38 @@ very small pixels (65 nm makes 47 px, which costs memory and time).
 
 ### significance
 How far above the background's noise a spot must be.  Lower finds dimmer
-molecules, and more noise.
+molecules, and more noise.  For molecules on the coverslip it is the peak of
+the filter matched to the frame's defocus, in robust standard deviations of
+the filtered frame: 5 on M5's AF647.
+
+### height
+Molecules on the coverslip: on *auto* learnt, one height for all of them.
+Hold it at a value when the learnt one runs to its bound (200 nm) or is
+unlikely for the sample: it trades with the pupil's apodisation (γ), the
+two damping the outer pupil alike.  On M5's AF647 it came to about 24 nm,
+and holding it at 9 nm moved γ by about 0.04.
+
+### PSF
+How each file's focus is found: where σx = σy behind a cylindrical lens
+(*astigmatic*), or where the spot is smallest (*round*).  On *auto*, from
+how much the spots' elongation changes over the sweep.
+
+### illumination radius
+On *auto* the circle inscribed in the image.  Set it smaller for an
+illumination smaller than the image, larger when the whole image is lit.
+
+### z step
+Only for files that do not record the stage's z for each frame; with
+*frames per sweep*, every sweep upwards from the first frame.
+
+### frames per sweep
+With a typed *z step*: how many frames one sweep has.
+
+### registration
+Dual colour: the file holding the map between the halves, a dual bead
+calibration or a registration from a movie.  Empty, it is measured from the
+molecules' own detections over the whole chip; the learning refines it
+either way.
 
 ### z proxy
 *astigmatism* for an astigmatic PSF; *size* for one without astigmatism,
