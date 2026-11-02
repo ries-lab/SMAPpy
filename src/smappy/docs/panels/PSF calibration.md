@@ -659,8 +659,13 @@ them.
 ### PSF model
 The PSF model's choices, one section wherever a model is learnt -- beads in
 one or two channels, in situ, 4Pi -- so that the same choices build the same
-model in each.  In the *4Pi* mode it starts on *symmetric Zernike* with a
-60 nm blur and no pixel blur, the choices 4Pi was checked with.
+model in each, the *4Pi* mode too: *minimal*, one γ for both objectives
+(*same magnitude*), a round blur over the pixel's own.  On uiPSF's 4Pi
+beads the minimal pupil fitted as well as the rotationally symmetric
+Zernikes, with fewer numbers, once the NA under *microscope* was the
+objective's effective one: 1.32 for its nominal 1.35.  At the nominal NA
+it fitted 1 % worse and bent the envelope's z by up to 9 nm, against 5 nm;
+an objective passes less light at its very edge than its NA promises.
 
 ### Zernike order
 The highest radial order of the pupil's modes.  Higher orders describe finer
@@ -786,8 +791,9 @@ one -- two beads stuck together, or a speck.  The marked beads stay in the
 table, and *Exclude / include* lets them in again.
 
 ### magnitude modes
+Shown for a Zernike *pupil magnitude* only: the minimal one has no modes.
 *auto* takes the modes the *PSF model*'s *pupil magnitude* says: on
-*symmetric Zernike*, its default here, the rotationally symmetric modes up to
+*symmetric Zernike* the rotationally symmetric modes up to
 the *Zernike order* -- Noll 4, 11 and 22 up to the 6th -- for the vectorial
 model, and every mode for the scalar one.  Fewer, 4 and 11 say, ask for a smoother apodisation;
 an empty field or *none* holds the magnitude flat.  On eight of uiPSF's
@@ -795,9 +801,10 @@ example beads, 4 and 11 alone fitted 1 % worse than *auto*, and a flat
 magnitude 11 % worse: the apodisation matters.
 
 ### same magnitude
-Both objectives get one magnitude shape, as twin objectives have -- with a
-*minimal* magnitude, one γ; how much light each arm brings is learnt apart
-either way.  On eight of uiPSF's
+On by default: both objectives get one magnitude shape, as twin objectives
+have -- with a *minimal* magnitude, one γ; how much light each arm brings is
+learnt apart either way.  On uiPSF's 18 example beads a γ per objective
+came out 0.400 and 0.405 and fitted no better.  On eight of uiPSF's
 example beads the two objectives, left free, learnt nearly the same
 magnitude, and one shared magnitude fitted as well (0.01 % apart) in two
 thirds of the time.
