@@ -1,0 +1,86 @@
+{
+ "constant": {
+  "kind": "constant",
+  "beads": 52,
+  "of": 60,
+  "minutes": 12.6,
+  "objective": 1745635.099609375,
+  "deviance_per_pixel": 2.302462860669024,
+  "sigma_nm": [
+   92.8,
+   117.2
+  ],
+  "noise_slope": 0.36
+ },
+ "field": {
+  "kind": "field",
+  "beads": 51,
+  "of": 60,
+  "minutes": 30.9,
+  "objective": 1012637.0751953125,
+  "deviance_per_pixel": 1.3618402974273531,
+  "sigma_nm": [
+   75.4,
+   101.8
+  ],
+  "noise_slope": 0.621,
+  "field": "field dependence is significant (935173 nats over 14 coefficients, threshold 27); largest changes over the beads' 170 \u00b5m: Noll 5 -1.376 rad (-149 nm), Noll 6 +0.711 rad (+77 nm), Noll 7 -0.275 rad (-30 nm), Noll 8 +0.315 rad (+34 nm)",
+  "coefficients": {
+   "(5, 1, 0)": -0.0725,
+   "(5, 0, 1)": 0.0097,
+   "(5, 2, 0)": -0.0041,
+   "(5, 1, 1)": 0.5079,
+   "(5, 0, 2)": 0.0058,
+   "(6, 1, 0)": -0.0302,
+   "(6, 0, 1)": 0.0283,
+   "(6, 2, 0)": 0.2686,
+   "(6, 1, 1)": -0.0127,
+   "(6, 0, 2)": -0.2226,
+   "(7, 1, 0)": -0.0013,
+   "(7, 0, 1)": 0.1615,
+   "(8, 1, 0)": 0.1826,
+   "(8, 0, 1)": -0.0038
+  },
+  "centre_px": [
+   808.0,
+   809.0
+  ],
+  "grid": [
+   9,
+   9
+  ]
+ },
+ "localisation": {
+  "note": "239 beads, 120 slices within \u00b1600 nm; z error rms over each bead's slices after its own height, median over beads, nm; bands by distance from the chip's centre",
+  "field (node splines)": {
+   "all": 36.3,
+   "not learnt from": 38.0,
+   "0-40 um": 25,
+   "40-70 um": 27,
+   "70-120 um": 51
+  },
+  "field model's centre spline": {
+   "all": 92.3,
+   "not learnt from": 92.5,
+   "0-40 um": 29,
+   "40-70 um": 66,
+   "70-120 um": 160
+  },
+  "learnt without field": {
+   "all": 96.7,
+   "not learnt from": 94.7,
+   "0-40 um": 35,
+   "40-70 um": 76,
+   "70-120 um": 137
+  }
+ },
+ "first run, beads missing the chip's right side": {
+  "field z error 70-120 um": 85,
+  "exact spline per far bead": 86,
+  "9x9 blend per far bead": 85,
+  "blend error of the peak": {
+   "9x9": 0.0271,
+   "13x13": 0.013
+  }
+ }
+}
