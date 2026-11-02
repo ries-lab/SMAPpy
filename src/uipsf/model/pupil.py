@@ -205,9 +205,8 @@ class MinimalPupil(ZernikePupil):
         if self.ring and self.held_ring_h is None:
             extra.append(ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0)))
         if self.learn_na:
-            # from just below the objective's: an aperture started at its bound would not move; 5 % above it
-            # so that the data can say the nominal NA is right
-            extra.append(ParamSpec("pupil.na", (), init=0.98 * self.na,
+            # started at the typed NA, inside its bounds: 5 % above it, so that the data can say it is right
+            extra.append(ParamSpec("pupil.na", (), init=self.na,
                                    transform=Bounded(0.8 * self.na, min(1.05 * self.na, self.grid_na))))
         return super().specs() + extra
 

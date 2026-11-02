@@ -673,8 +673,8 @@ model in each, the *4Pi* mode too: *minimal*, one γ for both objectives
 beads the minimal pupil fitted as well as the rotationally symmetric
 Zernikes, with fewer numbers, once the NA under *microscope* was the
 objective's effective one: 1.32 for its nominal 1.35.  At the nominal NA
-it fitted 1 % worse and bent the envelope's z by up to 9 nm, against 5 nm;
-an objective passes less light at its very edge than its NA promises.
+it fitted 1 % worse (9 700 nats) and bent the envelope's z by up to 9 nm,
+against 5 nm: learn the NA once (*learn NA*) and type what it finds.
 
 ### Zernike order
 The highest radial order of the pupil's modes.  Higher orders describe finer
@@ -721,16 +721,17 @@ pixel's 30 nm in quadrature.  A *start from* model of the other kind is
 converted, the image's blur kept.
 
 ### learn NA
-Off by default, for *minimal* only: the aperture then cuts at the NA under
-*microscope*.  On, the NA is learnt -- an effective NA, between 0.8 of the
-typed one and 5 % above it -- and saved with the model; an in situ model that
-holds the beads' γ holds their NA with it.  On uiPSF's 4Pi beads it came out
-at 1.31 behind objectives of 1.35, and M5's beads wanted 1.40 behind 1.43.
-Why an objective's aperture should be that much smaller is not understood
-yet -- a sample of lower index than assumed would cut the light at its own
-index too -- so typing the effective NA, or learning it here, are both
-offered; the rotationally symmetric Zernikes (*symmetric Zernike*) take an
-edge inside the aperture up by themselves.
+Off by default, for *minimal* only, in every method: the aperture then cuts
+at the NA under *microscope*.  On, the NA is learnt -- an effective NA,
+started at the typed one and kept between 0.8 of it and 5 % above it -- and
+saved with the model; an in situ model that holds the beads' γ holds their
+learnt NA with it.  On uiPSF's 4Pi beads the typed 1.35 fitted 9 700 nats
+worse than a learnt 1.31, and bent the envelope's z twice as much.  So, for
+a new objective, learn the NA once with this tick and then type the learnt
+value under *microscope*.  It is not a fixed ratio of the nominal NA: on M5's
+beads it ran to the edge of the sampled pupil, 1.51 behind a typed 1.50.  Why
+the aperture comes out smaller is not understood; the sample's index does
+not explain it.
 
 ### learn sample index
 Off by default: the sample's index is *sample index* under *microscope*.
