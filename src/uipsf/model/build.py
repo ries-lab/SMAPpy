@@ -30,6 +30,13 @@ from .psf import VectorPSF
 from .pupil import MinimalPupil, ZernikePupil, minimal_grid_optics
 
 
+#: γ held where there is no bead model of the microscope to take it from: the middle of what M5's 100 nm beads
+#: learnt, 0.32–0.41 over two colours, two media and with and without the 3D lens (`MinimalPupil`).  It is the
+#: objective's apodisation, so a nominal value is closer than one learnt from molecules, where γ trades with
+#: the focus (`docs/uipsf/architecture.md`, "In situ on the minimal model").
+NOMINAL_GAMMA = 0.36
+
+
 @dataclass
 class Held:
     """What a model holds from another's description (`held_from`): phase modes in radians of this model's
