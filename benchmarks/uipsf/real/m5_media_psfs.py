@@ -98,7 +98,15 @@ def learn(args):
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     from edge_magnitude import use_pupil
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
     from z_blur import use_z_blur
 
     import uipsf.workflows.beads as beads
@@ -149,9 +157,9 @@ def learn(args):
                                     free_na=extra == "na")
             else:
                 magnitude = use_pupil(pupil)
-            model = BeadSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude, blur=kind,
-                                 blur_nm=float(np.mean((104.7, 106.4))) / np.sqrt(12) if kind == "fixed" else 30.0,
-                                 bead_diameter_nm=bead_nm)
+            psf = PSFModelSettings(pixel_blur=False, zernike_order=ORDER, magnitude=magnitude, blur=kind,
+                                   blur_nm=float(np.mean((104.7, 106.4))) / np.sqrt(12) if kind == "fixed" else 30.0)
+            model = BeadSettings(psf=psf, bead_diameter_nm=bead_nm)
             run = run_calibration(files, False, run_optics, model, run=RunSettings(save_model=False), rois=rois,
                                   decisions={i: "include" for i in range(len(keep))})
             record = fit_record(run, rois)

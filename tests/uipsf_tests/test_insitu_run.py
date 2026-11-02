@@ -1,11 +1,13 @@
 """In situ in the PSF calibration window: movies to a saved calibration (M5, step 6)."""
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import tifffile
 import torch
 from smappy.calibrate.insitu import InSituSettings
 from smappy.calibrate.insitu_run import InSituModelSettings, block_order, insitu_spline, movie_rois
-from smappy.calibrate.pupil import BeadSettings, OpticsSettings
+from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings
 from smappy.metadata import CameraMetadata
 
 from test_insitu_rois import FOCUS, OPTICS, model_and_shared
@@ -37,19 +39,24 @@ def movie_file(tmp_path_factory):
 SELECTION = InSituSettings(block_frames=150, molecules=63)          # 3 a bin
 
 
-def small_model(optics, settings, roi_shape, focus_nm, z_max_nm=2000.0, device=None, dtype=torch.float32,
-                held_phase=None, held_magnitude=None, fit_focus=True, fit_tilt=False):
-    """`insitu_model` with a pupil of 16 samples on the CPU instead of 64, for seconds rather than a minute."""
+def small_model(optics, spec, roi_shape, focus_nm, z_max_nm=2000.0, device=None, dtype=torch.float32, held=None,
+                fit_focus=True, fit_tilt=False):
+    """`insitu_model` with a pupil of 16 samples on the CPU instead of 64, for seconds rather than a minute: the
+    same builder (`uipsf.model.build`), a smaller grid."""
+    from dataclasses import replace
+
     import uipsf
-    from uipsf.workflows.calibrate import magnitude_modes
-    grid = uipsf.PupilGrid.build(optics, 16, device="cpu", dtype=dtype)
-    pupil = uipsf.ZernikePupil(grid, n_max=settings.order, magnitude_modes=magnitude_modes(settings.order,
-                                                                                        settings.magnitude),
-                               held_phase=held_phase, held_magnitude=held_magnitude)
-    psf = uipsf.VectorPSF(grid, pupil, tuple(roi_shape), sigma_nm=(settings.blur_nm,) * 2)
+    from uipsf.model import make_psf, pupil_grid
+    spec = replace(spec, saf_damping=False)
+    grid = pupil_grid(optics, spec, size=16, device="cpu", dtype=dtype)
+    psf = make_psf(optics, spec, roi_shape, held=held, grid=grid)
     geometry = uipsf.model.InSituGeometry(focus_nm, fit_focus=fit_focus, fit_tilt=fit_tilt)
-    return uipsf.ForwardModel(psf, geometry=geometry,
-                              intensity=uipsf.model.Bleaching(order=0))
+    return uipsf.ForwardModel(psf, geometry=geometry, intensity=uipsf.model.Bleaching(order=0))
+
+
+def small(**kw):
+    """The PSF model of these small runs: the movie's own blur, no pixel blur under it (it was drawn without)."""
+    return BeadSettings(psf=PSFModelSettings(**{"zernike_order": 2, "blur_nm": 30.0, "pixel_blur": False, **kw}))
 
 
 def test_blocks_are_read_coarse_to_fine_over_the_whole_movie_and_a_short_one_whole():
@@ -135,7 +142,7 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
     monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
     monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)          # 7 starting heights, not 13
     path, _ = movie_file
-    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0),
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
                         SELECTION, camera=CAMERA, save_to=tmp_path / "insitu_3dcal.h5")
     assert result.saved.exists() and model_path(result.saved).exists()
@@ -161,7 +168,7 @@ def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_
     monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
     monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
     path, _ = movie_file
-    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0, fit_tilt=True),
+    result = run_insitu([path], OPTICS_SETTINGS, replace(small(), fit_tilt=True),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
                         SELECTION, camera=CAMERA, save_to=tmp_path / "tilt_3dcal.h5")
     assert result.model.geometry.fit_tilt
@@ -182,7 +189,7 @@ def test_the_focus_from_the_data_moves_a_guess_toward_the_truth_before_any_learn
     rois = movie_rois([path], SELECTION, CAMERA)
     o = OPTICS_SETTINGS.optics(CAMERA, 1)[0]
     roi = rois.units.regions.shape[-1]
-    model = small_model(o, BeadSettings(zernike_order=3, blur_nm=30.0), (roi, roi), 1000.0)
+    model = small_model(o, small(zernike_order=3, magnitude="fixed").psf, (roi, roi), 1000.0)
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[model.psf.pupil.phase_modes.index(6)] = 0.4
     focus, edge = focus_from_data(model, rois, {"pupil.phase": phase}, ShiftedPoisson(), 1000.0, molecules=30)
@@ -240,20 +247,35 @@ def test_a_pupil_kept_from_a_model_starts_in_situ_where_that_model_ended():
     assert float(typed["pupil.phase"][modes.index(6)]) == pytest.approx(2 * math.pi * 40 / 680)
 
 
-KEPT = {"phase_nm": {"5": 3.0, "6": 60.0, "11": 20.0, "12": -4.0, "22": 3.0, "37": 2.0},
+KEPT = {"kind": "zernike", "phase_nm": {"5": 3.0, "6": 60.0, "11": 20.0, "12": -4.0, "22": 3.0, "37": 2.0},
         "magnitude": {"2": 0.01, "4": -0.1, "6": 0.02, "11": -0.07, "22": -0.05}, "wavelength_nm": 676.0}
+#: a minimal bead model's description, as `VectorPSF.describe` gives it and the microscope keeps it
+KEPT_MINIMAL = {"kind": "minimal", "phase_nm": {"5": 3.0, "6": 60.0, "11": 20.0, "37": 2.0}, "gamma": 0.37,
+                "sigma_nm": [25.0, 25.0], "pixel_blur": True, "wavelength_nm": 676.0}
 
 
 def test_in_situ_holds_the_kept_pupils_symmetric_magnitude_and_its_phase_above_the_order():
     import math
 
     from smappy.calibrate.insitu_run import held_pupil
-    phase, magnitude, source = held_pupil(None, KEPT, 6, 580.0)
-    assert magnitude == {4: -0.1, 11: -0.07, 22: -0.05}                 # m = 0 only: not 2 or 6
-    assert set(phase) == {37}                                            # Noll 37 is order 8, 22 order 6
-    assert phase[37] == pytest.approx(2 * math.pi * 2.0 / 580.0)         # nm of wavefront, at this emission
-    assert "microscope" in source
-    assert held_pupil(None, None, 6, 580.0) == ({}, {}, "")
+    held = held_pupil(None, KEPT, 6, 580.0)
+    assert held.magnitude == {4: -0.1, 11: -0.07, 22: -0.05} and held.gamma is None    # m = 0 only: not 2 or 6
+    assert set(held.phase) == {37}                                       # Noll 37 is order 8, 22 order 6
+    assert held.phase[37] == pytest.approx(2 * math.pi * 2.0 / 580.0)    # nm of wavefront, at this emission
+    assert "microscope" in held.source and held.kind == "fixed"
+    assert not held_pupil(None, None, 6, 580.0) and held_pupil(None, None, 6, 580.0).source == ""
+
+
+def test_in_situ_holds_a_minimal_models_gamma_and_its_phase_above_the_order():
+    from smappy.calibrate.insitu_run import held_pupil
+    held = held_pupil(None, KEPT_MINIMAL, 6, 580.0)
+    assert held.gamma == 0.37 and not held.magnitude and set(held.phase) == {37} and held.kind == "minimal"
+    o = OPTICS_SETTINGS.optics(CAMERA, 1)[0]
+    model = small_model(o, small(magnitude=held.kind).psf, (15, 15), 600.0, held=held)
+    pupil = model.psf.pupil
+    names = {s.name for s in model.psf.specs()}
+    assert pupil.held_gamma == 0.37 and "pupil.gamma" not in names and 37 in pupil.held_phase
+    assert not pupil.ring                                                # in situ never learns SAF damping
 
 
 def test_a_start_model_s_pupil_is_held_whole_its_own_held_modes_included():
@@ -267,36 +289,65 @@ def test_a_start_model_s_pupil_is_held_whole_its_own_held_modes_included():
     shared = {"pupil.phase": torch.zeros(len(pupil.phase_modes), dtype=f64),
               "pupil.magnitude": torch.full((len(pupil.magnitude_modes),), 0.01, dtype=f64)}
     previous = SimpleNamespace(model=uipsf.ForwardModel(uipsf.VectorPSF(grid, pupil, (9, 9))), shared=shared)
-    phase, magnitude, _ = held_pupil(previous, KEPT, 4, OPTICS.wavelength_nm)
-    assert phase == pytest.approx({22: 0.03}) and magnitude == pytest.approx({4: 0.01, 11: -0.07})
+    held = held_pupil(previous, KEPT, 4, OPTICS.wavelength_nm)
+    assert held.phase == pytest.approx({22: 0.03}, abs=1e-4)              # kept to 0.001 nm
+    assert held.magnitude == pytest.approx({4: 0.01, 11: -0.07}) and held.source == "the start model"
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("hold", ["start", "nothing"])
-def test_in_situ_holds_the_start_or_learns_the_symmetric_magnitude_with_the_focus_pinned(movie_file, monkeypatch,
+def test_in_situ_holds_the_start_or_learns_gamma_with_the_focus_pinned(movie_file, monkeypatch,
                                                                                          hold):
     # the microscope's kept pupil (`microscope_db.pupil_of`), one round on the small model, nothing saved
     import smappy.microscope_db as db
     from smappy.calibrate.insitu_run import run_insitu
     from smappy.calibrate.pupil import RunSettings
 
+    import uipsf.model
     import uipsf.workflows
     import uipsf.workflows.insitu as insitu_module
     monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
     monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
     monkeypatch.setattr(db, "pupil_of", lambda scope: KEPT)
     path, _ = movie_file
-    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0),
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1,
                                             hold=hold), SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
     pupil = result.model.psf.pupil
-    assert pupil.magnitude_modes == ([] if hold == "start" else [4])    # m != 0 never learnt in situ
+    assert pupil.magnitude_modes == []                                  # m != 0 never learnt in situ
     if hold == "start":
         assert pupil.held_magnitude == {4: -0.1, 11: -0.07, 22: -0.05} and 22 in pupil.held_phase
         assert result.model.geometry.fit_focus and "held from" in result.messages[0]
     else:
-        assert not pupil.held_magnitude and not result.model.geometry.fit_focus
+        # nothing held: the minimal magnitude, its γ learnt, and the focus pinned
+        assert isinstance(pupil, uipsf.model.MinimalPupil) and pupil.held_gamma is None
+        assert not result.model.geometry.fit_focus
         assert any("pinned to the coverslip" in m for m in result.messages)
+
+
+@pytest.mark.slow
+def test_in_situ_from_a_minimal_bead_model_holds_its_gamma(movie_file, monkeypatch):
+    # decision 3 (November 2026): in situ holds γ and the phase above the order, learns σ, the focus and the
+    # phase up to it, never the SAF damping
+    import smappy.microscope_db as db
+    from smappy.calibrate.insitu_run import run_insitu
+    from smappy.calibrate.pupil import RunSettings
+
+    import uipsf.model
+    import uipsf.workflows
+    import uipsf.workflows.insitu as insitu_module
+    monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
+    monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
+    monkeypatch.setattr(db, "pupil_of", lambda scope: KEPT_MINIMAL)
+    path, _ = movie_file
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
+                        InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
+                        SELECTION, camera=CAMERA, run=RunSettings(save_model=False))
+    pupil = result.model.psf.pupil
+    assert isinstance(pupil, uipsf.model.MinimalPupil) and pupil.held_gamma == 0.37 and not pupil.ring
+    shared = result.cal.shared()
+    assert "pupil.gamma" not in shared and "pupil.ring_h" not in shared and "psf.sigma" in shared
+    assert result.model.geometry.fit_focus and "γ = 0.370" in result.messages[0]
 
 
 @pytest.mark.slow
@@ -316,11 +367,11 @@ def test_in_situ_holding_every_aberration_learns_only_the_focus_and_finds_it(mov
     monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
     model, shared = model_and_shared()
     wavelength = OPTICS_SETTINGS.optics(CAMERA, 1)[0].wavelength_nm
-    kept = {"phase_nm": {str(j): float(v) * wavelength / (2 * math.pi)
+    kept = {"kind": "zernike", "phase_nm": {str(j): float(v) * wavelength / (2 * math.pi)
                          for j, v in zip(model.psf.pupil.phase_modes, shared["pupil.phase"], strict=True)}}
     monkeypatch.setattr(db, "pupil_of", lambda scope: kept)
     path, _ = movie_file
-    result = run_insitu([path], OPTICS_SETTINGS, BeadSettings(zernike_order=2, blur_nm=30.0),
+    result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=450.0, max_rounds=3, hold="all"), SELECTION, camera=CAMERA,
                         run=RunSettings(save_model=False))
     pupil = result.model.psf.pupil
@@ -361,7 +412,8 @@ def test_spline_3d_in_situ_learns_the_focus_with_the_beads_aberrations_and_keeps
     monkeypatch.setattr(uipsf.workflows, "insitu_model", small_model)
     monkeypatch.setattr(insitu_module, "HEIGHT_STEP_NM", 300.0)
     model, shared = model_and_shared()
-    learned = LearnedPSF(model, shared, {}, describe(model), options={"zernike_order": 4, "blur_nm": 30.0})
+    learned = LearnedPSF(model, shared, {}, describe(model), options={"psf": {"zernike_order": 4, "blur_nm": 30.0,
+                                                                                    "pixel_blur": False}})
     monkeypatch.setattr(depth, "load", lambda path: learned)
     monkeypatch.setattr(pupil_module, "load_start", lambda path: learned)
     beads = spline_calibration(learned, 20.0, 700.0, 17)

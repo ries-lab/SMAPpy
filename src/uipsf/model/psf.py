@@ -87,6 +87,41 @@ class VectorPSF:
         # |E|² · ΔxΔy integrates the image; E carries Δk² from the DFT, the pupil energy Δk² once.
         self.norm = self.spacing[0] * self.spacing[1] / (self.energy * self.dft.scale)
 
+    def resized(self, roi_shape=None, upsample: int | None = None, *, bead_radius_nm: float | None = None,
+                pupil=None) -> VectorPSF:
+        """This PSF on another region (``roi_shape``, (Y, X) or an int) or sub-sampling, every other setting
+        copied: kind, analyser, blur and its pixel part, the bead's size unless ``bead_radius_nm`` says
+        otherwise, the pupil unless ``pupil`` replaces it.  Rebuilt from its settings, never copied, so that a
+        setting added here cannot be forgotten by a caller -- `spline.py` and `movie.py` each rebuilt a PSF
+        and dropped the pixel's blur that way."""
+        roi = self.roi_shape if roi_shape is None else (
+            (int(roi_shape), int(roi_shape)) if isinstance(roi_shape, int) else tuple(int(n) for n in roi_shape))
+        return VectorPSF(self.grid, self.pupil if pupil is None else pupil, roi,
+                         upsample=self.upsample if upsample is None else int(upsample), kind=self.kind,
+                         analyser=self.analyser,
+                         bead_radius_nm=self.bead_radius_nm if bead_radius_nm is None else bead_radius_nm,
+                         sigma_nm=self.sigma_init, fit_sigma=self.fit_sigma, round_sigma=self.round_sigma,
+                         pixel_blur=self.pixel_blur)
+
+    def for_emitters(self, roi_shape=None, upsample: int | None = None) -> VectorPSF:
+        """The point-emitter view of a learnt PSF, the one way a model is drawn for single molecules (a
+        spline, a movie, a 4Pi calibration): `resized`, without the bead's size, and with a minimal pupil's
+        supercritical ring undamped (`MinimalPupil.without_ring`: h is the beads' dye above the glass).  The
+        blur, the pixel's under it, kind and analyser are the learnt model's."""
+        pupil = self.pupil.without_ring() if hasattr(self.pupil, "without_ring") else self.pupil
+        return self.resized(roi_shape, upsample, bead_radius_nm=0.0, pupil=pupil)
+
+    def describe(self, p) -> dict:
+        """The PSF's hand-over description: the pupil's (`ZernikePupil.describe`) with the blur, ``sigma_nm``
+        (x, y), and whether it is beyond the pixel's own (``pixel_blur``), and the optics it was learnt with."""
+        o = self.grid.optics
+        out = dict(self.pupil.describe(p), wavelength_nm=float(o.wavelength_nm),
+                   NA=float(getattr(self.pupil, "na", o.NA)), n_immersion=float(o.n_imm))
+        if "psf.sigma" in p:
+            out["sigma_nm"] = [round(float(v), 2) for v in self.blur(p).detach().cpu().reshape(-1)]
+            out["pixel_blur"] = self.pixel_blur
+        return out
+
     def specs(self) -> list[ParamSpec]:
         init = torch.tensor(self.sigma_init)
         init = init.mean().reshape(1) if self.round_sigma else init

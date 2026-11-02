@@ -70,8 +70,16 @@ when a milestone lands or an item moves.
 7. **Model the magnitude physically:** done for beads (November 2026): the minimal pupil, cos θ^γ, the
    supercritical ring from a height h and the aperture held at the NA (`model.MinimalPupil`), with the
    pixel's blur under a round σ, is the bead calibration's default (architecture, "The minimal model").
-   Next: the same default for field-dependent and in situ learning, in situ holding γ from beads; why
-   M5's 40 nm beads learn a lower γ than its 100 nm beads.
+   **One PSF model** (November 2026, architecture "One PSF model"): one settings section
+   (`PSFModelSettings`), one builder (`model.build`), one point-emitter view (`VectorPSF.for_emitters`) and
+   one hand-over (`VectorPSF.describe`); in situ holds a bead model's γ and the phase above the order, and a
+   round blur is the default there too.  Next: in situ's full minimal workflow; 4Pi learnt with the minimal
+   pupil and retested on Zenodo (wired: one γ under *same magnitude*, the builder's grid margin); field
+   dependence built through the builder; why M5's 40 nm beads learn a lower γ than its 100 nm beads.
+   To revisit: γ is learnt per channel in a dual calibration and kept per colour -- if the channels' γ come
+   out alike, one shared γ; in situ's blur round by default, *free* kept as an option until in situ is
+   optimised.  The study scripts in `benchmarks/uipsf` were ported to the section and the builder (their pupil
+   patches now replace `model.build.ZernikePupil`) but not run again.
 8. **The z slope of 1.011** against the stage on Zenodo 1ch: model or stage.
 9. **In situ (M5), designed** (plan §9, M5, with a review of v1's): inclusive detection at several widths
    on absolute significance; an elliptical Gaussian on every candidate for photons and a z proxy; overlaps

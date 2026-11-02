@@ -59,7 +59,7 @@ import numpy as np
 import torch
 from smappy.calibrate.core import CalibrationSettings
 from smappy.calibrate.dual import DualColorSettings
-from smappy.calibrate.pupil import BeadSettings, PupilRun, bead_rois, fit_quality
+from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, PupilRun, bead_rois, fit_quality
 from zenodo_camera import CAMERA
 
 import uipsf
@@ -166,8 +166,8 @@ def simulated(seed=0, photons=20000.0, background=40.0):
 
     from uipsf.simulate import parameters, template
     optics = uipsf.Optics(NA=1.43, wavelength_nm=600, n_imm=1.516, n_med=1.33, pixel_size_nm=(116.0, 127.0))
-    truth_settings = BeadSettings(zernike_order=6, magnitude="symmetric", blur="fixed", blur_nm=SIM_SIGMA_NM,
-                                  bead_diameter_nm=40.0)
+    truth_settings = BeadSettings(psf=PSFModelSettings(zernike_order=6, magnitude="symmetric", blur="fixed",
+                                                       blur_nm=SIM_SIGMA_NM), bead_diameter_nm=40.0)
     model = bead_model(optics, truth_settings, (ROI, ROI), z_max_nm=1100, device="cpu")
     pupil = model.psf.pupil
     phase = torch.zeros(len(pupil.phase_modes))
@@ -221,7 +221,10 @@ def user(pattern, args):
 
 def build(name, rois, optics, bead_nm, device):
     spec = VARIANTS[name]
-    settings = BeadSettings(bead_diameter_nm=bead_nm, heldout=HELDOUT, **spec.get("settings", {}))
+    # the variants name the PSF model's choices (`PSFModelSettings`), as these studies had them: no pixel blur
+    settings = BeadSettings(psf=PSFModelSettings(**{"magnitude": "free", "blur": "free", "pixel_blur": False,
+                                                    **spec.get("settings", {})}),
+                            bead_diameter_nm=bead_nm, heldout=HELDOUT)
     o = spec.get("optics", {})
     optics = [replace(op, NA=op.NA + o.get("dNA", 0.0), wavelength_nm=op.wavelength_nm + o.get("dwavelength", 0.0))
               for op in optics]

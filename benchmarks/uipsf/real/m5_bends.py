@@ -54,8 +54,17 @@ def per_bead(run, centre_nm) -> dict:
 def learn(args):
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
-    from smappy.calibrate.pupil import BeadSettings, OpticsSettings, RunSettings, bead_rois, camera_for, run_calibration
+    from smappy.calibrate.pupil import (
+        BeadSettings,
+        OpticsSettings,
+        PSFModelSettings,
+        RunSettings,
+        bead_rois,
+        camera_for,
+        run_calibration,
+    )
 
+    import uipsf.model.build as build
     import uipsf.workflows.beads as beads
     import uipsf.workflows.calibrate as calibrate
     import uipsf.workflows.scoring as scoring
@@ -63,7 +72,7 @@ def learn(args):
     beads.MAX_DZ_NM = args.dz
     calibrate.learn_beads = functools.partial(calibrate.learn_beads, chunk_size=1, max_dz_nm=args.dz)
     scoring.localise = functools.partial(scoring.localise, chunk_size=int(2 * args.window // args.dz + 1))
-    calibrate.ZernikePupil = ZernikePupil
+    build.ZernikePupil = ZernikePupil
     os.makedirs(args.out, exist_ok=True)
     for path in args.acquisitions:
         name, cond, files, bead_nm = acquisition(path)
@@ -75,7 +84,8 @@ def learn(args):
         rois = subset(rois, keep, focus, args.window)
         optics = OpticsSettings(NA=GRID_NA, wavelength_nm=WAVELENGTH[cond["colour"]], n_immersion=N_IMM,
                                 n_medium=N_MED[cond["medium"]], pixel_x_nm=PIXEL[0], pixel_y_nm=PIXEL[1])
-        model = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free", blur_nm=30.0, bead_diameter_nm=bead_nm)
+        model = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur="free", blur_nm=30.0),
+                             bead_diameter_nm=bead_nm)
         run = run_calibration(files, False, optics, model, run=RunSettings(save_model=False), rois=rois,
                               decisions={i: "include" for i in range(len(keep))})
         used = list(run.cal.beads.used)

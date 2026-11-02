@@ -330,7 +330,8 @@ class MicroscopeManager(QWidget):
         self._versions = list(entry.versions)
         self._pupils = dict(entry.pupils)
         self.pupils_label.setText(
-            "objective pupil: " + "; ".join(f"{key} (from {p.get('source') or '?'}, {p.get('date') or '?'})"
+            "objective pupil: " + "; ".join(f"{key} (from {p.get('source') or '?'}, {p.get('date') or '?'}"
+                                            + (")" if p.get("kind") else "; an old format, not used: keep it again)")
                                             for key, p in self._pupils.items())
             if self._pupils else "no objective pupil kept: PSF calibration's Add to microscope... keeps one")
         self.versions_label.setText(

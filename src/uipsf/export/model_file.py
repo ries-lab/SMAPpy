@@ -29,7 +29,9 @@ calibrations, which its global fitter reads: each channel sampled with
 channel's share), the secondary's spline in the camera's orientation, and
 `LearnedPSF.transform(1)` as its ``transformation``.
 
-**Versions.**  A file is written as `VERSION`, and read up to it.  5: the minimal pupil
+**Versions.**  A file is written as `VERSION`, and read up to it.  6: a minimal pupil's held γ and h
+(``held_gamma``, ``held_ring_h``: in situ holds a bead model's γ), and the options (`BeadSettings`) with the
+PSF model's choices nested (``psf``, `PSFModelSettings`).  5: the minimal pupil
 (`model.MinimalPupil`: a pupil entry ``kind = "minimal"`` with the objective's ``na``, the parameters
 ``pupil.gamma`` and ``pupil.ring_h``), the PSF's ``pixel_blur``, and the geometry's drift by name
 (``drift``, ``drift_axes``, ``geometry.drift_rate``).  4: a field-dependent pupil (a channel's ``field``
@@ -82,7 +84,7 @@ from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
-VERSION = 5
+VERSION = 6
 #: the coverslip's entries of the optics, left out where they are the defaults so that a version-2 reader
 #: still builds the optics of a model that does not need them
 _COVERSLIP = {"d_cov_nm": 170_000.0, "d_cov_design_nm": 170_000.0}
@@ -92,7 +94,8 @@ CONVENTIONS = 1          # docs/uipsf/conventions.md: axes, signs and units of t
 def _describe_channel(ch: Channel) -> dict:
     psf, pupil = ch.psf, ch.psf.pupil
     if isinstance(pupil, MinimalPupil):
-        pup = dict(kind="minimal", phase_modes=list(pupil.phase_modes), na=pupil.na, saf_damping=pupil.saf_damping)
+        pup = dict(kind="minimal", phase_modes=list(pupil.phase_modes), na=pupil.na, saf_damping=pupil.saf_damping,
+                   held_gamma=pupil.held_gamma, held_ring_h=pupil.held_ring_h)
         if pupil.held_phase:
             pup["held_phase"] = {str(j): v for j, v in pupil.held_phase.items()}
     elif isinstance(pupil, ZernikePupil):
@@ -148,7 +151,8 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     pup = config["pupil"]
     if pup["kind"] == "minimal":
         pupil = MinimalPupil(grid, phase_modes=pup["phase_modes"], na=pup["na"], held_phase=pup.get("held_phase"),
-                             saf_damping=pup["saf_damping"])
+                             saf_damping=pup["saf_damping"], held_gamma=pup.get("held_gamma"),
+                             held_ring_h=pup.get("held_ring_h"))
     elif pup["kind"] == "zernike":
         pupil = ZernikePupil(grid, phase_modes=pup["phase_modes"], magnitude_modes=pup["magnitude_modes"],
                              high_na=pup["high_na"], held_phase=pup.get("held_phase"),
@@ -204,8 +208,9 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
 
     The blur is the learned one (with the pixel's under it where the model has it); the bead's size, part of
     the bead stacks and not of a point emitter, is left out unless ``include_bead`` (then ``xyz_nm`` must be
-    one stack of equal z steps), and so is a minimal pupil's ring height (`MinimalPupil`: the beads' dye above
-    the glass).  The stage's z scale is not applied: z is the emitter's, not an objective position.  Pixels are
+    one stack of equal z steps), and so is a minimal pupil's ring damping (`MinimalPupil`: the beads' dye
+    above the glass): `VectorPSF.for_emitters`.  The stage's z scale is not applied: z is the emitter's, not an
+    objective position.  Pixels are
     integrated by summing ``upsample``² sub-samples (default the model's); sample the light at more
     of them for a spline that must not inherit the sampling's error.  ``roi_px`` is the region,
     an int or (Y, X), default the model's.  ``depth_nm``, the emitter's height in the sample (in situ,
@@ -215,16 +220,12 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     base = model.channels[channel].psf
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
     up = base.upsample if upsample is None else int(upsample)
-    psf = VectorPSF(base.grid, base.pupil, roi, upsample=up, kind=base.kind, analyser=base.analyser,
-                    bead_radius_nm=base.bead_radius_nm if include_bead else 0.0, pixel_blur=base.pixel_blur)
+    # the point-emitter view (`VectorPSF.for_emitters`), or with ``include_bead`` the beads' own
+    psf = base.resized(roi, up) if include_bead else base.for_emitters(roi, up)
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     xyz = torch.as_tensor(xyz_nm, dtype=dt, device=dev).reshape(1, -1, 3)
     shared = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}
     p = view(shared, channel)
-    if not include_bead and "pupil.ring_h" in p:
-        # the minimal pupil's ring height is the beads' dye above the glass; a point emitter's light beyond the
-        # critical angle follows the physics of its own depth (``depth_nm``, the vector model), so h is 0
-        p = dict(p, **{"pupil.ring_h": torch.zeros_like(p["pupil.ring_h"])})
     field = getattr(model.channels[channel], "field", None)
     if field is not None:
         where = field.centre_px if field_xy is None else field_xy

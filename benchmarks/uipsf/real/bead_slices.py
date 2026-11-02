@@ -110,6 +110,7 @@ def main():
     from smappy.calibrate.pupil import (
         BeadSettings,
         OpticsSettings,
+        PSFModelSettings,
         RunSettings,
         bead_rois,
         camera_for,
@@ -125,8 +126,9 @@ def main():
     for magnitude, blur in VARIANTS:
         t0 = time.perf_counter()
         # a free blur starts at 30 nm as `lab_beads.py`'s: from 0 its transform cannot move it
-        model = BeadSettings(zernike_order=ORDER, magnitude=magnitude, blur="free" if blur == "free" else "fixed",
-                             blur_nm=30.0 if blur == "free" else 0.0, bead_diameter_nm=BEAD_NM)
+        psf = PSFModelSettings(zernike_order=ORDER, magnitude=magnitude, blur="free" if blur == "free" else "fixed",
+                               blur_nm=30.0 if blur == "free" else 0.0)
+        model = BeadSettings(psf=psf, bead_diameter_nm=BEAD_NM)
         run = run_calibration(files, False, optics, model, detection=detection, run=RunSettings(save_model=False),
                               rois=rois, decisions=decisions)
         p = run.cal.result.params.physical()

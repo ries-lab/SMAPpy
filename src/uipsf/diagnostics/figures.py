@@ -157,6 +157,8 @@ def model_text(source, channel: int = 0) -> str:
         ring = _learnt(source, pre + "pupil.ring_h")
         if ring is not None:
             parts.append("ring h " + _pm(ring[0][0], ring[1][0], "{:.0f}") + " nm")
+    elif getattr(psf.pupil, "held_gamma", None) is not None:          # in situ: the bead model's γ
+        parts.append(f"γ {psf.pupil.held_gamma:.3f} held")
     sigma = _learnt(source, pre + "psf.sigma")
     if sigma is not None:
         parts.append("blur σ " + "/".join(_pm(v, e, "{:.1f}") for v, e in zip(*sigma, strict=True)) + " nm"

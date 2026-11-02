@@ -9,7 +9,7 @@ import pytest
 import tifffile
 import torch
 from smappy.calibrate.core import CalibrationSettings
-from smappy.calibrate.pupil import BeadSettings, OpticsSettings, learns_tilt, model_path
+from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, learns_tilt, model_path
 from smappy.metadata import CameraMetadata
 
 from uipsf.export import load_model, sample_psf
@@ -34,15 +34,15 @@ def test_the_coverslip_reaches_uipsfs_optics_with_the_design_thickness_by_defaul
 
 
 def test_a_bead_run_learns_the_tilt_only_through_a_coverslip_of_another_index():
-    tilted = BeadSettings(zernike_order=4, fit_tilt=True)
+    tilted = BeadSettings(psf=PSFModelSettings(zernike_order=4), fit_tilt=True)
     assert not learns_tilt(tilted, OIL.optics(CAMERA)).fit_tilt         # beads under oil see none
     kept = learns_tilt(tilted, WATER.optics(CAMERA))
     assert kept.fit_tilt
     model = bead_model(WATER.optics(CAMERA), kept, (ROI, ROI), device="cpu")
     assert isinstance(model.geometry, BeadStackGeometry) and model.geometry.fit_tilt
-    assert not bead_model(WATER.optics(CAMERA), BeadSettings(zernike_order=4), (ROI, ROI),
+    assert not bead_model(WATER.optics(CAMERA), BeadSettings(psf=PSFModelSettings(zernike_order=4)), (ROI, ROI),
                           device="cpu").geometry.fit_tilt
-    situ = insitu_model(OIL.optics(CAMERA)[0], BeadSettings(zernike_order=4), (ROI, ROI), 500.0, device="cpu",
+    situ = insitu_model(OIL.optics(CAMERA)[0], PSFModelSettings(zernike_order=4), (ROI, ROI), 500.0, device="cpu",
                         fit_tilt=True)
     assert isinstance(situ.geometry, InSituGeometry) and situ.geometry.fit_tilt
 
@@ -52,7 +52,8 @@ def tilted_stack(tmp_path_factory):
     """Ten astigmatic beads through ±600 nm in 50 nm steps under a water objective, the coverslip tilted by
     `TILT`: one uint16 TIFF in a folder of its own."""
     optics = WATER.optics(CAMERA)
-    model = bead_model(optics, BeadSettings(zernike_order=4, magnitude="fixed", fit_tilt=True), (ROI, ROI),
+    model = bead_model(optics, BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed"), fit_tilt=True),
+                       (ROI, ROI),
                        z_max_nm=1200, device="cpu")
     phase = torch.zeros(len(model.psf.pupil.phase_modes))
     phase[:4] = torch.tensor([0.8, -0.2, 0.15, 0.1])                   # astigmatic, for z
@@ -111,7 +112,7 @@ def test_the_window_learns_the_coverslips_tilt_from_water_beads_and_shows_it(til
     # The tilted plate's coma through a water objective, apart from the pupil's own up to n = 4 (its secondary
     # coma, n = 5, among what tells them apart): `test_tilt.py` for the model alone.
     app, window = _window(tilted_stack, monkeypatch, "pupil model (uiPSF)", WATER)
-    window.model_form.set(BeadSettings(zernike_order=4, fit_tilt=True))
+    window.model_form.set(BeadSettings(psf=PSFModelSettings(zernike_order=4), fit_tilt=True))
     window.detection_form.set(CalibrationSettings(roi_size=ROI, min_distance_px=20, dz_nm=50.0))
     window.run()
     end = time.time() + 280

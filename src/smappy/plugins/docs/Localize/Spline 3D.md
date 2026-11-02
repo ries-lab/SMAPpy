@@ -1,5 +1,5 @@
 ---
-version: "6"
+version: "7"
 covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear]
 ---
 
@@ -353,7 +353,10 @@ in its log.  So little depends on the depth there that it rarely matters.
 
 *in situ* runs the in situ calibration (`insitu_run.run_insitu`) with *hold*
 set to every aberration.  The bead model's whole pupil, phase and magnitude,
-is held, and a mode up to its order that it lacks is held at 0.  Learnt are
+is held -- a *minimal* model's γ, a Zernike model's magnitude modes -- and a
+phase mode up to its order that it lacks is held at 0.  The beads' SAF
+damping is not: it is the beads', and a molecule's light beyond the critical
+angle follows its own depth.  Learnt are
 the focus, the blur and each molecule; with nothing of the pupil to learn
 there is no twin test.  It starts at the position *auto* finds, from 1000
 molecules, in at most 2 rounds.  The spline is the learnt model drawn as

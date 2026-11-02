@@ -169,10 +169,10 @@ def camera_of(args):
 
 
 def beads(args):
-    from smappy.calibrate.pupil import BeadSettings, RunSettings, run_calibration
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, RunSettings, run_calibration
     files = sorted(glob.glob(os.path.join(args.acquisition, "*", "*.ome.tif")))
     t0 = time.perf_counter()
-    model = BeadSettings(zernike_order=ORDER, magnitude=args.magnitude, blur=args.blur,
+    model = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude=args.magnitude, blur=args.blur),
                          bead_diameter_nm=args.bead_diameter)
     from smappy.calibrate.core import CalibrationSettings
     detection = CalibrationSettings(region=tuple(args.region)) if args.region else None
@@ -221,7 +221,7 @@ def detect(args):
 
 def learn(args):
     from smappy.calibrate.insitu_run import InSituModelSettings, run_insitu
-    from smappy.calibrate.pupil import BeadSettings, RunSettings, load_start
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, RunSettings, load_start
     previous = load_start(args.model)
     held = bead_magnitude(previous)
     bead_phase = bead_phases(previous)
@@ -239,8 +239,10 @@ def learn(args):
         drop_hazy(rois, args.max_haze)
     astig_nm = bead_phase[6] * WAVELENGTH_NM / (2 * math.pi)
     # a blur held round at a value (--blur-fixed): does in situ's extra astigmatism trade with σx != σy?
-    model = (BeadSettings(zernike_order=ORDER, magnitude="free", blur=args.blur) if args.blur_fixed is None else
-             BeadSettings(zernike_order=ORDER, magnitude="free", blur="fixed", blur_nm=args.blur_fixed))
+    model = (BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free",
+                                               blur=args.blur)) if args.blur_fixed is None else
+             BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur="fixed",
+                                               blur_nm=args.blur_fixed)))
     from dataclasses import replace as replaced
     model = replaced(model, fit_tilt=args.fit_tilt)          # the coverslip's tilt learnt (uipsf 774472e)
     insitu = InSituModelSettings(focus_nm=args.focus, astigmatism_nm=astig_nm, max_rounds=args.rounds,
@@ -394,7 +396,7 @@ def score(args):
     """Every saved run's model on one set of molecules (*set*), each molecule localised on it from the
     same heights: the deviance says which model the data prefer, Δnats = Δdeviance / 2."""
     global ORDER, N_MED
-    from smappy.calibrate.pupil import BeadSettings, load_start
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, load_start
 
     import uipsf.workflows as wf
     previous = load_start(args.model)
@@ -417,7 +419,7 @@ def score(args):
     original = wf.insitu_model
     o = optics().optics(rois.camera)[0]
     roi = int(rois.units.regions.shape[-1])
-    settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
+    settings = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur="free"))
     scored_n = N_MED
     for r in runs:
         wf.insitu_model = original
@@ -426,14 +428,14 @@ def score(args):
         N_MED = r.get("n_medium", scored_n)
         o = optics().optics(rois.camera)[0]
         # each run with its own blur: a round one is one value (`VectorPSF.round_sigma`)
-        settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur=r.get("blur", "free"),
-                                blur_nm=r.get("blur_nm") or 30.0)
+        settings = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur=r.get("blur", "free"),
+                                                     blur_nm=r.get("blur_nm") or 30.0))
         # a run held its own bead model's magnitude, and its high phase orders
         own = load_start(r["model"]) if "model" in r else previous
         patch_insitu_model(r["magnitude_kind"], bead_magnitude(own), r.get("hold_phase_above"), bead_phases(own))
         focus = float(r["shared"]["geometry.focus"])
         # a run that learnt the coverslip's tilt is scored with it
-        model = wf.insitu_model(o, settings, (roi, roi), focus, device=args.device,
+        model = wf.insitu_model(o, settings.psf, (roi, roi), focus, device=args.device,
                                 fit_tilt="geometry.tilt" in r["shared"])
         loc, d, pixels = deviances(model, r["shared"], rois, ids)
         emit(dict(step="score", set=args.set, magnitude_kind=r["magnitude_kind"], start=r["start"], molecules=len(ids),
@@ -475,7 +477,7 @@ def beadfit(args):
     """The bead model itself on the molecules (the user's question, October 2026): its pupil and σ as the
     beads learnt them, the bead's size already out of it (in situ models are point-like), only the focus
     scanned -- it is the one thing beads cannot tell.  Scored as `score` scores the in situ runs."""
-    from smappy.calibrate.pupil import BeadSettings, load_start
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings, load_start
 
     from uipsf.workflows import insitu_model, start_values
     previous = load_start(args.model)
@@ -485,9 +487,9 @@ def beadfit(args):
     ids = ids[:args.limit] if args.limit else ids
     o = optics().optics(rois.camera)[0]
     roi = int(rois.units.regions.shape[-1])
-    settings = BeadSettings(zernike_order=ORDER, magnitude="free", blur="free")
+    settings = BeadSettings(psf=PSFModelSettings(zernike_order=ORDER, magnitude="free", blur="free"))
     for focus in args.focus:
-        model = insitu_model(o, settings, (roi, roi), focus, device=args.device)
+        model = insitu_model(o, settings.psf, (roi, roi), focus, device=args.device)
         shared = dict(start_values(model, previous), **{"geometry.focus": torch.tensor(float(focus))})
         if args.sigma is not None:
             shared["psf.sigma"] = torch.tensor(args.sigma, dtype=torch.float64)

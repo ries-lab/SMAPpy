@@ -169,8 +169,8 @@ def adapter_dataset(name, seed, args):
 
 
 def settings_for(bead_nm, order=6):
-    from smappy.calibrate.pupil import BeadSettings
-    return BeadSettings(bead_diameter_nm=bead_nm, zernike_order=order)
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings
+    return BeadSettings(psf=PSFModelSettings(zernike_order=order), bead_diameter_nm=bead_nm)
 
 
 def run_adapter(name, seed, args, emit):

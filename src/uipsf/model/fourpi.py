@@ -67,17 +67,22 @@ the model's `phase_per_nm` is negative, as v1's export is (`smappy.fourpi.load_u
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import torch
 
-from ..optics.zernike import noll_to_nm, symmetric_modes
+from ..optics.zernike import noll_to_nm, symmetric_modes, zernike_modes
 from ..params import Bounded, ParamSpec
 from .background import Constant
+from .build import make_pupil
 from .channels import inverse_map, normalised, unpack_transform
 from .intensity import Bleaching
 from .psf import VectorPSF
-from .pupil import ZernikePupil
 
 LOWER = "lo."
+#: a pupil's magnitude parameters, one set for both objectives with ``same_magnitude``: a Zernike pupil's modes,
+#: a minimal pupil's γ (the user's decision, November 2026: one γ for twin objectives) and its ring's h
+MAGNITUDE = ("pupil.magnitude", "pupil.gamma", "pupil.ring_h")
 
 
 def lower_view(p: dict) -> dict:
@@ -93,7 +98,8 @@ class FourPiModel:
                  bead_radius_nm: float = 0.0, sigma_nm=(60.0, 60.0), steps_rad=None, deltas_rad=None,
                  coherence: float = 0.8, transforms=None, fit_transform: bool = True, intensity=None, background=None,
                  pupils=None, kind: str = "vector", plates: str = "aligned", polarisations=None,
-                 round_sigma: bool = False, same_magnitude: bool = False):
+                 round_sigma: bool = False, same_magnitude: bool = False, pixel_blur: bool = False,
+                 fit_sigma: bool = True):
         """``grid`` the pupil grid (both objectives share the optics); ``roi_shape`` (Y, X) camera pixels;
         ``steps_rad`` the mirror steps as set (only their differences from the first matter), the start of
         ``fourpi.steps``; ``deltas_rad`` the channels' phase offsets to start from (default 0, π/2, π,
@@ -110,7 +116,10 @@ class FourPiModel:
         ``same_magnitude`` gives both objectives one magnitude, each in its own frame: twin objectives have
         the same apodisation, and how much light each arm brings is the balance's (``fourpi.balance``), the
         magnitude's scale being the reference energy's.  The lower pupil then has no ``lo.pupil.magnitude``
-        and reads the upper one's through `lower_view`."""
+        (nor, minimal pupils, ``lo.pupil.gamma``: one γ, `MAGNITUDE`) and reads the upper one's through
+        `lower_view`.  ``pixel_blur`` puts the pixel's own blur under the learnt one, ``fit_sigma`` off holds
+        the blur at ``sigma_nm`` (`VectorPSF`).  Pupils made
+        here are `model.build.make_pupil`'s, as ``pupils`` from outside should be."""
         if kind not in ("scalar", "vector"):
             raise ValueError(f"kind must be 'scalar' or 'vector', got {kind!r}")
         if plates not in PLATES:
@@ -126,14 +135,19 @@ class FourPiModel:
         if len(self.polarisations) != self.n_channels or set(self.polarisations) - {"s", "p"}:
             raise ValueError(f"one polarisation, s or p, per channel: got {self.polarisations}")
         if pupils is None:
-            if magnitude_modes is None and magnitude_n_max is None and kind == "vector":
-                magnitude_modes = symmetric_modes(n_max)
-            pupils = [ZernikePupil(grid, n_max=n_max, magnitude_n_max=magnitude_n_max,
-                                   magnitude_modes=magnitude_modes) for _ in range(2)]
+            if magnitude_modes is None:
+                mn = n_max if magnitude_n_max is None else magnitude_n_max
+                magnitude_modes = (symmetric_modes(n_max) if magnitude_n_max is None and kind == "vector"
+                                   else zernike_modes(mn, exclude=("piston",)) if mn > 0 else [])
+            spec = SimpleNamespace(order=n_max, magnitude="free", saf_damping=False)
+            pupils = [make_pupil(grid.optics, spec, grid=grid, magnitude_override=list(magnitude_modes))
+                      for _ in range(2)]
         self.psf_up = VectorPSF(grid, pupils[0], roi_shape, upsample=upsample, kind=kind,
-                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma)
+                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma,
+                                pixel_blur=pixel_blur, fit_sigma=fit_sigma)
         self.psf_lo = VectorPSF(grid, pupils[1], roi_shape, upsample=upsample, kind=kind,
-                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma)
+                                bead_radius_nm=bead_radius_nm, sigma_nm=sigma_nm, round_sigma=round_sigma,
+                                pixel_blur=pixel_blur, fit_sigma=fit_sigma)
         C, M = self.n_channels, self.n_phases
         steps = torch.zeros(M) if steps_rad is None else torch.as_tensor(steps_rad, dtype=torch.float32)
         self.steps_init = (steps - steps[0])[1:]
@@ -297,12 +311,12 @@ class FourPiModel:
         return {s.name for s in self.psf_up.specs()} | {LOWER + s.name for s in self._lower_specs()}
 
     def _lower_specs(self):
-        """The lower pupil's own parameters: all of its pupil's, but its magnitude when it is the upper's."""
-        return [s for s in self.psf_lo.pupil.specs() if not (self.same_magnitude and s.name == "pupil.magnitude")]
+        """The lower pupil's own parameters: all of its pupil's, but its magnitude's when they are the upper's."""
+        return [s for s in self.psf_lo.pupil.specs() if not (self.same_magnitude and s.name in MAGNITUDE)]
 
     def lower_name(self, name: str) -> str:
         """The parameter the lower pupil's ``name`` is: its own, or with ``same_magnitude`` the upper's."""
-        return name if self.same_magnitude and name == "pupil.magnitude" else LOWER + name
+        return name if self.same_magnitude and name in MAGNITUDE else LOWER + name
 
     def _components(self, h: torch.Tensor, arm: int, polarisation: str) -> torch.Tensor:
         """The complex field each channel's light is made of, [..., D, uY, uX], from an image field

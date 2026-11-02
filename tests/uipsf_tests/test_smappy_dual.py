@@ -136,7 +136,7 @@ def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_
     after each bead's offset, the ratio 0.297 for 0.3, flat in z."""
     from smappy.calibrate.pupil import BeadROIs, PupilRun, fit_quality
 
-    from uipsf.workflows import BeadSettings, calibrate_beads
+    from uipsf.workflows import BeadSettings, PSFModelSettings, calibrate_beads
     from uipsf_tests.conftest import two_channel_beads
     from uipsf_tests.test_multichannel import _from_centroids
     optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.516, n_med=1.335, pixel_size_nm=(127, 116))
@@ -144,7 +144,7 @@ def test_the_dual_fit_quality_refits_each_pair_with_the_global_fitter_one_z_and_
     model, truth, batch = two_channel_beads(optics, n=8, kind="ratiometric", dtype=torch.float32, P=48,
                                             roi=(17, 17), K=25, z_range=600.0, n_max=4, photons=20000.0,
                                             mirrored=True)
-    cal = calibrate_beads(batch, [optics, redder], BeadSettings(zernike_order=4),
+    cal = calibrate_beads(batch, [optics, redder], BeadSettings(psf=PSFModelSettings(zernike_order=4)),
                           transforms=[None, _from_centroids(batch, None)],
                           geometry={"layout": "up-down mirrored", "main_channel": "upper"}, device="cpu")
     assert cal.transform_start == {1: "gaussian"}         # refitted from the beads, not the centroids

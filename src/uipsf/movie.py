@@ -35,7 +35,6 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .model import VectorPSF
 from .model.channels import view
 from .model.forward import _split
 
@@ -121,8 +120,7 @@ def render(model, shared: dict, truth: MovieTruth, image: np.ndarray, spot_px: i
     """Add every row of ``truth`` into ``image`` [T, Y, X], in place: the model's PSF in a region of
     ``spot_px`` pixels about the spot's pixel, times its photons."""
     base = model.psf
-    psf = VectorPSF(base.grid, base.pupil, (spot_px, spot_px), upsample=base.upsample, kind=base.kind,
-                    analyser=base.analyser, round_sigma=base.round_sigma)
+    psf = base.for_emitters((spot_px, spot_px))      # the molecules' view: the pixel's blur kept, no SAF damping
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     p = view({k: torch.as_tensor(v, device=dev) for k, v in shared.items()}, 0)
     px, py = model.pixel_size_nm

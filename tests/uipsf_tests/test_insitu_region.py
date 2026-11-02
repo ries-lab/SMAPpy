@@ -36,7 +36,7 @@ def test_a_region_set_by_hand_is_kept_and_auto_becomes_pixels_where_the_movie_co
 def test_on_an_exact_model_a_15_and_a_21_px_region_learn_the_same_astigmatism():
     # M2's optics and its beads' astigmatism, 0-1300 nm deep, focus 430 nm, ~3000 photons on 55 per pixel,
     # learnt from the truth: whatever moves is a bias of the region.  ~1 min on 4 cores.
-    from smappy.calibrate.pupil import BeadSettings
+    from smappy.calibrate.pupil import BeadSettings, PSFModelSettings
     from smappy.simulate import BlinkingSettings
 
     import uipsf
@@ -46,7 +46,8 @@ def test_on_an_exact_model_a_15_and_a_21_px_region_learn_the_same_astigmatism():
     truth = {5: -0.05, 6: -0.68, 7: 0.05, 8: 0.08, 11: 0.10}
 
     def model(roi, focus):
-        return insitu_model(optics, BeadSettings(zernike_order=4, magnitude="fixed", blur_nm=55.0), (roi, roi),
+        return insitu_model(optics, BeadSettings(psf=PSFModelSettings(zernike_order=4, magnitude="fixed",
+                                                                      blur_nm=55.0)), (roi, roi),
                             focus, z_max_nm=1300.0, device="cpu")
 
     def shared(m):

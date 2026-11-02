@@ -1450,7 +1450,8 @@ class SplineFit(_FitPlugin):
     # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     # 6: *focus* on auto by default: a pupil (Zernike) calibration is drawn for the focus in the
     #    sample, z the height above the coverslip (`calibrate.depth`)
-    version = "6"
+    # 7: *focus in situ* holds a minimal bead model's γ, where it held a flat magnitude (`insitu_run.held_pupil`)
+    version = "7"
     calibration_kind = "single"
 
     def model(self, settings, camera):
