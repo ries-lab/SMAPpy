@@ -55,6 +55,10 @@ import torch
 
 from ..params import Bounded, ParamSpec
 
+#: parameters of the sample, not of a channel: one value for every channel, under its plain name (a learnt
+#: sample index, `VectorPSF.learn_n_med`).  Channel c ≥ 1 reads the main channel's through `view`
+SHARED = ("optics.n_med",)
+
 
 def prefix(c: int) -> str:
     """The prefix of channel ``c``'s own parameter names: none for the main channel."""
@@ -123,7 +127,7 @@ class Channel:
     def specs(self, c: int, start: dict | None) -> list[ParamSpec]:
         """Channel ``c``'s parameters: its PSF's (prefixed) and, for c ≥ 1, transform, share and offset."""
         pre = prefix(c)
-        specs = [replace(s, name=pre + s.name) for s in self.psf.specs()]
+        specs = [replace(s, name=pre + s.name) for s in self.psf.specs() if c == 0 or s.name not in SHARED]
         if getattr(self, "field", None) is not None:
             specs += [replace(s, name=pre + s.name) for s in self.field.specs()]
         if c == 0:

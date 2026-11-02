@@ -33,6 +33,11 @@ PHASE_TRIALS = 12
 #: held at its start in stage 1: at the start the two pupils are alike and the balance even, near the
 #: symmetric point of the arms' gauge (`model.fourpi.swapped`), where it has no curvature.
 SYMMETRIC = ("fourpi.balance",)
+#: held at the typed value in stage 1 too, where learnt (`VectorPSF.learn_n_med`): the first stage finds the pupils'
+#: gross shape, and a buffer's index free beside it trades with the magnitude and the misalignment's Δz -- learnt
+#: from the start on uiPSF v1's 18 beads it stopped 17 000 nats behind the typed index's optimum, Δz −50 nm
+#: against +157 (docs/4pi.md §24)
+HELD_FIRST = SYMMETRIC + ("optics.n_med",)
 #: where stage 1 starts the arms' misalignment Δ, nm.  At Δ = 0 -- the symmetric point -- it has no
 #: curvature either: with one phase per stack (no mirror steps) both solvers' steps there were all
 #: rejected, 2 iterations, 116 393 nats against the truth's 42 886 on simulated beads.  Held at 0 for
@@ -128,7 +133,8 @@ def learn_fourpi(model: FourPiModel, batch, noise=None, first_order: int | None 
     values = _pupil_values(params.physical(), model, low, embed=False)
     values["fourpi.offset"] = torch.tensor(OFFSET_START_NM, dtype=dtype, device=device)
     specs = [_like(s, params.specs[s.name]) for s in low.specs(batch, start)]
-    p1 = Params(specs, batch.n_emitters, dtype=dtype, device=device, values=values).fix(*SYMMETRIC)
+    p1 = Params(specs, batch.n_emitters, dtype=dtype, device=device, values=values)
+    p1 = p1.fix(*[n for n in HELD_FIRST if n in p1.specs])
     first = _loosened(solver).solve(Problem(low, noise, batch), p1, progress=_tagged(progress, 1), cancel=cancel)
     if first.stop_reason == "cancelled":
         return FourPiFit(model, first, start, first)

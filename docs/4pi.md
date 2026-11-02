@@ -1930,13 +1930,93 @@ the stage, and the coherence is 0.76-0.82 in every row.
 - **Phase z does not care**: 2.20-2.23 nm rms everywhere (3.3× its CRLB: the beads' own motion and the stage),
   the envelope's z 6.3-7.3 nm (2.4-2.8×).
 
-**Decided (the user, 2026-11-02)**: the nominal NA stays the default and the effective one is typed under
-*microscope* for now; *learn NA* (`PSFModelSettings.learn_na`, `pupil.na` between 0.8 and 1.05 of the typed NA)
-is offered beside it, and the symmetric Zernikes remain a choice of *pupil magnitude*.  A drop to 0.97 of the
-NA is not what an objective should do, so the cause is open.  The next suspect is the buffer's index: the 4Pi
-model takes the sample as index-matched (`fourpi_beads.learn` sets n_med = n_imm), but the user says it is not
-always so -- the immersion's index is known (the oil is bought), the buffer's can be as low as water's, and is
-measured only when it is matched.  A buffer of lower index cuts the light of beads far from the glass at n_med,
-which would look like an aperture at ~1.31-1.33 (water 1.33).  Learning n_med
-needs the medium's maps (`PupilGrid.kz_med`, `cos_med`, the Fresnel factors, the dipole fields) as functions of
-a parameter, and would show itself in the fringe period too (§14: the model's 265 nm against the beads' 251 nm).
+**Decided (the user, 2026-11-02)**: the NA stays typed by default everywhere, 4Pi included, and the minimal
+pupil stays 4Pi's default at the typed NA; learning it is an option, *learn NA* (`PSFModelSettings.learn_na`,
+`pupil.na`, started at the typed NA, bounded to 0.8-1.05 of it), offered in every method. Plainly: **on the
+Zenodo 4Pi beads the typed 1.35 fits 9 700 nats worse than a learnt 1.31.** The remedy is to learn the NA once
+with *learn NA* and then type the learnt value under *microscope*. It is not a universal ratio: on M5's
+one-objective beads the learnt NA ran to the grid's edge, 1.51 behind a typed 1.50 (ries-lab/SMAPpy#135). The
+symmetric Zernikes remain a choice of *pupil magnitude*. Why the aperture is smaller is open; the buffer's index
+does not explain it (ries-lab/SMAPpy#135, learnt beside the NA it moved to 1.397 for 106 nats). The sample's
+index n_med stays typed by default too.
+
+## 24. The buffer's index learnt: it does not explain the effective NA (2026-11-02)
+
+§23 left the minimal pupil's effective NA, 1.31-1.32 behind objectives of 1.35, unexplained, and named the
+buffer's index as the suspect: the 4Pi model took the sample as index-matched, the buffer is measured only when it
+is matched, and a buffer of lower index cuts the light at its own index.  So the sample's index is now a parameter
+of every uipsf model (`docs/uipsf/architecture.md`, "The sample's index learnt"), and the 4Pi form reads it.
+
+**The form.**  The microscope's *sample index* is *auto* by default -- water's 1.33 for one objective and, for 4Pi,
+the immersion's (index-matched), each mode's assumption as before -- or typed, which 4Pi now takes for the buffer
+between the coverslips (`fourpi_beads.learn(n_med=)`, `OpticsSettings.sample_index`).  *learn sample index*
+(`PSFModelSettings.learn_n_med`, off) learns it from there, one index for both objectives (the same buffer).  A
+typed index below the NA brings the minimal pupil's ring and its h (one for both objectives under *same
+magnitude*), and the form shows *SAF damping* then (`fourpi_shown(ring=)`); the immersion's index stays typed.
+4Pi's first stage holds the index at the typed value (`workflows.fourpi.HELD_FIRST`): free from the start, it
+stopped 17 500 nats behind the typed index's optimum on these beads (943 370, Δz −50 nm against +157).
+
+**What the index does to z and the fringe.**  A bead scan moves the stage: coverslips, buffer and beads together,
+so each bead keeps its distance to both coverslips, and only the two immersion layers change, one thicker, one
+thinner.  The phase per nm of stage is k_z,imm in each arm whatever the buffer -- `VectorPSF._waves` is right
+to use it -- and the buffer enters only through fixed terms: the far arm's (k_z,med − k_z,imm)·D through the
+sample's thickness D, a defocus (part of the misalignment Δz) and spherical aberration (the lower pupil's
+Zernikes), the Fresnel factors, and the supercritical light.  So the scan's fringe hardly moves with the buffer:
+with a scalar model at NA 1.35, n_imm 1.406, 600 nm, the period at the image's centre is 289 nm matched, 292 nm at
+n_med 1.37 and 298 nm at 1.33 -- longer, not shorter, and §23's 265 nm model period against the beads' 251 nm
+(`beads_period_nm`, a different weighting of the pupil, §11) is not the index's.  A molecule moving *in* the
+buffer, the stage still, changes its phase by k_z,med instead: the same model gives 309 nm at 1.37 and 341 nm
+at 1.33, so a height from a bead model (in nm of stage) is the molecule's true height × 1.057 at 1.37 and × 1.145
+at 1.33 (paraxially n_imm/n_med would say 1.026 and 1.057: the high angles weigh more).  That is *4Pi z*'s *z
+scale*; it is 1 for a matched buffer, and should be set from the buffer's index where it is not.
+
+**Real beads** (`benchmarks/uipsf/real/zenodo_4pi_minimal.py`, `results/fourpi_nmed.jsonl`; uiPSF v1's 18 beads as in
+§23, the minimal pupil, one γ, at the nominal NA 1.35, on the CPU -- the typed matched row is §23's to the nat).
+"+warm" starts from the typed row's converged model of the same beads.
+
+| model | n_med | nats | γ | h (nm) | σ (nm) | Δ (nm) | period (nm) | envelope bias rms (max) (nm) |
+|---|---|---|---|---|---|---|---|---|
+| typed, matched (1.406) | 1.406 | 925 889 | 0.403 | | 41.1 | (−19, −15, 157) | 264.8 | 3.43 (8.9) |
+| learnt from 1.406 | 1.4266 ± 0.0007 | 925 265 | 0.369 | | 41.6 | (−20, −16, 157) | 265.1 | 3.38 (8.7) |
+| learnt from 1.406, +warm | 1.4266 ± 0.0006 | 925 265 | 0.369 | | 41.6 | (−20, −16, 157) | 265.1 | 3.37 (8.7) |
+| typed, water (1.33), ring damped | 1.33 | 948 358 | 0.573 | 400 (bound) | 38.6 | (−1, −3, −41) | 264.4 | 6.90 (13.0) |
+| typed, water, a point's ring | 1.33 | 958 475 | 0.627 | 0 | 37.8 | (0, −3, −42) | 263.7 | 4.82 (9.2) |
+| learnt from 1.33 | 1.3319 ± 0.0004 | 948 095 | 0.569 | 400 (bound) | 38.7 | (0, −3, −40) | 264.4 | 6.90 (13.0) |
+| learnt from 1.33, +warm | 1.4142 ± 0.0007 | 943 370 | 0.429 | 357 | 41.0 | (2, −2, −50) | 265.4 | 4.46 (8.6) |
+| *learn NA* (§23, NA 1.311) | 1.406 | 912 642 | 0.230 | | 42.7 | (−25, −14, 107) | 265 | 1.77 (3.9) |
+| *learn NA* and *learn sample index* (NA 1.310) | 1.3968 ± 0.0006 | 912 536 | 0.239 | | 42.6 | (−24, −14, 107) | 264.9 | 1.73 (3.9) |
+
+- **The beads want no buffer of lower index.**  Learnt from the matched start, n_med rises to 1.427 -- above the
+  immersion's -- and gains 624 nats; learning the aperture gained 13 200.  Typed as water the model is 22 000
+  nats worse, and the beads refuse the ring the index brings: h runs to its 400 nm bound, damping the light
+  beyond 1.33 away, and a point's undamped ring costs another 10 000.  The envelope bends twice as much.
+- **From water the index climbs back**: warm, it rises to 1.414 (h 357 nm), 5 000 nats better than typed water
+  but still 18 000 behind the matched optimum, in the other basin of Δz (−50 nm against +157); cold it stays
+  at 1.332, held by the ring at its bound.  Both basins say the same: the index wants to be at least the
+  immersion's.
+- **With the aperture free the index stays put**: learnt together, the NA comes out at 1.310 as alone, and n_med at
+  1.397, 0.009 below the immersion's, for 106 nats.  The aperture explains the beads; the index does not.
+- **The fringe period does not move** (263.7-265.4 nm), as the physics above says for a stage scan.
+- **An index above the immersion's** does not say the buffer is denser than the oil.  Above the NA, n_med acts
+  only through the Fresnel factors, the apodisation and the dipoles' field directions, so a free index is one
+  more knob on the aperture's radial weight, and it moves in the direction of the effective NA's correction,
+  far less effectively.  Not checked further: its CRLB (± 0.0007) is that of a parameter taking up a model error,
+  not of a measured buffer.
+
+So the buffer is not the cause of the effective NA (§23's decision: learn the NA once, then type it); the cause stays open (the objective's high-angle
+transmission, its coatings, or a field stop).  The default remains: index-matched on *auto*, the NA typed, *learn
+NA* and *learn sample index* offered as diagnostics.
+
+**One objective** (`benchmarks/uipsf/real/m5_nmed.py`, `results/m5_nmed.jsonl`): M5's 100 nm beads in PBS at 600
+nm (`20261029_600_100nm_mismatch_50ms_2D_1`, 29 central beads), the shipped bead defaults at order 8, NA 1.50
+typed, n_med from PBS's 1.334:
+
+| model | nats | n_med | NA | γ | h (nm) | σ (nm) |
+|---|---|---|---|---|---|---|
+| typed | 573 504 | 1.334 | 1.50 | 0.363 | 62 | 14.5 |
+| *learn sample index* | 572 905 | 1.3447 ± 0.0003 | 1.50 | 0.318 | 85 | 16.4 |
+| *learn NA* | 572 530 | 1.334 | 1.510 (bound) | 0.364 | 65 | 14.7 |
+
+Here the index moves by 0.011 for 600 nats and the NA wants to rise to the grid's edge for 975: on M5's objective
+at its own NA there is no effective-NA deficit to explain, and PBS's index holds within 0.01.  (The 676 nm stack
+was not on this machine; M2's 1.40 behind 1.43 is another objective's, not checked here.)

@@ -136,9 +136,10 @@ def start_values(model: ForwardModel, previous) -> dict:
     """Shared start values for ``model`` from ``previous`` (a `LearnedPSF` or a `Calibration`).
 
     Zernike coefficients go to the same Noll modes, zero where the previous model had none; the minimal
-    pupil's γ, h and NA where both have them; the blur, the channel transforms, shares and offsets are taken when
-    the model fits them, the blur converted where one model has the pixel's under it and the other not (the
-    image's blur kept); anything else (a fixed blur, the stage's terms) keeps the model's own start."""
+    pupil's γ, h and NA, and a learnt sample index, where both have them; the blur, the channel transforms, shares
+    and offsets are taken when the model fits them, the blur converted where one model has the pixel's under it
+    and the other not (the image's blur kept); anything else (a fixed blur, the stage's terms) keeps the model's
+    own start."""
     shared = previous.shared() if callable(getattr(previous, "shared", None)) else previous.shared
     old_model = previous.model
     if old_model.n_channels != model.n_channels:
@@ -174,6 +175,8 @@ def start_values(model: ForwardModel, previous) -> dict:
                     out[pre + n] = shared[pre + n]
     if "geometry.tilt" in shared and getattr(model.geometry, "fit_tilt", False):
         out["geometry.tilt"] = shared["geometry.tilt"]       # the coverslip's, where this model learns one
+    if "optics.n_med" in shared and model.psf.learn_n_med:
+        out["optics.n_med"] = shared["optics.n_med"]         # the sample's index, where this model learns one
     return {n: torch.as_tensor(v).detach().cpu() for n, v in out.items()}
 
 

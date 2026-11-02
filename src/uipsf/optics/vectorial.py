@@ -16,12 +16,18 @@ from .grid import PupilGrid
 
 def dipole_fields(grid: PupilGrid, analyser: str | None = None) -> torch.Tensor:
     """[F, P, P] complex: F = 6 without an analyser, 3 behind an x or y polariser."""
-    cos_phi = torch.cos(grid.phi).to(grid.kz_med.dtype)
-    sin_phi = torch.sin(grid.phi).to(grid.kz_med.dtype)
     sin_med = (grid.rho * grid.optics.NA / grid.optics.n_med).to(grid.kz_med.dtype)
+    return _vector_fields(grid, grid.fresnel_p, grid.fresnel_s, grid.cos_med, sin_med, analyser)
+
+
+def _vector_fields(grid, tp, ts, cos_med, sin_med, analyser):
+    """The fields from the transmissions t_p, t_s and the sample's cos θ and sin θ: `dipole_fields` at the
+    grid's n_med, `optics.medium.fields` at a learnt one."""
+    cos_phi = torch.cos(grid.phi).to(cos_med.dtype)
+    sin_phi = torch.sin(grid.phi).to(cos_med.dtype)
     zero = torch.zeros_like(cos_phi)
-    p = grid.fresnel_p * torch.stack([grid.cos_med * cos_phi, grid.cos_med * sin_phi, -sin_med])
-    s = grid.fresnel_s * torch.stack([-sin_phi, cos_phi, zero])
+    p = tp * torch.stack([cos_med * cos_phi, cos_med * sin_phi, -sin_med])
+    s = ts * torch.stack([-sin_phi, cos_phi, zero])
     hx = cos_phi * p - sin_phi * s
     hy = sin_phi * p + cos_phi * s
     if analyser is None:

@@ -413,13 +413,19 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _show_fourpi(self) -> None:
         """The typed corners only while the channels are typed, the magnitude modes only for a Zernike
-        magnitude, no SAF damping (`fourpi_beads.fourpi_shown`)."""
+        magnitude, the SAF damping only for a buffer typed below the NA (`fourpi_beads.fourpi_shown`)."""
         from .fourpi_beads import fourpi_shown
         try:
             settings = self.fourpi_form.value()
         except ValueError:                           # a field that does not read: leave the form as it is
             return
-        self.fourpi_form.set_shown(fourpi_shown(settings))
+        try:
+            optics = self.optics_form.value()
+            na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
+            ring = na is not None and self._sample_index(optics, True) < na
+        except Exception:                            # no stacks, or values that do not read: index-matched
+            ring = False
+        self.fourpi_form.set_shown(fourpi_shown(settings, ring))
 
     def _forget(self, message: str) -> None:
         """A change of method or mode makes the result another calibration's: dropped, settings kept."""
@@ -540,9 +546,12 @@ class PSFCalibrationWindow(QMainWindow):
             except Exception as error:               # a file that cannot be read says so when it is run
                 print(f"PSF calibration: the stacks' camera: {error}")
                 details = {"line": f"the stacks cannot be read: {error}", "status": "missing"}
+        # the sample's index on auto: water's, or the immersion's for 4Pi (`OpticsSettings.sample_index`)
+        fourpi = bool(getattr(self, "method", None) is not None and self.method.sections.get("4Pi", False))
+        hints["n_medium"] = OpticsSettings().sample_index(fourpi, hints.get("n_immersion") or 1.518)
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
-                                     "n_coverslip", "coverslip_um",
+                                     "n_medium", "n_coverslip", "coverslip_um",
                                      "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain",
                                      "camera")})
         self.optics_form.set_details(details)
@@ -570,7 +579,8 @@ class PSFCalibrationWindow(QMainWindow):
             na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
         except Exception:                            # no stacks, or values that do not read: the ring shown
             optics, na = None, None
-        ring = optics is None or na is None or optics.n_medium < na
+        fourpi = self.method.sections.get("4Pi", False)
+        ring = optics is None or na is None or self._sample_index(optics, fourpi) < na
         try:
             magnitude = self.model_form.value().psf.magnitude
         except ValueError:
@@ -579,6 +589,13 @@ class PSFCalibrationWindow(QMainWindow):
         self.model_form.set_shown(model_shown("insitu" if in_situ else "beads", magnitude, self.is_dual, layered,
                                               ring))
         self._show_fourpi()
+
+    def _sample_index(self, optics, fourpi: bool) -> float:
+        """The sample's index the method reads: typed, or its mode's *auto* (`OpticsSettings.sample_index`)."""
+        n_imm = optics.n_immersion
+        if n_imm is None and self.optics_camera is not None:
+            n_imm = optics.resolved(self.optics_camera)["n_immersion"]
+        return optics.sample_index(fourpi, n_imm or 1.518)
 
     def _coverslip_matters(self) -> bool:
         """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""

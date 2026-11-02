@@ -12,7 +12,12 @@ order 6, a free photon count per observation, point-like beads.  The variants (`
   pixel's blur;
 - **minimal-each**: γ per objective;
 - **symmetric-shared**: symmetric Zernikes shared, σ over the pixel's blur -- the magnitude's form alone
-  against *minimal*.
+  against *minimal*;
+- **minimal-na**: *minimal* with the aperture's NA learnt;
+- **minimal-water**, **minimal-water-point**: the buffer typed at water's 1.33, below the NA, its supercritical
+  ring damped by a learnt h or a point's on the glass;
+- **minimal-nmed**, **minimal-nmed-water**: the buffer's index learnt from the immersion's or from water's;
+- **minimal-na-nmed**: the aperture and the index learnt together.
 
 Each is exported (`workflows.fourpi.calibration`) and fits the beads back with Spline 4Pi's `Global4PiPSF`
 (`bead_z`): z of the envelope and of the phase against the stage, their scatter against the CRLB, the
@@ -35,6 +40,8 @@ from zenodo_4pi_beads import STEP_NM, v1_batch  # noqa: E402
 
 CROP = 15
 CORE = slice(3, -3)
+#: a learnt index's typed twin, whose converged model the learnt one is warm-started from with ``--warm``
+WARM_FROM = {"minimal-nmed": "minimal", "minimal-nmed-water": "minimal-water"}
 VARIANTS = {
     "old": dict(magnitude="symmetric", blur_nm=60.0, pixel_blur=False, same=False),
     "minimal": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True),
@@ -42,6 +49,17 @@ VARIANTS = {
     "symmetric-shared": dict(magnitude="symmetric", blur_nm=20.0, pixel_blur=True, same=True),
     # the minimal pupil with its aperture learnt (*learn NA*, `MinimalPupil.learn_na`), one for both objectives
     "minimal-na": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_na=True),
+    # the buffer's index (docs/4pi.md §24): typed at water's, with the ring beyond its critical angle damped by one
+    # learnt h; learnt (*learn sample index*, `VectorPSF.learn_n_med`) from the immersion's or from water's
+    "minimal-water": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, n_med=1.33),
+    "minimal-water-point": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, n_med=1.33,
+                                saf_damping=False),
+    "minimal-nmed": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_n_med=True),
+    "minimal-nmed-water": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, n_med=1.33,
+                               learn_n_med=True),
+    # both: does the index move once the aperture is free?
+    "minimal-na-nmed": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_na=True,
+                            learn_n_med=True),
 }
 
 
@@ -106,17 +124,22 @@ def bead_z(cal, data) -> dict:
             "envelope_scale": float(un.envelope_scale), "photons": med(np.asarray(v["photons"]))}
 
 
-def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_radius_nm: float = 0.0) -> dict:
+def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_radius_nm: float = 0.0,
+        warm: dict | None = None) -> dict:
+    """One variant learnt and fitted back; ``warm`` shared values to start from (a typed index's converged model,
+    for a learnt index: `learn`'s ``warm``, which skips the first stage)."""
     from smappy import fourpi
     from smappy.calibrate.fourpi_beads import FourPiBeadSettings, learn
 
     from uipsf.workflows.fourpi import calibration
     choice = VARIANTS[name]
     spec = replace(FourPiBeadSettings().psf, magnitude=choice["magnitude"], blur_nm=choice["blur_nm"],
-                   pixel_blur=choice["pixel_blur"], learn_na=choice.get("learn_na", False))
+                   pixel_blur=choice["pixel_blur"], learn_na=choice.get("learn_na", False),
+                   learn_n_med=choice.get("learn_n_med", False), saf_damping=choice.get("saf_damping", True))
     t = time.time()
     fit = learn(beads, NA=na, bead_radius_nm=bead_radius_nm, wavelength_nm=600, n_imm=1.406, pixel_size_nm=129,
                 steps_rad=(2.0, 0.0, -2.0), spec=spec, device=device, same_magnitude=choice["same"],
+                n_med=choice.get("n_med"), warm=warm,
                 progress=lambda e: print(name, e.get("stage"), e.get("iteration"), e.get("objective"), flush=True)
                 if e.get("iteration", 0) % 10 == 0 else None)
     seconds = time.time() - t
@@ -127,10 +150,12 @@ def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_ra
     fourpi.save_fourpi_calibration(out_dir / f"fourpi_minimal_{name}_na{na:g}_r{bead_radius_nm:g}.h5", cal,
                                    overwrite=True)
     pick = lambda key: shared[key].tolist() if key in shared else None  # noqa: E731
-    row = {"variant": name, **choice, "NA": na, "bead_radius_nm": bead_radius_nm,
+    row = {"variant": name + ("+warm" if warm else ""), **choice, "NA": na, "bead_radius_nm": bead_radius_nm,
            "objective": float(fit.result.objective), "shared_parameters": n_shared,
            "iterations": len(fit.result.history), "stop": fit.result.stop_reason, "seconds": round(seconds, 1),
            "learnt_na": pick("pupil.na"), "gamma": pick("pupil.gamma"), "lo_gamma": pick("lo.pupil.gamma"),
+           "n_med": pick("optics.n_med"), "n_med_std": std["optics.n_med"].tolist() if "optics.n_med" in std else None,
+           "ring_h_nm": pick("pupil.ring_h"),
            "gamma_std": std["pupil.gamma"].tolist() if "pupil.gamma" in std else None,
            "magnitude": pick("pupil.magnitude"), "lo_magnitude": pick("lo.pupil.magnitude"),
            "sigma_nm": pick("psf.sigma"), "sigma_std": std["psf.sigma"].tolist(),
@@ -138,6 +163,7 @@ def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_ra
            "coherence": pick("fourpi.coherence"), "balance": pick("fourpi.balance"),
            "modulation": cal.parameters["modulation"], "pupils": cal.parameters["pupils"],
            "fit": bead_z(cal, data)}
+    row["_shared"] = shared
     return row
 
 
@@ -148,17 +174,25 @@ def main():
     ap.add_argument("--na", default="1.35", help="the objective's NA, comma-separated for a scan: the minimal "
                                                  "pupil's aperture (an effective NA)")
     ap.add_argument("--bead-radius", type=float, default=0.0)
+    ap.add_argument("--warm", action="store_true",
+                    help="each learnt index (a variant with learn_n_med) also warm-started from the typed variant's "
+                         "converged model, its learnt-index twin without learn_n_med (`WARM_FROM`)")
     ap.add_argument("--out", default=str(Path(__file__).parents[1] / "results" / "fourpi_minimal.jsonl"))
     ap.add_argument("--models", default=str(Path.home() / ".cache/uipsf/fourpi_minimal"))
     a = ap.parse_args()
     models = Path(a.models)
     models.mkdir(parents=True, exist_ok=True)
     beads, data = v1_beads()
+    done = {}
     for name, na in ((n, float(v)) for n in a.variants.split(",") for v in a.na.split(",")):
-        row = run(name, beads, data, a.device, models, na, a.bead_radius)
-        with open(a.out, "a") as f:
-            f.write(json.dumps(row) + "\n")
-        print(json.dumps({k: v for k, v in row.items() if k != "pupils"}), flush=True)
+        warm = done.get((WARM_FROM.get(name), na)) if a.warm else None
+        for start in ([None, warm] if warm is not None else [None]):
+            row = run(name, beads, data, a.device, models, na, a.bead_radius, warm=start)
+            done[(name, na)] = done.get((name, na)) or row.pop("_shared")
+            row.pop("_shared", None)
+            with open(a.out, "a") as f:
+                f.write(json.dumps(row) + "\n")
+            print(json.dumps({k: v for k, v in row.items() if k != "pupils"}), flush=True)
 
 
 if __name__ == "__main__":

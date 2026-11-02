@@ -1033,7 +1033,9 @@ class FourPiPupil(_FourPi):
         if optics["pixel"] is None:
             raise ValueError("4Pi beads need the camera's pixel size")
         settings = inputs["fourpi"]
+        n_med = inputs["optics"].sample_index(True, optics["n_immersion"])     # typed, or index-matched on auto
         fit = learn(used, NA=optics["NA"], wavelength_nm=optics["wavelengths"][0], n_imm=optics["n_immersion"],
+                    n_med=n_med,
                     pixel_size_nm=optics["pixel"], steps_rad=steps_of(settings, used.data.shape[3]),
                     spec=settings.psf, photons_per_observation=settings.photons_per_observation,
                     bead_radius_nm=settings.bead_diameter_nm / 2, progress=progress, cancel=cancel,
