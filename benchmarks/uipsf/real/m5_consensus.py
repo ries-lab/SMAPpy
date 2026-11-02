@@ -87,7 +87,7 @@ def central(rois, keep, fraction: float, shape) -> list:
 
 
 def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead_nm: float,
-            grid_na: float = GRID_NA, free_na: bool = False):
+            grid_na: float = GRID_NA, free_na: bool = False, held_phase: dict | None = None):
     """Make `bead_model` build the minimal pupil (module docstring); ``free_na`` learns the aperture's cutoff
     instead of holding it at `NA` (ρ 0.85 … 1.05 of the grid's NA)."""
     import uipsf.model.build as build
@@ -101,7 +101,7 @@ def minimal(form: str, ring: bool, modes, hold: dict, held_magnitude: dict, bead
                              saf_step=ring and form == "bead s",
                              held_magnitude=held_magnitude,
                              hold=({} if free_na else {"pupil.edge_rho": NA / grid_na}) | hold,
-                             bead_nm=bead_nm)
+                             bead_nm=bead_nm, held_phase=held_phase)
     build.ZernikePupil = Build
     return "free"
 
@@ -201,6 +201,9 @@ def main():
     ap.add_argument("--npz-dir", default=None,
                     help="also keep each fit's images, slice fits and bends for `m5_scorecard.py` and the figures")
     ap.add_argument("--free-only", action="store_true", help="the free minimal fits alone: no references, no consensus")
+    ap.add_argument("--cross", action="store_true",
+                    help="each acquisition learnt again with γ, h and the phase held at another's free fit of the "
+                         "same condition (another day, the same beads moved): what the pupil's change costs")
     ap.add_argument("--drift", default="none", choices=("none", "xy", "xyz"),
                     help="a drift per defocus learnt along these axes (`m5_media.stage_drift`)")
     ap.add_argument("--centre", type=float, default=0.5, help="the central fraction of the width and height")
@@ -301,6 +304,33 @@ def main():
             for form in (args.forms if ring else ["none"]):
                 fit(path, "free", form, None, minimal(form, ring, MODE_SETS[modes], {}, {}, bead_nm), blur, {},
                     modes)
+    # 2b: the whole objective's part held at another acquisition's free fit (the user's day-to-day test, 2 November
+    # 2026): γ, h and every phase mode, so only σ and each bead's own numbers are learnt; the cost in nats against
+    # the free fit on the same beads is what the pupil moved by, and the free fits' phases say which modes moved
+    for path, source in itertools.permutations(args.acquisitions if args.cross else [], 2):
+        name, cond, _, bead_nm = acquisition(path)
+        other, other_cond, _, _ = acquisition(source)
+        if any(cond[k] != other_cond[k] for k in ("colour", "medium", "lens")):
+            continue
+        ring = cond["medium"] == "mismatch"
+        lam = WAVELENGTH[cond["colour"]]
+        for modes, blur in itertools.product(args.mode_sets, args.blurs):
+            for form in (args.forms if ring else ["none"]):
+                rows = [r for r in done if r["acquisition"] == other and r["stage"] == "free" and r["form"] == form
+                        and r.get("blur") == blur and r.get("modes", "x6") == modes
+                        and r.get("drift", "none") == args.drift]
+                if not rows or MODE_SETS[modes]:
+                    continue                    # the m ≠ 0 magnitude modes are not held here: minimal0 only
+                r = rows[-1]
+                hold = {"pupil.centre_g": r["edge"]["centre_g"]}
+                # the phase as held modes, not a fixed `pupil.phase`: the bead fit's first stage learns a truncated
+                # pupil and pads the modes above its order with zeros, which a fixed vector would keep
+                phase = {int(j): v * 2 * math.pi / lam for j, v in r["phase_nm_path"].items()}
+                if ring:
+                    hold["pupil.saf_h"] = r["edge"]["saf_h"]
+                fit(path, "held", form, other, minimal(form, ring, MODE_SETS[modes], hold, {}, bead_nm,
+                                                       held_phase=phase), blur,
+                    dict(held_from=other), modes)
     # 3: γ and the asymmetric modes held at the others' consensus
     for path in ([] if args.free_only else args.acquisitions):
         name, cond, _, bead_nm = acquisition(path)

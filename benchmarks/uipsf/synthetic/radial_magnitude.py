@@ -127,14 +127,15 @@ class EdgePupil(uipsf.ZernikePupil):
 
     Held, for a model whose objective's part is fixed (`real/m5_consensus.py`): ``asym_modes`` names the m ≠ 0
     modes kept (instead of every one to ``asym_order``), ``held_magnitude`` holds some at given values
-    ({Noll: value}, `ZernikePupil`), and ``hold`` holds any of this pupil's own parameters ({"pupil.centre_g":
-    0.4, "pupil.edge_rho": 0.993}), which are then neither learnt nor counted."""
+    ({Noll: value}, `ZernikePupil`), ``held_phase`` the phase modes the same way, and ``hold`` holds any of
+    this pupil's own parameters ({"pupil.centre_g": 0.4, "pupil.edge_rho": 0.993}), which are then neither
+    learnt nor counted."""
 
     def __init__(self, grid, n_max: int, centre=(4,), edge: str = "logistic", quartic: bool = False,
                  asymmetric: bool = False, saf: bool = False, saf_step: bool = False, saf_sd: bool = False,
                  ring: str = "height", asym_order: int | None = None, steps: bool = False,
                  signed: bool = False, asym_modes=None, held_magnitude: dict | None = None,
-                 hold: dict | None = None, bead_nm: float | None = None):
+                 hold: dict | None = None, bead_nm: float | None = None, held_phase: dict | None = None):
         every = zernike_modes(n_max, exclude=("piston",))
         self.mono = centre in ("mono", "cos", "steps")
         self.cos = centre == "cos"
@@ -144,7 +145,7 @@ class EdgePupil(uipsf.ZernikePupil):
         top = n_max if asym_order is None else asym_order
         modes = [j for j in every if (asymmetric and noll_to_nm(j)[1] != 0 and noll_to_nm(j)[0] <= top
                                       and (asym_modes is None or j in asym_modes)) or j in keep]
-        super().__init__(grid, n_max=n_max, magnitude_modes=modes, held_magnitude=held_magnitude)
+        super().__init__(grid, n_max=n_max, magnitude_modes=modes, held_magnitude=held_magnitude, held_phase=held_phase)
         self.hold = dict(hold or {})
         self.bead_nm = BEAD_NM if bead_nm is None else float(bead_nm)
         self.edge, self.quartic, self.saf, self.saf_step, self.saf_sd = edge, quartic, saf, saf_step, saf_sd
