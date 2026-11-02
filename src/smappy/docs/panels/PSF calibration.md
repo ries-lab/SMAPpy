@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, by one of three methods -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 from bead z-stacks, or that model learnt in situ from the blinking molecules of a measurement -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or, in the 4Pi mode, a 4Pi model for Spline 4Pi from 4Pi bead scans, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings]
 ---
 
 ## What it does
@@ -514,10 +514,22 @@ kept with the microscope (*Add to microscope...*), and learns the rest: the
 phase up to the order, the blur, the focus.  From a *minimal* bead model the
 magnitude is its γ; from a Zernike one, its rotationally symmetric modes (the
 others are never learnt in situ: there they took over the astigmatism from the
-phase).  The beads' SAF damping is never taken over: it is the beads'.  With
-*hold* on *nothing*, or when there is neither a start model nor a kept pupil,
-γ is learnt, and the focus is then pinned (*focus fit*), since the two cannot
-both be learnt.
+phase).  The beads' SAF damping is never taken over: it is the beads'.
+
+**γ belongs to the microscope.**  γ is how the objective passes light at
+steep angles: a property of the objective -- perhaps a little of the colour --
+and of nothing else, not of the sample or the 3D lens.  So without *start
+from* in situ takes it from the microscope's entry: a *gamma* typed there (one
+value, or one per emission filter), or else the γ of a minimal pupil kept with
+the microscope (*Add to microscope...*), under any state of the 3D lens, the
+one nearest in colour, with the NA it learnt if *learn NA* was on.  Only when
+the microscope has none is a nominal γ (0.36, from M5's beads) held, and the
+window warns: it matters.  On M2's January clathrin movie the beads' γ, 0.08,
+gave in situ the beads' astigmatism, and 0.36 gave a quarter of a radian more
+(and fitted the molecules a little better); on another M2 movie 0.36 cost 2
+nats per molecule.  With *hold* on *nothing*, γ is learnt from the molecules,
+and the focus is then pinned (*focus fit*), since the two cannot both be
+learnt.
 
 **One model, handed on.**  Every method builds its model from the same
 choices, the *PSF model* section (*Zernike order*, *pupil magnitude*, *blur*,
@@ -692,12 +704,14 @@ would be fewer numbers to learn; that is to be revisited.
 Whether the extra blur is learnt or held at *blur σ*.  *free* learns it
 along x and y apart, *round* one value for both: the default everywhere, in
 situ too, since a free blur takes up astigmatism the pupil should hold.
-*free* stays as an option for in situ: on dSTORM data of clathrin the
-molecules wanted a blur 10 nm stronger along one axis than the other, which
-their beads did not show, and a round blur made up for it with an
-astigmatism 0.2 rad too strong.  Which in situ should use is still open.  Do
-not take the beads' blur over: there the molecules wanted 60 nm, the beads
-76 nm.
+*free* stays as an option.  In situ was measured on both (November 2026):
+on two M2 movies and Zenodo's tubulin a round blur found the same
+astigmatism as a free one, within 0.05 rad from either start (on M2 as
+close to the beads'), and fitted the held-out molecules as well; on simulated
+molecules whose blur is 50 × 65 nm a round one cost 0.01 rad of astigmatism.
+The 0.2 rad once seen with a round blur came from regions of 15 pixels, since
+replaced by 25.  Do not take the beads' blur over: on M2 the molecules wanted
+about 50 nm, the beads 67 nm.
 
 ### blur σ
 The blur's start, or its value when held: with *pixel blur* on, the blur
@@ -885,7 +899,7 @@ from the coverslip's focus.  A rough value is enough: the rounds learn it.
 ### hold
 *the start's*: the symmetric magnitude and the phase above the *Zernike
 order* held from *start from*, or else from the microscope's kept pupil (the
-default; see *What is held*).  *every aberration*: the whole pupil of
+default; see *What is held*), and without either the microscope's γ.  *every aberration*: the whole pupil of
 *start from* (or the kept one) held, every mode of phase and magnitude, and
 only the focus and the blur learnt, with no twin test -- the beads' pupil
 taken as the objective's, for a sample whose depth is the question (Spline

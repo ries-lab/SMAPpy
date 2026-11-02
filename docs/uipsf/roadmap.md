@@ -127,8 +127,16 @@ when a milestone lands or an item moves.
    backgrounds (haze rejection or a planar background).  Next: a sloped background,
    the symmetric bead magnitude and the order choice in the PSF calibration window.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
-   and simulations.  Open, optimised once it runs: what separates depth, n_med and spherical
-   aberration.
+   and simulations.  **On the minimal model** (November 2026, architecture.md, "In situ on the minimal model"):
+   γ held from the microscope (`microscope_db.gamma_of`; a nominal 0.36 only as a warned last resort), no SAF
+   damping, order 6 with the beads' modes above held.  σ stays round: at 25 px both M2 pairs land within
+   0.03–0.05 rad of their beads' astigmatism from either start, round or free; free gains nothing on M2 or
+   tubulin, and on an anisotropic simulated truth round costs 0.01 rad.  Depth, n_med and spherical: with the
+   coverslip's edge the focus is found to 4–6 nm whether γ is held or learnt; a wrong index goes into σ, Noll 11
+   and the z scale with γ held, partly into γ when it is learnt.  The twin test and the edge work on the minimal
+   pupil; Spline 3D's *focus in situ* is stable to 12 nm from three starts.  Open: γ decides January's astigmatism
+   (its beads' 0.08 gives theirs, the 0.36 its molecules learn gives 0.25 rad more and fits them better, the dual
+   channel prefers its beads' γ by 2 nats per molecule) -- which γ M2's objective has; the dual channel's focus.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 
