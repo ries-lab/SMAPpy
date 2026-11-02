@@ -411,33 +411,42 @@ def test_a_magnitude_both_objectives_share_is_one_parameter_and_its_jacobian_sum
         assert float(((a - b).abs() / scale).max()) < 2e-3
 
 
-def _minimal_model(grid, same_magnitude=True, **kw):
+def _minimal_model(grid, same_magnitude=True, learn_na=False, **kw):
     """A 4Pi model of two minimal pupils (`model.build.make_pupil`), on the grid a minimal pupil needs."""
     from types import SimpleNamespace
 
     from uipsf.model import make_pupil, pupil_grid
-    spec = SimpleNamespace(order=4, magnitude="minimal", saf_damping=True)
+    spec = SimpleNamespace(order=4, magnitude="minimal", saf_damping=True, learn_na=learn_na)
     g = pupil_grid(grid.optics, spec, size=64, device="cpu")
     pupils = [make_pupil(grid.optics, spec, grid=g) for _ in range(2)]
     return FourPiModel(g, (R, R), n_max=4, pupils=pupils, same_magnitude=same_magnitude, **kw)
 
 
-@pytest.mark.parametrize("kind, same", [("vector", True), ("vector", False), ("scalar", True)])
-def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same):
-    """Minimal pupils in a 4Pi model: one γ for both objectives under ``same_magnitude`` (`MAGNITUDE`), each its
-    own otherwise; no ring, the sample being index-matched; the solver's linearised columns -- γ's the sum over
-    both arms when shared -- equal the JVPs', with the pixel's blur under the learnt one."""
+@pytest.mark.parametrize("kind, same, na", [("vector", True, False), ("vector", False, False),
+                                             ("scalar", True, False), ("vector", True, True),
+                                             ("vector", False, True)])
+def test_minimal_pupils_share_one_gamma_and_their_linearised_jacobian_is_the_jvps(beads, kind, same, na):
+    """Minimal pupils in a 4Pi model: one γ (and a learnt NA) for both objectives under ``same_magnitude``
+    (`MAGNITUDE`), each its own otherwise; no ring, the sample being index-matched; the solver's linearised
+    columns -- γ's the sum over both arms when shared -- equal the JVPs', with the pixel's blur under the learnt
+    one."""
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve.problem import Problem
     _, batch, truth = beads
-    model = _minimal_model(beads[0].grid, same_magnitude=same, kind=kind, pixel_blur=True, round_sigma=True)
+    model = _minimal_model(beads[0].grid, same_magnitude=same, learn_na=na, kind=kind, pixel_blur=True,
+                           round_sigma=True)
     start = {"xyz": truth["emitter.xyz"], "photons": truth["emitter.photons"],
              "background": truth["emitter.background"]}
     specs = model.specs(batch, start)
     names = {s.name for s in specs}
     assert "pupil.gamma" in names and ("lo.pupil.gamma" in names) != same
     assert not any("ring_h" in n for n in names)
+    assert ("pupil.na" in names) == na and ("lo.pupil.na" in names) == (na and not same)
     values = {k: v for k, v in truth.items() if "magnitude" not in k}
+    if na:
+        values["pupil.na"] = torch.tensor(0.97 * model.pupils[0].na)
+        if not same:
+            values["lo.pupil.na"] = torch.tensor(0.95 * model.pupils[0].na)
     values["psf.sigma"] = torch.tensor([30.0])
     values["pupil.gamma"] = torch.tensor(0.3)
     if not same:

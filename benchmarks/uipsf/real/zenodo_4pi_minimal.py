@@ -40,44 +40,9 @@ VARIANTS = {
     "minimal": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True),
     "minimal-each": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=False),
     "symmetric-shared": dict(magnitude="symmetric", blur_nm=20.0, pixel_blur=True, same=True),
-    # the minimal pupil with its aperture learnt (`EffectiveNA`), one for both objectives
+    # the minimal pupil with its aperture learnt (*learn NA*, `MinimalPupil.learn_na`), one for both objectives
     "minimal-na": dict(magnitude="minimal", blur_nm=20.0, pixel_blur=True, same=True, learn_na=True),
 }
-
-
-def effective_na_pupil():
-    """`MinimalPupil` with its aperture learnt: ``pupil.na_ratio``, the effective NA over the nominal one, in the
-    cutoff's place; with *same magnitude* one for both objectives.  A prototype for the question it answers
-    (docs/4pi.md §23), patched into the builder for the run."""
-    import torch
-
-    from uipsf.model import fourpi as fourpi_model
-    from uipsf.model.pupil import MinimalPupil
-    from uipsf.params import Bounded, ParamSpec
-
-    class EffectiveNA(MinimalPupil):
-        def specs(self):
-            return super().specs() + [ParamSpec("pupil.na_ratio", (), init=0.98, transform=Bounded(0.8, 1.0))]
-
-        def symmetric(self, p, cos_imm=None, kappa=None, cutoff=None):
-            if cutoff is None and "pupil.na_ratio" in p:
-                rho = self.grid.rho.real if self.grid.rho.is_complex() else self.grid.rho
-                width = max(0.01, 1.0 / self.grid.size)
-                cutoff = torch.sigmoid((p["pupil.na_ratio"][..., None, None] * self.na / self.grid_na - rho) / width)
-            return super().symmetric(p, cos_imm, kappa, cutoff)
-
-        def truncated(self, n_max):
-            out = super().truncated(n_max)
-            out.__class__ = EffectiveNA
-            return out
-
-        def without_ring(self):
-            out = super().without_ring()
-            out.__class__ = EffectiveNA
-            return out
-
-    fourpi_model.MAGNITUDE = fourpi_model.MAGNITUDE + ("pupil.na_ratio",)
-    return EffectiveNA
 
 
 def v1_beads():
@@ -147,12 +112,8 @@ def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_ra
 
     from uipsf.workflows.fourpi import calibration
     choice = VARIANTS[name]
-    import uipsf.model.build as build
-    from uipsf.model.pupil import MinimalPupil
-    build.MinimalPupil = effective_na_pupil() if choice.get("learn_na") else MinimalPupil
     spec = replace(FourPiBeadSettings().psf, magnitude=choice["magnitude"], blur_nm=choice["blur_nm"],
-                   pixel_blur=choice["pixel_blur"])
-    choice = {k: v for k, v in choice.items() if k != "learn_na"}
+                   pixel_blur=choice["pixel_blur"], learn_na=choice.get("learn_na", False))
     t = time.time()
     fit = learn(beads, NA=na, bead_radius_nm=bead_radius_nm, wavelength_nm=600, n_imm=1.406, pixel_size_nm=129,
                 steps_rad=(2.0, 0.0, -2.0), spec=spec, device=device, same_magnitude=choice["same"],
@@ -169,7 +130,7 @@ def run(name: str, beads, data, device, out_dir: Path, na: float = 1.35, bead_ra
     row = {"variant": name, **choice, "NA": na, "bead_radius_nm": bead_radius_nm,
            "objective": float(fit.result.objective), "shared_parameters": n_shared,
            "iterations": len(fit.result.history), "stop": fit.result.stop_reason, "seconds": round(seconds, 1),
-           "na_ratio": pick("pupil.na_ratio"), "gamma": pick("pupil.gamma"), "lo_gamma": pick("lo.pupil.gamma"),
+           "learnt_na": pick("pupil.na"), "gamma": pick("pupil.gamma"), "lo_gamma": pick("lo.pupil.gamma"),
            "gamma_std": std["pupil.gamma"].tolist() if "pupil.gamma" in std else None,
            "magnitude": pick("pupil.magnitude"), "lo_magnitude": pick("lo.pupil.magnitude"),
            "sigma_nm": pick("psf.sigma"), "sigma_std": std["psf.sigma"].tolist(),

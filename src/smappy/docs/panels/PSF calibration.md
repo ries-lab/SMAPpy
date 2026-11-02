@@ -711,6 +711,18 @@ learnt before November 2026 did; their *blur σ* was larger by about the
 pixel's 30 nm in quadrature.  A *start from* model of the other kind is
 converted, the image's blur kept.
 
+### learn NA
+Off by default, for *minimal* only: the aperture then cuts at the NA under
+*microscope*.  On, the NA is learnt -- an effective NA, between 0.8 of the
+typed one and 5 % above it -- and saved with the model; an in situ model that
+holds the beads' γ holds their NA with it.  On uiPSF's 4Pi beads it came out
+at 1.31 behind objectives of 1.35, and M5's beads wanted 1.40 behind 1.43.
+Why an objective's aperture should be that much smaller is not understood
+yet -- a sample of lower index than assumed would cut the light at its own
+index too -- so typing the effective NA, or learning it here, are both
+offered; the rotationally symmetric Zernikes (*symmetric Zernike*) take an
+edge inside the aperture up by themselves.
+
 ### drift
 *linear per stack* by default, two numbers per stack; *free per slice* two per
 slice, kept small (5 nm) where the data say nothing; *none* for stacks without

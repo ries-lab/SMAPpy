@@ -115,8 +115,9 @@ class VectorPSF:
         """The PSF's hand-over description: the pupil's (`ZernikePupil.describe`) with the blur, ``sigma_nm``
         (x, y), and whether it is beyond the pixel's own (``pixel_blur``), and the optics it was learnt with."""
         o = self.grid.optics
-        out = dict(self.pupil.describe(p), wavelength_nm=float(o.wavelength_nm),
-                   NA=float(getattr(self.pupil, "na", o.NA)), n_immersion=float(o.n_imm))
+        na = self.pupil.aperture(p) if hasattr(self.pupil, "aperture") else getattr(self.pupil, "na", o.NA)
+        out = dict(self.pupil.describe(p), wavelength_nm=float(o.wavelength_nm), NA=float(na),
+                   n_immersion=float(o.n_imm))
         if "psf.sigma" in p:
             out["sigma_nm"] = [round(float(v), 2) for v in self.blur(p).detach().cpu().reshape(-1)]
             out["pixel_blur"] = self.pixel_blur

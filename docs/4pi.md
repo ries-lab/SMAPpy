@@ -1925,11 +1925,18 @@ the stage, and the coherence is 0.76-0.82 in every row.
   (5 800 nats), their coefficients shrinking to a third: the nominal aperture was wrong for both models.
 - **The effective NA is 0.97-0.98 of the nominal one**, as on one objective's beads (1.40 against 1.43,
   `docs/uipsf/architecture.md`, "The bead's physics with an effective NA").  A parabola through 1.31-1.33 puts
-  it at 1.318; learnt (a prototype in the benchmark, `pupil.na_ratio` in the cutoff's place, one for both
-  objectives) it came out at 1.311.  Neighbouring fixed apertures differ by ~2 000 nats where a parabola would
+  it at 1.318; learnt (*learn NA*, `MinimalPupil.learn_na`, one for both objectives) it came out at 1.311.  Neighbouring fixed apertures differ by ~2 000 nats where a parabola would
   have them nearly equal, so the solver's stopping point is worth ~1-2 000 nats on these beads.
 - **Phase z does not care**: 2.20-2.23 nm rms everywhere (3.3× its CRLB: the beads' own motion and the stage),
   the envelope's z 6.3-7.3 nm (2.4-2.8×).
 
-Open: whether the effective NA is learnt (the minimal pupil's aperture a parameter, for one objective too) or
-typed under *microscope*; the user's decision (the question was put on 2026-11-02).
+**Decided (the user, 2026-11-02)**: the nominal NA stays the default and the effective one is typed under
+*microscope* for now; *learn NA* (`PSFModelSettings.learn_na`, `pupil.na` between 0.8 and 1.05 of the typed NA)
+is offered beside it, and the symmetric Zernikes remain a choice of *pupil magnitude*.  A drop to 0.97 of the
+NA is not what an objective should do, so the cause is open.  The next suspect is the buffer's index: the 4Pi
+model takes the sample as index-matched (`fourpi_beads.learn` sets n_med = n_imm), but the user says it is not
+always so -- the immersion's index is known (the oil is bought), the buffer's can be as low as water's, and is
+measured only when it is matched.  A buffer of lower index cuts the light of beads far from the glass at n_med,
+which would look like an aperture at ~1.31-1.33 (water 1.33).  Learning n_med
+needs the medium's maps (`PupilGrid.kz_med`, `cos_med`, the Fresnel factors, the dipole fields) as functions of
+a parameter, and would show itself in the fringe period too (§14: the model's 265 nm against the beads' 251 nm).

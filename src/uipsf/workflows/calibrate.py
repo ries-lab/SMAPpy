@@ -136,7 +136,7 @@ def start_values(model: ForwardModel, previous) -> dict:
     """Shared start values for ``model`` from ``previous`` (a `LearnedPSF` or a `Calibration`).
 
     Zernike coefficients go to the same Noll modes, zero where the previous model had none; the minimal
-    pupil's γ and h where both have them; the blur, the channel transforms, shares and offsets are taken when
+    pupil's γ, h and NA where both have them; the blur, the channel transforms, shares and offsets are taken when
     the model fits them, the blur converted where one model has the pixel's under it and the other not (the
     image's blur kept); anything else (a fixed blur, the stage's terms) keeps the model's own start."""
     shared = previous.shared() if callable(getattr(previous, "shared", None)) else previous.shared
@@ -160,7 +160,7 @@ def start_values(model: ForwardModel, previous) -> dict:
             out[name] = value
         if isinstance(new.psf.pupil, MinimalPupil) and isinstance(old.psf.pupil, MinimalPupil):
             learnt = {s.name for s in new.psf.pupil.specs()}          # not a held γ, nor h without a ring
-            for n in ("pupil.gamma", "pupil.ring_h"):
+            for n in ("pupil.gamma", "pupil.ring_h", "pupil.na"):
                 if pre + n in shared and n in learnt:
                     out[pre + n] = shared[pre + n]
         if new.psf.fit_sigma and pre + "psf.sigma" in shared:

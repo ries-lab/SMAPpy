@@ -2269,7 +2269,9 @@ Zenodo 4Pi beads it is 9 700 nats behind the symmetric Zernikes at the nominal N
 the aperture at 1.32, the effective NA 0.976 of the nominal one, as one objective's beads found (1.40 against
 1.43); one γ costs nothing against one per objective (0.400 / 0.405).  `FourPiModel` had ignored
 ``pixel_blur`` since the builder came in (it blurred by `blur(p)`); it now blurs by `image_sigma(p)` as
-`VectorPSF` does.
+`VectorPSF` does.  The aperture can be learnt (`MinimalPupil(learn_na=True)`, *learn NA*; `pupil.na`, shared
+under *same magnitude* as γ is, described as ``na`` and held with γ by `held_from`), but the default is the typed
+NA: why the aperture is that small is open (§23 there).
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

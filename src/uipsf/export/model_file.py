@@ -95,7 +95,7 @@ def _describe_channel(ch: Channel) -> dict:
     psf, pupil = ch.psf, ch.psf.pupil
     if isinstance(pupil, MinimalPupil):
         pup = dict(kind="minimal", phase_modes=list(pupil.phase_modes), na=pupil.na, saf_damping=pupil.saf_damping,
-                   held_gamma=pupil.held_gamma, held_ring_h=pupil.held_ring_h)
+                   held_gamma=pupil.held_gamma, held_ring_h=pupil.held_ring_h, learn_na=pupil.learn_na)
         if pupil.held_phase:
             pup["held_phase"] = {str(j): v for j, v in pupil.held_phase.items()}
     elif isinstance(pupil, ZernikePupil):
@@ -152,7 +152,7 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     if pup["kind"] == "minimal":
         pupil = MinimalPupil(grid, phase_modes=pup["phase_modes"], na=pup["na"], held_phase=pup.get("held_phase"),
                              saf_damping=pup["saf_damping"], held_gamma=pup.get("held_gamma"),
-                             held_ring_h=pup.get("held_ring_h"))
+                             held_ring_h=pup.get("held_ring_h"), learn_na=pup.get("learn_na", False))
     elif pup["kind"] == "zernike":
         pupil = ZernikePupil(grid, phase_modes=pup["phase_modes"], magnitude_modes=pup["magnitude_modes"],
                              high_na=pup["high_na"], held_phase=pup.get("held_phase"),

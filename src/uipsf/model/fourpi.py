@@ -82,7 +82,7 @@ from .psf import VectorPSF
 LOWER = "lo."
 #: a pupil's magnitude parameters, one set for both objectives with ``same_magnitude``: a Zernike pupil's modes,
 #: a minimal pupil's γ (the user's decision, November 2026: one γ for twin objectives) and its ring's h
-MAGNITUDE = ("pupil.magnitude", "pupil.gamma", "pupil.ring_h")
+MAGNITUDE = ("pupil.magnitude", "pupil.gamma", "pupil.ring_h", "pupil.na")
 
 
 def lower_view(p: dict) -> dict:
@@ -586,7 +586,7 @@ def swapped(model: FourPiModel, shared: dict) -> dict:
         out[f"pupil.{which}"] = sign * parity * b
         if f"{LOWER}pupil.{which}" in shared:
             out[f"{LOWER}pupil.{which}"] = sign * parity * a
-    for name in ("pupil.gamma", "pupil.ring_h"):                            # minimal pupils' own numbers
+    for name in ("pupil.gamma", "pupil.ring_h", "pupil.na"):                # minimal pupils' own numbers
         if LOWER + name in shared:
             out[name], out[LOWER + name] = shared[LOWER + name], shared[name]
     out["fourpi.offset"] = -torch.as_tensor(shared["fourpi.offset"])

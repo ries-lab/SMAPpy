@@ -129,6 +129,42 @@ def test_a_start_from_a_model_without_the_pixel_blur_keeps_the_images_blur():
     assert torch.allclose(sigma.double(), torch.sqrt(40.0 ** 2 - pixel ** 2).mean().reshape(1), atol=1e-6)
 
 
+def test_a_learnt_na_cuts_where_a_held_one_would_and_travels_with_the_model():
+    """``learn_na``: the aperture at ``pupil.na`` is the held aperture of a pupil built at that NA; the model file
+    keeps the choice, the description the NA, and a model holding γ (in situ) holds the NA with it."""
+    from uipsf.model import held_from, make_pupil
+    learnt = bead_model(MATCHED, BeadSettings(psf=PSFModelSettings(zernike_order=4, learn_na=True)), ROI,
+                        z_max_nm=1000, device="cpu")
+    pupil = learnt.psf.pupil
+    spec = {s.name: s for s in pupil.specs()}["pupil.na"]
+    assert pupil.learn_na and float(spec.init) == pytest.approx(0.98 * 1.5)
+    held = make_pupil(replace(MATCHED, NA=1.45), PSFModelSettings(zernike_order=4), grid=pupil.grid)
+    p = {"pupil.phase": torch.zeros(len(pupil.phase_modes)), "pupil.magnitude": torch.zeros(0),
+         "pupil.gamma": torch.tensor(0.3), "pupil.na": torch.tensor(1.45)}
+    assert torch.allclose(pupil(p)[0], held(p)[0], atol=1e-6)
+    assert pupil.values(p)["na"] == pytest.approx(1.45) and "pupil.na" in {s.name for s in pupil.truncated(2).specs()}
+    assert build(describe(learnt), device="cpu").psf.pupil.learn_na
+    description = learnt.psf.describe(p | {"psf.sigma": torch.tensor([20.0])})
+    assert description["na"] == pytest.approx(1.45) and description["NA"] == pytest.approx(1.45)
+    insitu = make_pupil(MATCHED, PSFModelSettings(zernike_order=4, learn_na=True),
+                        held_from(description, 4, 600.0))
+    assert not insitu.learn_na and insitu.na == pytest.approx(1.45) and insitu.held_gamma == pytest.approx(0.3)
+    nominal = bead_model(MATCHED, BeadSettings(psf=PSFModelSettings(zernike_order=4)), ROI, z_max_nm=1000,
+                         device="cpu")
+    assert "na" not in nominal.psf.describe(p | {"psf.sigma": torch.tensor([20.0])})
+
+
+@pytest.mark.slow
+def test_a_calibration_learns_an_effective_na_below_the_objectives():
+    """Beads drawn with the aperture at 1.42 behind a typed 1.5 give the 1.42 back with *learn NA*."""
+    settings = BeadSettings(psf=PSFModelSettings(zernike_order=4, learn_na=True))
+    model = bead_model(MATCHED, settings, ROI, z_max_nm=1000, device="cpu")
+    beads = simulated(model, extra={"pupil.gamma": torch.tensor(GAMMA), "pupil.na": torch.tensor(1.42)})
+    shared = calibrate_beads(beads, MATCHED, settings, device="cpu").shared()
+    assert float(shared["pupil.na"]) == pytest.approx(1.42, abs=0.01)
+    assert float(shared["pupil.gamma"]) == pytest.approx(GAMMA, abs=0.05)
+
+
 def test_the_minimal_pupil_survives_the_first_stages_truncation():
     model = bead_model(OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=6)), ROI, z_max_nm=1000, device="cpu")
     low = model.psf.pupil.truncated(4)

@@ -121,8 +121,9 @@ def learn(beads: FourPiBeads, NA: float, wavelength_nm: float, n_imm: float, pix
     ``steps_rad`` the deformable mirrors' steps as set; which way round they act is found from the data.
     ``spec`` the PSF model's choices (`PSFModelSettings`, default the 4Pi form's: `FourPiBeadSettings.psf`,
     the minimal model), both pupils built by uipsf's builder (`uipsf.model.build`) on one grid -- a minimal
-    pupil's reaching beyond the NA as one objective's does.  The sample is index-matched (n_med = n_imm), so
-    a minimal pupil has no supercritical ring.
+    pupil's reaching beyond the NA as one objective's does.  The sample is taken as index-matched (n_med =
+    n_imm), so a minimal pupil has no supercritical ring -- an assumption: a 4Pi buffer can be as low as
+    water's, and is measured only when matched (the user, 2026-11-02; docs/4pi.md §23).
     A free photon count per observation by default: on the example beads it took the mean deviance from
     1.16 to 1.06, the largest term found (docs/4pi.md §8).  ``kind`` "vector" (the default) follows each
     arm's field through the polarisation optics (``plates``, `uipsf.model.fourpi`; docs/4pi.md §17): it
@@ -220,7 +221,7 @@ class FourPiBeadSettings:
                                     help="the beads' size, taken out of the pupil model: its dyes, spread over "
                                          "its height, average the fringe; 0: point-like")
     # the minimal model, as one objective's (the user's, November 2026; docs/4pi.md §23): γ, σ round over the
-    # pixel's blur; the sample is index-matched, so there is no supercritical ring and no SAF damping to learn
+    # pixel's blur; the sample is taken as index-matched (`learn`), so no supercritical ring and no SAF damping
     psf: PSFModelSettings = param(default_factory=PSFModelSettings, label="PSF model")
     vectorial: bool = param(True, label="vectorial", advanced=True,
                             help="the pupil model follows each arm's dipole fields through the quarter-wave "
@@ -245,12 +246,13 @@ class FourPiBeadSettings:
 def fourpi_shown(settings: FourPiBeadSettings) -> dict:
     """Which of the 4Pi form's fields it shows (`FormState.shown`, dotted for the PSF part): the typed corners
     only while the channels are typed; the PSF model's as the bead form's (`pupil.model_shown`), the sample
-    index-matched, so never the SAF damping; the *magnitude modes* only for a Zernike magnitude, whose modes
-    they are."""
+    taken as index-matched (`learn`), so never the SAF damping; the *magnitude modes* only for a Zernike
+    magnitude, whose modes they are."""
     from .pupil import model_shown
     typed = settings.layout == "typed"
     shown = {n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")}
-    shown["psf.saf_damping"] = model_shown("beads", settings.psf.magnitude, ring=False)["psf.saf_damping"]
+    beads = model_shown("beads", settings.psf.magnitude, ring=False)
+    shown["psf.saf_damping"], shown["psf.learn_na"] = beads["psf.saf_damping"], beads["psf.learn_na"]
     shown["magnitude_modes"] = settings.psf.magnitude in ("free", "symmetric")
     return shown
 

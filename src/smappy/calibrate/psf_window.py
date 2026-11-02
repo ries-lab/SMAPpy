@@ -559,7 +559,8 @@ class PSFCalibrationWindow(QMainWindow):
     def _show_model(self) -> None:
         """The model's fields the method reads, and only those (`pupil.model_shown`): in situ without the
         beads' own, the SAF damping only for a minimal magnitude over a sample below the NA, the tilt only
-        where the coverslip is a layer of its own; 4Pi's sample is index-matched, so it has no SAF damping."""
+        where the coverslip is a layer of its own; 4Pi's sample is taken as index-matched, so it has no SAF
+        damping."""
         from .pupil import model_shown
         if not hasattr(self, "method") or not hasattr(self, "fourpi_form"):     # still being built
             return
