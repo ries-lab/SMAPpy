@@ -30,7 +30,7 @@ from .psf import VectorPSF
 from .pupil import MinimalPupil, ZernikePupil, minimal_grid_optics
 
 #: γ held in situ as a last resort, when neither a start model nor the microscope gives one (SMAPpy's
-#: `microscope_db.gamma_of`, which warns then): the middle of what M5's 100 nm beads learnt, 0.32–0.41 over two
+#: `microscope_db.gamma_of`; the run warns): the middle of what M5's 100 nm beads learnt, 0.32–0.41 over two
 #: colours, two media and with and without the 3D lens.  Not a property of objectives in general -- M2's beads
 #: learnt 0.08 and 0.16, and on M2's January movie 0.36 moved the learnt astigmatism by 0.24 rad
 #: (`docs/uipsf/architecture.md`, "In situ on the minimal model").

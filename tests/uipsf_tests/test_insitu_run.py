@@ -367,9 +367,10 @@ def test_in_situ_from_a_minimal_bead_model_holds_its_gamma(movie_file, monkeypat
 
 
 @pytest.mark.slow
-def test_without_a_bead_model_in_situ_holds_the_microscope_s_gamma_else_a_nominal_one_with_a_warning(movie_file, monkeypatch):
-    # no start model and nothing kept with the microscope: γ is the objective's, so a nominal one is held
-    # rather than learnt (where it traded with the focus, which then had to be pinned)
+def test_without_a_bead_model_in_situ_holds_the_microscope_s_gamma_else_a_nominal_one_with_a_warning(
+        movie_file, monkeypatch):
+    # γ is the objective's: without a start model the microscope's entry gives it, and with nothing there a
+    # nominal one is held, with a warning, rather than learnt (where it traded with the focus)
     import smappy.microscope_db as db
     from smappy.calibrate.insitu_run import run_insitu
     from smappy.calibrate.pupil import RunSettings
