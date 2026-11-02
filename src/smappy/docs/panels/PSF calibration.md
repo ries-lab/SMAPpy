@@ -166,9 +166,11 @@ The model is vectorial and high-NA: the pupil field carries the dipole
 emission's polarisation through the immersion, coverslip and sample media
 given under *microscope*, and the image is taken at each camera pixel's
 centre.  The pixel's width blurs the image too, by its size / √12 (30 nm for
-105 nm pixels); with *pixel blur* (the default) the model adds it under the
-learnt blur, so that *blur σ* is what blurs the image beyond the pixel.
-Without it the learnt blur takes the pixel's width up as well.
+105 nm pixels), which the model always adds under the learnt blur, so that
+*blur σ* is what blurs the image beyond the pixel.  Every camera integrates
+over its pixels, so there is no setting to leave it out; a script that
+reproduces a model learnt before November 2026, without it, can
+(`PSFModelSettings(pixel_blur=False)`).
 **The coverslip.**  Between the sample and the immersion lies the coverslip,
 with its own refractive index (*coverslip index*) and thickness (*coverslip
 thickness*).  The objective is corrected for one thickness, its design
@@ -235,9 +237,9 @@ follows the acquisition, not the objective.
 The magnitude can instead be 1 plus Zernike modes: all of them up to the
 order (*Zernike*), only the rotationally symmetric ones (*symmetric Zernike*:
 Noll 4, 11, 22, ...), or none, so that only the apodisation of the objective
-remains (*fixed*).  The blur is a Gaussian, one σ (*round*, the default) or
-σ for x and y (*free*), learnt, or held at *blur σ* (*fixed*); held at 0 with
-*pixel blur*, the image is blurred by the pixel alone.
+remains (*fixed*).  The blur beyond the pixel's is a Gaussian, one σ (*round*,
+the default) or σ for x and y (*free*), learnt, or held at *blur σ* (*fixed*);
+held at 0, the image is blurred by the pixel alone.
 
 **The stage's drift** (*drift*, under *more*): a lateral drift of the stage
 through each stack, *linear per stack* -- the beads of a stack shifted by a
@@ -532,8 +534,8 @@ and the focus is then pinned (*focus fit*), since the two cannot both be
 learnt.
 
 **One model, handed on.**  Every method builds its model from the same
-choices, the *PSF model* section (*Zernike order*, *pupil magnitude*, *blur*,
-*blur σ*, and under *more* *pixel blur* and *SAF damping*), and a learnt
+choices, the *PSF model* section (*Zernike order*, *pupil magnitude*, and
+under *more* *blur*, *blur σ* and *SAF damping*), and a learnt
 model hands itself on in one form: its kind, its phase in nanometres of
 wavefront, γ or the magnitude's Zernikes, and its blur.  That is what *Add to
 microscope...* keeps, what in situ holds and starts from, and what Spline 3D's
@@ -701,7 +703,8 @@ edge differently.  Should the two come out alike on real pairs, one shared γ
 would be fewer numbers to learn; that is to be revisited.
 
 ### blur
-Whether the extra blur is learnt or held at *blur σ*.  *free* learns it
+Under *more*.  Whether the blur beyond the pixel's is learnt or held at *blur
+σ*; the output page reports what it came to.  *free* learns it
 along x and y apart, *round* one value for both: the default everywhere, in
 situ too, since a free blur takes up astigmatism the pupil should hold.
 *free* stays as an option.  In situ was measured on both (November 2026):
@@ -714,8 +717,10 @@ replaced by 25.  Do not take the beads' blur over: on M2 the molecules wanted
 about 50 nm, the beads 67 nm.
 
 ### blur σ
-The blur's start, or its value when held: with *pixel blur* on, the blur
-beyond the pixel's own, so 0 holds the image at the pixel's blur.
+Under *more*.  The blur beyond the pixel's own: its start, or its value when
+held, so 0 holds the image at the pixel's blur.  A large learnt value is worth
+a look: on M2 it is about 67 nm, which the pupil alone cannot replace (with
+the blur held at 0 the in-focus core comes out 15 % too sharp).
 
 ### SAF damping
 On by default, for *minimal* only.  The supercritical-angle ring -- the light
@@ -727,12 +732,6 @@ coverslip.  The damping belongs to the beads, as their size does: the spline
 for single molecules is drawn without it, their supercritical light following
 the physics of their own depth, and in situ never learns it.  Shown only for
 the *minimal* magnitude over a sample whose index is below the NA.
-
-### pixel blur
-On by default.  Off, the learnt blur includes the pixel's width, as models
-learnt before November 2026 did; their *blur σ* was larger by about the
-pixel's 30 nm in quadrature.  A *start from* model of the other kind is
-converted, the image's blur kept.
 
 ### learn NA
 Off by default, for *minimal* only, in every method: the aperture then cuts
@@ -1091,7 +1090,7 @@ diagnostics*), explained on its page.  The pupil model's:
 
 - **Pupil and Zernikes**: above, the model's few numbers with their CRLBs, each
   where it was learnt -- the minimal pupil's γ and ring height h, the blur σ (beyond
-  the pixel's with *pixel blur*), the stage's drift (*linear per stack*: the rate
+  the pixel's), the stage's drift (*linear per stack*: the rate
   per stack, nm per µm; *free per slice*: its rms) and the coverslip's tilt; the
   summary line under the run says the same.  On the left the learnt phase and magnitude over the
   pupil, the phase in the *units* chosen above the page: nm of wavefront,
