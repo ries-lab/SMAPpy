@@ -288,7 +288,7 @@ beams, more trades:
 Often only one plane can be scanned.  A z stack is what breaks the **twin** in widefield beads
 (`conventions.md`): the pupil A(k) and its twin A*(−k) give the same intensity at height −z, so in the
 focal plane itself they are indistinguishable.  For a single plane at focus this predicts (scalar light,
-matched indices; to be confirmed numerically, the first test of S3):
+matched indices), and the measurements below confirm for detection PSFs:
 
 - **determined:** the odd Zernikes (m odd: tilt, coma, trefoil), which the twin leaves alone
   (c_j → −(−1)^m c_j); the magnitude of the even ones; ε; the beam's fill;
@@ -310,6 +310,42 @@ twin from the model:
 Vectorial light adds little: the twin also conjugates the polarisation (circular L ↔ R), which changes
 nothing for linear input and, for a vortex with circular light, flips both together.
 
+**Measured** (November 2026, `benchmarks/uipsf/synthetic/single_plane_twin.py`, results in
+`benchmarks/uipsf/results/single_plane_twin.jsonl`).  The detection PSF -- vectorial, unpolarised, NA 1.45 --
+with astigmatism (Noll 5, 6: 0.2, 0.3 rad), coma (7, 8), trefoil (9) and spherical (11: 0.12 rad), each mask
+0.05/0.03 of the pupil radius off; 10⁴ photons per bead and plane, 10 background per pixel.  The fits are 20
+beads in one plane at focus, the phase (order 4), the mask's centre and every bead's position, photons and
+background free, started once from the truth and once from the twin (even modes flipped, centre at −c, heights
+mirrored).  Δ is what the twin start's optimum is worse by, over the 20 beads:
+
+| mask | oil, matched: Δ, nats | where the twin start ends | water: Δ, nats |
+| --- | --- | --- | --- |
+| none | 0 | at the twin | 141 (stays at the twin) |
+| vortex | 0 | **back at the truth** | 0, back at the truth |
+| top-hat | 22 | at the twin, centre at −c | 494 (stays) |
+| half-moon | 0 | at the twin, centre at −c | 180 (stays) |
+| double helix | 0 | **back at the truth** | 0, back at the truth |
+| tetrapod (Zernike design) | 2341 | a poor local optimum | 1812 (poor local optimum) |
+
+- *The twin is exact in focus without a mask and with the twin-symmetric masks:* with matched indices the
+  top-hat and the half-moon end at the twin with the centre mirrored, Δ = 0–22 nats over 20 beads, about one
+  nat per bead or less: the data cannot choose.
+- *A vortex or a double helix breaks it outright:* started at the twin, the fit walks back to the truth -- the
+  even modes' signs and the centre's direction come back.  The tetrapod design breaks it too (the expected
+  images differ by ~470 nats per bead), but a fit started at the twin stops in a poor local optimum: a
+  second start is needed to find the truth, not more data.
+- *Index mismatch breaks it partly:* beads on the coverslip in water, through oil, prefer the truth by 7 nats
+  per bead without a mask (25 with the top-hat), but a fit started at the twin stays near it.  So the sign is
+  in the data but the optimiser does not find it alone: **fit from both starts and keep the better**, as in
+  situ's twin test does.
+- *With the even modes known, the centre's direction is determined* for the twin-symmetric masks too: the
+  centre mirrored alone costs 39 (half-moon) to 130 (top-hat) nats per bead in the expected images.
+- *Precision* (CRLB, the same 20 beads): one plane determines every mode to 3–6 mrad (11 for the double helix's
+  astigmatism) and the centre to 0.002–0.004 of the pupil radius when the aberrations are of the size above, about twice the CRLB of three
+  planes (−400, 0, +400 nm).  With the even modes five times weaker, one plane without a mask determines them
+  4× worse than three planes (8 against 2 mrad), as their first-order effect on a focused image vanishes at
+  zero; the vortex keeps them at 4 mrad.  So precision is not what a single plane lacks; it is the sign.
+
 **Ways to break it without moving the stage**, in order of preference:
 1. **Hold the even modes from a widefield calibration of the objective** (step 1 above).  The twin is
    then not in the model, and the single plane learns the mask's parameters, the odd modes and
@@ -322,8 +358,11 @@ nothing for linear input and, for a vortex with circular light, flips both toget
 3. **Two or three planes**, if the stage or piezo can take them at all: not a full stack, but enough to
    fix the signs.
 4. **Emitters at different heights in one plane** -- beads in a gel, a tilted coverslip -- each sampling
-   another defocus, as in situ does: the twin is then broken only by the index mismatch, weakly.  Last
-   resort.
+   another defocus, as in situ does: the twin is then broken only by the index mismatch, which on the
+   coverslip alone already gave 7 nats per bead (measured, above) but needs both starts.  Last resort.
+5. **A vortex scan of the same beam path** (or any mask that is not twin-symmetric) fixes the even modes'
+   signs for the other patterns that share the pupil: the measured vortex and double helix leave no
+   ambiguity in one plane.
 
 Otherwise the fit is reported with the even modes' signs as undetermined (the solver finds one of two
 equally good optima; both are written out, as the twin test does in situ), and spherical aberration is

@@ -118,6 +118,32 @@ def test_a_calibration_starts_its_mask_where_a_previous_model_put_it():
     assert torch.allclose(start["mask.centre"], torch.tensor([0.05, -0.02], dtype=start["mask.centre"].dtype))
 
 
+def _twin_divergence(kind):
+    """The Poisson KL divergence, nats per bead at 10⁴ photons, between the in-focus image of a pupil with even
+    and odd aberrations and a mask 0.05/0.03 off, and its twin's: the even modes flipped, the centre at −c."""
+    spec = None if kind == "none" else MaskSpec(kind=kind)
+    psf = psf_with(spec, roi=(21, 21))
+    modes = psf.pupil.phase_modes
+
+    def p(sign, centre):
+        phase = torch.zeros(len(modes), dtype=torch.float64)
+        for j, c in {5: 0.2, 6: 0.3, 7: 0.15, 8: -0.1, 11: 0.12}.items():
+            phase[modes.index(j)] = c * (sign if j in (5, 6, 11) else 1)
+        return physical(psf, **{"pupil.phase": phase}, **({} if spec is None else {"mask.centre": centre}))
+    mu, alt = (1e4 * image(psf, p(s, c)) + 10 for s, c in ((1, [0.05, 0.03]), (-1, [-0.05, -0.03])))
+    return float((mu * torch.log(mu / alt) - mu + alt).sum())
+
+
+@pytest.mark.parametrize("kind", ["none", "half-moon"])
+def test_in_focus_a_pupil_and_its_twin_look_alike_without_a_mask_or_behind_a_twin_symmetric_one(kind):
+    assert _twin_divergence(kind) < 0.05
+
+
+@pytest.mark.parametrize("kind", ["vortex", "double helix"])
+def test_a_vortex_or_a_double_helix_tells_a_pupil_from_its_twin_in_one_plane(kind):
+    assert _twin_divergence(kind) > 100
+
+
 @pytest.mark.slow
 def test_a_calibration_finds_a_decentred_vortex_and_the_aberrations_beside_it():
     """Beads imaged through a vortex in emission (the Vortex PSF), the plate 0.06 and −0.04 of the pupil radius
