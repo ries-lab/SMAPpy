@@ -457,6 +457,16 @@ Each one ends, as uipsf's do, in parameters recovered from simulated data to the
 | S6 | ISM: SPAD elements as channels on a lattice | a SPAD-array dataset (Vicidomini lab, BrightEyes) | S5 |
 | later | user masks as images | | S1 |
 
+**S1 paused (November 2026).**  The mask machinery is built and tested (`model/mask.py`, the model file,
+`start_from`, the twin study §7a), and fitted on real double-helix beads (§6), but it is not in the GUI.  The
+analytic Pavani design with Zernikes on top stops at 29 (Moerner) and 43 (DHPSFU) deviance per pixel: real
+plates are optimised designs, not the textbook mode sum, and DHPSFU's Zernikes run to ±210 rad at the rim,
+which points to a clipped aperture.  It waits for better data -- beads of a plate whose design is known, or a
+measured phase map -- and for the masks as images.  Open ends when it resumes: learnable mode weights of the
+design, NA free on DHPSFU, the vortex beads of Hulleman 2021 (4TU did not answer for six hours), the
+*phase mask* choice in the calibration window.  S2 does not wait for it: the masks are there for the
+excitation side.
+
 S1 is useful on its own and settles the mask machinery on data where z stacks are routine.  S3 is the first
 scanned PSF and the first publishable result: no modern maximum-likelihood retrieval of a MINFLUX or STED
 beam from bead scans exists (Kromann et al. 2012 used Gerchberg–Saxton on a point gold bead), and none that

@@ -182,7 +182,7 @@ Masks with phase jumps cannot be written as Zernikes, so they are a pupil compon
 phase is the mask's, placed on the pupil by a few fitted parameters, plus the Zernikes learnt on top of it as
 the system's aberrations (noted October 2026).  **Built in part (November 2026, `model/mask.py`, architecture.md
 "Phase masks in the pupil"):** analytic vortex, top-hat, half-moon, double helix and Zernike designs, their
-placement held and freed by name; next the settings form, real beads, images.  The same component serves detection (engineered PSFs for 3D)
+placement held and freed by name, fitted on real double-helix beads; paused there, out of the GUI, until better data and real plate designs (scanned-psfs.md, §9).  The same component serves detection (engineered PSFs for 3D)
 and excitation (the donuts of MINFLUX and STED, above).
 
 - **Shipped, pre-calculated:** the double helix, the 2D vortex (e^{iφ}, charge 1) and the 3D top-hat vortex
