@@ -922,6 +922,42 @@ class ROIProject:
                 return v[:, 0], v[:, 1]
         return xy[:, 0], xy[:, 1]
 
+    def view_region(self, roi, line: str = "") -> Optional[Region]:
+        """The ROI as the 2D view's own ROI (`Session.set_roi`), which the
+        3D view's slab follows: along its line ``line`` -- or the first of
+        the project's line names it has -- as a line ROI as wide as the ROI
+        reaches across it, else its shape, else (an ROI of an id) the
+        rectangle round what it is drawn as.
+
+        A line first because a line ROI is what the 3D window turns its box
+        and its view with: an ROI drawn round a structure with a line along
+        it is looked at along that line, as a profile of it is taken.
+        """
+        if roi.spatial:
+            region = self.region(roi)
+        else:
+            xs, ys = self.outline(roi)
+            if not len(xs):
+                return None
+            region = Region.rect(float(np.min(xs)), float(np.min(ys)),
+                                 float(np.max(xs)), float(np.max(ys)))
+        lines = dict(roi.lines or {})
+        if line not in lines:
+            line = next((n for n in list(self.line_names) + list(lines)
+                         if n in lines), "")
+        if not line:
+            return region
+        p0, p1 = (np.asarray(p, float) for p in lines[line])
+        d = p1 - p0
+        length = float(np.hypot(*d))
+        if length <= 0:
+            return region
+        xs, ys = region.outline()
+        across = (np.asarray(xs) - p0[0]) * -d[1] / length \
+            + (np.asarray(ys) - p0[1]) * d[0] / length
+        width = float(np.ptp(across)) if len(across) else 0.0
+        return Region.line(p0, p1, width if width > 0 else length)
+
     def rim_distance(self, roi, x: float, y: float) -> float:
         """How far a point is from what the ROI is drawn as: its outline, or
         its track's line -- which the ROI manager selects a track by."""

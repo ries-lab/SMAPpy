@@ -362,8 +362,9 @@ def test_the_regions_tab_shows_the_selected_rois_numbers_and_the_picture_goes_th
     view = RenderView(session)
     header = ROIHeader(session, view)
     header.open_manager()
-    assert not header.manager.follow_2d.isChecked()          # off by default
-    header.manager.follow_2d.setChecked(True)
+    link = header.manager.link_2d
+    assert link.currentData() == "off"                       # off by default
+    link.setCurrentIndex(link.findData("centre"))
     first, second = list(project.rois)
     header.manager.select(first)
     header.manager.select(second)
@@ -371,4 +372,38 @@ def test_the_regions_tab_shows_the_selected_rois_numbers_and_the_picture_goes_th
     assert header.results.horizontalHeaderItem(0).text() == "ROI 1"
     centre = view.view.viewRect().center()
     assert abs(centre.x()) < 1 and abs(centre.y()) < 1
+    header.manager.close()
+
+
+def test_an_roi_shown_in_the_2d_view_becomes_its_roi_along_its_line_on_its_own_file(app):
+    """*shows the ROI*: the 3D view's box follows the 2D view's ROI, so the
+    manager's ROI is put there -- a line ROI along its line, as wide as the
+    ROI -- and every layer is filtered to the ROI's file (the table's
+    0-based `filenumber`, not the list's 1-based count)."""
+    from smappy.gui.render_view import RenderView
+    from smappy.gui.roi_tab import ROIHeader
+    from smappy.io.formats import FileInfo
+    from smappy.view3d import Slab
+    session = Session()
+    session.add_file(table([(0, 0)]), FileInfo("a", "/a.h5", "smappy"))
+    session.add_file(table([(0, 0), (1000, 1000)], seed=1),
+                     FileInfo("b", "/b.h5", "smappy"), append=True)
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(200)
+    second = list(project.sources)[1]
+    added = project.add_roi(second, [1000, 1000])
+    roi_id = added.id
+    added.lines["direction"] = [[950.0, 1000.0], [1050.0, 1000.0]]
+    view = RenderView(session)
+    header = ROIHeader(session, view)
+    header.open_manager()
+    link = header.manager.link_2d
+    link.setCurrentIndex(link.findData("roi"))
+    header.manager.select(roi_id)
+    roi = session.roi
+    assert roi.kind == "line" and roi.width == pytest.approx(200.0)
+    assert np.allclose(Slab.from_region(roi, (0, 1)).center[:2], [1000, 1000])
+    assert session.slab.angle == pytest.approx(0.0)
+    assert all(layer.files == [1] for layer in session.layers if not layer.is_image)
     header.manager.close()

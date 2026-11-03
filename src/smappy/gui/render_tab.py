@@ -1439,6 +1439,11 @@ class RenderTab(QWidget):
             self._bind_layer(self.strip.current)
         elif what in ("roi", "roi-edited"):
             self.filter._update_count()
+        elif what == "layer" and self.filter.current_field() == "filenumber":
+            # the files a layer shows changed from elsewhere -- the ROI
+            # manager puts the layers on a selected ROI's file -- and the
+            # ticks here have to say so, or the next tick undoes it
+            self.filter._show_field()
         elif what == "append":
             self._appended += 1
             if self._appended % 5 == 1:      # the histogram need not follow every block
