@@ -8,7 +8,8 @@ dropped the pixel's blur).  Here they are made once:
 
 - **the spec** is SMAPpy's `PSFModelSettings` (`smappy.calibrate.pupil`, torch-free, the form's section) or
   anything with its attributes: ``order``, ``magnitude`` (minimal, free, symmetric, fixed), ``saf_damping``,
-  ``blur`` (free, round, fixed), ``blur_nm``, ``pixel_blur`` and ``learn_n_med`` (the sample's index learnt);
+  ``blur`` (free, round, fixed), ``blur_nm``, ``pixel_blur`` and ``learn_n_med`` (the sample's index learnt),
+  and optionally ``phase_mask``, a `MaskSpec` (`model.mask`; none without it);
 - `pupil_grid` owns the grid (and its margin), `make_pupil` the pupil, `make_psf` the PSF;
 - **the hand-over** between models is the description a learnt PSF gives of itself
   (`VectorPSF.describe`, plain data, kept with a microscope by SMAPpy): ``kind``, the phase in nm, γ (a
@@ -26,6 +27,7 @@ import torch
 
 from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
+from .mask import make_mask
 from .psf import VectorPSF
 from .pupil import MinimalPupil, ZernikePupil, minimal_grid_optics
 
@@ -85,21 +87,23 @@ def make_pupil(optics, spec, held: Held | None = None, *, grid: PupilGrid | None
     """The pupil ``spec`` describes for the objective ``optics`` (its NA the aperture), on ``grid`` or a new
     `pupil_grid`.  ``held`` holds phase modes and, by its kind, γ (and a learnt NA) or magnitude modes; a spec
     whose magnitude cannot hold them is refused, rather than the held part silently dropped.
-    ``magnitude_override`` replaces a Zernike magnitude's modes (4Pi's typed ones)."""
+    ``magnitude_override`` replaces a Zernike magnitude's modes (4Pi's typed ones).  The spec's ``phase_mask``,
+    if it has one, is placed on the pupil in units of the objective's NA (`model.mask`)."""
     held = held or Held()
     grid = grid if grid is not None else pupil_grid(optics, spec, z_max_nm, device=device, dtype=dtype)
     n_max = int(spec.order)
+    mask = make_mask(getattr(spec, "phase_mask", None), grid, aperture_na=optics.NA)
     if spec.magnitude == "minimal":
         if held.magnitude:
             raise ValueError("a minimal pupil cannot hold Zernike magnitude modes: hold a minimal model's γ")
         return MinimalPupil(grid, n_max=n_max, na=optics.NA if held.na is None else held.na,
                             held_phase=held.phase, saf_damping=spec.saf_damping, held_gamma=held.gamma,
-                            learn_na=bool(getattr(spec, "learn_na", False)) and held.na is None)
+                            learn_na=bool(getattr(spec, "learn_na", False)) and held.na is None, mask=mask)
     if held.gamma is not None:
         raise ValueError("a Zernike pupil cannot hold a minimal model's γ: choose the minimal magnitude")
     modes = magnitude_override if magnitude_override is not None else magnitude_modes(n_max, spec.magnitude)
     return ZernikePupil(grid, n_max=n_max, magnitude_modes=modes, held_phase=held.phase,
-                        held_magnitude=held.magnitude)
+                        held_magnitude=held.magnitude, mask=mask)
 
 
 def make_psf(optics, spec, roi_shape, *, held: Held | None = None, bead_radius_nm: float = 0.0,
@@ -142,7 +146,9 @@ def held_from(description: dict | None, order: int, wavelength_nm: float, every:
 
 def start_from(pupil, description: dict | None, wavelength_nm: float) -> dict:
     """Start values of ``pupil``'s learnt parameters from ``description``: every phase mode it learns from
-    the description's nm, γ where it learns one, the magnitude's Zernikes where both have them."""
+    the description's nm, γ where it learns one, the magnitude's Zernikes where both have them, and a phase
+    mask's placement where both have a mask of the same kind (a calibration with the mask in, started from one
+    that learnt where it sits)."""
     dtype = pupil.grid.rho.real.dtype
     out = {"pupil.phase": torch.zeros(len(pupil.phase_modes), dtype=dtype)}
     if not description:
@@ -159,4 +165,10 @@ def start_from(pupil, description: dict | None, wavelength_nm: float) -> dict:
     elif pupil.magnitude_modes and description.get("magnitude"):
         out["pupil.magnitude"] = torch.tensor([float(description["magnitude"].get(str(j), 0.0))
                                                for j in pupil.magnitude_modes], dtype=dtype)
+    mask, theirs = getattr(pupil, "mask", None), description.get("mask")
+    if mask is not None and theirs and theirs.get("kind") == mask.kind:
+        for sp in mask.specs():
+            key = sp.name.removeprefix("mask.")
+            if key in theirs:
+                out[sp.name] = torch.tensor(theirs[key], dtype=dtype)
     return out

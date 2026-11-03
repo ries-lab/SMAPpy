@@ -29,7 +29,9 @@ calibrations, which its global fitter reads: each channel sampled with
 channel's share), the secondary's spline in the camera's orientation, and
 `LearnedPSF.transform(1)` as its ``transformation``.
 
-**Versions.**  A file is written as `VERSION`, and read up to it.  6: a minimal pupil's held γ and h
+**Versions.**  A file is written as `VERSION`, and read up to it.  7: a pupil's phase mask (a pupil entry's
+``mask``, `model.mask.config` with the objective's ``aperture_na``; its parameters ``mask.centre``, ...).
+6: a minimal pupil's held γ and h
 (``held_gamma``, ``held_ring_h``: in situ holds a bead model's γ), and the options (`BeadSettings`) with the
 PSF model's choices nested (``psf``, `PSFModelSettings`).  5: the minimal pupil
 (`model.MinimalPupil`: a pupil entry ``kind = "minimal"`` with the objective's ``na``, the parameters
@@ -81,10 +83,12 @@ from ..model import (
 )
 from ..model.channels import Channel, prefix, unpack_transform, view
 from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
+from ..model.mask import config as mask_config
+from ..model.mask import make_mask
 from ..optics import Optics, PupilGrid
 
 FORMAT = "uipsf-model"
-VERSION = 6
+VERSION = 7
 #: the coverslip's entries of the optics, left out where they are the defaults so that a version-2 reader
 #: still builds the optics of a model that does not need them
 _COVERSLIP = {"d_cov_nm": 170_000.0, "d_cov_design_nm": 170_000.0}
@@ -110,6 +114,8 @@ def _describe_channel(ch: Channel) -> dict:
         pup = dict(kind="pixel")
     else:
         raise TypeError(f"no model-file entry for the pupil {type(pupil).__name__}")
+    if getattr(pupil, "mask", None) is not None:          # absent in older files: no mask
+        pup["mask"] = dict(mask_config(pupil.mask.spec), aperture_na=pupil.mask.aperture_na)
     optics = {k: v for k, v in dataclasses.asdict(psf.grid.optics).items() if _COVERSLIP.get(k, None) != v}
     return dict(name=ch.name, optics=optics, pupil_size=psf.grid.size, pupil=pup,
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
@@ -159,6 +165,9 @@ def _build_channel(config: dict, device, dtype) -> Channel:
                              held_magnitude=pup.get("held_magnitude"))
     else:
         pupil = PixelPupil(grid)
+    if pup.get("mask"):
+        m = dict(pup["mask"])
+        pupil.mask = make_mask(m, grid, aperture_na=m.pop("aperture_na", None))
     s = config["psf"]
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),

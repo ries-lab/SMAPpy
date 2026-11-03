@@ -33,12 +33,15 @@ from ..params import Bounded, ParamSpec
 class ZernikePupil:
     def __init__(self, grid: PupilGrid, n_max: int = 6, magnitude_n_max: int | None = None,
                  phase_modes: list[int] | None = None, magnitude_modes: list[int] | None = None,
-                 high_na: bool = False, held_phase: dict | None = None, held_magnitude: dict | None = None):
+                 high_na: bool = False, held_phase: dict | None = None, held_magnitude: dict | None = None,
+                 mask=None):
         """Phase modes default to Noll 5 … up to n_max; magnitude modes to Noll 2 … up to
         ``magnitude_n_max`` (default n_max).  ``magnitude_n_max=0`` gives a uniform magnitude.
         ``held_phase`` / ``held_magnitude`` hold modes at given values (module docstring); a held mode is
-        taken out of the learnt ones."""
+        taken out of the learnt ones.  ``mask``: a phase mask (`model.mask`), its transmission multiplied into
+        the pupil field (`transmission`), the Zernikes learnt beside it being the system's aberrations."""
         self.grid, self.high_na = grid, high_na
+        self.mask = mask
         self.held_phase = {int(j): float(v) for j, v in (held_phase or {}).items()}
         self.held_magnitude = {int(j): float(v) for j, v in (held_magnitude or {}).items()}
         phase = phase_modes if phase_modes is not None else zernike_modes(n_max)
@@ -75,7 +78,16 @@ class ZernikePupil:
 
     def specs(self) -> list[ParamSpec]:
         return [ParamSpec("pupil.phase", (len(self.phase_modes),)),
-                ParamSpec("pupil.magnitude", (len(self.magnitude_modes),))]
+                ParamSpec("pupil.magnitude", (len(self.magnitude_modes),))] + self._mask_specs()
+
+    def _mask_specs(self) -> list[ParamSpec]:
+        return self.mask.specs() if self.mask is not None else []
+
+    def transmission(self, p) -> torch.Tensor | None:
+        """The phase mask's complex transmission, [P, P], or None without a mask.  Apart from (magnitude,
+        phase): a mask's mean over a pupil sample is complex, its phase undefined where it is ~0 (a vortex's
+        centre), so it is multiplied into the field rather than added to the phase (`VectorPSF.pupil_field`)."""
+        return self.mask.transmission(p) if self.mask is not None else None
 
     def describe(self, p) -> dict:
         """The pupil's hand-over description, plain data (`model.build`, `docs/uipsf/architecture.md`, "One
@@ -87,12 +99,14 @@ class ZernikePupil:
                             for j, v in self.coefficients(p, "phase").items()}}
         if self.magnitude_modes or self.held_magnitude:
             out["magnitude"] = {str(j): round(v, 5) for j, v in self.coefficients(p, "magnitude").items()}
+        if self.mask is not None:
+            out["mask"] = self.mask.describe(p)
         return out
 
     def truncated(self, n_max: int) -> ZernikePupil:
         """The same pupil with only the modes of radial order ≤ ``n_max``: a fit's first stage."""
         new = object.__new__(ZernikePupil)
-        new.grid, new.high_na = self.grid, self.high_na
+        new.grid, new.high_na, new.mask = self.grid, self.high_na, self.mask
         # the held modes stay held at every stage, whatever their order
         new.held_phase, new.held_magnitude = self.held_phase, self.held_magnitude
         new.held_phase_map, new.held_magnitude_map = self.held_phase_map, self.held_magnitude_map
@@ -165,12 +179,13 @@ class MinimalPupil(ZernikePupil):
 
     def __init__(self, grid: PupilGrid, n_max: int = 6, na: float | None = None, held_phase: dict | None = None,
                  phase_modes: list[int] | None = None, saf_damping: bool = True, held_gamma: float | None = None,
-                 held_ring_h: float | None = None, learn_na: bool = False):
+                 held_ring_h: float | None = None, learn_na: bool = False, mask=None):
         """``held_gamma`` / ``held_ring_h`` hold γ and h at given values, as ``held_phase`` holds modes: no
         parameters then.  In situ holds a bead model's γ (`model.build.Held`): learnt from molecules the
         magnitude trades with the focus, as the symmetric Zernikes did.  ``learn_na`` learns the aperture's NA
         from ``na`` (`aperture`)."""
-        super().__init__(grid, n_max=n_max, phase_modes=phase_modes, magnitude_modes=[], held_phase=held_phase)
+        super().__init__(grid, n_max=n_max, phase_modes=phase_modes, magnitude_modes=[], held_phase=held_phase,
+                         mask=mask)
         o = grid.optics
         self.na = float(o.NA / GRID_MARGIN if na is None else na)
         self.n_imm, self.n_med, self.wavelength_nm, self.grid_na = o.n_imm, o.n_med, o.wavelength_nm, o.NA
