@@ -44,11 +44,29 @@ A detection in frame k of sweep s at chip position (u, v) µm from the field's c
 z_k − f_s − (a·u + b·v) + δz_e: z_k the stage's nominal z in SMAPpy's sign, f_s a focus per sweep, (a, b) the
 focal plane's slope, δz_e the molecule's own offset from the plane, held at 0 while learning (a prior of 0.5 nm)
 and freed by the z check.  Every molecule is at one height h above the glass (``geometry.height``), its z in
-the sample, the fourth coordinate, read by the PSF as in situ reads an emitter's depth -- nothing of it in the
-optics (the user's decision, 3 November 2026): physics, not a fudge -- the SAF light decays as exp(−2πκh), and the propagating part's
-k_z,med·h is a focus shift f_s absorbs.  Learnt by default, from the glass (0.5 nm), bounded to (0, 200) nm; held at a value
-under *more*.  It is the sample's, not the pupil's (unlike ``pupil.ring_h``): the pupil saved is a point at the
-glass.
+the sample: a property of the sample, never of the optics, learnt from the glass (0.5 nm), bounded to (0, 200)
+nm, held at a value under *more*.
+
+**The SAF sees only h** -- not the plane's slope, the sweep's focus or a molecule's δz, which are all the
+defocus's, through the immersion.  And the height enters through the SAF's decay alone, exp(−2πκh)
+(`VectorPSF.saf_only_depth`): the propagating phase Re k_z,med·h a molecule at h carries is every molecule's,
+and the pupil's phase and the foci take it up.  With the whole physics of the depth instead, h took up the sharp
+phase feature at the critical angle, which the Zernikes cannot hold, and came to 27 nm with γ 0.40 on M5's
+AF647; with the SAF alone it is 10 nm and γ 0.448, the prototype's (the user's decision, 3 November 2026).
+
+**The model saved is the objective's.**  Its pupil is P_obj = P_Z·exp(−2πi Re k_z,med·h): the learnt Zernike
+pupil with the phase at h taken out, kept as the Zernikes and h (``phase_reference_nm``,
+`VectorPSF.for_emitters`).  Drawn for an emitter at any height z, the depth term is then the whole physics of
+z, exp(2πi k_z,med·z): the SAF and the propagating phase both z's own, one height parameter per molecule, and
+at z = h exactly the learnt model.  h is never fitted again and never set to 0: dropped, the phase at h would
+be counted twice, most of it a z offset of about h.  Bead and in situ models have no reference; theirs is the
+Zernike pupil.  What the split assumes: the phase near the critical angle is the objective's, where its edge
+errors are and low Zernikes describe them poorly; the SAF's brightness is the sample's height.
+
+The simulations (`benchmarks/uipsf/real` scratch, 3 November 2026; molecules at 8 nm, γ 0.5): clean, both
+the physics and the SAF alone recover γ 0.53 and h 3-5 nm; unmodelled z offsets of ±15 nm per molecule double
+h in both, γ kept; a 3 % error of the stage's z scale takes γ to 0.40 in both; a focal plane held flat against
+a real slope of (20, −10) nm/µm breaks both and shows, a 22 nm bend.
 
 ## The z check
 
@@ -65,21 +83,24 @@ three rounds there, the first most of it.
 
 ## M5's AF647, the prototype against the method
 
-The five 3D files of 2 November 2026 (70 sweeps), minimal pupil to order 8, the pixel's blur under σ:
+The five 3D files of 2 November 2026 (70 sweeps), minimal pupil to order 8, the pixel's blur under σ, 4000
+molecules, 11 min:
 
 | | prototype, ring height, round 2 | the method, round 2 | round 3 |
 |---|---|---|---|
-| Z5 / Z6 / Z11 / Z22 (nm) | −28.55 / 66.58 / 57.63 / 36.02 | −29.22 / 67.40 / 58.71 / 36.07 | −29.09 / 67.25 / 58.70 / 36.07 |
-| γ | 0.456 | 0.416 | 0.414 |
-| height (nm) | 5 held + 4.2 ring | 24.3 | 23.4 |
+| Z5 / Z6 / Z11 / Z22 (nm) | −28.55 / 66.58 / 57.63 / 36.02 | −28.62 / 66.40 / 57.54 / 36.18 | −28.58 / 66.35 / 57.62 / 36.23 |
+| γ | 0.456 | 0.451 | 0.448 ± 0.004 |
+| height (nm) | 5 held + 4.2 ring | 11.0 | 10.9 ± 1.2 |
 | σ (nm) | 0 | 0 | 0 |
-| z bend, rms over ±600 nm | 5.03 | 5.34 | 5.30 |
-| z scatter / CRLB | 1.75 | 1.76 | 1.76 |
-| the +900 / +1000 nm bins | 38 / 142 nm | 44 / 128 nm | 42 / 130 nm |
+| z bend, rms over ±600 nm | 5.03 | 7.17 | 6.92 |
+| z scatter / CRLB | 1.75 | 1.80 | 1.81 |
+| the +900 / +1000 nm bins | 38 / 142 nm | −5 / 22 nm | −5 / 23 nm |
 
-The Zernikes, σ, the bend and the scatter agree.  γ is 0.04 lower and the height 2.5 times the prototype's: the
-two trade, both damping the outer pupil.  (That run's detection was the prototype's; the method's own, with the
-width curve's fixes for sparse data, is in the next run.)
+The Zernikes, γ, σ and the height agree.  The bend is 2 nm larger than the prototype's, from the detection: on
+the prototype's own detection the method's bend was 5.3 nm, and the +900 / +1000 nm bins broke away as there
+(42 / 130 nm).  Which of the detection's changes (the focus search, the curve's bins, the spots a bin needs)
+moves both is not yet known.  With the whole
+physics of the depth instead of the SAF alone, the same data gave h 27 nm and γ 0.40.
 
 ## 4Pi
 

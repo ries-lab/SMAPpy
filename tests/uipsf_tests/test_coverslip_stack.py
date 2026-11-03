@@ -1,4 +1,6 @@
 """Single molecules on the coverslip through repeated z sweeps: the geometry (`CoverslipStackGeometry`)."""
+from dataclasses import replace as dataclasses_replace
+
 import numpy as np
 import pytest
 import torch
@@ -66,6 +68,20 @@ def test_the_geometry_is_written_to_the_model_file_and_read_back():
     assert back.centre_px == (64.5, 63.5) and back.height_nm == 8.0 and not back.fit_plane
 
 
+def test_the_model_file_keeps_the_learnt_form_and_the_drawn_one_its_phase_reference():
+    optics = uipsf.Optics(NA=1.5, wavelength_nm=676.0, n_imm=1.518, n_med=1.334, pixel_size_nm=(105.0, 106.0))
+    grid = uipsf.PupilGrid.build(optics, 16, device="cpu", dtype=f64)
+    learnt = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=4), (9, 9), saf_only_depth=True)
+    g = CoverslipStackGeometry(1, [0.0], (0.0, 0.0), (105.0, 106.0))
+    back = build(describe(uipsf.ForwardModel(learnt, geometry=g, intensity=Bleaching(order=0)))).psf
+    assert back.saf_only_depth and back.phase_reference_nm == 0.0
+    drawn = learnt.for_emitters(height_nm=9.0)
+    assert not drawn.saf_only_depth and drawn.phase_reference_nm == 9.0
+    assert build(describe(uipsf.ForwardModel(drawn))).psf.phase_reference_nm == 9.0
+    with pytest.raises(ValueError, match="height"):
+        learnt.for_emitters()
+
+
 # ------------------------------------------------------------------------------- learning, in rounds
 OPTICS = uipsf.Optics(NA=1.45, wavelength_nm=680.0, n_imm=1.518, n_med=1.334, pixel_size_nm=(110.0, 110.0))
 ROI = 13
@@ -118,6 +134,38 @@ def stack_molecules(sweeps=3, per_frame=6, step_nm=100.0, span_nm=900.0, height_
     return model, truth, replace(data, start=start), np.asarray(z) - np.repeat(np.asarray(foci[:sweeps]), E // sweeps)
 
 
+def test_the_saf_sees_only_the_common_height_and_the_drawn_model_agrees_at_it_and_follows_z_elsewhere():
+    model, truth, batch, _ = stack_molecules(sweeps=1, per_frame=1, step_nm=400.0, span_nm=400.0, dtype=f64)
+    p = truth.physical()
+    learnt = model.psf
+    h = float(p["geometry.height"])
+    xyz = torch.tensor([[[0.0, 0.0, d] for d in (-400.0, 0.0, 300.0)]], dtype=f64)
+    at = lambda psf, depth: psf(p, xyz, torch.full((1, 3), depth, dtype=f64))   # noqa: E731
+    drawn = learnt.for_emitters(height_nm=h)
+    # at the molecules' height the objective's pupil with the whole physics is the learnt model, exactly
+    assert torch.allclose(at(drawn, h), at(learnt, h), rtol=1e-9, atol=1e-12)
+    # the learnt model's depth is the SAF's decay alone: no propagating phase, so no focus shift with it
+    light = [float(at(learnt, z).sum()) for z in (0.0, 20.0, 60.0)]
+    assert light[0] > light[1] > light[2]
+    shift = at(learnt, 60.0) / float(at(learnt, 60.0).sum()) - at(learnt, 0.0) / light[0]
+    # the drawn model moves the focus with the height as the physics does: 60 nm in the sample is a defocus
+    moved = at(drawn, h + 60.0) / float(at(drawn, h + 60.0).sum()) - at(drawn, h) / float(at(drawn, h).sum())
+    assert float(moved.abs().sum()) > 3 * float(shift.abs().sum())
+
+
+def test_the_linearised_normal_equations_are_the_jvps_with_the_height_through_the_saf_alone():
+    from uipsf.noise import Poisson
+    from uipsf.solve import Problem
+    model, truth, batch, _ = stack_molecules(sweeps=2, per_frame=1, step_nm=600.0, span_nm=600.0, dtype=f64)
+    model.geometry.free_z = True
+    batch = dataclasses_replace(batch, data=batch.data.to(f64))
+    p = truth.replace(shared=truth.shared_vector() * 1.02 + 0.01, emitter=truth.emitter_matrix() * 1.02 + 1e-3)
+    a = Problem(model, Poisson(), batch, linearise=False).normal_equations(p)
+    b = Problem(model, Poisson(), batch).normal_equations(p)
+    for k in ("H_ss", "H_se", "H_ee", "g_s", "g_e"):
+        assert torch.allclose(getattr(b, k), getattr(a, k), rtol=1e-9, atol=1e-8), k
+
+
 @pytest.mark.slow
 def test_the_rounds_recover_the_pupil_the_height_the_foci_and_the_plane_and_find_no_z_bend():
     from uipsf.workflows.molecule_stack import StackRoundSettings, learn_molecule_stack
@@ -128,8 +176,9 @@ def test_the_rounds_recover_the_pupil_the_height_the_foci_and_the_plane_and_find
     nm = (p["pupil.phase"] - t["pupil.phase"]) * OPTICS.wavelength_nm / (2 * np.pi)
     assert float(nm.abs().max()) < 3.0
     assert abs(float(p["pupil.gamma"] - t["pupil.gamma"])) < 0.1
-    # the height is told only by the supercritical light's decay, and trades with the common focus: a few nm
-    assert abs(float(p["geometry.height"] - t["geometry.height"])) < 5.0
+    # the height is told only by the supercritical light's brightness, which γ shares: ±7 nm from 228 molecules
+    sd = float(run.final.calibration.result.std["geometry.height"])
+    assert abs(float(p["geometry.height"] - t["geometry.height"])) < 3 * sd and sd < 12.0
     assert float((p["geometry.focus"] - t["geometry.focus"]).abs().max()) < 10.0
     assert float((p["geometry.plane"] - t["geometry.plane"]).abs().max()) < 3.0
     check = run.final.check

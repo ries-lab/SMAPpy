@@ -520,13 +520,18 @@ with z_k the stage's z, f_s a **focus per sweep** (the stage drifts between
 sweeps, about ten seconds apart) and (a, b) the **focal plane's slope** --
 the coverslip's tilt, shared by all sweeps.  All molecules sit at one
 **height** h above the glass, their z in the sample, learnt from 0: the
-dye's linker and whatever holds it.  It enters the PSF as an emitter's depth
-does in situ, nothing of it in the optics.  It is physics, not a fudge --
-the SAF light decays as
-$e^{-2\pi\kappa h}$ above the glass, κ its decay rate, so the height is told
-by how bright the outermost ring of the pupil is.  It is the sample's, not
-the microscope's: the pupil saved is a point at the glass, and carries over
-to other samples.  If the learnt height runs off, hold it under *more*
+dye's linker and whatever holds it.  It is the sample's, never the
+microscope's, and it is the only thing the supercritical (SAF) light sees:
+that light decays as $e^{-2\pi\kappa h}$ above the glass, κ its decay
+rate, so the height is told by how bright the outermost ring of the pupil
+is.  The focus, the plane's slope and a molecule's own offset only defocus
+it.  The phase a molecule at h carries is the same for all of them, so the
+pupil and the foci take it up rather than the height.
+
+The model saved is the objective's: the learnt pupil with that phase taken
+out, kept as its Zernikes and h.  A fit then draws each molecule with the
+whole physics of its own z -- its SAF and its phase -- and needs only one
+height per molecule.  If the learnt height runs off, hold it under *more*
 (*height*).
 
 **Learning, in rounds.**  The pupil, the foci, the plane and the height are
@@ -1087,8 +1092,9 @@ the filtered frame: 5 on M5's AF647.
 Molecules on the coverslip: on *auto* learnt, one height for all of them.
 Hold it at a value when the learnt one runs to its bound (200 nm) or is
 unlikely for the sample: it trades with the pupil's apodisation (γ), the
-two damping the outer pupil alike.  On M5's AF647 it came to about 24 nm,
-and holding it at 9 nm moved γ by about 0.04.
+two damping the outer pupil alike.  On M5's AF647 it came to 11 ± 1 nm with
+γ 0.448.  Molecules that are not all at one height, or off the focal plane,
+make it come out higher.
 
 ### PSF
 How each file's focus is found: where σx = σy behind a cylindrical lens

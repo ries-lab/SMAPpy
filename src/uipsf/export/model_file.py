@@ -121,7 +121,9 @@ def _describe_channel(ch: Channel) -> dict:
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
                          sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma,
-                         round_sigma=psf.round_sigma, pixel_blur=psf.pixel_blur, learn_n_med=psf.learn_n_med),
+                         round_sigma=psf.round_sigma, pixel_blur=psf.pixel_blur, learn_n_med=psf.learn_n_med,
+                         **(dict(saf_only_depth=True) if psf.saf_only_depth else {}),
+                         **(dict(phase_reference_nm=psf.phase_reference_nm) if psf.phase_reference_nm else {})),
                 transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform,
                 **({} if getattr(ch, "field", None) is None else dict(field=ch.field.config())))
 
@@ -176,7 +178,9 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
                     fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False),
-                    pixel_blur=s["pixel_blur"], learn_n_med=s.get("learn_n_med", False))
+                    pixel_blur=s["pixel_blur"], learn_n_med=s.get("learn_n_med", False),
+                    saf_only_depth=s.get("saf_only_depth", False),
+                    phase_reference_nm=s.get("phase_reference_nm", 0.0))
     field = None if config.get("field") is None else FieldPolynomial.from_config(config["field"])
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
                    name=config.get("name"), fit_transform=config.get("fit_transform", True), field=field)
@@ -238,7 +242,8 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
     up = base.upsample if upsample is None else int(upsample)
     # the point-emitter view (`VectorPSF.for_emitters`), or with ``include_bead`` the beads' own
-    psf = base.resized(roi, up) if include_bead else base.for_emitters(roi, up)
+    height = shared.get("geometry.height") if base.saf_only_depth else None    # molecules on the coverslip
+    psf = base.resized(roi, up) if include_bead else base.for_emitters(roi, up, height_nm=height)
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     xyz = torch.as_tensor(xyz_nm, dtype=dt, device=dev).reshape(1, -1, 3)
     shared = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}

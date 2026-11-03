@@ -138,17 +138,21 @@ def molecule_stack_model(optics, spec: PSFModelSettings, roi_shape, sweeps: int,
     """The model learnt from single molecules on the coverslip through z sweeps (`CoverslipStackGeometry`,
     `molecule_stack`): one channel per `Optics` in ``optics``, the main one first, secondaries started at
     ``transforms`` as `bead_model`'s; each a point's PSF as ``spec`` describes it, with no SAF damping of
-    the pupil's own: the molecules' common height ``geometry.height`` decays the supercritical light
-    physically (learnt, or held at ``height_nm``).  One focus per sweep, shared by the channels; one photon
+    the pupil's own: the molecules' common height ``geometry.height`` (learnt, or held at ``height_nm``)
+    decays the supercritical light, and only that (`VectorPSF.saf_only_depth`: the phase at that height is
+    every molecule's, the pupil's and the foci's to take up; drawn, the pupil is the objective's with it taken
+    out, `VectorPSF.for_emitters`).  One focus per sweep, shared by the channels; one photon
     count per molecule.  ``z_max_nm`` the sampling's defocus: the sweeps' ±1 µm and a margin."""
     from dataclasses import replace as replaced
 
     from ..model import Bleaching, CoverslipStackGeometry
     optics = [optics] if not isinstance(optics, (list, tuple)) else list(optics)
     transforms = list(transforms) if transforms is not None else [None] * len(optics)
-    channels = [Channel(make_psf(o, replaced(spec, saf_damping=False), roi_shape, z_max_nm=z_max_nm,
-                                 device=device, dtype=dtype), transform=H)
-                for o, H in zip(optics, transforms, strict=True)]
+    channels = []
+    for o, H in zip(optics, transforms, strict=True):
+        psf = make_psf(o, replaced(spec, saf_damping=False), roi_shape, z_max_nm=z_max_nm, device=device, dtype=dtype)
+        psf.saf_only_depth = True
+        channels.append(Channel(psf, transform=H))
     geometry = CoverslipStackGeometry(sweeps, focus_nm, centre_px, optics[0].pixel_size_nm, height_nm=height_nm)
     return ForwardModel(channels, geometry=geometry, intensity=Bleaching(order=0))
 

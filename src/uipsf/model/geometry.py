@@ -193,15 +193,16 @@ class CoverslipStackGeometry:
     learn.  The z check (``free_z``) frees it, and how far each molecule then moves is the z bend.
 
     Every molecule is at one height h above the glass (``geometry.height``), its z in the sample, the fourth
-    coordinate, read by the PSF through k_z,med as in situ reads an emitter's depth (`InSituGeometry`): the
-    dye's linker and whatever holds it.  Nothing of it is in the optics.  Learnt from the glass, h = 0.  It is physics, not a fudge: the
-    supercritical (SAF) light decays as exp(−2πκh) above the glass (`MinimalPupil` with no ``saf_damping``),
-    and the propagating part's k_z,med·h is a focus shift that f_s absorbs.  One h for all molecules is
-    what the data can tell: on M5's AF647 (2 November 2026) a dye held at 5 nm plus a ring height learnt on
-    top gave about 9-17 nm, against a per-molecule height a single frame cannot tell from its δz.
-    ``height_nm`` holds it at a value instead (the window's *more*: when it runs off).  Unlike a ring
-    height in the pupil (``pupil.ring_h``), it stays the sample's: the pupil learnt is the microscope's, a
-    point at the glass, and carries over to other samples.
+    coordinate: the dye's linker and whatever holds it.  It is the sample's, never the optics', and it is the
+    only thing the supercritical (SAF) light sees: exp(−2πκh), the same for every molecule, whatever the
+    focus, the plane's slope or a molecule's δz, which are all the defocus's.  The PSF reads it through the SAF
+    alone (`VectorPSF.saf_only_depth`): the propagating phase a molecule at h has is every molecule's, and the
+    pupil's phase and f_s take it up; with it in, it held the sharp feature at the critical angle the Zernikes
+    cannot, and h came to 27 nm on M5's AF647 where the SAF alone gives 10 (3 November 2026).  The pupil saved
+    is the objective's, that phase taken out (`VectorPSF.for_emitters`): an emitter at any height is then drawn
+    with the whole physics of its own z.  Learnt from the glass, h = 0; ``height_nm`` holds it at a value
+    instead (the window's *more*: when it runs off).  One h for all molecules is what the data can tell: a
+    single frame cannot tell a molecule's own height from its δz.
 
     Each molecule otherwise learns x, y, photons and background.  ``centre_px`` is the field's centre in
     chip pixels (`Batch.field_xy`'s), ``pixel_nm`` the pixel.  No coverslip tilt of the layers: with an oil

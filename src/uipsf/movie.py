@@ -120,7 +120,8 @@ def render(model, shared: dict, truth: MovieTruth, image: np.ndarray, spot_px: i
     """Add every row of ``truth`` into ``image`` [T, Y, X], in place: the model's PSF in a region of
     ``spot_px`` pixels about the spot's pixel, times its photons."""
     base = model.psf
-    psf = base.for_emitters((spot_px, spot_px))      # the molecules' view: the pixel's blur kept, no SAF damping
+    psf = base.for_emitters((spot_px, spot_px), height_nm=shared.get("geometry.height") if base.saf_only_depth
+                            else None)      # the molecules' view: the pixel's blur kept, no SAF damping
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     p = view({k: torch.as_tensor(v, device=dev) for k, v in shared.items()}, 0)
     px, py = model.pixel_size_nm
