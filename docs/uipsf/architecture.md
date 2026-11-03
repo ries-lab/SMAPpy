@@ -2503,3 +2503,28 @@ per bead of 40 × 27² (15.5 kB per value; chunks of 8: 4.3 GB, 108 s; of 29: 13
 about 11 kB per value.  Available memory is psutil's where installed, else ``MemAvailable`` on Linux,
 ``GlobalMemoryStatusEx`` on Windows and the reclaimable pages of ``vm_stat`` on macOS, asked at most every
 5 s; unknown, the chunk stays as before.  The sums do not depend on the chunk (`test_memory.py`).
+
+## Phase masks in the pupil (November 2026; `model/mask.py`, S1 of `docs/uipsf/scanned-psfs.md`)
+
+A mask is an analytic design Φ(u′, v′) in units of the objective's pupil radius, placed on the pupil by
+(u′, v′) = R(−θ)((u, v) − c)/s with transmission exp(iαΦ): `Vortex` (charge ℓ), `TopHat` (π inside a radius,
+its own parameter), `HalfMoon` (π on one half, δ on the other), `DoubleHelix` (Prasad's annular vortex zones,
+an idealisation of a commercial plate) and `ZernikeMask` (a design given as Zernikes, moving as one block:
+the tetrapod, the saddle point).
+
+- **Parameters** `mask.centre`, `mask.rotation`, `mask.scale`, `mask.alpha` and a mask's own (`mask.radius`,
+  `mask.delta`): held at the design (`ParamSpec.fixed`) unless named in `MaskSpec.free`, a diagnostic of
+  misalignment then.  A mask offers only what it can show: a vortex has a centre and α (its scale changes
+  nothing, its rotation is a piston), a top-hat a centre, α and its radius; freeing another is refused.
+- **Derivatives through steps**: a step is a logistic over a quarter of a sub-sample, and each pupil sample
+  takes the mean of exp(iαΦ) over 4 × 4 sub-samples; `gradcheck` passes for the centre of every mask.
+- **Where it enters**: `ZernikePupil(mask=)` / `MinimalPupil(mask=)` carry it (`specs`, `transmission`,
+  `truncated`, `describe`); `VectorPSF.pupil_field` multiplies the transmission into the field before the
+  energy normalisation, so the solver's pupil Jacobian (JVPs of `pupil_field`) covers the mask's parameters
+  with no other change.  The builder reads a spec's ``phase_mask`` (`MaskSpec`); `start_from` takes a previous
+  model's placement for a mask of the same kind; the model file (version 7) writes the pupil's ``mask``.
+- **Measured** (`test_phase_mask.py`): beads simulated through a vortex in emission, 0.06/−0.04 of the pupil
+  radius off, with astigmatism and coma: the calibration finds the centre to 0.01 and Noll 5–8 to 0.03 rad
+  (8 beads × 21 slices, 3 s on four CPU cores).
+- **Not yet**: the settings form (SMAPpy's `PSFModelSettings` has no mask section), user masks as images, the
+  freed parameters' report (value, CRLB, nats gained), real engineered-PSF beads.

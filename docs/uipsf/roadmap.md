@@ -180,7 +180,9 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
 
 Masks with phase jumps cannot be written as Zernikes, so they are a pupil component of their own: the pupil
 phase is the mask's, placed on the pupil by a few fitted parameters, plus the Zernikes learnt on top of it as
-the system's aberrations (noted October 2026).  The same component serves detection (engineered PSFs for 3D)
+the system's aberrations (noted October 2026).  **Built in part (November 2026, `model/mask.py`, architecture.md
+"Phase masks in the pupil"):** analytic vortex, top-hat, half-moon, double helix and Zernike designs, their
+placement held and freed by name; next the settings form, real beads, images.  The same component serves detection (engineered PSFs for 3D)
 and excitation (the donuts of MINFLUX and STED, above).
 
 - **Shipped, pre-calculated:** the double helix, the 2D vortex (e^{iφ}, charge 1) and the 3D top-hat vortex
