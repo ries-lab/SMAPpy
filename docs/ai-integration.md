@@ -102,7 +102,10 @@ user's own.  It starts in a folder of its own, the same each time
 (`launch.default_folder`, *SMAPpy assistant* in Documents, asked at the first
 start), not the data's: the client keys its conversations, memory and trust
 by that folder, a lab's `CLAUDE.md` is read from it, and scratch files stay
-out of the raw data; Claude Code gets the output folder with `--add-dir`.
+out of the raw data; Claude Code gets the output folder with `--add-dir`;
+the folder holds SMAPpy's `AGENTS.md` (where the data, the code and the
+user's plugins are, kept to the version) and the user's `CLAUDE.md`, which
+imports it (`launch.prepare_folder`).
 The server command is SMAPpy's own Python
 (`-m smappy.assistant.server --attach PID`), which needs nothing on the PATH.
 Typing to the assistant from SMAPpy itself stays step 5.

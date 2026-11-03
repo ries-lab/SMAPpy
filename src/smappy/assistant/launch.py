@@ -25,7 +25,10 @@ its conversations, its memory and its trust in a folder by the folder, a
 lab's standing instructions (``CLAUDE.md``) are read from it, and its scratch
 scripts do not land beside the raw data.  The data's folder -- where SMAPpy
 lets it write -- is added to Claude Code with ``--add-dir``, as SMAPpy's own
-code is, so it is read without a question each time.
+code is, so it is read without a question each time.  The folder gets an
+``AGENTS.md`` of SMAPpy's, saying where the data, the code and the user's
+plugins are, and a ``CLAUDE.md`` for the user's own notes that imports it
+(`prepare_folder`).
 
 A script is written and the terminal runs it, rather than a command typed
 into AppleScript or ``cmd``: three layers of quoting (Python, the terminal's
@@ -112,6 +115,39 @@ def mcp_config(pid: Optional[int] = None) -> Dict:
 def _quote(part: str) -> str:
     return subprocess.list2cmdline([part]) if sys.platform.startswith("win") \
         else shlex.quote(part)
+
+
+# (the shipped source in data/assistant, the name in the folder, SMAPpy's?)
+# SMAPpy's own file follows the installed version; the user's is written only
+# when missing.  Codex reads AGENTS.md, Claude Code CLAUDE.md, which imports it.
+FOLDER_FILES = (("AGENTS.md.in", "AGENTS.md", True),
+                ("CLAUDE.md.in", "CLAUDE.md", False))
+# what SMAPpy's own file starts with: an AGENTS.md without it is someone
+# else's -- a folder chosen for the assistant may be a project of the user's
+_OURS = "<!-- SMAPpy's:"
+
+
+def prepare_folder(folder: Path) -> None:
+    """``folder``'s AGENTS.md and CLAUDE.md (`FOLDER_FILES`), never over a
+    file of the user's."""
+    from importlib import resources
+    from .. import __version__, config
+    from .tools import source_folder
+    for source, name, ours in FOLDER_FILES:
+        path = folder / name
+        try:
+            current = path.read_text(encoding="utf-8") if path.exists() else None
+        except (OSError, UnicodeDecodeError):
+            continue
+        if current is not None and not (ours and current.startswith(_OURS)):
+            continue
+        text = (resources.files("smappy").joinpath("data", "assistant", source)
+                .read_text(encoding="utf-8")
+                .replace("@@VERSION@@", str(__version__))
+                .replace("@@PACKAGE@@", str(source_folder()))
+                .replace("@@PLUGINS@@", str(config.user_plugin_dir())))
+        if text != current:
+            path.write_text(text, encoding="utf-8")
 
 
 def client_command(key: str, config_file: Path, own: str = "",
@@ -387,6 +423,10 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
     if key == "manual":
         raise ValueError("an assistant started by hand is not started here")
     folder.mkdir(parents=True, exist_ok=True)
+    try:
+        prepare_folder(folder)
+    except OSError as error:            # a folder it may not write: start anyway
+        print(f"assistant folder {folder}: {error}", file=sys.stderr)
     also = [Path(f) for f in also if Path(f).resolve() != folder.resolve()]
     if key == "claude-app":
         written = add_to_project(folder)

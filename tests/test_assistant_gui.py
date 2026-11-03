@@ -454,6 +454,30 @@ def test_the_assistant_starts_in_its_own_folder_with_the_datas_beside_it(tmp_pat
     assert launch.default_folder().name == "SMAPpy assistant"
 
 
+def test_the_folder_gets_smappys_agents_md_and_a_claude_md_of_the_users_own(tmp_path):
+    from smappy.assistant import launch
+    from smappy.assistant.tools import source_folder
+    work = tmp_path / "work"
+    work.mkdir()
+    launch.prepare_folder(work)
+    agents, claude = work / "AGENTS.md", work / "CLAUDE.md"
+    assert str(source_folder()) in agents.read_text(encoding="utf-8")
+    assert claude.read_text(encoding="utf-8").startswith("@AGENTS.md")
+    # the user's notes are kept; SMAPpy's own file follows the version
+    claude.write_text("@AGENTS.md\nour cameras: an iXon\n", encoding="utf-8")
+    agents.write_text(agents.read_text(encoding="utf-8").replace("data", "old"),
+                      encoding="utf-8")
+    launch.prepare_folder(work)
+    assert "iXon" in claude.read_text(encoding="utf-8")
+    assert "The data" in agents.read_text(encoding="utf-8")
+    # a folder of the user's with an AGENTS.md of its own: never written over
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("# my project\n", encoding="utf-8")
+    launch.prepare_folder(project)
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "# my project\n"
+
+
 def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls, monkeypatch):
     from smappy.gui import assistant_pane
     kept = {}

@@ -191,6 +191,13 @@ Code with `/add-dir`.  For the Claude app this is the folder whose
 `.mcp.json` gets the connection.  Not shown for *one I start myself*, which
 starts wherever you start it.
 
+SMAPpy puts two files in it.  `AGENTS.md` tells the assistant where your
+data, SMAPpy's code and your own plugins are; it is SMAPpy's, and follows the
+installed version.  `CLAUDE.md` is yours, written once and then left alone:
+what the assistant should know every time -- your microscopes and cameras,
+the settings you always use -- goes there.  A folder of yours that has an
+`AGENTS.md` or `CLAUDE.md` of its own keeps it.
+
 ### writes under
 The only folder the assistant may write files into; *choose...* sets
 another.

@@ -1,0 +1,20 @@
+<!-- SMAPpy's: written by SMAPpy @@VERSION@@ and kept up to date with the installed version.  CLAUDE.md beside it is yours. -->
+# The SMAPpy assistant's folder
+
+SMAPpy's *Start assistant* starts you here, in the same folder every time, so
+that your conversations, what you learn and the user's notes in CLAUDE.md are
+found again whichever dataset is open.  The data is not here.
+
+* **The data** is in the session's output folder (`session_state`,
+  `output_folder`), added to your folders at the start.  SMAPpy's tools
+  write files only there.
+* **SMAPpy's code and pages**: @@PACKAGE@@ -- `read_doc` and `read_source`,
+  or read them directly.  The code is the authority on what is computed.
+* **This folder** is for your scripts, figures and scratch work, kept out of
+  the raw data.  Name a script for what it does, so that it is found again.
+* **A plugin of the user's own** goes in their plugin folder,
+  @@PLUGINS@@, not here; that folder has its own AGENTS.md on how to write one.
+* **What the lab has decided** (a camera, a threshold, a dye's ratio):
+  `remember` it once the user agrees, and `recall` before deciding again.
+  Standing instructions for this user's assistant go in CLAUDE.md here, when
+  the user asks for them.
