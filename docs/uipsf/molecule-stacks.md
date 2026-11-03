@@ -96,11 +96,13 @@ molecules, 11 min:
 | z scatter / CRLB | 1.75 | 1.80 | 1.81 |
 | the +900 / +1000 nm bins | 38 / 142 nm | −5 / 22 nm | −5 / 23 nm |
 
-The Zernikes, γ, σ and the height agree.  The bend is 2 nm larger than the prototype's, from the detection: on
-the prototype's own detection the method's bend was 5.3 nm, and the +900 / +1000 nm bins broke away as there
-(42 / 130 nm).  Which of the detection's changes (the focus search, the curve's bins, the spots a bin needs)
-moves both is not yet known.  With the whole
-physics of the depth instead of the SAF alone, the same data gave h 27 nm and γ 0.40.
+The Zernikes, γ, σ and the height agree.  The bend's differences are the noise of measuring it: bootstrapped over
+the molecules, its rms over ±600 nm is ±1.0 nm, and from the medians' noise alone (110-160 molecules a bin) a flat
+bend shows 3 nm; another draw of the same code gave 6.5 nm (γ 0.441, h 11.4 nm), the prototype's detection 5.3 and
+the prototype 5.0.  What is real is in all of them: a dip of about −10 nm around focus, −100 to +100 nm (−9.9 ±
+1.4 and −9.5 ± 1.6 nm), the model's mismatch there, not the selection's.  The +900 / +1000 nm bins differ between
+the detections (−5 / 23 nm here, 42 / 130 on the prototype's), where the CRLB is 60 nm.  With the whole physics
+of the depth instead of the SAF alone, the same data gave h 27 nm and γ 0.40.
 
 ## 4Pi
 
