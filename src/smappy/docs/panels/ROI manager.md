@@ -451,10 +451,17 @@ matters, as for averaging ROIs.
 ### Clear line
 Removes the chosen line from the ROI.
 
-### show in the 2D view
-Off by default.  Ticked, selecting an ROI centres the main picture on it, at the
-zoom it has, and a layer that shows other files is switched to the ROI's
-file, so the ROI is looked at where the Render tab's tools are.
+### 2D view
+What selecting an ROI does to the main picture.  *not linked* (the default)
+leaves it alone.  *centred on the ROI* centres it on the ROI, at the zoom
+it has, and filters every localization layer to the ROI's file, as the
+Render tab's file list would -- so other files are not drawn over it.
+*shows the ROI, in 3D too* does the same and also makes the ROI the 2D
+view's own ROI, which the 3D view's box follows while its *follow 2D ROI*
+is on: an ROI with a line becomes a line ROI along it, as wide as the ROI
+reaches across it -- the chosen line under *Draw line*, or the first it has
+-- so the 3D view looks along the line; an ROI without one is put there
+as its shape.  That replaces whatever ROI the 2D view had.
 
 ### annotate
 What the selected ROI is, in the user's own words.  The keys work wherever

@@ -87,6 +87,22 @@ def arrow(line):
     return xs, ys
 
 
+# what selecting an ROI does to the main picture (`link_mode`): the 2D view
+# left alone, centred on the ROI, or given the ROI as its own -- which the
+# 3D view's box follows (`ROIProject.view_region`)
+LINK_CHOICES = (("not linked", "off"), ("centred on the ROI", "centre"),
+                ("shows the ROI, in 3D too", "roi"))
+
+
+def link_mode(navigation: dict) -> str:
+    """The *2D view* choice kept with the project.  Files from before it
+    carry the tick *show in the 2D view*, which was the centring alone."""
+    mode = navigation.get("link_2d")
+    if mode in {key for _, key in LINK_CHOICES}:
+        return mode
+    return "centre" if navigation.get("follow_2d") else "off"
+
+
 UNDO_TEXT_WIDTH = 130      # px of an undo button's text, past which it is elided
 
 
@@ -550,13 +566,22 @@ class ROIManagerWindow(QMainWindow):
         self.redo_button = QPushButton("Redo ROI edit")
         self.redo_button.clicked.connect(self.redo)
         # the main picture goes where the ROI is, on its file: the ROI image
-        # here is small, and the 2D view is where it is worked on
-        self.follow_2d = QCheckBox("show in the 2D view")
-        self.follow_2d.setToolTip("centre the main picture on the selected ROI, "
-                                  "and show its file there")
-        self.follow_2d.toggled.connect(
-            lambda on: self.project.navigation.__setitem__("follow_2d", bool(on)))
-        edits.addWidget(self.follow_2d)
+        # here is small, and the 2D view is where it is worked on -- and,
+        # put there as its ROI, the 3D view, whose box follows the 2D ROI
+        link = QHBoxLayout()
+        link.setSpacing(3)
+        link.addWidget(QLabel("2D view"))
+        self.link_2d = QComboBox()
+        for text, key in LINK_CHOICES:
+            self.link_2d.addItem(text, key)
+        self.link_2d.setToolTip("what selecting an ROI does to the main picture: "
+                                "nothing; centre it on the ROI, on its file; or "
+                                "also make the ROI the 2D view's ROI -- a line ROI "
+                                "along its line when it has one -- so the 3D view "
+                                "shows it")
+        self.link_2d.currentIndexChanged.connect(self._on_link_2d)
+        link.addWidget(self.link_2d, 1)
+        llayout.addLayout(link)
         edits.addWidget(self.remove_button, 1)
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
@@ -743,7 +768,7 @@ class ROIManagerWindow(QMainWindow):
                 row = ids.index(saved)
             self.files.setCurrentRow(max(0, min(row, self.files.count() - 1)))
         self._fill_table()
-        self.follow_2d.setChecked(bool(project.navigation.get("follow_2d", False)))
+        self.link_2d.setCurrentIndex(max(0, self.link_2d.findData(link_mode(project.navigation))))
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -1486,6 +1511,16 @@ class ROIManagerWindow(QMainWindow):
         self._fill_table()
         self.redraw()
         self.changed.emit()
+
+    def _on_link_2d(self) -> None:
+        if self._loading:
+            return
+        mode = self.link_2d.currentData() or "off"
+        self.project.navigation["link_2d"] = mode
+        self.project.navigation.pop("follow_2d", None)
+        roi = self._selected()
+        if mode != "off" and roi is not None:
+            self.selected.emit(roi)          # the 2D view goes there now
 
     def _on_select(self) -> None:
         if self._loading:

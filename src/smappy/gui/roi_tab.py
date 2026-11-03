@@ -298,21 +298,40 @@ class ROIHeader(QWidget):
         show_help("Panels/Regions tab", self.window())
 
     def _on_selected(self, roi) -> None:
-        """An ROI was selected in the manager: its numbers here, and with
-        *show in the 2D view* the picture centred on it, on its file."""
+        """An ROI was selected in the manager: its numbers here, and as the
+        manager's *2D view* says, the picture centred on it, on its file --
+        and with *shows the ROI* the ROI made the 2D view's own, so the 3D
+        view's box, which follows that, shows it too."""
+        from .roi_window import link_mode
         self._show_result()
-        if self.view is None or roi is None or \
-                not self.project.navigation.get("follow_2d", False):
+        mode = link_mode(self.project.navigation)
+        if self.view is None or roi is None or mode == "off":
             return
-        number = self.project.file_number(roi.file_id)
+        self._show_file(roi.file_id)
+        if mode == "roi":
+            line = self.manager.line_name if self.manager is not None else ""
+            region = self.project.view_region(roi, line)
+            if region is not None:
+                self.session.set_roi(region)
+        self.view.center_on(*roi.center)
+
+    def _show_file(self, file_id) -> None:
+        """Every localization layer filtered to the ROI's file, as the Render
+        tab's file list would: a layer that showed every file showed the
+        other files' localizations over the ROI, so it is narrowed too."""
+        source = self.project.sources.get(file_id)
+        if source is None or len(self.project.sources) < 2:
+            return
+        # the table's `filenumber`, from 0 -- not `file_number`, which is the
+        # list's 1-based count, and once put the layer on the next file
+        number = int(source.number)
         changed = False
         for layer in self.session.layers:
-            if not layer.is_image and layer.files is not None and number not in layer.files:
-                layer.set_files([number])       # a layer showing another file
+            if not layer.is_image and layer.files != [number]:
+                layer.set_files([number])
                 changed = True
         if changed:
             self.session.changed("layer")
-        self.view.center_on(*roi.center)
 
     # --------------------------------------------------------------- work
     def _on_measure(self, on: bool) -> None:
