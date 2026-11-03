@@ -405,22 +405,53 @@ def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
     controls.server.stop()
 
 
-def test_the_first_start_asks_one_question_and_starts_what_was_chosen(controls, monkeypatch):
+def test_the_first_start_asks_which_assistant_and_where_it_works_and_starts_it(
+        controls, monkeypatch, tmp_path):
     from smappy.assistant import launch
     from smappy.gui import assistant_pane
     prefs = dict(assistant_pane.DEFAULTS)
     monkeypatch.setattr(assistant_pane, "preferences", lambda: dict(prefs))
     monkeypatch.setattr(assistant_pane, "save_preferences", prefs.update)
+    monkeypatch.setattr(launch, "default_folder", lambda: tmp_path / "SMAPpy assistant")
     started = []
-    monkeypatch.setattr(launch, "start", lambda key, *a, **k: started.append(key) or "ok")
+    monkeypatch.setattr(launch, "start", lambda key, folder, *a, **k:
+                        started.append((key, folder, k["also"])) or "ok")
     controls.start()
     chooser = controls.chooser
     assert chooser.isVisible() and chooser.chosen() == "claude" and not started
+    # the default is offered, and kept as "", so that it follows the default
+    assert chooser.folder.text() == str(tmp_path / "SMAPpy assistant")
     chooser.buttons["codex"].setChecked(True)
     chooser.start()
-    assert started == ["codex"] and prefs["client"] == "codex"
+    data = controls.server.assistant.output
+    assert started == [("codex", tmp_path / "SMAPpy assistant", [data])]
+    assert prefs["client"] == "codex" and prefs["folder"] == ""
     assert not chooser.isVisible()
     controls.server.stop()
+    # a folder of the user's own is kept, and started in
+    prefs["client"] = ""
+    controls.start()
+    controls.chooser.folder.setText(str(tmp_path / "mine"))
+    controls.chooser.start()
+    assert prefs["folder"] == str(tmp_path / "mine")
+    assert started[-1][1] == tmp_path / "mine"
+    controls.server.stop()
+
+
+def test_the_assistant_starts_in_its_own_folder_with_the_datas_beside_it(tmp_path):
+    from smappy.assistant import launch
+    work, data = tmp_path / "work", tmp_path / "data"
+    data.mkdir()
+    launch.start("claude", work, tmp_path / "settings", 4242, run=lambda *a: None,
+                 also=[data, work])
+    assert work.is_dir()                # made the first time
+    name = "start-claude." + ("cmd" if sys.platform.startswith("win") else "sh")
+    script = (tmp_path / "settings" / name).read_text(encoding="utf-8")
+    assert str(data) in script and script.count("--add-dir") == 2   # the code and the data
+    config = tmp_path / "settings" / "mcp-gui.json"
+    command = launch.client_command("claude", config, also=[data])
+    assert command[command.index(str(data)) - 1] == "--add-dir"
+    assert launch.default_folder().name == "SMAPpy assistant"
 
 
 def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls, monkeypatch):
@@ -513,7 +544,7 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
     # not installed, and the user says no: nothing is installed, and they are
     # told the one line that would.  (Answered, never left to the default yes:
     # a test must not reach a real installer.)
-    (tmp_path / "work dir").mkdir()
+    assert (tmp_path / "work dir").is_dir()    # the start made it
     empty = tmp_path / "bin"
     empty.mkdir()
     out = subprocess.run(["/bin/sh", str(file)], input="n\n", capture_output=True,

@@ -132,16 +132,20 @@ class _Client:
 @contextmanager
 def _no_terminal():
     """*Start assistant* without its terminal: the machine that builds the
-    tutorial is not the viewer's, and a Terminal opening on it helps nobody."""
+    tutorial is not the viewer's, and a Terminal opening on it helps nobody --
+    nor a folder made in its Documents: the assistant's folder is the
+    tutorial's configuration's."""
+    from ... import config
     from ...assistant import launch
-    kept = launch.open_terminal, launch.raise_terminal
+    kept = launch.open_terminal, launch.raise_terminal, launch.default_folder
     try:
         # the script is written as for anyone; only the terminal is not opened
         launch.open_terminal = lambda *a, **k: None
         launch.raise_terminal = lambda *a, **k: False
+        launch.default_folder = lambda: config.config_dir() / "SMAPpy assistant"
         yield
     finally:
-        launch.open_terminal, launch.raise_terminal = kept
+        launch.open_terminal, launch.raise_terminal, launch.default_folder = kept
 
 
 def _menu_action(d, title: str, text: str):
@@ -227,11 +231,14 @@ def make(d) -> None:
     d.settle()
     chooser = control.assistant_controls.chooser
     _place(d, chooser)
-    d.shot("The first time it asks one question: which assistant. That is all "
-           "there is to set up.",
+    d.shot("The first time it asks two things: which assistant, and the folder "
+           "it works in. Keep that folder the same: its conversations go with "
+           "it. That is all there is to set up.",
            spot=[d.window_rect(chooser)], point=chooser.buttons["claude"])
     start = next(b for b in chooser.findChildren(QPushButton) if b.text() == "Start")
     with _no_terminal():
+        # shown as the viewer's would be, started in the tutorial's own
+        chooser.folder.setText(str(launch.default_folder()))
         start.click()
         d.settle()
     server = control.assistant_controls.server

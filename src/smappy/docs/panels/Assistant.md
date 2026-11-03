@@ -51,8 +51,10 @@ writing plugins with it.
 or Ctrl+Shift+A -- does it in one go: SMAPpy allows connections, starts your
 assistant already connected to this window, and puts its window beside the
 picture.  The first time it
-asks one question, which assistant: Claude, Codex or the Claude app; *another
-assistant...* opens these settings.
+asks which assistant -- Claude, Codex or the Claude app -- and which folder
+it works in: one of its own, *SMAPpy assistant* in your Documents unless you
+choose another (see *works in* below); *another assistant...* opens
+these settings.
 
 Nothing needs to be typed in a terminal.  If the assistant is not installed
 yet, its window says so and asks *Install it now? [Y/n]*; Enter installs it
@@ -175,10 +177,19 @@ this window and `{config}` by a JSON file naming it, the form most clients'
 `--mcp-config` options take.
 
 ### works in
-The folder the assistant starts in: what its own file tools see first, and
-for the Claude app the folder whose `.mcp.json` gets the connection.  *same*
-makes it the folder after *writes under*.  Not shown for *one I start
-myself*, which starts wherever you start it.
+The folder the assistant starts in, the same every time, made when it is not
+there yet: *SMAPpy assistant* in your Documents, or the one you chose
+(*default* goes back).  It is one folder rather than the data's because the
+assistant keeps its conversations (to pick one up again), what it has learnt
+and which folders you trust by the folder it starts in, so a folder per
+dataset would scatter them; a `CLAUDE.md` or `AGENTS.md` put there -- your
+lab's cameras, the filters you always use -- is read at every start; and its
+scripts and scratch files stay out of your raw data.  Claude Code gets the
+folder after *writes under* added (`--add-dir`), so it reads your data there
+without asking; a folder chosen there after it started is added in Claude
+Code with `/add-dir`.  For the Claude app this is the folder whose
+`.mcp.json` gets the connection.  Not shown for *one I start myself*, which
+starts wherever you start it.
 
 ### writes under
 The only folder the assistant may write files into; *choose...* sets

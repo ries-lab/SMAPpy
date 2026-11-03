@@ -19,6 +19,14 @@ session started there finds it.
 program do that: Terminal on a Mac through AppleScript.  On Windows and Linux
 it opens where the system puts it.
 
+**It works in a folder of its own**, the same one every time
+(`default_folder`, or the user's choice), not in the data's: the client keys
+its conversations, its memory and its trust in a folder by the folder, a
+lab's standing instructions (``CLAUDE.md``) are read from it, and its scratch
+scripts do not land beside the raw data.  The data's folder -- where SMAPpy
+lets it write -- is added to Claude Code with ``--add-dir``, as SMAPpy's own
+code is, so it is read without a question each time.
+
 A script is written and the terminal runs it, rather than a command typed
 into AppleScript or ``cmd``: three layers of quoting (Python, the terminal's
 own language, the shell) around a JSON path were where this went wrong.  The
@@ -38,6 +46,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 NAME = "smappy-gui"           # the server's name in the client's settings
+
+
+def default_folder() -> Path:
+    """Where the assistant works unless the user chose a folder: in
+    Documents, where the user finds what it wrote, else in the home folder."""
+    home = Path.home()
+    documents = home / "Documents"
+    return (documents if documents.is_dir() else home) / "SMAPpy assistant"
 
 
 @dataclass(frozen=True)
@@ -99,17 +115,20 @@ def _quote(part: str) -> str:
 
 
 def client_command(key: str, config_file: Path, own: str = "",
-                   pre_allow: bool = True):
+                   pre_allow: bool = True, also: Sequence[Path] = ()):
     """The client's command line, its server in ``config_file``: a list of
     arguments, or for a command of the user's own the line as they wrote it
     with ``{server}`` (the server's command) and ``{config}`` (the JSON
-    file) filled in."""
+    file) filled in.  ``also``: folders beside the one it starts in that
+    Claude Code may use without asking -- the data's."""
     if key == "claude":
         from .tools import source_folder
-        # SMAPpy's own code beside the data it works in: read and grepped
-        # without a question each time (edits there still ask)
+        # SMAPpy's own code and the data: read and grepped without a question
+        # each time (edits in the code still ask)
         command = ["claude", "--mcp-config", str(config_file),
                    "--add-dir", str(source_folder())]
+        for folder in also:
+            command += ["--add-dir", str(folder)]
         if pre_allow:
             # SMAPpy's own switch decides what the assistant may change, so
             # asking again before every tool call would only be clicks
@@ -357,21 +376,25 @@ def open_app(run=subprocess.Popen) -> List[str]:
 
 
 def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = "",
-          pre_allow: bool = True, bounds=None, run=subprocess.Popen) -> str:
+          pre_allow: bool = True, bounds=None, run=subprocess.Popen,
+          also: Sequence[Path] = ()) -> str:
     """Start the client ``key`` connected to process ``pid``, working in
-    ``folder``.  Returns a line for the user: what was started, or what they
-    do next."""
+    ``folder`` (made if it is not there yet), with the folders ``also``
+    beside it (`client_command`).  Returns a line for the user: what was
+    started, or what they do next."""
     client = CLIENTS[key]
     folder = Path(folder).expanduser()
     if key == "manual":
         raise ValueError("an assistant started by hand is not started here")
+    folder.mkdir(parents=True, exist_ok=True)
+    also = [Path(f) for f in also if Path(f).resolve() != folder.resolve()]
     if key == "claude-app":
         written = add_to_project(folder)
         open_app(run)
         return (f"Claude app opened.  Start a Code session in {folder} and approve "
                 f"the '{NAME}' server it finds ({written.name}).")
     config = write_config(settings_folder, pid)
-    command = client_command(key, config, own, pre_allow)
+    command = client_command(key, config, own, pre_allow, also)
     if sys.platform.startswith("win"):
         file = settings_folder / f"start-{key}.cmd"
         # newline="": the lines end in \r\n already, which text mode on

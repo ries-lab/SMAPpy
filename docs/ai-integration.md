@@ -98,7 +98,12 @@ the chosen client already connected, in a column beside the picture
 their command line (`claude --mcp-config`, Codex's `-c`), so the user's
 settings are not touched; the Claude app, which cannot be started on a
 folder from outside, through the folder's `.mcp.json`; or a command of the
-user's own.  The server command is SMAPpy's own Python
+user's own.  It starts in a folder of its own, the same each time
+(`launch.default_folder`, *SMAPpy assistant* in Documents, asked at the first
+start), not the data's: the client keys its conversations, memory and trust
+by that folder, a lab's `CLAUDE.md` is read from it, and scratch files stay
+out of the raw data; Claude Code gets the output folder with `--add-dir`.
+The server command is SMAPpy's own Python
 (`-m smappy.assistant.server --attach PID`), which needs nothing on the PATH.
 Typing to the assistant from SMAPpy itself stays step 5.
 

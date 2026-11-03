@@ -86,6 +86,11 @@ def save_preferences(values: Dict) -> None:
     config.set("assistant", {**preferences(), **values})
 
 
+def _default_folder() -> Path:
+    from ..assistant.launch import default_folder
+    return default_folder()
+
+
 def _name_of(path) -> str:
     """A plugin as the menus name it ("RCC drift correction"), not its path."""
     from .. import plugins
@@ -244,8 +249,10 @@ class AssistantControls(QObject):
             return
         if not self.allow(True):
             return
+        # a folder of its own, the same each time; the data's beside it
+        # (`launch`, "It works in a folder of its own")
         folder = Path(prefs["folder"]).expanduser() if prefs["folder"] \
-            else self.server.assistant.output
+            else launch.default_folder()
         client = launch.CLIENTS[prefs["client"]]
         if prefs["client"] == "manual":
             # SMAPpy listens; the user starts theirs with what the settings copy
@@ -269,7 +276,7 @@ class AssistantControls(QObject):
             line = launch.start(prefs["client"], folder,
                                 config.config_dir() / "assistant", os.getpid(),
                                 own=prefs["command"], pre_allow=prefs["pre_allow"],
-                                bounds=terminal)
+                                bounds=terminal, also=[self.server.assistant.output])
         except Exception as error:
             self.say(f"could not start {client.label}: {error}")
             self.show_settings()
@@ -666,6 +673,22 @@ class FirstStart(QWidget):
         note.setWordWrap(True)
         note.setStyleSheet(note_style())
         column.addWidget(note)
+        column.addSpacing(6)
+        # asked once, because it is where its conversations and notes are kept:
+        # a folder per dataset would scatter them (`launch`)
+        where = QLabel("Which folder should it work in?  Keep it the same: its "
+                       "conversations and notes go with the folder.")
+        where.setWordWrap(True)
+        column.addWidget(where)
+        place = QHBoxLayout()
+        self.folder = QLineEdit(preferences()["folder"] or str(_default_folder()))
+        self.folder.setToolTip("the folder it works in, the same every time; the "
+                               "folder of your data is added beside it")
+        place.addWidget(self.folder, 1)
+        choose = QToolButton(text="choose...")
+        choose.clicked.connect(self._choose)
+        place.addWidget(choose)
+        column.addLayout(place)
         row = QHBoxLayout()
         other = QToolButton(text="another assistant...")
         other.setToolTip("the settings: a command of your own, or how to connect "
@@ -683,9 +706,20 @@ class FirstStart(QWidget):
         return next(k for k, b in self.buttons.items() if b.isChecked())
 
     def start(self) -> None:
-        save_preferences({"client": self.chosen()})
+        folder = self.folder.text().strip()
+        # the default stays "" in the preferences, so that it follows
+        # `launch.default_folder` rather than a path written down once
+        save_preferences({"client": self.chosen(),
+                          "folder": "" if not folder or Path(folder).expanduser()
+                          == _default_folder() else folder})
         self.close()
         self.controls.start()
+
+    def _choose(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "The folder the assistant works in", self.folder.text())
+        if folder:
+            self.folder.setText(folder)
 
     def _other(self) -> None:
         self.close()
@@ -889,13 +923,14 @@ class AssistantSettings(QWidget):
         grid.addWidget(self.folder, 2, 1)
         folder_buttons = QHBoxLayout()
         folder_button = self.folder_button = QToolButton(text="choose...")
-        folder_button.setToolTip("the folder the assistant starts in")
+        folder_button.setToolTip("the folder the assistant starts in, the same every "
+                                 "time: its conversations and notes are kept by it")
         folder_button.clicked.connect(self._choose_folder)
-        self.same = QToolButton(text="same")
-        self.same.setToolTip("start where it may write")
-        self.same.clicked.connect(lambda: (save_preferences({"folder": ""}), self.refresh()))
+        self.default = QToolButton(text="default")
+        self.default.setToolTip(f"back to {_default_folder()}")
+        self.default.clicked.connect(lambda: (save_preferences({"folder": ""}), self.refresh()))
         folder_buttons.addWidget(folder_button)
-        folder_buttons.addWidget(self.same)
+        folder_buttons.addWidget(self.default)
         grid.addLayout(folder_buttons, 2, 2)
 
         grid.addWidget(QLabel("writes under"), 3, 0)
@@ -1001,8 +1036,8 @@ class AssistantSettings(QWidget):
             self.output.setText(str(server.assistant.output))
             self.follow.setEnabled(server.output_pinned)
             folder = preferences()["folder"]
-            self.folder.setText(folder or "where it writes")
-            self.same.setEnabled(bool(folder))
+            self.folder.setText(folder or str(_default_folder()))
+            self.default.setEnabled(bool(folder))
         except Exception:
             traceback.print_exc()
 
@@ -1015,7 +1050,7 @@ class AssistantSettings(QWidget):
         self.command_label.setVisible(own)
         self.command.setVisible(own)
         self.other.setVisible(key == "manual")
-        for widget in (self.folder_label, self.folder, self.folder_button, self.same):
+        for widget in (self.folder_label, self.folder, self.folder_button, self.default):
             widget.setVisible(key != "manual")      # it starts wherever its user does
         self.pre_allow.setVisible(key == "claude")
         self.refresh()
@@ -1027,7 +1062,7 @@ class AssistantSettings(QWidget):
     def _choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self, "The folder the assistant starts in", preferences()["folder"]
-            or str(self.controls.server.assistant.output))
+            or str(_default_folder()))
         if folder:
             save_preferences({"folder": folder})
             self.refresh()
