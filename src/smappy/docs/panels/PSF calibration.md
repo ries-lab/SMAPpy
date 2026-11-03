@@ -519,8 +519,10 @@ $$d = z_k - f_s - (a u + b v)$$
 with z_k the stage's z, f_s a **focus per sweep** (the stage drifts between
 sweeps, about ten seconds apart) and (a, b) the **focal plane's slope** --
 the coverslip's tilt, shared by all sweeps.  All molecules sit at one
-**height** h above the glass, learnt: the dye's linker and whatever holds it.
-It is physics, not a fudge -- the SAF light decays as
+**height** h above the glass, their z in the sample, learnt from 0: the
+dye's linker and whatever holds it.  It enters the PSF as an emitter's depth
+does in situ, nothing of it in the optics.  It is physics, not a fudge --
+the SAF light decays as
 $e^{-2\pi\kappa h}$ above the glass, κ its decay rate, so the height is told
 by how bright the outermost ring of the pupil is.  It is the sample's, not
 the microscope's: the pupil saved is a point at the glass, and carries over

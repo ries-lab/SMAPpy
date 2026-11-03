@@ -171,8 +171,9 @@ class InSituGeometry(_Tilted):
 #: start is the width curve's focus of the sweep's file, within a few hundred nm; 50 nm/µm is 0.05 rad, as
 #: loose as the coverslip's tilt prior
 SWEEP_FOCUS_PRIOR_NM, PLANE_PRIOR_NM_PER_UM = 300.0, 50.0
-#: the molecules' common height above the glass: started at 5 nm, bounded to (0, 200) nm
-HEIGHT_START_NM, HEIGHT_MAX_NM = 5.0, 200.0
+#: the molecules' common height above the glass: started at the glass (0.5 nm: a logistic cannot start on its
+#: bound, and its slope there is the height itself, so not much lower), bounded to (0, 200) nm
+HEIGHT_START_NM, HEIGHT_MAX_NM = 0.5, 200.0
 #: how firmly each molecule's own z offset is held at the plane while learning (nm)
 OFFSET_HOLD_NM = 0.5
 
@@ -191,8 +192,9 @@ class CoverslipStackGeometry:
     held at 0 by a tight prior: z is known, and a free z per molecule would take up what the pupil should
     learn.  The z check (``free_z``) frees it, and how far each molecule then moves is the z bend.
 
-    Every molecule is at one height h above the glass (``geometry.height``), the fourth coordinate, read by
-    the PSF through k_z,med: the dye's linker and whatever holds it.  It is physics, not a fudge: the
+    Every molecule is at one height h above the glass (``geometry.height``), its z in the sample, the fourth
+    coordinate, read by the PSF through k_z,med as in situ reads an emitter's depth (`InSituGeometry`): the
+    dye's linker and whatever holds it.  Nothing of it is in the optics.  Learnt from the glass, h = 0.  It is physics, not a fudge: the
     supercritical (SAF) light decays as exp(−2πκh) above the glass (`MinimalPupil` with no ``saf_damping``),
     and the propagating part's k_z,med·h is a focus shift that f_s absorbs.  One h for all molecules is
     what the data can tell: on M5's AF647 (2 November 2026) a dye held at 5 nm plus a ring height learnt on

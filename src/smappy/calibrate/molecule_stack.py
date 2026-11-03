@@ -47,6 +47,8 @@ REGION_NM = 2600.0
 #: bin needs: with 100 nm steps a bin of ±50 nm held one frame of each sweep, too few, and the curve
 #: interpolated across the gaps rejected every spot near focus for its shape (simulated sweeps)
 CURVE_SPAN_NM, CURVE_STEP_NM, CURVE_MIN = 1100.0, 50.0, 5
+#: a z step's spots above the file's median brightness that the width curve takes them from, not the step's own
+BRIGHT_MIN = 20
 #: defocus bins for the brightness window (nm) and for drawing evenly (nm)
 BRIGHTNESS_BIN_NM, DRAW_BIN_NM = 200.0, 100.0
 #: a spot's Gaussian further than this from its region's centre (px) went to a neighbour
@@ -320,15 +322,19 @@ def width_curve(spots: list, z_um: list, inside: list, shape: str = "auto") -> W
 
 
 def _brighter_half(photons, z_um, step_um) -> np.ndarray:
-    """The spots brighter than the median of their own z step: a defocused spot's photons in a 15-pixel
-    Gaussian are a fraction of a focused one's, and a median over the whole file left none beyond 100 nm on
-    one side of focus (simulated sweeps)."""
+    """The spots brighter than the file's median, the prototype's rule: the dim ones are the false
+    detections and the overlapped, and on M5's AF647 (2 November 2026) a median per z step instead bent the z
+    check at focus by 15 nm and took the bins beyond 900 nm off the curve.  A z step where that leaves fewer
+    than `BRIGHT_MIN` takes its own brighter half: a defocused spot's photons in a 15-pixel Gaussian are a
+    fraction of a focused one's, and in sparse sweeps (simulated) the file's median left none beyond 100 nm
+    on one side of focus."""
     photons = np.asarray(photons, float)
+    out = photons > np.nanmedian(photons)
     bins = np.round((np.asarray(z_um) - np.min(z_um)) / step_um).astype(int)
-    out = np.zeros(len(photons), bool)
     for b in np.unique(bins):
         m = bins == b
-        out[m] = photons[m] > np.nanmedian(photons[m])
+        if (out & m).sum() < BRIGHT_MIN:
+            out[m] = photons[m] > np.nanmedian(photons[m])
     return out
 
 

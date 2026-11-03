@@ -45,14 +45,14 @@ def test_the_z_check_frees_each_molecules_offset_from_the_plane():
     assert float(out[0, 0, 2]) == 30.0
 
 
-def test_a_held_height_is_not_learnt_and_a_learnt_one_starts_at_five_nm():
+def test_a_held_height_is_not_learnt_and_a_learnt_one_starts_at_the_glass():
     batch = _batch([0.0], [0], [[0, 0]])
     held = {s.name: s for s in CoverslipStackGeometry(1, [0.0], (0, 0), (100, 100), height_nm=20.0)
             .specs(batch, {"xyz": torch.zeros(1, 3)})}
     free = {s.name: s for s in CoverslipStackGeometry(1, [0.0], (0, 0), (100, 100))
             .specs(batch, {"xyz": torch.zeros(1, 3)})}
     assert held["geometry.height"].fixed and held["geometry.height"].init == 20.0
-    assert not free["geometry.height"].fixed and free["geometry.height"].init == 5.0
+    assert not free["geometry.height"].fixed and free["geometry.height"].init < 1.0
 
 
 def test_the_geometry_is_written_to_the_model_file_and_read_back():

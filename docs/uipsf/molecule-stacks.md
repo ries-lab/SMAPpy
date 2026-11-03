@@ -43,9 +43,10 @@ of it: points at h ≈ 0, which is what a single-molecule fit needs, and what te
 A detection in frame k of sweep s at chip position (u, v) µm from the field's centre is at defocus
 z_k − f_s − (a·u + b·v) + δz_e: z_k the stage's nominal z in SMAPpy's sign, f_s a focus per sweep, (a, b) the
 focal plane's slope, δz_e the molecule's own offset from the plane, held at 0 while learning (a prior of 0.5 nm)
-and freed by the z check.  Every molecule is at one height h above the glass (``geometry.height``), the
-fourth coordinate: physics, not a fudge -- the SAF light decays as exp(−2πκh), and the propagating part's
-k_z,med·h is a focus shift f_s absorbs.  Learnt by default, from 5 nm, bounded to (0, 200) nm; held at a value
+and freed by the z check.  Every molecule is at one height h above the glass (``geometry.height``), its z in
+the sample, the fourth coordinate, read by the PSF as in situ reads an emitter's depth -- nothing of it in the
+optics (the user's decision, 3 November 2026): physics, not a fudge -- the SAF light decays as exp(−2πκh), and the propagating part's
+k_z,med·h is a focus shift f_s absorbs.  Learnt by default, from the glass (0.5 nm), bounded to (0, 200) nm; held at a value
 under *more*.  It is the sample's, not the pupil's (unlike ``pupil.ring_h``): the pupil saved is a point at the
 glass.
 
