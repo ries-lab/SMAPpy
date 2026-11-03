@@ -91,6 +91,15 @@ def test_frames_are_read_from_the_offsets_in_the_index(tmp_path):
     assert np.array_equal(read, frames)
 
 
+def test_a_dataset_renamed_with_its_files_is_read_from_the_file_now_in_its_folder(tmp_path):
+    # the index keeps the name the stack had when written (M5's AF647: x_3D_1 renamed x_2D_1)
+    frames = stack()
+    folder = write_ndtiff(tmp_path / "x_2D_1", frames, name="x_3D_1_NDTiffStack.tif")
+    (folder / "x_3D_1_NDTiffStack.tif").rename(folder / "x_2D_1_NDTiffStack.tif")
+    source = open_ndtiff(folder)
+    assert source.n_frames == 4 and np.array_equal(source.frame(3), frames[3])
+
+
 def test_the_zero_padding_at_the_end_is_not_an_image(tmp_path):
     padded = read_index(write_ndtiff(tmp_path / "a", stack(), pad=True))
     bare = read_index(write_ndtiff(tmp_path / "b", stack(), pad=False))
