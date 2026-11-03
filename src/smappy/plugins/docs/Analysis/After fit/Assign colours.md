@@ -461,8 +461,10 @@ are not clear in the histogram, or to keep the ratios fixed between samples.
 ### channel1
 The column $r$ counts positive.  Name both columns or neither; auto takes
 the first pair the table has of `photons_ch0`/`photons_ch1`,
-`photons_ch1`/`photons_ch2`, `intensity_ch0`/`intensity_ch1` and
-`intensity_ch1`/`intensity_ch2`.
+`photons_ch1`/`photons_ch2`, `intensity_ch0`/`intensity_ch1`,
+`intensity_ch1`/`intensity_ch2` and SMAP's `phot1`/`phot2`, then MINFLUX's
+`dcr`.  A SMAP table has no errors on `phot1` and `phot2`, so its weights
+come from the square root of the photons.
 
 ### cmap
 Only the look of the intensity plot.

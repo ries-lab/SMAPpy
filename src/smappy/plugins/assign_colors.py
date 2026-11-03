@@ -51,12 +51,15 @@ from ..locs import Localizations
 from . import Context, FormState, ColumnRecipe, Plugin, Result, param, register
 
 # candidate column pairs, in the order they are looked for: what the paired
-# fit writes first, then the 1-based spelling a SMAP or hand-made table uses
+# fit writes first, then the 1-based spelling a hand-made table uses, then
+# SMAP's: its two-colour workflow writes phot1 / phot2, which the sml loader
+# keeps by name (`io.formats.SML_COLUMNS` has no rule for them)
 CHANNEL_COLUMNS: Sequence[Tuple[str, str]] = (
     ("photons_ch0", "photons_ch1"),
     ("photons_ch1", "photons_ch2"),
     ("intensity_ch0", "intensity_ch1"),
     ("intensity_ch1", "intensity_ch2"),
+    ("phot1", "phot2"),
 )
 # how far apart two maxima must be, in smoothing widths: below this they are
 # one mode that the smoothing has not quite joined up

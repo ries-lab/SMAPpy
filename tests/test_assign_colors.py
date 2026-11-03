@@ -393,6 +393,20 @@ def test_the_figure_draws(tmp_path):
             plt.close(fig)
 
 
+def test_a_smap_two_colour_tables_phot1_and_phot2_are_found_on_auto():
+    """SMAP's two-colour workflow writes phot1 / phot2, which the sml loader
+    keeps by name: auto finds them, and they give the same r as the fit's."""
+    from smappy.plugins.assign_colors import channel_columns
+    locs, truth = simulate(n=2000, seed=12, errors=False)
+    smap = Localizations({"x_nm": locs["x_nm"], "y_nm": locs["y_nm"],
+                          "frame": locs["frame"], "photons": locs["photons"],
+                          "phot1": locs["photons_ch0"],
+                          "phot2": locs["photons_ch1"]}, {"units": "nm"})
+    assert channel_columns(smap) == ("phot1", "phot2")
+    assert np.allclose(ratios(smap).r, ratios(locs, use_errors=False).r,
+                       equal_nan=True)
+
+
 def test_a_minflux_tables_detection_channel_ratio_is_its_photon_split():
     """MINFLUX writes no photons per channel but dcr = N1 / (N1 + N2): the
     same species come back from it as from the two counts (simulated: no
