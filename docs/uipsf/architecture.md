@@ -2635,3 +2635,37 @@ the bend and the scatter against the CRLB, the molecules off the plane dropped. 
 matched to each frame's defocus and the selection, is `smappy.calibrate.molecule_stack` (`molecule_dual` for a
 split chip).  The design, the reuse of in situ and the comparison with the prototype on M5's AF647:
 `molecule-stacks.md`.
+
+## The excitation beam (November 2026; `model/excitation.py`, S2 of `docs/uipsf/scanned-psfs.md`)
+
+The focal field of a laser beam focused by the objective, E(r) = Σ_k a(k)·[e_x h_x(k) + e_y h_y(k)]·exp(2πi k·r) Δk²,
+the beam travelling towards +z.  By reciprocity h_x, h_y are detection's x- and y-analyser dipole fields read the
+other way (their rows are E_x, E_y, E_z): with detection's apodisation and Fresnel factors this is exact up to the
+constant n_imm/n_med, which the normalisation takes up (module docstring).
+
+- **The pupil** a(k): the objective's `ZernikePupil` or `MinimalPupil` (magnitude rescaled to keep a flat beam's
+  power), a phase mask (`model.mask`, not rescaled: what its steps scatter is lost), and the input beam, a
+  Gaussian of 1/e field radius ``fill`` in aperture radii at ``centre``, normalised to unit total power so that
+  overfilling loses light (`BeamSpec`; ``fill=None`` flat).
+- **The polarisation** (ψ, χ), J = R(ψ)(cos χ, i sin χ), or a radial or azimuthal map.  ``beam.angle``,
+  ``beam.ellipticity``, ``beam.fill``, ``beam.centre`` are held unless named in ``BeamSpec.free``.
+- **Normalisation:** I = |E|² / (Δk² Σ_aperture |h_x|²), so a flat x-polarised beam integrates to one over the
+  focal plane, a Gaussian to the share of its power the aperture passes, and a donut keeps the power of the
+  Gaussian it is made from (crest 0.285 of the Gaussian's peak for SimuFLUX's fill, NA 1.4).
+- **What an emitter absorbs** (`intensity`): |E|² for a rotating dye, |μ·E|² for a fixed dipole (``dipole``),
+  Σ_d w_d |E_d|² for a bead (``weights``).  z enters through the immersion's k_z (the objective moved), a depth
+  through the sample's.
+- **Against Leutenegger's library** (`tests/uipsf_tests/test_excitation.py`, fixtures from
+  `scripts/uipsf/make_oracles_focus.py` through SimuFLUX): weighted as the library weights its pupil, the fields
+  agree to 0.3 % of the peak at 128 pupil samples and 0.05 % at 256 (Gaussian, circular, vortex, shifted vortex;
+  the top-hat's sharp step 1 %, 2 µm into water 4 %), once two differences of the library are allowed for:
+  - its E_z is n_m too small (t_p sin θ_imm / n_s where the p wave's is t_p sin θ_s): |E_z|² 2.3× low in oil, in
+    MINFLUXexcitation's MATLAB and SimuFLUX's Python alike;
+  - its pupil x is uipsf's −u (it transforms with exp(−i k·r)): a mask shifted by +s there is at −s here.
+- **Apodisation, a departure kept:** the library weights by 1/cos θ_imm and an air-lens-air transmission, uipsf by
+  the aplanatic √cos θ_imm / cos θ_med of detection, which the reciprocity argument gives.  The difference is about
+  1 % of the peak for Gaussian beams and fills a top-hat's zero to 0.12 of the peak against 0.06; the objective's
+  transmission is learnt (γ, a Zernike magnitude), so it is only the start.
+- **Not yet:** the scan (beam against emitter positions, S3), the detection and its pinhole (S5), a learnt
+  n_med or a tilted coverslip for the beam (the layered model), shared OPD Zernikes between excitation and
+  detection.

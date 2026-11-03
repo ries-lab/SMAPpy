@@ -77,9 +77,12 @@ is the excitation field.  Only two things change:
 - the Fresnel coefficients are those for light going from the immersion through the coverslip into the
   sample.  They differ from detection's by the ratio of n·cos θ in the two end media;
 - the apodisation (√cos θ_imm / cos θ_med in k-space, `grid.apodisation`) should be the same by
-  reciprocity.  It is worth pinning against an oracle: Leutenegger's library applies only 1/cos θ inside
-  the aperture (`SimuFLUX/python/psfs/library/modifiers.py:64`), with an "air-lens" transmission
-  elsewhere.  The two conventions should be compared numerically, not by reading.
+  reciprocity.  **Compared (S2, November 2026):** Leutenegger's library weights by 1/cos θ_imm and its
+  "air-lens" transmission (`SimuFLUX/python/psfs/library/modifiers.py:64`, `transmission.py`); uipsf keeps
+  √cos θ_imm / cos θ_med, which the reciprocity argument gives exactly up to n_imm/n_med.  About 1 % of the
+  peak for a Gaussian, 0.12 against 0.06 of the peak at a top-hat's zero.  Weighted as the library weights,
+  uipsf reproduces its fields to 0.05 % at 256 pupil samples -- once the library's E_z, n_m too small, is
+  corrected (architecture.md, "The excitation beam").
 
 A z position works as in a bead stack: kz_imm·z for the stage, kz_med·depth in the sample, the layered
 model with a tilt.  Unlike the widefield case, defocus of the *beam* has two physically different sources:
@@ -450,7 +453,7 @@ Each one ends, as uipsf's do, in parameters recovered from simulated data to the
 | | what | data | depends on |
 | --- | --- | --- | --- |
 | S1 | analytic phase masks, detection side: tetrapod and double helix; centre, rotation, scale, α held, each freeable as a diagnostic | simulated z stacks; widefield beads with a mask | the builder |
-| S2 | excitation focusing: fields, input beam, Jones pupil, normalisation; the oracle | Leutenegger's library through SimuFLUX, PyFocus, as fixtures | S1 for the masks |
+| S2 | excitation focusing: fields, input beam, Jones pupil, normalisation; the oracle.  **Built** (`model/excitation.py`) | Leutenegger's library through SimuFLUX, as fixtures (`scripts/uipsf/make_oracles_focus.py`) | S1 for the masks |
 | S3 | beam scans with an open detector: Gaussian, vortex, top-hat, half-moon; bead size; w_z; ε's causes.  **First: the single-plane study (§7a)** -- which parameters one plane determines, with and without held even modes and with SLM defocus diversity, by Fisher information on simulations | simulated, then 20–40 nm fluorescent and 80 nm gold scans | S2 |
 | S4 | scanned single molecules: one shared height, a factor per line, blinking and bleaching masked, fixed dipoles as an option | simulated, then molecules on glass | S3 |
 | S5 | confocal: pinhole, product, λ_em, shared OPD Zernikes, scanner geometry, dead time | Abberior confocal bead scans (`.msr`) | S3 |

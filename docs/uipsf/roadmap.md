@@ -148,6 +148,9 @@ when a milestone lands or an item moves.
 The pupil, Zernikes, Fresnel terms, bead kernel, Poisson likelihood, nuisance parameters and the
 multi-channel machinery carry over; the forward model and the data's geometry change.
 
+- **Built (November 2026, S2 of scanned-psfs.md):** the focused excitation field, `model/excitation.py` --
+  reciprocity from the detection's fields, the input beam's fill, centre and polarisation, the masks of S1,
+  power-normalised; checked against Leutenegger's library (whose E_z is n_m too small).  Next the scan (S3).
 - **Confocal and ISM:** the focused excitation field (reversed apodisation; the input beam's fill,
   decentration and polarisation; a known phase mask such as a vortex, a top-hat or the SLM pattern; an
   incoherent floor ε), times detection convolved with the pinhole.  For SPAD-array ISM and ISM-FLUX each

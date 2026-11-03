@@ -41,6 +41,8 @@ E(x, y) = Σ_k  P(k) · h_f(k) · exp(iW(k)) · exp(2πi k_z,imm z) · exp(2πi 
 - `W(k)` is the aberration phase.
 - `(x0, y0, z)` is the emitter's position and `d` its depth.
 
+**An excitation beam** (`model.excitation`) uses the same sign for light travelling the other way, into the sample: `E(r) = Σ_k a(k)·J(k)·exp(2πi[k_x x + k_y y + k_z z]) Δk²`, the beam travelling towards +z, so z is again the height above the focus and a mask at `(u, v)` sits at the wave vector `(k_x, k_y)` it shapes.  Leutenegger's library transforms with `exp(−i k·r)`: its pupil x is uipsf's −u. [`test_excitation.py::test_the_focal_field_is_leuteneggers_when_weighted_as_his`]
+
 Above the critical angle, the axial wave numbers take the `+i·|·|` branch of the square root, so `exp(2πi k_z d)` decays. [`test_optics.py::test_above_the_critical_angle_kz_in_the_medium_is_positive_imaginary_so_depth_decays`]
 
 **The pupil grid.** P × P samples at `u, v = (i − (P−1)/2)·2/P`:

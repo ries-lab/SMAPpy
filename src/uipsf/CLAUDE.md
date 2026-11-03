@@ -35,6 +35,7 @@ SMAPpy's whole suite (`python -m pytest tests -q -n auto`) includes these.
 - The oracles:
   - `tests/uipsf_tests/fixtures/oracle_v1.npz` comes from uiPSF v1 (TensorFlow) via `scripts/uipsf/make_oracles_v1.py`. Regenerate it only in a TF environment, against uiPSF `test_roi` b367f00.
   - `tests/uipsf_tests/oracles/vecfit.py` is the TU Delft model, ported in its own conventions.
+  - `tests/uipsf_tests/fixtures/oracle_focus.npz` holds focal fields from Leutenegger's library (LGPL, an oracle only, never imported by uipsf) via `scripts/uipsf/make_oracles_focus.py` and a SimuFLUX checkout: the excitation beam's oracle.
   - A change to the optics must keep `tests/uipsf_tests/test_oracles.py` passing. If it departs from v1 on purpose, say so in `docs/uipsf/conventions.md` with a test that pins the departure, as the even-region blur does.
 - CI (`.github/workflows/uipsf.yml`) runs the fast tier on Linux, macOS and Windows (CPU) when these paths change.
 
