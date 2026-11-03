@@ -259,6 +259,34 @@ the SLM's retardance error and its axis angle (Deguchi's notebook), and the zero
 double helix on the widefield bead pipeline, where z stacks are routine.  It is the cheapest way to settle
 the mask's gradients, sampling and identifiability (S1, §9).
 
+**Measured on real double-helix beads** (November 2026, `benchmarks/uipsf/real/dh_beads.py`, results in
+`benchmarks/uipsf/results/dh_beads.jsonl`).  Two plates, one bead each: Moerner's (Barentine et al. 2025, 61
+planes at 50 nm, 120 nm pixels, objective not stated, NA 1.35 assumed) and DHPSFU's (Zhang et al. 2025, a
+Double Helix Optics far-red plate, 1.27 NA water, 207 nm pixels, the field's most isolated bead, every other
+plane).  Photons from each stack's own noise (the gains are not published), so the deviances compare models
+on a set, not sets.  Mean deviance per pixel (1 at the noise):
+
+| model | Moerner | DHPSFU |
+| --- | --- | --- |
+| Zernikes to order 8, flat start | 95.7 | 70.9 |
+| Zernikes to order 12, flat start | 68.9 | 66.7 |
+| Pavani double helix + Zernikes to 4 | 46.1 | 67.2 |
+| Pavani double helix + Zernikes to 8 | **28.6** | **50.9** |
+
+- *Prasad's zones are not a real plate's design*: their lobes came out broad and smeared.  Pavani & Piestun
+  2008's design -- the phase of a sum of Gauss–Laguerre modes LG(k, 2k + 1) -- reproduces Moerner's bead by
+  eye (lobes, separation, rotation over ±1.2 µm) and is now `DoubleHelix`'s default.
+- *The mask as the base wins*: the design with Zernikes to order 8 beats free Zernikes to order 12 by 1.0 M
+  nats (Moerner) and 0.14 M (DHPSFU).  Part of that may be the start: free Zernikes from a flat pupil can stop in
+  a poor optimum, and the mask is also how a fit of an engineered PSF gets a good one.
+- *Neither reaches the noise*: 29 and 51 per pixel, a blur of 87 and 120 nm taking up the rest.  The plates are
+  optimised beyond Pavani's equal-weight design, DHPSFU's more (it turns over ±2 µm, longer than five modes
+  give).  Next: the modes' weights as the design's own parameters, or the mask as an image.
+- *The centre as a diagnostic*: stable on Moerner's plate (0.10 then 0.09 of the pupil radius off in x, with
+  Zernikes to 4 and to 8), not on DHPSFU's (0.25, then 0.05): where the design is wrong, the centre takes up
+  what the design misses, and its CRLB (10⁻⁴) says nothing about that.  A freed placement is a misalignment
+  only once the design fits.
+
 ## 7. What trades with what, and how to separate it
 
 The roadmap names the mask's trades: decentration vs coma, scale vs defocus and spherical, α vs ε.  For

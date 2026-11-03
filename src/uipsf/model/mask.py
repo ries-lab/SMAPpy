@@ -56,7 +56,9 @@ class MaskSpec:
     charge: int = 1                       # vortex: the topological charge ℓ
     radius: float = 1 / math.sqrt(2) + 0.03   # top-hat: the π step's radius (SimuFLUX's, `library/pishift.py`)
     delta: float = 0.0                    # half-moon: the phase of the half without the π, moving the zero
-    zones: int = 5                        # double helix: the number of annular zones
+    design: str = "pavani"                # double helix: "pavani" (Gauss–Laguerre modes) or "prasad" (zones)
+    zones: int = 5                        # double helix: the number of modes (pavani) or annular zones (prasad)
+    waist: float = 0.4                    # double helix, pavani: the modes' waist w, in pupil radii
     zernike: dict = field(default_factory=dict)   # zernike: the design, {Noll index: rad}
     centre: tuple[float, float] = (0.0, 0.0)
     rotation: float = 0.0
@@ -203,16 +205,48 @@ class HalfMoon(PhaseMask):
 
 
 class DoubleHelix(PhaseMask):
-    """Annular zones of vortices whose charge grows by 2 from zone to zone, the zones' edges at √(k/L): Prasad's
-    rotating PSF with two lobes (Prasad 2013, Opt Lett 38:585).  An idealisation: a commercial double-helix plate
-    is an optimised design, which this approximates; how well is for the data to say."""
+    """The double helix, two designs (``design``):
+
+    - **pavani** (the default): the phase of a sum of Gauss–Laguerre modes LG(p, l) with (p, l) = (k, 2k + 1),
+      k = 0 … L − 1, equal weights and waist w (``waist``, in pupil radii) -- Pavani & Piestun 2008's rotating PSF,
+      the design commercial plates start from and then optimise.  Their charges 1, 3, 5, … differ by 2, which
+      makes two lobes; their Gouy phases (2p + l) grow by 4 per mode, which turns them with z.
+    - **prasad**: annular zones of vortices whose charge grows by 2 from zone to zone, the zones' edges at √(k/L)
+      (Prasad 2013, Opt Lett 38:585).  On the beads of `benchmarks/uipsf/real/dh_beads.py` its lobes came out
+      broad where the plates' are tight.
+
+    Either is an idealisation of a real plate; how close is for the data to say.  The sign of ``charge`` is the
+    handedness, which way the lobes turn with z."""
     kind = "double helix"
 
     def phase(self, p, u, v):
+        hand = 1 if self.spec.charge >= 0 else -1
         L = int(self.spec.zones)
-        rho = torch.sqrt(u * u + v * v)
-        charge = sum(2 * self.step(rho - math.sqrt(k / L)) for k in range(1, L))
-        return charge * torch.atan2(v, u)
+        rho2 = u * u + v * v
+        if self.spec.design == "prasad":
+            rho = torch.sqrt(rho2)
+            charge = sum(2 * self.step(rho - math.sqrt(k / L)) for k in range(1, L))
+            return hand * charge * torch.atan2(v, u)
+        if self.spec.design != "pavani":
+            raise ValueError(f"no double-helix design {self.spec.design!r}: pavani or prasad")
+        x = 2 * rho2 / self.spec.waist ** 2
+        phi = hand * torch.atan2(v, u)
+        re, im = torch.zeros_like(x), torch.zeros_like(x)
+        for k in range(L):
+            pk, lk = k, 2 * k + 1
+            norm = math.sqrt(math.factorial(pk) / math.factorial(pk + lk))
+            amp = norm * x ** (lk / 2) * _laguerre(pk, lk, x) * torch.exp(-x / 2)
+            re = re + amp * torch.cos(lk * phi)
+            im = im + amp * torch.sin(lk * phi)
+        return torch.atan2(im, re)
+
+
+def _laguerre(p: int, a: int, x: torch.Tensor) -> torch.Tensor:
+    """The generalised Laguerre polynomial L_p^a(x)."""
+    out = torch.zeros_like(x)
+    for j in range(p + 1):
+        out = out + (-1) ** j * math.comb(p + a, p - j) / math.factorial(j) * x ** j
+    return out
 
 
 class ZernikeMask(PhaseMask):
@@ -270,7 +304,7 @@ def config(spec: MaskSpec) -> dict:
     elif spec.kind == "half-moon":
         out["delta"] = float(spec.delta)
     elif spec.kind == "double helix":
-        out["zones"] = int(spec.zones)
+        out.update(design=spec.design, zones=int(spec.zones), charge=int(spec.charge), waist=float(spec.waist))
     elif spec.kind == "zernike":
         out["zernike"] = {str(j): float(v) for j, v in spec.zernike.items()}
     out.update(centre=[float(c) for c in spec.centre], rotation=float(spec.rotation), scale=float(spec.scale),

@@ -2508,8 +2508,9 @@ about 11 kB per value.  Available memory is psutil's where installed, else ``Mem
 
 A mask is an analytic design Φ(u′, v′) in units of the objective's pupil radius, placed on the pupil by
 (u′, v′) = R(−θ)((u, v) − c)/s with transmission exp(iαΦ): `Vortex` (charge ℓ), `TopHat` (π inside a radius,
-its own parameter), `HalfMoon` (π on one half, δ on the other), `DoubleHelix` (Prasad's annular vortex zones,
-an idealisation of a commercial plate) and `ZernikeMask` (a design given as Zernikes, moving as one block:
+its own parameter), `HalfMoon` (π on one half, δ on the other), `DoubleHelix` (Pavani & Piestun's sum of
+Gauss–Laguerre modes by default, Prasad's annular vortex zones as ``design="prasad"``; idealisations of a
+commercial plate) and `ZernikeMask` (a design given as Zernikes, moving as one block:
 the tetrapod, the saddle point).
 
 - **Parameters** `mask.centre`, `mask.rotation`, `mask.scale`, `mask.alpha` and a mask's own (`mask.radius`,
@@ -2526,5 +2527,9 @@ the tetrapod, the saddle point).
 - **Measured** (`test_phase_mask.py`): beads simulated through a vortex in emission, 0.06/−0.04 of the pupil
   radius off, with astigmatism and coma: the calibration finds the centre to 0.01 and Noll 5–8 to 0.03 rad
   (8 beads × 21 slices, 3 s on four CPU cores).
-- **Not yet**: the settings form (SMAPpy's `PSFModelSettings` has no mask section), user masks as images, the
-  freed parameters' report (value, CRLB, nats gained), real engineered-PSF beads.
+- **On real double-helix beads** (`benchmarks/uipsf/real/dh_beads.py`, scanned-psfs.md §6): the Pavani design
+  with Zernikes to order 8 beats free Zernikes to order 12 (28.6 against 68.9 deviance per pixel on Moerner's
+  bead, 50.9 against 66.7 on DHPSFU's) but stays far from the noise; the freed centre is stable only where the
+  design fits.
+- **Not yet**: the settings form (SMAPpy's `PSFModelSettings` has no mask section), the design's own weights,
+  user masks as images, the freed parameters' report (value, CRLB, nats gained).

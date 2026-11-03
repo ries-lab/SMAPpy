@@ -67,3 +67,17 @@ v2 does not write this format (plan §10.2); the files are read only, as benchma
   - slices 1–39 of 41.
   `benchmarks/uipsf/real/zenodo_1ch_beads.py --source raw` cuts the same beads from the stacks in the camera's frame and SMAPpy's photons.
 - The 1ch beads have non-square pixels (127 × 116 nm). That is useful as a test, because v1's bead kernel swaps x and y for non-square pixels (review F1, minor).
+
+## Engineered-PSF beads (not in the uiPSF archive)
+
+Real beads behind phase masks for the masks of `model/mask.py`, under ``~/.cache/uipsf/engineered`` (or
+``$UIPSF_ENGINEERED``), each set with ``raw/`` as downloaded and ``data/`` unpacked; all CC BY 4.0.  Read by
+`benchmarks/uipsf/real/dh_beads.py`.
+
+| folder | source | what |
+| --- | --- | --- |
+| `dh_moerner2026/` | Barentine, Balaji, Moerner, Zenodo 20402153 (`data.zip`) | one double-helix bead, 61 × 40 × 40, 50 nm, 120 nm pixels, iXon 897, frames averaged |
+| `dh_dhpsfu2025/` | Zhang, Ochirova, Ponjavic, Zenodo 16357203 (`Calib.tif`, `Stack0.tif` out of `Real_dataset_Tcell.zip`) | a double-helix bead field, 127 × 75 × 75, 40 nm, 207 nm pixels; DH PAINT of a T cell, 5000 frames |
+| `tetrapod_liteloc/` | Fei, Fu, Shi … Li, Zenodo 15696718 | DMO 6 µm tetrapod beads, 61 × 512 × 512, 100 nm, 110 nm pixels, NA 1.35 silicone, with the authors' SMAP calibration |
+| `vortex_hulleman2021/` | Hulleman et al., 4TU 10.4121/13031837 | fixed ATTO 565 z stacks with and without a vortex plate (4TU unreachable when tried) |
+
