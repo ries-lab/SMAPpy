@@ -197,13 +197,13 @@ class RegisterSettings:
 
 def resolve_arrangement(settings: RegisterSettings, microscope=None,
                         camera: str = "") -> RegisterSettings:
-    """``settings`` with *microscope* spelt out: the layout, the main half and the split from
+    """``settings`` with *microscope* spelt out: the layout, the main channel and the split from
     the microscope's entry (`microscope_db.arrangement_of`; ``microscope`` a summary, a
     `MicroscopeResolution` or an entry's name), what is chosen by hand kept as it is.
 
     A layout on *microscope* with no entry that gives one is refused, saying what to choose: the
-    arrangement is never guessed.  A main half on *microscope* without one is the left or upper
-    half, as the dual calibration has always taken it."""
+    arrangement is never guessed.  A main channel on *microscope* without one is the left or upper
+    side of the chip, as the dual calibration has always taken it."""
     from .. import microscope_db
     found = microscope_db.arrangement_of(microscope, camera)
     layout = settings.layout
@@ -270,10 +270,10 @@ BEAD_HELP = {
 
 @dataclass
 class DualColorSettings(CalibrationSettings):
-    """A single-channel calibration's settings, and the split between the
-    halves: the same `RegisterSettings` a movie registration reads, with a
-    bead slide's defaults.  With the layout on *auto* it is detected from
-    the beads, by the vote a movie registration takes on its localizations."""
+    """A single-channel calibration's settings, and the arrangement of the two
+    channels: the same `RegisterSettings` a movie registration reads, with a
+    bead slide's defaults.  The arrangement is the microscope's or chosen,
+    never detected."""
     registration: RegisterSettings = param(default_factory=bead_registration,
                                            label="registration")
 
@@ -653,8 +653,8 @@ class _Mapping:
 
     def layout(self):
         """The two channels as the channel layer has them (`smappy.channels.ChannelLayout`), on the chip:
-        the main half channel 0, the secondary channel 1 flipped back along its mirror, and the map
-        between their own pixels -- this one's, read through each half's corner and flip.  A polynomial
+        the main channel 0, the secondary channel 1 flipped back along its mirror, and the map
+        between their own pixels -- this one's, read through each channel's corner and flip.  A polynomial
         registration rides as the layout's warp, exact; its projective part is the map."""
         from ..channels import ChannelLayout
         chip = geometry_layout(self.geometry)
@@ -742,13 +742,13 @@ def mirrored_spline(cal: SplineCalibration, axis: int) -> SplineCalibration:
 def with_registration(calibration: DualColorCalibration, transform) -> DualColorCalibration:
     """``calibration``'s two PSFs with ``transform``'s registration (a `ChannelTransform`): a splitter
     that moved since the beads, the PSFs not.  The main channel and the layout must be the
-    calibration's -- the main PSF was made from the main half, and fitted on the other it describes
+    calibration's -- the main PSF was made from the main channel, and fitted on the other it describes
     the wrong light -- so another is refused, not swapped."""
     for key in ("layout", "main_channel"):
         mine, theirs = calibration.geometry.get(key), transform.geometry.get(key)
         if mine is not None and theirs is not None and mine != theirs:
             raise ValueError(f"the registration's {key.replace('_', ' ')} is {theirs}, the calibration's "
-                             f"{mine}: its PSFs would be fitted on the wrong halves")
+                             f"{mine}: its PSFs would be fitted on the wrong channels")
     combined = DualColorCalibration(calibration.main, calibration.secondary,
                                     np.asarray(transform.transformation, float), dict(transform.geometry),
                                     dict(calibration.parameters,
@@ -802,7 +802,7 @@ def resolved_geometry(settings, stacks, report=None, microscope=None) -> DualCol
         microscope = beads_microscope(stacks)
     resolved = resolve_arrangement(g, microscope)
     if report and g.layout == 'microscope':
-        report(f"Layout: {resolved.layout}, main half {resolved.main_channel}, the microscope's")
+        report(f"Layout: {resolved.layout}, main channel {resolved.main_channel}, the microscope's")
     return replace(settings, registration=resolved)
 
 
@@ -868,7 +868,7 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
     for ch, collection in enumerate(channels):
         positions = []
         for rec, volume in zip(collection.records, collection.volumes):
-            # Same objective planes in both halves; fit x/y only, never a channel z correction.
+            # Same objective planes in both channels; fit x/y only, never a channel z correction.
             mid = volume.shape[0]//2
             center = volume.shape[-1]//2
             roi = volume[max(0, mid-5):mid+6, center-6:center+7, center-6:center+7].mean(axis=0)

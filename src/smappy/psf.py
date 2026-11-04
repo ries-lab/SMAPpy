@@ -327,13 +327,13 @@ class GlobalSplinePSF(_GlobalPSF):
     def photon_scales(self) -> np.ndarray:
         """What one fitted photon of each channel is: `signal_integral`.
 
-        A dual bead calibration normalises both halves by the *main* half's
+        A dual bead calibration normalises both channels by the *main* channel's
         integral (`calibrate.core.positive_pair_models`), so that the pair
         keeps the beads' brightness split: the secondary spline integrates to
         that split, not to one.  A photon number fitted against it is then in
         bead units, and read as photons it put ``photons_ch1`` out by the
         split -- the total 3.4x the truth for a splitter sending a fifth of
-        the light to the second half -- and the ratio against the beads'
+        the light to the second channel -- and the ratio against the beads'
         rather than the dye's.  SMAP divides by the same number
         (``PhotonRatios / normf``).  A calibration without the record (SMAP's,
         one built by hand) is taken to be normalised per channel.

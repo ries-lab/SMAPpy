@@ -10,15 +10,22 @@ is typed the way the camera editor types a map: ``on: 28000; off: 4000``, a pixe
 
 An entry starts from an EMU configuration (*Import EMU configuration...*, `io.emu`), from
 scratch, or from a shipped one; *Check with a file...* shows, as it is edited, what the
-entry makes of a stack.  Saving writes the user's ``microscopes.json`` and keeps what the
-entry said before as a version, dated (*old version until*: the EMU configuration's date
-after an import, else today), so older files are still read as they were taken.
+entry makes of a stack, and the *channels* tab draws the split on its first frame.  Saving
+writes the user's ``microscopes.json`` and keeps what the entry said before as a version,
+dated (*old version until*: the EMU configuration's date after an import, else today), so
+older files are still read as they were taken; the *versions* tab shows them, their dates
+editable.  The objective's pupils (*PSF*) are kept by PSF calibration, never typed: the tab
+draws them and can drop one.
+
+What is drawn is drawn by module-level functions (`draw_channels`, `draw_pupil`) on the
+entry and arrays, so a test or a page reads the same picture without the window.
 """
 from __future__ import annotations
 
 import datetime
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -26,7 +33,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormL
                                QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import microscope_db
-from ..microscope_db import FROM_NAME, OBJECTIVE, READS, Microscope
+from ..microscope_db import FROM_NAME, READS, Microscope
 
 # ------------------------------------------------------------- text in a cell
 
@@ -89,6 +96,141 @@ def parse_follows(device: str, text: str) -> Any:
             "values": FROM_NAME if text == FROM_NAME else parse_map(text)}
 
 
+# ------------------------------------------------------------------ drawings
+
+#: an entry's ``layout`` where its arms have no sides yet: how the optics lie, which arm is where
+#: read from data later (`Microscope.arrangement`)
+LAYOUTS = ("", "right-left", "right-left mirrored", "up-down", "up-down mirrored")
+
+#: immersions offered; any other is typed
+IMMERSIONS = ("oil", "water", "silicone", "glycerol", "air")
+
+
+def _noll(j: int):
+    """Noll's index as (n, m), the order of `uipsf.optics.zernike.noll_to_nm` -- copied, not
+    imported: uipsf imports torch, and the manager must open without it."""
+    n = 0
+    while (n + 1) * (n + 2) // 2 < j:
+        n += 1
+    m = n % 2 + 2 * ((j - n * (n + 1) // 2 - 1 + (n + 1) % 2) // 2)
+    return n, (-m if j % 2 else m) if m else 0
+
+
+def zernike(j: int, rho: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    """Noll-normalised Zernike polynomial ``j``, unit RMS over the disc, as uiPSF's."""
+    from math import factorial
+    n, m = _noll(j)
+    a = abs(m)
+    radial = sum((-1) ** k * factorial(n - k)
+                 / (factorial(k) * factorial((n + a) // 2 - k) * factorial((n - a) // 2 - k))
+                 * rho ** (n - 2 * k) for k in range((n - a) // 2 + 1))
+    norm = np.sqrt(n + 1) if m == 0 else np.sqrt(2 * n + 2)
+    return norm * radial * (np.sin(a * phi) if m < 0 else np.cos(a * phi))
+
+
+def pupil_phase(pupil: Dict[str, Any], size: int = 65) -> np.ndarray:
+    """A kept pupil's phase over the aperture, nm of wavefront, NaN outside: the sum of its
+    Zernikes (`phase_nm`, Noll's index to nm), on a ``size`` square grid across the disc."""
+    axis = np.linspace(-1, 1, size)
+    x, y = np.meshgrid(axis, axis)
+    rho, phi = np.hypot(x, y), np.arctan2(y, x)
+    phase = np.zeros_like(rho)
+    for j, value in (pupil.get("phase_nm") or {}).items():
+        phase += float(value) * zernike(int(j), rho, phi)
+    phase[rho > 1] = np.nan
+    return phase
+
+
+def draw_pupil(ax, pupil: Optional[Dict[str, Any]]) -> None:
+    """The pupil's phase, its largest modes and γ or the magnitude's count in the title."""
+    ax.set_axis_off()
+    if not pupil:
+        ax.text(0.5, 0.5, "choose a pupil", ha="center", va="center", transform=ax.transAxes,
+                color="gray")
+        return
+    phase = pupil_phase(pupil)
+    limit = max(float(np.nanmax(np.abs(phase))), 1.0)
+    image = ax.imshow(phase, cmap="RdBu_r", vmin=-limit, vmax=limit, origin="lower")
+    ax.figure.colorbar(image, ax=ax, shrink=0.8, label="phase (nm)")
+    top = sorted((pupil.get("phase_nm") or {}).items(), key=lambda kv: -abs(float(kv[1])))[:3]
+    modes = ", ".join(f"Z{j} {float(v):+.0f}" for j, v in top)
+    extra = (f"γ {pupil['gamma']:g}" if pupil.get("gamma") is not None else
+             f"{len(pupil.get('magnitude') or {})} magnitude modes")
+    ax.set_title(f"{pupil.get('kind', '?')}: {modes}; {extra}", fontsize=9)
+
+
+def draw_channels(ax, entry: Microscope, camera: str = "", roi=None,
+                  frame: Optional[np.ndarray] = None) -> None:
+    """The entry's channels on the chip, over ``frame`` where there is one: its regions (a 4Pi's)
+    or its two-arm split cut on the camera ROI ``roi`` (x0, y0, width, height) as the fitters cut
+    it (`Microscope.split_layout`), the main channel solid, each labelled with its arm and its
+    flip.  What keeps it from being drawn is said in its place."""
+    ax.clear()
+    if frame is not None and roi is not None:
+        x0, y0, w, h = roi
+        ax.imshow(frame, cmap="gray", origin="upper",
+                  extent=(x0 - 0.5, x0 + w - 0.5, y0 + h - 0.5, y0 - 0.5))
+    arms = entry.ordered_channels()
+    try:
+        layout = entry.channel_layout(camera)
+        names = [c.name for c in entry.channels if c.region_for(camera or entry.camera)]
+        if layout is None:
+            if roi is None:
+                raise ValueError("check with a file to draw the split on its frame")
+            layout = entry.split_layout(roi, camera)
+            names = [c.name for c in arms[:2]] or ["main", "other"]
+        if layout is None:
+            raise ValueError("no arrangement: give the arms their sides, or a layout")
+    except ValueError as error:
+        ax.text(0.5, 0.5, str(error), ha="center", va="center", wrap=True,
+                transform=ax.transAxes, color="gray")
+        ax.set_axis_off()
+        return
+    from matplotlib.patches import Rectangle
+    for c, ((x, y, w, h), (fx, fy)) in enumerate(zip(layout.regions, layout.flips)):
+        main = c == 0
+        ax.add_patch(Rectangle((x - 0.5, y - 0.5), w, h, fill=False, lw=2 if main else 1.5,
+                               ls="-" if main else "--", color="#e0453a" if main else "#3a8ee0"))
+        flip = " ".join(axis for axis, on in (("x", fx), ("y", fy)) if on)
+        label = (names[c] if c < len(names) else f"channel {c}") + (" (main)" if main else "") \
+            + (f", mirrored {flip}" if flip else "")
+        ax.text(x + w / 2 - 0.5, y + h / 2 - 0.5, label, ha="center", va="center", fontsize=9,
+                color="white", bbox=dict(facecolor="black", alpha=0.5, lw=0))
+    xs = [r[0] for r in layout.regions] + [r[0] + r[2] for r in layout.regions]
+    ys = [r[1] for r in layout.regions] + [r[1] + r[3] for r in layout.regions]
+    if roi is not None:
+        xs += [roi[0], roi[0] + roi[2]]
+        ys += [roi[1], roi[1] + roi[3]]
+    # a margin, so that a channel's edge on the frame's is not hidden under the axes' frame
+    pad = 0.02 * max(max(xs) - min(xs), max(ys) - min(ys))
+    ax.set_xlim(min(xs) - 0.5 - pad, max(xs) - 0.5 + pad)
+    ax.set_ylim(max(ys) - 0.5 + pad, min(ys) - 0.5 - pad)
+    ax.set_aspect("equal")
+    ax.set_xlabel("chip x (px)")
+    ax.set_ylabel("chip y (px)")
+
+
+def version_text(version: Dict[str, Any]) -> str:
+    """What a version holds, by section and name: what the entry said differently before."""
+    parts = []
+    for key, value in version.items():
+        if key == "until":
+            continue
+        parts.append(f"{key}: {', '.join(map(str, value))}" if isinstance(value, dict) else key)
+    return "; ".join(parts) or "nothing"
+
+
+def unnamed_filters(entry: Microscope) -> List[str]:
+    """The states of the filter devices a wavelength is read from whose name gives none, and that
+    the filters table does not type: what a fit in them would miss."""
+    devices = {c.filter for c in entry.channels if c.filter}
+    devices |= {raw["device"] for raw in entry.parameters.values()
+                if isinstance(raw, dict) and raw.get("values") == FROM_NAME}
+    return [state for name in devices if name in entry.devices
+            for state in entry.devices[name].states
+            if microscope_db.filter_wavelength(state, entry.filters) is None]
+
+
 # ----------------------------------------------------------------- the window
 
 def _table(headers: List[str], tip: str) -> QTableWidget:
@@ -120,9 +262,10 @@ TABS = (
     ("identify", ["tag", "value"],
      "tags that must all match for a file to be this microscope: take a device that stays "
      "with it (a laser's serial number), not the camera, which moves"),
-    ("objective", ["", "value"],
-     "the objective: its name, NA, immersion and the immersion's refractive index -- what uiPSF "
-     "reads; no magnification, the pixel on the sample is the camera's"),
+    ("filters", ["filter", "wavelength_nm", "band from", "band to"],
+     "a filter whose name is not its band (a long pass, an empty slot behind the splitting "
+     "dichroic): the wavelength a PSF is drawn at, or the band it passes; a filter named as its "
+     "band (676/37) needs no row"),
     ("devices", ["name", "tags", "read", "tolerance", "states", "EMU control"],
      "each device: the Micro-Manager tags it is read from (an older name after a ' | '), how "
      "(exact, nearest, value), and its states as 'name: reading; ...'"),
@@ -130,11 +273,16 @@ TABS = (
      "n_coverslip, coverslip_design_um, wavelength_nm, pixel_nm, modality, astigmatism_nm ...: a "
      "value, or a device it follows "
      "and 'state: value; ...' ('from the name' reads a filter's band)"),
-    ("channels", ["arm", "filter", "side", "mirror"],
-     "the split: its arms, transmitted first, the filter device each follows, the half of "
-     "the chip it lands on with this camera (left, right, upper, lower) and the axis the optics "
-     "flip it along against the other arm (x, y; empty for none)"),
+    ("channels", ["arm", "filter", "side", "mirror", "region"],
+     "the split: its arms, transmitted first, the filter device each follows, the side of "
+     "the chip it lands on with this camera (left, right, upper, lower), the axis the optics "
+     "flip it along against the other arm (x, y; empty for none), and for more than two arms "
+     "(4Pi) its rectangle on the chip, 'x y width height'"),
 )
+
+#: the order of the tabs; the tables' in `TABS`, the forms' built in place
+ORDER = ("identify", "objective", "filters", "devices", "parameters", "channels", "PSF",
+         "versions")
 
 
 class MicroscopeManager(QWidget):
@@ -149,6 +297,7 @@ class MicroscopeManager(QWidget):
         self._versions: List[Dict[str, Any]] = []
         self._metadata: Dict[str, Any] = {}
         self._file = ""
+        self._frame: Optional[np.ndarray] = None
         layout = QHBoxLayout(self)
 
         left = QVBoxLayout()
@@ -195,27 +344,40 @@ class MicroscopeManager(QWidget):
 
         self.tabs = QTabWidget()
         self.tables: Dict[str, QTableWidget] = {}
+        pages: Dict[str, QWidget] = {}
         for title, headers, tip in TABS:
             page = QWidget()
             box = QVBoxLayout(page)
             table = _table(headers, tip)
             self.tables[title] = table
-            box.addWidget(table)
+            box.addWidget(table, 1)
             buttons = QHBoxLayout()
             add, remove = QPushButton("Add row"), QPushButton("Remove row")
             add.clicked.connect(lambda _=False, t=table: t.insertRow(t.rowCount()))
-            remove.clicked.connect(lambda _=False, t=table: t.removeRow(t.currentRow()))
+            remove.clicked.connect(lambda _=False, t=table: (t.removeRow(t.currentRow()),
+                                                             self.check()))
             buttons.addWidget(add)
             buttons.addWidget(remove)
             buttons.addStretch(1)
             box.addLayout(buttons)
-            self.tabs.addTab(page, title)
-        right.addWidget(self.tabs, 2)
+            pages[title] = page
+        pages["objective"] = self._objective_page()
+        self.unnamed = QLabel("")
+        self.unnamed.setStyleSheet("color: gray")
+        self.unnamed.setWordWrap(True)
+        pages["filters"].layout().insertWidget(1, self.unnamed)
+        self._arrangement(pages["channels"])
+        pages["PSF"] = self._psf_page()
+        pages["versions"] = self._versions_page()
+        for title in ORDER:
+            self.tabs.addTab(pages[title], title)
+        right.addWidget(self.tabs, 3)
 
         check = QHBoxLayout()
         self.check_button = QPushButton("Check with a file...")
         self.check_button.setToolTip("what this entry, as it stands, makes of a stack: whether it "
-                                     "recognises it, each device's state, each value")
+                                     "recognises it, each device's state, each value; the channels "
+                                     "drawn on its first frame")
         self.check_button.clicked.connect(self.choose_file)
         check.addWidget(self.check_button)
         self.file_label = QLabel("no file")
@@ -233,22 +395,13 @@ class MicroscopeManager(QWidget):
         self.until.setToolTip("saving a changed entry keeps the old one for files taken before "
                               "this day: the EMU configuration's date after an import, else today")
         save_row.addWidget(self.until)
-        self.versions_label = QLabel("")
-        self.versions_label.setStyleSheet("color: gray")
-        save_row.addWidget(self.versions_label, 1)
+        save_row.addStretch(1)
         self.save_button = QPushButton("Save")
         self.save_button.setToolTip("write the entry into your microscopes.json")
         self.save_button.clicked.connect(self.save)
         save_row.addWidget(self.save_button)
         right.addLayout(save_row)
-        # the objective's pupils (`Microscope.pupils`): kept by PSF calibration's *Add to
-        # microscope...*, not typed; said here, and carried through an edit of the rest
-        self.pupils_label = QLabel("")
-        self.pupils_label.setStyleSheet("color: gray")
-        self.pupils_label.setWordWrap(True)
-        right.addWidget(self.pupils_label)
-        self._pupils = {}
-        self._kept: Dict[str, Any] = {}
+        self._pupils: Dict[str, Dict[str, Any]] = {}
         self.message = QLabel("")
         self.message.setWordWrap(True)
         right.addWidget(self.message)
@@ -256,11 +409,126 @@ class MicroscopeManager(QWidget):
 
         for table in self.tables.values():
             table.itemChanged.connect(lambda _: self.check())
+        self.version_table.itemChanged.connect(lambda _: self.check())
         self.name.textChanged.connect(lambda _: self.check())
         self.refresh_list()
         if path:
             self.check_file(path)
-        self.resize(1000, 640)
+        self.resize(1100, 760)
+
+    # ------------------------------------------------------------- the pages
+    def _objective_page(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+        self.objective: Dict[str, Any] = {}
+        tips = {"name": "the objective as the lab calls it, 'Olympus 100x NA1.49'",
+                "NA": "the numerical aperture, the objective's nominal one: a pupil model may "
+                      "learn a slightly smaller one",
+                "immersion": "oil, water, silicone ...: what the objective is designed for",
+                "n_immersion": "the immersion's refractive index, 1.518 for oil"}
+        for name in microscope_db.OBJECTIVE:
+            if name == "immersion":
+                field = QComboBox()
+                field.setEditable(True)
+                field.addItems(("",) + IMMERSIONS)
+                field.currentTextChanged.connect(lambda _: self.check())
+            else:
+                field = QLineEdit()
+                field.textChanged.connect(lambda _: self.check())
+            field.setToolTip(tips.get(name, ""))
+            self.objective[name] = field
+            form.addRow(name, field)
+        note = QLabel("No magnification: the pixel on the sample is the camera's, per state of the "
+                      "3D lens, under parameters.")
+        note.setStyleSheet("color: gray")
+        note.setWordWrap(True)
+        form.addRow(note)
+        return page
+
+    def _arrangement(self, page: QWidget) -> None:
+        """Under the arms: the main one, the layout, the split, and the split drawn."""
+        box = page.layout()
+        form = QFormLayout()
+        self.main_channel = QComboBox()
+        self.main_channel.setToolTip("the arm the other is registered onto and whose PSF is a dual "
+                                     "calibration's main; empty: the first arm")
+        self.main_channel.currentTextChanged.connect(lambda _: self.check())
+        form.addRow("main channel", self.main_channel)
+        self.layout_choice = QComboBox()
+        self.layout_choice.addItems(LAYOUTS)
+        self.layout_choice.setToolTip("how a two-arm split lies while the arms have no sides yet; "
+                                      "the arms' sides win")
+        self.layout_choice.currentTextChanged.connect(lambda _: self.check())
+        form.addRow("layout", self.layout_choice)
+        self.split = QLineEdit()
+        self.split.setPlaceholderText("the middle of the frame")
+        self.split.setToolTip("where the second half starts on the chip, px along the split's "
+                              "axis; per camera as 'iXon 1: 256; ...'")
+        self.split.textChanged.connect(lambda _: self.check())
+        form.addRow("split position", self.split)
+        box.addLayout(form)
+        from matplotlib.figure import Figure
+        from .canvas import canvas_class
+        self.channels_figure = Figure(figsize=(4, 3), layout="constrained")
+        self.channels_canvas = canvas_class()(self.channels_figure)
+        self.channels_canvas.setMinimumHeight(220)
+        box.addWidget(self.channels_canvas, 2)
+        self.tables["channels"].itemChanged.connect(lambda _: self._fill_main())
+
+    def _psf_page(self) -> QWidget:
+        page = QWidget()
+        box = QHBoxLayout(page)
+        column = QVBoxLayout()
+        self.pupil_table = _table(["key", "kind", "from", "date"],
+                                  "the objective's pupils, kept by PSF calibration's Add to "
+                                  "microscope...: one per state of the 3D lens and colour")
+        self.pupil_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.pupil_table.itemSelectionChanged.connect(self.draw_pupil)
+        column.addWidget(self.pupil_table, 1)
+        row = QHBoxLayout()
+        remove = QPushButton("Remove pupil")
+        remove.setToolTip("drop the chosen pupil from the entry; Save keeps the entry before as "
+                          "a version")
+        remove.clicked.connect(self.remove_pupil)
+        row.addWidget(remove)
+        row.addStretch(1)
+        column.addLayout(row)
+        box.addLayout(column, 1)
+        from matplotlib.figure import Figure
+        from .canvas import canvas_class
+        self.pupil_figure = Figure(figsize=(3, 3), layout="constrained")
+        self.pupil_canvas = canvas_class()(self.pupil_figure)
+        box.addWidget(self.pupil_canvas, 1)
+        return page
+
+    def _versions_page(self) -> QWidget:
+        page = QWidget()
+        box = QVBoxLayout(page)
+        self.version_table = _table(["until", "what it said otherwise"],
+                               "the entry's older setups: each holds what the entry said before a "
+                               "change, for files taken before its day")
+        box.addWidget(self.version_table, 1)
+        row = QHBoxLayout()
+        remove = QPushButton("Remove version")
+        remove.setToolTip("forget the chosen version: the files of its days are then read as the "
+                          "next setup says")
+        remove.clicked.connect(self.remove_version)
+        row.addWidget(remove)
+        row.addStretch(1)
+        box.addLayout(row)
+        return page
+
+    def _fill_main(self) -> None:
+        arms = [_cell(self.tables["channels"], r, 0).strip()
+                for r in range(self.tables["channels"].rowCount())]
+        current = self.main_channel.currentText()
+        self.main_channel.blockSignals(True)
+        self.main_channel.clear()
+        self.main_channel.addItems([""] + [a for a in arms if a])
+        if current and self.main_channel.findText(current) < 0:
+            self.main_channel.addItem(current)
+        self.main_channel.setCurrentText(current)
+        self.main_channel.blockSignals(False)
 
     def _fill_cameras(self, current: str) -> None:
         from ..camera_db import database as cameras
@@ -312,16 +580,26 @@ class MicroscopeManager(QWidget):
             self.show_entry(found)
 
     # ---------------------------------------------------------- entry <-> tables
+    def _quiet(self, quiet: bool) -> None:
+        for widget in [*self.tables.values(), self.version_table, *self.objective.values(),
+                       self.main_channel, self.layout_choice, self.split]:
+            widget.blockSignals(quiet)
+
     def show_entry(self, entry: Microscope) -> None:
-        for table in self.tables.values():
-            table.blockSignals(True)
+        self._quiet(True)
+        for table in [*self.tables.values(), self.version_table]:
             table.setRowCount(0)
         self.name.setText(entry.name)
         self.comment.setText(entry.comment)
         for tag, value in entry.identify.items():
             _put(self.tables["identify"], [tag, value])
-        for name in OBJECTIVE:
-            _put(self.tables["objective"], [name, value_text(entry.objective.get(name))])
+        for name, field in self.objective.items():
+            text = value_text(entry.objective.get(name))
+            field.setCurrentText(text) if isinstance(field, QComboBox) else field.setText(text)
+        for name, typed in entry.filters.items():
+            band = typed.get("band_nm") or [None, None]
+            _put(self.tables["filters"], [name, value_text(typed.get("wavelength_nm")),
+                                          value_text(band[0]), value_text(band[1])])
         for name, device in entry.devices.items():
             _put(self.tables["devices"], [name, " | ".join(device.tags), device.read,
                                           value_text(device.tolerance), map_text(device.states),
@@ -330,27 +608,54 @@ class MicroscopeManager(QWidget):
             _put(self.tables["parameters"], [name, *follows_text(raw)])
         for channel in entry.channels:
             side = map_text(channel.side) if isinstance(channel.side, dict) else channel.side
-            _put(self.tables["channels"], [channel.name, channel.filter, side, channel.mirror])
+            region = (map_text(channel.region) if isinstance(channel.region, dict)
+                      else value_text(channel.region))
+            _put(self.tables["channels"], [channel.name, channel.filter, side, channel.mirror,
+                                           region])
+        self._fill_main()
+        self.main_channel.setCurrentText(entry.main_channel)
+        self.layout_choice.setCurrentText(entry.layout)
+        self.split.setText(map_text(entry.split_position) if isinstance(entry.split_position, dict)
+                           else value_text(entry.split_position))
         self._fill_cameras(entry.camera)
-        for table in self.tables.values():
-            table.blockSignals(False)
-        self._versions = list(entry.versions)
+        self._versions = [dict(v) for v in entry.versions]
+        for version in self._versions:
+            _put(self.version_table, [str(version.get("until", "")), version_text(version)])
+            self.version_table.item(self.version_table.rowCount() - 1, 1).setFlags(Qt.ItemIsEnabled)
         self._pupils = dict(entry.pupils)
-        # what the tables have no column for yet -- the objective, the filters, the arrangement,
-        # an arm's mirror and region -- carried through unchanged, as the pupils are
-        raw = entry.to_dict()
-        self._kept = {key: raw[key] for key in ("filters", "main_channel", "split_position",
-                                                 "layout") if key in raw}
-        self._kept_arms = {c.name: {"region": c.region} for c in entry.channels if c.region}
-        self.pupils_label.setText(
-            "objective pupil: " + "; ".join(f"{key} (from {p.get('source') or '?'}, {p.get('date') or '?'}"
-                                            + (")" if p.get("kind") else "; an old format, not used: keep it again)")
-                                            for key, p in self._pupils.items())
-            if self._pupils else "no objective pupil kept: PSF calibration's Add to microscope... keeps one")
-        self.versions_label.setText(
-            "versions until " + ", ".join(str(v.get("until")) for v in self._versions)
-            if self._versions else "no older versions")
+        self._fill_pupils()
+        self._quiet(False)
         self.check()
+
+    def _fill_pupils(self) -> None:
+        self.pupil_table.setRowCount(0)
+        for key, pupil in self._pupils.items():
+            _put(self.pupil_table, [key, pupil.get("kind") or "old format: keep it again",
+                                    pupil.get("source") or "?", pupil.get("date") or "?"])
+        if self._pupils:
+            self.pupil_table.selectRow(0)
+        self.draw_pupil()
+
+    def draw_pupil(self) -> None:
+        row = self.pupil_table.currentRow()
+        key = _cell(self.pupil_table, row, 0) if row >= 0 else ""
+        self.pupil_figure.clear()
+        pupil = self._pupils.get(key)
+        draw_pupil(self.pupil_figure.add_subplot(), pupil if pupil and pupil.get("kind") else None)
+        self.pupil_canvas.draw_idle()
+
+    def remove_pupil(self) -> None:
+        row = self.pupil_table.currentRow()
+        if row >= 0:
+            self._pupils.pop(_cell(self.pupil_table, row, 0), None)
+            self._fill_pupils()
+
+    def remove_version(self) -> None:
+        row = self.version_table.currentRow()
+        if row >= 0:
+            self.version_table.removeRow(row)
+            del self._versions[row]
+            self.check()
 
     def entry(self) -> Microscope:
         """The entry as the tables say; a ValueError naming what does not parse."""
@@ -368,22 +673,48 @@ class MicroscopeManager(QWidget):
                 "read": read.strip() or "exact", "states": parse_map(states, values=False),
                 **({"tolerance": float(tolerance)} if tolerance.strip() else {}),
                 **({"emu": emu.strip()} if emu.strip() else {})}
+        filters = {}
+        for name, wavelength, low, high in rows("filters"):
+            if not name.strip():
+                continue
+            typed = {}
+            if wavelength.strip():
+                typed["wavelength_nm"] = float(wavelength)
+            if low.strip() or high.strip():
+                typed["band_nm"] = [float(low) if low.strip() else None,
+                                    float(high) if high.strip() else None]
+            filters[name.strip()] = typed
+        objective = {}
+        for name, field in self.objective.items():
+            text = field.currentText() if isinstance(field, QComboBox) else field.text()
+            if text.strip():
+                objective[name] = parse_value(text) if name != "name" else text.strip()
+        split = self.split.text().strip()
+        versions = []
+        for row, version in enumerate(self._versions):
+            until = _cell(self.version_table, row, 0).strip()
+            if not microscope_db.read_date(until):
+                raise ValueError(f"version {row + 1}: {until!r} is not a day (2026-11-04)")
+            versions.append(dict(version, until=until))
         raw = {
             "name": self.name.text().strip(), "comment": self.comment.text().strip(),
             "identify": {tag.strip(): value.strip() for tag, value in rows("identify") if tag.strip()},
             "devices": devices,
             "parameters": {name.strip(): parse_follows(device, value)
                            for name, device, value in rows("parameters") if name.strip()},
-            "objective": {name.strip(): parse_value(value) for name, value in rows("objective")
-                          if name.strip() and value.strip()},
+            "objective": objective, "filters": filters,
             "channels": {arm.strip(): {"filter": filter_.strip(),
                                        "side": parse_map(side, values=False) if ":" in side
                                        else side.strip(),
                                        "mirror": mirror.strip(),
-                                       **getattr(self, "_kept_arms", {}).get(arm.strip(), {})}
-                         for arm, filter_, side, mirror in rows("channels") if arm.strip()},
-            "camera": self.camera.currentData() or "", "versions": self._versions,
-            "pupils": self._pupils, **self._kept,
+                                       **({"region": parse_map(region) if ":" in region
+                                           else parse_value(region)} if region.strip() else {})}
+                         for arm, filter_, side, mirror, region in rows("channels") if arm.strip()},
+            "main_channel": self.main_channel.currentText().strip(),
+            "layout": self.layout_choice.currentText(),
+            "split_position": (parse_map(split) if ":" in split else parse_value(split)) or None,
+            "camera": self.camera.currentData() or "", "versions": versions,
+            "pupils": self._pupils,
         }
         return Microscope.from_dict(raw)
 
@@ -396,28 +727,47 @@ class MicroscopeManager(QWidget):
 
     def check_file(self, path: str) -> None:
         try:
-            from ..io.tiff import camera_tags, open_stack
-            self._metadata = camera_tags(open_stack(path))
+            from ..io.tiff import _parse_roi, camera_tags, open_stack
+            source = open_stack(path)
+            self._metadata = camera_tags(source)
+            # the brightest of the first frames: a frame of a movie shows a few molecules, the
+            # maximum over fifty shows where each channel has light
+            self._frame = np.max(next(source.frames(chunk=50, stop=min(50, len(source))))[1],
+                                 axis=0)
+            height, width = self._frame.shape
+            self._roi = _parse_roi(self._metadata.get("ROI")) or (0, 0, width, height)
             self._file = str(path)
         except Exception as error:
-            self._metadata, self._file = {}, ""
+            self._metadata, self._file, self._frame = {}, "", None
             self.message.setText(f"{path}: {error}")
         self.check()
 
     def check(self) -> None:
-        """What the entry as typed makes of the file being checked with."""
-        self.result.setRowCount(0)
-        if not self._file:
-            self.file_label.setText("no file")
-            return
+        """What the entry as typed makes of the file being checked with, and its channels drawn."""
         from pathlib import Path
+        self.result.setRowCount(0)
         try:
             entry = self.entry()
         except (ValueError, TypeError) as error:
-            self.file_label.setText(f"{Path(self._file).name}: {error}")
+            entry = None
+            self.file_label.setText((f"{Path(self._file).name}: " if self._file else "") + str(error))
+        camera = None
+        if self._file:
+            from ..camera_db import database as cameras
+            camera = cameras().identify(self._metadata)
+        self.unnamed.setText("")
+        if entry is not None:
+            missing = unnamed_filters(entry)
+            if missing:
+                self.unnamed.setText("no wavelength in the name, and none typed here: "
+                                     + ", ".join(missing))
+            self.draw_channels(entry, camera.name if camera else "")
+        if not self._file:
+            if entry is not None:
+                self.file_label.setText("no file")
             return
-        from ..camera_db import database as cameras
-        camera = cameras().identify(self._metadata)
+        if entry is None:
+            return
         found = entry.resolve(self._metadata, camera=camera.name if camera else "", channels=2)
         recognised = entry.identifies(self._metadata)
         self.file_label.setText(f"{Path(self._file).name}: "
@@ -425,6 +775,13 @@ class MicroscopeManager(QWidget):
                                    "not recognised by the identify tags (shown as if chosen)"))
         from .microscope_view import fill_rows
         fill_rows(self.result, found.rows())
+
+    def draw_channels(self, entry: Microscope, camera: str = "") -> None:
+        self.channels_figure.clear()
+        draw_channels(self.channels_figure.add_subplot(), entry, camera,
+                      getattr(self, "_roi", None) if self._file else None,
+                      self._frame if self._file else None)
+        self.channels_canvas.draw_idle()
 
     # ------------------------------------------------------------------ EMU
     def import_emu(self) -> None:
@@ -485,8 +842,9 @@ class MicroscopeManager(QWidget):
             self.message.setText("the microscope needs a name")
             return None
         until = self.until.text().strip() or None
-        entry.versions = []                         # save_microscope keeps the stored ones
-        path = microscope_db.save_microscope(entry, until=until)
+        # the versions as the tab has them -- a date moved, one removed -- and the change saved now
+        # added to them as a new one
+        path = microscope_db.save_microscope(entry, until=until, versions=entry.versions)
         self.refresh_list(select=entry.name)
         self.load(entry.name)
         self.message.setText(f"saved to {path}")

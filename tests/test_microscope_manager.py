@@ -77,7 +77,8 @@ def test_the_manager_shows_an_entry_as_tables_and_reads_it_back(app):
         shipped = microscope_db.database().get(name)
         manager.load(name)
         back = manager.entry().to_dict()
-        for part in ("identify", "devices", "parameters", "channels", "camera", "versions"):
+        for part in ("identify", "devices", "parameters", "channels", "camera", "versions",
+                     "objective", "filters", "main_channel", "layout", "split_position", "pupils"):
             assert back.get(part) == shipped.to_dict().get(part), (name, part)
     manager.close()
 
@@ -90,9 +91,7 @@ def test_the_manager_checks_the_entry_against_a_file_as_it_is_edited(app, tmp_pa
     shown = {manager.result.item(r, 0).text(): manager.result.item(r, 1).text()
              for r in range(manager.result.rowCount())}
     assert shown["device: 3DA"] == "on" and shown["pixel_nm"] == "127 × 116"
-    table = manager.tables["objective"]
-    row = next(r for r in range(table.rowCount()) if table.item(r, 0).text() == "NA")
-    table.item(row, 1).setText("1.3")                        # checked again at once
+    manager.objective["NA"].setText("1.3")                   # checked again at once
     shown = {manager.result.item(r, 0).text(): manager.result.item(r, 1).text()
              for r in range(manager.result.rowCount())}
     assert shown["NA"] == "1.3"
@@ -115,15 +114,13 @@ def test_saving_writes_the_users_file_and_keeps_the_old_entry_dated(app, config)
     from smappy.gui.microscope_editor import MicroscopeManager
     manager = MicroscopeManager()
     manager.load("M2")
-    table = manager.tables["objective"]
-    row = next(r for r in range(table.rowCount()) if table.item(r, 0).text() == "NA")
-    table.item(row, 1).setText("1.45")
+    manager.objective["NA"].setText("1.45")
     manager.until.setText("2026-10-01")
     assert manager.save()
     stored = json.loads((config / "microscopes.json").read_text())["microscopes"]
     assert [m["name"] for m in stored] == ["M2"]
     assert stored[0]["objective"]["NA"] == 1.45
-    # what the tables have no column for is carried through: the arrangement, the mirror
+    # the arrangement and the mirror, read back from the channels tab
     assert stored[0]["main_channel"] == "transmitted"
     assert stored[0]["channels"]["reflected"]["mirror"] == "x"
     # the Evolve setup it shipped with, then what this save replaced
@@ -348,7 +345,7 @@ def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_surviv
     assert entry.pupil_for({"3DA": "on"}, 700.0)["gamma"] == 0.36
     manager = MicroscopeManager()
     manager.show_entry(entry)
-    assert "3DA: on" in manager.pupils_label.text()
+    assert manager.pupil_table.item(0, 0).text() == "3DA: on \u00b7 far red"
     assert manager.entry().pupils == entry.pupils
     manager.close()
 
@@ -394,3 +391,104 @@ def test_a_pupil_without_its_kind_is_neither_kept_nor_found(app, tmp_path, confi
     entry = copy.deepcopy(microscope_db.database().get("M2"))           # not the cached database's
     entry.pupils["3DA: on"] = old
     assert entry.pupil_for({"3DA": "on"}) is None
+
+
+# ------------------------------------------------------------- the third round's tabs
+
+def test_the_channels_are_drawn_on_the_chip_where_the_fitters_cut_them():
+    from matplotlib.figure import Figure
+    from smappy.gui.microscope_editor import draw_channels
+    m2 = microscope_db.database().get("M2")
+    ax = Figure().add_subplot()
+    draw_channels(ax, m2, "iXon 1", (100, 0, 64, 32), np.zeros((32, 64)))
+    (main, other) = ax.patches
+    # the transmitted arm on the right half of the frame, the main one; its corner on the chip
+    assert (main.get_x(), main.get_width()) == (131.5, 32) and other.get_x() == 99.5
+    labels = [t.get_text() for t in ax.texts]
+    assert labels == ["transmitted (main)", "reflected, mirrored x"]
+    # a 4Pi's regions need no file: they are on the chip already
+    ax = Figure().add_subplot()
+    draw_channels(ax, microscope_db.database().get("4Pi-SMS example"))
+    assert [p.get_x() + 0.5 for p in ax.patches] == [93, 469, 1409, 1769]
+    # a split without a file says what it needs instead
+    ax = Figure().add_subplot()
+    draw_channels(ax, m2, "iXon 1")
+    assert not ax.patches and "check with a file" in ax.texts[0].get_text()
+
+
+def test_the_manager_draws_the_split_on_the_files_frame_as_it_is_edited(app, tmp_path):
+    from smappy.gui.microscope_editor import MicroscopeManager
+    manager = MicroscopeManager(path=a_tiff(tmp_path / "beads.ome.tif", M2_BEADS))
+    manager.load("M2")
+    assert len(manager.channels_figure.axes[0].patches) == 2
+    manager.split.setText("10")                              # the split moved: drawn again
+    main = manager.channels_figure.axes[0].patches[0]
+    assert (main.get_x(), main.get_width()) == (9.5, 22)
+    assert manager.entry().split_position == 10.0
+    manager.split.setText("40")                              # outside the frame: said, not drawn
+    assert "outside the frame" in manager.channels_figure.axes[0].texts[0].get_text()
+    manager.close()
+
+
+def test_a_versions_day_is_moved_and_a_version_removed_where_it_is_saved(app, config):
+    from smappy.gui.microscope_editor import MicroscopeManager
+    manager = MicroscopeManager()
+    manager.load("M2")
+    assert manager.version_table.item(0, 0).text() == "2026-07-15"
+    assert "camera" in manager.version_table.item(0, 1).text()
+    manager.version_table.item(0, 0).setText("2026-07-20")
+    assert manager.save()
+    stored = json.loads((config / "microscopes.json").read_text())["microscopes"][0]
+    assert [v["until"] for v in stored["versions"]] == ["2026-07-20"]
+    manager.version_table.selectRow(0)
+    manager.remove_version()
+    assert manager.save()
+    assert microscope_db.database().get("M2").versions == []
+    manager.version_table.setRowCount(0)
+    manager.close()
+
+
+def test_a_day_that_is_not_one_is_refused_before_saving(app, config):
+    from smappy.gui.microscope_editor import MicroscopeManager
+    manager = MicroscopeManager()
+    manager.load("M2")
+    manager.version_table.item(0, 0).setText("July")
+    assert manager.save() is None and "not a day" in manager.message.text()
+    manager.close()
+
+
+def test_a_kept_pupil_is_drawn_and_can_be_dropped(app):
+    from smappy.gui.microscope_editor import MicroscopeManager, pupil_phase
+    pupil = {"kind": "minimal", "phase_nm": {"6": 50.0}, "gamma": 0.3}
+    # Noll 6 is sqrt(6) rho^2 cos(2 phi): 50 nm of it is 122 nm at the rim along x, -122 along y
+    phase = pupil_phase(pupil, size=65)
+    assert phase[32, 64] == pytest.approx(50 * 6 ** 0.5) and phase[64, 32] == pytest.approx(-50 * 6 ** 0.5)
+    assert np.isnan(phase[0, 0])
+    entry = microscope_db.Microscope(name="test", pupils={"3DA: on · far red": pupil})
+    manager = MicroscopeManager()
+    manager.show_entry(entry)
+    assert "Z6 +50" in manager.pupil_figure.axes[0].get_title()
+    manager.pupil_table.selectRow(0)
+    manager.remove_pupil()
+    assert manager.entry().pupils == {}
+    manager.close()
+
+
+def test_the_filters_tab_types_a_band_and_names_what_no_name_gives(app):
+    from PySide6.QtWidgets import QTableWidgetItem
+    from smappy.gui.microscope_editor import MicroscopeManager, unnamed_filters
+    entry = microscope_db.Microscope.from_dict({
+        "name": "test",
+        "devices": {"wheel": {"tag": "Wheel-Label", "states": {"676/37": "1", "665LP": "2"}}},
+        "channels": {"transmitted": {"filter": "wheel"}}})
+    assert unnamed_filters(entry) == ["665LP"]
+    manager = MicroscopeManager()
+    manager.show_entry(entry)
+    assert "665LP" in manager.unnamed.text()
+    table = manager.tables["filters"]
+    table.insertRow(0)
+    for column, text in enumerate(["665LP", "", "665", "720"]):
+        table.setItem(0, column, QTableWidgetItem(text))
+    assert manager.entry().filters == {"665LP": {"band_nm": [665.0, 720.0]}}
+    assert manager.unnamed.text() == ""
+    manager.close()

@@ -2,7 +2,7 @@
 title: Microscope manager
 summary: Keeps your microscopes -- which devices they have, what each state of a device is called, and what follows from it (the pixel from the 3D lens, the emission from the filter, the NA) -- so that every file is read with the optics it was taken with, without typing them.
 widget: smappy.gui.microscope_editor.MicroscopeManager
-covers: [smappy.microscope_db.Device.state, smappy.microscope_db.Follows.resolve, smappy.microscope_db.Microscope.resolve, smappy.microscope_db.Microscope.as_of, smappy.microscope_db.save_microscope, smappy.microscope_db.one_line, smappy.io.emu.draft, smappy.io.emu.update, smappy.io.tiff.with_microscope, smappy.calibrate.pupil.OpticsSettings.resolved, smappy.io.calibration.microscope_differences, smappy.gui.microscope_editor.MicroscopeManager, smappy.gui.microscope_view.FoundMicroscope]
+covers: [smappy.microscope_db.Device.state, smappy.microscope_db.Follows.resolve, smappy.microscope_db.Microscope.resolve, smappy.microscope_db.Microscope.as_of, smappy.microscope_db.save_microscope, smappy.microscope_db.one_line, smappy.io.emu.draft, smappy.io.emu.update, smappy.io.tiff.with_microscope, smappy.calibrate.pupil.OpticsSettings.resolved, smappy.io.calibration.microscope_differences, smappy.gui.microscope_editor.MicroscopeManager, smappy.gui.microscope_view.FoundMicroscope, smappy.gui.microscope_editor.draw_channels, smappy.gui.microscope_editor.draw_pupil, smappy.gui.microscope_editor.unnamed_filters, smappy.microscope_db.Microscope.arrangement, smappy.microscope_db.Microscope.split_layout]
 ---
 
 ## What it does
@@ -67,8 +67,17 @@ its devices' properties and values and keeps every name and every value
 typed.  A dichroic put in by hand (the splitting 665LP) is in neither EMU nor
 the metadata, and is not a device here.
 
+**The channels on the chip.**  A microscope with a split camera sends each
+arm of the split to one side of the chip.  Which side, and which arm the
+optics mirror, is a fact about the microscope and its camera, so it is kept
+here, and the two-colour fitters and the dual bead calibration cut the chip
+as the entry says -- nothing guesses it from the data.  The *channels* tab
+draws the cut on the first frames of the file being checked, so a wrong side
+or split shows at once: each arm's light should fall inside its own box.
+
 **Versions.**  Saving a changed entry keeps the old one with the day it
 applied until, so files taken before a change are read as they were taken.
+The *versions* tab lists them.
 
 ## Controls
 
@@ -92,9 +101,9 @@ laser's or the focus lock's serial number -- not the camera, which moves
 between microscopes.
 
 ### objective
-The objective's *name*, *NA*, *immersion* (oil, water, silicone) and
-*n_immersion*, the immersion's refractive index -- what *PSF calibration* and
-in situ learning read.  No magnification: what a fit needs is the pixel on the
+The objective's *name*, *NA*, *immersion* (oil, water, silicone; any other
+typed) and *n_immersion*, the immersion's refractive index -- what *PSF
+calibration* and in situ learning read.  No magnification: what a fit needs is the pixel on the
 sample, which is the camera's, measured, and differs with the 3D lens on some
 microscopes; the nominal magnification says little with relay optics behind
 the objective.  An entry from before this table had the NA and the index among
@@ -126,22 +135,71 @@ the other.  *follows* a
 device: `state: value; ...`, or `from the name` for a filter.
 
 
-Under the tables, in grey, the objective's pupils kept with the entry, one
-per state of the 3D lens and colour (green, red, far red: not per filter),
-each with the calibration it came from and its date.  They are not typed: *PSF calibration*'s *Add to microscope...* keeps
-one from a pupil model, and an edit of the rest of the entry carries them
-through.  In situ learning starts from the one for its movie's lens state.
+### filters
+A filter whose name does not say what it passes: a long pass (*665LP*), an
+empty slot (*Empty*) behind the splitting dichroic.  Type the wavelength a PSF
+should be drawn at, or the band it lets through (*band from*, *band to*; the
+centre is taken).  A filter named as its band, *676/37*, needs no row.  The
+grey line under the table names the states of the filter devices that give no
+wavelength either way: a PSF calibration in one of them would refuse.
+
 ### channels
 The arms of a split, the transmitted one first -- it is the one used alone,
 when the splitting dichroic is out.  Each names the device that holds its
-filter and the half of the chip it lands on: `left`, `right`, `upper`,
+filter and the side of the chip it lands on: `left`, `right`, `upper`,
 `lower`, for this camera: a camera mounted turned puts the arm on another
 side, which is why a new camera is a new setup.  Find it from a ratiometric
-acquisition of two far-red dyes (a 665LP splitting them): the transmitted half
+acquisition of two far-red dyes (a 665LP splitting them): the transmitted side
 is the brighter.  *mirror* is the axis the optics flip an arm along against the
 other -- `x` for a right-left split with one more mirror in one arm, as on the
-lab's microscopes; empty for none.  The main arm -- the one the other is registered onto
--- is the transmitted one unless the entry names another.
+lab's microscopes; empty for none.  *region* is for more than two arms, the
+four phase images of a 4Pi: the arm's rectangle on the chip,
+`x y width height` in pixels (per camera as `iXon 1: 228 0 284 512; ...`).
+
+Below the arms, the split drawn on the chip: on the brightest of the first 50
+frames of the file being checked, each arm's box where the fitters cut it, the
+main one solid and red.  A 4Pi's regions are drawn without a file.
+
+### main channel
+The arm the other is registered onto, and whose PSF is a dual calibration's
+main.  Empty: the first arm.
+
+### layout
+How the split lies while the arms have no sides yet -- *right-left mirrored*
+on a microscope whose optics are known but whose arms have not been told
+apart.  The left or upper side is then taken as the main one.  The arms'
+sides win when they are typed.
+
+### split position
+Where the second side starts, in chip pixels along the split: the column for
+a right-left split, the row for up-down.  Empty: the middle of the frame as
+it was acquired, which is how the lab centres its camera ROI on the split.
+Per camera as `iXon 1: 256; Evolve 1: 251`.  Move it until the boxes in the
+drawing sit on the light.
+
+### PSF
+The objective's pupils kept with the entry, one per state of the 3D lens and
+colour (green, red, far red: not per filter), each with the calibration it
+came from and its day, and the chosen one drawn: its phase over the pupil in
+nm of wavefront, its three largest Zernike modes and γ, the apodisation (a
+minimal pupil) or the number of magnitude modes in the title.  They are not
+typed: *PSF calibration*'s *Add to microscope...* keeps one from a pupil
+model.  In situ learning starts from the one for its movie's lens state.
+
+### Remove pupil
+Drops the chosen pupil, for a model that turned out wrong.  It is gone once
+the entry is saved; the entry before is kept as a version.
+
+### versions
+The entry's older setups, newest last: each the day it applied until and
+what it said otherwise (the sections and names that differed).  A day can be
+corrected in place, when a change of the microscope turns out to have been
+made on another day than the one saved: files between the two days are read
+with the wrong setup until it is.
+
+### Remove version
+Forgets the chosen version: the files of its days are then read as the next
+newer setup says.
 
 ### camera
 The camera the microscope is set up with, from the camera database.  The pixel

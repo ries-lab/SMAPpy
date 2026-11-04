@@ -989,7 +989,8 @@ def changes(old: Microscope, new: Microscope) -> Dict[str, Dict[str, Any]]:
 
 
 def save_microscope(microscope: Microscope, path=None, until: Any = None,
-                    previous: Optional[Microscope] = None) -> Path:
+                    previous: Optional[Microscope] = None,
+                    versions: Optional[List[Dict[str, Any]]] = None) -> Path:
     """Add this microscope to the user's file, or replace it there by name,
     keeping what the entry said before as a version.
 
@@ -997,7 +998,8 @@ def save_microscope(microscope: Microscope, path=None, until: Any = None,
     of the same name if not given.  What it said that the new entry does
     not is kept with `until`, the day it stopped applying: the EMU
     configuration's date for an import, else today.  An unchanged entry
-    adds no version.
+    adds no version.  `versions` are the ones to keep, edited (the manager's
+    *versions* tab: a day moved, one removed); None keeps the stored ones.
     """
     path = Path(path) if path is not None else user_file()
     mine = MicroscopeDatabase.load(path) if path.exists() else MicroscopeDatabase()
@@ -1005,13 +1007,14 @@ def save_microscope(microscope: Microscope, path=None, until: Any = None,
         previous = mine.get(microscope.name) or database().get(microscope.name)
     microscope = copy.deepcopy(microscope)
     if previous is not None:
+        kept = list(previous.versions if versions is None else versions)
         diff = changes(previous, microscope)
         if diff:
             day = until or _dt.date.today()
             day = day.isoformat() if isinstance(day, _dt.date) else str(day)[:10]
-            microscope.versions = list(previous.versions) + [dict(until=day, **diff)]
+            microscope.versions = kept + [dict(until=day, **diff)]
         else:
-            microscope.versions = list(previous.versions)
+            microscope.versions = kept
     for i, existing in enumerate(mine.microscopes):
         if existing.name == microscope.name:
             mine.microscopes[i] = microscope

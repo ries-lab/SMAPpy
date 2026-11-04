@@ -593,7 +593,7 @@ def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from
         assert json.loads(f.attrs["metadata"])["calibration"]["file"] == str(calibration_file)
     # a registration with the other half as the main one would put each PSF on the wrong light
     flipped = ChannelTransform(moved.transformation, dict(moved.geometry, main_channel="lower"), {})
-    with pytest.raises(ValueError, match="wrong halves"):
+    with pytest.raises(ValueError, match="wrong channels"):
         with_registration(beads, flipped)
 
 

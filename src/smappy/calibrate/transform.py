@@ -232,7 +232,7 @@ def _as_mapping(h):
 def _pair(x, y, frame, mapping, is_reference, is_secondary, tolerance):
     """Match every secondary localization to a reference one, frame by frame.
 
-    The secondary half is mapped into reference coordinates first, so the
+    The secondary channel is mapped into reference coordinates first, so the
     tolerance is a distance in the reference channel and means the same thing
     in every round.  ``mapping`` is a callable, not a matrix, so a polynomial
     round pairs through exactly the same code as a projective one.

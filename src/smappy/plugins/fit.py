@@ -309,7 +309,7 @@ class ChannelsSettings:
         return self.split == "two channels"
 
     def arrangement(self, camera: Optional[CameraMetadata]) -> dict:
-        """The layout, main half, mirror and split this file is read with."""
+        """The layout, main channel, mirror and split this file is read with."""
         from ..calibrate.dual import resolve_arrangement
         told = resolve_arrangement(self, getattr(camera, "microscope", None))
         return {"layout": told.layout, "mirrored": told.layout.endswith("mirrored"),

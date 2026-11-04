@@ -575,6 +575,21 @@ against the entry's arrangement; 4Pi beads still read the current setup, not `as
   The map itself is still kept as a chip-to-chip matrix beside the layout, which
   `ChannelTransform.layout` turns into the layout's map between the channels' own pixels.
 
+### Built: step 3 (2026-11-04), the manager's tabs
+
+*identify*, *objective* (a form: name, NA, immersion, its index), *filters* (a filter's
+wavelength or band by name, and the filter states that give none, `unnamed_filters`),
+*devices*, *parameters*, *channels* (the arms with their side, mirror and, for a 4Pi, region;
+the *main channel*, the *layout* for arms without sides and the *split position*, per camera
+or one; the split drawn on the brightest of the checked file's first 50 frames, as
+`Microscope.split_layout` cuts it, `draw_channels`), *PSF* (the kept pupils, drawn from their
+Zernikes, `draw_pupil`; one can be removed) and *versions* (their days editable, one
+removable: `save_microscope(versions=)`).  Every part of the entry is now edited in the
+window, nothing carried through unseen but the pupils, which are kept by *PSF calibration*.
+Not done: *from this registration* (the arrangement is sides and a split now, not regions,
+and a registration's channels are the arrangement's), the EMU chip split as a start, and a
+version's days checked against the files (below, "Still open").
+
 ### The coordinates (decided 2026-11-04)
 
 Every fitter reports positions on the **camera chip**, in chip pixels with the camera ROI's corner

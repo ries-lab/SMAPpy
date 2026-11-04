@@ -190,7 +190,7 @@ def test_the_layout_is_the_microscopes_and_calibrates_as_if_it_were_chosen(layou
     found = calibrate_dual([stack], told, progress=said.append, microscope=scope)
     assert found.calibration.geometry['layout'] == layout
     assert found.calibration.geometry['main_channel'] == main
-    assert any(f"Layout: {layout}, main half {main}, the microscope's" in line for line in said)
+    assert any(f"Layout: {layout}, main channel {main}, the microscope's" in line for line in said)
     chosen = calibrate_dual([stack], given)
     np.testing.assert_array_equal(found.calibration.transformation,
                                   chosen.calibration.transformation)
