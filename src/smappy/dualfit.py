@@ -10,8 +10,6 @@ What stays is what both paths had to agree on:
 * **The link** (`LINK_XYZ`, `PARAMETERS`): which parameters the channels share.
 * **The pairing tolerance** (`MATCH_PIXELS`) and the mutual-nearest match (`_match`), SMAP's
   ``matchlocs``, which the registration and the layer's pairing both use.
-* **The split-frame geometry** (`split_axis`, `reference_is_first`, `which_channel`): how a
-  registration records which half is which, read by the registration and the simulator.
 * **The table** (`PairedROIs`, `paired_to_localizations`): the global fit's output as localizations.
 
 Two points of the design hold on the layer unchanged.  **The candidate list is the union, not the
@@ -88,28 +86,6 @@ class PairedROIs:
     def to_image_y(self, y_in_roi: np.ndarray) -> np.ndarray:
         return (np.asarray(y_in_roi, float) - self.half + self.candidates.y
                 + self.residual[:, 0, 1])
-
-
-# ----------------------------------------------------------------- geometry
-def split_axis(geometry: dict) -> int:
-    """The image axis the two channels are laid out along: 0 = y, 1 = x."""
-    return 1 if "right-left" in geometry["layout"] else 0
-
-
-def reference_is_first(geometry: dict) -> bool:
-    """Whether the main channel is the low half of the split axis."""
-    return geometry["main_channel"] in ("left", "upper")
-
-
-def which_channel(x: np.ndarray, y: np.ndarray, geometry: dict) -> np.ndarray:
-    """True where a position falls in the main (reference) half of the chip.
-
-    The registration's question about a chip position; ``PeakCombiner`` asked
-    the transformation through ``getRef``, the geometry answers it directly.
-    """
-    along = x if split_axis(geometry) == 1 else y
-    low = along < geometry["split_position"]
-    return low if reference_is_first(geometry) else ~low
 
 
 def _linearise(mapping, x: np.ndarray, y: np.ndarray,

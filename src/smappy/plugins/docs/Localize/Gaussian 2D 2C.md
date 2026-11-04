@@ -1,6 +1,6 @@
 ---
-version: "9"
-covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.chip_halves, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement]
+version: "10"
+covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement]
 ---
 
 ## What it does
@@ -71,9 +71,8 @@ from smappy.simulate.settings import LabellingSettings
 # a split camera, 100 x 100 px per half, main half on top: two dyes that send
 # 25 % and 75 % of their light into the lower half, behind a known map
 frames, truth = dual_camera_frames(150, seed=3, labelling=LabellingSettings(efficiency=0.1))
-geometry = {"layout": "up-down", "main_channel": "upper", "split_position": 100,
-            "image_shape": [200, 100], "coordinate_system": "camera-chip"}
-transform = ChannelTransform(dual_transformation(), geometry, {})
+from smappy.simulate.camera import dual_geometry
+transform = ChannelTransform(dual_transformation(), dual_geometry(100), {})
 layout = transform.layout()            # the two halves as channels, and the map between them
 camera = CameraMetadata(conversion=0.5, offset=100.0, pixelsize_um=0.1,
                         em_on=False, roi=(0, 0, 100, 200))
@@ -90,13 +89,13 @@ for f in np.unique(locs["frame"]):
     dye[np.flatnonzero(m)] = np.where(d < 50, truth["channel"][t][i], 0)
 ```
 
-**1. The two channels, and the map between them.**  Which half is which, and
-where the seam is, comes with the transformation (its *geometry*: up-down or
-right-left, mirrored or not, which half is the main one).  The two halves of
-the bead image it was measured on are cut apart as two channel images, the
-main one first, and a mirrored half is flipped back as it is cut -- a flip
-moves pixels, it does not resample them.  The halves need not be the same
-size: the seam is where it was measured.  The transformation maps a position
+**1. The two channels, and the map between them.**  Which half is which
+comes with the transformation (its *geometry*: the two channels' rectangles
+on the chip, the main one first, and which of them is mirrored).  The two
+halves are cut apart as two channel images, and a mirrored half is flipped
+back as it is cut -- a flip moves pixels, it does not resample them.  The
+halves need not be the same size: the split is where the microscope's
+arrangement put it when the transformation was made.  The transformation maps a position
 in the secondary channel to the position in the main channel where the same
 molecule appears.  It is a projective map -- a shift, a rotation, a
 magnification and a slight tilt of the image plane -- or, when it was
@@ -280,18 +279,18 @@ and every step goes into its history.
 
 **Calibrating from the movie.**  With *calibrate from this movie* ticked, a
 first pass runs before the fit.  It fits frames of the movie with a plain
-[Gaussian 2D](plugin:Localize/Gaussian 2D) fit over the whole frame, with the
-same camera and detection settings as the real fit, each half thresholded on
-its own about the seam -- the microscope's split, or the middle of the frame
-as acquired.  The layout, the mirroring and the main half are the
-microscope's or chosen (*channels*), never detected.
-Every molecule then shows up as two localizations in the same frame, and
-*Analysis/Register/Calibrate transform*'s method finds the map from those
-pairs: the vector between every two localizations of a frame is collected, the
-offset between the halves is the one that turns up over and over among the
-vectors that cross the seam, the pairs
-are matched through it and a projective map is fitted, then matched again,
-more tightly, through that map and fitted again.  The frames are chosen
+[Gaussian 2D](plugin:Localize/Gaussian 2D) fit read as two channels, with the
+same camera and detection settings as the real fit: the halves are cut apart
+as the microscope's arrangement (or the one chosen in *channels*) says, each
+detected and fitted on its own, at its own threshold, and every localization
+keeps its channel.  The arrangement is never detected.
+Every molecule then shows up as two localizations in the same frame, one per
+channel, and *Analysis/Register/Calibrate transform*'s method finds the map
+from those pairs: the layout puts the second channel roughly onto the main
+one, the vector between every two localizations of a frame, one of each
+channel, is collected, the extra offset is the one that turns up over and
+over, the pairs are matched through it and a projective map is fitted, then
+matched again, more tightly, through that map and fitted again.  The frames are chosen
 carefully:
 
 * the first *skip the first* frames (500) are left out -- at the start of a
@@ -443,7 +442,7 @@ The calibration pass fits at most *at most* frames with a plain Gaussian;
 then the real fit runs over the whole movie.
 
 ### transform.calibrate_locs
-10,000 in the dim half is usually plenty; a sparse movie runs out of frames
+10,000 in the dim channel is usually plenty; a sparse movie runs out of frames
 first, and the output says so.
 
 ### transform.calibrate_skip
@@ -588,8 +587,9 @@ fitter in *PSF free* mode)
   earlier registration (`RegisterLocs2`, cross-correlating rendered images).
   Here it can be measured in the same run, by voting on the vectors between
   localization pairs, weighted by their precision.
-* **Detection per half.**  The dynamic cutoff is set for each half on its
-  own; SMAP's workflows run one peak finder over the whole frame.
+* **Detection per channel.**  Each half is a channel of its own, and the
+  dynamic cutoff is set for each on its own; SMAP's workflows run one peak
+  finder over the whole frame.
 * **Raw frames by number, not by spacing.**  SMAP's CameraConverter keeps
   every `diffrawframes`-th frame after the average; here a number of frames
   is kept, spaced evenly over the fitted range, so that a long acquisition

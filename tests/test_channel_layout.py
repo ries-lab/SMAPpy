@@ -69,9 +69,9 @@ def test_origins_travel_with_the_layout_in_its_record():
 
 # ------------------------------------------------------------- dual colour on the layer
 def _geometry(shape, layout, main, split, mirror=None, roi=None):
-    return {"layout": layout + (" mirrored" if mirror is not None else ""), "main_channel": main,
-            "split_position": split, "image_shape": list(shape), "coordinate_system": "camera-chip",
-            "sources": [{"roi": roi}] if roi else [], "mirror_axis_xy": mirror}
+    from smappy.calibrate.dual import split_geometry
+    return split_geometry(layout + (" mirrored" if mirror is not None else ""), main, shape, roi,
+                          split_position=split)
 
 
 @pytest.mark.parametrize("layout, main, split, mirror, roi", [
@@ -83,7 +83,7 @@ def test_a_dual_colour_registration_reads_as_two_channels_with_the_same_map(layo
     """`ChannelTransform.layout`: the main half channel 0, the other channel 1 flipped back along its
     mirror; a position in the main half, read into channel 1 and put back on the chip, is where the
     chip's map puts it."""
-    from smappy.calibrate.dual import ChannelTransform, chip_halves
+    from smappy.calibrate.dual import ChannelTransform, geometry_layout
     shape = (80, 110) if layout == "right-left" else (100, 80)
     if roi:
         split += roi[0]
@@ -92,7 +92,7 @@ def test_a_dual_colour_registration_reads_as_two_channels_with_the_same_map(layo
     H[:2, 2] += (5.0, 300.0)
     t = ChannelTransform(H, g, {})
     lay = t.layout()
-    (mx, my, mw, mh), (sx, sy, sw, sh) = chip_halves(g)
+    (mx, my, mw, mh), (sx, sy, sw, sh) = geometry_layout(g).regions
     assert lay.regions == [(mx, my, mw, mh), (sx, sy, sw, sh)]
     assert lay.flips[1] == (mirror == 0, mirror == 1)
     local = np.array([[10.0, 12.0], [30.5, 20.25]])

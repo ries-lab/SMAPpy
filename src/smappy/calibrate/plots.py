@@ -217,15 +217,10 @@ def draw_pairs(figure, result, selected=(), excluded=()):
     axes[1].set(title="Main FoV: PSF + transform (green), transform only (orange)\n"
                       "Rejected (red), unpaired (+)",
                 xlabel="Main x (px)", ylabel="Main y (px)")
-    h, w = r.beads.geometry["image_shape"]
-    split = r.beads.geometry["split_position"]           # on the chip
-    last = r.beads.settings.registration.main_channel in ("right", "lower")
-    horizontal = "right-left" in r.beads.settings.registration.layout
-    origins = np.array([origin(r, i) for i in range(len(r.beads.sources))])
-    lo, hi = origins.min(axis=0), origins.max(axis=0)+(w, h)
-    along = 0 if horizontal else 1
-    limits = [[lo[0], hi[0]], [lo[1], hi[1]]]
-    limits[along] = [split, hi[along]] if last else [lo[along], split]
+    # the main channel's rectangle on the chip, as the bead images' corners put it
+    from .dual import geometry_layout
+    x0, y0, w, h = geometry_layout(r.beads.geometry).regions[0]
+    limits = [[x0 - 0.5, x0 + w - 0.5], [y0 - 0.5, y0 + h - 0.5]]
     axes[1].set_xlim(*limits[0])
     axes[1].set_ylim(limits[1][1], limits[1][0])
     axes[1].set_aspect("equal")

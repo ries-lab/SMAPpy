@@ -209,9 +209,12 @@ def test_all_layouts_shared_z_ratio_rebuild_and_roundtrip(layout, tmp_path):
     assert len(result.beads.records) == 9
     assert result.accepted.sum() == 9
     assert result.transform_accepted.sum() == 9
-    # on the chip: the bead image's ROI starts at x = 91
-    assert result.calibration.geometry['split_position'] == (
-        91+220 if 'right-left' in layout else 220)
+    # on the chip: the bead image's ROI starts at x = 91; the main channel the right or lower half
+    from smappy.calibrate.dual import geometry_layout
+    chip = geometry_layout(result.calibration.geometry)
+    assert chip.regions[0][:2] == ((91+220, 0) if 'right-left' in layout else (91, 220))
+    assert chip.flips[1] == (('right-left' in layout, 'up-down' in layout) if 'mirrored' in layout
+                             else (False, False))
     assert result.calibration.main.z0 == result.calibration.secondary.z0
     assert result.calibration.main.shape == result.calibration.secondary.shape
     np.testing.assert_array_equal(result.registration.beads.channel_offsets[:, :, 0], 0)
@@ -243,23 +246,22 @@ def test_all_layouts_shared_z_ratio_rebuild_and_roundtrip(layout, tmp_path):
 
 
 @pytest.mark.parametrize('layout', ['right-left', 'right-left mirrored'])
-def test_the_split_is_recorded_on_the_chip_where_the_fitter_reads_it(layout):
-    """A bead image taken with a camera ROI at x = 91: the seam is the
-    chip's, so `which_channel`, which the fitter hands chip coordinates,
-    puts every bead in the half it came from -- and a split given by hand is
-    read on the chip too."""
-    from smappy.dualfit import which_channel
+def test_the_channels_are_recorded_on_the_chip_where_the_fitter_reads_them(layout):
+    """A bead image taken with a camera ROI at x = 91: the channels' rectangles are the chip's, so
+    every bead, in chip coordinates, lies in the channel it came from -- and a split given by hand
+    is read on the chip too."""
+    from smappy.calibrate.dual import geometry_layout
     stack, settings = synthetic(layout, 'left')
     result = calibrate_dual([stack], settings)
-    geometry = result.calibration.geometry
-    assert geometry['split_position'] == 91+220
-    assert which_channel(*result.beads.main_points.T, geometry).all()
-    assert not which_channel(*result.beads.secondary_points.T, geometry).any()
+    chip = geometry_layout(result.calibration.geometry)
+    assert chip.regions[1][0] == 91+220
+    assert (chip.channel_at(*result.beads.main_points.T) == 0).all()
+    assert (chip.channel_at(*result.beads.secondary_points.T) == 1).all()
     given = calibrate_dual([stack], replace(settings, registration=replace(
         settings.registration, split_position=91+220)))
     np.testing.assert_array_equal(given.calibration.transformation,
                                   result.calibration.transformation)
-    with pytest.raises(ValueError, match='outside a bead image'):
+    with pytest.raises(ValueError, match='outside the frame'):
         calibrate_dual([stack], replace(settings, registration=replace(
             settings.registration, split_position=60)))   # left of the image
 

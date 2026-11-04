@@ -38,11 +38,8 @@ def split_chosen(settings):
 def transform(dx=0.37, dy=-0.21):
     """Secondary -> reference, the direction `calibrate.dual` builds."""
     matrix = np.array([[1., 0., -dx], [0., 1., -SPLIT - dy], [0., 0., 1.]])
-    geometry = {"layout": "up-down", "main_channel": "upper",
-                "split_position": SPLIT, "image_shape": list(SHAPE),
-                "coordinate_system": "camera-chip", "sources": [],
-                "mirror_axis_xy": None}
-    return ChannelTransform(matrix, geometry, {})
+    from smappy.calibrate.dual import split_geometry
+    return ChannelTransform(matrix, split_geometry("up-down", "upper", SHAPE, split_position=SPLIT), {})
 
 
 def draw(frame, x, y, photons, sigma):
@@ -453,9 +450,10 @@ def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
     """A fit's table has no pixel copies of its nm columns -- only the peak
     finder's candidates stay in chip pixels -- and the registration, which
     lives in chip pixels, recovers them from the pixel size the table
-    records, along each axis: these pixels are not square."""
+    records, along each axis: these pixels are not square.  The table is a
+    two-channel fit's, which records the channels it read for the registration."""
     import tifffile
-    from smappy.plugins.fit import (CameraSettings, DetectionSettings,
+    from smappy.plugins.fit import (CameraSettings, ChannelsSettings, DetectionSettings,
                                     GaussianFit, GaussianFitSettings,
                                     OutputSettings, SourceSettings)
     from smappy.plugins.registration import (CalibrateChannelTransform,
@@ -470,10 +468,13 @@ def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1,
                               pixelsize_y_um=0.12),
+        channels=ChannelsSettings(split="two channels", layout="up-down", main_channel="upper"),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         fit=FitSettings(roisize=13),
         output=OutputSettings(save=False))
     locs = GaussianFit().run(Context(), settings).locs
+    assert locs.metadata["channels"]["regions"] == [[0, 0, SHAPE[1], SPLIT],
+                                                    [0, SPLIT, SHAPE[1], SHAPE[0] - SPLIT]]
 
     assert {"x_nm", "y_nm", "xy_err_nm", "sigma_nm",
             "peak_x_pix", "peak_y_pix"} <= set(locs.keys())

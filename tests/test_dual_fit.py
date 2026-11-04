@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 
 from smappy.calibrate.core import spline_coefficients
-from smappy.calibrate.dual import DualColorCalibration
+from smappy.calibrate.dual import DualColorCalibration, geometry_layout, split_geometry
 from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-from smappy.dualfit import LINK_XYZ, which_channel
+from smappy.dualfit import LINK_XYZ
 from smappy.io.calibration import SplineCalibration, evaluate_spline
 from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
@@ -49,9 +49,7 @@ def dual_calibration(dx=0.37, dy=-0.21, ratio=0.45):
     transformation = np.array([[1., 0., -dx],
                                [0., 1., -SPLIT - dy],
                                [0., 0., 1.]])
-    geometry = {"layout": "up-down", "main_channel": "upper",
-                "split_position": SPLIT, "image_shape": list(SHAPE),
-                "coordinate_system": "camera-chip"}
+    geometry = split_geometry("up-down", "upper", SHAPE, split_position=SPLIT)
     return DualColorCalibration(spline(0.6), spline(-0.6), transformation, geometry,
                                 {"secondary_main_brightness_ratio": ratio / (1 - ratio)})
 
@@ -114,20 +112,15 @@ def peaks_of(frame, cal):
 
 
 # ------------------------------------------------------------------ geometry
-def test_a_position_is_assigned_to_the_half_of_the_chip_it_is_on():
-    geometry = dual_calibration().geometry
+def test_a_position_is_assigned_to_the_channel_of_the_chip_it_is_on():
     x = np.array([10., 10., 50., 50.])
     y = np.array([10., 50., 10., 50.])
-    np.testing.assert_array_equal(which_channel(x, y, geometry),
-                                  [True, False, True, False])
-
-    flipped = dict(geometry, main_channel="lower")
-    np.testing.assert_array_equal(which_channel(x, y, flipped),
-                                  [False, True, False, True])
-
-    sideways = dict(geometry, layout="right-left", main_channel="left")
-    np.testing.assert_array_equal(which_channel(x, y, sideways),
-                                  [True, True, False, False])
+    chip = geometry_layout(dual_calibration().geometry)
+    np.testing.assert_array_equal(chip.channel_at(x, y), [0, 1, 0, 1])
+    flipped = geometry_layout(split_geometry("up-down", "lower", SHAPE, split_position=SPLIT))
+    np.testing.assert_array_equal(flipped.channel_at(x, y), [1, 0, 1, 0])
+    sideways = geometry_layout(split_geometry("right-left", "left", SHAPE))
+    np.testing.assert_array_equal(sideways.channel_at(x, y), [0, 0, 1, 1])
 
 
 # ----------------------------------------------------------------- combining
@@ -425,7 +418,8 @@ def test_a_2c_preview_shows_each_channels_peaks_and_the_fits_where_the_channels_
     frame = split_frame([(25.0, 15.0), (42.0, 21.0)], 24.0, 9000., 0.3, 30., rng, cal)
     tifffile.imwrite(tmp_path / "split.tif", (frame[None] + 100).astype(np.uint16))
     # chip coordinates: the beads covered the chip from its corner to the movie's far edge
-    cal.geometry = dict(cal.geometry, split_position=SPLIT + oy, image_shape=[SHAPE[0] + oy, SHAPE[1]])
+    cal.geometry = split_geometry("up-down", "upper", (SHAPE[0] + oy, SHAPE[1]),
+                                  split_position=SPLIT + oy)
     calibration_file = _dual_calibration_file(tmp_path / "dual.h5", cal)
 
     plugin = DualSplineFit()
@@ -476,9 +470,7 @@ def _mirrored_calibration(dx=0.37, dy=-0.21, ratio=0.3):
     volume = np.flip(psf_volume(astigmatism=-0.6), axis=1).copy()
     secondary = SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
                                   psf=volume, parameters={})
-    geometry = {"layout": "up-down mirrored", "main_channel": "upper",
-                "split_position": SPLIT, "image_shape": list(SHAPE),
-                "coordinate_system": "camera-chip", "mirror_axis_xy": 1}
+    geometry = split_geometry("up-down mirrored", "upper", SHAPE, split_position=SPLIT)
     return DualColorCalibration(spline(0.6), secondary, transformation, geometry,
                                 {"secondary_main_brightness_ratio": ratio / (1 - ratio)})
 

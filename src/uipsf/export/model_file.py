@@ -20,9 +20,9 @@ uipsf's only output.  SMAPpy loads it with `load_model`, samples it with
 
 For channels split on one chip, ``/model`` also holds the split's
 geometry (attribute ``geometry``, JSON) as SMAPpy records it with a dual
-calibration (`DualColorCalibration.geometry`: layout, main channel, split
-position, mirror axis, image shape, coordinate system, the stacks' camera
-ROIs).  With it, SMAPpy turns the file into one of its own dual
+calibration (`DualColorCalibration.geometry`: layout, main channel, the two
+channels' rectangles and flips on the chip, image shape, coordinate system,
+the stacks' camera ROIs).  With it, SMAPpy turns the file into one of its own dual
 calibrations, which its global fitter reads: each channel sampled with
 `LearnedPSF.psf(…, channel=c)` on one z grid and normalised jointly as
 `positive_pair_models` does (its ``photon_normalization`` is then each

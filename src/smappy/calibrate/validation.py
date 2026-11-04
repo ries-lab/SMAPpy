@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from .core import shift_volume
+from .dual import mirror_axis
 
 
 def aligned_midline_profiles(result, bead_ids=None, normalize=True):
@@ -71,7 +72,7 @@ def paired_profiles(result):
     for ch in range(2):
         volume = samples[:, ch]
         average = reference[ch].copy()
-        mirror = result.beads.geometry['mirror_axis_xy']
+        mirror = mirror_axis(result.beads.geometry)
         if ch and mirror is not None:
             volume = np.flip(volume, 3-mirror)
             average = np.flip(average, 2-mirror)

@@ -578,35 +578,39 @@ class Polynomial:
         return q
 
 
-def chip_halves(geometry) -> tuple:
-    """The main and the secondary half as rectangles (x, y, width, height) on the chip: the bead image the
-    geometry was measured on, cut at its split.  The bead image's corner is its camera ROI's when the
-    geometry records one, else the chip's; a ROI-local geometry is its own chip."""
-    height, width = (int(v) for v in geometry['image_shape'])
-    ox = oy = 0
-    if geometry.get('coordinate_system') == 'camera-chip':
-        rois = [s.get('roi') for s in geometry.get('sources') or [] if s.get('roi') is not None]
-        if rois:
-            ox, oy = int(rois[0][0]), int(rois[0][1])
-    split = int(geometry['split_position'])
-    if 'right-left' in geometry['layout']:
-        low, high = (ox, oy, split - ox, height), (split, oy, ox + width - split, height)
-    else:
-        low, high = (ox, oy, width, split - oy), (ox, split, width, oy + height - split)
-    if min(low[2], low[3], high[2], high[3]) <= 0:
-        raise ValueError(f"the split at {split} is outside the {width} x {height} bead image at ({ox}, {oy})")
-    return (low, high) if geometry['main_channel'] in ('upper', 'left') else (high, low)
+def geometry_layout(geometry):
+    """The two channels a registration or calibration applies to, as rectangles on the chip with
+    their flips (`channels.ChannelLayout`, no maps): the main channel 0, the other 1.  The bead
+    image's corner is its camera ROI's when the geometry records one, else the chip's; a ROI-local
+    geometry is its own chip."""
+    from ..channels import ChannelLayout
+    if 'channels' not in geometry:
+        raise ValueError('this registration names no channels: it was written before they were '
+                         'kept (a halves geometry); measure it again')
+    return ChannelLayout.from_dict(geometry['channels'])
 
 
-def _channel_to_chip(rect, flip) -> np.ndarray:
-    """3x3: a channel's own pixels (after its flip) onto the chip."""
-    x, y, w, h = rect
-    m = np.array([[1., 0., x], [0., 1., y], [0., 0., 1.]])
-    if flip[0]:
-        m = m @ np.array([[-1., 0., w - 1], [0., 1., 0.], [0., 0., 1.]])
-    if flip[1]:
-        m = m @ np.array([[1., 0., 0.], [0., -1., h - 1], [0., 0., 1.]])
-    return m
+def split_geometry(layout: str, main_channel: str, image_shape, roi=None, split_position=None,
+                   roi_local: bool = False) -> dict:
+    """The geometry of a chip split as ``layout`` says (`channels.split_halves`), for frames of
+    ``image_shape`` (height, width) at camera ROI ``roi`` -- the chip's corner when None: what a
+    registration made by hand or simulated records, as a measured one does."""
+    from ..channels import split_halves
+    height, width = (int(v) for v in image_shape)
+    frame = tuple(int(v) for v in roi) if roi is not None else (0, 0, width, height)
+    chip = split_halves({'layout': layout, 'main_channel': main_channel,
+                         'split_position': split_position}, frame)
+    return {'layout': layout, 'main_channel': main_channel, 'channels': chip.to_dict(),
+            'image_shape': [height, width],
+            'coordinate_system': 'roi-local' if roi_local else 'camera-chip',
+            'sources': [{'path': None, 'axes': None, 'roi': list(frame), 'shape': [height, width],
+                         'z_nm': None}]}
+
+
+def mirror_axis(geometry):
+    """The axis, 0 for x and 1 for y, along which the second channel is mirrored, or None."""
+    flip = geometry_layout(geometry).flips[1]
+    return 0 if flip[0] else 1 if flip[1] else None
 
 
 @dataclass
@@ -653,14 +657,12 @@ class _Mapping:
         between their own pixels -- this one's, read through each half's corner and flip.  A polynomial
         registration rides as the layout's warp, exact; its projective part is the map."""
         from ..channels import ChannelLayout
-        main, secondary = chip_halves(self.geometry)
-        mirror = self.geometry.get('mirror_axis_xy')
-        flip = (mirror == 0, mirror == 1)
-        to_main, to_secondary = _channel_to_chip(main, (False, False)), _channel_to_chip(secondary, flip)
+        chip = geometry_layout(self.geometry)
+        to_main, to_secondary = chip.frame_matrix(0), chip.frame_matrix(1)
         matrix = np.linalg.inv(to_main) @ np.asarray(self.transformation, float) @ to_secondary
         warp = (_ChipWarp(self, to_main, to_secondary)
                 if getattr(self, 'polynomial', None) is not None else None)
-        return ChannelLayout([main, secondary], [(False, False), flip], [np.eye(3), matrix / matrix[2, 2]],
+        return ChannelLayout(chip.regions, chip.flips, [np.eye(3), matrix / matrix[2, 2]],
                              name=f"dual colour, {self.geometry['layout']}", warps=[None, warp])
 
 
@@ -709,7 +711,7 @@ class DualColorCalibration(_Mapping):
     def layer_splines(self):
         """(main, secondary) as the channel layer fits them: the secondary flipped back along the mirror,
         as its channel is (`layout`).  It is stored as the camera sees it (`build_dual_calibration`)."""
-        mirror = self.geometry.get('mirror_axis_xy')
+        mirror = mirror_axis(self.geometry)
         if mirror is None:
             return self.main, self.secondary
         return self.main, mirrored_spline(self.secondary, axis=2 - int(mirror))
@@ -829,8 +831,6 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
     s = resolved_geometry(s, stacks, report, microscope)
     g = s.registration
     shape = stacks[0].images.shape[-2:]
-    axis = 1 if 'right-left' in g.layout else 0  # y,x array axes
-    coord_axis = 1-axis                           # the same axis, as x,y
     if any(st.images.shape[-2:] != shape for st in stacks):
         raise ValueError('bead acquisitions must share split-frame image dimensions')
     full_chip = all(st.roi is not None for st in stacks)
@@ -840,27 +840,25 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         if len(known) > 1:
             raise ValueError('cannot pool differing known ROIs with missing ROI metadata')
     origins = [np.array(st.roi[:2] if full_chip else (0, 0), float) for st in stacks]
-    # The split is a position on the chip, as the fitter and a movie
-    # registration read it (`dualfit.which_channel`); each stack is cut where
-    # that position falls in its own pixels.
-    split = (int(g.split_position) if g.split_position is not None
-             else int(origins[0][coord_axis])+shape[axis]//2)
-    cuts = [split-int(o[coord_axis]) for o in origins]
-    if not all(0 < cut < shape[axis] for cut in cuts):
-        raise ValueError(f'the split at {split} px (chip) lies outside a bead image')
-    first_main = g.main_channel in ('left', 'upper')
-    order = [0, 1] if first_main else [1, 0]
+    # The two channels as rectangles on the chip (`channels.split_halves`), as the fitter and a
+    # movie registration read them; each stack is cut where they fall in its own pixels.
+    from ..channels import split_halves
+    arrangement = {'layout': g.layout, 'main_channel': g.main_channel,
+                   'split_position': g.split_position}
+    chip = split_halves(arrangement, (*(int(v) for v in origins[0]), shape[1], shape[0]))
+    try:
+        cuts = [chip.on_camera(o, tuple(shape)).regions for o in origins]
+    except ValueError as error:
+        raise ValueError(f'the split lies outside a bead image: {error}') from None
     batches, projections, sources = [[], []], [], []
-    for st, cut in zip(stacks, cuts):
-        slices = [slice(0, cut), slice(cut, shape[axis])]
+    for st, regions in zip(stacks, cuts):
         projections.append(np.max(st.images, axis=0))
         sources.append({'path': st.source, 'axes': st.axes, 'roi': st.roi,
                         'shape': list(st.images.shape), 'z_nm': st.z_nm.tolist()})
-        for ch, half in enumerate(order):
-            region = [slice(None)]*3
-            region[axis+1] = slices[half]
-            images = (st.images.crop(*region[1:]) if hasattr(st.images, 'crop')   # a `Planes`: still unread
-                      else st.images[tuple(region)])
+        for ch, (x0, y0, w, h) in enumerate(regions):
+            region = (slice(y0, y0 + h), slice(x0, x0 + w))
+            images = (st.images.crop(*region) if hasattr(st.images, 'crop')   # a `Planes`: still unread
+                      else st.images[(slice(None),) + region])
             batches[ch].append(BeadStack(images, st.z_nm, st.source, st.axes))
     base = CalibrationSettings(**{k: v for k, v in asdict(s).items() if k in CalibrationSettings.__dataclass_fields__})
     base.min_beads = 1
@@ -869,7 +867,6 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
     from ..psf import GaussianPSF
     for ch, collection in enumerate(channels):
         positions = []
-        half = order[ch]
         for rec, volume in zip(collection.records, collection.volumes):
             # Same objective planes in both halves; fit x/y only, never a channel z correction.
             mid = volume.shape[0]//2
@@ -882,18 +879,12 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
                 rec['brightness_accepted'] = False
                 rec['brightness_reason'] = 'unreliable lateral fit'
                 xy = np.array([6., 6.])
-            local = np.array([rec['x_px'], rec['y_px']], float)
-            local[coord_axis] += cuts[rec['stack']]*half
+            local = np.array([rec['x_px'], rec['y_px']], float) + cuts[rec['stack']][ch][:2]
             rec['full_image_xy'] = local.tolist()
             positions.append(local+origins[rec['stack']]+xy-6)
         points.append(np.asarray(positions))
-    # Translation votes are collected within acquisitions after the declared reflection.
-    approx = points[1].copy()
-    if 'mirrored' in g.layout:
-        approx[:, coord_axis] = 2*split-1-approx[:, coord_axis]
-    else:
-        cut = np.array([cuts[rec['stack']] for rec in channels[1].records], float)
-        approx[:, coord_axis] += cut*(1 if not first_main else -1)
+    # Translation votes are collected within acquisitions after the layout's nominal map.
+    approx = map_points(chip.nominal_map(1), points[1])
     diffs = []
     for si in range(len(stacks)):
         ia = [i for i, r in enumerate(channels[0].records) if r['stack'] == si and r['brightness_accepted']]
@@ -932,10 +923,9 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         record['brightness_reason'] = '; '.join(f'{name}: {r["brightness_reason"]}' for name, r in
                     zip(('main', 'secondary'), (ra, rb)) if not r['brightness_accepted']) or 'accepted'
         records.append(record)
-    geometry = {'layout': g.layout, 'main_channel': g.main_channel, 'split_position': split,
+    geometry = {'layout': g.layout, 'main_channel': g.main_channel, 'channels': chip.to_dict(),
                 'image_shape': list(shape), 'coordinate_system': 'camera-chip' if full_chip else 'roi-local',
-                'sources': sources, 'mirror_axis_xy': coord_axis if 'mirrored' in g.layout else None,
-                'convention': 'zero-based pixel centers; split is first index of second half'}
+                'sources': sources, 'convention': 'zero-based pixel centres'}
     unmatched = [[i for i in range(len(c.records)) if i not in set(pairs[:, ch])]
                  for ch, c in enumerate(channels)]
     known = {state for state in em_states if state is not None}
@@ -1008,7 +998,7 @@ def build_dual_calibration(beads, excluded=(), progress=None):
             if np.min(denominators)*np.max(denominators) <= 0:
                 raise ValueError('projective transform crosses infinity inside the camera image')
     pair_volumes, records, original_volumes, offsets = [], [], [], []
-    mirror = beads.geometry['mirror_axis_xy']
+    mirror = mirror_axis(beads.geometry)
     for i, (a, b) in enumerate(beads.pair_indices):
         ra, rb = beads.channels[0].records[a], beads.channels[1].records[b]
         va = beads.channels[0].volumes[a]*ra['brightness_adu']
@@ -1187,11 +1177,12 @@ def channel_result(result, channel):
     volumes = original.volumes[result.beads.pair_indices[:, channel]]
     collection = replace(r.beads, volumes=volumes, records=records)
     raw = r.channel_raw_psfs[channel]
-    if channel == 1 and result.beads.geometry['mirror_axis_xy'] is not None:
-        raw = np.flip(raw, 2-result.beads.geometry['mirror_axis_xy'])
+    mirror = mirror_axis(result.beads.geometry)
+    if channel == 1 and mirror is not None:
+        raw = np.flip(raw, 2-mirror)
     shifts = r.shifts+r.beads.channel_offsets[:, channel]
-    if channel == 1 and result.beads.geometry['mirror_axis_xy'] is not None:
+    if channel == 1 and mirror is not None:
         shifts = shifts.copy()
-        shifts[:, 2-result.beads.geometry['mirror_axis_xy']] *= -1
+        shifts[:, 2-mirror] *= -1
     return replace(r, calibration=(result.calibration.main if channel == 0 else result.calibration.secondary),
                    beads=collection, raw_psf=raw, shifts=shifts)

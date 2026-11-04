@@ -849,6 +849,10 @@ and registers the halves from that: it measures the layout, so there is none yet
 and it thresholds each half on its own (`PeakFinder.split`) at a provisional seam.  **The registration's
 geometry** (`which_channel`, `split_position`) is how a `_2ct.h5` records which half is which, read when
 the layout is built (`chip_halves`).
+*Since 2026-11-04* the pass is a two-channel fit cut by the microscope's arrangement
+(`multichannel.SplitEngine`) and the registration pairs its channels; the geometry records the
+channels' rectangles (`geometry["channels"]`, `dual.geometry_layout`), and `which_channel`,
+`split_position` and `chip_halves` are gone (`docs/microscope-database.md`).
 
 ## 10. Real data: 4Pi-SMS Nup96 in DCIMG (2026-10-27)
 

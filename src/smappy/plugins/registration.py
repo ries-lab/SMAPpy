@@ -9,10 +9,10 @@ object is not callable" -- in whichever module happens to be imported second,
 which is nowhere near the cause.)
 
 The calibration step of the 2D two-colour workflow.  Fit a split-frame movie
-with a plain Gaussian, ignoring the split, and every molecule appears twice in
-the same frame; `smappy.calibrate.transform` turns that into the projective map
-the paired fit needs, and this plugin is the place to look at what it found
-before trusting it.
+with a plain Gaussian as two channels (*channels* > *read*: *two channels*),
+and every molecule appears twice in the same frame, once per channel;
+`smappy.calibrate.transform` turns that into the map the paired fit needs, and
+this plugin is the place to look at what it found before trusting it.
 
 What the three panels answer, in the order one asks them:
 
@@ -57,8 +57,7 @@ def chip_pixels(locs, report=None):
     """The table's positions as chip pixels.
 
     A transformation is a statement about the camera, so it lives in chip
-    pixels -- `dualfit.which_channel` and the channel layout
-    (`ChannelTransform.layout`) both read it that way.  A fit writes nm only, so they are recovered from the pixel size the
+    pixels -- the channel layout (`ChannelTransform.layout`) reads it that way.  A fit writes nm only, so they are recovered from the pixel size the
     conversion recorded (`locs.in_pixels`) rather than demanded back from the
     user; a file saved in pixels gives its own.
     """
@@ -81,6 +80,22 @@ def source_geometry(locs):
     return shape, (tuple(roi) if roi is not None else None)
 
 
+def table_channels(locs, settings, shape, roi):
+    """The two channels the table was fitted as, on the chip: the layout the fit recorded
+    (``metadata["channels"]``), else the arrangement -- the microscope's or chosen -- cut from the
+    frame (`channels.split_halves`)."""
+    from ..calibrate.dual import resolve_arrangement
+    from ..channels import ChannelLayout, split_halves
+    told = resolve_arrangement(settings, (locs.metadata.get("camera") or {}).get("microscope"))
+    recorded = locs.metadata.get("channels")
+    if recorded:
+        return told, ChannelLayout.from_dict(recorded)
+    height, width = shape
+    arrangement = {"layout": told.layout, "main_channel": told.main_channel,
+                   "split_position": told.split_position}
+    return told, split_halves(arrangement, roi if roi is not None else (0, 0, width, height))
+
+
 def default_transform_path(locs, fallback: Path) -> Path:
     source = (locs.metadata.get("source")
               or (locs.metadata.get("provenance") or {}).get("source"))
@@ -92,12 +107,12 @@ def default_transform_path(locs, fallback: Path) -> Path:
 
 @register("Analysis/Register/Calibrate transform")
 class CalibrateChannelTransform(Plugin):
-    """Find the two channels in a single-channel fit, and register them."""
+    """Register the two channels of a two-channel fit."""
 
-    description = ("Measure the transformation between the two halves of a "
-                   "split frame from localizations fitted over the whole "
-                   "frame: the layout from the microscope or chosen, no "
-                   "initial shift and no magnification needed.")
+    description = ("Measure the transformation between the two channels of a "
+                   "split camera from localizations fitted as two channels: "
+                   "the layout from the microscope or chosen, no initial "
+                   "shift and no magnification needed.")
     changes_locs = False
     # bead pairs are matched frame by frame
     grouping = "ungrouped"
@@ -105,7 +120,9 @@ class CalibrateChannelTransform(Plugin):
     # 3: pairs within one frame of one file, never across two files
     # 4: the layout the microscope's or chosen, not detected; the vote over the pairs across the
     #    seam only
-    version = "4"
+    # 5: a two-channel table, the channel the fit's (`camera_channel`), no seam; the geometry
+    #    keeps the channels' rectangles
+    version = "5"
     Settings = RegisterLocsSettings
     preview_help = ("run the registration and draw it -- the vote, the "
                     "residual scatter and where the pairs are -- without "
@@ -130,14 +147,16 @@ class CalibrateChannelTransform(Plugin):
         precision = None
         if "xy_err_nm" in locs or "xy_err_pix" in locs:
             precision = in_pixels(locs, "xy_err_pix")
-        # how the chip is split: the microscope the table was fitted on, or chosen
-        from ..calibrate.dual import resolve_arrangement
-        registration = resolve_arrangement(
-            settings.registration, (locs.metadata.get("camera") or {}).get("microscope"))
+        if "camera_channel" not in locs:
+            raise ValueError("the table was not fitted as two channels: fit the movie with "
+                             "channels > read: two channels, so that each localization keeps "
+                             "the channel it was found in (camera_channel)")
+        # the channels the fit read, on the chip; the arrangement's words for the record
+        registration, layout = table_channels(locs, settings.registration, shape, roi)
         # a pair is two channels of one frame of one file: files opened
         # together share frame numbers, and beads from several files pool
-        return register_channels(x, y, frames_apart(locs), shape, roi,
-                                 settings=registration,
+        return register_channels(x, y, frames_apart(locs), np.asarray(locs["camera_channel"]),
+                                 layout, shape, roi, settings=registration,
                                  progress=ctx.report, precision=precision), locs
 
     def run(self, ctx: Context, settings) -> Result:
@@ -162,8 +181,7 @@ class CalibrateChannelTransform(Plugin):
     def _summary(result, path) -> str:
         p = result.transform.parameters
         g = result.geometry
-        lines = [f"{g['layout']}, split at {g['split_position']} px, "
-                 f"main channel {g['main_channel']}",
+        lines = [f"{g['layout']}, main channel {g['main_channel']}",
                  f"{p['n_inliers']:,} of {p['n_pairs']:,} pairs kept from "
                  f"{p['n_localizations']:,} localizations in {p['n_frames']:,} frames",
                  f"residual dx {p['residual_dx_px']:.3f} px, "
@@ -209,11 +227,8 @@ def _draw_vote(ax, result) -> None:
     ax.imshow(np.sqrt(vote.histogram.T), origin="lower", aspect="auto",
               extent=(ex[0], ex[-1], ey[0], ey[-1]), cmap="magma")
     ax.plot(vote.peak[0], vote.peak[1], "o", mfc="none", mec="cyan", ms=14, mew=1.5)
-    summed = {"none": "", "x": " (x summed)", "y": " (y summed)"}[vote.mode]
-    ax.set(title=f"pair vote{summed}: contrast {vote.score:.0f} from "
-                 f"{vote.n_vectors:,} pairs",
-           xlabel="dx (px)" if vote.mode != "x" else "x1 + x2 (px)",
-           ylabel="dy (px)" if vote.mode != "y" else "y1 + y2 (px)")
+    ax.set(title=f"pair vote: contrast {vote.score:.0f} from {vote.n_vectors:,} pairs",
+           xlabel="dx beyond the layout (px)", ylabel="dy beyond the layout (px)")
 
 
 def _draw_residuals(ax, result) -> None:
@@ -250,17 +265,10 @@ def _draw_coverage(ax, result) -> None:
             color="crimson", alpha=.6, label="rejected")
     kept = points[inliers][::step]
     ax.plot(kept[:, 0], kept[:, 1], ".", ms=2, color="#1f77b4", label="kept")
-    g = result.geometry
-    height, width = g["image_shape"]
-    roi = next((s["roi"] for s in g.get("sources", []) if s["roi"]), None)
-    x0, y0 = (roi[0], roi[1]) if roi else (0, 0)
-    split = g["split_position"]
-    if "right-left" in g["layout"]:
-        ax.axvline(split, color="k", lw=1, ls="--")
-    else:
-        ax.axhline(split, color="k", lw=1, ls="--")
-    ax.set(xlim=(x0, x0 + width), ylim=(y0, y0 + height),
-           title="pairs used, in the reference channel (dashed: the split)",
+    from ..calibrate.dual import geometry_layout
+    x0, y0, width, height = geometry_layout(result.geometry).regions[0]
+    ax.set(xlim=(x0 - 0.5, x0 + width - 0.5), ylim=(y0 - 0.5, y0 + height - 0.5),
+           title="pairs used, in the main channel",
            xlabel="x (chip px)", ylabel="y (chip px)")
     ax.set_aspect("equal", adjustable="box")
     ax.invert_yaxis()

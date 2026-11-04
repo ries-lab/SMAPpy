@@ -315,16 +315,22 @@ class ChannelsSettings:
         return {"layout": told.layout, "mirrored": told.layout.endswith("mirrored"),
                 "main_channel": told.main_channel, "split_position": told.split_position}
 
-    def layout_for(self, camera: CameraMetadata, shape):
-        """The two channels as a `channels.ChannelLayout` on the frames of this camera ROI:
-        `channels.split_halves` on the chip, put on the frames (`ChannelLayout.on_camera`)."""
+    def chip_layout(self, camera: Optional[CameraMetadata], shape):
+        """The two channels as a `channels.ChannelLayout` on the chip (`channels.split_halves`),
+        for frames of ``shape`` from this camera ROI: what a two-channel table records
+        (``metadata["channels"]``) and a registration is measured between."""
         from ..channels import split_halves
         height, width = (int(v) for v in shape[-2:])
         roi = tuple(camera.roi) if camera is not None and camera.roi is not None \
             else (0, 0, width, height)
-        chip = split_halves(self.arrangement(camera), roi)
-        return chip.on_camera(camera.roi_offset if camera is not None else (0, 0),
-                              (height, width), cut_into=True)
+        return split_halves(self.arrangement(camera), roi)
+
+    def layout_for(self, camera: CameraMetadata, shape):
+        """The two channels on the frames of this camera ROI: `chip_layout` put on the frames
+        (`ChannelLayout.on_camera`)."""
+        height, width = (int(v) for v in shape[-2:])
+        return self.chip_layout(camera, shape).on_camera(
+            camera.roi_offset if camera is not None else (0, 0), (height, width), cut_into=True)
 
 
 @dataclass
@@ -675,7 +681,9 @@ class _FitPlugin(Plugin):
             else (finder, None)
         finders = [ChannelRegionFinder(base, shapes, layout, c) if shapes else base
                    for c in range(layout.n_channels)]
-        return SplitEngine(camera, finders, model, layout, settings.fit)
+        engine = SplitEngine(camera, finders, model, layout, settings.fit)
+        engine.chip = channels.chip_layout(camera, source.shape)
+        return engine
 
     def finder(self, settings, camera: Optional[CameraMetadata] = None):
         """What finds the candidates, in each channel on its own for a
@@ -1299,6 +1307,10 @@ class _FitPlugin(Plugin):
             drive(engine, blocks, sink=sink, progress=progress, read_ahead=2,
                   flush_seconds=0.0 if src.live else None)
             record["frame_tags"] = tags.table()
+            # the two channels a two-channel fit read, on the chip: what a registration from
+            # this table is measured between (`calibrate.transform`)
+            chip = getattr(engine, "chip", None)
+            record["channels"] = chip.to_dict() if chip is not None else None
             # kept with the localizations, so a file that was fitted against
             # a mismatched calibration says so whoever opens it
             record["warnings"] = list(ctx.warnings)
@@ -1307,14 +1319,16 @@ class _FitPlugin(Plugin):
                                      "frame_tags": record["frame_tags"],
                                      "acquisition": record["acquisition"]}
                                     | ({"warnings": record["warnings"]}
-                                       if record["warnings"] else {}))
+                                       if record["warnings"] else {})
+                                    | ({"channels": record["channels"]}
+                                       if record["channels"] else {}))
         finally:
             if writer is not None:
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
-        for key in ("frame_tags", "acquisition", "warnings"):
-            if record[key]:
+        for key in ("frame_tags", "acquisition", "warnings", "channels"):
+            if record.get(key):
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
         rate = stats["frames"] / seconds if seconds > 0 else 0.0
@@ -1930,7 +1944,6 @@ class _TwoChannelFit(_FitPlugin):
         and a threshold set here and not there would register on a different
         population than it serves.
         """
-        from ..calibrate.dual import resolve_arrangement
         from ..calibrate.transform import register_channels
 
         from ..locs import concat
@@ -1940,12 +1953,14 @@ class _TwoChannelFit(_FitPlugin):
         camera = settings.camera.resolve(source)
         # how the chip is split: the *channels* part's -- the microscope's, or chosen -- never
         # detected; the registration's own fields of the same names are not read here
-        told = resolve_arrangement(settings.channels, camera.microscope)
-        registration = replace(settings.transform.registration, layout=told.layout,
-                               main_channel=told.main_channel,
-                               split_position=told.split_position)
-        provisional = _seam(registration, camera, source.shape[-2:])
-        ctx.report(f"the chip split {registration.layout}, the main half {registration.main_channel}"
+        channels = replace(settings.channels, split="two channels")
+        told = channels.arrangement(camera)
+        registration = replace(settings.transform.registration, layout=told["layout"],
+                               main_channel=told["main_channel"],
+                               split_position=told["split_position"])
+        chip = channels.chip_layout(camera, source.shape[-2:])
+        ctx.report(f"the chip split {registration.layout}, the main channel "
+                   f"{registration.main_channel}"
                    + ("" if settings.channels.layout != "microscope"
                       else f", as {camera.microscope.get('name')}'s entry says"))
         last = min(src.stop, source.n_frames) if src.stop else source.n_frames
@@ -1961,21 +1976,15 @@ class _TwoChannelFit(_FitPlugin):
         want = int(settings.transform.calibrate_locs)
 
         def fit_range(start, stop):
+            # the two channels each detected and fitted on its own, with its own threshold --
+            # what lets a dim channel be detected at all -- as a 1C fit on *two channels* does
             plain = GaussianFitSettings(
                 source=replace(src, start=start, stop=stop, live=False),
-                camera=settings.camera, detection=settings.detection,
+                camera=settings.camera, channels=channels, detection=settings.detection,
                 model=GaussianModelSettings(sigma=self._start_sigma(settings)),
-                # a transformation is a statement about the camera, and is
-                # fitted in chip pixels: the nm columns over the pixel size
                 fit=settings.fit,
                 output=OutputSettings(save=False, raw_frames=0))
-            # the provisional split only decides which half a localization is
-            # in, for the threshold and for the count; the seam the fit will
-            # actually use is measured by the registration afterwards
-            plain_fit = GaussianFit()
-            plain_fit.finder = lambda s, c, sp=provisional: _replace_split(
-                s.detection.finder(s.fit.n_threads), sp, c)
-            return plain_fit.run(quiet, plain).locs
+            return GaussianFit().run(quiet, plain).locs
 
         # One small block first, only to find out how dense this sample is.
         # Stopping early once the count is reached would be the obvious thing
@@ -1985,7 +1994,7 @@ class _TwoChannelFit(_FitPlugin):
         # how *many* frames are needed, and they are spread regardless.
         probe_start, probe_stop = blocks[0][0], min(blocks[0][0] + 100, last)
         probe = fit_range(probe_start, probe_stop)
-        rate = (_dim_channel_count([probe], provisional)
+        rate = (_dim_channel_count([probe])
                 / max(probe_stop - probe_start, 1)) if probe is not None else 0
         if rate > 0:
             needed = int(min(max(want / rate, 100),
@@ -1998,13 +2007,13 @@ class _TwoChannelFit(_FitPlugin):
                    f"{len(blocks)} block(s) between {blocks[0][0]:,} and "
                    f"{blocks[-1][1]:,}")
 
-        parts, used, dim = [], 0, 0
+        parts, used = [], 0
         for start, stop in blocks:
             part = fit_range(start, stop)
             used += stop - start
             if part is not None and len(part):
                 parts.append(part)
-        dim = _dim_channel_count(parts, provisional) if parts else 0
+        dim = _dim_channel_count(parts) if parts else 0
         if not parts:
             raise ValueError("the calibration pass found no localizations; check "
                              "the detection cutoff")
@@ -2016,8 +2025,8 @@ class _TwoChannelFit(_FitPlugin):
         from ..locs import in_pixels
         x, y = in_pixels(locs, "x_pix", "y_pix")
         result = register_channels(
-            x, y, np.asarray(locs["frame"]), source.shape[-2:],
-            camera.roi, settings=registration,
+            x, y, np.asarray(locs["frame"]), np.asarray(locs["camera_channel"]), chip,
+            source.shape[-2:], camera.roi, settings=registration,
             progress=ctx.report,
             precision=(in_pixels(locs, "xy_err_pix")
                        if "xy_err_nm" in locs else None))
@@ -2244,7 +2253,8 @@ class DualSplineFit(_TwoChannelFit):
     # 10: *measure from this movie* with the calibration's arrangement, the vote across the seam only
     # 11: positions on the camera chip, where the main channel saw them (the ROI's corner added),
     #     as every fitter reports them; not counted from the main channel's corner
-    version = "11"
+    # 12: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
+    version = "12"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2296,7 +2306,8 @@ def _measuring_key(settings, sigma: float) -> Optional[str]:
         return None
     transform = replace(settings.transform, path="", save_calibration=False)
     return repr((str(Path(src.path).resolve()), stat.st_size, stat.st_mtime_ns,
-                 replace(src, live=False), settings.camera, settings.detection, settings.fit,
+                 replace(src, live=False), settings.camera, settings.channels,
+                 settings.detection, settings.fit,
                  transform, float(sigma)))
 
 
@@ -2305,53 +2316,21 @@ TRANSFORM_FILTER = ("Channel transformation (*_2ct.h5 *.h5 *.hdf5);;"
                     "All files (*)")
 
 
-def _replace_split(finder, split, camera):
-    """The peak finder, thresholding each half of the frame on its own."""
-    from dataclasses import replace as _replace
-    if split is None:
-        return finder
-    axis, chip = split
-    offset = camera.roi_offset[1 - axis] if camera is not None else 0
-    return _replace(finder, split=(axis, chip - offset))
-
-
-def _seam(registration, camera, shape):
-    """Where the frame divides on the chip, ``(axis, position)``, axis 1 for columns: the
-    registration's split, else the middle of the frame as acquired (the camera ROI), which is
-    how the lab centres it.  Each half is thresholded on its own about it -- what lets a dim
-    channel be detected at all -- and the registration's vote pairs across it; the seam the
-    fit uses is measured by the registration afterwards, so a few pixels off cost nothing."""
-    axis = 1 if registration.layout.startswith("right-left") else 0
-    if registration.split_position is not None:
-        return (axis, float(registration.split_position))
-    height, width = (int(v) for v in shape)
-    roi = camera.roi if camera is not None and camera.roi is not None else (0, 0, width, height)
-    x0, y0, w, h = roi
-    origin, extent = ((x0, w) if axis == 1 else (y0, h))
-    return (axis, origin + extent / 2.0)
-
-
-def _dim_channel_count(parts, split) -> int:
-    """How many localizations the *dimmer* half has, over the blocks so far.
+def _dim_channel_count(parts) -> int:
+    """How many localizations the *dimmer* channel has, over the blocks so far.
 
     The dim channel is what limits the pairs -- a pair needs both -- so it is
     the thing to count, and counting the total instead would call a dataset
-    finished on the strength of the bright half alone.
+    finished on the strength of the bright channel alone.
     """
-    if split is None:
-        return sum(len(p) for p in parts)
-    axis, chip = split
-    from ..locs import in_pixels
-    column = "x_pix" if axis == 1 else "y_pix"
-    low = high = 0
+    counts = [0, 0]
     for part in parts:
-        try:
-            values = in_pixels(part, column)
-        except (KeyError, ValueError):
-            return sum(len(p) for p in parts)
-        low += int((values < chip).sum())
-        high += int((values >= chip).sum())
-    return min(low, high)
+        if part is None or not len(part):
+            continue
+        channel = np.asarray(part["camera_channel"])
+        counts[0] += int(np.sum(channel == 0))
+        counts[1] += int(np.sum(channel == 1))
+    return min(counts)
 
 
 def calibration_blocks(start: int, stop: int, frames: int, blocks: int,
@@ -2531,7 +2510,8 @@ class DualGaussianFit(_TwoChannelFit):
     # 8: *calibrate from this movie* with the microscope's or the chosen arrangement, never
     #    detected; the vote across the seam only
     # 9: positions on the camera chip, as Spline 3D 2C's 11
-    version = "9"
+    # 10: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
+    version = "10"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

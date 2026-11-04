@@ -3,47 +3,42 @@
 The 2D two-colour workflow has no PSF model to calibrate, only a registration:
 where on the chip the second channel puts the same molecule.  In a ratiometric
 experiment that registration can be read off the data itself, because every
-molecule is *already* imaged twice in the same frame.  Fit the whole frame
-with a plain Gaussian, ignoring the split, and each emitter appears as a pair
-of localizations in the same frame a constant offset apart; this module finds
-that offset, pairs the localizations frame by frame, and fits the projective
-map `smappy.dualfit` needs.
+molecule is *already* imaged twice in the same frame.  Fit the movie as two
+channels (`multichannel.SplitEngine`: each channel detected and fitted on its
+own, positions on the chip, the channel in ``camera_channel``) and each emitter
+appears as a pair of localizations in the same frame, one per channel; this
+module pairs them frame by frame and fits the map `smappy.channels` needs.
 
 The shape of it follows SMAP's ``RegisterLocs2``: a global alignment that owes
-nothing to an initial guess, then repeated pair-and-refit at shrinking
+nothing to a fine initial guess, then repeated pair-and-refit at shrinking
 tolerance.  The global step differs.  ``RegisterLocs2`` renders both channels
 into 500 nm histograms and cross-correlates them; here the same question is
 asked of the point pairs directly:
 
-    for every pair of localizations in a frame, the vector between them; the
-    offset between the channels is the one that shows up over and over.
+    for every pair of a main-channel and a secondary localization in a frame,
+    the vector between them; the offset between the channels is the one that
+    shows up over and over.
 
 That is a cross-correlation, computed on pairs rather than on rendered images,
 and it costs nothing in accuracy.  The layout -- which axis the chip is split
-along, whether one arm is mirrored, which half is the reference -- is given,
-from the microscope's entry or chosen (`dual.resolve_arrangement`); it was
-once voted for in every feature space, and on a wide, low camera ROI the vote
-chose the wrong axis.  Only the pairs across the seam are voted on: the given
-split, else the middle of the frame, which needs to be right only to within
-the band the splitter leaves dark.  The offset is found, the split position
-is then measured from the pairs, so a seam away from the middle still comes
-out where it is.
+along, whether one arm is mirrored, which half is the main channel -- is
+given, from the microscope's entry or chosen (`dual.resolve_arrangement`), and
+it is the fit that put each localization in a channel; the layout's nominal map
+(`ChannelLayout.nominal_map`: the secondary's flip undone, its corner moved
+onto the main one's) is applied before the vote, so a mirrored arm is no
+different from an unmirrored one here.  There used to be no channels, only a
+whole-chip fit and a seam measured from the pairs; that went with the halves
+(`docs/microscope-database.md`).
 
-A mirrored layout is the same argument with one sign changed.  Reflected about
-a line at ``m``, partners satisfy ``a + b = 2m - 1`` rather than ``b - a = d``,
-so the vote is taken on the *sum* along the mirrored axis.  The peak is then
-the mirror line itself, which is the split position, measured rather than
-assumed.
-
-Coordinates are chip pixels throughout, as in `smappy.calibrate.dual`, and so
-is the ``split_position`` written into the geometry -- `dualfit.which_channel`
-compares it against chip coordinates.
+Coordinates are chip pixels throughout, as in `smappy.calibrate.dual`, and the
+two channels' rectangles on the chip are kept in the geometry (``channels``), a
+`ChannelLayout`'s record.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 import json
 import os
@@ -52,9 +47,8 @@ import warnings
 
 import numpy as np
 from scipy import ndimage
-from scipy.spatial import cKDTree
 
-from .dual import (LAYOUTS, ChannelTransform, Polynomial, RegisterSettings,
+from .dual import (ChannelTransform, Polynomial, RegisterSettings,
                    fit_dual_transform, map_points, n_polynomial_terms,
                    point_coverage_area, polynomial_terms)
 
@@ -62,14 +56,6 @@ FORMAT = 'smappy-channel-transform'
 VERSION = 2
 READABLE = (1, 2)      # version 1 had no model but the projective one
 
-# The feature space each layout's vote is taken in.  'none' is the plain
-# difference and serves both unmirrored layouts; the axis is the layout's.
-MODE_LAYOUTS = {'none': ('right-left', 'up-down'),
-                'x': ('right-left mirrored',), 'y': ('up-down mirrored',)}
-# Bins around the origin excluded from the unmirrored vote.  Two molecules
-# close together in the same half also produce a short vector; the channel
-# offset is half a chip away and never anywhere near here.
-ORIGIN_GUARD_BINS = 3
 # How much room the tight round leaves around the misfit the coarse round
 # already shows.  A projective map cannot represent field distortion, so where
 # it misfits, the true partners sit further apart than any fixed tolerance
@@ -106,22 +92,13 @@ MIN_CLEAN_FRACTION = 0.6
 
 @dataclass
 class Vote:
-    """The global alignment, before a single pair has been matched."""
-    mode: str                    # which axis, if any, was summed
-    peak: np.ndarray             # (2,) the winning feature vector
+    """The global alignment, before a single pair has been matched: the shift left between the
+    channels once the layout's nominal map has put channel 1 onto channel 0."""
+    peak: np.ndarray             # (2,) the winning vector, main minus mapped secondary
     score: float                 # peak height over the map's noise
     histogram: np.ndarray        # for the diagnostic plot
     edges: Tuple[np.ndarray, np.ndarray]
     n_vectors: int
-
-    @property
-    def mirrored(self) -> bool:
-        return self.mode != 'none'
-
-    @property
-    def mirror_axis(self) -> Optional[int]:
-        """0 for x, 1 for y, in (x, y) order -- ``mirror_axis_xy``."""
-        return None if self.mode == 'none' else 'xy'.index(self.mode)
 
 
 @dataclass
@@ -166,39 +143,18 @@ def _frame_bounds(frame: np.ndarray):
     return starts, stops
 
 
-def _feature_vectors(x, y, frame, mode, max_vectors=4_000_000, low=None):
-    """Every within-frame pair, as the feature the vote is taken in.
-
-    ``mode`` names the axis whose *sum* is taken -- the mirrored one -- and
-    the other axis contributes a difference.  Ordered pairs, both directions,
-    so an unmirrored vote has a peak at ``+d`` and one at ``-d`` and the
-    choice between them is the choice of which half is the reference.
-
-    With ``low`` -- which localizations are on the low side of a known seam --
-    only the pairs across it count, each once, high minus low: two molecules
-    of one half are no candidates for a partner, and on a dense frame they are
-    most of the vectors.
-    """
+def _feature_vectors(points, mapped, frame, is_reference, max_vectors=4_000_000):
+    """Every pair of a main-channel localization and a secondary one of the same frame, as the
+    vector from the secondary (mapped onto the main channel) to the main one.  Two localizations
+    of one channel are no candidates for a pair, so they are never counted."""
     starts, stops = _frame_bounds(frame)
     out, total = [], 0
     for start, stop in zip(starts, stops):
-        k = stop - start
-        if k < 2:
+        ref = is_reference[start:stop]
+        a, b = points[start:stop][ref], mapped[start:stop][~ref]
+        if not len(a) or not len(b):
             continue
-        fx, fy = x[start:stop], y[start:stop]
-        if low is not None:
-            side = low[start:stop]
-            lx, ly, hx, hy = fx[side], fy[side], fx[~side], fy[~side]
-            if not len(lx) or not len(hx):
-                continue
-            dx = (hx[None, :] + lx[:, None]) if mode == 'x' else (hx[None, :] - lx[:, None])
-            dy = (hy[None, :] + ly[:, None]) if mode == 'y' else (hy[None, :] - ly[:, None])
-            out.append(np.c_[dx.ravel(), dy.ravel()])
-        else:
-            dx = (fx[None, :] + fx[:, None]) if mode == 'x' else (fx[None, :] - fx[:, None])
-            dy = (fy[None, :] + fy[:, None]) if mode == 'y' else (fy[None, :] - fy[:, None])
-            off = ~np.eye(k, dtype=bool)
-            out.append(np.c_[dx[off], dy[off]])
+        out.append((a[:, None, :] - b[None, :, :]).reshape(-1, 2))
         total += out[-1].shape[0]
         if total >= max_vectors:
             break
@@ -207,51 +163,36 @@ def _feature_vectors(x, y, frame, mode, max_vectors=4_000_000, low=None):
     return np.concatenate(out)
 
 
-def _vote(x, y, frame, mode, settings: RegisterSettings, low=None) -> Vote:
-    """Accumulate the feature vectors and find the constant among them.
+def find_alignment(points, mapped, frame, is_reference, settings: RegisterSettings) -> Vote:
+    """The shift the nominal map leaves, voted for by every cross-channel pair of a frame.
 
-    The map is scored as a difference of Gaussians: the answer is a *sharp*
-    peak, while everything the pairing is not interested in -- the short
-    vectors between two molecules in the same half, and, in a mirrored vote,
-    the broad ridge that same-half pairs draw along the sum axis -- is smooth
-    on a scale of many bins and subtracts away.  The same reasoning, and the
-    same filter, as the peak finder uses on an image.
+    The map is scored as a difference of Gaussians: the answer is a *sharp* peak, while the
+    vectors between molecules that are not partners spread smoothly over many bins and subtract
+    away -- the same reasoning, and the same filter, as the peak finder uses on an image.
     """
-    vectors = _feature_vectors(x, y, frame, mode, low=low)
+    vectors = _feature_vectors(points, mapped, frame, is_reference)
     if len(vectors) < 4:
-        return Vote(mode, np.zeros(2), 0.0, np.zeros((1, 1)),
-                    (np.zeros(2), np.zeros(2)), len(vectors))
-
+        raise ValueError('no frame has localizations in both channels: too few localizations '
+                         'per frame, or the table was not fitted as two channels')
     bin_px = float(settings.vote_bin_px)
     ranges = []
-    for axis, summed in enumerate((mode == 'x', mode == 'y')):
-        values = (x, y)[axis]
-        if summed:
-            ranges.append((2 * values.min() - bin_px, 2 * values.max() + bin_px))
-        else:
-            span = values.max() - values.min() + bin_px
-            ranges.append((-span, span))
+    for axis in range(2):
+        span = np.ptp(points[:, axis]) + bin_px
+        ranges.append((-span, span))
     bins = [max(int(round((hi - lo) / bin_px)), 4) for lo, hi in ranges]
-
-    hist, ex, ey = np.histogram2d(vectors[:, 0], vectors[:, 1], bins=bins,
-                                  range=ranges)
+    hist, ex, ey = np.histogram2d(vectors[:, 0], vectors[:, 1], bins=bins, range=ranges)
     narrow = settings.vote_smooth_px / bin_px
     score = (ndimage.gaussian_filter(hist, narrow)
              - ndimage.gaussian_filter(hist, narrow * 4))
-    if mode == 'none':
-        # the only place a short vector can come from is one half
-        centre = [np.searchsorted(e, 0.0) - 1 for e in (ex, ey)]
-        lo = [max(c - ORIGIN_GUARD_BINS, 0) for c in centre]
-        hi = [c + ORIGIN_GUARD_BINS + 1 for c in centre]
-        score[lo[0]:hi[0], lo[1]:hi[1]] = -np.inf
-
-    flat = int(np.argmax(score))
-    i, j = np.unravel_index(flat, score.shape)
-    finite = score[np.isfinite(score)]
-    spread = float(np.std(finite)) or 1.0
+    i, j = np.unravel_index(int(np.argmax(score)), score.shape)
+    spread = float(np.std(score)) or 1.0
     peak = _centroid(hist, ex, ey, i, j, max(int(round(narrow)), 1))
-    return Vote(mode, peak, float(score[i, j] / spread), hist, (ex, ey),
-                len(vectors))
+    vote = Vote(peak, float(score[i, j] / spread), hist, (ex, ey), len(vectors))
+    if vote.score <= 0 or not np.isfinite(vote.score):
+        raise ValueError('no channel offset stands out among the localization pairs: too few '
+                         'localizations per frame, or the two channels do not show the same '
+                         'molecules')
+    return vote
 
 
 def _centroid(hist, ex, ey, i, j, radius):
@@ -268,176 +209,19 @@ def _centroid(hist, ex, ey, i, j, radius):
                      float(window.sum(axis=0) @ cy / weight)])
 
 
-def find_alignment(x, y, frame, settings: RegisterSettings, low=None) -> Vote:
-    """The global alignment: the constant that defines the settings' layout.
-
-    The layout is given (`dual.resolve_arrangement`), which names the one
-    feature space that can answer for it; ``low``, the localizations on the
-    low side of the seam, keeps the vote to the pairs across it.
-    """
-    modes = [m for m, layouts in MODE_LAYOUTS.items() if settings.layout in layouts]
-    if not modes:
-        raise ValueError(f"the layout {settings.layout!r} must be resolved first "
-                         "(`dual.resolve_arrangement`): right-left or up-down, mirrored or not")
-    votes = [_vote(x, y, frame, mode, settings, low) for mode in modes]
-    best = max(votes, key=lambda v: v.score)
-    if best.score <= 0 or not np.isfinite(best.score):
-        raise ValueError('no channel offset stands out among the localization '
-                         'pairs: too few localizations per frame, or the two '
-                         'channels do not show the same molecules')
-    return best
-
-
-# ------------------------------------------------------- geometry and guesses
-def _relation(vote: Vote) -> np.ndarray:
-    """The vote as a map: where a low-half point's partner is.
-
-    "Low" and "high" are the two sides of the split, not the reference and
-    secondary channels -- which is the reference is a separate question, asked
-    of ``main_channel`` once the split axis is known.
-
-    Unmirrored, the partner is one translation away.  Mirrored on an axis, the
-    partners satisfy ``low + high = s`` there, so the map reflects about
-    ``s/2`` -- and is its own inverse, which is why that axis of a mirrored
-    vote has no sign to resolve.
-    """
-    h = np.eye(3)
-    for axis in range(2):
-        if vote.mirrored and axis == vote.mirror_axis:
-            h[axis, axis] = -1.0
-            h[axis, 2] = vote.peak[axis]
-        else:
-            h[axis, 2] = vote.peak[axis]
-    return h
-
-
-def _channel_map(vote: Vote, reference_is_first: bool) -> np.ndarray:
-    """Secondary -> reference, from the vote alone: the starting transform."""
-    forward = _relation(vote)
-    return np.linalg.inv(forward) if reference_is_first else forward
-
-
-def _partners(x, y, frame, forward, tolerance: float):
-    """Mutually-nearest partners under `forward`, frame by frame.
-
-    ``forward`` maps a low-side position to where its partner sits, so the two
-    index arrays returned are the high side and the low side of each pair.
-    For a reflection those names are empty: it is its own inverse and matches
-    both ways round, and only the *count* means anything -- which is all
-    `_orient` asks of it.
-    """
-    from ..dualfit import _match          # the same mutually-nearest pairing
-    points = np.c_[x, y]
-    back = map_points(np.linalg.inv(forward), points)
-    starts, stops = _frame_bounds(frame)
-    high, low = [], []
-    for start, stop in zip(starts, stops):
-        a, b = _match(back[start:stop], points[start:stop], tolerance)
-        high.append(start + a)
-        low.append(start + b)
-    if not high:
-        return np.empty(0, int), np.empty(0, int)
-    return np.concatenate(high), np.concatenate(low)
-
-
-def _sides(x, y, frame, forward, tolerance: float):
-    """Which side of the split each localization is on, by where its partner is.
-
-    Not by where it is: that would need the split position, which is what this
-    is on the way to measuring.  A localization that looks like both sides --
-    two molecules lining up by chance -- is claimed by neither.
-    """
-    high_idx, low_idx = _partners(x, y, frame, forward, tolerance)
-    high = np.zeros(len(x), bool)
-    low = np.zeros(len(x), bool)
-    high[high_idx] = True
-    low[low_idx] = True
-    return low & ~high, high & ~low
-
-
-def _orient(x, y, frame, vote: Vote, tolerance: float) -> Vote:
-    """Resolve the sign the vote cannot resolve on its own.
-
-    Every ordered pair is counted in both directions, so an unmirrored vote
-    has a peak at ``+d`` and one at ``-d``.  Those two are one answer read
-    from opposite ends, and choosing between them is pure convention: take the
-    one pointing from the low side of the split to the high side, which is
-    what the rest of this module assumes.
-
-    A mirrored vote has a single peak on its sum axis but still two on the
-    other, and there the two are *not* equivalent -- only one of them pairs
-    any localizations at all.  That one is found by trying both and counting.
-    """
-    if not vote.mirrored:
-        dominant = int(np.argmax(np.abs(vote.peak)))
-        if vote.peak[dominant] < 0:
-            vote = replace(vote, peak=-vote.peak)
-        return vote
-    other = 1 - vote.mirror_axis
-    flipped = vote.peak.copy()
-    flipped[other] *= -1
-    options = [vote, replace(vote, peak=flipped)]
-    counts = [len(_partners(x, y, frame, _relation(v), tolerance)[0])
-              for v in options]
-    return options[int(np.argmax(counts))]
-
-
-def _split_estimate(x, y, frame, vote: Vote, forward, coord: int, tolerance: float):
-    """Where the two halves of the frame meet, in chip coordinates.
-
-    Returns ``(split, low_edge, high_edge, how)``; the two edges bracket the
-    values consistent with the data, and how wide that bracket is, is the
-    thing worth looking at.
-
-    **Unmirrored**, the pairs place it: a localization whose partner lies
-    above it is below the seam and vice versa, so any value between the two
-    populations classifies all of them correctly and the midpoint is the
-    natural pick.  The bracket is narrow when the two halves see the same
-    field, which is what a splitter is for, and wide when a misalignment
-    leaves a strip of one half with nothing to pair against.  This is asked of
-    the *fitted* transformation at the tightest tolerance, not of the vote at
-    the loosest: at 20 px and a few thousand localizations, chance matches
-    reach right across the frame and it is their tails, not the halves, that
-    the percentiles would be measuring.
-
-    **Mirrored**, the pairs cannot place it at all.  A seam at ``c`` with a
-    residual shift ``t`` and one at ``c + t/2`` with no shift predict exactly
-    the same pairs, so no amount of data separates them.  What the vote does
-    measure is the mirror line, which is the seam for a perfectly aligned
-    splitter and within half the misalignment of it otherwise -- a good
-    estimate, and the honest name for it is an estimate.  Set
-    ``split_position`` when that is not good enough.
-    """
-    if vote.mirrored:
-        line = float((vote.peak[coord] + 1) / 2)
-        return line, line, line, 'the mirror line, which a reflection cannot separate from the seam'
-    low, high = _sides(x, y, frame, forward, tolerance)
-    if not low.any() or not high.any():
-        raise ValueError('could not tell the two halves apart from the pairs found')
-    values = (x, y)[coord]
-    below = float(np.percentile(values[low], 99.9))
-    above = float(np.percentile(values[high], 0.1))
-    return (below + above) / 2, below, above, 'measured from the pairs'
-
-
-def _layout_name(vote: Vote, coord: int) -> str:
-    return (('right-left' if coord == 0 else 'up-down')
-            + (' mirrored' if vote.mirrored else ''))
-
-
-def _geometry(vote, coord, split, main_channel, image_shape, roi) -> dict:
-    layout = _layout_name(vote, coord)
+def _geometry(layout, settings: RegisterSettings, image_shape, roi) -> dict:
+    """What a registration applies to: the two channels on the chip (`channels.ChannelLayout`, the
+    record `ChannelTransform.layout` reads), the arrangement's words, and the frames it was
+    measured on."""
     height, width = int(image_shape[0]), int(image_shape[1])
-    return {'layout': layout, 'main_channel': main_channel,
-            'split_position': int(round(split)),
+    return {'layout': settings.layout, 'main_channel': settings.main_channel,
+            'channels': layout.to_dict(),
             'image_shape': [height, width],
             'coordinate_system': 'camera-chip' if roi is not None else 'roi-local',
             'sources': [{'path': None, 'axes': None,
                          'roi': list(roi) if roi is not None else None,
                          'shape': [height, width], 'z_nm': None}],
-            'mirror_axis_xy': vote.mirror_axis,
-            'convention': 'zero-based pixel centers; split is first index of '
-                          'second half, in chip coordinates'}
+            'convention': 'zero-based pixel centres, in chip coordinates'}
 
 # ----------------------------------------------------------- pair and refit
 def _as_mapping(h):
@@ -644,23 +428,19 @@ def _polynomial_round(x, y, frame, ref_ids, sec_ids, is_reference, is_secondary,
     return (polynomial, source, target, fitted, ref_ids, sec_ids), None
 
 
-def register_channels(x, y, frame, image_shape, roi=None, settings=None,
+def register_channels(x, y, frame, channel, layout, image_shape, roi=None, settings=None,
                       progress=None, precision=None) -> RegistrationResult:
-    """Find the transformation between the two halves, from localizations.
+    """The map from the second channel onto the first, from the localizations of a two-channel fit.
 
-    ``x`` and ``y`` are chip pixels, ``frame`` the frame each was found in,
-    ``image_shape`` the frame's ``(height, width)`` and ``roi`` the camera ROI
-    ``(x0, y0, width, height)`` those chip coordinates are relative to -- None
-    when it is unknown, which makes the result ROI-local, exactly as for a
-    bead calibration.
+    ``x`` and ``y`` are chip pixels, ``frame`` the frame each was found in and ``channel`` the
+    channel it was found in (``camera_channel``: 0 the main channel, 1 the other), ``layout`` the
+    two channels on the chip (`channels.split_halves`), ``image_shape`` the frame's ``(height,
+    width)`` and ``roi`` the camera ROI ``(x0, y0, width, height)`` -- None when it is unknown,
+    which makes the result ROI-local, exactly as for a bead calibration.
 
-    The order of the steps is the point of this function.  The first round
-    pairs by the vote alone, because the vote is the one thing that needs no
-    split position; only once that round has produced a transformation good to
-    a fraction of a pixel is the seam between the halves measured, at the
-    tightest tolerance, where the answer means something.  Every later round
-    then works with geometric halves, so a localization whose partner did not
-    blink in this frame still takes part in the next.
+    Which channel a localization is in is the fit's: nothing here measures a seam.  The layout's
+    nominal map puts channel 1 onto channel 0 -- its flip undone, its corner moved -- and what
+    is left is a shift the vote finds and the pair-and-refit rounds turn into a map.
     """
     s = settings or RegisterSettings()
     s.validate()
@@ -669,47 +449,38 @@ def register_channels(x, y, frame, image_shape, roi=None, settings=None,
     x = np.asarray(x, float)
     y = np.asarray(y, float)
     frame = np.asarray(frame)
-    if not (len(x) == len(y) == len(frame)):
-        raise ValueError('x, y and frame must be the same length')
+    channel = np.asarray(channel)
+    if not (len(x) == len(y) == len(frame) == len(channel)):
+        raise ValueError('x, y, frame and channel must be the same length')
+    if layout.n_channels != 2:
+        raise ValueError(f'a registration is between two channels, not {layout.n_channels}')
     if len(x) < 2 * s.min_pairs:
         raise ValueError(f'{len(x)} localizations is too few to register on')
     order = np.argsort(frame, kind='stable')
-    x, y, frame = x[order], y[order], frame[order]
+    x, y, frame, channel = x[order], y[order], frame[order], channel[order]
     if precision is not None:
         precision = np.asarray(precision, float)[order]
-
-    # the arrangement is the microscope's or chosen (`dual.resolve_arrangement`), never voted for
-    if s.layout not in LAYOUTS:
-        raise ValueError(f"the layout {s.layout!r} must be resolved first "
-                         "(`dual.resolve_arrangement`): right-left or up-down, mirrored or not")
-    coord = 0 if s.layout.startswith('right-left') else 1
-    halves = ('left', 'right') if coord == 0 else ('upper', 'lower')
-    if s.main_channel not in halves:
-        raise ValueError(f"the chip is split {halves[0]}/{halves[1]}, so the main "
-                         f"channel cannot be {s.main_channel!r}; use "
-                         f"{halves[0]!r} or {halves[1]!r}")
-    main_channel = s.main_channel
-    first = main_channel in ('left', 'upper')
-    # the seam the vote pairs across: the given split, else the middle of the frame
-    origin = (roi[coord] if roi is not None else 0)
-    extent = int(image_shape[1 - coord])
-    seam = float(s.split_position) if s.split_position is not None else origin + extent / 2
-    low = (x, y)[coord] < seam
+    is_reference = channel == 0
+    is_secondary = channel == 1
+    if not is_reference.any() or not is_secondary.any():
+        raise ValueError('the localizations are all in one channel: fit the movie as two channels')
 
     report('Registration: voting for the channel offset')
     coarse, fine = s.coarse_tolerance_px, s.fine_tolerance_px
-    vote = _orient(x, y, frame, find_alignment(x, y, frame, s, low), coarse)
-    what = 'mirror line' if vote.mirrored else 'offset'
-    report(f'Registration: {vote.mode if vote.mirrored else "unmirrored"} '
-           f'{what} {vote.peak[0]:.1f}, {vote.peak[1]:.1f} px '
+    nominal = layout.nominal_map(1)
+    points = np.c_[x, y]
+    vote = find_alignment(points, map_points(nominal, points), frame, is_reference, s)
+    report(f'Registration: {vote.peak[0]:.1f}, {vote.peak[1]:.1f} px beyond the layout '
            f'(contrast {vote.score:.1f} from {vote.n_vectors:,} vectors)')
+    start = np.eye(3)
+    start[:2, 2] = vote.peak
+    start = start @ nominal
 
     rng = np.random.default_rng(1729)
     rounds = []
 
-    # round one: paired by the vote, which needs no split position
-    high_idx, low_idx = _partners(x, y, frame, _relation(vote), coarse)
-    ref_ids, sec_ids = (low_idx, high_idx) if first else (high_idx, low_idx)
+    # round one: paired through the layout and the vote
+    ref_ids, sec_ids = _pair(x, y, frame, _as_mapping(start), is_reference, is_secondary, coarse)
     source, target, fitted = _refit(x, y, frame, ref_ids, sec_ids, coarse, s,
                                     rng, precision)
     transformation = fitted.transformation
@@ -720,24 +491,7 @@ def register_channels(x, y, frame, image_shape, roi=None, settings=None,
            f'{fitted.accepted.sum():,} inliers, '
            f'dx {np.std(fitted.dxdy[fitted.accepted, 0]):.3f} px, '
            f'dy {np.std(fitted.dxdy[fitted.accepted, 1]):.3f} px')
-
-    # now the seam, from that transformation rather than from the vote
-    forward = np.linalg.inv(transformation) if first else transformation
-    measured, below, above, how = _split_estimate(x, y, frame, vote, forward,
-                                                  coord, fine if fine > 0 else coarse)
-    split = float(s.split_position) if s.split_position is not None else measured
-    geometry = _geometry(vote, coord, split, main_channel, image_shape, roi)
-    report(f"Registration: {geometry['layout']}, split at "
-           f"{geometry['split_position']} px "
-           f"({'given' if s.split_position is not None else how})")
-    if s.split_position is None and above - below > 8:
-        warnings.warn(f'the two halves leave a {above - below:.0f} px band with no '
-                      'pairs in it, so the split position is only placed to within '
-                      'that band; set split_position if it matters', stacklevel=2)
-
-    from ..dualfit import which_channel
-    is_reference = which_channel(x, y, geometry)
-    is_secondary = ~is_reference
+    geometry = _geometry(layout, s, image_shape, roi)
 
     # How well the coarse round actually fits, so that the tight round is not
     # tightened past it -- which is what strips the edges of the field, where
@@ -863,11 +617,7 @@ def register_channels(x, y, frame, image_shape, roi=None, settings=None,
         'covered_fraction': float(covered/field) if field > 0 else None,
         'tolerances_px': [float(r.tolerance_px) for r in rounds],
         'coverage_by_round_px2': [float(r.coverage_px2) for r in rounds],
-        'split_interval_px': [float(below), float(above)],
-        'split_measured_px': float(measured),
-        'split_how': how,
-        'mirror_line_px': (float((vote.peak[coord] + 1) / 2)
-                           if vote.mirrored else None),
+        'vote_shift_px': [float(v) for v in vote.peak],
     }
     transform = ChannelTransform(transformation, geometry, parameters, polynomial)
     counts = {'localizations': int(len(x)),
@@ -919,7 +669,6 @@ def save_channel_transform(path, transform: ChannelTransform, result=None,
                 g['inverse_coef'] = np.asarray(q.inverse_coef, float)
             if result is not None:
                 g = f.create_group('diagnostics')
-                g['vote_mode'] = result.vote.mode
                 for name, value in {
                         'vote_peak': result.vote.peak,
                         'vote_histogram': result.vote.histogram,

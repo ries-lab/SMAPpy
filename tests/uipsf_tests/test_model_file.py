@@ -128,8 +128,10 @@ def test_a_version_1_file_still_loads(calibration, tmp_path):
 def test_a_two_channel_model_file_keeps_each_channels_psf_transform_and_share(optics, tmp_path):
     from uipsf_tests.conftest import two_channel_beads
     model, _, batch = two_channel_beads(optics, n=6, dtype=torch.float32, mirrored=True)
-    geometry = {"layout": "up-down mirrored", "main_channel": "upper", "split_position": 256,
-                "mirror_axis_xy": 1, "image_shape": [512, 512], "coordinate_system": "camera-chip"}
+    geometry = {"layout": "up-down mirrored", "main_channel": "upper", "image_shape": [512, 512],
+                "coordinate_system": "camera-chip",
+                "channels": {"name": "", "regions": [[0, 0, 512, 256], [0, 256, 512, 256]],
+                             "flips": [[False, False], [False, True]]}}
     cal = learn_beads(model, batch, first_order=None, geometry=geometry)
     path = tmp_path / "pair.uipsf.h5"
     save_model(cal, path)

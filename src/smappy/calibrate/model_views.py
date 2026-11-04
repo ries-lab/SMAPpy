@@ -35,6 +35,8 @@ from typing import Optional
 
 import numpy as np
 
+from .dual import mirror_axis
+
 #: the z step the *Model vs data* page aims for between its planes: few enough to read, close enough to
 #: follow an astigmatic PSF through focus
 PLANE_STEP_NM = (100.0, 150.0)
@@ -86,7 +88,7 @@ def average_views(result, dual: bool = False) -> ModelViews:
         data = [np.asarray(v, float) for v in r.channel_raw_psfs]
         model = [np.asarray(c.psf, float) for c in r.channel_calibrations]
         calibration, titles, mirror = r.channel_calibrations[0], ["main", "secondary"], \
-            result.beads.geometry.get("mirror_axis_xy")
+            mirror_axis(result.beads.geometry)
     else:
         r = result
         data, model = [np.asarray(r.raw_psf, float)], [np.asarray(r.calibration.psf, float)]
@@ -184,7 +186,7 @@ def pupil_views(run) -> ModelViews:
     pixel = [model.channels[c].psf.grid.optics.pixel_size_nm for c in range(model.n_channels)]
     C = model.n_channels
     views = ModelViews([], [], z_nm, ["main", "secondary"][:C] if C > 1 else [""],
-                       mirror_axis=None if run.rois.geometry is None else run.rois.geometry.get("mirror_axis_xy"))
+                       mirror_axis=None if run.rois.geometry is None else mirror_axis(run.rois.geometry))
     for ids, params in parts:
         data, expected, z_slice, xy = _bead_images(model, noise, batch.subset(torch.tensor(ids)), params)
         for j, bead in enumerate(ids):

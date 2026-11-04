@@ -30,7 +30,7 @@ from . import plots
 from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
                    calibration_save_path, collect_beads)
 from .dual import (BEAD_HELP, BEAD_UNUSED, DualColorSettings, build_dual_calibration,
-                   collect_dual_beads)
+                   collect_dual_beads, mirror_axis)
 from .input import discover_acquisitions
 
 PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
@@ -540,8 +540,12 @@ class CalibrationWindow(QMainWindow):
             first = records[0].get('channel_records', [records[0]])[0]
             hints['saturation_adu'] = first.get('saturation_adu')
         geometry = getattr(result.calibration, 'geometry', None)
-        if isinstance(geometry, dict):
-            hints['registration.split_position'] = geometry.get('split_position')
+        if isinstance(geometry, dict) and 'channels' in geometry:
+            # the first pixel of the second rectangle along the split: where the halves met
+            from .dual import geometry_layout
+            chip = geometry_layout(geometry)
+            along = 0 if 'right-left' in geometry['layout'] else 1
+            hints['registration.split_position'] = max(r[along] for r in chip.regions)
         self.form.set_hints({k: v for k, v in hints.items() if v is not None})
 
     # -------------------------------------------------------- stack viewer
@@ -559,7 +563,7 @@ class CalibrationWindow(QMainWindow):
                            "channel_raw_psfs", None)
         if channels is not None and len(channels) > 1:
             return (list(channels), ["main", "secondary"],
-                    result.beads.geometry.get("mirror_axis_xy"))
+                    mirror_axis(result.beads.geometry))
         return [np.asarray(result.raw_psf)], ["average bead stack"], None
 
     def browse_stack(self) -> None:

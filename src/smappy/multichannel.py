@@ -414,6 +414,7 @@ class SplitEngine:
         from dataclasses import replace
         from .pipeline import LocalizationEngine
         self.camera, self.layout = camera, layout
+        self.chip = None                           # the layout on the chip, as the table records it
         own = replace(camera, roi=None)            # each channel's own pixels; the chip comes after
         self.engines = [LocalizationEngine(own, finder, model, settings) for finder in finders]
 

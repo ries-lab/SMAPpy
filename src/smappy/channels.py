@@ -172,6 +172,29 @@ class ChannelLayout:
             xy[:, 1] = h - 1 - xy[:, 1]
         return xy + (x0, y0)
 
+    def frame_matrix(self, channel: int) -> np.ndarray:
+        """`on_frame` as a 3x3: a channel's own pixels onto the frame."""
+        x, y, w, h = self.regions[channel]
+        fx, fy = self.flips[channel]
+        return np.array([[-1. if fx else 1., 0., x + (w - 1 if fx else 0)],
+                         [0., -1. if fy else 1., y + (h - 1 if fy else 0)],
+                         [0., 0., 1.]])
+
+    def nominal_map(self, channel: int) -> np.ndarray:
+        """3x3, channel ``channel``'s positions on the frame onto channel 0's: its own pixels, the
+        layout's map, back on the frame.  For a split's halves with no map, where a molecule's
+        second image would be if the splitter were perfect -- the start a registration refines."""
+        return self.frame_matrix(0) @ self.maps[channel] @ np.linalg.inv(self.frame_matrix(channel))
+
+    def channel_at(self, x, y) -> np.ndarray:
+        """Which channel's rectangle each frame position (x, y) lies in, -1 for none."""
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        out = np.full(x.shape, -1, np.int8)
+        for c, (rx, ry, w, h) in enumerate(self.regions):
+            inside = (x >= rx - 0.5) & (x < rx + w - 0.5) & (y >= ry - 0.5) & (y < ry + h - 0.5)
+            out[inside & (out < 0)] = c
+        return out
+
     def from_frame(self, channel: int, xy) -> np.ndarray:
         """Positions on the frame, in a channel's own pixels: `on_frame` undone."""
         xy = np.asarray(xy, float).reshape(-1, 2) - self.regions[channel][:2]

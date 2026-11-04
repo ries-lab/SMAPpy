@@ -245,8 +245,8 @@ def _dual_calibration(path, main_channel="upper", split=32, shape=(64, 64)):
 
     shift = split if main_channel == "upper" else -split
     transformation = np.array([[1., 0., -0.37], [0., 1., -shift + 0.21], [0., 0., 1.]])
-    geometry = {"layout": "up-down", "main_channel": main_channel, "split_position": split,
-                "image_shape": list(shape), "coordinate_system": "camera-chip"}
+    from smappy.calibrate.dual import split_geometry
+    geometry = split_geometry("up-down", main_channel, shape, split_position=split)
     save_dual_color_calibration(path, DualColorCalibration(
         spline(0.6), spline(-0.6), transformation, geometry, {}))
     return path

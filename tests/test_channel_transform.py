@@ -1,11 +1,12 @@
 """Registering two channels from localizations alone.
 
-The claim the module makes is that it needs no initial guess: not the shift,
-not the magnification, and not where exactly the frame is split.  The layout
-is told -- it is the microscope's (`dual.resolve_arrangement`), never voted
-for -- and the tests give it what a guess would get wrong -- all four
-layouts, a seam nowhere near the middle, a rotation the vote cannot represent
--- and ask for the transformation back to a fraction of a pixel.
+The claim the module makes is that it needs no initial guess: not the shift
+and not the magnification.  The layout is told -- it is the microscope's
+(`dual.resolve_arrangement`), never voted for -- and which channel a
+localization is in is the fit's, as a two-channel fit gives it (`reg`, by the
+rectangle it lies in); the tests give it what a guess would get wrong -- all
+four layouts, a rotation the vote cannot represent -- and ask for the
+transformation back to a fraction of a pixel.
 """
 import warnings
 
@@ -15,6 +16,7 @@ import pytest
 from dataclasses import replace
 
 from smappy.calibrate.dual import map_points
+from smappy.channels import split_halves
 from smappy.calibrate.transform import (RegisterSettings, load_channel_transform,
                                         load_transform, register_channels,
                                         save_channel_transform)
@@ -112,12 +114,28 @@ def told(settings=None, axis=1, mirrored=False):
     return s
 
 
+def reg(x, y, f, shape=SHAPE, roi=ROI, settings=None, precision=None):
+    """`register_channels` on localizations put in a channel as a two-channel fit puts them: by
+    the rectangle of the told layout (`channels.split_halves`) they lie in."""
+    s = settings or told()
+    layout = split_halves({"layout": s.layout, "main_channel": s.main_channel,
+                           "split_position": s.split_position}, roi)
+    channel = layout.channel_at(x, y)
+    keep = channel >= 0
+    return register_channels(x[keep], y[keep], f[keep], channel[keep], layout, shape, roi,
+                             settings=s,
+                             precision=None if precision is None else precision[keep])
+
+
 def register(**kwargs):
     settings = told(kwargs.pop("settings", None), kwargs.get("axis", 1), kwargs.get("mirrored", False))
+    if settings.split_position is None:
+        settings = replace(settings, split_position=ROI[kwargs.get("axis", 1)]
+                           + kwargs.get("split", 256))
     x, y, f, forward, lo, hi = simulate(**kwargs)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = register_channels(x, y, f, SHAPE, ROI, settings=settings)
+        result = reg(x, y, f, settings=settings)
     return result, forward, lo, hi
 
 
@@ -147,11 +165,14 @@ def test_every_layout_is_registered_as_it_is_told(axis, mirrored, layout, split)
     assert grid_error(result, forward, lo, hi) < 0.05
 
 
-def test_the_seam_is_measured_and_not_assumed_to_be_the_middle():
-    """The whole reason for voting on pairs rather than on a rendered image: the vote pairs
-    across the middle of the frame, and the seam comes out where it is."""
-    result, _, _, _ = register(split=180)
-    assert abs(result.geometry["split_position"] - 180) < 8
+def test_a_split_away_from_the_middle_is_the_arrangements():
+    """Halves of unequal size: the split is the arrangement's -- the microscope's, or given --
+    and the channels' rectangles on the chip are kept with the registration."""
+    result, forward, lo, hi = register(split=180)
+    assert grid_error(result, forward, lo, hi) < 0.05
+    from smappy.calibrate.dual import geometry_layout
+    chip = geometry_layout(result.geometry)
+    assert chip.regions == [(177, 0, 207, 180), (177, 180, 207, 332)]
     assert result.geometry["image_shape"] == [512, 207]
 
 
@@ -159,13 +180,7 @@ def test_a_declared_layout_narrows_the_search_rather_than_being_ignored():
     x, y, f, *_ = simulate()
     settings = RegisterSettings(layout="right-left mirrored", main_channel="left")
     with pytest.raises(ValueError, match="no channel offset|too few|pairs"):
-        register_channels(x, y, f, SHAPE, ROI, settings=settings)
-
-
-def test_a_given_split_wins_over_the_measured_one():
-    result, _, _, _ = register(settings=RegisterSettings(split_position=300))
-    assert result.geometry["split_position"] == 300
-    assert result.transform.parameters["split_measured_px"] != 300
+        reg(x, y, f, settings=settings)
 
 
 def test_the_main_channel_can_be_the_other_half():
@@ -189,29 +204,20 @@ def test_the_tight_round_is_what_makes_it_accurate():
     assert grid_error(staged, forward, lo, hi) < grid_error(coarse, forward, lo, hi) / 3
 
 
-def test_a_seam_the_pairs_cannot_place_says_so():
-    """Halves so unequal that a wide band pairs with nothing: the split is
-    then bracketed, not known, and that has to be said out loud."""
-    x, y, f, *_ = simulate(split=330)
-    with pytest.warns(UserWarning, match="no pairs in it"):
-        result = register_channels(x, y, f, SHAPE, ROI, settings=told())
-    low, high = result.transform.parameters["split_interval_px"]
-    assert high - low > 50
-
-
 # ------------------------------------------------------------------ refusals
 def test_it_refuses_what_it_cannot_register():
     rng = np.random.default_rng(0)
     x = rng.uniform(0, 100, 10)
     with pytest.raises(ValueError, match="too few"):
-        register_channels(x, x, np.arange(10), SHAPE, ROI, settings=told())
+        reg(x + ROI[0], x, np.arange(10))
     x, y, f, *_ = simulate(n_frames=40, per_frame=1, lone=0.9)
     with pytest.raises(ValueError):
-        register_channels(x, y, f, SHAPE, ROI, settings=told())
-    # the layout is resolved before, never left to the vote
+        reg(x, y, f)
+    # the channel is the fit's: a table fitted over the whole chip has none to pair
     x, y, f, *_ = simulate()
-    with pytest.raises(ValueError, match="resolved first"):
-        register_channels(x, y, f, SHAPE, ROI)
+    layout = split_halves({"layout": "up-down", "main_channel": "upper"}, ROI)
+    with pytest.raises(ValueError, match="as two channels"):
+        register_channels(x, y, f, np.zeros(len(x), int), layout, SHAPE, ROI, settings=told())
 
 
 def test_the_settings_refuse_nonsense():
@@ -295,10 +301,8 @@ def test_a_distorted_field_is_described_far_better_by_the_polynomial():
     x, y, f, forward, lo, hi = simulate(barrel=0.03)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        flat = register_channels(x, y, f, SHAPE, ROI,
-                                 settings=told(RegisterSettings(model="projective")))
-        bent = register_channels(x, y, f, SHAPE, ROI,
-                                 settings=told(RegisterSettings(model="polynomial")))
+        flat = reg(x, y, f, settings=told(RegisterSettings(model="projective")))
+        bent = reg(x, y, f, settings=told(RegisterSettings(model="polynomial")))
     assert flat.transform.model == "projective"
     assert bent.transform.model == "polynomial"
     assert grid_error(bent, forward, lo, hi) < grid_error(flat, forward, lo, hi) / 5
@@ -310,8 +314,7 @@ def test_a_clean_field_is_not_made_worse_by_it():
     x, y, f, forward, lo, hi = simulate()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        bent = register_channels(x, y, f, SHAPE, ROI,
-                                 settings=told(RegisterSettings(model="polynomial")))
+        bent = reg(x, y, f, settings=told(RegisterSettings(model="polynomial")))
     assert grid_error(bent, forward, lo, hi) < 0.05
 
 
@@ -327,8 +330,7 @@ def test_it_refuses_a_polynomial_the_pairs_cannot_support():
     x, y, f, forward, lo, hi = simulate()
     band = (y < 256) | ((y > 256 + 40) & (y < 256 + 110))
     with pytest.warns(UserWarning, match="keeping the projective fit"):
-        result = register_channels(x[band], y[band], f[band], SHAPE, ROI,
-                                   settings=told(RegisterSettings(model="polynomial",
+        result = reg(x[band], y[band], f[band], settings=told(RegisterSettings(model="polynomial",
                                                              split_position=256)))
     assert result.transform.model == "projective"
 
@@ -336,8 +338,7 @@ def test_it_refuses_a_polynomial_the_pairs_cannot_support():
 def test_it_refuses_a_polynomial_too_few_pairs_can_support():
     x, y, f, forward, lo, hi = simulate(n_frames=15)
     with pytest.warns(UserWarning, match="too few for a polynomial"):
-        result = register_channels(x, y, f, SHAPE, ROI,
-                                   settings=told(RegisterSettings(model="polynomial")))
+        result = reg(x, y, f, settings=told(RegisterSettings(model="polynomial")))
     assert result.transform.model == "projective"
 
 
@@ -345,8 +346,7 @@ def test_a_saved_polynomial_comes_back_exactly(tmp_path):
     x, y, f, forward, lo, hi = simulate(barrel=0.03)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = register_channels(x, y, f, SHAPE, ROI,
-                                   settings=told(RegisterSettings(model="polynomial")))
+        result = reg(x, y, f, settings=told(RegisterSettings(model="polynomial")))
     path = tmp_path / "poly_2ct.h5"
     result.save(path)
     loaded = load_transform(path)
@@ -412,8 +412,8 @@ def test_dim_pairs_are_believed_only_as_far_as_they_deserve():
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        flat = register_channels(x, y, f, (512, ROI[2]), ROI, settings=told())
-        weighted = register_channels(x, y, f, (512, ROI[2]), ROI, settings=told(),
+        flat = reg(x, y, f, (512, ROI[2]), ROI, settings=told())
+        weighted = reg(x, y, f, (512, ROI[2]), ROI, settings=told(),
                                      precision=precision)
     # ~2.4x at this simulation size, and much more at a realistic one -- the
     # bar is where it is so the test does not ride the edge of its own noise
@@ -428,8 +428,8 @@ def test_equal_pairs_are_unaffected_by_weighting():
     hi = np.array([ROI[0] + ROI[2], 256.0])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        flat = register_channels(x, y, f, (512, ROI[2]), ROI, settings=told())
-        weighted = register_channels(x, y, f, (512, ROI[2]), ROI, settings=told(),
+        flat = reg(x, y, f, (512, ROI[2]), ROI, settings=told())
+        weighted = reg(x, y, f, (512, ROI[2]), ROI, settings=told(),
                                      precision=precision)
     a = grid_error(flat, forward, lo, hi)
     b = grid_error(weighted, forward, lo, hi)

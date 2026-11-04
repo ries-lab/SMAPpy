@@ -9,9 +9,22 @@ splitter, the optics that put two channels side by side on one camera -- that
 can be read off the data itself, because every molecule is already imaged
 twice in the same frame.
 
-    Localize/Gaussian 2D          fit the whole frame, ignoring the split
+    Localize/Gaussian 2D          fit as two channels (channels > read), camera_channel kept
     Analysis/Register/Calibrate transform   pair those localizations, fit the map
     Localize/Gaussian 2D 2C       fit both halves as one emitter
+
+**Since 2026-11-04 there are no halves here, only channels.**  The table is a
+two-channel fit (`multichannel.SplitEngine`), so which channel a localization
+is in is the fit's, and the layout -- the microscope's or chosen, never voted
+for -- is given as the two channels' rectangles on the chip
+(`channels.split_halves`).  The vote is taken after the layout's nominal map
+(`ChannelLayout.nominal_map`), so a mirror is no different from a shift, and
+nothing measures a seam: sections 1 and 3 below describe the method as it was
+before (a whole-chip fit, modes per mirror, the seam from the pairs) and are
+kept for the reasoning; `docs/microscope-database.md` has why it changed.  The
+geometry a `_2ct.h5` and a dual bead calibration record holds the channels'
+rectangles (`geometry["channels"]`, read by `dual.geometry_layout`) in place
+of `split_position` and `mirror_axis_xy`.
 
 or, in one step, tick **calibrate from this movie** on the 2C fit and it runs
 the first two itself on the leading frames.  This is SMAP's `fit_dualcolor`

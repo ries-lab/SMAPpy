@@ -175,7 +175,7 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
                          "transformation": layout["transformation"].tolist(),
                          "layout": geometry["layout"],
                          "main_channel": geometry["main_channel"],
-                         "split_position": geometry["split_position"]})
+                         "channels": geometry["channels"]})
     return Localizations(columns, metadata)
 
 
@@ -449,12 +449,16 @@ def split_layout(s: SimulationSettings) -> dict:
         problem = psf_problem(replace(s, output="camera"))
         if problem:
             raise ValueError(problem)
-        from ..dualfit import reference_is_first, split_axis
+        from ..calibrate.dual import geometry_layout
         cal = dual_calibration(path)
         geometry = dict(cal.geometry)
-        origin = np.zeros(2)
-        if not reference_is_first(geometry):
-            origin[1 - split_axis(geometry)] = geometry["split_position"]
+        # the main channel's corner, in the bead image the calibration was made on
+        chip = geometry_layout(geometry)
+        corner = np.zeros(2)
+        if geometry.get("coordinate_system") == "camera-chip":
+            corner = np.array(next((src["roi"][:2] for src in geometry.get("sources") or []
+                                    if src.get("roi")), (0, 0)), float)
+        origin = np.asarray(chip.regions[0][:2], float) - corner
         return {"shape": tuple(int(v) for v in geometry["image_shape"]),
                 "origin": origin, "to_secondary": cal.to_secondary,
                 "transformation": np.asarray(cal.transformation, float),
@@ -465,10 +469,15 @@ def split_layout(s: SimulationSettings) -> dict:
     return {"shape": (2 * size, size), "origin": np.zeros(2),
             "to_secondary": lambda xy: (np.c_[xy, np.ones(len(xy))] @ forward.T)[:, :2],
             "transformation": h,
-            "geometry": {"layout": "up-down", "main_channel": "upper",
-                         "split_position": size, "image_shape": [2 * size, size],
-                         "coordinate_system": "camera-chip"},
+            "geometry": dual_geometry(size),
             "splines": None}
+
+
+def dual_geometry(size_px: int = 100) -> dict:
+    """The built-in splitter's two channels: a chip of ``size_px`` x ``2 size_px``, the upper half
+    main, neither mirrored -- the geometry of `dual_transformation`."""
+    from ..calibrate.dual import split_geometry
+    return split_geometry("up-down", "upper", (2 * size_px, size_px))
 
 
 def dual_transformation(size_px: int = 100) -> np.ndarray:

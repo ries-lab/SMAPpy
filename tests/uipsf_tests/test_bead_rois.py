@@ -107,7 +107,8 @@ def test_pairs_their_rois_and_a_starting_transform_come_back_from_a_simulated_ch
     rois = dual_rois(list(stacks), CAMERA, DualColorSettings(roi_size=15, registration=told),
                      slices=slice(None))
     assert rois.geometry["layout"] == ("up-down mirrored" if mirrored else "up-down")
-    assert rois.geometry["split_position"] == 256
+    from smappy.calibrate.dual import geometry_layout
+    assert geometry_layout(rois.geometry).regions[1][1] == 256          # the lower half from row 256
     batch = rois.batch
     assert batch.data.shape == (42, 2, 7, 15, 15)
     truth_main, truth_second = np.concatenate(mains), np.concatenate(seconds)

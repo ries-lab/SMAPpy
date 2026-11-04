@@ -16,6 +16,7 @@ from uipsf.model import Channel
 from uipsf.model.channels import inverse_map
 
 pytest.importorskip("smappy")
+from smappy.calibrate.dual import split_geometry  # noqa: E402 -- after the skip
 
 PIXEL = 110.0
 SHAPE = (96, 48)                    # (height, width): the upper half main, the lower half mirrored
@@ -24,10 +25,7 @@ ANGLE = np.deg2rad(0.5)
 # secondary → main chip pixels: y mirrored across the split, a small turn and shift
 TRANSFORM = (np.array([[np.cos(ANGLE), -np.sin(ANGLE), 0.6], [np.sin(ANGLE), np.cos(ANGLE), -0.4], [0, 0, 1]])
              @ np.array([[1.0, 0, 0], [0, -1, 95], [0, 0, 1]]))
-GEOMETRY = {"layout": "up-down mirrored", "main_channel": "upper", "split_position": SPLIT,
-            "image_shape": list(SHAPE), "coordinate_system": "camera-chip", "mirror_axis_xy": 1,
-            "sources": [{"path": None, "axes": None, "roi": [0, 0, SHAPE[1], SHAPE[0]], "shape": [1, *SHAPE],
-                         "z_nm": [0.0]}]}
+GEOMETRY = split_geometry("up-down mirrored", "upper", SHAPE, split_position=SPLIT)
 SHARE, DZ = 0.3, 40.0
 
 

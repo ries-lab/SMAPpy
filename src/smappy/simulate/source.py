@@ -95,11 +95,9 @@ def write_transform(settings, path) -> Path:
     exactly, so its fit need not measure it from the movie."""
     from ..calibrate.dual import ChannelTransform
     from ..calibrate.transform import save_channel_transform
-    from .camera import dual_transformation
+    from .camera import dual_geometry, dual_transformation
     size = settings.camera.size_px
-    geometry = {"layout": "up-down", "main_channel": "upper", "split_position": size,
-                "image_shape": [2 * size, size], "coordinate_system": "camera-chip"}
-    transform = ChannelTransform(dual_transformation(size), geometry,
+    transform = ChannelTransform(dual_transformation(size), dual_geometry(size),
                                  {"source": "smappy simulation"})
     save_channel_transform(path, transform, overwrite=True)
     return Path(path)

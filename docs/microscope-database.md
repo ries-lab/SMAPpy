@@ -559,10 +559,21 @@ against the entry's arrangement; 4Pi beads still read the current setup, not `as
   it, which channel in `camera_channel` (`channel` is the dye's colour).  A two-colour fitter
   shows only the arrangement and its calibration pass reads it there; the registration's copies
   of it are hidden in its form.
-* **Stage 3, to come**: the registration between the channels of such a table, a map from
-  channel 1's chip coordinates to channel 0's stored as a `ChannelLayout` (4Pi's format); the
-  calibration pass a two-channel 1C fit plus that registration; the halves code removed
-  (`register_channels`' seam, `dualfit.which_channel`, `chip_halves`, the `_2ct.h5` geometry).
+* **Stage 3, built**: the registration is between the channels of such a table
+  (`calibrate.transform.register_channels(x, y, frame, channel, layout, ...)`): channel 1 put
+  onto channel 0 by the layout's nominal map (`ChannelLayout.nominal_map`), the remaining shift
+  voted for over the cross-channel pairs of a frame, then pair-and-refit as before.  Nothing
+  measures a seam.  A two-channel fit records its rectangles on the chip
+  (`metadata["channels"]`), which *Calibrate transform* reads; a table without `camera_channel`
+  is refused.  The calibration pass of *measure from this movie* is a two-channel 1C fit plus
+  that registration.  A registration's and a dual bead calibration's geometry hold the
+  channels' rectangles and flips (`geometry["channels"]`, `dual.geometry_layout`,
+  `dual.split_geometry`) in place of `split_position` and `mirror_axis_xy`; the bead
+  calibration cuts its stacks by them.  Gone: `dualfit.which_channel`, `split_axis`,
+  `reference_is_first`, `dual.chip_halves`, the seam estimate and the mirror modes of the
+  vote.  Files written before (a halves geometry) are refused with a message to measure again.
+  The map itself is still kept as a chip-to-chip matrix beside the layout, which
+  `ChannelTransform.layout` turns into the layout's map between the channels' own pixels.
 
 ### The coordinates (decided 2026-11-04)
 
@@ -591,9 +602,9 @@ region is drawn in frame pixels, as for a whole-chip fit (`fit.ChannelRegionFind
   through -- Gaussian 2D 2C, Spline 3D 2C, Spline 4Pi -- and 4Pi beads.  But where its layout
   comes from differs: Spline 4Pi and 4Pi beads take the entry's regions
   (`fit_4pi.microscope_layout`; 4Pi beads without `as_of`); the two-colour fitters only a
-  registration's halves (`_TwoChannelFit.channel_layout`); the calibration pass of *measure
-  from this movie* and the dual-colour bead calibration cut the chip themselves and detect
-  the layout (`dual.chip_halves`, `detect_bead_layout`).  The entry's `side` is read only to
+  registration's channels (`_TwoChannelFit.channel_layout`); the calibration pass of *measure
+  from this movie* and the dual-colour bead calibration cut the chip by the arrangement
+  (`channels.split_halves`).  The entry's `side` is read only to
   give each arm its wavelength (`OpticsSettings.resolved`).
 * **Not in any file** the lab has (`Setups/M2`, `M5`, `M6` of the test data): the objective,
   the tube lens, the dichroics, which half is which arm, a mirror.  EMU's newer
