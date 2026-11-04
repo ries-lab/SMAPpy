@@ -172,29 +172,33 @@ def scattered(layout, main, n=12, seed=0):
 
 
 @pytest.mark.parametrize('layout', LAYOUTS)
-def test_the_layout_is_found_from_the_beads_and_calibrates_as_if_it_were_chosen(layout):
-    """*auto* votes on the beads as a movie registration votes on its
-    localizations, so a left-right splitter needs nothing chosen by hand --
-    and the calibration is the one the layout chosen by hand gives."""
+def test_the_layout_is_the_microscopes_and_calibrates_as_if_it_were_chosen(layout):
+    """*microscope* takes the split from the microscope's entry -- its arms' sides and which one the
+    optics mirror -- and the calibration is the one the layout chosen by hand gives.  Nothing is
+    detected: without an entry that says, the calibration asks for the layout."""
+    from smappy.microscope_db import Channel, Microscope
     main = 'right' if 'right-left' in layout else 'lower'
+    other = {'right': 'left', 'lower': 'upper'}[main]
+    mirror = ('x' if 'right-left' in layout else 'y') if 'mirrored' in layout else ''
+    scope = Microscope(name='scope', main_channel='transmitted',
+                       channels=[Channel('transmitted', side=main), Channel('reflected', side=other,
+                                                                           mirror=mirror)])
     stack, given = scattered(layout, main)
-    auto = replace(given, registration=replace(given.registration, layout='auto',
-                                               main_channel='auto'))
+    told = replace(given, registration=replace(given.registration, layout='microscope',
+                                               main_channel='microscope'))
     said = []
-    detected = calibrate_dual([stack], auto, progress=said.append)
-    assert detected.calibration.geometry['layout'] == layout
-    assert any(f'Layout: {layout}, detected' in line for line in said)
-    # main channel auto: the left or upper half
-    assert detected.calibration.geometry['main_channel'] == (
-        'left' if 'right-left' in layout else 'upper')
-    chosen = calibrate_dual([stack], replace(given, registration=replace(
-        given.registration, main_channel=detected.calibration.geometry['main_channel'])))
-    np.testing.assert_array_equal(detected.calibration.transformation,
+    found = calibrate_dual([stack], told, progress=said.append, microscope=scope)
+    assert found.calibration.geometry['layout'] == layout
+    assert found.calibration.geometry['main_channel'] == main
+    assert any(f"Layout: {layout}, main half {main}, the microscope's" in line for line in said)
+    chosen = calibrate_dual([stack], given)
+    np.testing.assert_array_equal(found.calibration.transformation,
                                   chosen.calibration.transformation)
-    np.testing.assert_array_equal(detected.calibration.main.coeff,
-                                  chosen.calibration.main.coeff)
-    # what was detected is what the beads carry, for a rebuild and the pages
-    assert detected.beads.settings.registration.layout == layout
+    np.testing.assert_array_equal(found.calibration.main.coeff, chosen.calibration.main.coeff)
+    # what was resolved is what the beads carry, for a rebuild and the pages
+    assert found.beads.settings.registration.layout == layout
+    with pytest.raises(ValueError, match='choose the layout'):
+        calibrate_dual([stack], told)
 
 
 @pytest.mark.parametrize('layout', LAYOUTS)

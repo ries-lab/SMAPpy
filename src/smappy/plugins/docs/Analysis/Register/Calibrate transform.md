@@ -1,6 +1,6 @@
 ---
-version: "3"
-covers: [smappy.plugins.registration.chip_pixels, smappy.plugins.registration.default_transform_path, smappy.plugins.registration._draw_vote, smappy.plugins.registration._draw_residuals, smappy.plugins.registration._draw_coverage, smappy.calibrate.transform.register_channels, smappy.calibrate.transform.find_alignment, smappy.calibrate.transform._vote, smappy.calibrate.transform._orient, smappy.calibrate.transform._split_estimate, smappy.calibrate.transform._pair, smappy.calibrate.transform._refit, smappy.calibrate.transform.pair_weights, smappy.calibrate.transform.fit_polynomial, smappy.calibrate.transform._polynomial_round, smappy.calibrate.transform.save_channel_transform, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.fit_projective, smappy.calibrate.dual.refine_projective]
+version: "4"
+covers: [smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.registration.chip_pixels, smappy.plugins.registration.default_transform_path, smappy.plugins.registration._draw_vote, smappy.plugins.registration._draw_residuals, smappy.plugins.registration._draw_coverage, smappy.calibrate.transform.register_channels, smappy.calibrate.transform.find_alignment, smappy.calibrate.transform._vote, smappy.calibrate.transform._orient, smappy.calibrate.transform._split_estimate, smappy.calibrate.transform._pair, smappy.calibrate.transform._refit, smappy.calibrate.transform.pair_weights, smappy.calibrate.transform.fit_polynomial, smappy.calibrate.transform._polynomial_round, smappy.calibrate.transform.save_channel_transform, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.fit_projective, smappy.calibrate.dual.refine_projective]
 ---
 
 ## What it does
@@ -27,10 +27,16 @@ The plugin finds those pairs, and fits the map that takes one partner onto
 the other.
 
 It needs no starting values: not the shift, not the magnification, and not
-where the chip is split.  It also detects whether one half is mirrored.  What
-it needs is a table with a `frame` column and positions that can be put back
-into camera pixels, and enough molecules seen in both halves: a few hundred
-pairs at the least, from frames spread over the movie.
+exactly where the seam between the halves is.  What it does need is how the
+chip is split -- left and right or upper and lower, whether one half is
+mirrored, which half is the main one.  That is a fact about the microscope,
+and it comes from the microscope's entry in the
+[Microscope manager](plugin:Panels/Microscope manager) for the microscope
+the table was fitted on; for a microscope without one, choose it (*layout*,
+*main channel*).  It is never guessed.  It also needs a table with a `frame`
+column and positions that can be put back into camera pixels, and enough
+molecules seen in both halves: a few hundred pairs at the least, from frames
+spread over the movie.
 
 The 2C fit can do this step itself, on the first frames of the movie
 (*calibrate from this movie*).  Run it here to see what it found before
@@ -43,7 +49,7 @@ on.
 import warnings
 from smappy.simulate import simulate, dual_transformation
 from smappy.calibrate.dual import map_points
-from smappy.calibrate.transform import register_channels
+from smappy.calibrate.transform import RegisterSettings, register_channels
 from smappy.plugins.registration import _draw_vote, _draw_residuals, _draw_coverage
 # a single-colour fit of a split chip, 100 x 100 pixels a half: every molecule
 # is found twice in its frame, in the upper (main) half and, through the
@@ -63,8 +69,9 @@ points = points + rng.normal(size=points.shape) * sigma_all[:, None]
 frames = np.r_[frame[seen[0]], frame[seen[1]]]
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
+    told = RegisterSettings(layout="up-down", main_channel="upper")   # the split, as an entry says
     result = register_channels(points[:, 0], points[:, 1], frames, (200, 100),
-                               precision=sigma_all)
+                               settings=told, precision=sigma_all)
 ```
 
 **1. Positions in camera pixels.**  A transformation is a property of the
@@ -74,17 +81,18 @@ current [selection](plugin:Panels/Glossary) are used -- those that pass the
 layer's filter (the lowest and highest values of columns, set in the Render
 tab), inside the drawn ROI (region of interest).
 
-**2. The vote.**  For every two localizations in the same frame, the vector
-from one to the other is collected.  Most of these vectors connect unrelated
+**2. The vote.**  For every localization on one side of the seam and every
+one on the other side in the same frame, the vector from one to the other is
+collected.  The seam is the microscope's split, or the middle of the frame;
+it only has to be roughly right.  Most of these vectors connect unrelated
 molecules and point anywhere.  But every molecule seen in both halves adds
 the same vector -- the offset between the halves -- so over many frames that
 vector turns up again and again, and stands out in a histogram of all of them
-as a sharp peak.  Its position is the offset, found without any guess.  A
-mirrored half is found the same way on the *sum* of the coordinates along the
-mirrored axis instead of their difference.  All three possibilities are
-tried, and the sharpest peak decides the layout.
+as a sharp peak.  Its position is the offset, found without any guess.  For
+a mirrored layout the vote is taken on the *sum* of the coordinates along the
+mirrored axis instead of their difference.
 
-```figure Left: the simulated localizations on the chip; every molecule of the upper half appears again in the lower one.  Right: the vote, the vectors between all localizations of a frame -- the ring marks the one offset that thousands of them share.
+```figure Left: the simulated localizations on the chip; every molecule of the upper half appears again in the lower one.  Right: the vote, the vectors from each localization above the seam to each below it in the same frame -- the ring marks the one offset that thousands of them share.
 fig.set_size_inches(7.5, 3.4)
 left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1, 1.6]})
 left.plot(points[:, 0], points[:, 1], ".", ms=1, color="#1f77b4")
@@ -162,10 +170,23 @@ files selected, a pair is of one frame of one file (their frame numbers are
 moved apart, `frames_apart`), so bead files recorded at several positions
 pool into one registration.
 
-**The vote.**  For each frame, every ordered pair $(i, j)$ of its
-localizations gives a feature vector: $(x_j - x_i,\, y_j - y_i)$ for an
-unmirrored layout, or with the sum $x_j + x_i$ (or $y_j + y_i$) on the
-mirrored axis.  Frames are taken in order until 4 000 000 vectors have been
+**The layout** is not measured.  *layout* and *main channel* on
+*microscope* are read from the entry of the microscope the table records
+(`metadata["camera"]["microscope"]`): the side each arm lands on, which arm
+the optics mirror, which is the main one, and a split position if the entry
+gives one (`resolve_arrangement`).  Without an entry that says, the run
+stops and asks for the layout; a main channel left to a microscope without
+one is the left or the upper half.  Until 2026-11 the layout was voted for
+in all three feature spaces and the sharpest peak kept; on a wide, low
+camera ROI that chose the wrong axis.
+
+**The vote.**  The localizations are divided at the seam: the given split,
+else the middle of the frame along the layout's axis.  For each frame, every
+pair $(i, j)$ with $i$ on the low side and $j$ on the high side gives a
+feature vector: $(x_j - x_i,\, y_j - y_i)$ for an unmirrored layout, or with
+the sum $x_j + x_i$ (or $y_j + y_i$) on the mirrored axis.  Two localizations
+of one half are never a candidate pair, and on a dense frame they were most
+of the vectors.  Frames are taken in order until 4 000 000 vectors have been
 collected.  The vectors are binned into a histogram $H$ with bins of *vote
 bin* (2 px), and scored with a difference of Gaussians
 
@@ -175,12 +196,10 @@ $\sigma$ being *vote smoothing* (4 px), so that the sharp peak of the pairs
 stays and everything broad -- short vectors between neighbours in one half,
 the ridge that one-half pairs draw in a mirrored vote -- subtracts away.  In
 an unmirrored vote the 3 bins around zero are left out.  The *contrast* is
-the peak of $S$ over the standard deviation of $S$; the layout with the
-highest contrast wins, and the peak is refined to below a bin by the centroid
-of the counts around it.  An unmirrored vote has two equal peaks, $+d$ and
-$-d$; the one pointing from the lower to the higher side of the split is
-taken.  For a mirrored vote, whose sign on the other axis matters, both are
-tried and the one that pairs more localizations is kept.
+the peak of $S$ over the standard deviation of $S$, and the peak is refined
+to below a bin by the centroid of the counts around it.  For a mirrored
+vote, whose sign on the other axis matters, both signs are tried and the one
+that pairs more localizations is kept.
 
 **The mirror line.**  Reflected about a line at $m$, partners satisfy
 $a + b = 2m - 1$, so the peak of a mirrored vote is the mirror line itself.
@@ -268,8 +287,14 @@ which means the map is an extrapolation over the rest.
 ## Parameters
 
 ### registration.layout
-Set it only when detection picks the wrong one: declared, the vote is taken
-only in the space that layout needs.
+Leave it on *microscope* for a microscope in the database whose entry gives
+its arms' sides; choose it for any other.  A wrong layout finds no clear
+peak, and the run says so.
+
+### registration.main_channel
+The half the other is mapped onto.  For two far-red dyes imaged
+ratiometrically it is the transmitted arm, the brighter one; the
+microscope's entry names it.
 
 ### registration.model
 Stay with projective unless the residual grows towards the edges of the
@@ -345,9 +370,10 @@ keeps.
   pixels) and cross-correlates them; the user says where the second half is
   (*target position*) and whether it is mirrored, and the split is the middle
   of the ROI.  Here the offset is voted for on the pair vectors themselves,
-  which is the same cross-correlation computed on points, and the layout, the
-  mirroring and the split position are all measured from the pairs.  A seam
-  away from the middle of the chip then needs no setting.
+  which is the same cross-correlation computed on points.  The layout and the
+  mirroring are the microscope's, as SMAP's user states them, and the split
+  position is measured from the pairs, so a seam away from the middle of the
+  chip needs no setting.
 * **The fit.**  SMAP fits the pairs with MATLAB's `fitgeotrans` by plain
   least squares.  Here the fit is robust -- RANSAC, a soft-L1 refinement and
   a dx/dy screen -- and weighted by the localization precision.

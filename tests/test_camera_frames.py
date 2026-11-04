@@ -216,6 +216,7 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
     colours assigned from the photon split are the dyes."""
     tifffile = pytest.importorskip("tifffile")
     from scipy.spatial import cKDTree
+    from smappy.calibrate.dual import RegisterSettings
     from smappy.calibrate.transform import load_transform
     from smappy.plugins import Context
     from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
@@ -228,7 +229,10 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
     result = DualGaussianFit().run(Context(), DualGaussianFitSettings(
         source=SourceSettings(path=str(tmp_path / "two.tif")),
         camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
-        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0),
+        transform=ChannelTransformSettings(
+            calibrate=True, calibrate_skip=0,
+            # the simulation names no microscope: its split is chosen, as the tutorial chooses it
+            registration=RegisterSettings(layout="up-down", main_channel="upper")),
         output=OutputSettings(path=str(tmp_path / "two.hdf5"))))
     probe = np.array([[5.0, 105.0], [95.0, 195.0], [50.0, 150.0]])
     true = (np.c_[probe, np.ones(3)] @ dual_transformation().T)[:, :2]

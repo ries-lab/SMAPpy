@@ -2,7 +2,7 @@
 title: Bead calibration
 summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
 widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.detect_bead_layout, smappy.calibrate.dual.bead_registration, smappy.calibrate.transform.detect_layout, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
 ---
 
 ## What it does
@@ -48,8 +48,11 @@ What it needs:
 * **A known z step.**  It is read from the acquisition's metadata; if the
   file does not say, type it into *z step*.
 * **For dual colour**, broadband beads that are visible in both halves.  How
-  the chip is split -- left and right or up and down, mirrored or not -- is
-  found from the beads; it can also be chosen (*layout*, *main channel*).
+  the chip is split -- left and right or up and down, mirrored or not, and
+  which half is the main one -- comes from the microscope's entry
+  ([Microscope manager](plugin:Panels/Microscope manager)), for the
+  microscope the beads were taken on; for any other it is chosen (*layout*,
+  *main channel*).  It is never guessed from the beads.
   With the [camera ROI](plugin:Panels/Glossary) (the part of the chip that
   was read out) in the file's metadata the transformation is in chip
   coordinates; without it
@@ -218,14 +221,9 @@ for ax in (left, right):
 *split position* into the main half (*main channel*) and the other, the
 secondary.  Steps 1 and 2 run in each half on its own.  Then:
 
-* **The layout**, unless it was chosen.  The beads are found over the whole
-  frame, as in step 1, and the layout is read from where they are, the way
-  [Calibrate transform](plugin:Analysis/Register/Calibrate transform) reads it
-  from localizations: a bead and its partner in the other half are always
-  the same distance apart (or, for a mirrored half, always add up to the
-  same position along the mirrored axis), so among every pair of beads in a
-  stack that one value comes up once per bead, and the layout it belongs to
-  wins.  The status bar says which layout was found.
+* **The layout**, on *microscope*, is the entry's for the microscope the
+  first bead file was taken on; the status bar says which.  Without an entry
+  that says, the calibration stops and asks for it.
 * **Pairs.**  Each bead is located precisely by a 2D Gaussian fit to its
   eleven central planes.  After undoing the declared layout (the split, and
   a mirror if the layout says *mirrored*), the most common offset between
@@ -392,20 +390,14 @@ smoothed; pairs are mutual nearest neighbours within 12 pixels of each other
 after that offset (*coarse matching*, 12 pixels by default), and never cross
 stacks.  Fewer than *minimum pairs* stops the calibration.
 
-**Dual colour: the layout.**  On *detect*, the beads of every stack are found
-over the whole frame (step 1, both halves at once) and handed to the vote of
-the movie registration (`transform.detect_layout`), each stack standing for
-one frame.  Every ordered pair of beads in a stack gives a vector, taken
-three ways: the plain difference, and the difference with the x or the y
-coordinate summed instead -- the sum is what is constant for a pair mirrored
-along that axis.  Each is histogrammed in *vote bin* pixels and scored by a
-difference of Gaussians *vote smoothing* wide, and the sharpest peak names
-the mirror (if any); the split runs across the axis the partners lie
-furthest apart along.  The main channel on auto is then the left or the
-upper half.  Detection needs the beads where a slide puts them: a regular
-grid of beads centred in its half is its own mirror image, so from positions
-alone it looks mirrored and not mirrored alike -- choose the layout for such
-a sample.
+**Dual colour: the layout.**  On *microscope*, the microscope is the one the
+first bead file's metadata names (`beads_microscope`), its entry as it stood
+then; its arms' sides give the layout, a mirror on one arm makes it
+*mirrored*, the named main arm gives *main channel*, and a split position in
+the entry is used (`resolve_arrangement`).  A main channel left to a
+microscope without one is the left or the upper half.  Until 2026-11 the
+layout was voted for from the beads' positions, which a regular grid of
+beads -- its own mirror image -- could not decide.
 
 **Dual colour: the transformation.**  In homogeneous coordinates the map is
 $\mathbf{x}_m \propto H\, \mathbf{x}_s$ ($H$ a $3\times3$ matrix, secondary to
@@ -563,20 +555,20 @@ polynomial) are not shown.
 ### layout
 How the camera chip is split: *right-left* or *up-down*, and whether the
 secondary half is mirrored along the split (an image splitter with an odd
-number of mirrors in one path).  *detect* finds it from the beads, and the
-status bar says what it found.  Choose it by hand if the beads lie on a
-regular grid, or to be sure: look at a bead frame, and if the pattern of
-beads in one half is the other's mirror image, choose a *mirrored* layout.
+number of mirrors in one path).  *microscope* takes it from the microscope's
+entry, and the status bar says what it is.  For a microscope without an
+entry, look at a bead frame: if the pattern of beads in one half is the
+other's mirror image, choose a *mirrored* layout.
 
 ### main channel
 Which half is the reference that positions are reported in.  It must match
 the layout: *left*/*right* for right-left, *upper*/*lower* for up-down;
-auto is the left or the upper half.
+*microscope* is the entry's main arm, else the left or the upper half.
 
 ### split position
 The first pixel of the second half, on the camera chip (the bead image's
-camera ROI corner added), as the two-colour fitters read it; auto is the
-middle of the first bead image.  Each acquisition is cut where that chip
+camera ROI corner added), as the two-colour fitters read it; empty is the
+microscope's, else the middle of the first bead image.  Each acquisition is cut where that chip
 position falls in it, so acquisitions taken with different ROIs share one
 seam.
 
@@ -585,14 +577,6 @@ How far a bead may lie from where the most common offset between the halves
 puts its partner.  It has to cover the rotation and scale between the
 halves across the field; beads are at least *min distance* apart, so it can
 be generous without pairing the wrong ones.
-
-### vote bin
-Only used to detect the layout.  Bead positions are known to a pixel or so;
-the default suits them.
-
-### vote smoothing
-Only used to detect the layout; the width over which the vote's peak is
-told apart from its background.
 
 ### minimum pairs
 The fewest bead pairs the transformation may be fitted from; at least 4,

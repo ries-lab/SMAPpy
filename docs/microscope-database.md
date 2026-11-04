@@ -537,6 +537,17 @@ pupils keyed by lens state and colour (`colour_of`, `emission_of`); the manager'
 table and *mirror* column, and everything else carried through it.  M2, M5 and the new M6 (with
 its camera *Fusion BT 2*) filled in.  Nothing reads the arrangement yet: that is step 2.
 
+### Built: step 2 (2026-11-04)
+
+No detection: `transform.detect_layout`, `dual.detect_bead_layout` and the provisional seam down
+the longer axis are gone.  `RegisterSettings.layout` and `main_channel` default to *microscope*
+(an old *auto* reads as it), resolved by `dual.resolve_arrangement` from the file's microscope --
+in the two-colour fitters' calibration pass (`_seam`), *Calibrate transform* (the table's
+microscope) and the dual bead calibration (`beads_microscope`) -- and refused, asking for the
+layout, where no entry says.  The vote pairs only across the seam (the split, else the middle of
+the frame) and takes the axis from the layout.  Not done: checking a chosen registration file
+against the entry's arrangement; 4Pi beads still read the current setup, not `as_of`.
+
 ### Where it stands
 
 * **Built**: devices and their states, parameters following one device each, filters giving

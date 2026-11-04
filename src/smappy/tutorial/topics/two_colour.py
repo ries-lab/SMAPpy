@@ -150,6 +150,16 @@ def make(d) -> None:
            "movie's own molecules, which appear in both halves. No beads needed.",
            spot=[calibrate], point=calibrate, click=True,
            zoom=d.around(calibrate, 760))
+    # the simulated movie names no microscope, so its split is chosen; a microscope with an
+    # entry gives it, and it is never detected
+    type_into(panel, "transform.registration.layout", "up-down")
+    type_into(panel, "transform.registration.main_channel", "upper")
+    d.settle()
+    layout = field(panel, "transform.registration.layout")
+    main = field(panel, "transform.registration.main_channel")
+    d.shot("How the chip is split comes from the microscope's entry. This movie "
+           "names none, so say it here: an upper and a lower half, the main one above.",
+           spot=[layout, main], point=layout, zoom=d.around(layout, 760))
     path = field(panel, "transform.path")
     d.shot("It is saved beside the result, to use again here. A dual-colour bead "
            "calibration works too.",

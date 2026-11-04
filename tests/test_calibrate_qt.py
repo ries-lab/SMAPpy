@@ -92,7 +92,7 @@ def test_the_dual_form_is_the_movie_registrations_with_a_bead_slides_defaults(ap
     assert {"layout", "main_channel", "split_position", "min_pairs"} <= set(geometry.fields)
     settings = window.settings()
     assert settings.registration == bead_registration()
-    assert settings.registration.layout == "auto"
+    assert settings.registration.layout == "microscope"
     assert settings.registration.min_pairs == 8
     geometry.fields["layout"].set("right-left")
     assert window.settings().registration.layout == "right-left"

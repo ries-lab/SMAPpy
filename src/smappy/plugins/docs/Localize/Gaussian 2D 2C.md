@@ -1,6 +1,6 @@
 ---
-version: "7"
-covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.chip_halves, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
+version: "8"
+covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.chip_halves, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement]
 ---
 
 ## What it does
@@ -43,6 +43,12 @@ What it needs:
   on beads; the *PSF calibration* section of the Localize tab), whose
   transformation is used and whose PSF models are not.  With neither, the run
   asks before it starts.
+* **How the chip is split**, to measure the transformation from the movie:
+  left and right or upper and lower, whether one half is mirrored, and which
+  is the main one.  It comes from the microscope's entry
+  ([Microscope manager](plugin:Panels/Microscope manager)) for a recognised
+  microscope; for any other, choose it under *registration* (*layout*,
+  *main channel*).  It is never guessed.
 
 For 3D data with a bead calibration, use
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C); for one colour,
@@ -275,12 +281,15 @@ and every step goes into its history.
 **Calibrating from the movie.**  With *calibrate from this movie* ticked, a
 first pass runs before the fit.  It fits frames of the movie with a plain
 [Gaussian 2D](plugin:Localize/Gaussian 2D) fit over the whole frame, with the
-same camera and detection settings as the real fit (each half thresholded on
-its own about a provisional seam down the middle of the chip's longer side).
+same camera and detection settings as the real fit, each half thresholded on
+its own about the seam -- the microscope's split, or the middle of the frame
+as acquired.  The layout, the mirroring and the main half are the
+microscope's or chosen (*registration*), never detected.
 Every molecule then shows up as two localizations in the same frame, and
 *Analysis/Register/Calibrate transform*'s method finds the map from those
 pairs: the vector between every two localizations of a frame is collected, the
-offset between the halves is the one that turns up over and over, the pairs
+offset between the halves is the one that turns up over and over among the
+vectors that cross the seam, the pairs
 are matched through it and a projective map is fitted, then matched again,
 more tightly, through that map and fitted again.  The frames are chosen
 carefully:
@@ -440,8 +449,13 @@ Set it to 0 for a movie that does not start with everything on, such as a
 simulation, or one started after a bleaching phase.
 
 ### transform.registration.layout
-Auto tries plain, x-mirrored and y-mirrored and keeps the sharpest vote.  Set
-it only when the automatic answer is wrong.
+*microscope* reads it from the entry of the microscope the movie was taken
+on; a file no entry recognises stops with a message asking for it.  All the
+Ries lab's microscopes are *right-left mirrored*.
+
+### transform.registration.main_channel
+For two far-red dyes split by a long-pass dichroic, the transmitted arm is
+the brighter and the usual main channel; the microscope's entry names it.
 
 ### transform.registration.model
 *polynomial* is refused, with a message, when the pairs are too few for its

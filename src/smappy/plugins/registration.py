@@ -96,14 +96,16 @@ class CalibrateChannelTransform(Plugin):
 
     description = ("Measure the transformation between the two halves of a "
                    "split frame from localizations fitted over the whole "
-                   "frame: no initial shift, no magnification and no split "
-                   "position needed.")
+                   "frame: the layout from the microscope or chosen, no "
+                   "initial shift and no magnification needed.")
     changes_locs = False
     # bead pairs are matched frame by frame
     grouping = "ungrouped"
     # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
     # 3: pairs within one frame of one file, never across two files
-    version = "3"
+    # 4: the layout the microscope's or chosen, not detected; the vote over the pairs across the
+    #    seam only
+    version = "4"
     Settings = RegisterLocsSettings
     preview_help = ("run the registration and draw it -- the vote, the "
                     "residual scatter and where the pairs are -- without "
@@ -128,10 +130,14 @@ class CalibrateChannelTransform(Plugin):
         precision = None
         if "xy_err_nm" in locs or "xy_err_pix" in locs:
             precision = in_pixels(locs, "xy_err_pix")
+        # how the chip is split: the microscope the table was fitted on, or chosen
+        from ..calibrate.dual import resolve_arrangement
+        registration = resolve_arrangement(
+            settings.registration, (locs.metadata.get("camera") or {}).get("microscope"))
         # a pair is two channels of one frame of one file: files opened
         # together share frame numbers, and beads from several files pool
         return register_channels(x, y, frames_apart(locs), shape, roi,
-                                 settings=settings.registration,
+                                 settings=registration,
                                  progress=ctx.report, precision=precision), locs
 
     def run(self, ctx: Context, settings) -> Result:

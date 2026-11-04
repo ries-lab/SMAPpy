@@ -92,8 +92,7 @@ def make(d) -> None:
     window.add_paths([str(p) for p in stacks])
     form = window.detection_form
     geometry = form.fields["registration"]      # the split: a part of its own
-    # set by hand: the simulated beads sit on a grid centred in each half,
-    # which is its own mirror image, so *detect* could not tell the two apart
+    # set by hand: the simulated beads name no microscope whose entry would give the split
     for part, name, value in ((geometry, "layout", "up-down"),
                               (geometry, "main_channel", "upper"),
                               (form, "dz_nm", DZ_NM)):
@@ -108,8 +107,8 @@ def make(d) -> None:
            zoom=d.around(window.file_list, 760))
     layout = geometry.fields["layout"]
     main = geometry.fields["main_channel"]
-    d.shot("How the chip is split: detect finds it from the beads, or say it "
-           "here, an upper and a lower half with the main channel above. "
+    d.shot("How the chip is split comes from the microscope's entry. These beads "
+           "name none, so say it here: an upper and a lower half, the main one above. "
            "Mirrored is for a splitter that flips one half.",
            spot=[layout, main], point=layout, zoom=d.around(layout, 700))
 

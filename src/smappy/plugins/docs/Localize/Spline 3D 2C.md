@@ -1,5 +1,5 @@
 ---
-version: "9"
+version: "10"
 covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -421,7 +421,8 @@ Ignored when *measure from this movie* is ticked.
 For a splitter that moved since the beads -- the residuals of *link xy*
 off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
 plain Gaussian over both halves and registered, with the calibration's
-layout and main channel, so that each PSF stays on its half; then the real
+layout and main channel, so that each PSF stays on its half -- only the pairs
+across the seam vote for the offset; then the real
 fit runs with the calibration's PSFs and this registration.  *Preview*
 measures it too and shows it in a tab, *channel registration*; the
 measurement is kept, so the run uses the one the preview showed unless a

@@ -1,4 +1,6 @@
 """smappy.calibrate.pupil: bead files to uipsf's batch, with smappy's reader, camera, detection and pairing."""
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import torch
@@ -98,7 +100,12 @@ def _chip(H, seed, n=14, shape=(512, 256), origin=(100, 0)):
 def test_pairs_their_rois_and_a_starting_transform_come_back_from_a_simulated_chip(mirrored):
     H = H_SMALL @ MIRROR if mirrored else H_SMALL @ SHIFT
     stacks, mains, seconds = zip(*[_chip(H, seed) for seed in range(3)], strict=True)
-    rois = dual_rois(list(stacks), CAMERA, DualColorSettings(roi_size=15), slices=slice(None))
+    # the split is told, as a microscope's entry tells it: never detected
+    from smappy.calibrate.dual import bead_registration
+    told = replace(bead_registration(), layout="up-down mirrored" if mirrored else "up-down",
+                   main_channel="upper")
+    rois = dual_rois(list(stacks), CAMERA, DualColorSettings(roi_size=15, registration=told),
+                     slices=slice(None))
     assert rois.geometry["layout"] == ("up-down mirrored" if mirrored else "up-down")
     assert rois.geometry["split_position"] == 256
     batch = rois.batch

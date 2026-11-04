@@ -1803,14 +1803,20 @@ class _TwoChannelFit(_FitPlugin):
         and a threshold set here and not there would register on a different
         population than it serves.
         """
+        from ..calibrate.dual import resolve_arrangement
         from ..calibrate.transform import register_channels
 
         from ..locs import concat
 
         src = settings.source
-        provisional = settings.transform.provisional_split(settings)
         source = _open(replace(src, live=False), watch=False)
         camera = settings.camera.resolve(source)
+        # how the chip is split: the microscope's, or chosen in the form -- never detected
+        registration = resolve_arrangement(settings.transform.registration, camera.microscope)
+        provisional = _seam(registration, camera, source.shape[-2:])
+        ctx.report(f"the chip split {registration.layout}, the main half {registration.main_channel}"
+                   + ("" if settings.transform.registration.layout != "microscope"
+                      else f", as {camera.microscope.get('name')}'s entry says"))
         last = min(src.stop, source.n_frames) if src.stop else source.n_frames
         blocks = calibration_blocks(src.start, last,
                                     settings.transform.calibrate_frames,
@@ -1880,7 +1886,7 @@ class _TwoChannelFit(_FitPlugin):
         x, y = in_pixels(locs, "x_pix", "y_pix")
         result = register_channels(
             x, y, np.asarray(locs["frame"]), source.shape[-2:],
-            camera.roi, settings=settings.transform.registration,
+            camera.roi, settings=registration,
             progress=ctx.report,
             precision=(in_pixels(locs, "xy_err_pix")
                        if "xy_err_nm" in locs else None))
@@ -2090,7 +2096,8 @@ class DualSplineFit(_TwoChannelFit):
     # 8: a fit region drawn on one half applies to both
     # 9: on the channel layer (docs/4pi.md §9): positions in the main channel's own pixels from its
     #    corner on the chip, each channel searched alone, a box never across the seam
-    version = "9"
+    # 10: *measure from this movie* with the calibration's arrangement, the vote across the seam only
+    version = "10"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2159,6 +2166,22 @@ def _replace_split(finder, split, camera):
     axis, chip = split
     offset = camera.roi_offset[1 - axis] if camera is not None else 0
     return _replace(finder, split=(axis, chip - offset))
+
+
+def _seam(registration, camera, shape):
+    """Where the frame divides on the chip, ``(axis, position)``, axis 1 for columns: the
+    registration's split, else the middle of the frame as acquired (the camera ROI), which is
+    how the lab centres it.  Each half is thresholded on its own about it -- what lets a dim
+    channel be detected at all -- and the registration's vote pairs across it; the seam the
+    fit uses is measured by the registration afterwards, so a few pixels off cost nothing."""
+    axis = 1 if registration.layout.startswith("right-left") else 0
+    if registration.split_position is not None:
+        return (axis, float(registration.split_position))
+    height, width = (int(v) for v in shape)
+    roi = camera.roi if camera is not None and camera.roi is not None else (0, 0, width, height)
+    x0, y0, w, h = roi
+    origin, extent = ((x0, w) if axis == 1 else (y0, h))
+    return (axis, origin + extent / 2.0)
 
 
 def _dim_channel_count(parts, split) -> int:
@@ -2275,44 +2298,6 @@ class ChannelTransformSettings:
                                    help="write the measured transformation "
                                         "beside the output, as *_2ct.h5")
 
-    def provisional_split(self, settings):
-        """Roughly where the frame divides, before anything has measured it.
-
-        The calibration pass has a chicken-and-egg problem: thresholding each
-        half separately is what lets a dim channel be detected at all, and the
-        seam is not known until the registration that needs those detections
-        has run.  A rough answer settles it.  The threshold only needs the two
-        populations kept apart, so a seam a few pixels off costs nothing but a
-        thin band judged against the wrong half -- whereas pooling the two
-        costs the dim channel outright.
-
-        The chip is split down the middle of its longer axis, which is what a
-        split-frame camera ROI looks like, unless the registration settings
-        already say otherwise.  Returns ``(axis, chip position)``, axis 0 for
-        rows and 1 for columns, or None when there is nothing to go on.
-        """
-        given = getattr(self, "registration", None)
-        layout = getattr(given, "layout", "auto") if given else "auto"
-        position = getattr(given, "split_position", None) if given else None
-        roi = None
-        try:
-            camera = settings.camera.resolve(
-                _open(replace(settings.source, live=False), watch=False))
-            roi = camera.roi
-        except Exception:
-            return None
-        if roi is None:
-            return None
-        x0, y0, width, height = roi
-        if layout != "auto":
-            axis = 1 if "right-left" in layout else 0
-        else:
-            axis = 1 if width > height else 0
-        if position is not None:
-            return (axis, float(position))
-        origin, extent = ((x0, width) if axis == 1 else (y0, height))
-        return (axis, origin + extent / 2.0)
-
     def load(self):
         from ..calibrate.transform import load_transform
         if not self.path:
@@ -2396,7 +2381,9 @@ class DualGaussianFit(_TwoChannelFit):
     # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
     # 6: a fit region drawn on one half applies to both
     # 7: on the channel layer, as Spline 3D 2C's 9
-    version = "7"
+    # 8: *calibrate from this movie* with the microscope's or the chosen arrangement, never
+    #    detected; the vote across the seam only
+    version = "8"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

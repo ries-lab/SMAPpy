@@ -876,6 +876,43 @@ def pupil_of(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return entry.pupil_for(summary.get("states") or {}, emission_of(summary))
 
 
+def _summary_of(microscope) -> Optional[Dict[str, Any]]:
+    """A summary from a summary, a `MicroscopeResolution` or a name."""
+    if microscope is None or microscope == "":
+        return None
+    if isinstance(microscope, MicroscopeResolution):
+        return microscope.summary() if microscope.microscope is not None else None
+    if isinstance(microscope, str):
+        return {"name": microscope}
+    return microscope if isinstance(microscope, dict) else None
+
+
+def name_of(microscope) -> str:
+    if isinstance(microscope, Microscope):
+        return microscope.name
+    found = _summary_of(microscope)
+    return str(found.get("name") or "") if found else ""
+
+
+def arrangement_of(microscope, camera: str = "") -> Optional[Dict[str, Any]]:
+    """How the chip is split on the microscope a file was taken on (`Microscope.arrangement`):
+    ``microscope`` a summary, a `MicroscopeResolution`, an entry's name or the entry itself; the
+    setup of the file's version, the camera it names unless ``camera`` is given.  None when no
+    entry says."""
+    if isinstance(microscope, Microscope):
+        return microscope.arrangement(camera)
+    summary = _summary_of(microscope)
+    if not summary or not summary.get("name"):
+        return None
+    entry = database().get(str(summary["name"]))
+    if entry is None:
+        return None
+    until = read_date(summary.get("version")) if summary.get("version") else None
+    if until is not None:
+        entry = entry.as_of(until - _dt.timedelta(days=1))
+    return entry.arrangement(camera or str(summary.get("camera") or ""))
+
+
 def emission_of(summary: Optional[Dict[str, Any]]) -> Optional[float]:
     """A summary's emission, nm: the main arm's, else the microscope's ``wavelength_nm``."""
     if not summary:

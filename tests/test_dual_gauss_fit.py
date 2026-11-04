@@ -22,6 +22,13 @@ SHAPE = (96, 64)
 WIDTHS = (1.1, 1.4)   # the two halves see different wavelengths
 
 
+def chosen():
+    """The split these movies have, chosen as for a microscope without an entry: their files name
+    none, and the arrangement is never detected."""
+    from smappy.calibrate.dual import RegisterSettings
+    return RegisterSettings(layout="up-down", main_channel="upper")
+
+
 def transform(dx=0.37, dy=-0.21):
     """Secondary -> reference, the direction `calibrate.dual` builds."""
     matrix = np.array([[1., 0., -dx], [0., 1., -SPLIT - dy], [0., 0., 1.]])
@@ -216,7 +223,8 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
-        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150,
+                                           registration=chosen()),
         fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
@@ -262,7 +270,8 @@ def test_the_preview_shows_the_registration_it_measured_and_the_run_reuses_it(tm
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
-        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150,
+                                           registration=chosen()),
         fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
     measured = []
@@ -294,6 +303,27 @@ def test_the_preview_shows_the_registration_it_measured_and_the_run_reuses_it(tm
     assert measured == [1, 1]
 
 
+def test_without_a_microscope_the_split_is_chosen_never_detected(tmp_path):
+    """A file no microscope entry recognises: measuring the transformation from it asks for the
+    layout rather than guessing it, and says so in the preview."""
+    import tifffile
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DetectionSettings, DualGaussianFit,
+                                    DualGaussianFitSettings, SourceSettings)
+    frames, _ = movie(30, np.random.default_rng(2), transform(), per=3)
+    stack = tmp_path / "unknown.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = DualGaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0))
+    preview = DualGaussianFit().preview(Context(), settings, frame=0)
+    assert "choose the layout" in preview.text
+    with pytest.raises(ValueError, match="choose the layout"):
+        DualGaussianFit().run(Context(), settings)
+
+
 def test_a_failed_measurement_is_said_in_the_preview_not_raised(tmp_path):
     import tifffile
     from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
@@ -306,7 +336,8 @@ def test_a_failed_measurement_is_said_in_the_preview_not_raised(tmp_path):
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=1e6),    # nothing found
-        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0))
+        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0,
+                                           registration=chosen()))
     preview = DualGaussianFit().preview(Context(), settings, frame=0)
     assert "measuring the transformation failed" in preview.text
     assert "channel registration" not in preview.plots
@@ -452,6 +483,6 @@ def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
     assert np.median(np.abs(y - locs["peak_y_pix"])) < 0.5
 
     found = CalibrateChannelTransform().preview(
-        Context(locs=locs), RegisterLocsSettings(save=False)).data["transform"]
+        Context(locs=locs), RegisterLocsSettings(save=False, registration=chosen())).data["transform"]
     probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
     np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)

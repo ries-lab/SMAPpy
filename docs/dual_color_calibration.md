@@ -146,19 +146,14 @@ Each bead's lateral coordinate is refined by an elliptical Gaussian fit to the
 mean of eleven central objective planes. There is no independent channel z fit
 or channel z alignment. Failed lateral fits cannot contribute to calibration.
 
-With the layout on *detect*, it is found first (`detect_bead_layout`): the
-beads of each acquisition are detected over the whole frame, as for a single
-channel, and handed to the movie registration's vote
-(`transform.detect_layout`), one acquisition standing for one frame. Within an
-acquisition every ordered pair of beads gives a difference vector, and for each
-mirror axis a vector with that coordinate summed instead; a bead and its
-partner give the same value every time, so the sharpest peak among the three
-names the mirror and the axis the partners lie apart along names the split.
-What was found is written into the settings the beads carry, so a rebuild, the
-pages and the saved file read the layout that was used. Positions alone cannot
-tell a mirrored from an unmirrored layout when the beads form a regular grid
-centred in its half, which is its own mirror image; choose the layout for such
-a sample.
+With the layout on *microscope* (the default), it is the microscope's
+(`resolved_geometry`, `resolve_arrangement`): the entry of the microscope the
+first bead file names gives the arms' sides, which one is mirrored and which
+is the main one; for a microscope without an entry the layout is chosen, and
+the calibration stops until it is. It was once voted for from the beads'
+positions, which a regular grid of beads -- its own mirror image -- could not
+decide. What was resolved is written into the settings the beads carry, so a
+rebuild, the pages and the saved file read the layout that was used.
 
 The declared or detected split/reflection initializes matching. A
 two-pixel-bin translation vote pools candidate differences **within** each
