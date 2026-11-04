@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormL
                                QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import microscope_db
-from ..microscope_db import FROM_NAME, READS, Microscope
+from ..microscope_db import FROM_NAME, OBJECTIVE, READS, Microscope
 
 # ------------------------------------------------------------- text in a cell
 
@@ -120,16 +120,20 @@ TABS = (
     ("identify", ["tag", "value"],
      "tags that must all match for a file to be this microscope: take a device that stays "
      "with it (a laser's serial number), not the camera, which moves"),
+    ("objective", ["", "value"],
+     "the objective: its name, NA, immersion and the immersion's refractive index -- what uiPSF "
+     "reads; no magnification, the pixel on the sample is the camera's"),
     ("devices", ["name", "tags", "read", "tolerance", "states", "EMU control"],
      "each device: the Micro-Manager tags it is read from (an older name after a ' | '), how "
      "(exact, nearest, value), and its states as 'name: reading; ...'"),
     ("parameters", ["parameter", "follows", "value"],
-     "NA, n_immersion, n_coverslip, coverslip_design_um, wavelength_nm, pixel_nm, modality ...: a "
+     "n_coverslip, coverslip_design_um, wavelength_nm, pixel_nm, modality, astigmatism_nm ...: a "
      "value, or a device it follows "
      "and 'state: value; ...' ('from the name' reads a filter's band)"),
-    ("channels", ["arm", "filter", "side"],
-     "the split: its arms, transmitted first, the filter device each follows and the half of "
-     "the chip it lands on with this camera (left, right, upper, lower)"),
+    ("channels", ["arm", "filter", "side", "mirror"],
+     "the split: its arms, transmitted first, the filter device each follows, the half of "
+     "the chip it lands on with this camera (left, right, upper, lower) and the axis the optics "
+     "flip it along against the other arm (x, y; empty for none)"),
 )
 
 
@@ -244,6 +248,7 @@ class MicroscopeManager(QWidget):
         self.pupils_label.setWordWrap(True)
         right.addWidget(self.pupils_label)
         self._pupils = {}
+        self._kept: Dict[str, Any] = {}
         self.message = QLabel("")
         self.message.setWordWrap(True)
         right.addWidget(self.message)
@@ -315,6 +320,8 @@ class MicroscopeManager(QWidget):
         self.comment.setText(entry.comment)
         for tag, value in entry.identify.items():
             _put(self.tables["identify"], [tag, value])
+        for name in OBJECTIVE:
+            _put(self.tables["objective"], [name, value_text(entry.objective.get(name))])
         for name, device in entry.devices.items():
             _put(self.tables["devices"], [name, " | ".join(device.tags), device.read,
                                           value_text(device.tolerance), map_text(device.states),
@@ -323,12 +330,18 @@ class MicroscopeManager(QWidget):
             _put(self.tables["parameters"], [name, *follows_text(raw)])
         for channel in entry.channels:
             side = map_text(channel.side) if isinstance(channel.side, dict) else channel.side
-            _put(self.tables["channels"], [channel.name, channel.filter, side])
+            _put(self.tables["channels"], [channel.name, channel.filter, side, channel.mirror])
         self._fill_cameras(entry.camera)
         for table in self.tables.values():
             table.blockSignals(False)
         self._versions = list(entry.versions)
         self._pupils = dict(entry.pupils)
+        # what the tables have no column for yet -- the objective, the filters, the arrangement,
+        # an arm's mirror and region -- carried through unchanged, as the pupils are
+        raw = entry.to_dict()
+        self._kept = {key: raw[key] for key in ("filters", "main_channel", "split_position",
+                                                 "layout") if key in raw}
+        self._kept_arms = {c.name: {"region": c.region} for c in entry.channels if c.region}
         self.pupils_label.setText(
             "objective pupil: " + "; ".join(f"{key} (from {p.get('source') or '?'}, {p.get('date') or '?'}"
                                             + (")" if p.get("kind") else "; an old format, not used: keep it again)")
@@ -361,12 +374,16 @@ class MicroscopeManager(QWidget):
             "devices": devices,
             "parameters": {name.strip(): parse_follows(device, value)
                            for name, device, value in rows("parameters") if name.strip()},
+            "objective": {name.strip(): parse_value(value) for name, value in rows("objective")
+                          if name.strip() and value.strip()},
             "channels": {arm.strip(): {"filter": filter_.strip(),
                                        "side": parse_map(side, values=False) if ":" in side
-                                       else side.strip()}
-                         for arm, filter_, side in rows("channels") if arm.strip()},
+                                       else side.strip(),
+                                       "mirror": mirror.strip(),
+                                       **getattr(self, "_kept_arms", {}).get(arm.strip(), {})}
+                         for arm, filter_, side, mirror in rows("channels") if arm.strip()},
             "camera": self.camera.currentData() or "", "versions": self._versions,
-            "pupils": self._pupils,
+            "pupils": self._pupils, **self._kept,
         }
         return Microscope.from_dict(raw)
 

@@ -91,6 +91,15 @@ Tags that must all match.  Take a device that stays with the microscope -- a
 laser's or the focus lock's serial number -- not the camera, which moves
 between microscopes.
 
+### objective
+The objective's *name*, *NA*, *immersion* (oil, water, silicone) and
+*n_immersion*, the immersion's refractive index -- what *PSF calibration* and
+in situ learning read.  No magnification: what a fit needs is the pixel on the
+sample, which is the camera's, measured, and differs with the 3D lens on some
+microscopes; the nominal magnification says little with relay optics behind
+the objective.  An entry from before this table had the NA and the index among
+the *parameters*, which are still read when the table leaves them empty.
+
 ### devices
 One row per device: its name; the Micro-Manager tags it is read from (an
 older name after `|`, for files from before a rename); *exact*, *nearest* or
@@ -99,7 +108,7 @@ number is no state at all; the states as `name: reading; ...`; the EMU button
 it came from.  When two states share one reading, the first listed wins.
 
 ### parameters
-One row per value: `NA`, `n_immersion`, `n_coverslip`, `coverslip_design_um`,
+One row per value: `n_coverslip`, `coverslip_design_um`,
 `wavelength_nm`, `pixel_nm` (`127 116`: x and y), `modality`,
 `astigmatism_nm`.  *follows* empty: the value.
 `n_coverslip` and `coverslip_design_um` are the objective's: the coverslip's
@@ -108,7 +117,7 @@ them the coverslip is taken to be the immersion (an oil objective, where
 neither matters) and 170 µm thick; a water or silicone objective needs
 `n_coverslip` (about 1.52 for glass) for *PSF calibration* to model the glass
 plate and to offer learning its tilt.  A microscope with several objectives
-lets them follow the device that holds the objective, as the NA does.
+lets them follow the device that holds the objective.
 `astigmatism_nm` is where *PSF calibration*'s in situ learning starts without a
 model: the vertical astigmatism (Noll 6) in nm of wavefront, read from a bead
 model of the microscope, per state of the 3D lens (`on: 62; off: 0`).  Its sign
@@ -118,8 +127,8 @@ device: `state: value; ...`, or `from the name` for a filter.
 
 
 Under the tables, in grey, the objective's pupils kept with the entry, one
-per state of the 3D lens, each with the calibration it came from and its
-date.  They are not typed: *PSF calibration*'s *Add to microscope...* keeps
+per state of the 3D lens and colour (green, red, far red: not per filter),
+each with the calibration it came from and its date.  They are not typed: *PSF calibration*'s *Add to microscope...* keeps
 one from a pupil model, and an edit of the rest of the entry carries them
 through.  In situ learning starts from the one for its movie's lens state.
 ### channels
@@ -127,8 +136,12 @@ The arms of a split, the transmitted one first -- it is the one used alone,
 when the splitting dichroic is out.  Each names the device that holds its
 filter and the half of the chip it lands on: `left`, `right`, `upper`,
 `lower`, for this camera: a camera mounted turned puts the arm on another
-side, which is why a new camera is a new setup.  Find it from a dual-colour
-acquisition of two far-red dyes: the transmitted half is the brighter.
+side, which is why a new camera is a new setup.  Find it from a ratiometric
+acquisition of two far-red dyes (a 665LP splitting them): the transmitted half
+is the brighter.  *mirror* is the axis the optics flip an arm along against the
+other -- `x` for a right-left split with one more mirror in one arm, as on the
+lab's microscopes; empty for none.  The main arm -- the one the other is registered onto
+-- is the transmitted one unless the entry names another.
 
 ### camera
 The camera the microscope is set up with, from the camera database.  The pixel

@@ -90,9 +90,9 @@ def test_the_manager_checks_the_entry_against_a_file_as_it_is_edited(app, tmp_pa
     shown = {manager.result.item(r, 0).text(): manager.result.item(r, 1).text()
              for r in range(manager.result.rowCount())}
     assert shown["device: 3DA"] == "on" and shown["pixel_nm"] == "127 × 116"
-    table = manager.tables["parameters"]
+    table = manager.tables["objective"]
     row = next(r for r in range(table.rowCount()) if table.item(r, 0).text() == "NA")
-    table.item(row, 2).setText("1.3")                        # checked again at once
+    table.item(row, 1).setText("1.3")                        # checked again at once
     shown = {manager.result.item(r, 0).text(): manager.result.item(r, 1).text()
              for r in range(manager.result.rowCount())}
     assert shown["NA"] == "1.3"
@@ -115,18 +115,21 @@ def test_saving_writes_the_users_file_and_keeps_the_old_entry_dated(app, config)
     from smappy.gui.microscope_editor import MicroscopeManager
     manager = MicroscopeManager()
     manager.load("M2")
-    table = manager.tables["parameters"]
+    table = manager.tables["objective"]
     row = next(r for r in range(table.rowCount()) if table.item(r, 0).text() == "NA")
-    table.item(row, 2).setText("1.45")
+    table.item(row, 1).setText("1.45")
     manager.until.setText("2026-10-01")
     assert manager.save()
     stored = json.loads((config / "microscopes.json").read_text())["microscopes"]
     assert [m["name"] for m in stored] == ["M2"]
-    assert stored[0]["parameters"]["NA"] == 1.45
+    assert stored[0]["objective"]["NA"] == 1.45
+    # what the tables have no column for is carried through: the arrangement, the mirror
+    assert stored[0]["main_channel"] == "transmitted"
+    assert stored[0]["channels"]["reflected"]["mirror"] == "x"
     # the Evolve setup it shipped with, then what this save replaced
     assert stored[0]["versions"][0]["camera"] == "Evolve 1"
-    assert stored[0]["versions"][-1] == {"until": "2026-10-01", "parameters": {"NA": 1.43}}
-    assert microscope_db.database().get("M2").parameters["NA"] == 1.45
+    assert stored[0]["versions"][-1] == {"until": "2026-10-01", "objective": {"NA": 1.43}}
+    assert microscope_db.database().get("M2").objective["NA"] == 1.45
     assert "(yours)" in manager.entries.currentItem().text()
     manager.close()
 
@@ -332,14 +335,17 @@ def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_surviv
         return CameraSettings().resolve(source, require=False)
     beads = scope(M2_BEADS, "beads")
     key, path = microscope_db.keep_pupil(beads.microscope, PUPIL)
-    assert key == "3DA: on" and path == microscope_db.user_file()
+    assert key == "3DA: on \u00b7 far red" and path == microscope_db.user_file()   # by lens and colour
     assert microscope_db.pupil_of(beads.microscope)["phase_nm"]["11"] == 21.0
     assert microscope_db.pupil_of(scope(M2_MOVIE, "movie").microscope) is None      # the lens out
     # in situ's start astigmatism: the pupil's, over the entry's +62
     assert start_astigmatism(InSituModelSettings(), beads)[0] == 58.0
     # the entry before is kept, dated; an edit in the manager carries the pupil through
     entry = microscope_db.database().get("M2")
-    assert entry.versions[-1]["pupils"] == {"3DA: on": None}
+    assert entry.versions[-1]["pupils"] == {"3DA: on \u00b7 far red": None}
+    # a red file with the lens in does not take the far-red model; a far-red one does
+    assert entry.pupil_for({"3DA": "on"}, 600.0) is None
+    assert entry.pupil_for({"3DA": "on"}, 700.0)["gamma"] == 0.36
     manager = MicroscopeManager()
     manager.show_entry(entry)
     assert "3DA: on" in manager.pupils_label.text()

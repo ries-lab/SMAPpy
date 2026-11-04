@@ -455,6 +455,46 @@
       }
     },
     {
+      "name": "Fusion BT 2",
+      "aliases": [
+        "M6 Fusion BT"
+      ],
+      "prefix": "HamamatsuHam_DCAM",
+      "parameters": {
+        "em_on": {
+          "fixed": false
+        },
+        "pixelsize_um": {
+          "fixed": [
+            0.102,
+            0.108
+          ]
+        },
+        "conversion": {
+          "fixed": 0.24
+        },
+        "emgain": {
+          "fixed": 1.0
+        },
+        "offset": {
+          "fixed": 100.0
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_time_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        }
+      },
+      "comment": "M6's Orca Fusion BT: no file yet gives its serial (chosen by hand). The pixel on the sample 102 x 108 nm (the lab, 2026-11-04); conversion and offset M5's Fusion BT's until measured."
+    },
+    {
       "name": "4Pi-SMS example camera",
       "comment": "The camera of the 4Pi-SMS consortium's Example Data II (zenodo 4022827), as SMAP's 4Pi settings give it (Cell01_642_000_000_3dcal.mat): an ORCA-Flash 4.0, 100 nm pixels on the sample, offset 100, 0.5 photons per ADU. No tag identifies it in a DCIMG file: chosen by hand. An example until the Ries-lab 4Pi has its own entry.",
       "parameters": {
@@ -500,9 +540,15 @@
   "microscopes": [
     {
       "name": "M2",
-      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. Set up with the iXon since July 2026 (the last Evolve stack 2026-07-09, the first iXon one 07-23; the Evolve kept as a version until 07-15). The pixel per lens state, for each camera, was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront, uiPSF v1's sign), from bead models: +62 with the iXon (0.54-0.64 rad at 676 nm, four stacks Aug-Oct 2026, benchmarks/uipsf/results/lab_beads.jsonl and insitu_magnitude.jsonl), -73 with the Evolve, turned by 90 degrees (-0.67 rad, 260622 and 260105).",
+      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. Set up with the iXon since July 2026 (the last Evolve stack 2026-07-09, the first iXon one 07-23; the Evolve kept as a version until 07-15). The pixel per lens state, for each camera, was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront, uiPSF v1's sign), from bead models: +62 with the iXon (0.54-0.64 rad at 676 nm, four stacks Aug-Oct 2026, benchmarks/uipsf/results/lab_beads.jsonl and insitu_magnitude.jsonl), -73 with the Evolve, turned by 90 degrees (-0.67 rad, 260622 and 260105). The objective a Leica 160x NA 1.43, oil; the 160x is nominal, the relay optics after it set the pixel, which is the camera's per state of the 3D lens. The split is right-left, the reflected arm mirrored against the transmitted one, which is the main channel; the splitting dichroic for ratiometric imaging a 665LP.",
       "identify": {
         "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644"
+      },
+      "objective": {
+        "name": "Leica 160x NA1.43",
+        "NA": 1.43,
+        "immersion": "oil",
+        "n_immersion": 1.518
       },
       "devices": {
         "filter wheel": {
@@ -605,8 +651,6 @@
         }
       },
       "parameters": {
-        "NA": 1.43,
-        "n_immersion": 1.518,
         "wavelength_nm": {
           "device": "filter wheel",
           "values": "from the name"
@@ -646,7 +690,8 @@
         },
         "reflected": {
           "filter": "Channel 2 (reflected)",
-          "side": "left"
+          "side": "left",
+          "mirror": "x"
         }
       },
       "camera": "iXon 1",
@@ -687,13 +732,20 @@
             }
           }
         }
-      ]
+      ],
+      "main_channel": "transmitted"
     },
     {
       "name": "M5",
-      "comment": "Imported from M5's EMU configuration (October 2026), the optics added by hand. Two filter wheels, the transmitted arm's on top in EMU; the pixel does not depend on the 3D lens and is the camera's. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront), from bead models: +65 (0.37-0.71 rad at 676 nm, four stacks Feb-Sep 2026, benchmarks/uipsf/results/lab_beads.jsonl).",
+      "comment": "Imported from M5's EMU configuration (October 2026), the optics added by hand. Two filter wheels, the transmitted arm's on top in EMU; the pixel does not depend on the 3D lens and is the camera's. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront), from bead models: +65 (0.37-0.71 rad at 676 nm, four stacks Feb-Sep 2026, benchmarks/uipsf/results/lab_beads.jsonl). The objective an Olympus 100x NA 1.50, oil; the pixel is the camera's. The split is right-left, the reflected arm mirrored; which arm is on which side is still to be read from ratiometric data (665LP, the transmitted arm the brighter) -- until then the layout alone, the left half the main. The first filter wheel is the transmitted arm's (EMU's top wheel).",
       "identify": {
         "iChrome-MLE-TCP-System: Serial Number": "iCHROME-MLE-L-CD_30087"
+      },
+      "objective": {
+        "name": "Olympus 100x NA1.50",
+        "NA": 1.5,
+        "immersion": "oil",
+        "n_immersion": 1.518
       },
       "devices": {
         "filter wheel": {
@@ -787,8 +839,6 @@
         }
       },
       "parameters": {
-        "NA": 1.5,
-        "n_immersion": 1.518,
         "wavelength_nm": {
           "device": "filter wheel",
           "values": "from the name"
@@ -813,10 +863,147 @@
           "filter": "filter wheel"
         },
         "reflected": {
-          "filter": "filter wheel 2"
+          "filter": "filter wheel 2",
+          "mirror": "x"
         }
       },
-      "camera": "Fusion BT 1"
+      "camera": "Fusion BT 1",
+      "main_channel": "transmitted",
+      "layout": "right-left mirrored"
+    },
+    {
+      "name": "M6",
+      "comment": "From M6's EMU configuration (Setups/M6/config.uicfg, 2026-10-14): M5's arrangement, an Olympus 100x NA 1.49 oil objective, a serial iChrome MLE (no -TCP in the tags), its own filter-wheel tags -- the Micro-Manager wheel ending in -2 is the transmitted (top) one -- 700/100 at the reflected wheel's position 3 where M5 has 685/70, the 3D lens reversed (on at 44317 um, off at 0) and TIRF at 19040/21040. Its camera an Orca Fusion BT, 102 x 108 nm on the sample. No file of M6 was on the share (2025, 2026) to identify it by: chosen by hand until one gives its camera's serial. astigmatism_nm M5's, a start for in situ learning until beads say better.",
+      "identify": {},
+      "objective": {
+        "name": "Olympus 100x NA1.49",
+        "NA": 1.49,
+        "immersion": "oil",
+        "n_immersion": 1.518
+      },
+      "devices": {
+        "filter wheel": {
+          "tag": "transmitted_ Filter Wheel-2-State",
+          "read": "nearest",
+          "states": {
+            "525/45": "0",
+            "600/60": "1",
+            "676/37": "2",
+            "685/70": "3",
+            "452/45": "4",
+            "None": "5"
+          },
+          "emu": "Filter wheel"
+        },
+        "filter wheel 2": {
+          "tag": "reflected_ Filter Wheel-State",
+          "read": "nearest",
+          "states": {
+            "525/50": "0",
+            "600/52": "1",
+            "676/37": "2",
+            "700/100": "3",
+            "457/15": "4",
+            "None": "5"
+          },
+          "emu": "Filter wheel 2"
+        },
+        "3D": {
+          "tag": "Thorlabs ELL20-Position (um)",
+          "read": "nearest",
+          "states": {
+            "on": "44317",
+            "off": "0"
+          },
+          "emu": "Two-state device 1"
+        },
+        "TIRF": {
+          "tag": "Thorlabs ELL17-Position (um)",
+          "read": "nearest",
+          "states": {
+            "on": "19040",
+            "off": "21040"
+          },
+          "emu": "Two-state device 2"
+        },
+        "BFP": {
+          "tag": "Thorlabs ELL6-State",
+          "read": "nearest",
+          "states": {
+            "on": "0",
+            "off": "1"
+          },
+          "emu": "Two-state device 3"
+        },
+        "laser 405": {
+          "tag": "iChrome-MLE-Laser 4: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 0"
+        },
+        "laser 488": {
+          "tag": "iChrome-MLE-Laser 3: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 1"
+        },
+        "laser 561": {
+          "tag": "iChrome-MLE-Laser 2: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 2"
+        },
+        "laser 640": {
+          "tag": "iChrome-MLE-Laser 1: 1. Enable",
+          "read": "nearest",
+          "states": {
+            "on": "1",
+            "off": "0"
+          },
+          "emu": "Laser 3"
+        }
+      },
+      "parameters": {
+        "wavelength_nm": {
+          "device": "filter wheel",
+          "values": "from the name"
+        },
+        "modality": {
+          "device": "3D",
+          "values": {
+            "on": "astigmatic",
+            "off": "2D"
+          }
+        },
+        "astigmatism_nm": {
+          "device": "3D",
+          "values": {
+            "on": 65,
+            "off": 0
+          }
+        }
+      },
+      "channels": {
+        "transmitted": {
+          "filter": "filter wheel"
+        },
+        "reflected": {
+          "filter": "filter wheel 2",
+          "mirror": "x"
+        }
+      },
+      "camera": "Fusion BT 2",
+      "main_channel": "transmitted",
+      "layout": "right-left mirrored"
     },
     {
       "name": "4Pi-SMS example",

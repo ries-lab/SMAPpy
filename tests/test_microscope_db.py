@@ -526,3 +526,102 @@ def test_an_arm_without_a_wavelength_is_missing_not_the_others():
     one_arm = camera_of(M5_BEADS)
     one_arm.microscope["channels"] = one_arm.microscope["channels"][:1]
     assert OpticsSettings().resolved(one_arm, 2)["wavelengths"] == [685.0, 685.0]
+
+
+# ------------------------------------------- the objective, the filters, the arrangement (2026-11)
+
+def test_the_objective_section_gives_the_na_and_wins_over_an_older_entrys_parameters():
+    entry = Microscope(name="scope", parameters={"NA": 1.3, "n_immersion": 1.33},
+                       objective={"name": "Olympus 100x NA1.50", "NA": 1.5, "immersion": "oil",
+                                  "n_immersion": 1.518})
+    found = entry.resolve({})
+    assert found.values["NA"] == 1.5 and found.values["n_immersion"] == 1.518
+    assert found.values["objective"] == "Olympus 100x NA1.50" and found.values["immersion"] == "oil"
+    assert found.sources["NA"].kind == "fixed"
+    # an entry from before the section still reads its parameters
+    assert Microscope(name="old", parameters={"NA": 1.3}).resolve({}).values["NA"] == 1.3
+    assert Microscope.from_dict(entry.to_dict()).objective == entry.objective
+
+
+def test_a_filter_whose_name_is_not_its_band_takes_the_band_typed_for_it():
+    wheel = Device(name="wheel", tags=["Wheel-State"], states={"676/37": "0", "665LP": "1", "Empty": "2"})
+    entry = Microscope(name="scope", devices={"wheel": wheel},
+                       parameters={"wavelength_nm": {"device": "wheel", "values": FROM_NAME}},
+                       filters={"665LP": {"band_nm": [665, 715]}})
+    assert entry.resolve({"Wheel-State": "0"}).values["wavelength_nm"] == 676       # the name
+    assert entry.resolve({"Wheel-State": "1"}).values["wavelength_nm"] == 690       # the band's centre
+    empty = entry.resolve({"Wheel-State": "2"})
+    assert empty.values["wavelength_nm"] is None and "no band typed" in empty.sources["wavelength_nm"].detail
+
+
+def test_a_kept_pupil_is_told_apart_by_the_colour_not_the_filter():
+    assert [microscope_db.colour_of(w) for w in (452, 525, 600, 676, 700, None)] == \
+        ["blue", "green", "red", "far red", "far red", ""]
+    entry = Microscope(name="scope", devices={"3D lens": lens()},
+                       parameters={"modality": {"device": "3D lens",
+                                                "values": {"in": "astigmatic", "out": "2D"}}})
+    assert entry.pupil_key({"3D lens": "in"}, 676) == "3D lens: in · far red"
+    entry.pupils = {"3D lens: in · red": {"kind": "minimal", "gamma": 0.2},
+                    "3D lens: in": {"kind": "minimal", "gamma": 0.3}}
+    assert entry.pupil_for({"3D lens": "in"}, 600)["gamma"] == 0.2
+    assert entry.pupil_for({"3D lens": "in"}, 700)["gamma"] == 0.3      # kept before colours were
+    assert entry.pupil_for({"3D lens": "out"}, 600) is None
+
+
+def test_m2s_split_is_its_arms_the_transmitted_one_main_on_the_right_the_reflected_mirrored():
+    m2 = microscope_db.database(reload=True).get("M2")
+    assert m2.arrangement() == {"layout": "right-left mirrored", "mirrored": True,
+                                "main_channel": "right", "split_position": None}
+    layout = m2.split_layout((0, 0, 512, 512))
+    assert layout.regions == [(256, 0, 256, 512), (0, 0, 256, 512)]
+    assert layout.flips == [(False, False), (True, False)]
+    # a camera ROI: the frame's middle, on the chip
+    assert m2.split_layout((100, 50, 300, 200)).regions == [(250, 50, 150, 200), (100, 50, 150, 200)]
+    found = microscope_db.database().resolve(M2_BEADS, channels=2)
+    assert [(c.name, c.side, c.mirror) for c in found.channels] == [
+        ("transmitted", "right", ""), ("reflected", "left", "x")]
+    assert found.values["objective"] == "Leica 160x NA1.43"
+
+
+def test_a_split_position_per_camera_moves_the_cut_and_one_outside_the_frame_is_refused():
+    m2 = microscope_db.database(reload=True).get("M2")
+    m2.split_position = {"iXon 1": 240}
+    assert m2.split_layout((0, 0, 512, 512)).regions == [(240, 0, 272, 512), (0, 0, 240, 512)]
+    with pytest.raises(ValueError, match="outside the frame"):
+        m2.split_layout((300, 0, 200, 512))
+    # a version holds it: the arrangement as it stood
+    m2.versions = [{"until": "2026-10-01", "split_position": 250, "main_channel": "reflected"}]
+    before = m2.as_of(datetime.date(2026, 9, 1))
+    assert before.split_for("iXon 1") == 250 and before.arrangement()["main_channel"] == "left"
+
+
+def test_m5_and_m6_know_their_layout_before_their_arms_sides():
+    db = microscope_db.database(reload=True)
+    assert db.get("M5").objective == {"name": "Olympus 100x NA1.50", "NA": 1.5, "immersion": "oil",
+                                      "n_immersion": 1.518}
+    assert db.get("M6").objective["name"] == "Olympus 100x NA1.49" and db.get("M6").objective["NA"] == 1.49
+    for name in ("M5", "M6"):
+        entry = db.get(name)
+        assert entry.arrangement()["layout"] == "right-left mirrored"
+        assert entry.arrangement()["main_channel"] == "left"      # as a dual calibration's auto
+        assert entry.split_layout((0, 0, 1000, 300)).flips == [(False, False), (True, False)]
+
+
+M6_MOVIE = {
+    "Core-Camera": "HamamatsuHam_DCAM", "iChrome-MLE-Laser 1: 1. Enable": "1",
+    "Thorlabs ELL20-Position (um)": "44317", "Thorlabs ELL17-Position (um)": "19040",
+    "Thorlabs ELL6-State": "1", "transmitted_ Filter Wheel-2-State": "2",
+    "reflected_ Filter Wheel-State": "3", "StartTime": "2026-11-04 10:00:00.000 +0100",
+}
+
+
+def test_m6_is_chosen_by_hand_and_reads_its_own_devices():
+    db = microscope_db.database(reload=True)
+    assert db.resolve(M6_MOVIE).microscope is None                  # nothing identifies it yet
+    found = db.resolve(M6_MOVIE, microscope="M6", camera="Fusion BT 2", channels=2)
+    states = found.state_names()
+    assert states["3D"] == "on" and states["TIRF"] == "on" and states["laser 640"] == "on"
+    assert [(c.name, c.wavelength_nm) for c in found.channels] == [("transmitted", 676.0),
+                                                                    ("reflected", 700.0)]
+    camera = camera_db.database(reload=True).get("Fusion BT 2")
+    assert camera is not None and camera.parameters["pixelsize_um"].fixed == [0.102, 0.108]

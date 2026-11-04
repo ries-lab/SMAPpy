@@ -1,10 +1,11 @@
 # The microscope database
 
-A design note, 2026-10.  **Built so far** (the core, no GUI): `smappy/microscope_db.py`,
-the importer `smappy/io/emu.py`, the lab's M2 and M5 in `data/microscopes.json`, the
-cameras in the same file and named for themselves; tests in `tests/test_microscope_db.py`
-and `tests/test_emu.py`.  **Not yet**: the fit and *PSF calibration* reading it, the
-calibration's device states, the editor (see "Next").  uiPSF needs the optics of the
+A design note, 2026-10.  **Built**: `smappy/microscope_db.py`, the importer
+`smappy/io/emu.py`, the lab's M2 and M5 in `data/microscopes.json`, the cameras in the same
+file and named for themselves, the fit and *PSF calibration* reading it ("Wired in"), the
+manager (`gui/microscope_editor.py`); tests in `tests/test_microscope_db.py`,
+`tests/test_emu.py` and `tests/test_microscope_manager.py`.  **Proposed**: the channels'
+geometry, the objective, the filters and a default PSF ("Third round", 2026-11-04).  uiPSF needs the optics of the
 microscope that took a file -- the NA, the immersion index, the emission wavelength, the
 pixel per axis -- and today they are typed into *PSF calibration* every time
 (`calibrate.pupil.OpticsSettings`).  Most of them are fixed per microscope; the rest follow
@@ -490,6 +491,207 @@ Decided with Jonas:
   kept under any state of the 3D lens, nearest in emission, with its learnt NA; only failing both a nominal
   0.36, with a warning.  M2's minimal bead models learnt 0.08 (Evolve, January 2026) and 0.16 (iXon, August
   2026), M5's 0.32–0.41 (`docs/uipsf/architecture.md`, "In situ on the minimal model").
+
+## Third round (2026-11-04): the channels, the objective, the filters, a default PSF
+
+Proposed, then decided (below); the proposal's parts that the decisions changed are kept
+as they were written, the decisions win.  What started it: *measure from this movie* in the two-colour fitters
+guesses the split -- which axis, which half is the main one, where the seam is
+(`transform.detect_layout`, a provisional seam down the middle of the longer axis) -- and the
+guess failed on real data.  The arrangement of the channels on the chip is a fact about the
+microscope and its camera, measured once; it belongs in the entry, as the 4Pi quadrants
+already are.
+
+### Decided (2026-11-04, with Jonas)
+
+* **No detection of the layout.**  `transform.detect_layout` and the bead calibration's
+  `detect_bead_layout` go; the arrangement is a setting of the chip, in the two-colour
+  fitters and the dual bead calibration: *layout* (right-left, up-down), *mirrored*, the
+  *main* half, the split -- on *microscope* by default, the entry's arrangement, and chosen
+  by hand for a microscope without one.  The registration only refines the map within it.
+* **The arrangement in the entry** is the arms' `side`s, a `mirror` on the arm the optics
+  flip, a named `main_channel` and an optional `split_position` per camera (the middle of
+  the frame as acquired otherwise).  All the lab's microscopes are right-left, mirrored;
+  which arm is on which side is read from ratiometric data, where the transmitted arm is
+  the brighter.  M5 and M6 have the same arrangement.  The 4Pi quadrants stay `region`s.
+* **The objective** is a section of the entry: name, NA, immersion and its index.  No
+  magnification: the pixel on the sample is the camera's (per 3D-lens state where it
+  differs), and the nominal magnification says little with the relay optics behind it.
+  M2: *Leica 160x NA1.43*; M5: *Olympus 100x NA1.50*; M6: *Olympus 100x NA1.49*; all oil.
+* **Filters**: a table of the filters by name with an effective band, typed for a filter
+  whose name is not its band.  **No manual elements**: the dichroics are not needed (the
+  ratiometric splitter is a 665LP, written in the entry's comment).
+* **The default PSF** is what *PSF calibration*'s *Add to microscope* keeps: one per state
+  of the 3D lens and per colour -- green, red, far red, not per filter -- so the key is
+  ``3DA: on · far red``; one kept before colours were keyed serves every colour.
+* **Cameras**: M2 has only its Andor (iXon 1) for this; M5 and M6 an Orca Fusion BT each, M6's
+  pixel 102 x 108 nm.  No M6 file exists yet on the share (2025, 2026), so
+  M6 is chosen by hand until one gives its camera's serial to `identify` by.
+
+### Built: step 1 (2026-11-04)
+
+The entry's `objective`, `filters` (`filter_wavelength`), `main_channel`, `split_position`,
+`layout`, an arm's `mirror` in the resolution and its summary; `Microscope.arrangement` (the
+chip settings' words) and `split_layout` (the two halves as a `ChannelLayout` on a camera ROI);
+pupils keyed by lens state and colour (`colour_of`, `emission_of`); the manager's *objective*
+table and *mirror* column, and everything else carried through it.  M2, M5 and the new M6 (with
+its camera *Fusion BT 2*) filled in.  Nothing reads the arrangement yet: that is step 2.
+
+### Where it stands
+
+* **Built**: devices and their states, parameters following one device each, filters giving
+  the wavelength by name, arms with a `side` (M2) or a `region` and `mirror` (the 4Pi
+  example), dated versions, the pupil per state of the 3D lens (`pupils`, `gamma_of`), the
+  manager, the found-microscope line.
+* **The channel reader** (`channels.ChannelSource`) is what every multi-channel fitter reads
+  through -- Gaussian 2D 2C, Spline 3D 2C, Spline 4Pi -- and 4Pi beads.  But where its layout
+  comes from differs: Spline 4Pi and 4Pi beads take the entry's regions
+  (`fit_4pi.microscope_layout`; 4Pi beads without `as_of`); the two-colour fitters only a
+  registration's halves (`_TwoChannelFit.channel_layout`); the calibration pass of *measure
+  from this movie* and the dual-colour bead calibration cut the chip themselves and detect
+  the layout (`dual.chip_halves`, `detect_bead_layout`).  The entry's `side` is read only to
+  give each arm its wavelength (`OpticsSettings.resolved`).
+* **Not in any file** the lab has (`Setups/M2`, `M5`, `M6` of the test data): the objective,
+  the tube lens, the dichroics, which half is which arm, a mirror.  EMU's newer
+  configurations record a chip split for activation feedback (M2 vertical at 218 px, M5
+  horizontal at 251 px, a 10 px seam) -- a start for the seam, not the optics.
+
+### 1. One channel geometry, two to four channels
+
+An entry's arms say where each lands, per camera, in one form whatever their number (the
+numbers are illustrative, the iXon's from EMU's split at 218 with its 10 px seam):
+
+```json
+"channels": {
+  "transmitted": {"filter": "Channel 1 (transmitted)",
+                  "region": {"iXon 1": [228, 0, 284, 512], "Evolve 1": [0, 0, 512, 251]}},
+  "reflected":   {"filter": "Channel 2 (reflected)",
+                  "region": {"iXon 1": [0, 0, 218, 512], "Evolve 1": [0, 261, 512, 251]},
+                  "mirror": "x"}},
+"main_channel": "transmitted"
+```
+
+* **`region`** on the chip, whole pixels, per camera -- as the 4Pi quadrants are.  A seam
+  between the halves is simply not in either region.  `side` stays readable (old entries,
+  and the coarse word the PSF calibration's `main_channel` speaks), and becomes derived: the
+  side of the chip a region's centre is on.
+* **`mirror`** per arm, against the main arm: what a mirror in the path flips.
+* **`main_channel`**: the reference the registration maps onto and whose PSF a dual
+  calibration's main is -- named, not *left or upper*.  Default the first arm.
+* **`Microscope.channel_layout(camera)`** then serves two and four arms alike, and with
+  `as_of` everywhere (4Pi beads too).
+
+**Who reads it, in order**: a registration or calibration chosen for the run (its sub-pixel
+map, its own halves); else the entry's layout; else, for a microscope with no regions, the
+detection there is today, with a warning that says the entry would make it certain.  So:
+
+* **Two-colour fitters**: `channel_layout` takes the entry's regions when the registration
+  is measured from the movie, and checks a file's registration against them (a calibration
+  of another arrangement is refused, as another main channel is now).
+* **The calibration pass** (*measure from this movie*) reads the movie through
+  `ChannelSource` on the entry's layout and registers channel 1's localizations onto
+  channel 0's: no provisional seam, no layout vote -- the vote only finds the residual
+  offset, in a window a few pixels wide.  This is the change that fixes the failure.
+* **Dual-colour bead calibration** the same: the beads cut by the entry's layout.
+* `RegisterSettings.layout` gains *microscope*, the default when the entry has regions.
+
+**Filled in**: in the manager's *Channels* tab, on a frame of a file -- the regions drawn
+over it, dragged or typed, a seam's width and the EMU split as a start
+(`emu.chip_split`), a *from this registration* button that takes the halves of a
+`_2ct.h5` or dual calibration that is known to be right.
+
+### 2. The objective
+
+Fixed per entry (we do not swap objectives), a section of its own rather than loose
+parameters, so the manager can show it as a form and a version can hold it:
+
+```json
+"objective": {"name": "Olympus UPLAPO100XOHR", "magnification": 100, "NA": 1.5,
+              "immersion": "oil", "n_immersion": 1.518, "n_coverslip": 1.523,
+              "coverslip_design_um": 170, "tube_lens_mm": 180}
+```
+
+`NA`, `n_immersion`, `n_coverslip`, `coverslip_design_um` are what uiPSF reads today
+(`OpticsSettings.resolved`), from `parameters`; they move here, with `parameters` still
+read for old entries.  The magnification and tube lens give the nominal pixel (chip pixel
+over the total magnification), shown beside the learnt `pixel_nm` as a check, never used in
+its place.
+
+### 3. The filters
+
+The filter names are the data today (`676/37` -> 676).  What that cannot say -- a long
+pass, a band whose name is not its band, an arm bounded by the splitting dichroic -- goes
+in a table of the filters by name, shared by every device that holds them:
+
+```json
+"filters": {"665LP": {"from_nm": 665}, "700/100": {"centre_nm": 700, "width_nm": 100},
+            "Empty": {}},
+"manual": {"splitting dichroic": {"states": ["none", "640LP", "665LP"], "default": "665LP"}}
+```
+
+* An arm's **emission** is its band cut by what else is in its path -- the arm's filter, the
+  common wheel, the splitting dichroic's side -- and the wavelength uiPSF takes is the
+  centre of that, or one typed per filter where the dye matters more than the band
+  (`wavelength_nm`).  A band with no upper bound (a long pass alone) is missing, as now.
+* **Manual elements** (planned since 2026-10-22): a device no file records, with a default,
+  set where the microscope is found (the found-settings line) and kept with a calibration
+  like any state.  The splitting dichroic is the first: *none* is one channel over the
+  whole chip -- the answer to single or dual, which nothing else records.
+
+### 4. A default PSF
+
+`pupils` already keeps a learnt pupil per state of the 3D lens (`keep_pupil`, *Add to
+microscope...*), and in situ learning starts from it.  What is missing:
+
+* **Shipped ones**: M2's, M5's and M6's minimal pupils from the lab's bead models
+  (`benchmarks/uipsf/results/lab_beads.jsonl`), so a fresh install has them.
+* **A PSF from the description**: `uipsf` builds a `VectorPSF` from a kept pupil and the
+  resolved optics (a constructor beside `export.sample_psf`), so that what today needs a
+  `.uipsf.h5` beside a spline can take the microscope's instead: *Simulate*'s PSF
+  (*microscope's default*), Spline 3D's *focus* with no model file, and a first fit of
+  astigmatic data with no calibration at all (a spline sampled from it, kept as a
+  calibration in `calibration_list` marked *default*, never chosen by *auto* over a measured
+  one).
+* Per arm where the arms differ (the reflected arm's astigmatism), keyed `3DA: on /
+  reflected`; the arm-less key stays the common one.
+
+### 5. The manager
+
+Tabs: *Objective* (the form above), *Filters*, *Devices* (as now, with manual elements),
+*Channels* (the regions on a frame, per camera), *PSF* (the kept pupils, their source and
+date, a drawing of each), *Versions*.  *Check a file* shows everything resolved, the
+channels drawn on its frame.
+
+### 6. The entries
+
+* **M2**: regions for the iXon and the Evolve from its dual-colour data; the older EMU
+  configurations as dated versions -- `ht-SMLM` (`Servos-Position0` the wheel,
+  `Servos-Position3` slider 1, a 700/50, BFP on `Servos-Position2`) and the `Mojo-` era
+  (other tags, 3DA on at 37000) -- when their dates are known.
+* **M5**: regions (EMU's horizontal split at 251) and which arm is which.
+* **M6**: new, from `Setups/M6/config.uicfg`: M5's layout with the serial MLE
+  (`iChrome-MLE-…`), wheels `transmitted_ Filter Wheel-2-State` (transmitted, the `-2`)
+  and `reflected_ Filter Wheel-State` (700/100 at 3), the 3D lens reversed (on 44317, off
+  0), TIRF 19040/21040.  Nothing in its files identifies it (no serial); an `identify` tag
+  is needed from the instrument.
+
+### Order of work
+
+1. The schema and its resolution (`main_channel`, regions per camera, `objective`,
+   `filters`, `manual`), old entries read as before; tests.
+2. The two-colour fitters, the calibration pass and the dual bead calibration on the
+   entry's layout through `ChannelSource`; 4Pi beads with `as_of`; tests on simulated split
+   data with a known arrangement, and on the test data's M2 dual-colour movie.
+3. The manager's tabs; its page.
+4. The default PSF: the builder, the shipped pupils, *Simulate* and *focus* reading it.
+5. M2, M5, M6 filled in.
+
+### Needed from the lab
+
+The objective of each (name, NA, immersion), the tube lens or total magnification, the
+camera on M5 and M6 (model, pixel), which arm lands on which half and whether one is
+mirrored on each, the splitting dichroics in use, an identifying property for M6, and the
+dates of M2's EMU configurations.
 
 ## Next
 

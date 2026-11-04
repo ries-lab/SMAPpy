@@ -144,23 +144,40 @@ def wavelength_from_name(name: Any) -> Optional[float]:
     return float(found.group(1)) if found else None
 
 
+def filter_wavelength(name: Any, filters: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """The emission a filter passes, nm: the entry's table first (``filters``: a typed
+    ``wavelength_nm``, or the centre of a typed ``band_nm``), else the name (`wavelength_from_name`).
+    The table is for a filter whose name is not its band -- a long pass, an empty slot behind the
+    splitting dichroic -- whose effective band is typed once."""
+    typed = (filters or {}).get(str(name))
+    if isinstance(typed, dict):
+        if typed.get("wavelength_nm") is not None:
+            return float(typed["wavelength_nm"])
+        band = typed.get("band_nm")
+        if band and len(band) == 2 and None not in band:
+            return (float(band[0]) + float(band[1])) / 2
+    return wavelength_from_name(name)
+
+
 @dataclass
 class Follows:
     """A parameter that follows one device: a value per state of it."""
     device: str
     values: Any = field(default_factory=dict)      # {state: value}, or FROM_NAME
 
-    def resolve(self, states: Dict[str, Tuple[Optional[str], Any, Source]]):
+    def resolve(self, states: Dict[str, Tuple[Optional[str], Any, Source]],
+                filters: Optional[Dict[str, Any]] = None):
         if self.device not in states:
             return None, Source("missing", f"no device {self.device}")
         state, _, source = states[self.device]
         if state is None:
             return None, Source("missing", f"{self.device}: {source.detail}")
         if self.values == FROM_NAME:
-            value = wavelength_from_name(state)
+            value = filter_wavelength(state, filters)
             if value is None:
                 return None, Source("missing",
-                                    f"{self.device} is {state}: no wavelength in the name")
+                                    f"{self.device} is {state}: no wavelength in the name, "
+                                    f"and no band typed for it")
             return value, Source("device", f"{self.device} is {state}")
         if state not in self.values:
             return None, Source("missing", f"{self.device} is {state}: no value for it")
@@ -183,9 +200,9 @@ def parameter_to(parameter) -> Any:
     return parameter.to_dict()
 
 
-def resolve_parameter(parameter, metadata, states):
+def resolve_parameter(parameter, metadata, states, filters=None):
     if isinstance(parameter, Follows):
-        return parameter.resolve(states)
+        return parameter.resolve(states, filters)
     value, source = parameter.resolve(metadata)
     if source.kind == "fixed" and not parameter.tag:
         source = Source("fixed", "in the microscope's entry")
@@ -257,9 +274,27 @@ def read_date(text: Any) -> Optional[_dt.date]:
         return None
 
 
-#: the parts of an entry a version can hold: tables by name, and the camera
-SECTIONS = ("devices", "parameters", "channels", "pupils")
-SCALARS = ("camera",)
+#: the parts of an entry a version can hold: tables by name, and the scalars
+SECTIONS = ("devices", "parameters", "channels", "pupils", "objective", "filters")
+SCALARS = ("camera", "main_channel", "split_position", "layout")
+
+#: what the objective section holds: fixed for an entry (we do not swap objectives), and no
+#: magnification -- the pixel on the sample is the camera's, measured, per state of the 3D lens
+#: where it differs; the nominal magnification says little with relay optics behind it
+OBJECTIVE = ("name", "NA", "immersion", "n_immersion")
+
+#: the colours a kept PSF is told apart by (`colour_of`): an objective's aberrations change
+#: with the colour, not between two far-red filters
+COLOURS = ((500.0, "blue"), (570.0, "green"), (640.0, "red"), (float("inf"), "far red"))
+
+
+def colour_of(wavelength_nm: Any) -> str:
+    """``blue`` below 500 nm, ``green`` to 570, ``red`` to 640, ``far red`` above; "" for none."""
+    try:
+        value = float(wavelength_nm)
+    except (TypeError, ValueError):
+        return ""
+    return next(name for edge, name in COLOURS if value < edge)
 
 
 def same_camera(a: str, b: str) -> bool:
@@ -298,6 +333,22 @@ class Microscope:
     #: bead model describes itself (`uipsf.VectorPSF.describe`: kind, phase in nm, γ or the magnitude's
     #: Zernikes, σ), what in situ learning holds and starts from (`pupil_of`)
     pupils: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: the objective (`OBJECTIVE`): its name, NA, immersion and the immersion's index -- the NA
+    #: and index uiPSF reads, where an older entry has them under `parameters`
+    objective: Dict[str, Any] = field(default_factory=dict)
+    #: filters whose name is not their band, by name: ``{"wavelength_nm": 690}`` or
+    #: ``{"band_nm": [665, 720]}`` (`filter_wavelength`)
+    filters: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: the arm the others are registered onto, and whose PSF is a dual calibration's main; "" the
+    #: first arm
+    main_channel: str = ""
+    #: where the two halves of a split meet on the chip, the first pixel of the second half along
+    #: the split's axis -- a number, or a table from camera to one; None the middle of the frame as
+    #: acquired, which is how the lab centres its camera ROI on the split
+    split_position: Any = None
+    #: how a two-arm split lies when the arms' sides are not known yet (``right-left mirrored``):
+    #: the optics say it, which arm is on which side is read from data later; the arms' `side`s win
+    layout: str = ""
 
     # ------------------------------------------------------------ identifying
     def identifies(self, metadata: Dict[str, Any]) -> bool:
@@ -398,7 +449,14 @@ class Microscope:
         sources: Dict[str, Source] = {}
         for name, parameter in entry.parameters.items():
             values[name], sources[name] = resolve_parameter(parameter_from(parameter), metadata,
-                                                            states)
+                                                            states, entry.filters)
+        # the objective's section wins over the same names in `parameters`, which older
+        # entries used for them
+        for name in OBJECTIVE:
+            key = "objective" if name == "name" else name
+            if entry.objective.get(name) not in (None, ""):
+                values[key] = entry.objective[name]
+                sources[key] = Source("fixed", "the entry's objective")
         used = camera or entry.camera
         resolved = MicroscopeResolution(
             microscope=self, version=version, camera=used, camera_note=note,
@@ -419,8 +477,8 @@ class Microscope:
                 "wavelength_nm"), source=resolved.sources.get(
                     "wavelength_nm", Source("missing", "no wavelength_nm")))]
         out = []
-        for channel in self.channels[:max(1, count)]:
-            value, source = (Follows(channel.filter, FROM_NAME).resolve(states)
+        for channel in self.ordered_channels()[:max(1, count)]:
+            value, source = (Follows(channel.filter, FROM_NAME).resolve(states, self.filters)
                              if channel.filter else
                              (None, Source("missing", "no filter device")))
             if value is None and resolved.values.get("wavelength_nm") is not None:
@@ -430,8 +488,78 @@ class Microscope:
                                 f"{resolved.sources['wavelength_nm'].detail}")
             out.append(ChannelResolution(name=channel.name,
                                          side=channel.side_for(camera) if count > 1 else "",
-                                         wavelength_nm=value, source=source))
+                                         wavelength_nm=value, source=source,
+                                         mirror=channel.mirror if count > 1 else ""))
         return out
+
+    # ------------------------------------------------------------- the arrangement
+    def ordered_channels(self) -> List[Channel]:
+        """The arms, the main one first (`main_channel`), the rest as entered."""
+        main = next((c for c in self.channels if c.name == self.main_channel), None)
+        if main is None:
+            return list(self.channels)
+        return [main] + [c for c in self.channels if c is not main]
+
+    def split_for(self, camera: str = "") -> Optional[float]:
+        """The split's position on `camera`'s chip, or None for the middle of the frame."""
+        position = self.split_position
+        if isinstance(position, dict):
+            position = position.get(camera or self.camera)
+        return None if position in (None, "") else float(position)
+
+    def arrangement(self, camera: str = "") -> Optional[Dict[str, Any]]:
+        """How a two-arm split lies on `camera`'s chip, in the words of the chip settings
+        (`calibrate.dual.RegisterSettings`): ``layout`` (``right-left`` or ``up-down``),
+        ``mirrored`` (one arm flipped against the other, along the split's axis), the
+        ``main_channel`` half (``left``, ``right``, ``upper``, ``lower``) and the
+        ``split_position`` (None: the middle).  None for an entry without two arms on two sides --
+        a 4Pi's regions are `channel_layout`'s."""
+        used = camera or self.camera
+        arms = self.ordered_channels()[:2]
+        sides = [arm.side_for(used) for arm in arms]
+        if len(arms) == 2 and set(sides) == {"left", "right"}:
+            layout = "right-left"
+        elif len(arms) == 2 and set(sides) == {"upper", "lower"}:
+            layout = "up-down"
+        elif self.layout:
+            # the arrangement without the arms' sides: the main half the left or upper one, as a
+            # dual calibration's *auto* takes it
+            layout = self.layout.replace(" mirrored", "")
+            mirrored = self.layout.endswith("mirrored")
+            return {"layout": self.layout, "mirrored": mirrored,
+                    "main_channel": "left" if layout == "right-left" else "upper",
+                    "split_position": self.split_for(used)}
+        else:
+            return None
+        mirrored = set(arms[0].mirror) != set(arms[1].mirror)
+        return {"layout": layout + (" mirrored" if mirrored else ""), "mirrored": mirrored,
+                "main_channel": sides[0], "split_position": self.split_for(used)}
+
+    def split_layout(self, roi, camera: str = "", name: str = ""):
+        """The two arms as a `channels.ChannelLayout` on the chip, for frames with camera ROI
+        ``roi`` (x0, y0, width, height): the frame cut at the split -- the entry's position, or
+        the frame's middle -- the main arm first, the other flipped where the optics flip it.
+        None without an `arrangement`."""
+        from .channels import ChannelLayout
+        found = self.arrangement(camera)
+        if found is None:
+            return None
+        x0, y0, width, height = (int(v) for v in roi)
+        across = found["layout"].startswith("right-left")
+        start, extent = (x0, width) if across else (y0, height)
+        split = found["split_position"]
+        split = int(round(start + extent / 2 if split is None else split))
+        if not start < split < start + extent:
+            raise ValueError(f"{self.name}'s split at {split} px is outside the frame "
+                             f"({start} to {start + extent} px)")
+        if across:
+            low, high = (x0, y0, split - x0, height), (split, y0, x0 + width - split, height)
+        else:
+            low, high = (x0, y0, width, split - y0), (x0, split, width, y0 + height - split)
+        first_low = found["main_channel"] in ("left", "upper")
+        regions = [low, high] if first_low else [high, low]
+        flip = (across, not across) if found["mirrored"] else (False, False)
+        return ChannelLayout(regions, [(False, False), flip], name=name or self.name)
 
     def channel_layout(self, camera: str = "", name: str = ""):
         """The channels' rectangles on the chip as a `channels.ChannelLayout`,
@@ -463,6 +591,11 @@ class Microscope:
             camera=str(raw.get("camera", "")),
             versions=[dict(v) for v in (raw.get("versions") or [])],
             pupils={str(k): dict(v) for k, v in (raw.get("pupils") or {}).items()},
+            objective=dict(raw.get("objective") or {}),
+            filters={str(k): dict(v) for k, v in (raw.get("filters") or {}).items()},
+            main_channel=str(raw.get("main_channel") or ""),
+            split_position=copy.deepcopy(raw.get("split_position")),
+            layout=str(raw.get("layout") or ""),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -470,10 +603,20 @@ class Microscope:
         if self.comment:
             out["comment"] = self.comment
         out["identify"] = dict(self.identify)
+        if self.objective:
+            out["objective"] = dict(self.objective)
         out["devices"] = {k: d.to_dict() for k, d in self.devices.items()}
         out["parameters"] = {k: copy.deepcopy(v) for k, v in self.parameters.items()}
         if self.channels:
             out["channels"] = {c.name: c.to_dict() for c in self.channels}
+        if self.main_channel:
+            out["main_channel"] = self.main_channel
+        if self.layout:
+            out["layout"] = self.layout
+        if self.split_position not in (None, ""):
+            out["split_position"] = copy.deepcopy(self.split_position)
+        if self.filters:
+            out["filters"] = copy.deepcopy(self.filters)
         if self.camera:
             out["camera"] = self.camera
         if self.pupils:
@@ -492,18 +635,27 @@ class Microscope:
                 return str(raw["device"])
         return None
 
-    def pupil_key(self, states: Dict[str, Any]) -> str:
-        """Where a pupil learnt in ``states`` ({device: state}) is kept: ``3DA: on``, or ``all``."""
+    def pupil_key(self, states: Dict[str, Any], wavelength_nm: Any = None) -> str:
+        """Where a pupil learnt in ``states`` ({device: state}) at ``wavelength_nm`` is kept:
+        ``3DA: on · far red``, ``3DA: on`` without a wavelength, ``all`` (``all · red``) for a
+        microscope without a 3D lens.  By colour (`colour_of`), not by filter: the objective's
+        aberrations move between green and far red, not between 676/37 and 700/100."""
         device = self.lens_device()
-        if device is None or states.get(device) is None:
-            return "all"
-        return f"{device}: {states[device]}"
+        key = "all" if device is None or states.get(device) is None else f"{device}: {states[device]}"
+        colour = colour_of(wavelength_nm)
+        return f"{key} \u00b7 {colour}" if colour else key
 
-    def pupil_for(self, states: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """The pupil kept for ``states``, or for every state; one kept before pupils described their kind
-        (Zernike magnitude dicts, before November 2026) is none: no legacy, it is kept again from a new
-        bead model (`keep_pupil`)."""
-        found = self.pupils.get(self.pupil_key(states)) or self.pupils.get("all")
+    def pupil_for(self, states: Dict[str, Any], wavelength_nm: Any = None) -> Optional[Dict[str, Any]]:
+        """The pupil kept for ``states`` in this colour; else one kept for the state in no colour
+        (before colours were told apart), then for every state.  Never another colour's: a red
+        model holds the wrong aberrations for far red.  One kept before pupils described their
+        kind (Zernike magnitude dicts, before November 2026) is none: no legacy, it is kept again
+        from a new bead model (`keep_pupil`)."""
+        keys = [self.pupil_key(states, wavelength_nm), self.pupil_key(states)]
+        if colour_of(wavelength_nm):
+            keys.append(f"all \u00b7 {colour_of(wavelength_nm)}")
+        keys.append("all")
+        found = next((self.pupils[k] for k in keys if k in self.pupils), None)
         return found if found and found.get("kind") else None
 
 
@@ -513,6 +665,7 @@ class ChannelResolution:
     side: str
     wavelength_nm: Optional[float]
     source: Source
+    mirror: str = ""
 
 
 @dataclass
@@ -563,8 +716,10 @@ class MicroscopeResolution:
                 "fallback": self.fallback,
                 "states": self.state_names(), "values": values,
                 "followed": self.microscope.followed() if self.microscope else [],
-                "channels": [{"name": c.name, "side": c.side,
-                              "wavelength_nm": c.wavelength_nm} for c in self.channels]}
+                "channels": [dict({"name": c.name, "side": c.side,
+                                   "wavelength_nm": c.wavelength_nm},
+                                  **({"mirror": c.mirror} if c.mirror else {}))
+                             for c in self.channels]}
 
     def warnings(self) -> List[str]:
         return [self.camera_note] if self.microscope is not None and self.camera_note else []
@@ -718,7 +873,18 @@ def pupil_of(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     until = read_date(summary.get("version")) if summary.get("version") else None
     if until is not None:
         entry = entry.as_of(until - _dt.timedelta(days=1))
-    return entry.pupil_for(summary.get("states") or {})
+    return entry.pupil_for(summary.get("states") or {}, emission_of(summary))
+
+
+def emission_of(summary: Optional[Dict[str, Any]]) -> Optional[float]:
+    """A summary's emission, nm: the main arm's, else the microscope's ``wavelength_nm``."""
+    if not summary:
+        return None
+    for channel in summary.get("channels") or []:
+        if channel.get("wavelength_nm") is not None:
+            return float(channel["wavelength_nm"])
+    value = (summary.get("values") or {}).get("wavelength_nm")
+    return None if value is None else float(value)
 
 
 def gamma_of(summary: Optional[Dict[str, Any]],
@@ -771,7 +937,8 @@ def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tup
     if not pupil.get("kind"):
         raise ValueError("a pupil to keep describes its kind (`uipsf.VectorPSF.describe`)")
     entry = copy.deepcopy(entry)
-    key = entry.pupil_key(summary.get("states") or {})
+    key = entry.pupil_key(summary.get("states") or {},
+                          pupil.get("wavelength_nm") or emission_of(summary))
     entry.pupils[key] = dict(pupil)
     return key, save_microscope(entry, path)
 

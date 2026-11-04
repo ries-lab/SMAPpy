@@ -685,7 +685,8 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _keep_pupil(self) -> None:
         """*Add to microscope...*: the run's pupil kept with the microscope the beads were taken on, for
-        the state of its 3D lens (`microscope_db.keep_pupil`), after saying what and where."""
+        the state of its 3D lens and the colour it was learnt in (`microscope_db.keep_pupil`), after
+        saying what and where."""
         from .. import microscope_db
         from .pupil import objective_pupil
         cal = self._learnt()
@@ -695,7 +696,9 @@ class PSFCalibrationWindow(QMainWindow):
         source = str(self.run_result.saved or (self.paths[0] if self.paths else ""))
         pupil = objective_pupil(cal, source=Path(source).name)
         entry = microscope_db.database().get(str(scope.get("name") or ""))
-        key = entry.pupil_key(scope.get("states") or {}) if entry is not None else "?"
+        key = (entry.pupil_key(scope.get("states") or {},
+                               pupil.get("wavelength_nm") or microscope_db.emission_of(scope))
+               if entry is not None else "?")
         before = entry.pupils.get(key) if entry is not None else None
         magnitude = (f"γ {pupil['gamma']:.3f}" if pupil.get("kind") == "minimal"
                      else f"{len(pupil.get('magnitude') or {})} magnitude Zernikes")
