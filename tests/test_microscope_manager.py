@@ -29,11 +29,16 @@ def app():
 
 @pytest.fixture
 def config(tmp_path, monkeypatch):
+    from smappy import config as settings
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    settings.load(reload=True)
     camera_db.database(reload=True)
     microscope_db.database(reload=True)
     yield tmp_path / "config"
     monkeypatch.undo()
+    # a fit's file recognised here is the "last used" microscope (`config`, cached): read the session's
+    # again, or a later test of an unrecognised file is given it as a stand-in
+    settings.load(reload=True)
     camera_db.database(reload=True)
     microscope_db.database(reload=True)
 
@@ -275,9 +280,10 @@ def test_a_gaussian_fit_runs_without_the_optics_a_psf_model_needs(app, tmp_path)
 
 # ------------------------------------------- in situ's start astigmatism, from the entry
 
-@pytest.mark.parametrize("tags, expected", [(M2_BEADS, 62.0), (M2_MOVIE, 0.0), (M2_EVOLVE, -73.0)])
+@pytest.mark.parametrize("tags, expected", [(M2_BEADS, 59.119), (M2_MOVIE, 0.0), (M2_EVOLVE, -73.0)])
 def test_in_situ_starts_from_the_astigmatism_of_the_microscopes_3d_lens_state(tmp_path, config, tags, expected):
-    # the iXon's sign, the Evolve's mounted turned by 90 degrees the other; the lens out none
+    # the iXon's from the pupil shipped with M2 (its beads of 260829); the Evolve's, mounted turned by 90
+    # degrees, the other sign, from the entry -- the iXon's pupil is not the Evolve's; the lens out none
     from smappy.calibrate.insitu_run import InSituModelSettings, start_astigmatism
     from smappy.io.tiff import open_stack
     from smappy.plugins.fit import CameraSettings
@@ -295,7 +301,8 @@ def test_the_astigmatism_field_shows_only_when_neither_the_entry_nor_a_start_mod
     form = window.insitu_form
     window.add_paths([a_tiff(tmp_path / "movie_MMStack.ome.tif", M2_BEADS)])
     field = form.fields["astigmatism_nm"]
-    assert field.widget.text() == "62" and form.labels["astigmatism_nm"].styleSheet() == ""
+    # the shipped pupil's, over the entry's 62
+    assert field.widget.text() == "59.119" and form.labels["astigmatism_nm"].styleSheet() == ""
     assert not form.more_section.button.isChecked()                     # under more, closed
     # a start model: the field is not used, so not shown
     window.start_form.set_values({"start_from": str(tmp_path / "m.uipsf.h5")})
@@ -337,9 +344,10 @@ def test_a_kept_pupil_is_found_for_files_taken_in_the_same_lens_state_and_surviv
     assert microscope_db.pupil_of(scope(M2_MOVIE, "movie").microscope) is None      # the lens out
     # in situ's start astigmatism: the pupil's, over the entry's +62
     assert start_astigmatism(InSituModelSettings(), beads)[0] == 58.0
-    # the entry before is kept, dated; an edit in the manager carries the pupil through
+    # no version for it: the objective's pupil holds for the files taken before it was kept too
     entry = microscope_db.database().get("M2")
-    assert entry.versions[-1]["pupils"] == {"3DA: on \u00b7 far red": None}
+    assert all("pupils" not in v for v in entry.versions)
+    assert microscope_db.pupil_of(scope(M2_BEADS, "again").microscope)["phase_nm"]["11"] == 21.0
     # a red file with the lens in does not take the far-red model; a far-red one does
     assert entry.pupil_for({"3DA": "on"}, 600.0) is None
     assert entry.pupil_for({"3DA": "on"}, 700.0)["gamma"] == 0.36
@@ -360,7 +368,7 @@ def test_gamma_is_the_microscope_s_whatever_its_3d_lens_and_from_its_nearest_col
         return CameraSettings().resolve(open_stack(a_tiff(tmp_path / f"{name}_MMStack.ome.tif", tags)),
                                         require=False).microscope
     beads, movie = scope(M2_BEADS, "beads"), scope(M2_MOVIE, "movie")
-    assert microscope_db.gamma_of(movie, 676.0) == (None, None, "")
+    assert microscope_db.gamma_of(movie, 676.0) == (0.2017, None, "M2's kept pupil at 700 nm")    # shipped
     microscope_db.keep_pupil(beads, PUPIL)
     assert microscope_db.pupil_of(movie) is None                       # its pupil follows the lens, γ not
     assert microscope_db.gamma_of(movie, 680.0) == (0.36, None, "M2's kept pupil at 676 nm")

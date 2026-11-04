@@ -1052,12 +1052,14 @@ button ([Spline 3D](plugin:Localize/Spline 3D)).
 ### Add to microscope...
 After a pupil model or an in situ run: keeps the learnt pupil -- every
 Zernike of phase, in nm of wavefront, and of magnitude, with the blur -- in
-the microscope's entry, for the state its 3D lens was in, in your
-`microscopes.json` (the entry before is kept as a dated version).  It
-describes the objective, and in situ learning starts from it when there is
-no *start from*; its vertical astigmatism stands in for the entry's
-*astigmatism*.  Asks first, saying what it replaces.  Only for beads taken
-on a recognised microscope in its current setup.
+the microscope's entry, for the state its 3D lens was in, its colour and
+its camera, in your `microscopes.json`.  It describes the objective, so it
+holds for that camera's files of every day, older ones too.  In situ learning
+starts from it when there is no *start from*, its vertical astigmatism
+standing in for the entry's *astigmatism*; Spline 3D fits with it where there
+is no bead calibration, and *Simulate* draws with it (*calibration*'s
+menu).  Asks first, saying what it replaces.  Only for beads taken on a
+recognised microscope in its current setup.
 
 ### Exclude / include
 Marks the selected beads for the next *Calibrate*: a bead to be left out,

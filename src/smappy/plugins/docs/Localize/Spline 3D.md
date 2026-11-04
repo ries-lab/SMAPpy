@@ -1,6 +1,6 @@
 ---
 version: "7"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear]
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of]
 ---
 
 ## What it does
@@ -214,6 +214,18 @@ the plane in focus marked, and the Run after it uses what Preview found.  An
 session.  A bead-average calibration has no model: there the setting is not
 shown, and *auto* fits as calibrated.
 
+**Without a bead calibration: the microscope's pupil.**  *PSF calibration*'s
+*Add to microscope...* keeps the objective's pupil with the microscope, for
+each state of its 3D lens and each colour; smappy comes with one for M2 and
+for M5.  *calibration*'s menu offers it where the file's microscope keeps one
+for the file's state and camera.  The pupil is drawn into a spline with the
+file's emission and pixel, once, and kept as a file in smappy's settings
+folder, which the fit and its history name.  It has a model, so *focus* draws
+it in the sample as it draws a pupil calibration.  It is the PSF of beads of
+another day: the blur, a re-aligned 3D lens and the coverslip of the data are
+not in it, so a bead calibration of the data's own day is better where there
+is one.  *auto* never takes it.
+
 **After the fit.**  Once the last frame is fitted, the steps of the folded
 section [*after the fit*](plugin:Analysis/After fit/After the fit) run over
 the whole table before it is saved: a drift correction (none by default),
@@ -416,6 +428,10 @@ calibration found, those that do not match marked, and *auto*.
 A fitted `.h5` works here too: the fit uses the calibration that file was
 fitted with, as its file recorded it.  A calibration moved or deleted since
 is refused, naming it.
+
+The menu's last line, *M2's pupil, 3DA: on · far red*, is the microscope's
+pupil (above, "Without a bead calibration"): the field then reads
+`microscope`, and the run writes the drawn file's path in its place.
 
 ### channels.split
 *two channels* is for a split camera: the frame is cut into its two channels

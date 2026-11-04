@@ -199,6 +199,65 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
     return ForwardModel(channels, geometry, intensity, background)
 
 
+def from_description(description: dict, optics: Optics, roi_px: int = 27, upsample: int = 1,
+                     z_max_nm: float = 2000.0, pupil_size: int | None = None, device=None,
+                     dtype=torch.float64) -> LearnedPSF:
+    """The one-channel model a PSF's description (`VectorPSF.describe`) stands for, with ``optics``: what a
+    pupil kept with a microscope (SMAPpy's `microscope_db.keep_pupil`) is drawn as, without its model file.
+
+    The description holds what a bead model learnt that belongs to the objective -- every phase mode in nm of
+    wavefront, γ and the learnt NA of a minimal pupil or a Zernike pupil's magnitude modes, the blur -- and
+    ``optics`` the rest: the emission it is drawn at (the phase goes through nm, so a pupil learnt at 676 nm
+    draws at 700), the immersion, the sample's index and the pixel.  ``optics.NA`` is the objective's: a
+    minimal pupil's grid reaches beyond it, and its learnt NA, where it has one, cuts it.  Every parameter is
+    the description's, none learnt: a model to draw, as `sample_psf` draws a loaded one.  The pupil grid keeps
+    defocus up to ``z_max_nm`` from aliasing (`choose_pupil_size`), the depths a focus in the sample reaches,
+    unless ``pupil_size`` is given; on the CPU by default.
+
+    A field-dependent model has one pupil per place on the chip; its description is its centre's, and so is
+    the model made here."""
+    from ..model.build import start_from
+    from ..model.geometry import InSituGeometry
+    from ..model.pupil import minimal_grid_optics
+    from ..optics import choose_pupil_size
+    from ..optics.zernike import noll_to_nm
+    # on the CPU unless asked: a model to draw a spline from, in float64, which Apple's GPU has not
+    device = torch.device("cpu") if device is None else device
+    kind = description.get("kind")
+    phase = sorted(int(j) for j in (description.get("phase_nm") or {}))
+    if kind == "minimal":
+        g = minimal_grid_optics(optics)
+        grid = PupilGrid.build(g, pupil_size or choose_pupil_size(g, z_max_nm), device=device, dtype=dtype)
+        pupil = MinimalPupil(grid, phase_modes=phase, na=optics.NA)
+    elif kind == "zernike":
+        grid = PupilGrid.build(optics, pupil_size or choose_pupil_size(optics, z_max_nm), device=device,
+                               dtype=dtype)
+        magnitude = sorted(int(j) for j in (description.get("magnitude") or {}))
+        pupil = ZernikePupil(grid, phase_modes=phase, magnitude_modes=magnitude)
+    else:
+        raise ValueError(f"a description of kind {kind!r} cannot be drawn: a minimal or a Zernike pupil, "
+                         f"kept from a bead model since November 2026")
+    sigma = [float(v) for v in (description.get("sigma_nm") or [0.0])]
+    # a round blur is described as its value on both axes (`VectorPSF.describe`)
+    round_sigma = sigma[0] == sigma[-1]
+    sigma = sigma[:1] if round_sigma else sigma[:2]
+    psf = VectorPSF(grid, pupil, (int(roi_px), int(roi_px)), upsample=int(upsample),
+                    sigma_nm=(sigma[0], sigma[-1]), round_sigma=round_sigma,
+                    pixel_blur=bool(description.get("pixel_blur", True)))
+    model = ForwardModel([Channel(psf)], InSituGeometry(0.0, None, False), PerObservation(), Constant())
+    shared = {spec.name: torch.as_tensor(spec.init, dtype=dtype, device=device).expand(spec.shape).clone()
+              for spec in psf.specs()}
+    shared.update(start_from(pupil, description, optics.wavelength_nm))
+    shared["psf.sigma"] = torch.tensor(sigma, dtype=dtype, device=device)
+    order = max([noll_to_nm(j)[0] for j in phase] + [2])
+    magnitude_kind = ("minimal" if kind == "minimal" else
+                      "symmetric" if all(noll_to_nm(j)[1] == 0 for j in pupil.magnitude_modes) else "free")
+    # what a run that starts from this model (in situ, `BeadSettings.from_options`) reads it as
+    options = {"psf": {"magnitude": magnitude_kind, "zernike_order": order,
+                       "blur": "round" if round_sigma else "free"}}
+    return LearnedPSF(model, shared, {}, describe(model), options=options)
+
+
 #: positions `sample_psf` draws at once
 SAMPLE_CHUNK = 256
 

@@ -590,6 +590,29 @@ Not done: *from this registration* (the arrangement is sides and a split now, no
 and a registration's channels are the arrangement's), the EMU chip split as a start, and a
 version's days checked against the files (below, "Still open").
 
+### Built: step 4 (2026-11-04), the microscope's PSF
+
+Decided with Jonas: the kept pupils are the default PSF, and one builder serves every use -- no second
+converter beside the bead model's.
+
+* **The builder** is uiPSF's `export.from_description`: a pupil's description (`VectorPSF.describe`) and
+  the optics drawn as a one-channel model, every value the description's.  It reproduces the model it
+  was described from to the description's rounding (3e-6 of the peak on the same pupil grid).
+* **A spline from it** is `calibrate.microscope_psf`: the pupil for the file's lens state, colour and
+  camera, drawn with the file's emission and pixel (`record`) and sampled as a pupil calibration
+  (`pupil.spline_calibration`, 20 nm over ±800 nm), kept once in the configuration folder
+  (`microscope_psfs/`) and recording the pupil in its parameters where a pupil calibration names its
+  model file.  `depth.model_of` reads either, so *focus* -- auto, in situ, typed -- draws it at depth with
+  no other path.
+* **Spline 3D**: *calibration*'s menu offers *the microscope's pupil* (the field reads `microscope`, the
+  run writes the drawn file's path); *auto* never takes it.  **Simulate**: every kept pupil in *PSF
+  calibration*'s menu, drawn at the simulation's pixel.
+* **Shipped**: M2's (260829, iXon, γ 0.20; 260904 gave 0.28 and 261012 γ at its bound) and M5's (260818,
+  Fusion BT, γ 0.37), minimal models with PSF calibration's defaults.  M6 has no beads yet.
+* **Pupils are not versioned** any more, and carry their **camera**: kept today, a pupil is read for the
+  files of its camera before today too -- the objective's -- but not for another camera, mounted turned
+  (M2's Evolve against its iXon).
+
 ### The coordinates (decided 2026-11-04)
 
 Every fitter reports positions on the **camera chip**, in chip pixels with the camera ROI's corner

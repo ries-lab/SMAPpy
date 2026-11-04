@@ -479,7 +479,7 @@ class MicroscopeManager(QWidget):
         page = QWidget()
         box = QHBoxLayout(page)
         column = QVBoxLayout()
-        self.pupil_table = _table(["key", "kind", "from", "date"],
+        self.pupil_table = _table(["key", "kind", "camera", "from", "date"],
                                   "the objective's pupils, kept by PSF calibration's Add to "
                                   "microscope...: one per state of the 3D lens and colour")
         self.pupil_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -631,7 +631,8 @@ class MicroscopeManager(QWidget):
         self.pupil_table.setRowCount(0)
         for key, pupil in self._pupils.items():
             _put(self.pupil_table, [key, pupil.get("kind") or "old format: keep it again",
-                                    pupil.get("source") or "?", pupil.get("date") or "?"])
+                                    pupil.get("camera") or "any", pupil.get("source") or "?",
+                                    pupil.get("date") or "?"])
         if self._pupils:
             self.pupil_table.selectRow(0)
         self.draw_pupil()

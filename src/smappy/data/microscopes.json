@@ -540,7 +540,7 @@
   "microscopes": [
     {
       "name": "M2",
-      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. Set up with the iXon since July 2026 (the last Evolve stack 2026-07-09, the first iXon one 07-23; the Evolve kept as a version until 07-15). The pixel per lens state, for each camera, was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront, uiPSF v1's sign), from bead models: +62 with the iXon (0.54-0.64 rad at 676 nm, four stacks Aug-Oct 2026, benchmarks/uipsf/results/lab_beads.jsonl and insitu_magnitude.jsonl), -73 with the Evolve, turned by 90 degrees (-0.67 rad, 260622 and 260105). The objective a Leica 160x NA 1.43, oil; the 160x is nominal, the relay optics after it set the pixel, which is the camera's per state of the 3D lens. The split is right-left, the reflected arm mirrored against the transmitted one, which is the main channel; the splitting dichroic for ratiometric imaging a 665LP.",
+      "comment": "Imported from M2's EMU configuration (October 2026), the optics added by hand. Set up with the iXon since July 2026 (the last Evolve stack 2026-07-09, the first iXon one 07-23; the Evolve kept as a version until 07-15). The pixel per lens state, for each camera, was learnt on beads (benchmarks/uipsf/results/lab_beads_pixel.jsonl); the transmitted arm is the brighter half of dual-channel data with two far-red dyes: the right on the iXon (260821), the top on the Evolve (260401), which is turned by 90 degrees against it. EMU's configuration gives the transmitted slider's 685/70 and empty the same value, 10000; empty is put first, so a file reading 10000 is empty and the filter wheel decides: the 561 nm beads of 260917 (wheel 600/60) and the single-mode stacks whose comment says 700/100 read 10000. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront, uiPSF v1's sign), from bead models: +62 with the iXon (0.54-0.64 rad at 676 nm, four stacks Aug-Oct 2026, benchmarks/uipsf/results/lab_beads.jsonl and insitu_magnitude.jsonl), -73 with the Evolve, turned by 90 degrees (-0.67 rad, 260622 and 260105). The objective a Leica 160x NA 1.43, oil; the 160x is nominal, the relay optics after it set the pixel, which is the camera's per state of the 3D lens. The split is right-left, the reflected arm mirrored against the transmitted one, which is the main channel; the splitting dichroic for ratiometric imaging a 665LP. The objective's pupil for 3DA: on \u00b7 far red is a minimal bead model of 260829_AA_BeadsCalZ_638_SingleMode_M2 (PSF calibration's defaults, November 2026): \u03b3 0.20, \u03c3 49 nm, where 260904 gave \u03b3 0.28 and 261012 \u03b3 at its bound, 0 -- the same astigmatism in all three (Z6 58-59 nm).",
       "identify": {
         "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644"
       },
@@ -733,11 +733,55 @@
           }
         }
       ],
-      "main_channel": "transmitted"
+      "main_channel": "transmitted",
+      "pupils": {
+        "3DA: on \u00b7 far red": {
+          "kind": "minimal",
+          "phase_nm": {
+            "5": -3.719,
+            "6": 59.119,
+            "7": -14.621,
+            "8": 1.166,
+            "9": 1.824,
+            "10": -0.168,
+            "11": 24.776,
+            "12": -1.783,
+            "13": 1.026,
+            "14": 0.97,
+            "15": 0.373,
+            "16": -6.971,
+            "17": 0.047,
+            "18": 2.922,
+            "19": 1.175,
+            "20": -1.583,
+            "21": 2.443,
+            "22": 8.251,
+            "23": 1.509,
+            "24": -0.801,
+            "25": 2.182,
+            "26": -0.965,
+            "27": -0.777,
+            "28": 1.33
+          },
+          "gamma": 0.2017,
+          "wavelength_nm": 700.0,
+          "NA": 1.43,
+          "n_immersion": 1.518,
+          "n_medium": 1.33,
+          "sigma_nm": [
+            48.6,
+            48.6
+          ],
+          "pixel_blur": true,
+          "source": "260829_AA_BeadsCalZ_638_SingleMode_M2 (shipped)",
+          "date": "2026-08-29",
+          "camera": "iXon 1"
+        }
+      }
     },
     {
       "name": "M5",
-      "comment": "Imported from M5's EMU configuration (October 2026), the optics added by hand. Two filter wheels, the transmitted arm's on top in EMU; the pixel does not depend on the 3D lens and is the camera's. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront), from bead models: +65 (0.37-0.71 rad at 676 nm, four stacks Feb-Sep 2026, benchmarks/uipsf/results/lab_beads.jsonl). The objective an Olympus 100x NA 1.50, oil; the pixel is the camera's. The split is right-left, the reflected arm mirrored; which arm is on which side is still to be read from ratiometric data (665LP, the transmitted arm the brighter) -- until then the layout alone, the left half the main. The first filter wheel is the transmitted arm's (EMU's top wheel).",
+      "comment": "Imported from M5's EMU configuration (October 2026), the optics added by hand. Two filter wheels, the transmitted arm's on top in EMU; the pixel does not depend on the 3D lens and is the camera's. astigmatism_nm, the start of in situ learning (Noll 6, nm of wavefront), from bead models: +65 (0.37-0.71 rad at 676 nm, four stacks Feb-Sep 2026, benchmarks/uipsf/results/lab_beads.jsonl). The objective an Olympus 100x NA 1.50, oil; the pixel is the camera's. The split is right-left, the reflected arm mirrored; which arm is on which side is still to be read from ratiometric data (665LP, the transmitted arm the brighter) -- until then the layout alone, the left half the main. The first filter wheel is the transmitted arm's (EMU's top wheel). The objective's pupil for 3D: on \u00b7 far red is a minimal bead model of 260818_PM_beadsCal_M5 (PSF calibration's defaults, November 2026): \u03b3 0.37, \u03c3 30 nm.",
       "identify": {
         "iChrome-MLE-TCP-System: Serial Number": "iCHROME-MLE-L-CD_30087"
       },
@@ -869,7 +913,51 @@
       },
       "camera": "Fusion BT 1",
       "main_channel": "transmitted",
-      "layout": "right-left mirrored"
+      "layout": "right-left mirrored",
+      "pupils": {
+        "3D: on \u00b7 far red": {
+          "kind": "minimal",
+          "phase_nm": {
+            "5": -13.057,
+            "6": 57.909,
+            "7": -5.918,
+            "8": -12.392,
+            "9": 3.964,
+            "10": 0.074,
+            "11": 18.645,
+            "12": 4.936,
+            "13": -1.249,
+            "14": 2.444,
+            "15": 0.957,
+            "16": 2.43,
+            "17": -5.202,
+            "18": 0.521,
+            "19": -1.492,
+            "20": -0.962,
+            "21": -1.128,
+            "22": 13.746,
+            "23": 1.159,
+            "24": 3.349,
+            "25": -2.373,
+            "26": 2.214,
+            "27": -0.099,
+            "28": 0.106
+          },
+          "gamma": 0.3721,
+          "wavelength_nm": 685.0,
+          "NA": 1.5,
+          "n_immersion": 1.518,
+          "n_medium": 1.33,
+          "sigma_nm": [
+            30.35,
+            30.35
+          ],
+          "pixel_blur": true,
+          "source": "260818_PM_beadsCal_M5 (shipped)",
+          "date": "2026-08-18",
+          "camera": "Fusion BT 1"
+        }
+      }
     },
     {
       "name": "M6",

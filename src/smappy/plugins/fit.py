@@ -374,8 +374,9 @@ class SplineModelSettings:
     calibration: str = param("", label="calibration", kind="open_file",
                              file_filter="Bead calibrations or fitted files (*.h5 *.hdf5 *_3dcal.mat *.mat)",
                              help="empty: auto, the calibration listed for this file's microscope "
-                                  "and state (the menu: all found); a bead calibration .h5 or a SMAP "
-                                  "_3dcal.mat; or a fitted .h5, for the calibration it was fitted with")
+                                  "and state (the menu: all found, and the microscope's pupil); a bead "
+                                  "calibration .h5 or a SMAP _3dcal.mat; a fitted .h5, for the "
+                                  "calibration it was fitted with; or 'microscope', its kept pupil")
     # shown only for a calibration with a pupil model beside it (`SplineFit._focus_form`); one
     # place in the sample, the focus, known three ways, or the beads' spline as it is
     focus: str = param("auto", label="focus", choices=FOCUS_CHOICES,
@@ -582,8 +583,17 @@ class _FitPlugin(Plugin):
         if self.calibration_kind is None or not settings.source.path:
             return settings
         from .. import calibration_list
+        from ..calibrate.microscope_psf import MICROSCOPE
         chosen = settings.model.calibration
         tell = ctx.report if ctx is not None else (lambda text: None)
+        if chosen == MICROSCOPE and self.calibration_kind == "single":
+            # the pupil kept with the microscope, drawn into a spline once and kept as a file, so that
+            # the history and the fitted file name what was fitted with (`calibrate.microscope_psf`)
+            from ..calibrate.microscope_psf import calibration_path
+            scope, em_on = self._scope(settings)
+            path = calibration_path(scope, em_on)
+            tell(f"calibration: {scope.get('name')}'s pupil, {path.name}")
+            return replace(settings, model=replace(settings.model, calibration=str(path)))
         if chosen:
             recorded = calibration_list.recorded_calibration(chosen)
             if recorded is None:
@@ -598,8 +608,10 @@ class _FitPlugin(Plugin):
             kind = "dual-colour" if self.calibration_kind == "dual" else "bead"
             others = (f"; {len(found)} other{'s' if len(found) != 1 else ''} listed, for "
                       f"another microscope or state (choose one from the menu)" if found else "")
+            pupil = (" or the microscope's pupil" if self.calibration_kind == "single"
+                     and self._microscope_choice(settings) else "")
             raise ValueError(f"no {kind} calibration listed for this file's microscope and state"
-                             f"{others}: make one with PSF calibration, or choose a file")
+                             f"{others}: make one with PSF calibration, or choose a file{pupil}")
         entry = found[0][0]
         tell(f"calibration on auto: {entry.label()}")
         return replace(settings, model=replace(settings.model, calibration=entry.path))
@@ -622,8 +634,37 @@ class _FitPlugin(Plugin):
         state.choices["model.calibration"] = [
             (e.path, e.label() if ok else f"{e.label()} -- not this microscope or state")
             for e, ok in found]
+        if self.calibration_kind == "single":
+            mine = self._microscope_choice(settings)
+            if mine:
+                state.choices["model.calibration"].append(mine)
         state.hints["model.calibration"] = (f"auto: {found[0][0].label()}" if found and found[0][1]
                                             else "auto: none listed for this microscope and state")
+
+    def _scope(self, settings) -> tuple:
+        """(the file's microscope summary, its EM state): what the microscope's pupil is drawn for."""
+        resolved = self.resolution(settings)
+        if resolved is None:
+            raise ValueError("no file to find the microscope of")
+        camera = resolved.camera_metadata()
+        return camera.microscope, camera.em_on
+
+    def _microscope_choice(self, settings):
+        """``(MICROSCOPE, label)`` for the calibration's menu where the file's microscope keeps a pupil for
+        its state and colour, else None.  Asked with every change of the form: no drawing here."""
+        from ..calibrate.microscope_psf import MICROSCOPE
+        from ..microscope_db import database, emission_of, pupil_of
+        try:
+            scope, _ = self._scope(settings)
+        except Exception:
+            return None
+        pupil = pupil_of(scope)
+        if not pupil:
+            return None
+        entry = database().get(str(scope.get("name")))
+        key = entry.pupil_key(scope.get("states") or {}, emission_of(scope)) if entry else ""
+        return (MICROSCOPE, f"{scope.get('name')}'s pupil, {key} (from {pupil.get('source') or 'beads'}, "
+                            f"{pupil.get('date') or '?'})")
 
     def _model_telling(self, ctx: Context, settings, camera: CameraMetadata):
         """`model`, with what it warned about said where the user reads it.
@@ -1597,10 +1638,15 @@ class SplineFit(_FitPlugin):
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
 
-    def model_file(self, settings):
-        """The pupil model beside the calibration as it stands (*auto* resolved), or None: what
-        *focus* draws from.  Kept per calibration, since the form asks with every change."""
-        from ..calibrate.depth import model_file
+    def drawable(self, settings):
+        """The calibration as it stands (*auto* resolved) if it has a pupil model to draw at depth -- a
+        model file beside it, or the microscope's pupil it records (`calibrate.depth.has_model`) -- else
+        None: what *focus* draws from.  Kept per calibration, since the form asks with every change; the
+        microscope's pupil is not drawn for the form's sake (`_microscope_choice` says it has one)."""
+        from ..calibrate.depth import has_model
+        from ..calibrate.microscope_psf import MICROSCOPE
+        if settings.model.calibration == MICROSCOPE:
+            return MICROSCOPE if self._microscope_choice(settings) else None
         try:
             path = self.with_calibration(settings).model.calibration
         except Exception:
@@ -1608,14 +1654,15 @@ class SplineFit(_FitPlugin):
         if not path or not Path(path).is_file():
             return None
         key = (str(path), Path(path).stat().st_mtime)
-        if getattr(self, "_model_file_key", None) != key:
+        if getattr(self, "_drawable_key", None) != key:
             from ..io.calibration import load_spline_calibration
             try:
-                found = model_file(load_spline_calibration(path))
+                cal = load_spline_calibration(path)
+                found = cal if has_model(cal) else None
             except Exception:
                 found = None
-            self._model_file_key, self._model_file_value = key, found
-        return self._model_file_value
+            self._drawable_key, self._drawable_value = key, found
+        return self._drawable_value
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
@@ -1631,7 +1678,8 @@ class SplineFit(_FitPlugin):
         *in situ* it shows what the last Preview or Run found for this file, if it found it."""
         from ..calibrate import depth
         m = settings.model
-        has = self.model_file(settings) is not None
+        drawable = self.drawable(settings)
+        has = drawable is not None
         shown = has or m.focus in ("typed", "insitu")
         state.shown["model.focus"] = shown
         state.shown["model.focus_nm"] = shown and m.focus != "calibrated"
@@ -1644,8 +1692,13 @@ class SplineFit(_FitPlugin):
                                              if found is not None else f"{word}: found at Preview or Run")
         if shown and has and m.focus != "calibrated":
             try:
-                state.hints["model.sample_index"] = (
-                    f"auto: {depth.medium(depth.load(self.model_file(settings))):g}")
+                if isinstance(drawable, str):           # the microscope's pupil, not drawn yet
+                    from ..microscope_db import pupil_of
+                    medium = (pupil_of(self._scope(settings)[0]) or {}).get("n_medium")
+                else:
+                    medium = depth.medium(depth.model_of(drawable))
+                if medium is not None:
+                    state.hints["model.sample_index"] = f"auto: {float(medium):g}"
             except Exception:
                 pass
 
@@ -1653,8 +1706,15 @@ class SplineFit(_FitPlugin):
         """What a focus found depends on: the movie and its range, the calibration, the sample's index,
         and -- for *auto*, which fits the movie's spots -- the detection, the fit box and the camera.  A
         Preview finds it once for these, and the Run after it uses it."""
+        from ..calibrate.microscope_psf import MICROSCOPE, path_for, record
         try:
-            settings = self.with_calibration(settings)
+            if settings.model.calibration == MICROSCOPE:
+                # the file it will be drawn into, without drawing it: the form asks with every change
+                scope, em_on = self._scope(settings)
+                settings = replace(settings, model=replace(settings.model,
+                                                           calibration=str(path_for(record(scope), em_on))))
+            else:
+                settings = self.with_calibration(settings)
         except Exception:
             pass
         m, src = settings.model, settings.source
@@ -1683,7 +1743,7 @@ class SplineFit(_FitPlugin):
             return settings
         from ..io.calibration import load_spline_calibration
         cal = load_spline_calibration(m.calibration)
-        if depth.model_file(cal) is None:
+        if not depth.has_model(cal):
             if m.focus == "auto":
                 return replace(settings, model=replace(m, focus="calibrated"))
             raise ValueError("in situ needs a calibration made with the pupil (Zernike) method: its "

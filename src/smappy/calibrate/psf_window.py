@@ -706,7 +706,7 @@ class PSFCalibrationWindow(QMainWindow):
                 f"{len(pupil['phase_nm'])} phase Zernikes and {magnitude}, "
                 f"learnt at {pupil['wavelength_nm']:g} nm.  In situ learning holds and starts from it."
                 + (f"\n\nIt replaces the one from {before.get('source') or '?'} ({before.get('date')}), "
-                   f"which is kept in a dated version of the entry." if before else ""))
+                   f"for older files too: a pupil is the objective's, whatever the day." if before else ""))
         if self._confirm(text) != QMessageBox.Ok:
             return
         try:

@@ -640,6 +640,14 @@ is nearly perfect.  Raise it to see linking fail.
 The width and astigmatism settings are then not used for the frames.  The
 localizations output still uses the Gaussian precision.
 
+The field's menu also offers every pupil kept with a microscope -- M2's and
+M5's come with smappy, and *PSF calibration*'s *Add to microscope...* adds
+yours.  Choosing one draws it into a spline at its own emission and this
+*pixel size*, kept as a file in smappy's settings folder, and the field then
+names that file: the frames are drawn with the microscope's PSF, and *Fit
+this* fits them with it.  Change the pixel size first: the spline is drawn
+in the pixel it was chosen at.
+
 ### localizations.min_photons
 Keep it low: the dim localizations are part of real data.  Filter them away
 afterwards (at 200 photons, say) before anything about precision.

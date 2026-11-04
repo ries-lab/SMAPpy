@@ -2,7 +2,7 @@
 title: Microscope manager
 summary: Keeps your microscopes -- which devices they have, what each state of a device is called, and what follows from it (the pixel from the 3D lens, the emission from the filter, the NA) -- so that every file is read with the optics it was taken with, without typing them.
 widget: smappy.gui.microscope_editor.MicroscopeManager
-covers: [smappy.microscope_db.Device.state, smappy.microscope_db.Follows.resolve, smappy.microscope_db.Microscope.resolve, smappy.microscope_db.Microscope.as_of, smappy.microscope_db.save_microscope, smappy.microscope_db.one_line, smappy.io.emu.draft, smappy.io.emu.update, smappy.io.tiff.with_microscope, smappy.calibrate.pupil.OpticsSettings.resolved, smappy.io.calibration.microscope_differences, smappy.gui.microscope_editor.MicroscopeManager, smappy.gui.microscope_view.FoundMicroscope, smappy.gui.microscope_editor.draw_channels, smappy.gui.microscope_editor.draw_pupil, smappy.gui.microscope_editor.unnamed_filters, smappy.microscope_db.Microscope.arrangement, smappy.microscope_db.Microscope.split_layout]
+covers: [smappy.microscope_db.Device.state, smappy.microscope_db.Follows.resolve, smappy.microscope_db.Microscope.resolve, smappy.microscope_db.Microscope.as_of, smappy.microscope_db.save_microscope, smappy.microscope_db.one_line, smappy.io.emu.draft, smappy.io.emu.update, smappy.io.tiff.with_microscope, smappy.calibrate.pupil.OpticsSettings.resolved, smappy.io.calibration.microscope_differences, smappy.gui.microscope_editor.MicroscopeManager, smappy.gui.microscope_view.FoundMicroscope, smappy.gui.microscope_editor.draw_channels, smappy.gui.microscope_editor.draw_pupil, smappy.gui.microscope_editor.unnamed_filters, smappy.microscope_db.Microscope.arrangement, smappy.microscope_db.Microscope.split_layout, smappy.microscope_db.Microscope.pupil_for, smappy.microscope_db.keep_pupil]
 ---
 
 ## What it does
@@ -179,16 +179,23 @@ drawing sit on the light.
 
 ### PSF
 The objective's pupils kept with the entry, one per state of the 3D lens and
-colour (green, red, far red: not per filter), each with the calibration it
-came from and its day, and the chosen one drawn: its phase over the pupil in
-nm of wavefront, its three largest Zernike modes and γ, the apodisation (a
-minimal pupil) or the number of magnitude modes in the title.  They are not
-typed: *PSF calibration*'s *Add to microscope...* keeps one from a pupil
-model.  In situ learning starts from the one for its movie's lens state.
+colour (green, red, far red: not per filter), each with the camera it was
+learnt with, the calibration it came from and its day, and the chosen one
+drawn: its phase over the pupil in nm of wavefront, its three largest
+Zernike modes and γ, the apodisation (a minimal pupil) or the number of
+magnitude modes in the title.  They are not typed: *PSF calibration*'s *Add
+to microscope...* keeps one from a pupil model, and M2 and M5 come with one
+each, learnt from their beads.
+
+A pupil is read for every file of its camera, whatever its day -- it is the
+objective's -- but not for another camera's: a camera mounted turned sees the
+astigmatism the other way.  In situ learning starts from the one for its
+movie's lens state, and Spline 3D and *Simulate* can fit and draw with it
+where there is no bead calibration.
 
 ### Remove pupil
 Drops the chosen pupil, for a model that turned out wrong.  It is gone once
-the entry is saved; the entry before is kept as a version.
+the entry is saved, for older files too.
 
 ### versions
 The entry's older setups, newest last: each the day it applied until and

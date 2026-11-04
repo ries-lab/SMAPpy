@@ -286,6 +286,12 @@ class Simulate(Plugin):
         state.keys = key_labels(settings, keys)
         state.hints["preset"] = "modified" if modified(settings) else ""
         state.notice = motion_notice(settings)
+        # the pupils kept with the microscopes, drawn into a spline when one is chosen (`react`)
+        from ..calibrate.microscope_psf import choices
+        try:
+            state.choices["optics.calibration"] = choices()
+        except Exception:
+            pass
         # two colours on one unsplit camera are one colour to any fitter
         unsplit = (f"{colours(settings)} colours drawn on one camera, as one: tick "
                    f"split camera for frames the two-colour fitter can tell apart"
@@ -316,6 +322,12 @@ class Simulate(Plugin):
         file no longer shown cannot decide the structure."""
         if changed == "preset" and settings.preset:
             return preset_values(settings.preset)
+        from ..calibrate.microscope_psf import MICROSCOPE, simulation_path
+        if changed == "optics.calibration" and settings.optics.calibration.startswith(MICROSCOPE + ":"):
+            # a microscope's pupil from the menu, drawn at the simulation's pixel and kept as a file: the
+            # recipe and Fit this then name a calibration as for any other (`calibrate.microscope_psf`)
+            return {"optics.calibration": str(simulation_path(settings.optics.calibration,
+                                                              settings.optics.pixelsize_nm))}
         parts = changed.split(".")
         if (len(parts) == 4 and parts[0] == "components" and parts[2:] == ["structure", "preset"]
                 and parts[1].isdigit()):

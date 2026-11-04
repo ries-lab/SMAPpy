@@ -331,7 +331,8 @@ class Microscope:
     versions: List[Dict[str, Any]] = field(default_factory=list)
     #: the objective's pupil, learnt from beads, by the state of the 3D lens (`pupil_key`): the PSF as a
     #: bead model describes itself (`uipsf.VectorPSF.describe`: kind, phase in nm, γ or the magnitude's
-    #: Zernikes, σ), what in situ learning holds and starts from (`pupil_of`)
+    #: Zernikes, σ), what in situ learning holds and starts from (`pupil_of`) and the microscope's PSF is drawn
+    #: from (`calibrate.microscope_psf`); with the ``camera`` it was learnt with, whose files alone it is read for
     pupils: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     #: the objective (`OBJECTIVE`): its name, NA, immersion and the immersion's index -- the NA
     #: and index uiPSF reads, where an older entry has them under `parameters`
@@ -633,7 +634,8 @@ class Microscope:
         colour = colour_of(wavelength_nm)
         return f"{key} \u00b7 {colour}" if colour else key
 
-    def pupil_for(self, states: Dict[str, Any], wavelength_nm: Any = None) -> Optional[Dict[str, Any]]:
+    def pupil_for(self, states: Dict[str, Any], wavelength_nm: Any = None,
+                  camera: str = "") -> Optional[Dict[str, Any]]:
         """The pupil kept for ``states`` in this colour; else one kept for the state in no colour
         (before colours were told apart), then for every state.  Never another colour's: a red
         model holds the wrong aberrations for far red.  One kept before pupils described their
@@ -643,7 +645,11 @@ class Microscope:
         if colour_of(wavelength_nm):
             keys.append(f"all \u00b7 {colour_of(wavelength_nm)}")
         keys.append("all")
-        found = next((self.pupils[k] for k in keys if k in self.pupils), None)
+        # a pupil holds for every day but not every camera: one mounted turned has the astigmatism the other
+        # way (M2's Evolve against its iXon), so a pupil kept with one camera is not another's
+        mine = {k: p for k, p in self.pupils.items()
+                if not camera or not p.get("camera") or same_camera(camera, str(p["camera"]))}
+        found = next((mine[k] for k in keys if k in mine), None)
         return found if found and found.get("kind") else None
 
 
@@ -861,7 +867,8 @@ def pupil_of(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     until = read_date(summary.get("version")) if summary.get("version") else None
     if until is not None:
         entry = entry.as_of(until - _dt.timedelta(days=1))
-    return entry.pupil_for(summary.get("states") or {}, emission_of(summary))
+    return entry.pupil_for(summary.get("states") or {}, emission_of(summary),
+                           str(summary.get("camera") or entry.camera))
 
 
 def _summary_of(microscope) -> Optional[Dict[str, Any]]:
@@ -964,7 +971,8 @@ def keep_pupil(summary: Dict[str, Any], pupil: Dict[str, Any], path=None) -> tup
     entry = copy.deepcopy(entry)
     key = entry.pupil_key(summary.get("states") or {},
                           pupil.get("wavelength_nm") or emission_of(summary))
-    entry.pupils[key] = dict(pupil)
+    # the camera it was learnt with: a pupil is read for that camera's files, whatever their day (`pupil_for`)
+    entry.pupils[key] = dict(pupil, camera=str(summary.get("camera") or entry.camera))
     return key, save_microscope(entry, path)
 
 
@@ -981,6 +989,11 @@ def changes(old: Microscope, new: Microscope) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Any] = {scalar: before.get(scalar, "") for scalar in SCALARS
                            if before.get(scalar, "") != after.get(scalar, "")}
     for section in SECTIONS:
+        if section == "pupils":
+            # a pupil is the objective's, learnt from beads of whatever day: kept now, it is read for
+            # the files taken before too -- a version would hide it from them, and a fit with the
+            # microscope's pupil (`calibrate.microscope_psf`) of August data would find none
+            continue
         a, b = before.get(section) or {}, after.get(section) or {}
         diff = {k: copy.deepcopy(a.get(k)) for k in set(a) | set(b) if a.get(k) != b.get(k)}
         if diff:

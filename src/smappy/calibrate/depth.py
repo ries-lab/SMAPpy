@@ -46,6 +46,7 @@ torch is imported inside the functions: Spline 3D imports this module without it
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -73,6 +74,25 @@ def model_file(cal) -> Optional[Path]:
         return None
     path = Path(cal.source).with_name(str(name))
     return path if path.is_file() else None
+
+
+def model_of(cal):
+    """The pupil model a spline calibration was drawn from, loaded, or None: the model file beside it
+    (`model_file`), or the microscope's pupil it records (``parameters["pupil"]``, `microscope_psf`) --
+    two places, one model, so that *focus* draws either alike."""
+    path = model_file(cal)
+    if path is not None:
+        return load(path)
+    kept = (cal.parameters or {}).get("pupil")
+    if kept:
+        from .microscope_psf import learned
+        return learned(kept)
+    return None
+
+
+def has_model(cal) -> bool:
+    """Whether ``cal`` has a pupil model to draw at depth, without loading it (torch need not be there)."""
+    return model_file(cal) is not None or bool((cal.parameters or {}).get("pupil"))
 
 
 _LOADED: dict = {}
@@ -155,12 +175,11 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
     from ..io.calibration import SplineCalibration
     from .core import spline_coefficients
     if learned is None:
-        path = model_file(cal)
-        if path is None:
+        learned = model_of(cal)
+        if learned is None:
             raise ValueError(f"{Path(cal.source).name if cal.source else 'the calibration'} has no pupil model "
                              f"beside it: a focus in the sample needs a calibration made with the pupil (Zernike) "
-                             f"method")
-        learned = load(path)
+                             f"method, or the microscope's pupil")
     model, shared = with_medium(learned, n_med)
     dz, roi = float(cal.dz), _roi_px(cal)
     half = (cal.shape[0] - 1) * dz / 2
@@ -196,7 +215,10 @@ def at_depth(cal, focus_nm: float, n_med: Optional[float] = None, learned=None):
     """`depth_spline`, kept for the last few (calibration, focus, index): a form's Preview and every file of a
     batch ask for the same one, and a spline takes a second to draw and fit."""
     path = model_file(cal) if learned is None else None
-    key = (str(cal.source), id(cal) if cal.source is None else None, path.stat().st_mtime if path else id(learned),
+    # the microscope's pupil is named by what it records; a model file by its time
+    kept = json.dumps((cal.parameters or {}).get("pupil"), sort_keys=True, default=str) if learned is None else None
+    key = (str(cal.source), id(cal) if cal.source is None else None,
+           path.stat().st_mtime if path else kept if kept != "null" else id(learned),
            round(float(focus_nm), 1), None if n_med is None else round(float(n_med), 4))
     if key not in _DRAWN:
         if len(_DRAWN) >= 4:
@@ -276,7 +298,7 @@ def auto_focus(cal, images: np.ndarray, n_med: Optional[float] = None, iteration
     noise's variance added) lie on the coverslip (module docstring).  ``cal`` is the bead spline, ``learned``
     its model if loaded already (`model_file`)."""
     from uipsf.workflows.insitu_rounds import coverslip_edge
-    learned = learned if learned is not None else load(model_file(cal))
+    learned = learned if learned is not None else model_of(cal)
     keep = brightest(images)
     images = np.ascontiguousarray(images[keep], np.float32)
 
@@ -338,10 +360,10 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
     from .insitu_run import InSituModelSettings, run_insitu
     from .pupil import BeadSettings, OpticsSettings, RunSettings
     path = model_file(cal)
-    if path is None:
+    learned = model_of(cal)
+    if learned is None:
         raise ValueError("in situ with the beads' aberrations needs a calibration made with the pupil (Zernike) "
-                         "method: its model is the start")
-    learned = load(path)
+                         "method, or the microscope's pupil: its model is the start")
     o = learned.model.channels[0].psf.grid.optics
     # the objective's NA: a minimal pupil's grid reaches beyond it (`MinimalPupil`)
     na = float(getattr(learned.model.channels[0].psf.pupil, "na", o.NA))
@@ -367,8 +389,11 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
                  + ("" if left is None else f", about {duration(left)} left"))
     result = run_insitu(paths, optics, model,
                         InSituModelSettings(focus_nm=focus_nm, hold="all", max_rounds=rounds, spline_z="height"),
-                        InSituSettings(molecules=molecules), run=RunSettings(start_from=str(path), save_model=False),
-                        camera=camera, progress=tell, cancel=cancel)
+                        InSituSettings(molecules=molecules),
+                        run=RunSettings(start_from=str(path) if path is not None else "", save_model=False),
+                        camera=camera, progress=tell, cancel=cancel,
+                        # the microscope's pupil held, where there is no model file to start from
+                        pupil=None if path is not None else cal.parameters["pupil"]["pupil"])
     dtype = result.model.psf.grid.rho.dtype                  # the model's own, as it was learnt
     shared = {k: v.detach().cpu().to(dtype) for k, v in result.cal.shared().items()}
     focus = float(shared["geometry.focus"])

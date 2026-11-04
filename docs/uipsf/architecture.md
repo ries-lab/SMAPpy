@@ -666,6 +666,14 @@ MPS, atlas deviance 1.377, σ (66.96, 74.81) nm.  `--slow -n auto`: 132 passed, 
   default; a spline should be sampled with more. Tests: `tests/uipsf_tests/test_model_file.py` (round trip, the
   same model from the description for every component, the sampled PSF is the model's, one photon
   over a wide region, x along columns, sub-sampling converges, the bead only on request).
+- `from_description(description, optics, roi_px, ...)` (November 2026) is a `LearnedPSF` without a file:
+  the one-channel model a PSF's hand-over description (`VectorPSF.describe`, what SMAPpy keeps with a
+  microscope) stands for, with the optics it is drawn in -- the emission, the pixel, the immersion, the
+  sample's index.  Every value is the description's: the phase through nm, so it draws at another
+  emission; γ and a learnt NA, or a Zernike magnitude; the blur.  SMAPpy draws it into a spline
+  (`smappy/calibrate/microscope_psf.py`), and Spline 3D's focus at depth.  It reproduces the model it was
+  described from to the description's rounding, about 3e-6 of the peak on the same pupil grid; its own
+  grid is chosen for defocus up to 2 µm.  Tests: `tests/uipsf_tests/test_microscope_psf.py`.
 
 ## What a free pupil magnitude absorbs (`benchmarks/uipsf/synthetic/magnitude.py`, plan §10, 2)
 
