@@ -13,7 +13,7 @@ import threading
 import traceback
 from typing import Optional, Type
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton,
@@ -266,6 +266,14 @@ class PluginPanel(QWidget):
         self._warnings = 0
         self._follow_timer = QTimer(self, singleShot=True, interval=120)
         self._follow_timer.timeout.connect(self._follow_step)
+        # A clock beside "running...", every second: a fit's progress line
+        # moves once per block of frames, which on a slow machine or during a
+        # two-colour fit's registration pass is many seconds, and a status
+        # that never changes reads as a hung window (`app._tick` for loading).
+        self._run_clock = QElapsedTimer()
+        self._run_ticker = QTimer(self, interval=1000)
+        self._run_ticker.timeout.connect(self._tick_status)
+        self._status_text = ""
         # the token of a run waiting for the blinks to be merged (`gui.merging`)
         self._merge_wait = None
         self.form.field_changed.connect(self._react)
@@ -461,8 +469,9 @@ class PluginPanel(QWidget):
             self._warnings += 1
             self.output.appendPlainText(f"warning: {payload}")
             self._progress_lines = 0
-            self.status.setText(f"running... ({self._warnings} warning"
-                                f"{'s' if self._warnings > 1 else ''})")
+            self._status_text = (f"running... ({self._warnings} warning"
+                                 f"{'s' if self._warnings > 1 else ''})")
+            self._tick_status()
             self.status.setStyleSheet(WARNING_STYLE)
         elif event == "start":
             # owned first: a window listening to the session can raise inside
@@ -560,7 +569,8 @@ class PluginPanel(QWidget):
         self._stop.set()
         self.run_button.setText("stopping…")
         self.run_button.setEnabled(False)
-        self.status.setText("stopping...")
+        self._status_text = "stopping..."
+        self._tick_status()
 
     def open_window(self, window: Optional[str] = None) -> None:
         """Hand the settings to the window the plugin names (`Plugin.window`,
@@ -727,7 +737,11 @@ class PluginPanel(QWidget):
                                        "done so far (a plugin that does not "
                                        "check runs to the end)")
             self.run_button.setEnabled(True)
-        self.status.setText(message)
+        self._status_text = message
+        if stop is not None:                # a run: previews are over in a moment
+            self._run_clock.start()
+            self._run_ticker.start()
+        self._tick_status()
         self.status.setStyleSheet("")
         self.status.setToolTip("")
         self.details_button.hide()
@@ -928,9 +942,18 @@ class PluginPanel(QWidget):
         return [b for b in (self.run_button, self.preview_button) if b is not None] \
             + list(self.part_buttons.values())
 
+    def _tick_status(self) -> None:
+        """The status of a run in progress, with how long it has run."""
+        if not self._run_ticker.isActive():
+            self.status.setText(self._status_text)
+            return
+        seconds = self._run_clock.elapsed() // 1000
+        self.status.setText(f"{self._status_text} {seconds // 60}:{seconds % 60:02d}")
+
     def _release_buttons(self) -> bool:
         """Run is Run again and the buttons take clicks; whether Stop had
         been pressed."""
+        self._run_ticker.stop()
         stop, self._stop = self._stop, None
         if stop is not None:                 # a run, not a preview
             self.run_button.setText("Run")

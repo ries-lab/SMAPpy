@@ -164,9 +164,12 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
     if dual:
         columns["ratio"] = fl.ratio[em.owner].astype(np.float32)
         layout = split_layout(s)
-        # where the fit puts them: in the main channel's own pixels, counted from its corner on the
-        # chip (`channels.ChannelLayout`), which is where they were drawn -- not the frame's
+        # where the fit puts them: on the chip, where the main channel's spot was drawn -- its
+        # own position plus the main half's corner (`render`), as every fitter reports positions
         geometry = layout["geometry"]
+        for axis, name in enumerate(("x_nm", "y_nm")):
+            columns[name] = (columns[name] + layout["origin"][axis] * s.optics.pixelsize_nm
+                             ).astype(np.float32)
         metadata.update({"sigma_nm": list(dual["sigma_nm"]),
                          "ratios": sorted({float(r) for r in fl.ratio}),
                          "transformation": layout["transformation"].tolist(),

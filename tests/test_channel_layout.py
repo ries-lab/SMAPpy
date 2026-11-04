@@ -130,3 +130,15 @@ def test_a_polynomial_registration_rides_on_the_layout_exactly():
     lay = t.layout()
     local = np.array([[20.0, 20.0], [60.5, 30.25]])
     np.testing.assert_allclose(lay.to_channel(1, local) + (0, 50), t.to_secondary(local), atol=1e-9)
+
+
+def test_a_channels_own_pixels_go_to_the_frame_and_back_flips_included():
+    layout = ChannelLayout([(10, 4, 20, 30), (40, 4, 20, 30)], [(False, False), (True, True)])
+    own = np.array([[0.0, 0.0], [3.5, 7.25], [19.0, 29.0]])
+    for channel in (0, 1):
+        np.testing.assert_allclose(layout.from_frame(channel, layout.on_frame(channel, own)), own)
+    # a flipped channel's first pixel is its rectangle's far corner on the frame
+    np.testing.assert_allclose(layout.on_frame(1, [[0.0, 0.0]]), [[59.0, 33.0]])
+    # imshow draws it there: the extent runs the other way along a flip
+    assert layout.frame_extent(0) == (9.5, 29.5, 33.5, 3.5)
+    assert layout.frame_extent(1) == (59.5, 39.5, 3.5, 33.5)

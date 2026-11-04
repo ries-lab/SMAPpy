@@ -209,3 +209,20 @@ def test_a_table_saved_without_images_opens_without_any(tmp_path):
     assert session.images == []
     with pytest.raises(ValueError, match="no image"):
         session.add_image()
+
+
+def test_a_channel_layers_frames_are_kept_on_the_chip_where_the_main_channel_lies():
+    """The positions of a two-channel fit are on the chip, and so is the image under them: the
+    main channel, its flip undone, on its rectangle -- the camera ROI's corner added."""
+    from dataclasses import replace
+    from smappy.channels import ChannelLayout
+    from smappy.metadata import CameraMetadata
+    layout = ChannelLayout([(32, 0, 32, 16), (0, 0, 32, 16)], [(True, False), (False, False)])
+    frame = np.arange(16 * 64, dtype=float).reshape(16, 64)
+    keeper = RawFrameKeeper(1, 0, 1)
+    keeper.see(0, layout.cut(frame))                               # (1, C, h, w)
+    camera = replace(CameraMetadata(conversion=1.0, offset=0.0, pixelsize_um=0.1), roi=(100, 50, 64, 16))
+    image = keeper.image(camera, layout=layout)
+    np.testing.assert_allclose(image.data[0], frame[:, 32:])          # as on the chip, unflipped
+    assert image.x0 == pytest.approx((100 + 32 - 0.5) * 100)
+    assert image.y0 == pytest.approx((50 - 0.5) * 100)

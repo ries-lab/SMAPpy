@@ -804,7 +804,8 @@ channel, with frames paired between them.  Step 1 is the first, and was decided 
   few near the seam may differ, and are counted.  Measured on six scenarios end to end through the
   plugins -- up-down, mirrored in y and in x, right-left with the main channel second, unequal halves,
   spline and Gaussian -- whose tables before the port are kept as the reference.
-- **Positions in channel 0's own pixels**, as 4Pi's: `x_nm` of dual-colour data moves by the main
+- **Positions in channel 0's own pixels** (until 2026-11; since then on the camera chip, where channel 0
+  saw them -- `docs/microscope-database.md`, "the coordinates"), as 4Pi's: `x_nm` of dual-colour data moves by the main
   half's corner against files fitted before.  They are counted from channel 0's rectangle *on the chip*,
   so a calibration from one camera ROI applies to a movie from another: a ROI that cuts into a channel
   leaves that channel smaller, and its pixels keep their place in the rectangle (`ChannelLayout.origins`).

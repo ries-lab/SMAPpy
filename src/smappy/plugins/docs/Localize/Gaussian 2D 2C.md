@@ -1,5 +1,5 @@
 ---
-version: "8"
+version: "9"
 covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.chip_halves, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement]
 ---
 
@@ -372,10 +372,12 @@ $N/2$ photons each and the same width, without background, that is
 $\sigma_x = \sigma_a / \sqrt{N}$ against $\sigma_a / \sqrt{N/2}$ for one half:
 the factor $\sqrt{2}$ of the figure.
 
-**What is written.**  `x_nm`, `y_nm` are the linked position, in the main
-channel's own pixels counted from its corner on the chip, whatever camera ROI
-the movie was taken with.  (Before version 7 they were the chip's pixels: for
-a main half on the right or at the bottom, the seam's position more.)  With the photons free, `photons` is
+**What is written.**  `x_nm`, `y_nm` are the linked position on the camera
+chip, where the main channel saw the molecule: its own pixels put back on
+the frame, a mirror undone, and the camera ROI's corner added -- as every
+fitter reports positions, so a whole-chip fit of the same movie puts the
+main channel's molecules at the same place.  (Versions 7 and 8 counted them
+from the main channel's corner instead.)  With the photons free, `photons` is
 $N_0 + N_1$ and `photons_err` the two errors added in quadrature; `ratio` is
 $N_1 / (N_0 + N_1)$.  With *link photons* on, one number $\hat{N}$ is fitted
 and the halves see $\hat{N}$ and $r\,\hat{N}$ for the *photon ratio* $r$;
@@ -501,8 +503,8 @@ to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
 shapes away.  With shapes to fit in, only the candidates inside one of them
 are fitted; a candidate inside a shape left out never is.  The channels
 are still filtered whole, so a dynamic cutoff is set as without a region.
-The shapes are drawn on channel 1, the main channel, in its own pixels --
-where the positions are reported -- and kept with the settings: in the
+The shapes are drawn on channel 1, the main channel, shown where it lies on
+the frame -- as for a whole-chip fit -- and kept with the settings: in the
 workspace, a chain or a batch they apply to every file.  They act on the
 pairs: each channel's peaks are found and paired first, and a molecule is
 kept or left out by where it lies in channel 1 -- so a bead left out is not
@@ -516,7 +518,7 @@ The table, one row per molecule and frame:
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm` | the position, in the main channel's own pixels from its corner on the chip |
+| `x_nm`, `y_nm` | the position on the camera chip, where the main channel saw it |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | its precision (CRLB), from both halves |
 | `photons`, `photons_err` | the photons of both halves together |
 | `photons_ch0`, `photons_ch1` | the photons in the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |

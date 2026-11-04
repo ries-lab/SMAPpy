@@ -548,6 +548,23 @@ layout, where no entry says.  The vote pairs only across the seam (the split, el
 the frame) and takes the axis from the layout.  Not done: checking a chosen registration file
 against the entry's arrangement; 4Pi beads still read the current setup, not `as_of`.
 
+### The coordinates (decided 2026-11-04)
+
+Every fitter reports positions on the **camera chip**, in chip pixels with the camera ROI's corner
+added: a whole-chip fit as always; a fit through the channel layer where the main channel saw the
+molecule -- its own pixels put back on the frame, its flip undone (`ChannelLayout.on_frame`),
+the ROI's corner added (`MultiChannelEngine.flush`).  A 1C fit split into two channels reports
+each channel's localizations on the chip where that channel saw them, until a registration maps
+the second channel onto the main one.  So one molecule has one position whichever fitter found it,
+and positions line up with the camera's own image.
+
+**Images follow the same convention**: an image layer is placed on the chip.  The raw frames a
+channel fit keeps are the main channel, its flip undone, on its rectangle
+(`RawFrameKeeper.image`).  Still to do where it fits: an image of another channel (a channel's
+average, a registered overlay) placed on the chip -- through the registration where it is mapped
+onto the main channel, which a placement by offset cannot express for a mirrored channel.  The fit
+region is drawn in frame pixels, as for a whole-chip fit (`fit.ChannelRegionFinder`).
+
 ### Where it stands
 
 * **Built**: devices and their states, parameters following one device each, filters giving

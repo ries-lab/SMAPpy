@@ -361,15 +361,16 @@ class MultiChannelEngine:
         self.stats["pairs"] += len(pairs)
 
         locs = paired_to_localizations(result, pairs, self.model, self.camera)
-        # in channel 0's own pixels: the camera ROI, which the table writer
-        # adds for a chip, is the channel layer's business here
-        # counted from channel 0's whole rectangle, which a camera ROI may have cut into
-        # (`ChannelLayout.origins`), so that a position means the same whatever ROI the movie had
-        roi_x, roi_y = self.camera.roi_offset
-        ox, oy = self.layout.origins[0]
-        for name, roi, origin in (("x_pix", roi_x, ox), ("y_pix", roi_y, oy),
-                                  ("peak_x_pix", roi_x, ox), ("peak_y_pix", roi_y, oy)):
-            locs.columns[name] = (np.asarray(locs[name], float) - roi + origin).astype(np.float64)
+        # On the camera chip, as every fitter reports positions (docs/microscope-database.md,
+        # "the coordinates"): the main channel's own pixels put back where they lie on the frame,
+        # its flip undone, and the camera ROI's corner added -- so a two-channel fit and a
+        # whole-chip fit of the same movie put a molecule at the same place.
+        roi = np.array(self.camera.roi_offset, float)
+        for xs, ys in (("x_pix", "y_pix"), ("peak_x_pix", "peak_y_pix")):
+            own = np.c_[np.asarray(locs[xs], float), np.asarray(locs[ys], float)] - roi
+            chip = self.layout.on_frame(0, own) + roi
+            locs.columns[xs] = chip[:, 0].astype(np.float64)
+            locs.columns[ys] = chip[:, 1].astype(np.float64)
         keep = valid(locs, self.settings.max_fit_distance)
         self.stats["rejected"] += int((~keep).sum())
         locs = locs[keep]

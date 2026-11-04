@@ -172,6 +172,26 @@ class ChannelLayout:
             xy[:, 1] = h - 1 - xy[:, 1]
         return xy + (x0, y0)
 
+    def from_frame(self, channel: int, xy) -> np.ndarray:
+        """Positions on the frame, in a channel's own pixels: `on_frame` undone."""
+        xy = np.asarray(xy, float).reshape(-1, 2) - self.regions[channel][:2]
+        _, _, w, h = self.regions[channel]
+        fx, fy = self.flips[channel]
+        if fx:
+            xy[:, 0] = w - 1 - xy[:, 0]
+        if fy:
+            xy[:, 1] = h - 1 - xy[:, 1]
+        return xy
+
+    def frame_extent(self, channel: int) -> Tuple[float, float, float, float]:
+        """``imshow``'s extent (left, right, bottom, top) that draws a channel's own image where it
+        lies on the frame, its flip undone: pixel centres on whole frame pixels."""
+        x, y, w, h = self.regions[channel]
+        fx, fy = self.flips[channel]
+        left, right = x - 0.5, x + w - 0.5
+        top, bottom = y - 0.5, y + h - 0.5
+        return ((right, left) if fx else (left, right)) + ((top, bottom) if fy else (bottom, top))
+
     # ---------------------------------------------------------------- record
     def to_dict(self) -> dict:
         out = {"name": self.name, "regions": [list(r) for r in self.regions],

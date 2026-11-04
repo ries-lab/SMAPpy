@@ -220,7 +220,8 @@ class FourPiFit(_FitPlugin):
     """Fit 4Pi data: each molecule in every phase channel at once, with the IAB spline model, for x, y, the envelope's z and the interference phase."""
 
     Settings = FourPiFitSettings
-    version = "1"
+    # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
+    version = "2"
     phase = True
     # a simulated 4Pi camera's model, with the maps it was drawn with
     calibration_kind = "fourpi"
@@ -276,11 +277,15 @@ class FourPiFit(_FitPlugin):
         # DCIMG followed by its frames' footers, `io.dcimg.DcimgSource.watch`)
         return source.watch(**options)
 
-    def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
-        # positions are in channel 0's own pixels, where the camera ROI is
-        # already behind the channel layer
-        from dataclasses import replace
-        return replace(camera, roi=None)
+    def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
+        """The molecules found on the channels' sum, in the main channel's own pixels, judged by a
+        region drawn on the frame (`fit.ChannelRegionFinder`)."""
+        from .fit import ChannelRegionFinder
+        finder = self.finder(settings, camera)
+        region = getattr(settings, "region", None)
+        if region is None or not region.active():
+            return finder
+        return ChannelRegionFinder(finder, list(region.shapes), self.open_source(settings).layout)
 
     def engine(self, settings, camera: CameraMetadata, finder, model):
         from ..multichannel import MultiChannelEngine
@@ -339,8 +344,9 @@ class FourPiFit(_FitPlugin):
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """One frame: the channels' sum with the molecules found in it -- the
-        panel a fit region is drawn on, in channel 0's pixels as the
-        molecules are -- and each channel with the positions fitted there."""
+        panel a fit region is drawn on, drawn where the main channel lies on
+        the frame, as for a whole-chip fit -- and each channel with the
+        positions fitted there."""
         from ..camera import to_photons
         from ..multichannel import MultiChannelEngine, detection_image
         from . import ShapeEdit
@@ -372,22 +378,29 @@ class FourPiFit(_FitPlugin):
             fitted = engine.flush()
             text += f", {0 if fitted is None else len(fitted)} fitted"
         (px, py), _ = camera.pixelsize_nm_or_default
+        roi = np.array(camera.roi_offset, float)
         shapes = list(settings.region.shapes)
+        found_on_frame = layout.on_frame(0, np.c_[candidates.x, candidates.y])
+        own = None
+        if fitted is not None and len(fitted):
+            # the table is on the chip: less the ROI's corner, on the frame; then the main channel's
+            on_frame = np.c_[np.asarray(fitted["x_nm"]) / px, np.asarray(fitted["y_nm"]) / py] - roi
+            own = layout.from_frame(0, on_frame)
 
         def draw(figure):
             from .fit import draw_region
             panels = figure.subplots(1, layout.n_channels + 1)
-            panels[0].imshow(summed[0], cmap="gray")
-            panels[0].plot(candidates.x, candidates.y, "o", mfc="none", color="C1", ms=8)
+            panels[0].imshow(summed[0], cmap="gray", extent=layout.frame_extent(0))
+            panels[0].plot(found_on_frame[:, 0], found_on_frame[:, 1], "o", mfc="none",
+                           color="C1", ms=8)
             panels[0].set_title("sum")
             draw_region(panels[0], shapes)
             for c in range(layout.n_channels):
                 ax = panels[c + 1]
                 ax.imshow(channels[0, c], cmap="gray")
                 ax.set_title(f"channel {c + 1}")
-                if fitted is not None and len(fitted):
-                    xy = np.c_[np.asarray(fitted["x_nm"]) / px, np.asarray(fitted["y_nm"]) / py]
-                    there = xy if c == 0 else layout.to_channel(c, xy)
+                if own is not None:
+                    there = own if c == 0 else layout.to_channel(c, own)
                     ax.plot(there[:, 0], there[:, 1], "+", color="C3", ms=8)
             for ax in panels:
                 ax.set_xticks([])

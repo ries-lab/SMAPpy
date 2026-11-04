@@ -1,5 +1,5 @@
 ---
-version: "10"
+version: "11"
 covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -488,8 +488,8 @@ to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
 shapes away.  With shapes to fit in, only the candidates inside one of them
 are fitted; a candidate inside a shape left out never is.  The channels
 are still filtered whole, so a dynamic cutoff is set as without a region.
-The shapes are drawn on channel 1, the main channel, in its own pixels --
-where the positions are reported -- and kept with the settings: in the
+The shapes are drawn on channel 1, the main channel, shown where it lies on
+the frame -- as for a whole-chip fit -- and kept with the settings: in the
 workspace, a chain or a batch they apply to every file.  They act on the
 pairs: each channel's peaks are found and paired first, and a molecule is
 kept or left out by where it lies in channel 1 -- so a bead left out is not
@@ -504,7 +504,7 @@ photons of each half beside the totals:
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm`, `z_nm` | the linked position, in the main channel's own pixels from its corner on the chip, and the height |
+| `x_nm`, `y_nm`, `z_nm` | the linked position on the camera chip, where the main channel saw it, and the height |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm`, `z_err_nm` | their precision (CRLB), from both halves |
 | `photons`, `photons_err` | the photons of both halves together: the sum of the two, or, linked, the one fitted number |
 | `photons_ch0`, `photons_ch1` | photons free: the photons of the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |

@@ -81,7 +81,7 @@ class RawFrameKeeper:
             block = block[None]
         if block.ndim == 4:
             # channels (n, C, h, w), from a channel layer: the reference
-            # channel's, whose pixels the positions are in
+            # channel's, put back on the frame by `image`
             block = block[:, 0]
         if not len(block):
             return
@@ -103,7 +103,7 @@ class RawFrameKeeper:
                                  if (k - self.start) % self.stride == 0}
 
     def image(self, camera: CameraMetadata, name: str = "raw frames",
-              source: str = "") -> Optional[ImageData]:
+              source: str = "", layout=None) -> Optional[ImageData]:
         """The average and the kept frames, in photons, placed under the table.
 
         In nanometres, as the table's positions are -- with the assumed pixel
@@ -121,8 +121,19 @@ class RawFrameKeeper:
         data = to_photons(np.stack(planes), camera)
         (px, py), _ = camera.pixelsize_nm_or_default
         rx, ry = camera.roi_offset
+        if layout is not None:
+            # the main channel of a channel layer (`see`), turned back to the chip's orientation
+            # and placed on its rectangle there: images are on the chip as the positions are
+            x, y, w, h = layout.regions[0]
+            fx, fy = layout.flips[0]
+            data = data[:, :h, :w]
+            if fx:
+                data = data[:, :, ::-1]
+            if fy:
+                data = data[:, ::-1, :]
+            rx, ry = rx + x, ry + y
         return ImageData(
-            data=data, pixelsize=float(px), pixelsize_y=float(py),
+            data=np.ascontiguousarray(data), pixelsize=float(px), pixelsize_y=float(py),
             x0=(rx - 0.5) * px, y0=(ry - 0.5) * py, name=name,
             path=str(source) if source else None,
             kind="raw", frames=np.array([AVERAGE] + numbers, np.int64),

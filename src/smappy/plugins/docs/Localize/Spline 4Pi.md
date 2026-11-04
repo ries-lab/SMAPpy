@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.fit_4pi.FourPiFit, smappy.plugins.fit_4pi.layout_of, smappy.multichannel.MultiChannelEngine, smappy.multichannel.detection_image, smappy.channels.detection_lookup, smappy.channels.onto_reference, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.channels.ChannelLayout, smappy.channels.from_corners, smappy.channels.maps_from_uipsf_v1, smappy.psf.Global4PiPSF, smappy.fourpi.FourPiCalibration, smappy.fourpi.from_volumes, smappy.fourpi.normalise, smappy.fourpi.load_uipsf_v1, smappy.fourpi.render_frames, smappy.fourpi.spots, smappy.io.quadrants.open_quadrant_frames, smappy.io.dcimg.DcimgFile, smappy.channels.register_channels, smappy.channels.bead_positions, smappy.channels.bead_projections, smappy.multichannel.measure_channel_drift, smappy.multichannel.ChannelDrift, smappy.plugins.fit_4pi.FourPiFit.channel_drift, smappy.group.combine, smappy.channels.ChannelSource, smappy.channels.ChannelLayout.on_camera, smappy.channels.describe_map, smappy.channels.save_registration, smappy.channels.load_registration, smappy.plugins.fit_4pi.registration_from_beads, smappy.plugins.fit_4pi.microscope_layout, smappy.microscope_db.Microscope.channel_layout, smappy.io.dcimg.DcimgSource.watch, smappy.plugins.fit_4pi.FourPiFit.watch_blocks]
 ---
 
@@ -311,10 +311,12 @@ channel, how far its position is from where the map puts it
 
 ## Output
 
-The localizations, in the first channel's own pixels: the sample's
-coordinates, whatever rectangle of which camera the channel was cut from.
-The raw frames kept with the table are the first channel's.  A fit region is
-drawn on the Preview's *sum* panel, in the same pixels.  Besides the usual
+The localizations on the camera chip, where the first channel saw them: its
+own pixels put back on the frame, a mirror undone, the camera ROI's corner
+added -- as every fitter reports positions.  The raw frames kept with the
+table are the first channel's, on its rectangle of the chip.  A fit region
+is drawn on the Preview's *sum* panel, shown where the first channel lies on
+the frame.  Besides the usual
 columns:
 
 - `z_nm`, `z_err_nm`: the envelope's z.  After *4Pi z*, z from the phase.

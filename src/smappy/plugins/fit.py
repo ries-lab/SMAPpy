@@ -228,6 +228,21 @@ class RegionFinder:
         return f"{self._finder} in {len(self.shapes)} drawn shapes"
 
 
+class ChannelRegionFinder(RegionFinder):
+    """`RegionFinder` for candidates in a channel layer's main channel: the region is drawn on the
+    frame, as for a whole-chip fit, so each candidate is put back there (`ChannelLayout.on_frame`)
+    before it is judged."""
+
+    def __init__(self, finder, shapes, layout):
+        super().__init__(finder, shapes)
+        self.layout = layout
+
+    def __call__(self, photons, first_frame: int = 0, **kwargs):
+        candidates, filtered = self._finder(photons, first_frame=first_frame, **kwargs)
+        on = self.layout.on_frame(0, np.c_[candidates.x, candidates.y])
+        return candidates[in_region(on[:, 0], on[:, 1], self.shapes)], filtered
+
+
 #: how a shape of the region is drawn: what is fitted in, what is left out
 REGION_STYLE = {"include": dict(color="#2ca02c", ls="-"),
                 "exclude": dict(color="#d62728", ls="--")}
@@ -570,8 +585,8 @@ class _FitPlugin(Plugin):
 
     def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
         """The camera of the space positions are reported in: the chip's,
-        its ROI included.  A channel layer reports them in channel 0's own
-        pixels, where the ROI has already been taken off."""
+        its ROI included -- for a channel layer too, whose positions are put
+        back on the chip (`multichannel.MultiChannelEngine.flush`)."""
         return camera
 
     def engine(self, settings, camera: CameraMetadata, finder, model):
@@ -1227,7 +1242,8 @@ class _FitPlugin(Plugin):
             from ..io.hdf5 import save_localizations
             save_localizations(out, finished.locs, record)
         raw = keeper.image(self.view_camera(camera), source=str(src.path),
-                           name=f"{Path(str(src.path)).name}: raw frames")
+                           name=f"{Path(str(src.path)).name}: raw frames",
+                           layout=getattr(source, "layout", None))
         if raw is not None and out is not None:
             # last, after any rewrite above: that one starts the file again
             from ..io.hdf5 import save_images
@@ -1929,10 +1945,6 @@ class _TwoChannelFit(_FitPlugin):
     def watch_blocks(self, source, path, **options):
         return source.watch(**options)
 
-    def view_camera(self, camera: CameraMetadata) -> CameraMetadata:
-        # positions are in channel 0's own pixels, where the camera ROI is behind the channel layer
-        return replace(camera, roi=None)
-
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
         # each channel is searched alone; the region, drawn on channel 0, picks among the pairs
         # (`engine`), so a molecule only the other channel saw is judged where it lies
@@ -1965,8 +1977,12 @@ class _TwoChannelFit(_FitPlugin):
         region = getattr(settings, "region", None)
         select = None
         if region is not None and region.active():
-            shapes = list(region.shapes)
-            select = lambda x, y: in_region(x, y, shapes)      # noqa: E731
+            # drawn on the frame, as for a whole-chip fit; the pairs are in channel 0's own pixels
+            shapes, layout = list(region.shapes), source.layout
+
+            def select(x, y):
+                on = layout.on_frame(0, np.c_[x, y])
+                return in_region(on[:, 0], on[:, 1], shapes)
         return MultiChannelEngine(camera, finder, model, source.layout, settings.fit,
                                   detection="pairs", photon_factors=self.photon_factors(settings),
                                   select=select)
@@ -2001,9 +2017,10 @@ class _TwoChannelFit(_FitPlugin):
 
     def _layer_preview(self, ctx: Context, settings, frame: int) -> Result:
         """One frame: each channel with the molecules found in it, with its own cutoff; on channel 1
-        -- where a fit region is drawn, in the pixels positions are reported in -- the second
-        channel's peaks put there by the registration, the cheapest check of it there is; and the
-        fitted positions in both.  Without a registration, the frame as the camera wrote it."""
+        -- drawn where it lies on the frame, where a fit region is drawn as for a whole-chip fit --
+        the second channel's peaks put there by the registration, the cheapest check of it there
+        is; and the fitted positions in both.  Without a registration, the frame as the camera
+        wrote it."""
         from ..camera import to_photons
         from . import ShapeEdit
         src = settings.source
@@ -2029,7 +2046,10 @@ class _TwoChannelFit(_FitPlugin):
             candidates, filtered = finder(np.ascontiguousarray(channels[:, c, :h, :w]), first_frame=index)
             found.append(candidates)
             cutoffs.append(float(np.max(finder.cutoffs(filtered)[0])))
-        projected = layout.to_reference(1, np.c_[found[1].x, found[1].y].astype(float))
+        # the main panel draws channel 1 where it lies on the frame, as the fit region is drawn
+        own = layout.to_reference(1, np.c_[found[1].x, found[1].y].astype(float))
+        projected = layout.on_frame(0, own)
+        found_on_frame = layout.on_frame(0, np.c_[found[0].x, found[0].y].astype(float))
         text = (f"frame {index}: " + ", ".join(f"{len(f)} in channel {c + 1} (cutoff {k:.3g})"
                                                 for c, (f, k) in enumerate(zip(found, cutoffs))))
         fitted, trouble = None, ""
@@ -2043,19 +2063,29 @@ class _TwoChannelFit(_FitPlugin):
             trouble = str(error)
             text += f"; not fitted -- {error}"
         (px, py), _ = camera.pixelsize_nm_or_default
-        ox, oy = layout.origins[0]
+        roi = np.array(camera.roi_offset, float)
         shapes = list(settings.region.shapes)
 
         def draw(figure):
             panels = figure.subplots(1, 2)
+            on_frame = None
+            if fitted is not None and len(fitted):
+                # the table is on the chip: less the ROI's corner, on the frame
+                on_frame = np.c_[np.asarray(fitted["x_nm"]) / px,
+                                 np.asarray(fitted["y_nm"]) / py] - roi
             for c, ax in enumerate(panels):
                 w, h = layout.sizes[c]
-                ax.imshow(channels[0, c, :h, :w], cmap="gray")
+                if c == 0:
+                    ax.imshow(channels[0, c, :h, :w], cmap="gray", extent=layout.frame_extent(0))
+                    ax.plot(found_on_frame[:, 0], found_on_frame[:, 1], "o", mfc="none",
+                            color="C1", ms=8)
+                else:
+                    ax.imshow(channels[0, c, :h, :w], cmap="gray")
+                    ax.plot(found[c].x, found[c].y, "o", mfc="none", color="C1", ms=8)
                 ax.set_title(f"channel {c + 1}")
-                ax.plot(found[c].x, found[c].y, "o", mfc="none", color="C1", ms=8)
-                if fitted is not None and len(fitted):
-                    xy = np.c_[np.asarray(fitted["x_nm"]) / px - ox, np.asarray(fitted["y_nm"]) / py - oy]
-                    there = xy if c == 0 else layout.to_channel(c, xy)
+                if on_frame is not None:
+                    there = (on_frame if c == 0
+                             else layout.to_channel(c, layout.from_frame(0, on_frame)))
                     ax.plot(there[:, 0], there[:, 1], "+", color="C3", ms=8)
                 ax.set_xticks([])
                 ax.set_yticks([])
@@ -2097,7 +2127,9 @@ class DualSplineFit(_TwoChannelFit):
     # 9: on the channel layer (docs/4pi.md §9): positions in the main channel's own pixels from its
     #    corner on the chip, each channel searched alone, a box never across the seam
     # 10: *measure from this movie* with the calibration's arrangement, the vote across the seam only
-    version = "10"
+    # 11: positions on the camera chip, where the main channel saw them (the ROI's corner added),
+    #     as every fitter reports them; not counted from the main channel's corner
+    version = "11"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2383,7 +2415,8 @@ class DualGaussianFit(_TwoChannelFit):
     # 7: on the channel layer, as Spline 3D 2C's 9
     # 8: *calibrate from this movie* with the microscope's or the chosen arrangement, never
     #    detected; the vote across the seam only
-    version = "8"
+    # 9: positions on the camera chip, as Spline 3D 2C's 11
+    version = "9"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

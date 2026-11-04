@@ -278,8 +278,8 @@ def test_a_split_camera_with_a_dual_calibration_takes_its_halves_and_registratio
     made = Simulate().run(Context(), settings)
     assert open_stack(made.written).shape == (64, 64)
     truth = made.files[0][0]
-    # the truth where the fit puts it: in the main (lower) half's own pixels, from its corner
-    assert 0 <= truth["y_nm"].min() and truth["y_nm"].max() < 3200
+    # the truth where the fit puts it: on the chip, in the main (lower) half
+    assert 3200 <= truth["y_nm"].min() and truth["y_nm"].max() < 6400
     # the calibration carries the registration: none written, Spline 3D 2C takes it
     assert recipe_transform(made.written) is None
     assert recipe_calibration(made.written) == ("dual", str(calibration))

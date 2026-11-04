@@ -198,3 +198,21 @@ def test_rcc_stopped_from_the_panel_leaves_the_table_uncorrected(app):
     assert panel.status.text() == "stopped"
     assert np.array_equal(np.asarray(session.locs["x_nm"]), before)
     panel._thread.wait()
+
+
+def test_a_run_shows_a_clock_beside_running_that_stops_with_the_run(app):
+    from smappy.gui.plugin_panel import PluginPanel
+    STARTED.clear()
+    panel = PluginPanel(Loops, Session(a_table()))
+    said = ended_of(panel)
+    panel.run_button.click()
+    wait_for(app, STARTED.is_set)
+    assert panel.status.text() == "running... 0:00"
+    wait_for(app, lambda: panel.status.text() == "running... 0:01", seconds=3)
+
+    panel.run_button.click()                    # Stop
+    assert panel.status.text().startswith("stopping... 0:0")
+    wait_for(app, lambda: said)
+    app.processEvents()
+    assert panel.status.text() == "stopped"
+    assert not panel._run_ticker.isActive()

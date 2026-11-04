@@ -72,19 +72,26 @@ inline void expand(const Link& link, const float* global, float* theta) {
                 : global[link.slots[p] + c] + link.offset[c * P + p];
 }
 
-// The derivative of the global vector's entry `l` on channel `c`:
-// d theta_c[p] / d global[l], folded into the chain rule below.
-template <class Model>
-inline void chain(const Link& link, const float* dudt, int channel, int nv,
-                  float* dudt_global) {
-    constexpr int P = Model::NV;
-    std::memset(dudt_global, 0, nv * sizeof(float));
-    for (int p = 0; p < P; ++p) {
-        if (link.shared[p])
-            dudt_global[link.slots[p]] += dudt[p] * link.factor[channel * P + p];
-        else
-            dudt_global[link.slots[p] + channel] += dudt[p];
-    }
+// Channel `c`'s parameters in the global vector: where each lives and
+// d theta_c[p] / d global (the factor of a shared one, else 1), the chain
+// rule of the link.  Each parameter has a slot of its own, and the slots rise strictly with
+// p (a free parameter's C entries sit between its neighbours'), so a pair
+// p <= q always lands in the upper triangle.
+template <int P>
+inline void slots_of(const Link& link, int channel, int* at) {
+    for (int p = 0; p < P; ++p) at[p] = link.slot(p, channel);
+}
+
+template <int P>
+inline void chain_sparse(const Link& link, const float* dudt, int channel, float* g) {
+    for (int p = 0; p < P; ++p)
+        g[p] = link.shared[p] ? dudt[p] * link.factor[channel * P + p] : dudt[p];
+}
+
+// The lower triangle from the upper, once per sum rather than per pixel.
+inline void mirror_upper(float* m, int nv) {
+    for (int l = 0; l < nv; ++l)
+        for (int k = l + 1; k < nv; ++k) m[k * nv + l] = m[l * nv + k];
 }
 
 // Poisson log-likelihood error, gradient and Hessian summed over every pixel
@@ -93,28 +100,33 @@ inline void chain(const Link& link, const float* dudt, int channel, int nv,
 // The pixel loop is outside and the channel loop inside, as in GlobLoc: every
 // channel contributes to the same pixel's term before the next pixel, so the
 // sums are accumulated in the reference's order and not merely its value.
-// `dudt_global` is GlobLoc's `newDudtAll`, (C, nv).
+// GlobLoc's `newDudtAll` is (C, nv) and mostly zeros; `g` keeps a channel's
+// P nonzero entries and `at` where they go.
 template <class Model>
 inline void accumulate_global(const Model* models, const float* const* data, int sz,
                               const Link& link, const float* theta, float* err,
                               float* jacobian, float* hessian) {
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
-    float dudt[P], dudt_global[MAX_CHANNELS * MAX_GLOBAL_NV];
+    float dudt[P], g[MAX_CHANNELS][P];
+    int at[MAX_CHANNELS][P];
     float mu[MAX_CHANNELS], d[MAX_CHANNELS];
 
     *err = 0.0f;
     std::memset(jacobian, 0, nv * sizeof(float));
     std::memset(hessian, 0, nv * nv * sizeof(float));
 
-    for (int c = 0; c < C; ++c) models[c].prepare(theta + c * P, sz);
+    for (int c = 0; c < C; ++c) {
+        models[c].prepare(theta + c * P, sz);
+        slots_of<P>(link, c, at[c]);
+    }
 
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
                 mu[c] = std::max(mu[c], MIN_MODEL);    // see lm.hpp's accumulate
-                chain<Model>(link, dudt, c, nv, dudt_global + c * nv);
+                chain_sparse<P>(link, dudt, c, g[c]);
                 d[c] = data[c][iy * sz + ix];
 
                 if (d[c] > 0.0f)
@@ -125,19 +137,22 @@ inline void accumulate_global(const Model* models, const float* const* data, int
                 }
             }
 
-            for (int l = 0; l < nv; ++l)
-                for (int c = 0; c < C; ++c)
-                    jacobian[l] += (1.0f - d[c] / mu[c]) * dudt_global[c * nv + l];
-
-            for (int l = 0; l < nv; ++l)
-                for (int m = l; m < nv; ++m) {
-                    for (int c = 0; c < C; ++c)
-                        // the expected information, as in lm.hpp's accumulate
-                        hessian[l * nv + m] += 1.0f / std::max(mu[c], MIN_MODEL) *
-                            dudt_global[c * nv + l] * dudt_global[c * nv + m];
-                    hessian[m * nv + l] = hessian[l * nv + m];
-                }
+            // Only a channel's own P slots: the dense (C, nv) form summed
+            // nv(nv+1)/2 products per channel and pixel, most of them zeros,
+            // 2.8x the time of two separate fits for two Gaussians
+            // (2026-11).  The nonzero terms are added in the same order --
+            // pixel, then channel -- so the sums are bit for bit the same.
+            for (int c = 0; c < C; ++c) {
+                const float t1 = 1.0f - d[c] / mu[c];
+                for (int p = 0; p < P; ++p) jacobian[at[c][p]] += t1 * g[c][p];
+                // the expected information, as in lm.hpp's accumulate
+                const float w = 1.0f / std::max(mu[c], MIN_MODEL);
+                for (int p = 0; p < P; ++p)
+                    for (int q = p; q < P; ++q)
+                        hessian[at[c][p] * nv + at[c][q]] += w * g[c][p] * g[c][q];
+            }
         }
+    mirror_upper(hessian, nv);
 }
 
 template <class Model>
@@ -147,28 +162,30 @@ inline void crlb_and_logl_global(const Model* models, const float* const* data, 
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
     float M[MAX_GLOBAL_NV * MAX_GLOBAL_NV] = {0}, Minv[MAX_GLOBAL_NV * MAX_GLOBAL_NV] = {0};
-    float dudt[P], dudt_global[MAX_CHANNELS * MAX_GLOBAL_NV];
+    float dudt[P], g[MAX_CHANNELS][P];
+    int at[MAX_CHANNELS][P];
     float mu[MAX_CHANNELS], d[MAX_CHANNELS];
     float div = 0.0f;
 
-    for (int c = 0; c < C; ++c) models[c].prepare(theta + c * P, sz);
+    for (int c = 0; c < C; ++c) {
+        models[c].prepare(theta + c * P, sz);
+        slots_of<P>(link, c, at[c]);
+    }
 
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
                 mu[c] = std::max(mu[c], MIN_MODEL);    // as in the fit
-                chain<Model>(link, dudt, c, nv, dudt_global + c * nv);
+                chain_sparse<P>(link, dudt, c, g[c]);
                 d[c] = data[c][iy * sz + ix];
             }
 
-            for (int k = 0; k < nv; ++k)
-                for (int l = k; l < nv; ++l) {
-                    for (int c = 0; c < C; ++c)
-                        M[k * nv + l] += dudt_global[c * nv + l] *
-                                         dudt_global[c * nv + k] / mu[c];
-                    M[l * nv + k] = M[k * nv + l];
-                }
+            // sparse, as in accumulate_global
+            for (int c = 0; c < C; ++c)
+                for (int p = 0; p < P; ++p)
+                    for (int q = p; q < P; ++q)
+                        M[at[c][p] * nv + at[c][q]] += g[c][q] * g[c][p] / mu[c];
 
             for (int c = 0; c < C; ++c)
                 if (mu[c] > 0.0f) {
@@ -179,6 +196,7 @@ inline void crlb_and_logl_global(const Model* models, const float* const* data, 
                 }
         }
 
+    mirror_upper(M, nv);
     mat_inv_n(M, Minv, crlb, nv);
     *logl = div;
 }

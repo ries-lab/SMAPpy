@@ -623,6 +623,11 @@ def _plugin_on(tmp_path, frames, cal, roi, name):
     settings.output.save = False
     read = plugin._camera
     plugin._camera = lambda s: replace(read(s), roi=roi)
+    # the fit's own camera too, which puts the positions on the chip by the ROI's corner: a file
+    # records its ROI once, and both read it from there
+    resolve = type(settings.camera).resolve
+    settings.camera.resolve = lambda source, *a, **k: replace(resolve(settings.camera, source, *a, **k),
+                                                              roi=roi)
     return plugin, settings
 
 

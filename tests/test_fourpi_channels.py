@@ -504,8 +504,8 @@ def test_a_fit_region_is_drawn_in_channel_0s_pixels(cal, tmp_path):
 
 def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
     """Four channels typed on a DCIMG chip, the last two mirrored: the layer
-    takes them apart, and the molecules come back where they were drawn in
-    channel 0's pixels."""
+    takes them apart, and the molecules come back where they were drawn --
+    on the chip, channel 0's pixels from its corner there (4, 2)."""
     from tests.test_fourpi import _write_new_dcimg
     from smappy.plugins import Context
     from smappy.plugins.fit import CameraSettings, OutputSettings, SourceSettings
@@ -533,10 +533,10 @@ def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
     settings.finish.fourpi_z = False
     locs = FourPiFit().run(Context(), settings).locs
     from scipy.spatial import cKDTree
-    d, i = cKDTree(np.c_[x, y]).query(np.c_[locs["x_nm"], locs["y_nm"]] / 100)
+    d, i = cKDTree(np.c_[x + 4, y + 2]).query(np.c_[locs["x_nm"], locs["y_nm"]] / 100)
     same = (d < 1) & (np.asarray(locs["frame"]) == i)
     assert same.sum() > 0.8 * n
-    assert abs(np.median(np.asarray(locs["x_nm"])[same] / 100 - x[i[same]])) < 0.02
+    assert abs(np.median(np.asarray(locs["x_nm"])[same] / 100 - 4 - x[i[same]])) < 0.02
 
 
 def _growing_dcimg(path, frames, first: int, step: int, pause: float):

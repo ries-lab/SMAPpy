@@ -543,10 +543,8 @@ the `_2ct.h5` a two-colour fitter reads.  With a dual-colour calibration
 the frame is the calibration's `image_shape`, the main half where its
 geometry says, and the secondary spot at the calibration's `to_secondary`
 of the main one, each evaluated from its own spline, as the fit evaluates
-them (`multichannel.build_link`).  The truth table is in the main half's
-own pixels, counted from its corner -- where Spline 3D 2C reports
-positions -- so a molecule at x, y in the table is drawn at x, y plus that
-corner.
+them (`multichannel.build_link`).  The truth table is on the chip, where
+the main half's spot was drawn -- where Spline 3D 2C reports positions.
 Each frame's noise has its own seed, so a frame is the same
 whichever block of the stack it is drawn in.
 
