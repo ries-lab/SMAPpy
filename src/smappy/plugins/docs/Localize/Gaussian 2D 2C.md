@@ -301,6 +301,18 @@ beside the output, as `<acquisition>_locs_2ct.h5` by default, ready to be chosen
 time.  The output box reports how many pairs it was registered on and the
 residual in x and y.
 
+**Checking it before the fit.**  *Preview* runs the same pass, so the
+registration can be judged before a long fit is started on it: the frame is
+drawn with the measured map, and a tab *channel registration* shows the
+figures of [Calibrate transform](plugin:Analysis/Register/Calibrate transform)
+-- the vote, the residuals and where the pairs are.  The first preview takes
+as long as the pass; the measurement is then kept, so another frame's
+preview, and the run after it, use it at once.  It is measured again only
+when something it depends on changes: the movie, its frames, the camera,
+the detection, the fit or the calibration pass's own settings.  A preview
+writes no file; the run saves the transformation, and its result has the
+same tab.
+
 ## In detail
 
 **The model.**  For pixel $i$ of the fit box of half $c$ ($c = 0$ the main half,
@@ -516,6 +528,12 @@ What to check:
   cross that sits on its partner's circle is a good registration; a cross
   beside it shows the error directly.  The line above gives each channel's
   cutoff, the one detection applied to that frame.
+* **The registration**, when it was measured from the movie: the tab
+  *channel registration* of the preview or the result.  A sharp, single peak
+  in the vote and residuals of a few hundredths of a pixel, from pairs that
+  cover the field, are a good one; a vote with no clear peak, or pairs only
+  in one corner, are not -- detect more (a lower cutoff, more *localizations
+  wanted*) or choose a transformation from beads.
 * **The ratio histogram** should show one clear peak per dye.  Peaks that
   merge mean too few photons or dyes too alike; a pile-up at 0 or 1 is
   molecules whose partner fit box held only background -- a dye that sends almost

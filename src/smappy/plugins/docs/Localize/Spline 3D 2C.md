@@ -422,7 +422,10 @@ For a splitter that moved since the beads -- the residuals of *link xy*
 off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
 plain Gaussian over both halves and registered, with the calibration's
 layout and main channel, so that each PSF stays on its half; then the real
-fit runs with the calibration's PSFs and this registration.
+fit runs with the calibration's PSFs and this registration.  *Preview*
+measures it too and shows it in a tab, *channel registration*; the
+measurement is kept, so the run uses the one the preview showed unless a
+setting it depends on changed since.
 
 ### transform.calibrate_skip
 Set it to 0 for a movie that does not start with everything on.
@@ -523,7 +526,10 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
   transformation (crosses); a cross on its partner's circle means the
   calibration fits this data.  A calibration made with a different splitter
   alignment misses.  The line above gives each channel's own cutoff on that
-  frame.
+  frame.  With *measure from this movie* ticked, the crosses are drawn with
+  the registration measured from the movie, and the tab *channel
+  registration* shows how it was found -- the vote, the residuals, where the
+  pairs are -- as in [Calibrate transform](plugin:Analysis/Register/Calibrate transform).
 * **The ratio histogram** should show one peak per dye, and should not change
   with z: a ratio that drifts with height means the two PSFs do not describe
   the two halves at the same z.

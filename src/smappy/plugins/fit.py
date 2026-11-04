@@ -1703,7 +1703,24 @@ class _TwoChannelFit(_FitPlugin):
 
     def measure(self, ctx: Context, settings):
         """A registration measured from the movie before the fit, or None."""
-        return None
+        found = self.measured(ctx, settings)
+        return None if found is None else self.with_measured(settings, found.transform)
+
+    def measured(self, ctx: Context, settings, save: bool = False):
+        """The `RegistrationResult` measured from this movie when *measure / calibrate from this
+        movie* is ticked, else None: kept, so a preview pays for it once and the run that follows
+        fits with the very registration the preview showed (`_calibrate`)."""
+        if not settings.transform.calibrate:
+            return None
+        return self._calibrate(ctx, self.measuring_settings(settings), save=save)
+
+    def measuring_settings(self, settings):
+        """The settings the calibration pass runs with."""
+        return settings
+
+    def with_measured(self, settings, transform):
+        """The registration the fit uses, from a transformation measured from the movie."""
+        return transform
 
     def registration(self, settings):
         """The registration: the one this run read, or off disk."""
@@ -1734,14 +1751,52 @@ class _TwoChannelFit(_FitPlugin):
 
     def run(self, ctx: Context, settings) -> Result:
         settings = self.with_calibration(settings, ctx)
-        measured = self.measure(ctx, settings)
-        return self._reading_once(
+        found = self.measured(ctx, settings, save=True)
+        measured = None if found is None else self.with_measured(settings, found.transform)
+        result = self._reading_once(
             settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
             measured)
+        if found is not None:
+            # a tab of the result, never a window of its own: a run without a GUI shows nothing
+            from .registration import registration_plot
+            result.plots = {"channel registration": registration_plot(found), **result.plots}
+        return result
 
     # ------------------------------------------------------------ calibrate
-    def _calibrate(self, ctx: Context, settings):
-        """Fit the first frames plainly, register the pairs, save the result.
+    def _calibrate(self, ctx: Context, settings, save: bool = True):
+        """The registration measured from the movie, a `RegistrationResult`; saved beside the output
+        when ``save`` and *save it* say so.
+
+        Measured once per movie and the settings it depends on (`_measuring_key`), and kept: it
+        fits up to thousands of frames, so a preview that measured it is not to be followed by a
+        run -- or a second preview at another frame -- that measures it again."""
+        key = _measuring_key(settings, self._start_sigma(settings))
+        found = _MEASURED.get(key) if key is not None else None
+        if found is None:
+            found = self._measure_registration(ctx, settings)
+            if key is not None:
+                _MEASURED.clear()             # one movie's at a time: it holds every pair
+                _MEASURED[key] = found
+        else:
+            ctx.report("the channel transformation as measured before, for these settings")
+        if save and settings.transform.save_calibration:
+            src = settings.source
+            out = settings.output.resolve(src.path)
+            if out is None:
+                # saving the localizations is off, but the transformation was
+                # still asked for: it belongs beside the movie it describes,
+                # not in whatever directory the process happens to be in
+                out = default_output_path(src.path)
+            path = out.with_name(out.name.rsplit(".", 1)[0] + "_2ct.h5")
+            found.save(path, overwrite=True)
+            ctx.report(f"transformation saved to {path}")
+        p = found.transform.parameters
+        ctx.report(f"registered on {p['n_inliers']:,} pairs, residual "
+                   f"dx {p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
+        return found
+
+    def _measure_registration(self, ctx: Context, settings):
+        """Fit frames spread over the movie plainly and register the pairs.
 
         Deliberately the *same* detection and camera settings as the real fit:
         the registration has to describe the peaks the fit will go on to pair,
@@ -1829,21 +1884,7 @@ class _TwoChannelFit(_FitPlugin):
             progress=ctx.report,
             precision=(in_pixels(locs, "xy_err_pix")
                        if "xy_err_nm" in locs else None))
-
-        if settings.transform.save_calibration:
-            out = settings.output.resolve(src.path)
-            if out is None:
-                # saving the localizations is off, but the transformation was
-                # still asked for: it belongs beside the movie it describes,
-                # not in whatever directory the process happens to be in
-                out = default_output_path(src.path)
-            path = out.with_name(out.name.rsplit(".", 1)[0] + "_2ct.h5")
-            result.save(path, overwrite=True)
-            ctx.report(f"transformation saved to {path}")
-        p = result.transform.parameters
-        ctx.report(f"registered on {p['n_inliers']:,} pairs, residual "
-                   f"dx {p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
-        return result.transform
+        return result
 
     def _start_sigma(self, settings) -> float:
         """The Gaussian width the calibration pass's plain fit starts from, px."""
@@ -1925,11 +1966,32 @@ class _TwoChannelFit(_FitPlugin):
                                   select=select)
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        """`_layer_preview`; with *measure from this movie* ticked, on the registration measured
+        from it, whose figures are a tab beside the frame's -- the check that it worked before a
+        long fit is started on it.  The first preview pays for the measurement, the next ones
+        and the run reuse it while the settings it depends on stay (`_calibrate`)."""
         try:
             settings = self.with_calibration(settings)
         except ValueError:
             pass
-        return self._reading_once(settings, lambda: self._layer_preview(ctx, settings, frame))
+        found, failed = None, ""
+        if settings.transform.calibrate:
+            try:
+                found = self.measured(ctx, settings)
+            except Exception as error:
+                failed = str(error) or type(error).__name__
+        measured = None if found is None else self.with_measured(settings, found.transform)
+        result = self._reading_once(settings, lambda: self._layer_preview(ctx, settings, frame),
+                                    measured)
+        if found is not None:
+            from .registration import CalibrateChannelTransform, registration_plot
+            result.text = (f"{result.text}\nmeasured from the movie: "
+                           f"{CalibrateChannelTransform._summary(found, None)}")
+            result.plots = {**result.plots, "channel registration": registration_plot(found)}
+            result.data["registration"] = found
+        elif failed:
+            result.text = f"{result.text}\nmeasuring the transformation failed -- {failed}"
+        return result
 
     def _layer_preview(self, ctx: Context, settings, frame: int) -> Result:
         """One frame: each channel with the molecules found in it, with its own cutoff; on channel 1
@@ -2043,24 +2105,45 @@ class DualSplineFit(_TwoChannelFit):
             return with_registration(calibration, settings.transform.load())
         return calibration
 
-    def measure(self, ctx: Context, settings):
-        """The calibration's PSFs with the registration measured from this movie, when asked: the
-        splitter moves between bead calibrations, the PSFs hardly.  Measured with the calibration's
-        layout and main channel, so that each PSF stays on the half it was made from
-        (`dual.with_registration` refuses one that does not)."""
-        if not settings.transform.calibrate:
-            return None
-        from ..calibrate.dual import with_registration
-        calibration = settings.model.load()
-        g = calibration.geometry
+    def measuring_settings(self, settings):
+        """Measured with the calibration's layout and main channel, so that each PSF stays on the
+        half it was made from (`dual.with_registration` refuses one that does not)."""
+        g = settings.model.load().geometry
         given = settings.transform.registration
-        fixed = replace(settings, transform=replace(settings.transform, registration=replace(
+        return replace(settings, transform=replace(settings.transform, registration=replace(
             given, layout=g.get("layout", given.layout), main_channel=g.get("main_channel",
                                                                            given.main_channel))))
-        return with_registration(calibration, self._calibrate(ctx, fixed))
+
+    def with_measured(self, settings, transform):
+        """The calibration's PSFs with the registration measured from this movie: the splitter
+        moves between bead calibrations, the PSFs hardly."""
+        from ..calibrate.dual import with_registration
+        return with_registration(settings.model.load(), transform)
 
     def model(self, settings, camera):
         return settings.model.model(self.registration(settings), camera)
+
+
+# The last registration measured from a movie, under what it was measured with (`_measuring_key`).
+# Module-level, not the plugin's: the GUI's preview and run, a chain's step and the assistant each
+# hold an instance of their own, and the run is the one that most needs the preview's.
+_MEASURED: Dict[str, Any] = {}
+
+
+def _measuring_key(settings, sigma: float) -> Optional[str]:
+    """What the calibration pass reads, as one string: the movie (and its size and date, so a file
+    written again is measured again), the frames, the camera, the detection, the fit and the
+    registration's own settings.  Not where the fit writes nor whether the transformation is
+    saved, which change nothing measured.  None when the movie cannot be found."""
+    src = settings.source
+    try:
+        stat = Path(src.path).stat()
+    except (OSError, TypeError, ValueError):
+        return None
+    transform = replace(settings.transform, path="", save_calibration=False)
+    return repr((str(Path(src.path).resolve()), stat.st_size, stat.st_mtime_ns,
+                 replace(src, live=False), settings.camera, settings.detection, settings.fit,
+                 transform, float(sigma)))
 
 
 # ----------------------------------------------------- two channels, no model
@@ -2325,15 +2408,6 @@ class DualGaussianFit(_TwoChannelFit):
     def read_registration(self, settings):
         """A transformation off disk, or the one in a dual-colour calibration."""
         return settings.transform.load()
-
-    def measure(self, ctx: Context, settings):
-        """The transformation measured from this movie, when that is asked for.
-
-        Handed to the run rather than saved and read back: writing a file
-        only to read it would make saving it a precondition of fitting rather
-        than a convenience.
-        """
-        return self._calibrate(ctx, settings) if settings.transform.calibrate else None
 
     def _start_sigma(self, settings) -> float:
         return float(settings.model.sigma)

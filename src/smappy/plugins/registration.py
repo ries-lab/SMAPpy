@@ -141,13 +141,13 @@ class CalibrateChannelTransform(Plugin):
             out = (Path(settings.path) if settings.path
                    else default_transform_path(locs, Path.cwd() / "channels_2ct.h5"))
             result.save(out, overwrite=settings.overwrite)
-        return Result(text=self._summary(result, out), plot=self._plot(result),
+        return Result(text=self._summary(result, out), plot=registration_plot(result),
                       data={"transform": result.transform, "result": result},
                       written=None if out is None else str(out), settings=settings)
 
     def preview(self, ctx: Context, settings) -> Result:
         result, _ = self._register(ctx, settings)
-        return Result(text=self._summary(result, None), plot=self._plot(result),
+        return Result(text=self._summary(result, None), plot=registration_plot(result),
                       data={"transform": result.transform, "result": result},
                       settings=settings)
 
@@ -168,22 +168,24 @@ class CalibrateChannelTransform(Plugin):
             lines.append(f"saved to {path}")
         return "; ".join(lines)
 
-    @staticmethod
-    def _plot(result):
-        # three panels in a figure the window lays out: setting the figure's
-        # size and layout engine here broke on the All page, whose SubFigure
-        # has neither
-        def draw(figure) -> None:
-            vote_ax, residual_ax, cover_ax = figure.subplots(1, 3)
-            _draw_vote(vote_ax, result)
-            _draw_residuals(residual_ax, result)
-            _draw_coverage(cover_ax, result)
-            for panel in (vote_ax, residual_ax, cover_ax):
-                panel.title.set_fontsize(9)
-                panel.tick_params(labelsize=8)
-                panel.xaxis.label.set_fontsize(8)
-                panel.yaxis.label.set_fontsize(8)
-        return Plot(draw, panels=3, size=(15, 4.6))
+def registration_plot(result):
+    """The three panels a registration is judged by -- the vote, the residuals,
+    where the pairs are -- for a `RegistrationResult`; also what the two-channel
+    fitters show of a transformation they measured from the movie."""
+    # three panels in a figure the window lays out: setting the figure's
+    # size and layout engine here broke on the All page, whose SubFigure
+    # has neither
+    def draw(figure) -> None:
+        vote_ax, residual_ax, cover_ax = figure.subplots(1, 3)
+        _draw_vote(vote_ax, result)
+        _draw_residuals(residual_ax, result)
+        _draw_coverage(cover_ax, result)
+        for panel in (vote_ax, residual_ax, cover_ax):
+            panel.title.set_fontsize(9)
+            panel.tick_params(labelsize=8)
+            panel.xaxis.label.set_fontsize(8)
+            panel.yaxis.label.set_fontsize(8)
+    return Plot(draw, panels=3, size=(15, 4.6))
 
 
 def _draw_vote(ax, result) -> None:

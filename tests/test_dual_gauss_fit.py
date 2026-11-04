@@ -4,6 +4,8 @@ A synthetic split-frame movie with a known transformation between the halves
 and a known photon split, taken the way the plugin takes it -- no PSF model,
 no transformation given, the registration measured from the movie itself.
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from scipy.special import erf
@@ -238,6 +240,78 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
                                t.transform(probe), atol=0.3)
 
 
+def test_the_preview_shows_the_registration_it_measured_and_the_run_reuses_it(tmp_path, monkeypatch):
+    """*calibrate from this movie* is checked before the fit: Preview measures the registration and
+    draws it as a tab of its own; a second preview and the run then take that measurement rather
+    than fitting the calibration frames again -- until a setting it depends on changes."""
+    import tifffile
+    from smappy.plugins import fit as module
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DetectionSettings, DualGaussianFit,
+                                    DualGaussianFitSettings,
+                                    DualGaussianModelSettings, OutputSettings,
+                                    SourceSettings)
+
+    rng = np.random.default_rng(7)
+    t = transform(dx=0.8, dy=-0.5)
+    frames, _ = movie(300, rng, t, ratio=0.35, per=4)
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = DualGaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=50),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        model=DualGaussianModelSettings(sigma=1.2),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
+        fit=FitSettings(roisize=13),
+        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
+    measured = []
+    original = DualGaussianFit._measure_registration
+    monkeypatch.setattr(DualGaussianFit, "_measure_registration",
+                        lambda self, ctx, s: measured.append(1) or original(self, ctx, s))
+    module._MEASURED.clear()
+
+    preview = DualGaussianFit().preview(Context(), settings, frame=10)
+    assert "channel registration" in preview.plots
+    assert "measured from the movie" in preview.text and "pairs kept" in preview.text
+    probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
+    found = preview.data["registration"].transform
+    np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)
+    assert preview.data["error"] == "" and len(preview.data["locs"]) > 0     # fitted on it
+    assert not (tmp_path / "out_2ct.h5").exists()                            # a preview writes nothing
+
+    DualGaussianFit().preview(Context(), settings, frame=20)                 # another frame
+    result = DualGaussianFit().run(Context(), settings)
+    assert measured == [1]
+    assert "channel registration" in result.plots
+    assert (tmp_path / "out_2ct.h5").exists()                                # the run saves it
+
+    settings.transform.calibrate_frames = 120                                # what it depends on
+    DualGaussianFit().preview(Context(), settings, frame=10)
+    assert measured == [1, 1]
+    settings.output.path = str(tmp_path / "elsewhere.hdf5")                  # what it does not
+    DualGaussianFit().preview(Context(), settings, frame=10)
+    assert measured == [1, 1]
+
+
+def test_a_failed_measurement_is_said_in_the_preview_not_raised(tmp_path):
+    import tifffile
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DetectionSettings, DualGaussianFit,
+                                    DualGaussianFitSettings, SourceSettings)
+    frames, _ = movie(20, np.random.default_rng(1), transform(), per=1)
+    stack = tmp_path / "dark.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = DualGaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=1e6),    # nothing found
+        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0))
+    preview = DualGaussianFit().preview(Context(), settings, frame=0)
+    assert "measuring the transformation failed" in preview.text
+    assert "channel registration" not in preview.plots
+
+
 def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
     import tifffile
     from smappy.calibrate.transform import save_channel_transform
@@ -310,7 +384,8 @@ def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all
     assert len(reads) == 1
 
     reads.clear()
-    monkeypatch.setattr(DualGaussianFit, "_calibrate", lambda self, ctx, s: t)
+    monkeypatch.setattr(DualGaussianFit, "_calibrate",
+                        lambda self, ctx, s, save=True: SimpleNamespace(transform=t))
     settings.transform.calibrate = True
     assert len(plugin.run(Context(), settings).locs) > 10
     assert reads == []

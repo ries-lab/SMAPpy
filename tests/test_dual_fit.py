@@ -4,6 +4,8 @@ A synthetic split frame with a known transformation between the halves and a
 known photon split: the pipeline has to find the peaks, pair them, cut both
 ROIs, fit them jointly and give back the true position, z and colour.
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -579,9 +581,10 @@ def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from
     calibration_file = _dual_calibration_file(tmp_path / "dual_2Ccal.h5", beads)
     asked = []
 
-    def measured(self, ctx, settings):
+    def measured(self, ctx, settings, save=True):
         asked.append(settings.transform.registration)
-        return ChannelTransform(moved.transformation, dict(moved.geometry), {"n_inliers": 100})
+        return SimpleNamespace(transform=ChannelTransform(moved.transformation, dict(moved.geometry),
+                                                          {"n_inliers": 100}))
     monkeypatch.setattr(DualSplineFit, "_calibrate", measured)
     settings = DualSplineFitSettings(
         source=SourceSettings(path=str(stack), chunk=6),
