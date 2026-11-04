@@ -548,6 +548,22 @@ layout, where no entry says.  The vote pairs only across the seam (the split, el
 the frame) and takes the axis from the layout.  Not done: checking a chosen registration file
 against the entry's arrangement; 4Pi beads still read the current setup, not `as_of`.
 
+### Built: step 2b (2026-11-04), so far
+
+* **Stage 1**: every fit on the camera chip (below, "the coordinates").
+* **Stage 2**: every fitter's *channels* part (`fit.ChannelsSettings`): *read* whole chip (a 1C
+  fitter's default: no file records the dichroic) or two channels, and the arrangement --
+  *layout*, *main channel*, *split position* -- on *microscope* or chosen.  On two channels a 1C
+  fitter fits each channel on its own (`multichannel.SplitEngine`: one `LocalizationEngine` per
+  channel, cut by `channels.split_halves`), each localization on the chip where its channel saw
+  it, which channel in `camera_channel` (`channel` is the dye's colour).  A two-colour fitter
+  shows only the arrangement and its calibration pass reads it there; the registration's copies
+  of it are hidden in its form.
+* **Stage 3, to come**: the registration between the channels of such a table, a map from
+  channel 1's chip coordinates to channel 0's stored as a `ChannelLayout` (4Pi's format); the
+  calibration pass a two-channel 1C fit plus that registration; the halves code removed
+  (`register_channels`' seam, `dualfit.which_channel`, `chip_halves`, the `_2ct.h5` geometry).
+
 ### The coordinates (decided 2026-11-04)
 
 Every fitter reports positions on the **camera chip**, in chip pixels with the camera ROI's corner

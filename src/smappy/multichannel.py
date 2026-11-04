@@ -391,3 +391,110 @@ class MultiChannelEngine:
         return (f"{s['localizations']} localizations from {s['frames']} frames of "
                 f"{self.layout.n_channels} channels ({s['detect_seconds']:.1f} s detection, "
                 f"{s['fit_seconds']:.1f} s fitting)")
+
+
+class SplitEngine:
+    """A split camera's channels fitted each on its own, with a single-channel model: what a 1C
+    fitter does with *channels* on *two channels* (`plugins.fit.ChannelsSettings`).
+
+    One `pipeline.LocalizationEngine` per channel, each on its channel's own pixels as the
+    layout cuts them -- so each is thresholded on its own noise, which is what lets a dim channel
+    be detected at all -- with no pairing and no joint fit.  Each localization is put back on the
+    camera chip where its channel saw it (`ChannelLayout.on_frame`, the ROI's corner added), as
+    every fitter reports positions, and keeps which channel that was in ``camera_channel`` (0 the
+    main one).  Nothing maps one channel onto the other: that is a registration's business, made
+    from such a table (`calibrate.transform`).
+
+    ``finders`` is one per channel: a region drawn on the frame judges each channel's candidates
+    where they lie there (`plugins.fit.ChannelRegionFinder`).  A field-dependent model reads each
+    ROI's place in the channel's own pixels, not on the chip.
+    """
+
+    def __init__(self, camera, finders, model, layout: ChannelLayout, settings):
+        from dataclasses import replace
+        from .pipeline import LocalizationEngine
+        self.camera, self.layout = camera, layout
+        own = replace(camera, roi=None)            # each channel's own pixels; the chip comes after
+        self.engines = [LocalizationEngine(own, finder, model, settings) for finder in finders]
+
+    @property
+    def stats(self) -> dict:
+        out: dict = {}
+        for engine in self.engines:
+            for key, value in engine.stats.items():
+                out[key] = out.get(key, 0) + value
+        out["frames"] = self.engines[0].stats["frames"]      # one frame, however many channels
+        return out
+
+    @property
+    def finder(self):
+        return self.engines[0].finder
+
+    def _channels(self, frames):
+        block = self.layout.cut(np.asarray(frames))
+        for c, (w, h) in enumerate(self.layout.sizes):
+            yield c, np.ascontiguousarray(block[:, c, :h, :w])
+
+    def push(self, frames: np.ndarray, first_frame: int = 0):
+        out = []
+        for c, own in self._channels(frames):
+            found = self.engines[c].push(own, first_frame)
+            if found is not None and len(found):
+                out.append(self._on_chip(c, found))
+        return self._joined(out)
+
+    def flush(self):
+        out = []
+        for c, engine in enumerate(self.engines):
+            found = engine.flush()
+            if found is not None and len(found):
+                out.append(self._on_chip(c, found))
+        return self._joined(out)
+
+    def detect(self, photons: np.ndarray, first_frame: int = 0):
+        """``(positions on the frame (n, 2), the filtered image on the frame, cutoff per
+        channel)`` for one frame of photons: what a Preview draws."""
+        filtered_frame = np.zeros(np.asarray(photons).shape[-2:], np.float32)
+        found, cutoffs = [], []
+        for c, own in self._channels(photons):
+            candidates, filtered = self.engines[c].finder(own, first_frame=first_frame)
+            found.append(self.layout.on_frame(c, np.c_[candidates.x, candidates.y]))
+            cutoffs.append(float(np.max(self.engines[c].finder.cutoffs(filtered)[0])))
+            x, y, w, h = self.layout.regions[c]
+            part = np.asarray(filtered)[0, :h, :w]
+            fx, fy = self.layout.flips[c]
+            part = part[:, ::-1] if fx else part
+            part = part[::-1] if fy else part
+            filtered_frame[y:y + h, x:x + w] = part
+        return np.concatenate(found) if found else np.empty((0, 2)), filtered_frame[None], cutoffs
+
+    def _on_chip(self, channel: int, locs):
+        from .locs import in_pixels
+        (px, py), _ = self.camera.pixelsize_nm_or_default
+        roi = np.array(self.camera.roi_offset, float)
+        x, y = in_pixels(locs, "x_pix", "y_pix")
+        chip = self.layout.on_frame(channel, np.c_[x, y]) + roi
+        locs.columns["x_nm"] = chip[:, 0] * px
+        locs.columns["y_nm"] = chip[:, 1] * py
+        if "peak_x_pix" in locs:
+            peak = self.layout.on_frame(channel, np.c_[locs["peak_x_pix"], locs["peak_y_pix"]]) + roi
+            locs.columns["peak_x_pix"] = peak[:, 0]
+            locs.columns["peak_y_pix"] = peak[:, 1]
+        # a flipped channel's x error is the same size, its sign is no column
+        locs.columns["camera_channel"] = np.full(len(locs), channel, np.int8)
+        return locs
+
+    @staticmethod
+    def _joined(parts):
+        if not parts:
+            return None
+        from .locs import concat
+        joined = concat(parts) if len(parts) > 1 else parts[0]
+        order = np.argsort(np.asarray(joined["frame"]), kind="stable")
+        return joined[order]
+
+    def __str__(self) -> str:
+        s = self.stats
+        return (f"{s['localizations']} localizations from {s['frames']} frames of "
+                f"{len(self.engines)} channels, each fitted on its own "
+                f"({s['detect_seconds']:.1f} s detection, {s['fit_seconds']:.1f} s fitting)")

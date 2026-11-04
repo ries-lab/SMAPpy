@@ -249,6 +249,31 @@ class ChannelLayout:
         return self._with(regions, origins)
 
 
+def split_halves(arrangement: dict, roi, name: str = "") -> ChannelLayout:
+    """A two-way split as a layout on the chip, for frames with camera ROI ``roi`` (x0, y0, width,
+    height): the frame cut at ``arrangement["split_position"]`` -- a chip position, None for the
+    frame's middle -- along the ``layout``'s axis, the ``main_channel`` half first, the other
+    flipped along that axis when ``mirrored``.  The words are the chip settings'
+    (`microscope_db.Microscope.arrangement`, `calibrate.dual.resolve_arrangement`)."""
+    x0, y0, width, height = (int(v) for v in roi)
+    across = arrangement["layout"].startswith("right-left")
+    start, extent = (x0, width) if across else (y0, height)
+    split = arrangement.get("split_position")
+    split = int(round(start + extent / 2 if split is None else split))
+    if not start < split < start + extent:
+        raise ValueError(f"the split at {split} px is outside the frame "
+                         f"({start} to {start + extent} px)")
+    if across:
+        low, high = (x0, y0, split - x0, height), (split, y0, x0 + width - split, height)
+    else:
+        low, high = (x0, y0, width, split - y0), (x0, split, width, y0 + height - split)
+    first_low = arrangement["main_channel"] in ("left", "upper")
+    mirrored = arrangement.get("mirrored", arrangement["layout"].endswith("mirrored"))
+    flip = (across, not across) if mirrored else (False, False)
+    return ChannelLayout([low, high] if first_low else [high, low], [(False, False), flip],
+                         name=name)
+
+
 def describe_map(matrix, size: Tuple[int, int]) -> dict:
     """A channel's map read about its centre: the shift there (px), the
     scale along x and y, the rotation (mrad) and the projective part's

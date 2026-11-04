@@ -29,6 +29,12 @@ def chosen():
     return RegisterSettings(layout="up-down", main_channel="upper")
 
 
+def split_chosen(settings):
+    """``settings`` -- a two-colour fitter's -- with the split chosen in its *channels* part."""
+    settings.channels.layout, settings.channels.main_channel = "up-down", "upper"
+    return settings
+
+
 def transform(dx=0.37, dy=-0.21):
     """Secondary -> reference, the direction `calibrate.dual` builds."""
     matrix = np.array([[1., 0., -dx], [0., 1., -SPLIT - dy], [0., 0., 1.]])
@@ -218,15 +224,14 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
     stack = tmp_path / "split.tif"
     tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
 
-    settings = DualGaussianFitSettings(
+    settings = split_chosen(DualGaussianFitSettings(
         source=SourceSettings(path=str(stack), chunk=50),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
-        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150,
-                                           registration=chosen()),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
         fit=FitSettings(roisize=13),
-        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
+        output=OutputSettings(path=str(tmp_path / "out.hdf5"))))
 
     said = []
     result = DualGaussianFit().run(Context(progress=said.append), settings)
@@ -265,15 +270,14 @@ def test_the_preview_shows_the_registration_it_measured_and_the_run_reuses_it(tm
     frames, _ = movie(300, rng, t, ratio=0.35, per=4)
     stack = tmp_path / "split.tif"
     tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
-    settings = DualGaussianFitSettings(
+    settings = split_chosen(DualGaussianFitSettings(
         source=SourceSettings(path=str(stack), chunk=50),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
-        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150,
-                                           registration=chosen()),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
         fit=FitSettings(roisize=13),
-        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
+        output=OutputSettings(path=str(tmp_path / "out.hdf5"))))
     measured = []
     original = DualGaussianFit._measure_registration
     monkeypatch.setattr(DualGaussianFit, "_measure_registration",
@@ -332,12 +336,11 @@ def test_a_failed_measurement_is_said_in_the_preview_not_raised(tmp_path):
     frames, _ = movie(20, np.random.default_rng(1), transform(), per=1)
     stack = tmp_path / "dark.tif"
     tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
-    settings = DualGaussianFitSettings(
+    settings = split_chosen(DualGaussianFitSettings(
         source=SourceSettings(path=str(stack)),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=1e6),    # nothing found
-        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0,
-                                           registration=chosen()))
+        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0)))
     preview = DualGaussianFit().preview(Context(), settings, frame=0)
     assert "measuring the transformation failed" in preview.text
     assert "channel registration" not in preview.plots
@@ -360,14 +363,14 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
     path = tmp_path / "given_2ct.h5"
     save_channel_transform(path, t)
 
-    settings = DualGaussianFitSettings(
+    settings = split_chosen(DualGaussianFitSettings(
         source=SourceSettings(path=str(stack), chunk=10),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(path=str(path)),
         fit=FitSettings(roisize=13),
-        output=OutputSettings(save=False))
+        output=OutputSettings(save=False)))
 
     plugin = DualGaussianFit()
     result = plugin.run(Context(), settings)
@@ -404,12 +407,12 @@ def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all
     load = module.load_transform
     monkeypatch.setattr(module, "load_transform",
                         lambda p: reads.append(p) or load(p))
-    settings = DualGaussianFitSettings(
+    settings = split_chosen(DualGaussianFitSettings(
         source=SourceSettings(path=str(stack), chunk=4),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         transform=ChannelTransformSettings(path=str(path)),
-        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False)))
     plugin = DualGaussianFit()
     assert len(plugin.run(Context(), settings).locs) > 10
     assert len(reads) == 1
@@ -486,3 +489,45 @@ def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
         Context(locs=locs), RegisterLocsSettings(save=False, registration=chosen())).data["transform"]
     probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
     np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)
+
+
+def test_a_1c_fit_reads_two_channels_on_request_each_on_its_own_and_on_the_chip(tmp_path):
+    """Gaussian 2D with *channels* on *two channels*: each half detected and fitted on its own --
+    the dim half too, at its own threshold -- every localization where its channel saw it on the
+    chip, as a whole-chip fit puts it, and which channel in ``camera_channel``."""
+    import tifffile
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings, GaussianFit,
+                                    GaussianFitSettings, OutputSettings, SourceSettings)
+    rng = np.random.default_rng(11)
+    t = transform(dx=0.8, dy=-0.5)
+    frames, truth = movie(40, rng, t, ratio=0.15, per=3)        # the lower half a sixth as bright
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+
+    def fit(split):
+        settings = GaussianFitSettings(
+            source=SourceSettings(path=str(stack)),
+            camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+            detection=DetectionSettings(cutoff_mode="dynamic"),
+            fit=FitSettings(roisize=11), output=OutputSettings(save=False))
+        settings.channels.split = split
+        settings.channels.layout, settings.channels.main_channel = "up-down", "upper"
+        return GaussianFit().run(Context(), settings).locs
+
+    two, whole = fit("two channels"), fit("whole chip")
+    channel = np.asarray(two["camera_channel"])
+    y = np.asarray(two["y_nm"]) / 100
+    assert set(channel) == {0, 1}
+    assert (y[channel == 0] < SPLIT).all() and (y[channel == 1] >= SPLIT).all()
+    # the main channel's molecules where the truth is, on the chip
+    from scipy.spatial import cKDTree
+    main = np.concatenate([np.c_[np.full(len(p), f), p] for f, p in enumerate(truth)])
+    xy0 = np.c_[two["frame"], two["x_nm"] / 100, two["y_nm"] / 100][channel == 0]
+    d, _ = cKDTree(main).query(xy0)
+    assert np.median(d) < 0.1
+    # and where a whole-chip fit of the same movie puts them
+    d, _ = cKDTree(np.c_[whole["frame"], whole["x_nm"] / 100, whole["y_nm"] / 100]).query(
+        np.c_[two["frame"], two["x_nm"] / 100, two["y_nm"] / 100])
+    assert np.median(d) < 0.05
+    # each half thresholded on its own finds the dim half's molecules
+    assert (channel == 1).sum() >= (np.asarray(whole["y_nm"]) / 100 >= SPLIT).sum()

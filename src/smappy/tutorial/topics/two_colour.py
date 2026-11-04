@@ -152,11 +152,12 @@ def make(d) -> None:
            zoom=d.around(calibrate, 760))
     # the simulated movie names no microscope, so its split is chosen; a microscope with an
     # entry gives it, and it is never detected
-    type_into(panel, "transform.registration.layout", "up-down")
-    type_into(panel, "transform.registration.main_channel", "upper")
+    expand(field(panel, "channels.layout"))
+    type_into(panel, "channels.layout", "up-down")
+    type_into(panel, "channels.main_channel", "upper")
     d.settle()
-    layout = field(panel, "transform.registration.layout")
-    main = field(panel, "transform.registration.main_channel")
+    layout = field(panel, "channels.layout")
+    main = field(panel, "channels.main_channel")
     d.shot("How the chip is split comes from the microscope's entry. This movie "
            "names none, so say it here: an upper and a lower half, the main one above.",
            spot=[layout, main], point=layout, zoom=d.around(layout, 760))

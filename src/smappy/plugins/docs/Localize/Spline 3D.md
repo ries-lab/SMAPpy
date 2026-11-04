@@ -417,6 +417,21 @@ A fitted `.h5` works here too: the fit uses the calibration that file was
 fitted with, as its file recorded it.  A calibration moved or deleted since
 is refused, naming it.
 
+### channels.split
+*two channels* is for a split camera: the frame is cut into its two channels
+by *layout* and *split position*, a mirror undone, and each channel is
+detected and fitted on its own -- a dim channel then has a threshold of its
+own instead of the bright one's.  Nothing pairs the two, and nothing maps one
+onto the other: each localization is on the chip where its channel saw it,
+with `camera_channel` saying which.  That table is what *Calibrate
+transform* registers the channels from.  No file records whether the
+splitting dichroic was in, so the choice is yours.
+
+### channels.layout
+On *microscope*, the entry of the microscope the file was taken on gives it
+([Microscope manager](plugin:Panels/Microscope manager)); a file no entry
+recognises asks for it to be chosen.  Read only on *two channels*.
+
 ### fit.roisize
 At least 2 pixels smaller than the calibration laterally (the Bead
 calibration's *bead box*, 27 by default), or the fit refuses to start:
@@ -489,7 +504,8 @@ z instead of the PSF width:
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm` | the position |
+| `x_nm`, `y_nm` | the position on the camera chip (the camera ROI's corner added) |
+| `camera_channel` | on *two channels*: which channel saw it, 0 the main one |
 | `z_nm` | height relative to the calibration's focal plane, in objective nanometres; drawn for a focus in the sample (*focus* not *as calibrated*), the height above the coverslip |
 | `z_err_nm` | its precision (CRLB) |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | the lateral precision (CRLB) |

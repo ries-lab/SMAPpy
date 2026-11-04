@@ -203,6 +203,17 @@ def in_region(x, y, shapes) -> np.ndarray:
     return keep
 
 
+class _Points:
+    """Positions as a Preview draws candidates: ``x``, ``y`` and a length."""
+
+    def __init__(self, xy):
+        xy = np.asarray(xy, float).reshape(-1, 2)
+        self.x, self.y = xy[:, 0], xy[:, 1]
+
+    def __len__(self) -> int:
+        return len(self.x)
+
+
 class RegionFinder:
     """A peak finder that drops the candidates outside the drawn region.
 
@@ -229,17 +240,17 @@ class RegionFinder:
 
 
 class ChannelRegionFinder(RegionFinder):
-    """`RegionFinder` for candidates in a channel layer's main channel: the region is drawn on the
-    frame, as for a whole-chip fit, so each candidate is put back there (`ChannelLayout.on_frame`)
-    before it is judged."""
+    """`RegionFinder` for candidates in a channel layer's channel (the main one unless told): the
+    region is drawn on the frame, as for a whole-chip fit, so each candidate is put back there
+    (`ChannelLayout.on_frame`) before it is judged."""
 
-    def __init__(self, finder, shapes, layout):
+    def __init__(self, finder, shapes, layout, channel: int = 0):
         super().__init__(finder, shapes)
-        self.layout = layout
+        self.layout, self.channel = layout, channel
 
     def __call__(self, photons, first_frame: int = 0, **kwargs):
         candidates, filtered = self._finder(photons, first_frame=first_frame, **kwargs)
-        on = self.layout.on_frame(0, np.c_[candidates.x, candidates.y])
+        on = self.layout.on_frame(self.channel, np.c_[candidates.x, candidates.y])
         return candidates[in_region(on[:, 0], on[:, 1], self.shapes)], filtered
 
 
@@ -258,6 +269,62 @@ def draw_region(ax, shapes) -> None:
         closed = np.vstack([points, points[:1]])
         style = REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"])
         ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
+
+
+#: how a split chip lies, in the words a microscope's entry gives it (`microscope_db.Microscope.
+#: arrangement`); *microscope* reads the entry, and a microscope without one has it chosen
+LAYOUT_CHOICES = (("microscope", "the microscope's"), "right-left", "right-left mirrored",
+                  "up-down", "up-down mirrored")
+HALF_CHOICES = (("microscope", "the microscope's"), "left", "right", "upper", "lower")
+
+
+@dataclass
+class ChannelsSettings:
+    """How the camera chip is read: whole, or as a split camera's two channels, and how the split
+    lies -- the microscope's arrangement, or chosen for a microscope without an entry
+    (`calibrate.dual.resolve_arrangement`); never detected.
+
+    A 1C fitter reads the whole chip unless told: nothing in a file says whether the splitting
+    dichroic was in.  On *two channels* each channel is detected and fitted on its own
+    (`multichannel.SplitEngine`), positions on the chip where each channel saw them and a
+    ``camera_channel`` column.  A two-colour fitter always reads two channels and shows only the
+    arrangement."""
+    split: str = param("whole chip", label="read", choices=("whole chip", "two channels"),
+                       help="two channels: a split camera, each channel detected and fitted on "
+                            "its own; whether the dichroic was in, no file says")
+    layout: str = param("microscope", label="layout", choices=LAYOUT_CHOICES,
+                        help="how the chip is split: the microscope's entry, or chosen for a "
+                             "microscope without one")
+    main_channel: str = param("microscope", label="main channel", choices=HALF_CHOICES,
+                              help="the half positions are registered onto; the microscope's, "
+                                   "else the left or upper half")
+    split_position: Optional[int] = param(None, label="split position", unit="px", min=1,
+                                          advanced=True,
+                                          help="the first pixel of the second half, on the "
+                                               "chip; empty: the microscope's, else the "
+                                               "middle of the frame")
+
+    @property
+    def two(self) -> bool:
+        return self.split == "two channels"
+
+    def arrangement(self, camera: Optional[CameraMetadata]) -> dict:
+        """The layout, main half, mirror and split this file is read with."""
+        from ..calibrate.dual import resolve_arrangement
+        told = resolve_arrangement(self, getattr(camera, "microscope", None))
+        return {"layout": told.layout, "mirrored": told.layout.endswith("mirrored"),
+                "main_channel": told.main_channel, "split_position": told.split_position}
+
+    def layout_for(self, camera: CameraMetadata, shape):
+        """The two channels as a `channels.ChannelLayout` on the frames of this camera ROI:
+        `channels.split_halves` on the chip, put on the frames (`ChannelLayout.on_camera`)."""
+        from ..channels import split_halves
+        height, width = (int(v) for v in shape[-2:])
+        roi = tuple(camera.roi) if camera is not None and camera.roi is not None \
+            else (0, 0, width, height)
+        chip = split_halves(self.arrangement(camera), roi)
+        return chip.on_camera(camera.roi_offset if camera is not None else (0, 0),
+                              (height, width), cut_into=True)
 
 
 @dataclass
@@ -466,6 +533,9 @@ class _FitPlugin(Plugin):
     two_channel = False
     #: a 4Pi interference phase in the table: what *after the fit*'s 4Pi z needs
     phase = False
+    #: the *channels* part: "choice" -- whole chip or two channels (a 1C fitter), "two" -- always
+    #: two, the arrangement shown (a two-colour fitter), "none" -- channels of its own (4Pi)
+    channel_part = "choice"
     #: the kind of calibration a simulated recipe's (`simulate.source.recipe_calibration`) this
     #: fitter takes, where its model settings do not say; and what it sets beside it
     calibration_kind: Optional[str] = None
@@ -589,11 +659,23 @@ class _FitPlugin(Plugin):
         back on the chip (`multichannel.MultiChannelEngine.flush`)."""
         return camera
 
-    def engine(self, settings, camera: CameraMetadata, finder, model):
-        """What consumes the frames.  One ROI per candidate by default; the
-        multi-channel fitters override this with one ROI per channel."""
+    def engine(self, settings, camera: CameraMetadata, finder, model, source=None):
+        """What consumes the frames.  One ROI per candidate by default; on *two channels* one
+        engine per channel (`multichannel.SplitEngine`); the multi-channel fitters override this
+        with one ROI per channel."""
         from ..pipeline import LocalizationEngine
-        return LocalizationEngine(camera, finder, model, settings.fit)
+        channels = getattr(settings, "channels", None)
+        if channels is None or not channels.two:
+            return LocalizationEngine(camera, finder, model, settings.fit)
+        from ..multichannel import SplitEngine
+        if source is None:
+            source = _open(replace(settings.source, live=False), watch=False)
+        layout = channels.layout_for(camera, source.shape)
+        base, shapes = (finder._finder, finder.shapes) if isinstance(finder, RegionFinder) \
+            else (finder, None)
+        finders = [ChannelRegionFinder(base, shapes, layout, c) if shapes else base
+                   for c in range(layout.n_channels)]
+        return SplitEngine(camera, finders, model, layout, settings.fit)
 
     def finder(self, settings, camera: Optional[CameraMetadata] = None):
         """What finds the candidates, in each channel on its own for a
@@ -670,6 +752,22 @@ class _FitPlugin(Plugin):
                 state.shown.update(shown)
         except Exception:
             pass
+        channels = getattr(settings, "channels", None)
+        if channels is not None:
+            if self.channel_part == "none":
+                state.shown["channels"] = False
+            else:
+                two = self.channel_part == "two" or channels.two
+                state.shown["channels.split"] = self.channel_part == "choice"
+                for name in ("layout", "main_channel", "split_position"):
+                    state.active[f"channels.{name}"] = two
+                state.titles["channels"] = ("two channels" if two else "whole chip") + (
+                    f", {channels.layout}" if two and channels.layout != "microscope" else "")
+                if self.channel_part == "two":
+                    # the arrangement is the *channels* part's; the registration's copies of it
+                    # serve Calibrate transform and the bead calibration, not this form
+                    for name in ("layout", "main_channel", "split_position"):
+                        state.shown[f"transform.registration.{name}"] = False
         region = getattr(settings, "region", None)
         if region is not None:
             state.titles["region"] = region.summary()
@@ -954,10 +1052,19 @@ class _FitPlugin(Plugin):
 
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
-        candidates, filtered = finder(photons[None], first_frame=index)
-        # what detection applied to this frame, from the finder's own code
-        cutoff = float(finder.cutoffs(filtered)[0][0])
-        said = f"{cutoff:.3g}"
+        channels = getattr(settings, "channels", None)
+        if channels is not None and channels.two and self.channel_part == "choice":
+            # each channel on its own, drawn back on the frame
+            split = self.engine(settings, camera, finder, None, source)
+            xy, filtered, cutoffs = split.detect(photons[None], first_frame=index)
+            candidates = _Points(xy)
+            cutoff = max(cutoffs)
+            said = " and ".join(f"{k:.3g}" for k in cutoffs) + " (each channel)"
+        else:
+            candidates, filtered = finder(photons[None], first_frame=index)
+            # what detection applied to this frame, from the finder's own code
+            cutoff = float(finder.cutoffs(filtered)[0][0])
+            said = f"{cutoff:.3g}"
 
         region = getattr(settings, "region", None)
         shapes = list(getattr(region, "shapes", []) or [])
@@ -972,7 +1079,7 @@ class _FitPlugin(Plugin):
             trouble = f"focus: {error}"
         try:
             model = self._model_telling(ctx, fitting, camera)
-            engine = self.engine(fitting, camera, finder, model)
+            engine = self.engine(fitting, camera, finder, model, source)
             engine.push(raw[None], first_frame=index)
             locs = engine.flush()
         except Exception as error:
@@ -1321,6 +1428,9 @@ class _Reading:
     # camera is read far more often than it is set
     camera: CameraSettings = param(default_factory=CameraSettings, label="microscope",
                                    collapsed=True, kind="microscope")
+    # folded, its title how the chip is read: most fits read it whole
+    channels: ChannelsSettings = param(default_factory=ChannelsSettings, label="channels",
+                                       collapsed=True)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     # folded, its title what is drawn: most fits use the whole frame
     region: FitRegionSettings = param(default_factory=FitRegionSettings,
@@ -1710,6 +1820,7 @@ class _TwoChannelFit(_FitPlugin):
 
     _loaded = None             # (path, registration) of the run in progress
     two_channel = True
+    channel_part = "two"
 
     def registration_path(self, settings) -> str:
         raise NotImplementedError
@@ -1827,11 +1938,15 @@ class _TwoChannelFit(_FitPlugin):
         src = settings.source
         source = _open(replace(src, live=False), watch=False)
         camera = settings.camera.resolve(source)
-        # how the chip is split: the microscope's, or chosen in the form -- never detected
-        registration = resolve_arrangement(settings.transform.registration, camera.microscope)
+        # how the chip is split: the *channels* part's -- the microscope's, or chosen -- never
+        # detected; the registration's own fields of the same names are not read here
+        told = resolve_arrangement(settings.channels, camera.microscope)
+        registration = replace(settings.transform.registration, layout=told.layout,
+                               main_channel=told.main_channel,
+                               split_position=told.split_position)
         provisional = _seam(registration, camera, source.shape[-2:])
         ctx.report(f"the chip split {registration.layout}, the main half {registration.main_channel}"
-                   + ("" if settings.transform.registration.layout != "microscope"
+                   + ("" if settings.channels.layout != "microscope"
                       else f", as {camera.microscope.get('name')}'s entry says"))
         last = min(src.stop, source.n_frames) if src.stop else source.n_frames
         blocks = calibration_blocks(src.start, last,
@@ -2148,10 +2263,10 @@ class DualSplineFit(_TwoChannelFit):
         """Measured with the calibration's layout and main channel, so that each PSF stays on the
         half it was made from (`dual.with_registration` refuses one that does not)."""
         g = settings.model.load().geometry
-        given = settings.transform.registration
-        return replace(settings, transform=replace(settings.transform, registration=replace(
-            given, layout=g.get("layout", given.layout), main_channel=g.get("main_channel",
-                                                                           given.main_channel))))
+        given = settings.channels
+        return replace(settings, channels=replace(
+            given, layout=g.get("layout", given.layout),
+            main_channel=g.get("main_channel", given.main_channel)))
 
     def with_measured(self, settings, transform):
         """The calibration's PSFs with the registration measured from this movie: the splitter

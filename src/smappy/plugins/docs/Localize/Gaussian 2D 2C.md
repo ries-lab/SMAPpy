@@ -47,7 +47,7 @@ What it needs:
   left and right or upper and lower, whether one half is mirrored, and which
   is the main one.  It comes from the microscope's entry
   ([Microscope manager](plugin:Panels/Microscope manager)) for a recognised
-  microscope; for any other, choose it under *registration* (*layout*,
+  microscope; for any other, choose it under *channels* (*layout*,
   *main channel*).  It is never guessed.
 
 For 3D data with a bead calibration, use
@@ -284,7 +284,7 @@ first pass runs before the fit.  It fits frames of the movie with a plain
 same camera and detection settings as the real fit, each half thresholded on
 its own about the seam -- the microscope's split, or the middle of the frame
 as acquired.  The layout, the mirroring and the main half are the
-microscope's or chosen (*registration*), never detected.
+microscope's or chosen (*channels*), never detected.
 Every molecule then shows up as two localizations in the same frame, and
 *Analysis/Register/Calibrate transform*'s method finds the map from those
 pairs: the vector between every two localizations of a frame is collected, the
@@ -450,12 +450,15 @@ first, and the output says so.
 Set it to 0 for a movie that does not start with everything on, such as a
 simulation, or one started after a bleaching phase.
 
-### transform.registration.layout
+### channels.layout
 *microscope* reads it from the entry of the microscope the movie was taken
 on; a file no entry recognises stops with a message asking for it.  All the
-Ries lab's microscopes are *right-left mirrored*.
+Ries lab's microscopes are *right-left mirrored*.  The registration's own
+*layout*, *main channel* and *split position* are not shown here: they serve
+*Calibrate transform* and the bead calibration, and this form reads the
+arrangement from *channels*.
 
-### transform.registration.main_channel
+### channels.main_channel
 For two far-red dyes split by a long-pass dichroic, the transmitted arm is
 the brighter and the usual main channel; the microscope's entry names it.
 

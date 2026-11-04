@@ -582,7 +582,7 @@ def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from
     asked = []
 
     def measured(self, ctx, settings, save=True):
-        asked.append(settings.transform.registration)
+        asked.append(settings.channels)
         return SimpleNamespace(transform=ChannelTransform(moved.transformation, dict(moved.geometry),
                                                           {"n_inliers": 100}))
     monkeypatch.setattr(DualSplineFit, "_calibrate", measured)

@@ -223,6 +223,8 @@ class FourPiFit(_FitPlugin):
     # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
     version = "2"
     phase = True
+    # its channels are its own part (`model.channels`): four regions, not a two-way split
+    channel_part = "none"
     # a simulated 4Pi camera's model, with the maps it was drawn with
     calibration_kind = "fourpi"
     calibration_extras = {"model.channels.registration": "model"}

@@ -540,26 +540,14 @@ class Microscope:
         ``roi`` (x0, y0, width, height): the frame cut at the split -- the entry's position, or
         the frame's middle -- the main arm first, the other flipped where the optics flip it.
         None without an `arrangement`."""
-        from .channels import ChannelLayout
+        from .channels import split_halves
         found = self.arrangement(camera)
         if found is None:
             return None
-        x0, y0, width, height = (int(v) for v in roi)
-        across = found["layout"].startswith("right-left")
-        start, extent = (x0, width) if across else (y0, height)
-        split = found["split_position"]
-        split = int(round(start + extent / 2 if split is None else split))
-        if not start < split < start + extent:
-            raise ValueError(f"{self.name}'s split at {split} px is outside the frame "
-                             f"({start} to {start + extent} px)")
-        if across:
-            low, high = (x0, y0, split - x0, height), (split, y0, x0 + width - split, height)
-        else:
-            low, high = (x0, y0, width, split - y0), (x0, split, width, y0 + height - split)
-        first_low = found["main_channel"] in ("left", "upper")
-        regions = [low, high] if first_low else [high, low]
-        flip = (across, not across) if found["mirrored"] else (False, False)
-        return ChannelLayout(regions, [(False, False), flip], name=name or self.name)
+        try:
+            return split_halves(found, roi, name or self.name)
+        except ValueError as error:
+            raise ValueError(f"{self.name}'s {error}") from None
 
     def channel_layout(self, camera: str = "", name: str = ""):
         """The channels' rectangles on the chip as a `channels.ChannelLayout`,
