@@ -418,6 +418,72 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     assert analysis.plot is not None
 
 
+def _recording(label, monkeypatch):
+    """Every text the label is given, in order."""
+    shown = []
+    set_text = label.setText
+    monkeypatch.setattr(label, "setText", lambda text: (shown.append(text), set_text(text)))
+    return shown
+
+
+def test_the_region_steps_show_their_progress_while_they_run(app, monkeypatch):
+    """The progress line went only into the hidden output box, so a run over
+    many ROIs of a slow step showed nothing until it ended."""
+    from smappy.gui.region_steps import RegionSteps
+    from smappy.session import Session
+
+    session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(400)
+    project.find(next(iter(project.sources)), plugin=SegmentRegions(), settings=discs())
+    assert len(project.rois) == 4
+
+    window = RegionSteps(session)
+    shown = _recording(window.status, monkeypatch)
+    window.run()
+    progress = [t for t in shown if "of 4 ROIs)" in t]
+    assert len(progress) >= 2                         # on the way, and at the end
+    assert "100% (4 of 4 ROIs)" in progress[-1] and "a second" in progress[-1]
+    assert "4 ROIs, 1 step(s)" in window.status.text()       # how it ended, as before
+
+
+def test_the_region_steps_count_the_regions_of_an_id_column(app, monkeypatch):
+    from smappy.gui.region_steps import RegionSteps
+    from smappy.session import Session
+
+    locs = table([(0, 0), (3000, 0), (0, 3000)], per=20)
+    cluster_id = np.repeat(np.arange(1, 4), 20)
+    session = Session(Localizations({**locs.columns, "cluster_id": cluster_id}))
+    session.show_grouped(0, False)
+    session.rois.block = Block(regions="cluster_id",
+                               steps=pipeline_module.default_block().steps)
+    window = RegionSteps(session)
+    shown = _recording(window.status, monkeypatch)
+    window.run()
+    assert any("100% (3 of 3 regions)" in t for t in shown)
+
+
+def test_a_stopped_or_failed_run_leaves_no_percentage_behind(app, monkeypatch):
+    """The progress comes through the panel's own signals, and still does
+    after an edit has built a new panel."""
+    from smappy.gui import chooser
+    from smappy.gui.region_steps import RegionSteps
+    from smappy.session import Session
+
+    window = RegionSteps(Session(table([(0, 0)])))
+    monkeypatch.setattr(chooser, "choose_plugin",
+                        lambda *a, **k: "Analysis/Measure/NPC Corners")
+    window.panel.steps.setCurrentItem(None)
+    window.panel.add_step()                     # a new inner panel, wired again
+    line = "37% (37 of 100 ROIs), 2.1 a second, about 30 s left"
+    for how in ("stopped", "failed"):
+        window.panel.panel.progressed.emit(line)
+        assert window.status.text() == line
+        window.panel.panel.ended.emit(how, "")
+        assert window.status.text().startswith(how) and "%" not in window.status.text()
+
+
 def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     """Preview opens the manager with the proposals dashed and no ROI added;
     a second preview replaces the first; Run adds them and the window,

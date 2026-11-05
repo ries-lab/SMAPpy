@@ -219,7 +219,10 @@ Folded when the tab opens; unfold it to choose and run the steps.  Which steps r
 chain's, opened on the one block.  *check* times them in a few ROIs, and
 Run measures what is out of date and carries the rest forward.  While it
 measures, Run is Stop: the ROI being measured is finished, the ones measured
-so far are kept, and the rest wait for the next Run.  A new list starts with
+so far are kept, and the rest wait for the next Run.  The grey line under the
+steps says how far a run has got -- the share and number of ROIs (or regions)
+measured, how many a second and about how long is left -- and, after a Stop
+or a failure, how many are still to measure.  A new list starts with
 the general measurements, once each, with their own defaults; a specialised
 one, such as NPC Corners, is added there when the data call for it.  A run
 that will take more than a minute says how long before it starts.  The list
