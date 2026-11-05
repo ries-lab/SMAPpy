@@ -435,8 +435,8 @@ def test_the_microscope_database_places_the_channels_on_the_chip():
     resolution = SimpleNamespace(microscope=SimpleNamespace(microscope=scope, metadata={},
                                                             camera="orca"))
     settings = FourPiFitSettings()
-    settings.model.channels.layout = "microscope"
-    settings.model.channels.registration = "none"
+    settings.channels.layout = "microscope"
+    settings.model.registration.source = "none"
     camera = SimpleNamespace(roi_offset=(100, 0))
     layout = layout_of(settings, None, None, camera, resolution)
     assert layout.regions[0] == (51, 0, 168, 168)
@@ -526,8 +526,8 @@ def test_spline_4pi_reads_a_dcimg_chip_by_typed_mirrored_corners(cal, tmp_path):
         camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
         model=FourPiModelSettings(calibration=str(model_path)),
         output=OutputSettings(path=str(tmp_path / "out_locs.hdf5")))
-    part = settings.model.channels
-    part.layout, part.registration = "typed", "none"
+    part = settings.channels
+    part.layout, settings.model.registration.source = "typed", "none"
     part.x_corners, part.y_corners, part.width, part.height = "4, 54, 104, 154", "2,2,2,2", 44, 44
     part.mirrored = "3, 4"
     settings.finish.fourpi_z = False
@@ -657,8 +657,8 @@ def test_spline_4pi_fits_a_dcimg_live_as_it_would_the_finished_file(cal, tmp_pat
             camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
             model=FourPiModelSettings(calibration=str(model_path)),
             output=OutputSettings(path="", save=False))
-        part = s.model.channels
-        part.layout, part.registration = "typed", "none"
+        part = s.channels
+        part.layout, s.model.registration.source = "typed", "none"
         part.x_corners, part.y_corners, part.width, part.height = "0, 40, 80, 120", "0,0,0,0", 40, 40
         s.finish.fourpi_z = False
         return s
@@ -701,9 +701,9 @@ def test_a_simulated_4pi_camera_draws_four_channels_and_its_recipe_fills_spline_
                                  output=OutputSettings(path="", save=False))
     updates = fit.react("source.path", settings)
     assert updates["model.calibration"] == str(fourpi_path(path))
-    assert updates["model.channels.registration"] == "model"
+    assert updates["model.registration.source"] == "model"
     settings.model.calibration = updates["model.calibration"]
-    settings.model.channels.registration = "model"
+    settings.model.registration.source = "model"
     channels = fit.open_source(settings)
     assert channels.camera["conversion"] == s.camera.conversion
     assert channels.frame(0).shape == (4, 64, 64)

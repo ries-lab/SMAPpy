@@ -277,7 +277,7 @@ localizations are written to the file as they are fitted; when a finishing
 step changed them, the file is written once more with the finished table,
 and every step goes into its history.
 
-**Calibrating from the movie.**  With *calibrate from this movie* ticked, a
+**Calibrating from the movie.**  With *registration* > *from this movie* ticked, a
 first pass runs before the fit.  It fits frames of the movie with a plain
 [Gaussian 2D](plugin:Localize/Gaussian 2D) fit read as two channels, with the
 same camera and detection settings as the real fit: the halves are cut apart
@@ -402,7 +402,7 @@ offers a Gaussian PSF beside its spline.  Where the code departs from the public
   $(1 - f)\,h$ above).  A mirrored half is flipped back as it is cut, so $f$
   is close to 1 for any splitter.
 * **No bead calibration is needed.**  The paper builds its transformation from
-  beads; here the movie alone can give it (*calibrate from this movie*), by
+  beads; here the movie alone can give it (*registration* > *from this movie*), by
   voting on the vectors between localizations of the same frame.
 * **Colour from the free photon split only.**  The paper also fits each
   molecule with the photon ratio fixed at each dye's value and keeps the most
@@ -434,45 +434,45 @@ calibration.
 ### model.link_sigma
 Worth ticking only to test whether the two halves really differ in width.
 
-### transform.path
-Ignored when *calibrate from this movie* is ticked.
+### model.registration.path
+Ignored when *registration* > *from this movie* is ticked.
 
-### transform.calibrate
+### model.registration.calibrate
 The calibration pass fits at most *at most* frames with a plain Gaussian;
 then the real fit runs over the whole movie.
 
-### transform.calibrate_locs
+### model.registration.calibrate_locs
 10,000 in the dim channel is usually plenty; a sparse movie runs out of frames
 first, and the output says so.
 
-### transform.calibrate_skip
+### model.registration.calibrate_skip
 Set it to 0 for a movie that does not start with everything on, such as a
 simulation, or one started after a bleaching phase.
 
 ### channels.layout
 *microscope* reads it from the entry of the microscope the movie was taken
-on; a file no entry recognises stops with a message asking for it.  All the
-Ries lab's microscopes are *right-left mirrored*.  Where the entry gives its
-arms' regions on the chip, the channels are cut there and *split position*
-is greyed.  The registration's own
-*layout*, *main channel* and *split position* are not shown here: they serve
-*Calibrate transform* and the bead calibration, and this form reads the
-arrangement from *channels*.
-
+on -- the layout, the main channel and where the channels lie, its arms'
+regions or the frame's halves -- and the part says it in one line; a file no
+entry recognises stops with a message asking for it.  All the Ries lab's
+microscopes are *right-left mirrored*.  Choose a layout by hand and *main
+channel* and *split position* appear.  *channels* says where the two channels
+are on the chip; the map between them is the model's *registration*.  The
+*measuring* settings' own *layout*, *main channel* and *split position* are
+not shown here: they serve *Calibrate transform* and the bead calibration.
 ### channels.main_channel
 For two far-red dyes split by a long-pass dichroic, the transmitted arm is
-the brighter and the usual main channel; the microscope's entry names it.
+the brighter and the usual main channel; on *microscope* the entry names it.
 
-### transform.registration.model
+### model.registration.measure.model
 *polynomial* is refused, with a message, when the pairs are too few for its
 twenty coefficients or cover less than half of the field; the projective map
 is then kept.
 
-### transform.registration.coarse_tolerance_px
+### model.registration.measure.coarse_tolerance_px
 It has to cover what the voted offset alone cannot: a 3 degree rotation over
 512 px is 27 px at the edge.  Looser costs nothing measurable.
 
-### transform.registration.fine_tolerance_px
+### model.registration.measure.fine_tolerance_px
 About seven times the residual of a healthy registration (0.13 px); tighter
 strips the edges of the field.
 

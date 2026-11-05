@@ -38,22 +38,27 @@ def test_parts_show_up_as_children():
 
 
 def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place():
-    """The forms are declared in halves around the model (fit.py, "the
-    forms"); a part only one fitter has sits where it always did."""
+    """Every fitter shows the same parts in one order (fit.py, "the forms"): a
+    two-channel model holds its registration, and Spline 4Pi's *channels* is
+    its four rectangles, in the place of the others'."""
     from smappy.plugins.fit import DualGaussianFit, DualSplineFit, SplineFit
+    from smappy.plugins.fit_4pi import FourPiFit
     shared = ["source", "camera", "channels", "detection", "region", "model", "fit", "output",
               "finish"]
     assert list(GaussianFit.specs()) == shared
     assert list(SplineFit.specs()) == shared
-    assert list(DualSplineFit.specs()) == shared[:6] + ["transform"] + shared[6:]
-    assert list(DualGaussianFit.specs()) == shared[:6] + ["transform"] + shared[6:]
+    assert list(DualSplineFit.specs()) == shared
+    assert list(DualGaussianFit.specs()) == shared
+    assert list(FourPiFit.specs()) == shared
+    assert list(FourPiFit.specs()["channels"].children)[0] == "layout"
+    assert list(FourPiFit.specs()["model"].children)[-1] == "registration"
     # the model is each fitter's own, and the two-channel ones share links
     assert [list(cls.specs()["model"].children) for cls in
             (DualSplineFit, DualGaussianFit)] == [
         ["calibration", "link_xy", "link_z", "link_photons", "link_background",
-         "photon_ratio"],
+         "photon_ratio", "registration"],
         ["sigma", "link_xy", "link_photons", "link_background", "link_sigma",
-         "photon_ratio"]]
+         "photon_ratio", "registration"]]
 
 
 def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):

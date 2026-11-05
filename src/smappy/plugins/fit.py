@@ -293,16 +293,16 @@ class ChannelsSettings:
                        help="two channels: a split camera, each channel detected and fitted on "
                             "its own; whether the dichroic was in, no file says")
     layout: str = param("microscope", label="layout", choices=LAYOUT_CHOICES,
-                        help="how the chip is split: the microscope's entry, or chosen for a "
-                             "microscope without one")
+                        help="how the chip is split: the microscope's entry, or chosen by "
+                             "hand with the main channel and the split")
     main_channel: str = param("microscope", label="main channel", choices=HALF_CHOICES,
-                              help="the channel positions are registered onto; the "
-                                   "microscope's, else the left or upper one")
+                              help="the channel positions are registered onto, for a layout "
+                                   "chosen by hand")
     split_position: Optional[int] = param(None, label="split position", unit="px", min=1,
                                           advanced=True,
                                           help="the first pixel of the second channel, on "
-                                               "the chip, where the microscope's arms have "
-                                               "no regions; empty: the middle of the frame")
+                                               "the chip, for a layout chosen by hand; "
+                                               "empty: the middle of the frame")
 
     @property
     def two(self) -> bool:
@@ -541,7 +541,8 @@ class _FitPlugin(Plugin):
     #: a 4Pi interference phase in the table: what *after the fit*'s 4Pi z needs
     phase = False
     #: the *channels* part: "choice" -- whole chip or two channels (a 1C fitter), "two" -- always
-    #: two, the arrangement shown (a two-colour fitter), "none" -- channels of its own (4Pi)
+    #: two, the arrangement shown (a two-colour fitter), "own" -- a channels part of its own (4Pi),
+    #: "none" -- no channels part
     channel_part = "choice"
     #: the kind of calibration a simulated recipe's (`simulate.source.recipe_calibration`) this
     #: fitter takes, where its model settings do not say; and what it sets beside it
@@ -712,7 +713,7 @@ class _FitPlugin(Plugin):
         with one ROI per channel."""
         from ..pipeline import LocalizationEngine
         channels = getattr(settings, "channels", None)
-        if channels is None or not channels.two:
+        if channels is None or not getattr(channels, "two", False):
             return LocalizationEngine(camera, finder, model, settings.fit)
         from ..multichannel import SplitEngine
         if source is None:
@@ -805,20 +806,39 @@ class _FitPlugin(Plugin):
         if channels is not None:
             if self.channel_part == "none":
                 state.shown["channels"] = False
+            elif self.channel_part == "own":
+                pass                             # a fitter's own channels part says itself
             else:
                 two = self.channel_part == "two" or channels.two
                 state.shown["channels.split"] = self.channel_part == "choice"
                 for name in ("layout", "main_channel", "split_position"):
                     state.active[f"channels.{name}"] = two
+                said = self._arrangement_line(settings) if two else None
                 state.titles["channels"] = ("two channels" if two else "whole chip") + (
-                    f", {channels.layout}" if two and channels.layout != "microscope" else "")
-                if two:
-                    self._split_hint(settings, state)
+                    f", {said or channels.layout}" if two else "")
+                # on *microscope* the entry says it all, in the title and the layout's hint; the
+                # main channel and the split are fields only for an arrangement chosen by hand
+                by_hand = channels.layout != "microscope"
+                state.shown["channels.main_channel"] = by_hand
+                state.shown["channels.split_position"] = by_hand
+                if two and said and not by_hand:
+                    state.hints["channels.layout"] = said
                 if self.channel_part == "two":
                     # the arrangement is the *channels* part's; the registration's copies of it
                     # serve Calibrate transform and the bead calibration, not this form
                     for name in ("layout", "main_channel", "split_position"):
-                        state.shown[f"transform.registration.{name}"] = False
+                        state.shown[f"model.registration.measure.{name}"] = False
+                    registration = settings.model.registration
+                    measured = registration.calibrate
+                    state.titles["model.registration"] = "registration: " + (
+                        "from this movie" if measured else
+                        Path(registration.path).name if registration.path else
+                        "the calibration's" if hasattr(settings.model, "calibration") else
+                        "none chosen")
+                    state.active["model.registration.path"] = not measured
+                    for name in ("calibrate_frames", "calibrate_locs", "calibrate_blocks",
+                                 "calibrate_skip", "measure"):
+                        state.active[f"model.registration.{name}"] = measured
         region = getattr(settings, "region", None)
         if region is not None:
             state.titles["region"] = region.summary()
@@ -946,22 +966,28 @@ class _FitPlugin(Plugin):
         return {"line": title, "status": status, "values": ", ".join(bits),
                 "sources": sources}, shown
 
-    def _split_hint(self, settings, state) -> None:
-        """What the *split position* comes to: the microscope's arms' regions, where the entry
-        gives them and the layout is its -- the field is then not read, the entry says it once --
-        else the middle of the frame."""
+    def _arrangement_line(self, settings) -> Optional[str]:
+        """How the chip is split, in one line: the microscope's entry (`microscope_db.arrangement_of`)
+        on *microscope* -- ``M2's: right-left mirrored, main right, at its arms' regions`` -- or what is
+        chosen by hand; None where nothing can be said yet (no file, no entry)."""
+        channels = settings.channels
+        if channels.layout != "microscope":
+            return (f"{channels.layout}, main {channels.main_channel}"
+                    + (f", split at {channels.split_position} px" if channels.split_position
+                       else ""))
         try:
-            from ..calibrate.dual import entry_regions
+            from ..microscope_db import arrangement_of
             resolved = self.resolution(settings)
             scope = resolved.microscope if resolved is not None else None
-            regions = entry_regions(settings.channels, scope.summary() if scope else None)
+            found = arrangement_of(scope.summary()) if scope is not None else None
         except Exception:
-            return
-        if regions:
-            state.active["channels.split_position"] = False
-            state.hints["channels.split_position"] = f"{scope.name}'s arms' regions"
-        else:
-            state.hints["channels.split_position"] = "the middle of the frame"
+            return None
+        if scope is None:
+            return None
+        if found is None:
+            return f"{scope.name}'s entry does not say: choose it"
+        return (f"{scope.name}'s: {found['layout']}, main {found['main_channel']}, "
+                + ("at its arms' regions" if found.get("regions") else "the frame halved"))
 
     def unknown_camera(self, settings) -> Optional[str]:
         """The question at Run for a camera that is in no database and
@@ -1048,14 +1074,15 @@ class _FitPlugin(Plugin):
             # a simulated split camera knows the map between its halves and
             # writes it beside its recipe: a two-colour fitter takes it, as a
             # file picked by hand, unless one was chosen
-            transform = getattr(settings, "transform", None)
-            if transform is not None and hasattr(transform, "path"):
+            transform = getattr(getattr(settings, "model", None), "registration", None) \
+                if self.two_channel else None
+            if transform is not None:
                 from ..simulate.source import recipe_transform
                 written = recipe_transform(settings.source.path)
                 if written is not None and transform.path in (
                         "", getattr(self, "_default_transform", None)):
-                    updates["transform.path"] = str(written)
-                    updates["transform.calibrate"] = False
+                    updates["model.registration.path"] = str(written)
+                    updates["model.registration.calibrate"] = False
                     self._default_transform = str(written)
             # a recipe drawn with a bead calibration: a spline fitter fits
             # with that calibration, unless one was chosen
@@ -1121,7 +1148,7 @@ class _FitPlugin(Plugin):
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
         channels = getattr(settings, "channels", None)
-        if channels is not None and channels.two and self.channel_part == "choice":
+        if self.channel_part == "choice" and channels.two:
             # each channel on its own, drawn back on the frame
             split = self.engine(settings, camera, finder, None, source)
             xy, filtered, cutoffs = split.detect(photons[None], first_frame=index)
@@ -1488,11 +1515,11 @@ def _open(src: SourceSettings, watch: bool, stop_event=None):
 #
 # Every fitter's form is the same parts in the same order -- the frames, the
 # camera, detection, the PSF model, the fit, the output -- and only the model
-# is each fitter's own.  The parts are declared once, in halves rather than in
-# one base: a dataclass lays out its bases' fields first, the most basic base
-# first, so a part that sits *between* two of them -- the 2D two-colour fit's
-# *transform* -- needs a half on either side.  A fitter that declares `model`
-# again keeps it where the first half put it.  Saved workspaces and chains
+# is each fitter's own -- a two-channel model holds its registration, the map
+# between the channels, beside the PSF it belongs with.  The parts are declared
+# once, in halves rather than in one base: a dataclass lays out its bases'
+# fields first, the most basic base first, so a part could sit between the two.
+# A fitter that declares `model` again keeps it where the first half put it.  Saved workspaces and chains
 # name the fields by these paths (``fit.roisize``), so they are the contract.
 @dataclass
 class _Reading:
@@ -1535,6 +1562,77 @@ class GaussianFitSettings(_Finishing, _Writing, _Reading):
 @dataclass
 class SplineFitSettings(_Finishing, _Writing, _Reading):
     model: SplineModelSettings = field(default_factory=SplineModelSettings)
+
+
+TRANSFORM_FILTER = ("Channel transformation (*_2ct.h5 *.h5 *.hdf5);;"
+                    "All files (*)")
+
+@dataclass
+class ChannelTransformSettings:
+    """Where the second channel is.
+
+    Either a transformation measured earlier -- by *Register/Calibrate
+    transform*, or a dual-colour bead calibration, which carries one -- or one
+    measured from this very movie: fit its first frames with a plain Gaussian
+    over the whole frame, register the pairs, and go on to the real fit with
+    the result.  The second is the usual case, because a ratiometric
+    experiment images every molecule twice and so carries its own
+    registration; a saved file is for when the splitter is known to be stable,
+    or when the data are too sparse to register on.
+    """
+    path: str = param("", label="transformation", kind="open_file",
+                      file_filter=TRANSFORM_FILTER,
+                      help="from Register/Calibrate transform, or a dual-colour "
+                           "bead calibration")
+    calibrate: bool = param(False, label="from this movie",
+                            help="ignore the file: fit the first frames with a "
+                                 "plain Gaussian and register them")
+    # A cap, not a target: what is wanted is enough *pairs*, and how many
+    # frames that takes depends entirely on the sample and the dye.
+    calibrate_frames: int = param(5000, label="at most", unit="frames", min=50,
+                                  help="the most frames the calibration pass "
+                                       "fits, however few localizations they "
+                                       "give")
+    calibrate_locs: int = param(10000, label="localizations wanted", min=500,
+                                help="in the dimmer of the two channels, which "
+                                     "is what limits the pairs; blocks are read "
+                                     "until this is reached or the frame cap is")
+    calibrate_blocks: int = param(10, label="spread over", unit="blocks", min=1,
+                                  help="the frames are taken as this many "
+                                       "evenly spaced blocks across the whole "
+                                       "movie, not as one run at the start")
+    # how a registration is measured, from the movie here and by *Calibrate transform*: the
+    # arrangement fields in it are the *channels* part's in a fitter's form, and hidden there
+    measure: RegisterSettings = param(default_factory=RegisterSettings, label="measuring",
+                                      collapsed=True)
+    calibrate_skip: int = param(500, label="skip the first", unit="frames", min=0,
+                                help="the opening frames of a movie are not "
+                                     "single molecules: everything is on at "
+                                     "once and often saturated, and fitting "
+                                     "that gives a registration nothing to "
+                                     "pair")
+    save_calibration: bool = param(True, label="save it", advanced=True,
+                                   help="write the measured transformation "
+                                        "beside the output, as *_2ct.h5")
+
+    def load(self):
+        from ..calibrate.transform import load_transform
+        if not self.path:
+            raise ValueError("a two-channel fit needs a transformation: choose a "
+                             "file, or tick the registration's 'from this movie'")
+        return load_transform(self.path)
+
+
+@dataclass
+class SplineTransformSettings(ChannelTransformSettings):
+    """Spline 3D 2C's registration: the calibration's own, a file's, or one measured from the movie;
+    the PSFs are always the calibration's."""
+    path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
+                      help="empty: the calibration's own; a _2ct.h5 to use instead, with the "
+                           "calibration's PSFs")
+    calibrate: bool = param(False, label="from this movie",
+                            help="keep the calibration's PSFs and measure where the second channel is "
+                                 "from this movie: for a splitter moved since the beads")
 
 
 # The links two channels can share, declared once for both two-channel
@@ -1595,6 +1693,10 @@ class DualModelSettings(_LinkedChannels):
     link_background: bool = _link_background()
     photon_ratio: Optional[float] = _photon_ratio(
         "the split the calibration's two PSFs carry")
+    # where the second channel is: the calibration's own map, a file's or the movie's; the
+    # channels' rectangles are the *channels* part's
+    registration: SplineTransformSettings = param(default_factory=SplineTransformSettings,
+                                                  label="registration", collapsed=True)
 
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
@@ -1613,14 +1715,7 @@ class DualModelSettings(_LinkedChannels):
 
 
 @dataclass
-class _SplineTransform:
-    """Spline 3D 2C's registration, where the 2D form has its own (`_Transform`); the class is defined
-    below, with the 2D form's: the calibration's PSFs, another registration."""
-    transform: SplineTransformSettings = field(default_factory=lambda: SplineTransformSettings())
-
-
-@dataclass
-class DualSplineFitSettings(_Finishing, _Writing, _SplineTransform, _Reading):
+class DualSplineFitSettings(_Finishing, _Writing, _Reading):
     model: DualModelSettings = field(default_factory=DualModelSettings)
 
 
@@ -1930,7 +2025,7 @@ class _TwoChannelFit(_FitPlugin):
         """The `RegistrationResult` measured from this movie when *measure / calibrate from this
         movie* is ticked, else None: kept, so a preview pays for it once and the run that follows
         fits with the very registration the preview showed (`_calibrate`)."""
-        if not settings.transform.calibrate:
+        if not settings.model.registration.calibrate:
             return None
         return self._calibrate(ctx, self.measuring_settings(settings), save=save)
 
@@ -1999,7 +2094,7 @@ class _TwoChannelFit(_FitPlugin):
                 _MEASURED[key] = found
         else:
             ctx.report("the channel transformation as measured before, for these settings")
-        if save and settings.transform.save_calibration:
+        if save and settings.model.registration.save_calibration:
             src = settings.source
             out = settings.output.resolve(src.path)
             if out is None:
@@ -2034,7 +2129,7 @@ class _TwoChannelFit(_FitPlugin):
         # detected; the registration's own fields of the same names are not read here
         channels = replace(settings.channels, split="two channels")
         told = channels.arrangement(camera)
-        registration = replace(settings.transform.registration, layout=told["layout"],
+        registration = replace(settings.model.registration.measure, layout=told["layout"],
                                main_channel=told["main_channel"],
                                split_position=told["split_position"])
         chip = channels.chip_layout(camera, source.shape[-2:])
@@ -2044,15 +2139,15 @@ class _TwoChannelFit(_FitPlugin):
                       else f", as {camera.microscope.get('name')}'s entry says"))
         last = min(src.stop, source.n_frames) if src.stop else source.n_frames
         blocks = calibration_blocks(src.start, last,
-                                    settings.transform.calibrate_frames,
-                                    settings.transform.calibrate_blocks,
-                                    settings.transform.calibrate_skip)
+                                    settings.model.registration.calibrate_frames,
+                                    settings.model.registration.calibrate_blocks,
+                                    settings.model.registration.calibrate_skip)
         ctx.report("calibrating the channel transformation")
 
         # a context of its own: the calibration pass must not push its blocks
         # into the live view the real fit is about to draw into
         quiet = Context(progress=lambda _: None)
-        want = int(settings.transform.calibrate_locs)
+        want = int(settings.model.registration.calibrate_locs)
 
         def fit_range(start, stop):
             # the two channels each detected and fitted on its own, with its own threshold --
@@ -2077,10 +2172,10 @@ class _TwoChannelFit(_FitPlugin):
                 / max(probe_stop - probe_start, 1)) if probe is not None else 0
         if rate > 0:
             needed = int(min(max(want / rate, 100),
-                             settings.transform.calibrate_frames))
+                             settings.model.registration.calibrate_frames))
             blocks = calibration_blocks(src.start, last, needed,
-                                        settings.transform.calibrate_blocks,
-                                        settings.transform.calibrate_skip)
+                                        settings.model.registration.calibrate_blocks,
+                                        settings.model.registration.calibrate_skip)
         ctx.report(f"{rate:.0f} localizations per frame in the dimmer channel: "
                    f"taking {sum(b - a for a, b in blocks):,} frames in "
                    f"{len(blocks)} block(s) between {blocks[0][0]:,} and "
@@ -2191,7 +2286,7 @@ class _TwoChannelFit(_FitPlugin):
                                   select=select)
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
-        """`_layer_preview`; with *measure from this movie* ticked, on the registration measured
+        """`_layer_preview`; with the registration's *from this movie* ticked, on the registration measured
         from it, whose figures are a tab beside the frame's -- the check that it worked before a
         long fit is started on it.  The first preview pays for the measurement, the next ones
         and the run reuse it while the settings it depends on stay (`_calibrate`)."""
@@ -2200,7 +2295,7 @@ class _TwoChannelFit(_FitPlugin):
         except ValueError:
             pass
         found, failed = None, ""
-        if settings.transform.calibrate:
+        if settings.model.registration.calibrate:
             try:
                 found = self.measured(ctx, settings)
             except Exception as error:
@@ -2338,14 +2433,14 @@ class DualSplineFit(_TwoChannelFit):
     calibration_kind = "dual"
 
     def registration_path(self, settings) -> str:
-        return f"{settings.model.calibration}|{settings.transform.path}"
+        return f"{settings.model.calibration}|{settings.model.registration.path}"
 
     def read_registration(self, settings):
         """The dual-colour calibration: both PSFs, and its registration or the file's in place of it."""
         from ..calibrate.dual import with_registration
         calibration = settings.model.load()
-        if settings.transform.path:
-            return with_registration(calibration, settings.transform.load())
+        if settings.model.registration.path:
+            return with_registration(calibration, settings.model.registration.load())
         return calibration
 
     def measuring_settings(self, settings):
@@ -2383,7 +2478,7 @@ def _measuring_key(settings, sigma: float) -> Optional[str]:
         stat = Path(src.path).stat()
     except (OSError, TypeError, ValueError):
         return None
-    transform = replace(settings.transform, path="", save_calibration=False)
+    transform = replace(settings.model.registration, path="", save_calibration=False)
     return repr((str(Path(src.path).resolve()), stat.st_size, stat.st_mtime_ns,
                  replace(src, live=False), settings.camera, settings.channels,
                  settings.detection, settings.fit,
@@ -2391,8 +2486,7 @@ def _measuring_key(settings, sigma: float) -> Optional[str]:
 
 
 # ----------------------------------------------------- two channels, no model
-TRANSFORM_FILTER = ("Channel transformation (*_2ct.h5 *.h5 *.hdf5);;"
-                    "All files (*)")
+
 
 
 def _dim_channel_count(parts) -> int:
@@ -2459,59 +2553,6 @@ def calibration_blocks(start: int, stop: int, frames: int, blocks: int,
 
 
 @dataclass
-class ChannelTransformSettings:
-    """Where the second channel is.
-
-    Either a transformation measured earlier -- by *Register/Calibrate
-    transform*, or a dual-colour bead calibration, which carries one -- or one
-    measured from this very movie: fit its first frames with a plain Gaussian
-    over the whole frame, register the pairs, and go on to the real fit with
-    the result.  The second is the usual case, because a ratiometric
-    experiment images every molecule twice and so carries its own
-    registration; a saved file is for when the splitter is known to be stable,
-    or when the data are too sparse to register on.
-    """
-    path: str = param("", label="transformation", kind="open_file",
-                      file_filter=TRANSFORM_FILTER,
-                      help="from Register/Calibrate transform, or a dual-colour "
-                           "bead calibration")
-    calibrate: bool = param(False, label="calibrate from this movie",
-                            help="ignore the file: fit the first frames with a "
-                                 "plain Gaussian and register them")
-    # A cap, not a target: what is wanted is enough *pairs*, and how many
-    # frames that takes depends entirely on the sample and the dye.
-    calibrate_frames: int = param(5000, label="at most", unit="frames", min=50,
-                                  help="the most frames the calibration pass "
-                                       "fits, however few localizations they "
-                                       "give")
-    calibrate_locs: int = param(10000, label="localizations wanted", min=500,
-                                help="in the dimmer of the two channels, which "
-                                     "is what limits the pairs; blocks are read "
-                                     "until this is reached or the frame cap is")
-    calibrate_blocks: int = param(10, label="spread over", unit="blocks", min=1,
-                                  help="the frames are taken as this many "
-                                       "evenly spaced blocks across the whole "
-                                       "movie, not as one run at the start")
-    registration: RegisterSettings = field(default_factory=RegisterSettings)
-    calibrate_skip: int = param(500, label="skip the first", unit="frames", min=0,
-                                help="the opening frames of a movie are not "
-                                     "single molecules: everything is on at "
-                                     "once and often saturated, and fitting "
-                                     "that gives a registration nothing to "
-                                     "pair")
-    save_calibration: bool = param(True, label="save it", advanced=True,
-                                   help="write the measured transformation "
-                                        "beside the output, as *_2ct.h5")
-
-    def load(self):
-        from ..calibrate.transform import load_transform
-        if not self.path:
-            raise ValueError("a two-channel fit needs a transformation: choose a "
-                             "file, or tick 'calibrate from this movie'")
-        return load_transform(self.path)
-
-
-@dataclass
 class DualGaussianModelSettings(_LinkedChannels):
     """A free-width Gaussian per channel, and which parameters they share."""
     FIFTH_LINK = "link_sigma"
@@ -2528,6 +2569,10 @@ class DualGaussianModelSettings(_LinkedChannels):
     photon_ratio: Optional[float] = _photon_ratio(
         "the beads' ratio if the transformation is a bead calibration, "
         "otherwise 1")
+    # where the second channel is: a file's map or the movie's; the channels' rectangles are
+    # the *channels* part's
+    registration: ChannelTransformSettings = param(default_factory=ChannelTransformSettings,
+                                                   label="registration", collapsed=True)
 
     def model(self, channels: int = 2):
         from ..psf import GlobalGaussianPSF
@@ -2536,25 +2581,7 @@ class DualGaussianModelSettings(_LinkedChannels):
 
 
 @dataclass
-class SplineTransformSettings(ChannelTransformSettings):
-    """Spline 3D 2C's registration: the calibration's own, a file's, or one measured from the movie;
-    the PSFs are always the calibration's."""
-    path: str = param("", label="transformation", kind="open_file", file_filter=TRANSFORM_FILTER,
-                      help="empty: the calibration's own; a _2ct.h5 to use instead, with the "
-                           "calibration's PSFs")
-    calibrate: bool = param(False, label="measure from this movie",
-                            help="keep the calibration's PSFs and measure where the second channel is "
-                                 "from this movie: for a splitter moved since the beads")
-
-
-@dataclass
-class _Transform:
-    """The part only the 2D two-colour form has, between its two halves."""
-    transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
-
-
-@dataclass
-class DualGaussianFitSettings(_Finishing, _Writing, _Transform, _Reading):
+class DualGaussianFitSettings(_Finishing, _Writing, _Reading):
     model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
 
 
@@ -2597,11 +2624,11 @@ class DualGaussianFit(_TwoChannelFit):
         return settings.model.model()
 
     def registration_path(self, settings) -> str:
-        return settings.transform.path
+        return settings.model.registration.path
 
     def read_registration(self, settings):
         """A transformation off disk, or the one in a dual-colour calibration."""
-        return settings.transform.load()
+        return settings.model.registration.load()
 
     def _start_sigma(self, settings) -> float:
         return float(settings.model.sigma)
@@ -2614,11 +2641,11 @@ class DualGaussianFit(_TwoChannelFit):
         camera = super().preflight(ctx, settings)
         if camera is not None:
             return camera
-        if settings.transform.calibrate or settings.transform.path:
+        if settings.model.registration.calibrate or settings.model.registration.path:
             return None
         from dataclasses import replace as _replace
-        calibrated = _replace(settings, transform=_replace(settings.transform,
-                                                           calibrate=True))
+        calibrated = _replace(settings, model=_replace(
+            settings.model, registration=_replace(settings.model.registration, calibrate=True)))
         return PreflightQuestion(
             "No transformation chosen: the two channels cannot be paired "
             "without one.  Measure it from the first frames of this movie, or "

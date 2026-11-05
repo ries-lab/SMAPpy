@@ -40,8 +40,11 @@ REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"),
 
 
 @dataclass
-class ChannelLayoutSettings:
-    layout: str = param("auto", label="channels", choices=LAYOUTS,
+class FourPiChannelsSettings:
+    """Where the phase channels are on the chip: every fitter's *channels* part, here four
+    rectangles rather than a two-way split.  The maps between them are the model's part
+    (`FourPiRegistrationSettings`): they are learnt with the PSF and belong with it."""
+    layout: str = param("auto", label="layout", choices=LAYOUTS,
                         help="where the phase channels are: the file's own layout, the "
                              "microscope's (the database), or typed")
     x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
@@ -55,10 +58,15 @@ class ChannelLayoutSettings:
     mirrored: str = param("", label="mirrored in x",
                           help="the channels mirrored left-right, by number from 1, "
                                "comma-separated; empty: none")
-    registration: str = param("model", label="registration", choices=REGISTRATIONS,
-                              help="how the channels map onto the first: the maps kept "
-                                   "with the model, measured on beads, a saved registration, "
-                                   "or none")
+
+
+@dataclass
+class FourPiRegistrationSettings:
+    """How the channels map onto the first: the maps kept with the model, measured on beads, a
+    saved registration, or none."""
+    source: str = param("model", label="from", choices=REGISTRATIONS,
+                        help="the maps kept with the model, measured on beads, a saved "
+                             "registration, or none")
     beads: str = param("", label="beads", kind="open_file",
                        help="a bead acquisition in this layout (a z stack), or a folder "
                             "of them; measured once, kept beside them")
@@ -72,8 +80,6 @@ class FourPiModelSettings:
     calibration: str = param("", label="4Pi model", kind="open_file",
                              file_filter=MODEL_FILTER,
                              help="a 4Pi model (.h5): this program's or uiPSF v1's")
-    channels: ChannelLayoutSettings = param(default_factory=ChannelLayoutSettings,
-                                            label="channels")
     link_xy: bool = param(True, label="link x, y",
                           help="one position for every channel; off measures each "
                                "channel's own, to check the registration")
@@ -90,10 +96,15 @@ class FourPiModelSettings:
                                    "the drift is measured in")
     drift_frames: int = param(500, label="frames per block", unit="frames", min=10,
                               advanced=True, help="how many frames each block fits")
+    registration: FourPiRegistrationSettings = param(
+        default_factory=FourPiRegistrationSettings, label="registration", collapsed=True)
 
 
 @dataclass
 class FourPiFitSettings(_Finishing, _Writing, _Reading):
+    # the *channels* part in its place, four rectangles where the others read a split
+    channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings,
+                                             label="channels", collapsed=True)
     model: FourPiModelSettings = field(default_factory=FourPiModelSettings)
 
 
@@ -159,7 +170,8 @@ def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=N
     model's, the beads', a registration file's, or none.
     """
     from ..channels import YALE_4PI, from_corners, load_registration
-    part = settings.model.channels
+    part = settings.channels
+    registration = settings.model.registration
     own = getattr(base, "layout", None)
     roi = camera.roi_offset if camera is not None else (0, 0)
     choice = part.layout
@@ -187,18 +199,18 @@ def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=N
         layout = from_corners(x, y, part.width, part.height,
                               flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
     maps = None
-    if part.registration == "beads":
-        maps = registration_from_beads(part.beads, layout)
-    elif part.registration == "file":
-        if not part.path:
+    if registration.source == "beads":
+        maps = registration_from_beads(registration.beads, layout)
+    elif registration.source == "file":
+        if not registration.path:
             raise ValueError("choose a channel registration file")
-        saved = load_registration(part.path)
+        saved = load_registration(registration.path)
         if saved.size != layout.size or saved.n_channels != layout.n_channels:
             raise ValueError(f"the registration was measured on {saved.n_channels} channels "
                              f"of {saved.size}, this layout has {layout.n_channels} of "
                              f"{layout.size}")
         maps = saved.maps
-    elif part.registration == "model" and calibration is not None:
+    elif registration.source == "model" and calibration is not None:
         maps = calibration.maps()
         measured = getattr(calibration, "layout", None)
         if maps is not None and measured:
@@ -223,11 +235,11 @@ class FourPiFit(_FitPlugin):
     # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
     version = "2"
     phase = True
-    # its channels are its own part (`model.channels`): four regions, not a two-way split
-    channel_part = "none"
+    # its *channels* part is its own (`FourPiChannelsSettings`): four regions, not a two-way split
+    channel_part = "own"
     # a simulated 4Pi camera's model, with the maps it was drawn with
     calibration_kind = "fourpi"
-    calibration_extras = {"model.channels.registration": "model"}
+    calibration_extras = {"model.registration.source": "model"}
 
     def _calibration(self, settings):
         from ..fourpi import load_fourpi_calibration
@@ -329,13 +341,16 @@ class FourPiFit(_FitPlugin):
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
-        part = settings.model.channels
+        part, registration = settings.channels, settings.model.registration
         typed = part.layout == "typed"
-        state.shown.update({"model.channels.beads": part.registration == "beads",
-                            "model.channels.path": part.registration == "file",
-                            **{f"model.channels.{n}": typed
+        state.shown.update({"model.registration.beads": registration.source == "beads",
+                            "model.registration.path": registration.source == "file",
+                            **{f"channels.{n}": typed
                                for n in ("x_corners", "y_corners", "width", "height",
                                          "mirrored")}})
+        state.titles["channels"] = "channels: " + dict(LAYOUTS).get(part.layout, part.layout)
+        state.titles["model.registration"] = "registration: " + dict(REGISTRATIONS).get(
+            registration.source, registration.source)
         state.active.update({"model.drift_blocks": settings.model.channel_drift,
                              "model.drift_frames": settings.model.channel_drift})
         if not settings.model.link_xy:

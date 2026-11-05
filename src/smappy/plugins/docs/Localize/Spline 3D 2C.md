@@ -410,14 +410,14 @@ pixels lie in them; one made without the camera ROI (*ROI-local*) needs a
 movie of the bead image's size, and a movie with no camera ROI in its
 metadata is taken to start at the chip's corner, with a warning.
 
-### transform.path
+### model.registration.path
 A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
 registration, used in place of the calibration's own; the PSFs are still the
 calibration's.  It must put the main channel on the same half as the
 calibration does, or the fit refuses: each PSF was made from its own half.
-Ignored when *measure from this movie* is ticked.
+Ignored when *registration* > *from this movie* is ticked.
 
-### transform.calibrate
+### model.registration.calibrate
 For a splitter that moved since the beads -- the residuals of *link xy*
 off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
 plain Gaussian as two channels, cut with the calibration's layout and main
@@ -428,7 +428,7 @@ measures it too and shows it in a tab, *channel registration*; the
 measurement is kept, so the run uses the one the preview showed unless a
 setting it depends on changed since.
 
-### transform.calibrate_skip
+### model.registration.calibrate_skip
 Set it to 0 for a movie that does not start with everything on.
 
 ### model.link_xy
@@ -527,7 +527,7 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
   transformation (crosses); a cross on its partner's circle means the
   calibration fits this data.  A calibration made with a different splitter
   alignment misses.  The line above gives each channel's own cutoff on that
-  frame.  With *measure from this movie* ticked, the crosses are drawn with
+  frame.  With *registration* > *from this movie* ticked, the crosses are drawn with
   the registration measured from the movie, and the tab *channel
   registration* shows how it was found -- the vote, the residuals, where the
   pairs are -- as in [Calibrate transform](plugin:Analysis/Register/Calibrate transform).

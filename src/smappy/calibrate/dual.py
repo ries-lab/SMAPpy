@@ -217,7 +217,8 @@ def resolve_arrangement(settings: RegisterSettings, microscope=None,
                   "registration settings, or add the arms' sides to the microscope's entry")
         layout = found['layout']
     halves = ('left', 'right') if 'right-left' in layout else ('upper', 'lower')
-    main = settings.main_channel
+    # the entry's arrangement is all the entry's: a main channel is chosen with a layout by hand
+    main = 'microscope' if settings.layout == 'microscope' else settings.main_channel
     if main == 'microscope':
         main = (found['main_channel'] if found is not None and found['main_channel'] in halves
                 else halves[0])

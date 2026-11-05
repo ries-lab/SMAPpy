@@ -322,7 +322,7 @@ def test_fit_this_gives_a_split_camera_to_the_two_colour_fitter_with_its_map(
     assert opened.plugin == "Localize/Gaussian 2D 2C"
     values = localize.slots[opened.id].panel.form.values()
     assert values["source.path"] == made.written
-    assert values["transform.path"] == str(tmp_path / "two_2ct.h5")
+    assert values["model.registration.path"] == str(tmp_path / "two_2ct.h5")
 
 
 def test_fit_this_gives_a_simulation_drawn_with_a_calibration_to_the_spline_fitter(

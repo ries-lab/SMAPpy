@@ -607,8 +607,21 @@ Decided with Jonas: one description per fact.  The entry had four overlapping on
   *right-left mirrored* puts the mirror on the second arm where no arm has one.
 * **One place cuts**: `calibrate.dual.chip_channels`, which the fitters' *channels* part,
   *Calibrate transform* and the dual bead calibration all call -- the entry's regions where the
-  layout is the microscope's, else the typed *split position* or the frame's middle.  The
-  fitters grey *split position* where the entry's regions decide and say so as its hint.
+  layout is the microscope's, else the typed *split position* or the frame's middle.
+
+### Built: one channels part, the registration with the model (2026-11-05)
+
+Decided with Jonas, no compatibility with older saved settings.  Every fitter's *channels* part
+says where the channels are on the chip, and only that: on *microscope* it is one line (the
+title and the layout's hint, `_FitPlugin._arrangement_line`: the entry's layout, main channel and
+regions or halves), and the main channel and the split appear only for a layout chosen by hand
+(`resolve_arrangement` reads no main channel beside the microscope's layout).  Spline 4Pi's
+geometry is its *channels* part (`fit_4pi.FourPiChannelsSettings`) in the same place, no longer
+inside its model.  The map between the channels is calibration, beside the PSF it belongs with:
+the model's *registration* -- `model.registration` in the two-colour fitters
+(`ChannelTransformSettings`, `SplineTransformSettings`; how a registration is measured is its
+*measuring*, `measure`) and in Spline 4Pi (`FourPiRegistrationSettings`: the model's, beads, a
+file, none).  The two-colour fitters' *transform* part is gone.
 
 ### Built: step 4 (2026-11-04), the microscope's PSF
 

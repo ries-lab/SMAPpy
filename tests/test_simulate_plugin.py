@@ -150,8 +150,8 @@ def test_two_colour_pores_as_a_split_camera_are_fitted_by_the_two_colour_fitter(
     fit.output = OutputSettings(path=str(tmp_path / "pores.hdf5"))
     fit.camera = CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1)
     updates = fitter.react("source.path", fit)
-    assert updates["transform.path"] == str(tmp_path / "pores_2ct.h5")
-    fit.transform.path = updates["transform.path"]
+    assert updates["model.registration.path"] == str(tmp_path / "pores_2ct.h5")
+    fit.model.registration.path = updates["model.registration.path"]
     locs = fitter.run(Context(), fit).locs
     got, want = [], []
     for f in np.unique(locs["frame"]):

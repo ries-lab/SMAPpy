@@ -6,8 +6,8 @@ how the photons split.  So the parts are the transformation (where the second
 half sees what the first sees), a fit that fits both spots of a pair at once,
 and the colour assignment from the photon ratio.
 
-The transformation is measured from the movie itself ("calibrate from this
-movie") because that is the route that needs nothing else -- no beads, no
+The transformation is measured from the movie itself (the model's
+*registration*, "from this movie") because that is the route that needs nothing else -- no beads, no
 earlier file -- and the one most 2D users will take; a bead calibration or a
 saved ``_2ct.h5`` is said rather than shown.  3D, where the beads are needed
 for the PSF anyway, is the next tutorial.
@@ -142,14 +142,7 @@ def make(d) -> None:
            spot=[field(panel, "source.path")], point=field(panel, "source.path"),
            zoom=d.around(field(panel, "source.path"), 760))
 
-    d.chapter("The transformation")
-    calibrate = field(panel, "transform.calibrate")
-    type_into(panel, "transform.calibrate", True)
-    d.settle()
-    d.shot("Calibrate from this movie measures the transformation from the "
-           "movie's own molecules, which appear in both halves. No beads needed.",
-           spot=[calibrate], point=calibrate, click=True,
-           zoom=d.around(calibrate, 760))
+    d.chapter("The channels")
     # the simulated movie names no microscope, so its split is chosen; a microscope with an
     # entry gives it, and it is never detected
     expand(field(panel, "channels.layout"))
@@ -161,7 +154,18 @@ def make(d) -> None:
     d.shot("How the chip is split comes from the microscope's entry. This movie "
            "names none, so say it here: an upper and a lower half, the main one above.",
            spot=[layout, main], point=layout, zoom=d.around(layout, 760))
-    path = field(panel, "transform.path")
+
+    d.chapter("The transformation")
+    calibrate = field(panel, "model.registration.calibrate")
+    expand(calibrate)
+    type_into(panel, "model.registration.calibrate", True)
+    d.settle()
+    d.shot("Under the model's registration, from this movie measures the "
+           "transformation from the movie's own molecules, which appear in both "
+           "halves. No beads needed.",
+           spot=[calibrate], point=calibrate, click=True,
+           zoom=d.around(calibrate, 760))
+    path = field(panel, "model.registration.path")
     d.shot("It is saved beside the result, to use again here. A dual-colour bead "
            "calibration works too.",
            spot=[path], point=path, zoom=d.around(path, 760))

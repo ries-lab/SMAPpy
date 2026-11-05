@@ -585,7 +585,7 @@ def test_spline_2c_keeps_the_calibrations_psfs_with_a_registration_measured_from
         model=DualModelSettings(calibration=str(calibration_file)),
         fit=PipelineFitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
-    settings.transform.calibrate = True
+    settings.model.registration.calibrate = True
     locs = DualSplineFit().run(Context(), settings).locs
     assert (asked[0].layout, asked[0].main_channel) == ("up-down", "upper")
     assert len(locs) > 15 and np.median(locs["ratio"]) == pytest.approx(0.3, abs=0.06)

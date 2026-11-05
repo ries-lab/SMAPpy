@@ -503,3 +503,20 @@ def test_the_filters_tab_types_a_band_and_names_what_no_name_gives(app):
     assert manager.entry().filters == {"665LP": {"band_nm": [665.0, 720.0]}}
     assert manager.unnamed.text() == ""
     manager.close()
+
+
+def test_the_fitters_channels_part_is_one_line_on_the_microscope_and_its_fields_by_hand(tmp_path):
+    from smappy.plugins.fit import SplineFit
+    plugin = SplineFit()
+    settings = plugin.Settings()
+    settings.source.path = a_tiff(tmp_path / "beads.ome.tif", M2_BEADS)
+    settings.channels.split = "two channels"
+    state = plugin.describe(None, settings)
+    said = "M2's: right-left mirrored, main right, the frame halved"
+    assert state.titles["channels"] == "two channels, " + said
+    assert state.hints["channels.layout"] == said
+    assert not state.shown["channels.main_channel"] and not state.shown["channels.split_position"]
+    settings.channels.layout, settings.channels.main_channel = "up-down", "lower"
+    state = plugin.describe(None, settings)
+    assert state.titles["channels"] == "two channels, up-down, main lower"
+    assert state.shown["channels.main_channel"] and state.shown["channels.split_position"]

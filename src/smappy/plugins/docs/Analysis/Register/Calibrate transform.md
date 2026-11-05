@@ -40,7 +40,7 @@ put back into camera pixels, and enough molecules seen in both channels: a
 few hundred pairs at the least, from frames spread over the movie.
 
 The 2C fit can do this step itself, on the first frames of the movie
-(*calibrate from this movie*).  Run it here to see what it found before
+(*registration* > *from this movie*).  Run it here to see what it found before
 trusting it, or to save a transformation for movies too sparse to register
 on.
 

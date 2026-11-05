@@ -1559,7 +1559,7 @@ class ControlWindow(QMainWindow):
         if is_fourpi_calibration(path):
             # a 4Pi model: its maps between the channels come with it
             wanted, values, name = ("Localize/Spline 4Pi", {
-                "model.calibration": str(path), "model.channels.registration": "model"},
+                "model.calibration": str(path), "model.registration.source": "model"},
                 "Spline 4Pi fitter")
         elif is_calibration(path):
             # the elliptical Gaussian's curves: for the fit that measures the

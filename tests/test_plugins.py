@@ -81,11 +81,11 @@ def test_a_settings_class_is_shown_the_same_by_every_plugin_that_shows_it():
     fitter = DualGaussianFit.specs()
     assert shown(fitter["finish"].children["comet"].children) == \
         shown(CometDrift.specs())
-    assert shown(fitter["transform"].children["registration"].children) == \
+    assert shown(fitter["model"].children["registration"].children["measure"].children) == \
         shown(CalibrateChannelTransform.specs()["registration"].children)
     # every field of the registration has a label of its own, not its name
     assert all(s.info.label for s in
-               fitter["transform"].children["registration"].children.values())
+               fitter["model"].children["registration"].children["measure"].children.values())
     assert shown(param_specs(GaussianFit.Settings)) == \
         shown(GaussianFit.specs())
 

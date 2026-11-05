@@ -262,7 +262,7 @@ A 4Pi model made from beads of the same microscope, with the dye's filter.
 uiPSF v1's bead model (`psfmodel_zernike_4pi.h5`) and in-situ model
 (`psfmodel_iter*_insitu_zernike_4pi.h5`) both work.
 
-### model.channels.layout
+### channels.layout
 *auto* takes the file's own layout where it has one: MATLAB quadrant files
 put the channels side by side.  Otherwise it takes the microscope's: in its
 entry of the microscope database, each channel can have a `region`
@@ -274,14 +274,14 @@ the chip: SMAP's 4Pi settings file gives them as `x4pi`, `y4pi`,
 `width4pi`, `height4pi` and `mirror4pi`.  *4Pi-SMS* is the Bewersdorf-lab
 design: four 168-pixel images on a 2048 x 168 strip, the last two mirrored.
 
-### model.channels.registration
+### model.registration.source
 Use the model's: the PSF of each channel was learned centred where its map
 puts the molecule, so the two belong together.  *from beads* is for a model
 without maps, or after the camera has moved.  Tick *channel drift* with it,
 which also corrects the part of the registration that beads cannot see.
 *none* is for channels that were registered before they were saved.
 
-### model.channels.beads
+### model.registration.beads
 A bead z stack taken in the same layout: a DCIMG file or series, a quadrant
 `.mat` file, or a folder of either.  Beads all over the field make a
 projective map.  A few beads make only a shift.  It is measured once and
@@ -289,7 +289,7 @@ kept beside the beads (`<name>_channels.json`, or
 `channel_registration.json` in a folder).  It is measured again when a bead
 file is newer, or the rectangles differ.
 
-### model.channels.path
+### model.registration.path
 A registration that beads left, used for another acquisition.  It is
 readable as text: each channel's map is also given as its shift at the
 channel's centre, its scale and its rotation.
