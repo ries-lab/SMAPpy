@@ -4,8 +4,9 @@ Spline 3D fits, and an in situ run started from the minimal one.
     python benchmarks/uipsf/real/m5_psf_model.py ACQUISITION [--order 8] [--dz 100] [--chunk 2] [--memory 0.4] \\
         [--out benchmarks/uipsf/results/m5_psf_model.jsonl]
 
-For each model (the window's defaults, the magnitude *minimal* or *Zernike*; the same beads, `m5_media.select`
-and `subset`, every one included):
+For each model (the window's defaults, the magnitude *minimal*, *Zernike* (``free``) or *symmetric*; a Zernike
+name ending in ``-ring`` with the beads' ring too (``zernike_ring``, not in the form: off by default since
+November 2026); the same beads, `m5_media.select` and `subset`, every one included):
 
 1. learnt by `run_calibration`, as the PSF calibration window learns it;
 2. its spline (`spline_calibration`: the point-emitter view, `VectorPSF.for_emitters`) fitted to every slice of
@@ -106,18 +107,21 @@ def main():
     ap.add_argument("--dz", type=float, default=100.0, help="the slices' largest spacing in learning, nm")
     ap.add_argument("--chunk", type=int, default=2)
     ap.add_argument("--memory", type=float, default=0.4, help="MPS memory fraction")
-    ap.add_argument("--models", nargs="+", default=["minimal", "free"])
+    ap.add_argument("--models", nargs="+", default=["minimal", "free"],
+                    help="minimal, free, symmetric; free-ring, symmetric-ring: the beads' ring on the Zernikes")
+    ap.add_argument("--no-insitu", action="store_true", help="skip the in situ run from the minimal model")
     ap.add_argument("--insitu-from", default=None, help="a saved minimal model: only the in situ step, from it")
     ap.add_argument("--insitu-device", default="cpu",
                     help="where in situ learns: its 300 molecules on the NA 1.5 pupil overran 10 GB of MPS memory")
     ap.add_argument("--spline-ring", action="store_true",
-                    help="draw the minimal model's spline with the beads' ring damping (h as learnt): the beads' own "
+                    help="draw the model's spline with the beads' ring damping (h as learnt): the beads' own "
                          "view less their size, to tell the ring's share of the beads' z bias from the model's")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     if args.spline_ring:
-        from uipsf.model import MinimalPupil
-        MinimalPupil.without_ring = lambda self: self
+        # every pupil's ring kept in the spline, the minimal one's too
+        from uipsf.model import ZernikePupil
+        ZernikePupil.without_ring = lambda self: self
     if torch.backends.mps.is_available():
         torch.mps.set_per_process_memory_fraction(args.memory)
     import uipsf.workflows.beads as beads
@@ -147,23 +151,26 @@ def main():
     rois = subset(rois, keep, focus, args.window)
     decisions = {i: "include" for i in range(len(keep))}
     rows = {}
-    for magnitude in args.models:
+    for label in args.models:
         t0 = time.perf_counter()
-        settings = BeadSettings(psf=PSFModelSettings(zernike_order=args.order, magnitude=magnitude),
+        magnitude = label.removesuffix("-ring")
+        settings = BeadSettings(psf=PSFModelSettings(zernike_order=args.order, magnitude=magnitude,
+                                                     zernike_ring=label.endswith("-ring")),
                                 bead_diameter_nm=bead_nm)
         run = run_calibration(files, False, optics, settings, run=RunSettings(save_model=True), rois=rois,
-                              decisions=decisions, save_to=os.path.join(out_dir, f"{magnitude}_3dcal.h5"))
+                              decisions=decisions, save_to=os.path.join(out_dir, f"{label}_3dcal.h5"))
         quality = fit_quality(run)
         shared = run.cal.shared()
-        row = dict(acquisition=name, **cond, model=magnitude + (" (spline with the beads' ring)" if args.spline_ring
+        row = dict(acquisition=name, **cond, model=label + (" (spline with the beads' ring)" if args.spline_ring
                                                                  else ""), beads=cut, used=len(run.cal.beads.used),
                    objective=round(float(run.cal.result.objective), 1), stop=run.cal.result.stop_reason,
                    sigma_nm=round(float(shared["psf.sigma"][0]), 2),
                    gamma=round(float(shared["pupil.gamma"]), 4) if "pupil.gamma" in shared else None,
                    ring_h_nm=round(float(shared["pupil.ring_h"]), 1) if "pupil.ring_h" in shared else None,
+                   magnitude=_magnitude(run.cal.model.psf.pupil, shared),
                    saved=str(run.saved), **z_bias(quality, args.z_range, float(rois.batch.z_step_nm)),
                    minutes=round((time.perf_counter() - t0) / 60, 2))
-        rows[magnitude] = row
+        rows[label] = row
         emit(row, args.out)
     if {"minimal", "free"} <= set(rows):
         a, b = rows["minimal"], rows["free"]
@@ -172,10 +179,25 @@ def main():
         emit(dict(acquisition=name, model="minimal - free", z_nm=common, bias_difference_nm=d.round(2).tolist(),
                   difference_rms_nm=round(float(np.sqrt(np.mean(d ** 2))), 2),
                   difference_max_nm=round(float(np.max(np.abs(d))), 2)), args.out)
-    if "minimal" in rows and not args.spline_ring:
+    if "minimal" in rows and not args.spline_ring and not args.no_insitu:
         emit(dict(acquisition=name, model="in situ from minimal",
                   **insitu_from(os.path.join(out_dir, "minimal_3dcal.uipsf.h5"), optics, out_dir, 6,
                                 args.insitu_device)), args.out)
+
+
+def _magnitude(pupil, shared) -> dict | None:
+    """A Zernike magnitude's modes {Noll: value}, and the rms of its radial modes above Noll 4 and of its m ≠ 0 ones:
+    what the ring takes off the high orders."""
+    from uipsf.optics.zernike import noll_to_nm
+    modes = getattr(pupil, "magnitude_modes", [])
+    if not modes or "pupil.magnitude" not in shared:
+        return None
+    c = dict(zip(modes, shared["pupil.magnitude"].detach().cpu().double().tolist(), strict=True))
+    radial = [v for j, v in c.items() if noll_to_nm(j)[1] == 0 and j != 4]
+    other = [v for j, v in c.items() if noll_to_nm(j)[1] != 0]
+    rms = lambda v: round(float(np.sqrt(np.mean(np.square(v)))), 4) if v else 0.0  # noqa: E731
+    return dict(modes={str(j): round(v, 4) for j, v in c.items()}, radial_high_rms=rms(radial),
+                asymmetric_rms=rms(other))
 
 
 def emit(row: dict, out: str | None) -> None:

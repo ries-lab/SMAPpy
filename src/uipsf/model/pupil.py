@@ -10,13 +10,22 @@ It is not clipped at zero either; v1's clip had no gradient there.
 **Held coefficients.**  A Zernike pupil may hold some modes at given values
 (``held_phase``, ``held_magnitude``, {Noll index: value}): they are no
 parameters, only a fixed map added to the learnt modes' sum, so a mode is
-either learnt or held, never both; a minimal pupil holds its γ and h the same
-way (``held_gamma``, ``held_ring_h``).  In situ holds the objective's magnitude --
+either learnt or held, never both; a minimal pupil holds its γ, and any pupil its
+ring's h, the same way (``held_gamma``, ``held_ring_h``).  In situ holds the objective's magnitude --
 a minimal model's γ, or a Zernike model's symmetric modes -- and the phase above
 the learnt order from a bead model of the microscope (`model.build.held_from`):
 learnt from the molecules, the magnitude trades with the focus, and the high
 orders gain little over the beads' while scattering between molecule sets
 (`docs/uipsf/architecture.md`, "In situ on matched M2 pairs").
+
+**The supercritical ring** (``saf_damping``): exp(−2πκh) on the light beyond the
+critical angle, h the beads' dye above the glass, which the bead model puts at the
+glass.  As one factor it is the beads', and `without_ring` drops it.  A minimal
+magnitude has it by default; a Zernike magnitude only on request (``zernike_ring``
+in the builder), off by default: on M5's beads the learnt h ran to 120–160 nm as
+it traded with the high radial modes, and the spline drawn without that h
+compressed z by up to 17 % (`docs/uipsf/architecture.md`, "The supercritical ring
+on a Zernike magnitude").
 """
 from __future__ import annotations
 
@@ -34,12 +43,14 @@ class ZernikePupil:
     def __init__(self, grid: PupilGrid, n_max: int = 6, magnitude_n_max: int | None = None,
                  phase_modes: list[int] | None = None, magnitude_modes: list[int] | None = None,
                  high_na: bool = False, held_phase: dict | None = None, held_magnitude: dict | None = None,
-                 mask=None):
+                 mask=None, saf_damping: bool = False, held_ring_h: float | None = None):
         """Phase modes default to Noll 5 … up to n_max; magnitude modes to Noll 2 … up to
         ``magnitude_n_max`` (default n_max).  ``magnitude_n_max=0`` gives a uniform magnitude.
         ``held_phase`` / ``held_magnitude`` hold modes at given values (module docstring); a held mode is
         taken out of the learnt ones.  ``mask``: a phase mask (`model.mask`), its transmission multiplied into
-        the pupil field (`transmission`), the Zernikes learnt beside it being the system's aberrations."""
+        the pupil field (`transmission`), the Zernikes learnt beside it being the system's aberrations.
+        ``saf_damping``: the supercritical ring damped by a learnt height (module docstring), h held at
+        ``held_ring_h`` if given."""
         self.grid, self.high_na = grid, high_na
         self.mask = mask
         self.held_phase = {int(j): float(v) for j, v in (held_phase or {}).items()}
@@ -53,6 +64,18 @@ class ZernikePupil:
         self.phase_basis = zernike_basis(grid, self.phase_modes, high_na=high_na)
         self.magnitude_basis = zernike_basis(grid, self.magnitude_modes)
         self._held_maps()
+        self._ring_maps(saf_damping, held_ring_h, grid.optics.NA)
+
+    def _ring_maps(self, saf_damping: bool, held_ring_h: float | None, na: float):
+        """κ = √((ρ·NA_grid)² − n_med²)/λ, and whether there is a ring: only where the typed sample's index is
+        below the aperture's ``na`` (else there is no supercritical light), decided once (`MinimalPupil`)."""
+        o = self.grid.optics
+        # without ``saf_damping`` the ring is a point's at the glass: the physics alone, no height learnt
+        self.saf_damping = bool(saf_damping)
+        self.ring = self.saf_damping and o.n_med < na
+        self.held_ring_h = None if held_ring_h is None else float(held_ring_h)
+        rho = self.grid.rho.real if self.grid.rho.is_complex() else self.grid.rho
+        self.kappa = torch.sqrt(torch.clamp((rho * o.NA) ** 2 - o.n_med ** 2, min=0.0)) / o.wavelength_nm
 
     def _held_maps(self):
         """The held modes' fixed maps, [P, P] (0 where none is held)."""
@@ -78,7 +101,41 @@ class ZernikePupil:
 
     def specs(self) -> list[ParamSpec]:
         return [ParamSpec("pupil.phase", (len(self.phase_modes),)),
-                ParamSpec("pupil.magnitude", (len(self.magnitude_modes),))] + self._mask_specs()
+                ParamSpec("pupil.magnitude", (len(self.magnitude_modes),))] + self._ring_specs() + self._mask_specs()
+
+    def _ring_specs(self) -> list[ParamSpec]:
+        if self.ring and self.held_ring_h is None:
+            return [ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0))]
+        return []
+
+    def ring_h(self, p) -> torch.Tensor:
+        """h, nm: the learnt one, or the held one."""
+        return p["pupil.ring_h"] if self.held_ring_h is None else self.grid.rho.real.new_tensor(self.held_ring_h)
+
+    def ring_factor(self, p, kappa=None):
+        """exp(−2πκh), [..., P, P] (or at given κ, for a profile); 1 without a ring.  With a learnt sample index
+        (``optics.n_med``, `VectorPSF.learn_n_med`) κ follows it, through the critical angle's smoothed root
+        (`optics.medium`), so it stays differentiable as n_med crosses a sample of the pupil -- but a ring the
+        typed index did not give is not added, nor h with it, which the data could not fix while n_med stays
+        above the NA."""
+        if not self.ring:
+            return 1.0
+        if kappa is None:
+            kappa = self.kappa if "optics.n_med" not in p else medium.maps(self.grid, p["optics.n_med"]).kappa
+        return torch.exp(-2 * math.pi * kappa * self.ring_h(p)[..., None, None])
+
+    def without_ring(self):
+        """The same pupil for point emitters: no damping of the supercritical ring, which is the beads' (their
+        dye above the glass); a point's light beyond the critical angle follows the physics of its own depth.
+        A ring at h = 0 is exactly no ring, so the ring is switched off rather than h set to 0."""
+        out = object.__new__(type(self))
+        out.__dict__.update(self.__dict__)
+        out.ring, out.held_ring_h = False, None
+        return out
+
+    def values(self, p) -> dict:
+        """The magnitude's physical numbers: h (nm) with a ring."""
+        return {"ring_h_nm": float(self.ring_h(p))} if self.ring else {}
 
     def _mask_specs(self) -> list[ParamSpec]:
         return self.mask.specs() if self.mask is not None else []
@@ -110,6 +167,8 @@ class ZernikePupil:
         # the held modes stay held at every stage, whatever their order
         new.held_phase, new.held_magnitude = self.held_phase, self.held_magnitude
         new.held_phase_map, new.held_magnitude_map = self.held_phase_map, self.held_magnitude_map
+        for k in ("saf_damping", "ring", "held_ring_h", "kappa"):
+            setattr(new, k, getattr(self, k))
         keep_p = [i for i, j in enumerate(self.phase_modes) if noll_to_nm(j)[0] <= n_max]
         keep_m = [i for i, j in enumerate(self.magnitude_modes) if noll_to_nm(j)[0] <= n_max]
         new.phase_modes = [self.phase_modes[i] for i in keep_p]
@@ -126,12 +185,17 @@ class ZernikePupil:
             out[own.index(j)] = c
         return out
 
-    def __call__(self, p: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        """(magnitude, phase), each [..., P, P]; coefficients may carry leading (emitter) axes."""
+    def zernike_maps(self, p: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """The Zernikes' (magnitude, phase) alone, without the ring."""
         phase = torch.tensordot(p["pupil.phase"], self.phase_basis, dims=([-1], [0])) + self.held_phase_map
         magnitude = (1 + torch.tensordot(p["pupil.magnitude"], self.magnitude_basis, dims=([-1], [0]))
                      + self.held_magnitude_map)
         return magnitude, phase
+
+    def __call__(self, p: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        """(magnitude, phase), each [..., P, P]; coefficients may carry leading (emitter) axes."""
+        magnitude, phase = self.zernike_maps(p)
+        return magnitude * self.ring_factor(p), phase
 
 
 #: how far beyond the objective's NA a minimal pupil's grid reaches: 1.51 for NA 1.50, M5's.  On a grid at the
@@ -189,20 +253,17 @@ class MinimalPupil(ZernikePupil):
         o = grid.optics
         self.na = float(o.NA / GRID_MARGIN if na is None else na)
         self.n_imm, self.n_med, self.wavelength_nm, self.grid_na = o.n_imm, o.n_med, o.wavelength_nm, o.NA
-        # without ``saf_damping`` the ring is a point's at the glass: the physics alone, no height learnt
-        self.saf_damping = bool(saf_damping)
-        self.ring = self.saf_damping and o.n_med < self.na
+        # the ring against the objective's NA, not the grid's beyond it
+        self._ring_maps(saf_damping, held_ring_h, self.na)
         self.held_gamma = None if held_gamma is None else float(held_gamma)
-        self.held_ring_h = None if held_ring_h is None else float(held_ring_h)
         self.learn_na = bool(learn_na)
         rho = grid.rho.real if grid.rho.is_complex() else grid.rho
         self._extras(rho, grid.size)
 
     def _extras(self, rho, size):
-        """The fixed maps: cos θ_imm, κ and the aperture."""
+        """The fixed maps: cos θ_imm and the aperture (κ is the ring's, `ZernikePupil._ring_maps`)."""
         s = rho * self.grid_na                                        # n·sin θ
         self.cos_imm = torch.sqrt(torch.clamp(1 - (s / self.n_imm) ** 2, min=1e-6))
-        self.kappa = torch.sqrt(torch.clamp(s ** 2 - self.n_med ** 2, min=0.0)) / self.wavelength_nm
         # half a pupil sample at least, so the samples it crosses are partly lit (EdgePupil's `cut_w`)
         width = max(0.01, 1.0 / size)
         self.cutoff = torch.sigmoid((self.na / self.grid_na - rho) / width)
@@ -217,8 +278,6 @@ class MinimalPupil(ZernikePupil):
         extra = []
         if self.held_gamma is None:
             extra.append(ParamSpec("pupil.gamma", (), init=0.05, transform=Bounded(0.0, 2.0)))
-        if self.ring and self.held_ring_h is None:
-            extra.append(ParamSpec("pupil.ring_h", (), init=30.0, transform=Bounded(0.0, 400.0)))
         if self.learn_na:
             # started at the typed NA, inside its bounds: 5 % above it, so that the data can say it is right
             extra.append(ParamSpec("pupil.na", (), init=self.na,
@@ -229,10 +288,6 @@ class MinimalPupil(ZernikePupil):
         """γ: the learnt one, or the held one."""
         return p["pupil.gamma"] if self.held_gamma is None else self.grid.rho.real.new_tensor(self.held_gamma)
 
-    def ring_h(self, p) -> torch.Tensor:
-        """h, nm: the learnt one, or the held one."""
-        return p["pupil.ring_h"] if self.held_ring_h is None else self.grid.rho.real.new_tensor(self.held_ring_h)
-
     def aperture(self, p) -> torch.Tensor:
         """The aperture's NA: the learnt one, or the objective's."""
         return p["pupil.na"] if self.learn_na else self.grid.rho.real.new_tensor(self.na)
@@ -241,43 +296,28 @@ class MinimalPupil(ZernikePupil):
         new = super().truncated(n_max)
         out = object.__new__(MinimalPupil)
         out.__dict__.update(new.__dict__)
-        for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "saf_damping", "ring", "held_gamma",
-                  "held_ring_h", "learn_na", "cos_imm", "kappa", "cutoff"):
+        for k in ("na", "n_imm", "n_med", "wavelength_nm", "grid_na", "held_gamma", "learn_na", "cos_imm",
+                  "cutoff"):
             setattr(out, k, getattr(self, k))
         return out
 
     def symmetric(self, p, cos_imm=None, kappa=None, cutoff=None) -> torch.Tensor:
         """The magnitude's factor, [..., P, P] (or at given maps' points, for a profile)."""
         cos_imm = self.cos_imm if cos_imm is None else cos_imm
-        out = cos_imm ** self.gamma(p)[..., None, None]
-        if self.ring:
-            if kappa is None:
-                kappa = self.kappa if "optics.n_med" not in p else medium.maps(self.grid, p["optics.n_med"]).kappa
-            out = out * torch.exp(-2 * math.pi * kappa * self.ring_h(p)[..., None, None])
+        out = cos_imm ** self.gamma(p)[..., None, None] * self.ring_factor(p, kappa)
         if cutoff is None:
             cutoff = self._cutoff(p["pupil.na"]) if self.learn_na else self.cutoff
         return out * cutoff
 
     def __call__(self, p):
-        magnitude, phase = super().__call__(p)
+        magnitude, phase = self.zernike_maps(p)
         return magnitude * self.symmetric(p), phase
 
     def values(self, p) -> dict:
         """γ and, with a ring, h (nm): the magnitude's numbers, learnt or held."""
-        out = {"gamma": float(self.gamma(p))}
-        if self.ring:
-            out["ring_h_nm"] = float(self.ring_h(p))
+        out = {"gamma": float(self.gamma(p)), **super().values(p)}
         if self.learn_na:
             out["na"] = float(self.aperture(p))
-        return out
-
-    def without_ring(self) -> MinimalPupil:
-        """The same pupil for point emitters: no damping of the supercritical ring, which is the beads' (their
-        dye above the glass); a point's light beyond the critical angle follows the physics of its own depth.
-        A ring at h = 0 is exactly no ring, so the ring is switched off rather than h set to 0."""
-        out = object.__new__(MinimalPupil)
-        out.__dict__.update(self.__dict__)
-        out.ring, out.held_ring_h = False, None
         return out
 
     def describe(self, p) -> dict:

@@ -110,6 +110,8 @@ def _describe_channel(ch: Channel) -> dict:
             pup["held_phase"] = {str(j): v for j, v in pupil.held_phase.items()}
         if pupil.held_magnitude:
             pup["held_magnitude"] = {str(j): v for j, v in pupil.held_magnitude.items()}
+        if pupil.saf_damping:                            # absent in older files: no ring
+            pup.update(saf_damping=True, held_ring_h=pupil.held_ring_h)
     elif isinstance(pupil, PixelPupil):
         pup = dict(kind="pixel")
     else:
@@ -168,7 +170,8 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     elif pup["kind"] == "zernike":
         pupil = ZernikePupil(grid, phase_modes=pup["phase_modes"], magnitude_modes=pup["magnitude_modes"],
                              high_na=pup["high_na"], held_phase=pup.get("held_phase"),
-                             held_magnitude=pup.get("held_magnitude"))
+                             held_magnitude=pup.get("held_magnitude"), saf_damping=pup.get("saf_damping", False),
+                             held_ring_h=pup.get("held_ring_h"))
     else:
         pupil = PixelPupil(grid)
     if pup.get("mask"):
@@ -288,8 +291,8 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
 
     The blur is the learned one (with the pixel's under it where the model has it); the bead's size, part of
     the bead stacks and not of a point emitter, is left out unless ``include_bead`` (then ``xyz_nm`` must be
-    one stack of equal z steps), and so is a minimal pupil's ring damping (`MinimalPupil`: the beads' dye
-    above the glass): `VectorPSF.for_emitters`.  The stage's z scale is not applied: z is the emitter's, not an
+    one stack of equal z steps), and so is the pupil's ring damping (``saf_damping``: the beads' dye above
+    the glass): `VectorPSF.for_emitters`.  The stage's z scale is not applied: z is the emitter's, not an
     objective position.  Pixels are
     integrated by summing ``upsample``² sub-samples (default the model's); sample the light at more
     of them for a spline that must not inherit the sampling's error.  ``roi_px`` is the region,

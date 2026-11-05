@@ -9,7 +9,8 @@ dropped the pixel's blur).  Here they are made once:
 - **the spec** is SMAPpy's `PSFModelSettings` (`smappy.calibrate.pupil`, torch-free, the form's section) or
   anything with its attributes: ``order``, ``magnitude`` (minimal, free, symmetric, fixed), ``saf_damping``,
   ``blur`` (free, round, fixed), ``blur_nm``, ``pixel_blur`` and ``learn_n_med`` (the sample's index learnt),
-  and optionally ``phase_mask``, a `MaskSpec` (`model.mask`; none without it);
+  and optionally ``phase_mask``, a `MaskSpec` (`model.mask`; none without it) and ``zernike_ring`` (a Zernike
+  magnitude with the beads' ring too, when ``saf_damping``; off without it, not in the form);
 - `pupil_grid` owns the grid (and its margin), `make_pupil` the pupil, `make_psf` the PSF;
 - **the hand-over** between models is the description a learnt PSF gives of itself
   (`VectorPSF.describe`, plain data, kept with a microscope by SMAPpy): ``kind``, the phase in nm, γ (a
@@ -102,8 +103,11 @@ def make_pupil(optics, spec, held: Held | None = None, *, grid: PupilGrid | None
     if held.gamma is not None:
         raise ValueError("a Zernike pupil cannot hold a minimal model's γ: choose the minimal magnitude")
     modes = magnitude_override if magnitude_override is not None else magnitude_modes(n_max, spec.magnitude)
+    # the beads' ring on Zernikes only on request (the user's, November 2026): with free radial modes h traded
+    # with them on M5's beads, and the spline drawn without it compressed z by up to 17 % (`model.pupil`)
+    ring = spec.saf_damping and bool(getattr(spec, "zernike_ring", False))
     return ZernikePupil(grid, n_max=n_max, magnitude_modes=modes, held_phase=held.phase,
-                        held_magnitude=held.magnitude, mask=mask)
+                        held_magnitude=held.magnitude, mask=mask, saf_damping=ring)
 
 
 def make_psf(optics, spec, roi_shape, *, held: Held | None = None, bead_radius_nm: float = 0.0,

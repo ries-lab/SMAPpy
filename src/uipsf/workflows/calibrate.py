@@ -184,9 +184,10 @@ def start_values(model: ForwardModel, previous) -> dict:
                 if j in old_modes:
                     value[i] = coeff[old_modes.index(j)]
             out[name] = value
-        if isinstance(new.psf.pupil, MinimalPupil) and isinstance(old.psf.pupil, MinimalPupil):
+        if isinstance(new.psf.pupil, ZernikePupil):
             learnt = {s.name for s in new.psf.pupil.specs()}          # not a held γ, nor h without a ring
-            for n in ("pupil.gamma", "pupil.ring_h", "pupil.na"):
+            mine = ("pupil.gamma", "pupil.ring_h", "pupil.na") if isinstance(old.psf.pupil, MinimalPupil) else ()
+            for n in mine + ("pupil.ring_h",):
                 if pre + n in shared and n in learnt:
                     out[pre + n] = shared[pre + n]
         if new.psf.fit_sigma and pre + "psf.sigma" in shared:

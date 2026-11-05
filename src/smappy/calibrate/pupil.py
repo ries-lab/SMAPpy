@@ -104,6 +104,11 @@ class PSFModelSettings:
     saf_damping: bool = param(True, label="SAF damping", advanced=True,
                               help="minimal magnitude: learn a damping of the supercritical-angle ring, the "
                                    "light beyond the critical angle; off: the ring of a point on the coverslip")
+    # the same ring on a Zernike magnitude (`uipsf.model.build.make_pupil`).  Not in the form (the user's, November
+    # 2026): on M5's beads h traded with the high radial modes and the spline drawn without it compressed z by
+    # up to 17 %; kept for scripts that study it (benchmarks/uipsf/real/m5_psf_model.py)
+    zernike_ring: bool = param(False, label="SAF damping on Zernikes", hidden=True,
+                               help="a Zernike magnitude's ring damped as a minimal one's, with SAF damping on")
     # the aperture's NA learnt (`MinimalPupil.learn_na`): an option, not the default (the user's, November 2026) --
     # the 4Pi beads wanted 0.97 of the objective's NA and one objective's 0.98, which is not yet understood
     learn_na: bool = param(False, label="learn NA", advanced=True,

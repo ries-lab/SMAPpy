@@ -2229,6 +2229,52 @@ Open: the 40 nm beads learn γ 0.13–0.26 beside a σ of 45–50 nm where the 1
 and 22–36 nm -- the magnitude is the objective's and cannot depend on the bead, so something else is
 read as both; whether σ should be learnt beside a field-dependent pupil; the magnitude tilt.
 
+## The supercritical ring on a Zernike magnitude (November 2026; `model.ZernikePupil`, `real/m5_psf_model.py`)
+
+The ring's exp(−2πκh) moved from `MinimalPupil` into `ZernikePupil`, so *Zernike*, *symmetric* and *fixed*
+magnitudes can have it, and `VectorPSF.for_emitters` drops it for every pupil.  On request only (``zernike_ring``,
+not in the form; the user's decision after the study below): a minimal magnitude has it by default, a Zernike one
+not.  The question (the user's): without it the Zernikes must make the ring's loss, a kink at ρ = n_med/NA, with high
+radial orders, and that loss stays in a spline for single molecules.  Simulated (`test_zernike_ring.py`), h
+comes back within 15 nm and the other modes stay at 0, where without the ring the radial modes take the loss up.
+
+On M5's 100 nm beads in buffer, order 8, every bead (`results/m5_zernike_ring.jsonl`, run while the ring was the Zernikes' default: its
+`free` and `symmetric` rows are with the ring, `-noring` without; objective = −log L, lower
+is better; bias = the spline's centred z error on the beads, rms / max within ±600 nm):
+
+| acquisition | model | −log L | h (nm) | Noll 4 / 11 / 22 | bias rms / max |
+|---|---|---|---|---|---|
+| 676, 3D | Zernike + ring | 1 578 396 | 159 | −0.005 / +0.071 / +0.059 | 67.2 / 110 |
+| | Zernike, no ring | 1 590 557 | -- | −0.189 / −0.081 / −0.030 | 10.2 / 21 |
+| | Zernike + ring, spline with the ring | | | | 9.3 / 18 |
+| | symmetric + ring | 1 801 788 | 157 | −0.010 / +0.065 / +0.056 | 62.7 / 100 |
+| | symmetric, no ring | 1 811 184 | -- | −0.191 / −0.085 / −0.031 | 11.3 / 25 |
+| | minimal | 1 813 355 | 60 | γ 0.36 | 28.7 / 51 |
+| 600, 2D | Zernike + ring | 1 711 886 | 119 | −0.074 / +0.013 / +0.018 | 57.9 / 98 |
+| | Zernike, no ring | 1 723 478 | -- | −0.206 / −0.096 / −0.037 | 12.9 / 22 |
+| | symmetric + ring | 1 957 871 | 68 | −0.130 / −0.040 / −0.011 | 29.4 / 56 |
+| | symmetric, no ring | 1 962 330 | -- | −0.200 / −0.097 / −0.037 | 11.5 / 20 |
+| | minimal | 1 958 809 | 66 | γ 0.36 | 27.6 / 50 |
+
+- *The ring wins likelihood*: 11 600–12 200 nats with free Zernikes, 4 500–9 400 with symmetric ones.
+- *But h is not the beads' alone*: with free radial modes it runs to 119–159 nm, twice the minimal model's 60–66,
+  and Noll 11 and 22 turn positive to give the edge back -- the ring and the radial modes trade, as on M2's
+  beads in October (h 150–185 with cos θ^γ, "it carries the objective's losses there too").  Only where the
+  radial modes were small anyway (600 2D, symmetric) does h land at the minimal model's.
+- *Stripping that h moves the spline*: the molecules' spline fits the beads with 58–67 nm rms of z bias, against
+  10–13 without the ring and 9.3 with the ring kept in the spline.  The beads' own view is the best model yet;
+  whether the molecules' view is right depends on how much of h is the beads' and how much the objective's,
+  which beads alone cannot say.
+
+- *And the stripping is not a shift*: the bias is already centred per bead, and fitted against stage z the
+  molecules' spline is compressed -- slope 0.83 / 0.91 (676 / 600) with free Zernikes and the ring, 0.84 / 0.96
+  symmetric, against 0.98 without the ring, 0.98 with the ring kept in the spline and 0.94 / 0.95 for the minimal
+  model's h of 60 -- most of it below the focus, where the error rises by about 100 nm and levels off.  The
+  free h is twice what the beads would give, so most of that compression is the radial modes' work moved into h.
+
+Open: hold h (at the bead's physics, or at a minimal model's) under free Zernikes, or keep the radial modes above
+Noll 4 out while the ring is learnt; a Bertrand image or beads of another size would separate the beads' share.
+
 ## One PSF model (November 2026; `model/build.py`, `VectorPSF.for_emitters`, `VectorPSF.describe`)
 
 The minimal model was the bead calibration's default, but every other workflow built its pupil and PSF itself
@@ -2242,7 +2288,7 @@ the beads' ring damping for molecules.  Now there is one of each:
   situ run (which reads it from the same form) and of `FourPiBeadSettings` (the same defaults, *same magnitude*
   on: one γ for both objectives; `docs/4pi.md` §23).  Each workflow keeps only its own fields
   beside it; the form shows what a method reads (`model_shown`: in situ hides the magnitude, the SAF damping,
-  the bead's size, the drift and field dependence; the SAF damping only for a minimal magnitude below the NA).
+  the bead's size, the drift and field dependence; the SAF damping only below the NA, a Zernike magnitude's only on request since November 2026).
   The form's main rows are the order and the magnitude; the blur and its σ are under *more*, and the pixel
   blur is not in the form at all (always on; `pixel_blur=False` for scripts that reproduce older models).
   A model file keeps the options nested (``psf``), version 6.
