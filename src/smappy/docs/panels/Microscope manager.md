@@ -152,30 +152,30 @@ side, which is why a new camera is a new setup.  Find it from a ratiometric
 acquisition of two far-red dyes (a 665LP splitting them): the transmitted side
 is the brighter.  *mirror* is the axis the optics flip an arm along against the
 other -- `x` for a right-left split with one more mirror in one arm, as on the
-lab's microscopes; empty for none.  *region* is for more than two arms, the
-four phase images of a 4Pi: the arm's rectangle on the chip,
-`x y width height` in pixels (per camera as `iXon 1: 228 0 284 512; ...`).
+lab's microscopes; empty for none.  *region* is the arm's rectangle on the
+chip, `x y width height` in pixels (per camera as `iXon 1: 228 0 284 512;
+...`), where it lies exactly: the four phase images of a 4Pi, or a two-arm
+split that does not meet in the middle of the frame.  It is the one place the
+split's position is written: with regions the fitters cut there, without them
+the frame as it was acquired is halved -- which is how the lab centres its
+camera ROI on the split.  An arm's side then follows from its region, and a
+side that contradicts it is refused.
 
-Below the arms, the split drawn on the chip: on the brightest of the first 50
-frames of the file being checked, each arm's box where the fitters cut it, the
-main one solid and red.  A 4Pi's regions are drawn without a file.
+Below the arms, the split drawn on the chip: each arm's box where the fitters
+cut it, the main one solid and red, on the brightest of the first 50 frames of
+the file being checked.  Arms with regions are drawn without a file.  Move a
+region until its box sits on the light.
 
 ### main channel
 The arm the other is registered onto, and whose PSF is a dual calibration's
 main.  Empty: the first arm.
 
 ### layout
-How the split lies while the arms have no sides yet -- *right-left mirrored*
-on a microscope whose optics are known but whose arms have not been told
-apart.  The left or upper side is then taken as the main one.  The arms'
-sides win when they are typed.
-
-### split position
-Where the second side starts, in chip pixels along the split: the column for
-a right-left split, the row for up-down.  Empty: the middle of the frame as
-it was acquired, which is how the lab centres its camera ROI on the split.
-Per camera as `iXon 1: 256; Evolve 1: 251`.  Move it until the boxes in the
-drawing sit on the light.
+The split's axis, *right-left* or *up-down*, while the arms have neither sides
+nor regions -- a microscope whose optics are known but whose arms have not
+been told apart.  The left or upper side is then taken as the main one.  It is
+greyed once an arm has a side or a region: the arms say it then.  A mirror is
+the arm's (*mirror*), not the layout's.
 
 ### PSF
 The objective's pupils kept with the entry, one per state of the 3D lens and

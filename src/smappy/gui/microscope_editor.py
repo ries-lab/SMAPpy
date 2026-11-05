@@ -98,9 +98,9 @@ def parse_follows(device: str, text: str) -> Any:
 
 # ------------------------------------------------------------------ drawings
 
-#: an entry's ``layout`` where its arms have no sides yet: how the optics lie, which arm is where
-#: read from data later (`Microscope.arrangement`)
-LAYOUTS = ("", "right-left", "right-left mirrored", "up-down", "up-down mirrored")
+#: an entry's ``layout`` where its arms have no sides yet: the split's axis, which arm is where
+#: read from data later (`Microscope.arrangement`); a mirror is the arm's
+LAYOUTS = ("", "right-left", "up-down")
 
 #: immersions offered; any other is typed
 IMMERSIONS = ("oil", "water", "silicone", "glycerol", "air")
@@ -161,9 +161,9 @@ def draw_pupil(ax, pupil: Optional[Dict[str, Any]]) -> None:
 
 def draw_channels(ax, entry: Microscope, camera: str = "", roi=None,
                   frame: Optional[np.ndarray] = None) -> None:
-    """The entry's channels on the chip, over ``frame`` where there is one: its regions (a 4Pi's)
-    or its two-arm split cut on the camera ROI ``roi`` (x0, y0, width, height) as the fitters cut
-    it (`Microscope.split_layout`), the main channel solid, each labelled with its arm and its
+    """The entry's channels on the chip, over ``frame`` where there is one: its two-arm split as
+    the fitters cut it (`Microscope.split_layout`) -- the arms' regions, else the camera ROI
+    ``roi`` (x0, y0, width, height) halved -- or its regions (a 4Pi's), the main channel solid, each labelled with its arm and its
     flip.  What keeps it from being drawn is said in its place."""
     ax.clear()
     if frame is not None and roi is not None:
@@ -172,13 +172,15 @@ def draw_channels(ax, entry: Microscope, camera: str = "", roi=None,
                   extent=(x0 - 0.5, x0 + w - 0.5, y0 + h - 0.5, y0 - 0.5))
     arms = entry.ordered_channels()
     try:
-        layout = entry.channel_layout(camera)
-        names = [c.name for c in entry.channels if c.region_for(camera or entry.camera)]
-        if layout is None:
-            if roi is None:
+        if len(arms) == 2:
+            found = entry.arrangement(camera)
+            if found is not None and not found.get("regions") and roi is None:
                 raise ValueError("check with a file to draw the split on its frame")
-            layout = entry.split_layout(roi, camera)
-            names = [c.name for c in arms[:2]] or ["main", "other"]
+            layout = entry.split_layout(roi or (0, 0, 2, 2), camera)
+            names = [c.name for c in arms]
+        else:
+            layout = entry.channel_layout(camera)
+            names = [c.name for c in entry.channels if c.region_for(camera or entry.camera)]
         if layout is None:
             raise ValueError("no arrangement: give the arms their sides, or a layout")
     except ValueError as error:
@@ -276,8 +278,9 @@ TABS = (
     ("channels", ["arm", "filter", "side", "mirror", "region"],
      "the split: its arms, transmitted first, the filter device each follows, the side of "
      "the chip it lands on with this camera (left, right, upper, lower), the axis the optics "
-     "flip it along against the other arm (x, y; empty for none), and for more than two arms "
-     "(4Pi) its rectangle on the chip, 'x y width height'"),
+     "flip it along against the other arm (x, y; empty for none), and its rectangle on the "
+     "chip, 'x y width height', where it lies exactly: a 4Pi's arms, or a split that does not "
+     "meet in the middle of the frame (its side then follows from it)"),
 )
 
 #: the order of the tabs; the tables' in `TABS`, the forms' built in place
@@ -446,7 +449,9 @@ class MicroscopeManager(QWidget):
         return page
 
     def _arrangement(self, page: QWidget) -> None:
-        """Under the arms: the main one, the layout, the split, and the split drawn."""
+        """Under the arms: the main one, the layout while they have no sides, and the split
+        drawn.  Where the arms meet is their regions, not a field of its own: the entry says it
+        once."""
         box = page.layout()
         form = QFormLayout()
         self.main_channel = QComboBox()
@@ -456,16 +461,10 @@ class MicroscopeManager(QWidget):
         form.addRow("main channel", self.main_channel)
         self.layout_choice = QComboBox()
         self.layout_choice.addItems(LAYOUTS)
-        self.layout_choice.setToolTip("how a two-arm split lies while the arms have no sides yet; "
-                                      "the arms' sides win")
+        self.layout_choice.setToolTip("the split's axis while the arms have no sides or regions "
+                                      "yet; the main arm is then on the left or upper half")
         self.layout_choice.currentTextChanged.connect(lambda _: self.check())
         form.addRow("layout", self.layout_choice)
-        self.split = QLineEdit()
-        self.split.setPlaceholderText("the middle of the frame")
-        self.split.setToolTip("where the second half starts on the chip, px along the split's "
-                              "axis; per camera as 'iXon 1: 256; ...'")
-        self.split.textChanged.connect(lambda _: self.check())
-        form.addRow("split position", self.split)
         box.addLayout(form)
         from matplotlib.figure import Figure
         from .canvas import canvas_class
@@ -474,6 +473,7 @@ class MicroscopeManager(QWidget):
         self.channels_canvas.setMinimumHeight(220)
         box.addWidget(self.channels_canvas, 2)
         self.tables["channels"].itemChanged.connect(lambda _: self._fill_main())
+        self.tables["channels"].itemChanged.connect(lambda _: self._layout_needed())
 
     def _psf_page(self) -> QWidget:
         page = QWidget()
@@ -530,6 +530,17 @@ class MicroscopeManager(QWidget):
         self.main_channel.setCurrentText(current)
         self.main_channel.blockSignals(False)
 
+    def _layout_needed(self) -> None:
+        """The *layout* only while no arm has a side or a region: once one has, the arms say the
+        split, and a second description could only disagree with them."""
+        table = self.tables["channels"]
+        said = any(_cell(table, r, c).strip() for r in range(table.rowCount()) for c in (2, 4))
+        self.layout_choice.setEnabled(not said)
+        self.layout_choice.setToolTip(
+            "the arms' sides or regions say the split" if said else
+            "the split's axis while the arms have no sides or regions yet; the main arm is then "
+            "on the left or upper half")
+
     def _fill_cameras(self, current: str) -> None:
         from ..camera_db import database as cameras
         self.camera.clear()
@@ -582,7 +593,7 @@ class MicroscopeManager(QWidget):
     # ---------------------------------------------------------- entry <-> tables
     def _quiet(self, quiet: bool) -> None:
         for widget in [*self.tables.values(), self.version_table, *self.objective.values(),
-                       self.main_channel, self.layout_choice, self.split]:
+                       self.main_channel, self.layout_choice]:
             widget.blockSignals(quiet)
 
     def show_entry(self, entry: Microscope) -> None:
@@ -615,8 +626,7 @@ class MicroscopeManager(QWidget):
         self._fill_main()
         self.main_channel.setCurrentText(entry.main_channel)
         self.layout_choice.setCurrentText(entry.layout)
-        self.split.setText(map_text(entry.split_position) if isinstance(entry.split_position, dict)
-                           else value_text(entry.split_position))
+        self._layout_needed()
         self._fill_cameras(entry.camera)
         self._versions = [dict(v) for v in entry.versions]
         for version in self._versions:
@@ -690,7 +700,6 @@ class MicroscopeManager(QWidget):
             text = field.currentText() if isinstance(field, QComboBox) else field.text()
             if text.strip():
                 objective[name] = parse_value(text) if name != "name" else text.strip()
-        split = self.split.text().strip()
         versions = []
         for row, version in enumerate(self._versions):
             until = _cell(self.version_table, row, 0).strip()
@@ -712,8 +721,8 @@ class MicroscopeManager(QWidget):
                                            else parse_value(region)} if region.strip() else {})}
                          for arm, filter_, side, mirror, region in rows("channels") if arm.strip()},
             "main_channel": self.main_channel.currentText().strip(),
-            "layout": self.layout_choice.currentText(),
-            "split_position": (parse_map(split) if ":" in split else parse_value(split)) or None,
+            # the axis only while the arms do not say it: two descriptions would disagree
+            "layout": self.layout_choice.currentText() if self.layout_choice.isEnabled() else "",
             "camera": self.camera.currentData() or "", "versions": versions,
             "pupils": self._pupils,
         }

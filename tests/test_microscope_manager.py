@@ -83,7 +83,7 @@ def test_the_manager_shows_an_entry_as_tables_and_reads_it_back(app):
         manager.load(name)
         back = manager.entry().to_dict()
         for part in ("identify", "devices", "parameters", "channels", "camera", "versions",
-                     "objective", "filters", "main_channel", "layout", "split_position", "pupils"):
+                     "objective", "filters", "main_channel", "layout", "pupils"):
             assert back.get(part) == shipped.to_dict().get(part), (name, part)
     manager.close()
 
@@ -429,12 +429,15 @@ def test_the_manager_draws_the_split_on_the_files_frame_as_it_is_edited(app, tmp
     manager = MicroscopeManager(path=a_tiff(tmp_path / "beads.ome.tif", M2_BEADS))
     manager.load("M2")
     assert len(manager.channels_figure.axes[0].patches) == 2
-    manager.split.setText("10")                              # the split moved: drawn again
+    assert not manager.layout_choice.isEnabled()             # the arms' sides say the split
+    table = manager.tables["channels"]
+    table.item(0, 4).setText("10 0 22 32")                   # the arms placed: drawn again there
+    table.item(1, 4).setText("0 0 10 32")
     main = manager.channels_figure.axes[0].patches[0]
     assert (main.get_x(), main.get_width()) == (9.5, 22)
-    assert manager.entry().split_position == 10.0
-    manager.split.setText("40")                              # outside the frame: said, not drawn
-    assert "outside the frame" in manager.channels_figure.axes[0].texts[0].get_text()
+    assert manager.entry().channels[0].region == [10, 0, 22, 32]
+    table.item(0, 2).setText("left")                         # a side its region contradicts: said
+    assert "by its region" in manager.channels_figure.axes[0].texts[0].get_text()
     manager.close()
 
 

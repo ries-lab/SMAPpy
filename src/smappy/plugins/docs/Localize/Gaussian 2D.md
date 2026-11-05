@@ -326,7 +326,9 @@ splitting dichroic was in, so the choice is yours.
 ### channels.layout
 On *microscope*, the entry of the microscope the file was taken on gives it
 ([Microscope manager](plugin:Panels/Microscope manager)); a file no entry
-recognises asks for it to be chosen.  Read only on *two channels*.
+recognises asks for it to be chosen.  Read only on *two channels*.  Where
+that entry gives its arms' regions on the chip, the channels are cut there and
+*split position* is greyed: the entry says where the split lies once.
 
 ### detection.sigma
 1 to 1.5 for a well-sampled microscope.

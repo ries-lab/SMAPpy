@@ -294,7 +294,9 @@ chip.
 
 ### registration.split_position
 Read only for a table that does not record its channels: set it as the fit
-had it.  A two-channel fit records its rectangles, and they win.
+had it.  A two-channel fit records its rectangles, and they win; so do the
+microscope's arms' regions, where its entry gives them and the layout is the
+microscope's.
 
 ### registration.coarse_tolerance_px
 The first thing to raise if no pairs are found and the halves are strongly

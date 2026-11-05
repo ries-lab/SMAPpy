@@ -571,7 +571,7 @@ def test_a_kept_pupil_is_told_apart_by_the_colour_not_the_filter():
 def test_m2s_split_is_its_arms_the_transmitted_one_main_on_the_right_the_reflected_mirrored():
     m2 = microscope_db.database(reload=True).get("M2")
     assert m2.arrangement() == {"layout": "right-left mirrored", "mirrored": True,
-                                "main_channel": "right", "split_position": None}
+                                "main_channel": "right", "mirrors": {"right": "", "left": "x"}}
     layout = m2.split_layout((0, 0, 512, 512))
     assert layout.regions == [(256, 0, 256, 512), (0, 0, 256, 512)]
     assert layout.flips == [(False, False), (True, False)]
@@ -583,16 +583,56 @@ def test_m2s_split_is_its_arms_the_transmitted_one_main_on_the_right_the_reflect
     assert found.values["objective"] == "Leica 160x NA1.43"
 
 
-def test_a_split_position_per_camera_moves_the_cut_and_one_outside_the_frame_is_refused():
+def test_the_arms_regions_are_where_the_split_lies_whatever_the_frame_and_say_their_sides():
     m2 = microscope_db.database(reload=True).get("M2")
-    m2.split_position = {"iXon 1": 240}
-    assert m2.split_layout((0, 0, 512, 512)).regions == [(240, 0, 272, 512), (0, 0, 240, 512)]
-    with pytest.raises(ValueError, match="outside the frame"):
-        m2.split_layout((300, 0, 200, 512))
-    # a version holds it: the arrangement as it stood
-    m2.versions = [{"until": "2026-10-01", "split_position": 250, "main_channel": "reflected"}]
+    transmitted, reflected = m2.channels
+    transmitted.region, reflected.region = {"iXon 1": [240, 0, 272, 512]}, [0, 0, 236, 512]
+    for roi in ((0, 0, 512, 512), (100, 0, 300, 512)):         # the frame does not move them
+        assert m2.split_layout(roi).regions == [(240, 0, 272, 512), (0, 0, 236, 512)]
+    # without sides, the regions say them
+    transmitted.side = reflected.side = ""
+    assert m2.arrangement()["main_channel"] == "right"
+    assert m2.arrangement()["regions"] == {"right": [240, 0, 272, 512], "left": [0, 0, 236, 512]}
+    # a side that contradicts its region is refused, not resolved one way or the other
+    transmitted.side = "left"
+    with pytest.raises(ValueError, match="by its region"):
+        m2.arrangement()
+    # a version holds them: the arrangement as it stood
+    transmitted.side = ""
+    m2.versions = [{"until": "2026-10-01", "main_channel": "reflected", "channels": {
+        "transmitted": {"filter": "Channel 1 (transmitted)", "region": [256, 0, 256, 512]},
+        "reflected": {"filter": "Channel 2 (reflected)", "region": [0, 0, 256, 512],
+                      "mirror": "x"}}}]
     before = m2.as_of(datetime.date(2026, 9, 1))
-    assert before.split_for("iXon 1") == 250 and before.arrangement()["main_channel"] == "left"
+    assert before.arrangement()["main_channel"] == "left"
+    assert before.split_layout((0, 0, 512, 512)).regions == [(0, 0, 256, 512), (256, 0, 256, 512)]
+
+
+def test_the_fitters_cut_the_channels_at_the_arms_regions_and_read_a_typed_split_only_without():
+    from smappy.calibrate.dual import RegisterSettings, chip_channels
+    from smappy.plugins.fit import ChannelsSettings
+    m2 = microscope_db.database(reload=True).get("M2")
+    m2.channels[0].region, m2.channels[1].region = [240, 0, 272, 512], [0, 0, 236, 512]
+    for typed in (None, 300):                                 # the entry's regions win
+        told, chip = chip_channels(RegisterSettings(split_position=typed), (0, 0, 512, 512), m2)
+        assert chip.regions == [(240, 0, 272, 512), (0, 0, 236, 512)]
+        assert chip.flips == [(False, False), (True, False)] and told.main_channel == "right"
+    # a layout chosen by hand is not the entry's: its split is the typed one, else the middle
+    chosen = ChannelsSettings(split="two channels", layout="right-left", main_channel="left",
+                              split_position=300)
+    _, chip = chip_channels(chosen, (0, 0, 512, 512), m2)
+    assert chip.regions == [(0, 0, 300, 512), (300, 0, 212, 512)]
+
+
+def test_an_entry_from_before_the_arms_said_the_split_reads_its_mirror_and_warns_of_its_split():
+    raw = microscope_db.database(reload=True).get("M5").to_dict()
+    raw["layout"] = "right-left mirrored"
+    raw["channels"]["reflected"].pop("mirror")
+    raw["split_position"] = 256
+    with pytest.warns(UserWarning, match="give the arms their regions"):
+        entry = Microscope.from_dict(raw)
+    assert entry.layout == "right-left" and entry.channels[1].mirror == "x"
+    assert "split_position" not in entry.to_dict()
 
 
 def test_m5_and_m6_know_their_layout_before_their_arms_sides():
@@ -602,6 +642,7 @@ def test_m5_and_m6_know_their_layout_before_their_arms_sides():
     assert db.get("M6").objective["name"] == "Olympus 100x NA1.49" and db.get("M6").objective["NA"] == 1.49
     for name in ("M5", "M6"):
         entry = db.get(name)
+        assert entry.layout == "right-left"                        # the axis; the mirror the arm's
         assert entry.arrangement()["layout"] == "right-left mirrored"
         assert entry.arrangement()["main_channel"] == "left"      # as a dual calibration's auto
         assert entry.split_layout((0, 0, 1000, 300)).flips == [(False, False), (True, False)]

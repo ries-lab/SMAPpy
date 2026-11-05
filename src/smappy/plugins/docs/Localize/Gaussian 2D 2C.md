@@ -452,7 +452,9 @@ simulation, or one started after a bleaching phase.
 ### channels.layout
 *microscope* reads it from the entry of the microscope the movie was taken
 on; a file no entry recognises stops with a message asking for it.  All the
-Ries lab's microscopes are *right-left mirrored*.  The registration's own
+Ries lab's microscopes are *right-left mirrored*.  Where the entry gives its
+arms' regions on the chip, the channels are cut there and *split position*
+is greyed.  The registration's own
 *layout*, *main channel* and *split position* are not shown here: they serve
 *Calibrate transform* and the bead calibration, and this form reads the
 arrangement from *channels*.

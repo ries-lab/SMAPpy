@@ -913,7 +913,7 @@
       },
       "camera": "Fusion BT 1",
       "main_channel": "transmitted",
-      "layout": "right-left mirrored",
+      "layout": "right-left",
       "pupils": {
         "3D: on \u00b7 far red": {
           "kind": "minimal",
@@ -1091,7 +1091,7 @@
       },
       "camera": "Fusion BT 2",
       "main_channel": "transmitted",
-      "layout": "right-left mirrored"
+      "layout": "right-left"
     },
     {
       "name": "4Pi-SMS example",

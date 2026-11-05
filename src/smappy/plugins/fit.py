@@ -296,13 +296,13 @@ class ChannelsSettings:
                         help="how the chip is split: the microscope's entry, or chosen for a "
                              "microscope without one")
     main_channel: str = param("microscope", label="main channel", choices=HALF_CHOICES,
-                              help="the half positions are registered onto; the microscope's, "
-                                   "else the left or upper half")
+                              help="the channel positions are registered onto; the "
+                                   "microscope's, else the left or upper one")
     split_position: Optional[int] = param(None, label="split position", unit="px", min=1,
                                           advanced=True,
-                                          help="the first pixel of the second half, on the "
-                                               "chip; empty: the microscope's, else the "
-                                               "middle of the frame")
+                                          help="the first pixel of the second channel, on "
+                                               "the chip, where the microscope's arms have "
+                                               "no regions; empty: the middle of the frame")
 
     @property
     def two(self) -> bool:
@@ -316,14 +316,14 @@ class ChannelsSettings:
                 "main_channel": told.main_channel, "split_position": told.split_position}
 
     def chip_layout(self, camera: Optional[CameraMetadata], shape):
-        """The two channels as a `channels.ChannelLayout` on the chip (`channels.split_halves`),
+        """The two channels as a `channels.ChannelLayout` on the chip (`calibrate.dual.chip_channels`),
         for frames of ``shape`` from this camera ROI: what a two-channel table records
         (``metadata["channels"]``) and a registration is measured between."""
-        from ..channels import split_halves
+        from ..calibrate.dual import chip_channels
         height, width = (int(v) for v in shape[-2:])
         roi = tuple(camera.roi) if camera is not None and camera.roi is not None \
             else (0, 0, width, height)
-        return split_halves(self.arrangement(camera), roi)
+        return chip_channels(self, roi, getattr(camera, "microscope", None))[1]
 
     def layout_for(self, camera: CameraMetadata, shape):
         """The two channels on the frames of this camera ROI: `chip_layout` put on the frames
@@ -812,6 +812,8 @@ class _FitPlugin(Plugin):
                     state.active[f"channels.{name}"] = two
                 state.titles["channels"] = ("two channels" if two else "whole chip") + (
                     f", {channels.layout}" if two and channels.layout != "microscope" else "")
+                if two:
+                    self._split_hint(settings, state)
                 if self.channel_part == "two":
                     # the arrangement is the *channels* part's; the registration's copies of it
                     # serve Calibrate transform and the bead calibration, not this form
@@ -943,6 +945,23 @@ class _FitPlugin(Plugin):
                  "camera.emgain": camera.is_em}
         return {"line": title, "status": status, "values": ", ".join(bits),
                 "sources": sources}, shown
+
+    def _split_hint(self, settings, state) -> None:
+        """What the *split position* comes to: the microscope's arms' regions, where the entry
+        gives them and the layout is its -- the field is then not read, the entry says it once --
+        else the middle of the frame."""
+        try:
+            from ..calibrate.dual import entry_regions
+            resolved = self.resolution(settings)
+            scope = resolved.microscope if resolved is not None else None
+            regions = entry_regions(settings.channels, scope.summary() if scope else None)
+        except Exception:
+            return
+        if regions:
+            state.active["channels.split_position"] = False
+            state.hints["channels.split_position"] = f"{scope.name}'s arms' regions"
+        else:
+            state.hints["channels.split_position"] = "the middle of the frame"
 
     def unknown_camera(self, settings) -> Optional[str]:
         """The question at Run for a camera that is in no database and

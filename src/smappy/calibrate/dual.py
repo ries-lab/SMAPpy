@@ -74,9 +74,9 @@ class RegisterSettings:
     split_position: Optional[int] = param(None, label="split position",
                                           unit="px", min=1,
                                           help="the first pixel of the second "
-                                               "half, on the chip; empty: the "
-                                               "microscope's, else measured "
-                                               "from the pairs")
+                                               "channel, on the chip, where the "
+                                               "microscope's arms have no regions; "
+                                               "empty: the middle of the frame")
     # the vote
     vote_bin_px: float = param(2.0, label="vote bin", unit="px", min=0.1,
                                advanced=True,
@@ -197,7 +197,7 @@ class RegisterSettings:
 
 def resolve_arrangement(settings: RegisterSettings, microscope=None,
                         camera: str = "") -> RegisterSettings:
-    """``settings`` with *microscope* spelt out: the layout, the main channel and the split from
+    """``settings`` with *microscope* spelt out: the layout and the main channel from
     the microscope's entry (`microscope_db.arrangement_of`; ``microscope`` a summary, a
     `MicroscopeResolution` or an entry's name), what is chosen by hand kept as it is.
 
@@ -224,11 +224,39 @@ def resolve_arrangement(settings: RegisterSettings, microscope=None,
     if main not in halves:
         raise ValueError(f"the chip is split {halves[0]}/{halves[1]}, so the main "
                          f"channel cannot be {main!r}; use {halves[0]!r} or {halves[1]!r}")
-    split = settings.split_position
-    if split is None and found is not None and found.get('split_position') is not None \
-            and found['layout'].split()[0] == layout.split()[0]:
-        split = int(round(found['split_position']))
-    return replace(settings, layout=layout, main_channel=main, split_position=split)
+    return replace(settings, layout=layout, main_channel=main)
+
+
+def entry_regions(settings: RegisterSettings, microscope=None, camera: str = ""):
+    """The microscope's arms' regions by half (`microscope_db.Microscope.arrangement`) when the
+    split is the entry's -- *layout* on *microscope* and the entry giving them on this axis --
+    else None.  Where they are, they are where the channels lie, and the *split position* is not
+    read: the entry says it once."""
+    if settings.layout != 'microscope':
+        return None
+    from .. import microscope_db
+    found = microscope_db.arrangement_of(microscope, camera)
+    return (found or {}).get('regions')
+
+
+def chip_channels(settings: RegisterSettings, roi, microscope=None, camera: str = ""):
+    """``(resolved settings, the two channels on the chip)`` for frames at camera ROI ``roi`` (x0,
+    y0, width, height): the arrangement spelt out (`resolve_arrangement`), the channels the arms'
+    regions where the entry gives them (`entry_regions`), else the frame cut at the *split
+    position* or its middle (`channels.split_halves`), each flipped as its arm.  The one place a
+    split becomes rectangles -- the fitters, *Calibrate transform* and the bead calibration all
+    cut here."""
+    from .. import microscope_db
+    from ..channels import split_halves
+    told = resolve_arrangement(settings, microscope, camera)
+    arrangement = {'layout': told.layout, 'main_channel': told.main_channel,
+                   'split_position': told.split_position}
+    if settings.layout == 'microscope':
+        found = microscope_db.arrangement_of(microscope, camera) or {}
+        for key in ('regions', 'mirrors'):
+            if found.get(key):
+                arrangement[key] = found[key]
+    return told, split_halves(arrangement, roi)
 
 
 def bead_registration() -> RegisterSettings:
@@ -256,9 +284,9 @@ BEAD_UNUSED = ('model', 'fine_tolerance_px', 'adapt_fine_tolerance', 'max_pairs'
 # ...and where it reads a field differently from a movie registration, what
 # the bead window's tooltip says instead.
 BEAD_HELP = {
-    'split_position': "the first pixel of the second half, on the chip; "
-                      "empty: the microscope's, else the middle of the first "
-                      "bead image",
+    'split_position': "the first pixel of the second channel, on the chip, "
+                      "where the microscope's arms have no regions; empty: the "
+                      "middle of the first bead image",
     'coarse_tolerance_px': "how far a bead may lie from where the offset the "
                            "beads voted for puts its partner",
     'reprojection_threshold_px': "the first round's robust (RANSAC) inlier "
@@ -828,6 +856,9 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         # recorded it, and the warning the fitters call could not fire
         from .core import _em_on
         em_states = [_em_on(p) for p in paths]
+    asked = s.registration
+    if 'microscope' in (asked.layout, asked.main_channel) and microscope is None:
+        microscope = beads_microscope(stacks)
     s = resolved_geometry(s, stacks, report, microscope)
     g = s.registration
     shape = stacks[0].images.shape[-2:]
@@ -840,12 +871,10 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         if len(known) > 1:
             raise ValueError('cannot pool differing known ROIs with missing ROI metadata')
     origins = [np.array(st.roi[:2] if full_chip else (0, 0), float) for st in stacks]
-    # The two channels as rectangles on the chip (`channels.split_halves`), as the fitter and a
+    # The two channels as rectangles on the chip (`chip_channels`), as the fitter and a
     # movie registration read them; each stack is cut where they fall in its own pixels.
-    from ..channels import split_halves
-    arrangement = {'layout': g.layout, 'main_channel': g.main_channel,
-                   'split_position': g.split_position}
-    chip = split_halves(arrangement, (*(int(v) for v in origins[0]), shape[1], shape[0]))
+    _, chip = chip_channels(asked, (*(int(v) for v in origins[0]), shape[1], shape[0]),
+                            microscope)
     try:
         cuts = [chip.on_camera(o, tuple(shape)).regions for o in origins]
     except ValueError as error:

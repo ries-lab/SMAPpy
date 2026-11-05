@@ -83,17 +83,15 @@ def source_geometry(locs):
 def table_channels(locs, settings, shape, roi):
     """The two channels the table was fitted as, on the chip: the layout the fit recorded
     (``metadata["channels"]``), else the arrangement -- the microscope's or chosen -- cut from the
-    frame (`channels.split_halves`)."""
-    from ..calibrate.dual import resolve_arrangement
-    from ..channels import ChannelLayout, split_halves
-    told = resolve_arrangement(settings, (locs.metadata.get("camera") or {}).get("microscope"))
+    frame (`calibrate.dual.chip_channels`)."""
+    from ..calibrate.dual import chip_channels, resolve_arrangement
+    from ..channels import ChannelLayout
+    microscope = (locs.metadata.get("camera") or {}).get("microscope")
     recorded = locs.metadata.get("channels")
     if recorded:
-        return told, ChannelLayout.from_dict(recorded)
+        return resolve_arrangement(settings, microscope), ChannelLayout.from_dict(recorded)
     height, width = shape
-    arrangement = {"layout": told.layout, "main_channel": told.main_channel,
-                   "split_position": told.split_position}
-    return told, split_halves(arrangement, roi if roi is not None else (0, 0, width, height))
+    return chip_channels(settings, roi if roi is not None else (0, 0, width, height), microscope)
 
 
 def default_transform_path(locs, fallback: Path) -> Path:

@@ -510,8 +510,9 @@ already are.
   *main* half, the split -- on *microscope* by default, the entry's arrangement, and chosen
   by hand for a microscope without one.  The registration only refines the map within it.
 * **The arrangement in the entry** is the arms' `side`s, a `mirror` on the arm the optics
-  flip, a named `main_channel` and an optional `split_position` per camera (the middle of
-  the frame as acquired otherwise).  All the lab's microscopes are right-left, mirrored;
+  flip, a named `main_channel` and, where the split is not in the middle of the frame as
+  acquired, each arm's `region` (decided 2026-11-05: at first a `split_position` per camera,
+  which said the same as the regions; see "The arms say the split").  All the lab's microscopes are right-left, mirrored;
   which arm is on which side is read from ratiometric data, where the transmitted arm is
   the brighter.  M5 and M6 have the same arrangement.  The 4Pi quadrants stay `region`s.
 * **The objective** is a section of the entry: name, NA, immersion and its index.  No
@@ -580,8 +581,8 @@ against the entry's arrangement; 4Pi beads still read the current setup, not `as
 *identify*, *objective* (a form: name, NA, immersion, its index), *filters* (a filter's
 wavelength or band by name, and the filter states that give none, `unnamed_filters`),
 *devices*, *parameters*, *channels* (the arms with their side, mirror and, for a 4Pi, region;
-the *main channel*, the *layout* for arms without sides and the *split position*, per camera
-or one; the split drawn on the brightest of the checked file's first 50 frames, as
+the *main channel*, the *layout* for arms without sides (and, until 2026-11-05, a *split
+position*, per camera or one); the split drawn on the brightest of the checked file's first 50 frames, as
 `Microscope.split_layout` cuts it, `draw_channels`), *PSF* (the kept pupils, drawn from their
 Zernikes, `draw_pupil`; one can be removed) and *versions* (their days editable, one
 removable: `save_microscope(versions=)`).  Every part of the entry is now edited in the
@@ -589,6 +590,25 @@ window, nothing carried through unseen but the pupils, which are kept by *PSF ca
 Not done: *from this registration* (the arrangement is sides and a split now, not regions,
 and a registration's channels are the arrangement's), the EMU chip split as a start, and a
 version's days checked against the files (below, "Still open").
+
+### Built: the arms say the split (2026-11-05)
+
+Decided with Jonas: one description per fact.  The entry had four overlapping ones -- the arms'
+`side`s, their `mirror`s, an entry-wide `layout` that also said *mirrored*, and a
+`split_position` beside the arms' `region`s.  Now:
+
+* **Where an arm lies** is its `region` on the chip, where it is known exactly; without one, a
+  two-arm split is the frame's halves as acquired.  `split_position` is gone from the entry (an
+  older entry's is dropped with a warning: no chip size is kept to turn it into regions).
+* **Which side** is the arm's `side`, or follows from its region; a side that contradicts its
+  region is refused (`Microscope.arrangement`).
+* **The flip** is the arm's `mirror` alone.  The entry's `layout` is the axis only, read only
+  while no arm has a side or a region (the manager greys it then and saves none); an older
+  *right-left mirrored* puts the mirror on the second arm where no arm has one.
+* **One place cuts**: `calibrate.dual.chip_channels`, which the fitters' *channels* part,
+  *Calibrate transform* and the dual bead calibration all call -- the entry's regions where the
+  layout is the microscope's, else the typed *split position* or the frame's middle.  The
+  fitters grey *split position* where the entry's regions decide and say so as its hint.
 
 ### Built: step 4 (2026-11-04), the microscope's PSF
 

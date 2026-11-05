@@ -220,12 +220,15 @@ class Channel:
     the one that applies alone -- with the splitting dichroic out the light
     goes the transmitted way, over the whole chip.
 
-    `region` is where it lands exactly, for a split into more than two --
-    the four phase images of a 4Pi microscope: ``[x, y, width, height]`` on
-    the chip, in whole pixels, or a table from camera to that; `mirror` is
-    ``"x"``, ``"y"`` or ``"xy"`` for an arm the optics flip.  That is the
-    geometry, coarse and stable; the sub-pixel registration between the
-    channels belongs to a calibration (`smappy.channels`).
+    `region` is where it lands exactly: ``[x, y, width, height]`` on the
+    chip, in whole pixels, or a table from camera to that -- the four phase
+    images of a 4Pi microscope, or a two-arm split whose arms do not meet in
+    the middle of the frame.  It is the one description of where an arm lies:
+    without one, a two-arm split is the frame's halves on the arms' `side`s,
+    and with one the side must agree with it (`Microscope.arrangement`).
+    `mirror` is ``"x"``, ``"y"`` or ``"xy"`` for an arm the optics flip.
+    That is the geometry, coarse and stable; the sub-pixel registration
+    between the channels belongs to a calibration (`smappy.channels`).
     """
     name: str
     filter: str = ""
@@ -276,7 +279,7 @@ def read_date(text: Any) -> Optional[_dt.date]:
 
 #: the parts of an entry a version can hold: tables by name, and the scalars
 SECTIONS = ("devices", "parameters", "channels", "pupils", "objective", "filters")
-SCALARS = ("camera", "main_channel", "split_position", "layout")
+SCALARS = ("camera", "main_channel", "layout")
 
 #: what the objective section holds: fixed for an entry (we do not swap objectives), and no
 #: magnification -- the pixel on the sample is the camera's, measured, per state of the 3D lens
@@ -306,6 +309,16 @@ def same_camera(a: str, b: str) -> bool:
     from .camera_db import database
     found = database().get(a)
     return found is not None and found.answers_to(b)
+
+
+def _sides_of(regions) -> List[str]:
+    """The sides of the chip two rectangles ``[x, y, w, h]`` lie on: along the axis their centres
+    are further apart."""
+    (ax, ay, aw, ah), (bx, by, bw, bh) = regions
+    dx, dy = (bx + bw / 2) - (ax + aw / 2), (by + bh / 2) - (ay + ah / 2)
+    if abs(dx) >= abs(dy):
+        return ["left", "right"] if dx > 0 else ["right", "left"]
+    return ["upper", "lower"] if dy > 0 else ["lower", "upper"]
 
 
 @dataclass
@@ -343,12 +356,12 @@ class Microscope:
     #: the arm the others are registered onto, and whose PSF is a dual calibration's main; "" the
     #: first arm
     main_channel: str = ""
-    #: where the two halves of a split meet on the chip, the first pixel of the second half along
-    #: the split's axis -- a number, or a table from camera to one; None the middle of the frame as
-    #: acquired, which is how the lab centres its camera ROI on the split
-    split_position: Any = None
-    #: how a two-arm split lies when the arms' sides are not known yet (``right-left mirrored``):
-    #: the optics say it, which arm is on which side is read from data later; the arms' `side`s win
+    #: the axis of a two-arm split (``right-left`` or ``up-down``) while the arms' sides are not
+    #: known yet: the optics say it, which arm is on which side is read from data later.  Only the
+    #: axis -- a mirror is the arm's (`Channel.mirror`) -- and only without sides: once the arms
+    #: have them (or regions) it is theirs, and the manager clears it.  Where the two arms meet is
+    #: their `region`s, else the middle of the frame as acquired, which is how the lab centres its
+    #: camera ROI on the split
     layout: str = ""
 
     # ------------------------------------------------------------ identifying
@@ -501,45 +514,54 @@ class Microscope:
             return list(self.channels)
         return [main] + [c for c in self.channels if c is not main]
 
-    def split_for(self, camera: str = "") -> Optional[float]:
-        """The split's position on `camera`'s chip, or None for the middle of the frame."""
-        position = self.split_position
-        if isinstance(position, dict):
-            position = position.get(camera or self.camera)
-        return None if position in (None, "") else float(position)
-
     def arrangement(self, camera: str = "") -> Optional[Dict[str, Any]]:
         """How a two-arm split lies on `camera`'s chip, in the words of the chip settings
-        (`calibrate.dual.RegisterSettings`): ``layout`` (``right-left`` or ``up-down``),
-        ``mirrored`` (one arm flipped against the other, along the split's axis), the
-        ``main_channel`` half (``left``, ``right``, ``upper``, ``lower``) and the
-        ``split_position`` (None: the middle).  None for an entry without two arms on two sides --
-        a 4Pi's regions are `channel_layout`'s."""
+        (`calibrate.dual.RegisterSettings`): ``layout`` (``right-left`` or ``up-down``, with
+        `` mirrored`` when one arm is flipped against the other along the split's axis),
+        ``mirrored``, the ``main_channel`` half (``left``, ``right``, ``upper``, ``lower``), each
+        half's ``mirrors`` and, where both arms have one, their ``regions`` by half
+        (`channels.split_halves` cuts the frame's halves otherwise).  None for an entry without two
+        arms on two sides -- a 4Pi's regions are `channel_layout`'s.
+
+        The arms say it, one way each: a region where the arm lies exactly, else a side; the
+        entry's `layout` only gives the axis while neither is known, the main arm then on the left
+        or upper half, as a dual calibration's *auto* takes it.  A side that disagrees with its
+        arm's region is refused."""
         used = camera or self.camera
         arms = self.ordered_channels()[:2]
+        if len(arms) < 2:
+            return None
+        regions = [arm.region_for(used) for arm in arms]
         sides = [arm.side_for(used) for arm in arms]
-        if len(arms) == 2 and set(sides) == {"left", "right"}:
+        if all(regions):
+            placed = _sides_of(regions)
+            for arm, side, found in zip(arms, sides, placed):
+                if side and side != found:
+                    raise ValueError(f"{self.name}'s arm {arm.name} is on the {side} by its side "
+                                     f"and on the {found} by its region: one of them is wrong")
+            sides = placed
+        if set(sides) == {"left", "right"}:
             layout = "right-left"
-        elif len(arms) == 2 and set(sides) == {"upper", "lower"}:
+        elif set(sides) == {"upper", "lower"}:
             layout = "up-down"
         elif self.layout:
-            # the arrangement without the arms' sides: the main half the left or upper one, as a
-            # dual calibration's *auto* takes it
             layout = self.layout.replace(" mirrored", "")
-            mirrored = self.layout.endswith("mirrored")
-            return {"layout": self.layout, "mirrored": mirrored,
-                    "main_channel": "left" if layout == "right-left" else "upper",
-                    "split_position": self.split_for(used)}
+            sides = ["left", "right"] if layout == "right-left" else ["upper", "lower"]
         else:
             return None
-        mirrored = set(arms[0].mirror) != set(arms[1].mirror)
-        return {"layout": layout + (" mirrored" if mirrored else ""), "mirrored": mirrored,
-                "main_channel": sides[0], "split_position": self.split_for(used)}
+        mirrors = {side: arm.mirror for side, arm in zip(sides, arms)}
+        along = "x" if layout == "right-left" else "y"
+        mirrored = (along in arms[0].mirror) != (along in arms[1].mirror)
+        out = {"layout": layout + (" mirrored" if mirrored else ""), "mirrored": mirrored,
+               "main_channel": sides[0], "mirrors": mirrors}
+        if all(regions):
+            out["regions"] = {side: list(region) for side, region in zip(sides, regions)}
+        return out
 
     def split_layout(self, roi, camera: str = "", name: str = ""):
         """The two arms as a `channels.ChannelLayout` on the chip, for frames with camera ROI
-        ``roi`` (x0, y0, width, height): the frame cut at the split -- the entry's position, or
-        the frame's middle -- the main arm first, the other flipped where the optics flip it.
+        ``roi`` (x0, y0, width, height): the arms' regions, or the frame cut in its middle -- the
+        main arm first, the other flipped where the optics flip it.
         None without an `arrangement`."""
         from .channels import split_halves
         found = self.arrangement(camera)
@@ -583,9 +605,26 @@ class Microscope:
             objective=dict(raw.get("objective") or {}),
             filters={str(k): dict(v) for k, v in (raw.get("filters") or {}).items()},
             main_channel=str(raw.get("main_channel") or ""),
-            split_position=copy.deepcopy(raw.get("split_position")),
             layout=str(raw.get("layout") or ""),
-        )
+        )._legacy(raw)
+
+    def _legacy(self, raw: Dict[str, Any]) -> "Microscope":
+        """An entry written before the arms carried the whole split (0.5.11): a ``layout`` of
+        ``right-left mirrored`` is the axis and a mirror -- put on the second arm when no arm has
+        one -- and a ``split_position`` gives way to the arms' regions, which say the same and
+        more.  It is dropped with a warning: a chip's size is not in the entry to turn it into
+        regions."""
+        if self.layout.endswith(" mirrored"):
+            self.layout = self.layout.replace(" mirrored", "")
+            if len(self.channels) >= 2 and not any(c.mirror for c in self.channels[:2]):
+                second = self.ordered_channels()[1]
+                second.mirror = "x" if self.layout == "right-left" else "y"
+        if raw.get("split_position") not in (None, ""):
+            import warnings
+            warnings.warn(f"{self.name}: the entry's split_position "
+                          f"({raw['split_position']}) is no longer read -- give the arms their "
+                          f"regions on the chip in the microscope manager", stacklevel=3)
+        return self
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"name": self.name}
@@ -602,8 +641,6 @@ class Microscope:
             out["main_channel"] = self.main_channel
         if self.layout:
             out["layout"] = self.layout
-        if self.split_position not in (None, ""):
-            out["split_position"] = copy.deepcopy(self.split_position)
         if self.filters:
             out["filters"] = copy.deepcopy(self.filters)
         if self.camera:
