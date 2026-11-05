@@ -2541,3 +2541,16 @@ the tetrapod, the saddle point).
   design fits.
 - **Not yet**: the settings form (SMAPpy's `PSFModelSettings` has no mask section), the design's own weights,
   user masks as images, the freed parameters' report (value, CRLB, nats gained).
+
+## Molecules on the coverslip in a z stack (November 2026; `model.CoverslipStackGeometry`, `workflows/molecule_stack.py`)
+
+Single molecules stuck to the glass, imaged through repeated z sweeps: each detection its own emitter at a known
+defocus, a focus per sweep, the focal plane's slope, and one height above the glass for all of them, the
+sample's, learnt: it enters through the supercritical light's decay alone (`VectorPSF.saf_only_depth`), and the
+pupil saved is the objective's, its phase referenced at that height (``phase_reference_nm``), so that an emitter
+drawn at any height has the whole physics of its own z (no ``pupil.ring_h``).  Learnt as
+beads are (`learn_beads`), in rounds with a z check after each -- each molecule localised again with its z free,
+the bend and the scatter against the CRLB, the molecules off the plane dropped.  smappy's side, the detection
+matched to each frame's defocus and the selection, is `smappy.calibrate.molecule_stack` (`molecule_dual` for a
+split chip).  The design, the reuse of in situ and the comparison with the prototype on M5's AF647:
+`molecule-stacks.md`.

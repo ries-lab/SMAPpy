@@ -296,7 +296,7 @@ def test_the_astigmatism_field_shows_only_when_neither_the_entry_nor_a_start_mod
                                                                                             config):
     from smappy.calibrate.psf_window import PSFCalibrationWindow
     window = PSFCalibrationWindow()
-    window.method_box.setCurrentText("in situ (blinking molecules)")
+    window.sample_box.setCurrentText("blinking molecules in the sample (in situ)")
     window._ask = lambda box: None
     form = window.insitu_form
     window.add_paths([a_tiff(tmp_path / "movie_MMStack.ome.tif", M2_BEADS)])

@@ -19,7 +19,10 @@ light falling outside the region, make the sum over a region less than 1.
 region's centre, z the emitter's height above the focal plane.  In a bead
 stack z = −(objective position), and z enters through the immersion's k_z;
 ``depth_nm`` (in-situ) adds the emitter's depth in the sample through the
-medium's k_z.  With a tilted coverslip (``geometry.tilt``) or one off its design
+medium's k_z.  **Molecules on the coverslip** (`CoverslipStackGeometry`) learn with
+the depth's supercritical decay alone (``saf_only_depth``) and are drawn as the
+objective's pupil with that height's phase taken out (``phase_reference_nm``):
+`for_emitters`, `docs/uipsf/molecule-stacks.md`.  With a tilted coverslip (``geometry.tilt``) or one off its design
 thickness, the depth and the coverslip enter through the layered model's
 phase instead (`optics.layers`).
 """
@@ -51,7 +54,8 @@ class VectorPSF:
     def __init__(self, grid: PupilGrid, pupil, roi_shape: tuple[int, int], *, upsample: int = 1,
                  kind: str = "vector", analyser: str | None = "unpolarised", bead_radius_nm: float = 0.0,
                  sigma_nm: tuple[float, float] = (0.0, 0.0), fit_sigma: bool = True, round_sigma: bool = False,
-                 pixel_blur: bool = False, learn_n_med: bool = False):
+                 pixel_blur: bool = False, learn_n_med: bool = False, saf_only_depth: bool = False,
+                 phase_reference_nm: float = 0.0):
         """``roi_shape`` is (Y, X) camera pixels; ``kind`` "vector" or "scalar"; ``analyser``
         "unpolarised" (the default, also None), "x" or "y" (a channel behind a polariser); ``sigma_nm``
         the blur's starting value, or its value with ``fit_sigma=False``; ``round_sigma`` makes it one value
@@ -61,6 +65,15 @@ class VectorPSF:
         pixel's width up too, so with it σ is what blurs the image beyond the pixel.  ``learn_n_med`` learns the
         sample's refractive index, ``optics.n_med``, from the typed one (`medium`): a diagnostic, held by default.
 
+        ``saf_only_depth`` and ``phase_reference_nm`` are the two forms of one model of molecules at a common
+        height h on the coverslip.  Learning, the depth h enters through its supercritical decay alone,
+        exp(−2πκh) (``saf_only_depth``): the phase a molecule at h carries, Re k_z,med·h, is the same for every
+        molecule, so the pupil's phase and the sweeps' foci take it up, and the height is told by the SAF's
+        brightness only -- with the phase in, it took up the sharp feature at the critical angle the Zernikes
+        cannot, and came to 27 nm on M5's AF647 where the SAF alone gives 10 (3 November 2026).  Drawn for an
+        emitter at any height z, the pupil is the objective's, P_Z·exp(−2πi Re k_z,med·h) (``phase_reference_nm``
+        = h), and the depth term the whole physics of z: at z = h the same numbers, so the two forms agree on the
+        data, and away from it the SAF and the phase follow z alone.
         Unpolarised is the default and is said so: v1 put every two-channel vector fit behind an x and
         a y polariser unless told otherwise, so biplane and ratiometric data were fitted with the
         wrong PSFs (review F1)."""
@@ -80,6 +93,7 @@ class VectorPSF:
         self.round_sigma = bool(round_sigma)
         self.pixel_blur = bool(pixel_blur)
         self.learn_n_med = bool(learn_n_med)
+        self.saf_only_depth, self.phase_reference_nm = bool(saf_only_depth), float(phase_reference_nm)
         px, py = grid.optics.pixel_size_nm
         self.pixel_sigma = (px / math.sqrt(12), py / math.sqrt(12)) if self.pixel_blur else (0.0, 0.0)
         self.spacing = (px / self.upsample, py / self.upsample)
@@ -114,15 +128,24 @@ class VectorPSF:
                          analyser=self.analyser,
                          bead_radius_nm=self.bead_radius_nm if bead_radius_nm is None else bead_radius_nm,
                          sigma_nm=self.sigma_init, fit_sigma=self.fit_sigma, round_sigma=self.round_sigma,
-                         pixel_blur=self.pixel_blur, learn_n_med=self.learn_n_med)
+                         pixel_blur=self.pixel_blur, learn_n_med=self.learn_n_med,
+                         saf_only_depth=self.saf_only_depth, phase_reference_nm=self.phase_reference_nm)
 
-    def for_emitters(self, roi_shape=None, upsample: int | None = None) -> VectorPSF:
+    def for_emitters(self, roi_shape=None, upsample: int | None = None, height_nm=None) -> VectorPSF:
         """The point-emitter view of a learnt PSF, the one way a model is drawn for single molecules (a
         spline, a movie, a 4Pi calibration): `resized`, without the bead's size, and with a minimal pupil's
         supercritical ring undamped (`MinimalPupil.without_ring`: h is the beads' dye above the glass).  The
-        blur, the pixel's under it, kind and analyser are the learnt model's."""
+        blur, the pixel's under it, kind and analyser are the learnt model's.  A model learnt from molecules on
+        the coverslip (``saf_only_depth``) is drawn as the objective's pupil, its phase referenced at their
+        learnt height ``height_nm`` (``geometry.height``), with the whole physics of each emitter's depth
+        (`__init__`)."""
         pupil = self.pupil.without_ring() if hasattr(self.pupil, "without_ring") else self.pupil
-        return self.resized(roi_shape, upsample, bead_radius_nm=0.0, pupil=pupil)
+        out = self.resized(roi_shape, upsample, bead_radius_nm=0.0, pupil=pupil)
+        if self.saf_only_depth:
+            if height_nm is None:
+                raise ValueError("a model of molecules on the coverslip is drawn with their height (geometry.height)")
+            out.saf_only_depth, out.phase_reference_nm = False, float(height_nm)
+        return out
 
     def describe(self, p) -> dict:
         """The PSF's hand-over description: the pupil's (`ZernikePupil.describe`) with the blur, ``sigma_nm``
@@ -180,6 +203,8 @@ class VectorPSF:
     def pupil_field(self, p: dict[str, torch.Tensor]) -> torch.Tensor:
         """The complex pupil without the fields, magnitude rescaled to the reference energy; [..., P, P]."""
         magnitude, phase = self.pupil(p)
+        if self.phase_reference_nm:          # the objective's pupil: a molecule at the reference height's phase out
+            phase = phase - 2 * math.pi * self.depth_number(p, untilted=True).real * self.phase_reference_nm
         weight = self.medium(p)[3]
         # Not torch.polar(magnitude, phase): the magnitude 1 + Σ c_j Z_j dips below zero at the rim once its
         # coefficients grow, and polar's backward (torch 2.14) flips the gradient's sign there while its
@@ -303,6 +328,17 @@ class VectorPSF:
 
         return [h for h, _, _ in fields], apply
 
+    def depth_number(self, p, untilted: bool = False) -> torch.Tensor:
+        """[P, P] complex: what multiplies the depth in the waves' phase (cycles per nm) -- k_z,med, or the layered
+        model's c_h with a tilt or a coverslip off its design (``untilted``: at no tilt) -- with only its
+        imaginary, supercritical part under ``saf_only_depth`` (`__init__`)."""
+        n_med = p.get("optics.n_med")
+        if layers.layered(self.grid, p):
+            c_h = layers.coefficients(self.grid, None if untilted else p.get("geometry.tilt"), n_med=n_med)[0]
+        else:
+            c_h = self.grid.kz_med if n_med is None else medium.maps(self.grid, n_med).kz_med
+        return 1j * c_h.imag if self.saf_only_depth and not untilted else c_h
+
     def _waves(self, p, xyz, depth_nm):
         """exp(2πi k_z z) per emitter and observation, [E, K, P, P], with the depth term in-situ: one
         depth per emitter ([E]) or per emitter and observation ([E, K], `InSituGeometry`).  With a tilt of
@@ -313,13 +349,12 @@ class VectorPSF:
         if not layers.layered(self.grid, p):
             wave = torch.exp(2j * math.pi * self.grid.kz_imm * z)
             if depth_nm is not None:
-                kz_med = self.grid.kz_med if n_med is None else medium.maps(self.grid, n_med).kz_med
-                wave = wave * torch.exp(2j * math.pi * kz_med * _depth(depth_nm, self.grid))
+                wave = wave * torch.exp(2j * math.pi * self.depth_number(p) * _depth(depth_nm, self.grid))
             return wave
-        c_h, c_0 = layers.coefficients(self.grid, p.get("geometry.tilt"), n_med=n_med)
+        c_0 = layers.coefficients(self.grid, p.get("geometry.tilt"), n_med=n_med)[1]
         phase = self.grid.kz_imm * z + c_0
         if depth_nm is not None:
-            phase = phase + c_h * _depth(depth_nm, self.grid)
+            phase = phase + self.depth_number(p) * _depth(depth_nm, self.grid)
         return torch.exp(2j * math.pi * phase)
 
     def _stack(self, xyz, z_step_nm, depth_nm=None):

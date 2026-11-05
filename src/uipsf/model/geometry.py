@@ -165,3 +165,96 @@ class InSituGeometry(_Tilted):
         h = xyz[:, None, 2].expand(E, K)
         return torch.stack([xyz[:, None, 0].expand(E, K), xyz[:, None, 1].expand(E, K),
                             (z_k - p["geometry.focus"]).expand(E, K), h], -1)
+
+
+#: each sweep's focus about its start (nm), and the focal plane's slope (nm of focus per µm of field): the
+#: start is the width curve's focus of the sweep's file, within a few hundred nm; 50 nm/µm is 0.05 rad, as
+#: loose as the coverslip's tilt prior
+SWEEP_FOCUS_PRIOR_NM, PLANE_PRIOR_NM_PER_UM = 300.0, 50.0
+#: the molecules' common height above the glass: started at the glass (0.5 nm: a logistic cannot start on its
+#: bound, and its slope there is the height itself, so not much lower), bounded to (0, 200) nm
+HEIGHT_START_NM, HEIGHT_MAX_NM = 0.5, 200.0
+#: how firmly each molecule's own z offset is held at the plane while learning (nm)
+OFFSET_HOLD_NM = 0.5
+
+
+class CoverslipStackGeometry:
+    """Single molecules on the coverslip, imaged through repeated z sweeps (`docs/uipsf/molecule-stacks.md`).
+
+    A detection in frame k of sweep s, at chip position (u, v) µm from the field's centre, is at defocus
+
+        z_k − f_s − (a·u + b·v) + δz_e,
+
+    z_k the stage's nominal z in SMAPpy's sign (`Batch.z_nm`, [E, 1]), f_s the focus of its sweep
+    (`Batch.stack_id`: drift between sweeps; within one, about ten seconds, the stage holds), (a, b) the
+    focal plane's slope over the field -- the coverslip's tilt, shared by every sweep of one stage position
+    -- and δz_e the molecule's own offset from that plane (``emitter.xyz``'s z).  While learning δz_e is
+    held at 0 by a tight prior: z is known, and a free z per molecule would take up what the pupil should
+    learn.  The z check (``free_z``) frees it, and how far each molecule then moves is the z bend.
+
+    Every molecule is at one height h above the glass (``geometry.height``), its z in the sample, the fourth
+    coordinate: the dye's linker and whatever holds it.  It is the sample's, never the optics', and it is the
+    only thing the supercritical (SAF) light sees: exp(−2πκh), the same for every molecule, whatever the
+    focus, the plane's slope or a molecule's δz, which are all the defocus's.  The PSF reads it through the SAF
+    alone (`VectorPSF.saf_only_depth`): the propagating phase a molecule at h has is every molecule's, and the
+    pupil's phase and f_s take it up; with it in, it held the sharp feature at the critical angle the Zernikes
+    cannot, and h came to 27 nm on M5's AF647 where the SAF alone gives 10 (3 November 2026).  The pupil saved
+    is the objective's, that phase taken out (`VectorPSF.for_emitters`): an emitter at any height is then drawn
+    with the whole physics of its own z.  Learnt from the glass, h = 0; ``height_nm`` holds it at a value
+    instead (the window's *more*: when it runs off).  One h for all molecules is what the data can tell: a
+    single frame cannot tell a molecule's own height from its δz.
+
+    Each molecule otherwise learns x, y, photons and background.  ``centre_px`` is the field's centre in
+    chip pixels (`Batch.field_xy`'s), ``pixel_nm`` the pixel.  No coverslip tilt of the layers: with an oil
+    objective a point at the glass sees none (the module docstring), and the focal plane's slope is the
+    tilt as these data see it."""
+
+    fit_tilt, tilt_rad, tilt_prior_rad = False, None, None
+
+    def __init__(self, sweeps: int, focus_nm, centre_px, pixel_nm, height_nm: float | None = None,
+                 fit_plane: bool = True, free_z: bool = False, focus_prior_nm: float = SWEEP_FOCUS_PRIOR_NM,
+                 plane_prior: float = PLANE_PRIOR_NM_PER_UM):
+        self.sweeps = int(sweeps)
+        self.focus_nm = torch.as_tensor(focus_nm, dtype=torch.float32).reshape(self.sweeps)
+        self.centre_px = tuple(float(v) for v in centre_px)
+        self.pixel_nm = tuple(float(v) for v in pixel_nm)
+        self.height_nm = None if height_nm is None else float(height_nm)
+        self.fit_plane, self.free_z = bool(fit_plane), bool(free_z)
+        self.focus_prior_nm, self.plane_prior = float(focus_prior_nm), float(plane_prior)
+
+    def checking(self) -> CoverslipStackGeometry:
+        """The same geometry with every molecule's z free: the z check's."""
+        import copy
+        new = copy.copy(self)
+        new.free_z = True
+        return new
+
+    def specs(self, batch, start) -> list[ParamSpec]:
+        from ..params import Bounded
+        dt, dev = batch.data.dtype, batch.data.device
+        hold = Gaussian(torch.zeros(3, dtype=dt, device=dev),
+                        torch.tensor([1e9, 1e9, OFFSET_HOLD_NM], dtype=dt, device=dev))
+        f0 = self.focus_nm.to(dtype=dt, device=dev)
+        h = HEIGHT_START_NM if self.height_nm is None else self.height_nm
+        return [ParamSpec("emitter.xyz", (3,), "emitter", init=start["xyz"], prior=None if self.free_z else hold),
+                ParamSpec("geometry.focus", (self.sweeps,), init=f0, prior=Gaussian(f0, self.focus_prior_nm)),
+                ParamSpec("geometry.plane", (2,), init=0.0, prior=Gaussian(0.0, self.plane_prior),
+                          fixed=not self.fit_plane),
+                ParamSpec("geometry.height", (), init=h, transform=Bounded(0.0, HEIGHT_MAX_NM),
+                          fixed=self.height_nm is not None)]
+
+    def plane_focus(self, p, batch) -> torch.Tensor:
+        """[E] nm: where the focal plane is for each molecule, its sweep's focus and the slope at its place."""
+        xyz = p["emitter.xyz"]
+        uv = (batch.field_xy.to(xyz) - xyz.new_tensor(self.centre_px)) * xyz.new_tensor(self.pixel_nm) / 1000
+        return p["geometry.focus"][batch.stack_id.to(xyz.device)] + (uv * p["geometry.plane"]).sum(-1)
+
+    def __call__(self, p, batch) -> torch.Tensor:
+        """[E, K, 4] nm: x, y, the defocus through the immersion, the height in the sample."""
+        xyz = p["emitter.xyz"]
+        E = xyz.shape[0]
+        z_k = batch.z_nm.to(xyz.dtype).reshape(E, -1)                                   # [E, K]
+        K = z_k.shape[1]
+        defocus = z_k - self.plane_focus(p, batch)[:, None] + xyz[:, None, 2]
+        h = p["geometry.height"].to(xyz.dtype).expand(E, K)
+        return torch.stack([xyz[:, None, 0].expand(E, K), xyz[:, None, 1].expand(E, K), defocus, h], -1)

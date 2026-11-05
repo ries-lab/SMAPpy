@@ -4,7 +4,9 @@ The window (`psf_window`) shows one method at a time and knows none of them:
 each entry says which of the window's sections it reads (`sections`), how a
 run goes, its result pages, its bead table and how it
 saves.  A method added later -- in situ learning from blinking molecules, a
-field-dependent model -- is one more entry, not a branch through the window
+field-dependent model -- is one more entry, not a branch through the window;
+the window's *sample* only narrows which entries the method box lists
+(`SAMPLE_METHODS`)
 (`docs/uipsf/plan.md` §7.5).  No Qt here: a test or a script uses an entry
 as the window does.
 
@@ -14,6 +16,9 @@ as the window does.
 * **pupil model (uiPSF)**: `pupil.run_calibration` and uipsf's figures.
 * **in situ (blinking molecules)**: `insitu_run.run_insitu` on movies, uipsf's figures and the in situ
   pages (`insitu_views`); its table counts molecules by state, with no marks.
+* **molecules on the coverslip** (`MoleculeStack`, `MoleculeElliptical`): `molecule_stack_run.run_molecule_stack`
+  on z sweeps of molecules stuck to the glass, each detection at a known defocus; the pupil model's pages and
+  its own (`molecule_views`), the table counting molecules by state.
 * **elliptical Gaussian**: no PSF model at all, the curves of an elliptical Gaussian's widths in z
   (`elliptical`), for Astigmatic z rather than a fitter; saved as ``<name>_astigz.h5`` and never listed
   for the fitters' *auto*.
@@ -546,7 +551,9 @@ class InSitu:
     spline as the pupil model's, and its own (*in situ*: the focus, the start's astigmatism, the coverslip,
     the rounds; the detection's settings under *more*).  One channel.  There is no table of molecules to
     mark: thousands of them are chosen by rules, not by hand, so the table counts them by state."""
-    key, label = "insitu", "in situ (blinking molecules)"
+    # its own label: its spline means something else than the others' -- valid at the imaging focus, z the
+    # height in the sample
+    key, label = "insitu", "pupil model (in situ)"
     sections = {"start from": True, "microscope": True, "model": True, "spline": True, "averaging": False,
                 "in situ": True}
     columns = ("state", "units", "molecules")
@@ -1091,13 +1098,256 @@ class FourPiAverage(_FourPi):
         return run.saved
 
 
+class MoleculeStack:
+    """The pupil model from molecules on the coverslip imaged through z sweeps (`molecule_stack_run`): each
+    detection its own emitter at a known defocus, learnt in rounds with a z check after each, and saved as a
+    bead model is -- a PSF at the coverslip against defocus, for Spline 3D.
+
+    Its files are z sweeps of a blinking sample; its sections the microscope, the model, *start from* and the
+    spline as the pupil model's, and its own (*molecules*: how many, and under *more* the detection and the
+    molecules' height).  Thousands of molecules are chosen by rules, so the table counts them by state, as
+    in situ's does."""
+    key, label = "molecules", "pupil model (uiPSF)"
+    sections = {"start from": True, "microscope": True, "model": True, "spline": True, "averaging": False,
+                "molecules": True}
+    columns = ("state", "units", "molecules")
+    marks_include = False
+    marks = False
+    has_stack = False
+    files = "z sweeps"
+    finds = "molecules"
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .molecule_stack_run import estimate_seconds
+        if dual:
+            from .molecule_dual import dual_molecule_rois
+            rois = dual_molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
+        else:
+            from .molecule_stack import molecule_rois
+            rois = molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
+        (progress or (lambda entry: None))({"message": "timing the model on a few molecules", "fraction": 0.95})
+        seconds = estimate_seconds(rois, inputs["optics"], inputs["model"], inputs["molecules"])
+        used = len(rois.ids("used"))
+        return Detected(rois, f"{used} molecules in {rois.sweeps} sweeps to learn from "
+                              f"({'; '.join(rois.messages)}); learning takes about {duration(seconds)}",
+                        _unit_positions(rois), seconds)
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _state_rows(detected.found.units, detected.found.state)
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .molecule_stack_run import run_molecule_stack
+        rois = detected.found if detected is not None else (previous.result.rois if previous is not None else None)
+        done = run_molecule_stack(paths, inputs["optics"], inputs["model"], inputs["molecules"], inputs["spline"],
+                                  inputs["run"], camera=inputs.get("camera"), rois=rois, progress=progress,
+                                  cancel=cancel, save_to=previous.saved if previous is not None else None,
+                                  dual=dual)
+        run = Run(done, dual, done.saved)
+        warnings = [m.removeprefix("warning: ") for m in done.messages if m.startswith("warning: ")]
+        if warnings:
+            run.extra["warning"] = "; ".join(warnings)
+        return run
+
+    def finish(self, run: Run, progress=None) -> Run:
+        """The model against the data per defocus, kept with the run; nothing after a stopped run."""
+        from .molecule_views import model_vs_data
+        if run.result.cal.result.stop_reason == "cancelled":
+            return run
+        (progress or (lambda entry: None))({"message": "the model against the data", "fraction": 0.97})
+        run.extra["views"] = model_vs_data(run.result)
+        return run
+
+    def save_as(self, run: Run, path) -> Path:
+        from .molecule_stack_run import calibration_of
+        from .pupil import save
+        done = run.result
+        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)
+        run.saved = Path(path)
+        return run.saved
+
+    def pages(self, run: Run) -> list:
+        from uipsf.diagnostics import figures
+        from uipsf.diagnostics.figures import unit_choices, zernike_table
+
+        from .insitu_views import draw_model_vs_data
+        from .molecule_views import draw_foci, draw_selection, draw_z_check
+        result = run.result
+        cal = result.cal
+        pages = [Page("Selection", lambda f, s, e: draw_selection(f, result.rois, result), follows_selection=False),
+                 Page("z check", lambda f, s, e: draw_z_check(f, result), follows_selection=False),
+                 Page("Foci and plane", lambda f, s, e: draw_foci(f, result), follows_selection=False)]
+        for title, draw in figures(cal, reference=result.start).items():
+            if title == "Beads":
+                continue
+            if title.startswith("Pupil and Zernikes"):
+                units = unit_choices()
+                pages.append(Page(title, lambda f, s, e, chosen, draw=draw: draw(f, units=chosen["units"]),
+                                  follows_selection=False, controls={"units": units}))
+            else:
+                pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
+        pages.append(Page("Zernike table", None, follows_selection=False,
+                          table=lambda: zernike_table(cal, reference=result.start)))
+
+        def versus(figure, selected, excluded):
+            views = run.extra.get("views")
+            if views is None:
+                _not_yet(figure, "the model against the data is drawn after calibrating")
+                return None
+            return draw_model_vs_data(figure, views)
+        pages.append(Page("Model vs data", versus, follows_selection=False))
+        return pages
+
+    def _state(self, run: Run) -> list:
+        """Each unit's state after the run: the selection's, the last round's used ones "used", and those
+        the learning or the z check dropped "rejected: in learning"."""
+        used = set(np.asarray(run.result.used()).tolist())
+        return ["used" if i in used else ("rejected: in learning" if s == "used" else s)
+                for i, s in enumerate(run.result.rois.state)]
+
+    def rows(self, run: Run, marks: dict) -> list:
+        return _state_rows(run.result.rois.units, self._state(run))
+
+    def initial_marks(self, run: Run) -> dict:
+        return {}
+
+    def mark(self, run: Run, bead: int):
+        return None
+
+    def stacks(self, run: Run):
+        return None, None
+
+    def summary(self, run: Run) -> str:
+        result = run.result
+        if result.cal.result.stop_reason == "cancelled":
+            return "stopped, nothing saved"
+        from uipsf.diagnostics.figures import model_text
+        numbers = model_text(result.cal)
+        text = (f"{len(result.cal.beads.used)} molecules used, {len(result.run.rounds)} rounds"
+                + (f", {numbers}" if numbers else ""))
+        return text + "".join(f"; {m}" for m in result.messages if not m.startswith("warning: "))
+
+    def states(self, run: Run) -> dict:
+        return {i: s.split(":")[0] for i, s in enumerate(self._state(run))}
+
+    def detected_states(self, detected: Detected) -> dict:
+        return {i: s.split(":")[0] for i, s in enumerate(detected.found.state)}
+
+    def positions(self, run: Run) -> list:
+        return _unit_positions(run.result.rois)
+
+
+class MoleculeElliptical(EllipticalGaussian):
+    """The elliptical Gaussian's width curves from molecules on the coverslip in z sweeps, for *Astigmatic
+    z*: the molecules found and chosen as for the pupil model (`molecule_stack`), each fitted in the *fit
+    box* with the elliptical Gaussian the data will be fitted with, its z the stage's less its file's focus
+    (where the spots are round), and one defocus curve per axis fitted to all of them.  Seconds, no torch."""
+    key = "molecules elliptical"
+    sections = {"start from": False, "microscope": False, "model": False, "spline": False, "averaging": False,
+                "elliptical": True, "molecules": True}
+    columns = ("state", "units", "molecules")
+    files = "z sweeps"
+    finds = "molecules"
+    marks = False
+
+    def detect(self, paths, dual, inputs, progress=None) -> Detected:
+        from .molecule_stack import molecule_rois
+        if dual:
+            raise ValueError("the elliptical Gaussian calibration is one channel only")
+        rois = molecule_rois(paths, inputs["molecules"], inputs.get("camera"), progress=progress)
+        used = len(rois.ids("used"))
+        return Detected(rois, f"{used} molecules in {rois.sweeps} sweeps ({'; '.join(rois.messages)}); "
+                              f"calibrating takes seconds", _unit_positions(rois))
+
+    def detected_rows(self, detected: Detected, marks: dict) -> list:
+        return _state_rows(detected.found.units, detected.found.state)
+
+    def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
+            marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from .elliptical import bead_residuals, calibrate_widths, save_path
+        from .molecule_stack import molecule_widths
+        from .pupil import pixel_size_nm
+        rois = (detected.found if detected is not None else previous.result["rois"] if previous is not None
+                else self.detect(paths, dual, inputs, progress).found)
+        settings = inputs["elliptical"]
+        widths = molecule_widths(rois, pixel_size_nm(rois.camera), settings)
+        names = ", ".join(sorted({Path(str(s.get("path", ""))).name for s in rois.sources}))
+        cal = calibrate_widths(widths, settings.higher_orders, source=names)
+        result = {"rois": rois, "widths": widths, "calibration": cal, "excluded": [], "manual": [],
+                  "residuals": bead_residuals(widths, cal)}
+        run = Run(result, False)
+        if inputs["run"].save_model:
+            path = previous.saved if previous is not None and previous.saved is not None else save_path(paths)
+            run.saved = cal.save(path)
+        return run
+
+    def pages(self, run: Run) -> list:
+        from .elliptical import draw_widths, draw_z_back
+        from .molecule_views import draw_selection
+        r = run.result
+        return [Page("Widths in z", lambda f, s, e: draw_widths(f, r["widths"], r["calibration"]),
+                     follows_selection=False),
+                Page("z from the widths", lambda f, s, e: draw_z_back(f, r["widths"], r["calibration"]),
+                     follows_selection=False),
+                Page("Selection", lambda f, s, e: draw_selection(f, r["rois"]), follows_selection=False)]
+
+    def rows(self, run: Run, marks: dict) -> list:
+        return _state_rows(run.result["rois"].units, run.result["rois"].state)
+
+    def initial_marks(self, run: Run) -> dict:
+        return {}
+
+    def mark(self, run: Run, bead: int):
+        return None
+
+    def summary(self, run: Run) -> str:
+        cal = run.result["calibration"]
+        return (f"{cal.beads} molecules used; rms residual {cal.residual_nm[0]:.1f} / {cal.residual_nm[1]:.1f} nm "
+                f"in x / y")
+
+    def detected_states(self, detected: Detected) -> dict:
+        return {i: s.split(":")[0] for i, s in enumerate(detected.found.state)}
+
+    def states(self, run: Run) -> dict:
+        return {i: s.split(":")[0] for i, s in enumerate(run.result["rois"].state)}
+
+    def positions(self, run: Run) -> list:
+        return _unit_positions(run.result["rois"])
+
+
+#: what the window's *sample* box offers: what was imaged, first, before the method
+SAMPLES = ("beads in a z stack", "molecules on the coverslip in a z stack",
+           "blinking molecules in the sample (in situ)")
+
 #: what the window's *mode* box offers: the channel geometry, beside the method that makes the PSF
 MODES = ("Single channel", "Dual colour", "4Pi")
 
-METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian())
+METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian(), MoleculeStack(), MoleculeElliptical())
+
+#: the methods each sample offers, by key, as the method box lists them
+SAMPLE_METHODS = {SAMPLES[0]: ("average", "pupil", "elliptical"),
+                  SAMPLES[1]: ("molecules", "molecules elliptical"),
+                  SAMPLES[2]: ("insitu",)}
 
 #: the methods in the 4Pi mode, by the key of the method they are in the others
 FOURPI = {"average": FourPiAverage(), "pupil": FourPiPupil()}
+
+#: the methods that run in one channel only
+ONE_CHANNEL = ("insitu", "elliptical", "molecules elliptical")
+
+
+def by_key(key: str):
+    return next(m for m in METHODS if m.key == key)
+
+
+def methods_of(sample: str) -> tuple:
+    """The methods a sample offers, as the method box names them."""
+    return tuple(by_key(k) for k in SAMPLE_METHODS[sample])
+
+
+def sample_of(method) -> str:
+    """The sample a method (as the method box names it) learns from."""
+    return next(s for s, keys in SAMPLE_METHODS.items() if method.key in keys)
 
 
 def modes_of(method) -> tuple:
@@ -1107,10 +1357,10 @@ def modes_of(method) -> tuple:
 
 def for_mode(method, mode: str):
     """The entry that runs ``method`` in ``mode``, or None where there is none: the 4Pi variant in the 4Pi
-    mode, the method itself in the others -- except in situ (one channel, for now) and the elliptical
-    Gaussian (one channel)."""
+    mode, the method itself in the others -- except those of one channel (`ONE_CHANNEL`).  (sample, method,
+    mode) picks one entry: no entry asks which sample it is, the method does (`SAMPLE_METHODS`)."""
     if mode == "4Pi":
         return FOURPI.get(method.key)
-    if mode == "Dual colour" and method.key in ("insitu", "elliptical"):
+    if mode == "Dual colour" and method.key in ONE_CHANNEL:
         return None
     return method

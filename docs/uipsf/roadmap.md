@@ -18,6 +18,7 @@ when a milestone lands or an item moves.
 | M6 | SMAPpy integration and release | mostly done: window, adapter, spline, acceptance tests; open below |
 | M5 | in situ (blinking molecules) | designed (plan §9, M5); steps 1–6 done: the fit on cut regions, the twin test, linked blinks, simulated movies, detection and selection, the rounds and the coverslip edge, the window's *in situ* method |
 | M8 | physics where the atlas asks for it | ongoing: measured, not yet modelled |
+| M9 | molecules on the coverslip in a z stack | single channel and dual colour done (`molecule-stacks.md`): the window's *sample*, `CoverslipStackGeometry`, the rounds with a z check; 4Pi open |
 
 ## Done
 

@@ -5,13 +5,15 @@ Only widgets.  The methods are entries in `psf_methods` -- *bead average*
 the sections below it reads, how it runs, its pages and its bead table; the
 window shows the chosen one's and knows none of them (`docs/uipsf/plan.md` §7.5).
 
-A third method, *in situ (blinking molecules)*, learns from movies: its files are
-movies, its section *in situ*, its *Detect molecules* rings them on their frames,
-and its table counts them by state (`psf_methods.InSitu`).  A fourth,
-*elliptical Gaussian*, makes no PSF: the curves of an elliptical Gaussian's
-widths in z, for Astigmatic z, from its own section (`psf_methods.EllipticalGaussian`);
-its *Use* button and the `calibrated` signal hand them to that plugin, and it is
-never listed for the fitters.
+The *sample* comes first, and the method box offers what fits it (`psf_methods.SAMPLE_METHODS`):
+beads in a z stack (bead average, pupil model, elliptical Gaussian); molecules on the coverslip in a z
+stack (pupil model, elliptical Gaussian: `psf_methods.MoleculeStack`, `MoleculeElliptical`, their section
+*molecules*); blinking molecules in the sample, in situ (the pupil model, `psf_methods.InSitu`, its section
+*in situ*).  The mode box offers the modes the method has (`for_mode`).  The molecules' methods find
+*molecules*, ring them on their frames, and count them by state in the table.  The elliptical Gaussian
+makes no PSF: the curves of an elliptical Gaussian's widths in z, for Astigmatic z, from its own section;
+its *Use* button and the `calibrated` signal hand them to that plugin, and it is never listed for the
+fitters.
 
 What every method shares is the window's: the stacks and their *Stacks*
 page (`stack_browser`), *mode* (single channel or dual colour), the two steps
@@ -45,9 +47,11 @@ from .core import CalibrationSettings
 from .dual import DualColorSettings
 from .elliptical import EllipticalCalibrationSettings
 from .input import acquisition_kind, discover_acquisitions, is_fourpi_scan
-from .psf_methods import AVERAGE_ONLY, METHODS, MODES, LearningProgress, duration, for_mode
+from .psf_methods import (AVERAGE_ONLY, METHODS, SAMPLES, LearningProgress, duration, for_mode, methods_of, modes_of,
+                          sample_of)
 from .insitu import InSituSettings
 from .insitu_run import InSituModelSettings
+from .molecule_stack import MoleculeStackSettings
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
 from .qt_gui import _bead_specs
 
@@ -193,7 +197,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.resize(1400, 900)
         self._refresh_files()
         self._show_method()
-        for form in (*self.detection_forms.values(), self.insitu_detection_form):
+        for form in (*self.detection_forms.values(), self.insitu_detection_form, self.molecule_form):
             form.changed.connect(self._detection_changed)
 
     # ------------------------------------------------------------ controls
@@ -240,8 +244,12 @@ class PSFCalibrationWindow(QMainWindow):
             line.addWidget(box, 1)
             layout.addLayout(line)
             return box
-        self.method_box = choice("method", [m.label for m in METHODS], self.method_changed)
-        self.mode_box = choice("mode", list(MODES), self.mode_changed)
+        # what was imaged, first; the method box offers what fits it, the mode box what the method has
+        self.sample_box = choice("sample", list(SAMPLES), self.sample_changed)
+        self.sample_box.setToolTip("what the files show: beads stepped through focus, single molecules on the "
+                                   "coverslip stepped through focus, or a blinking sample imaged at one focus")
+        self.method_box = choice("method", [m.label for m in methods_of(SAMPLES[0])], self.method_changed)
+        self.mode_box = choice("mode", list(modes_of(METHODS[0])), self.mode_changed)
 
         # one RunSettings, two forms: *start from* is a choice of the model, *save model* of the run
         self.run_form = SettingsForm(RunSettings)
@@ -282,6 +290,8 @@ class PSFCalibrationWindow(QMainWindow):
         ilayout.setContentsMargins(0, 0, 0, 0)
         ilayout.addWidget(self.insitu_form)
         ilayout.addWidget(self.insitu_detection_form)
+        # molecules on the coverslip in z sweeps: how many, and under more how they are found and their height
+        self.molecule_form = SettingsForm(MoleculeStackSettings)
         # elliptical Gaussian: the fit box and the curves' terms
         self.elliptical_form = SettingsForm(EllipticalCalibrationSettings)
         # 4Pi beads: where the channels are, the scan's z step and mirror steps, the model's order
@@ -291,6 +301,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.sections = {"microscope": CollapsibleSection("microscope", self.optics_form, expanded=False),
                          "model": CollapsibleSection("model", model, expanded=True),
                          "in situ": CollapsibleSection("in situ", insitu, expanded=True),
+                         "molecules": CollapsibleSection("molecules", self.molecule_form, expanded=True),
                          "elliptical": CollapsibleSection("elliptical Gaussian", self.elliptical_form,
                                                           expanded=True),
                          "4Pi": CollapsibleSection("4Pi", self.fourpi_form, expanded=True),
@@ -378,23 +389,27 @@ class PSFCalibrationWindow(QMainWindow):
         if hasattr(self, "paths"):
             self._show_optics()
         self.sections["in situ"].setVisible(insitu)
+        molecules = reads.get("molecules", False)
+        self.sections["molecules"].setVisible(molecules)
+        self.molecule_form.set_shown({"registration": self.is_dual})
         self.sections["elliptical"].setVisible(reads.get("elliptical", False))
         fourpi = reads.get("4Pi", False)
         self.sections["4Pi"].setVisible(fourpi)
         self._show_fourpi()
         self._show_model()
         # 4Pi finds its beads on channel 0 by itself, and its channels are its section's
-        self.sections["beads"].setVisible(not insitu and not fourpi)
+        self.sections["beads"].setVisible(not insitu and not fourpi and not molecules)
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
-        self.stack_browser.set_movie(getattr(self.method, "files", "") == "movies")
+        # z sweeps are read as movies are, frame by frame, each molecule ringed on its own frame
+        self.stack_browser.set_movie(getattr(self.method, "files", "") in ("movies", "z sweeps"))
         self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
         shared = {f.name for f in fields(CalibrationSettings)}
         for cls, form in self.detection_forms.items():
             form.setVisible(cls is wanted)
             form.set_shown({name: reads["averaging"] for name in AVERAGE_ONLY if name in shared})
-        pupil = self.method.key in ("pupil", "insitu") or getattr(self.method, "needs_torch", False)
+        pupil = self.method.key in ("pupil", "insitu", "molecules") or getattr(self.method, "needs_torch", False)
         missing = torch_missing()
         self.notice.setText(missing or "")
         self.notice.setVisible(pupil and missing is not None)
@@ -460,25 +475,47 @@ class PSFCalibrationWindow(QMainWindow):
     def is_fourpi(self) -> bool:
         return self.mode_box.currentText() == "4Pi"
 
+    def sample_changed(self, sample: str) -> None:
+        """A sample chosen: the method box offers its methods, the one of the same name kept where it has one
+        (the pupil model), else its first."""
+        labels = [m.label for m in methods_of(sample)]
+        self._fill(self.method_box, labels, self.chosen.label)
+        self._choose(self.method_box.currentText(), "sample changed; files and settings kept - calibrate again")
+
     def method_changed(self, label: str) -> None:
-        """A method chosen: in this mode if it runs in it, else in the first mode it does (in situ and the
-        elliptical Gaussian are one channel)."""
-        self.chosen = next(m for m in METHODS if m.label == label)
-        if for_mode(self.chosen, self.mode_box.currentText()) is None:
-            from .psf_methods import modes_of
-            self.mode_box.blockSignals(True)
-            self.mode_box.setCurrentText(modes_of(self.chosen)[0])
-            self.mode_box.blockSignals(False)
+        """A method chosen: the mode box offers its modes, the current one kept where it has it."""
+        self._choose(label, "method changed; files and settings kept - calibrate again")
+
+    def _choose(self, label: str, message: str) -> None:
+        sample = self.sample_box.currentText()
+        self.chosen = next(m for m in methods_of(sample) if m.label == label)
+        self._fill(self.mode_box, list(modes_of(self.chosen)), self.mode_box.currentText())
         self.method = for_mode(self.chosen, self.mode_box.currentText())
-        self._forget("method changed; files and settings kept - calibrate again")
+        self._forget(message)
+        self._show_optics()
+
+    @staticmethod
+    def _fill(box, items, keep) -> None:
+        """``box`` offering ``items``, ``keep`` chosen if it is one, else the first; no signal."""
+        box.blockSignals(True)
+        box.clear()
+        box.addItems(items)
+        box.setCurrentText(keep if keep in items else items[0])
+        box.blockSignals(False)
+
+    def choose(self, sample: str, method: Optional[str] = None, mode: Optional[str] = None) -> None:
+        """Set the three boxes at once, as a script or a test says them: ``method`` by its label or key."""
+        self.sample_box.setCurrentText(sample)
+        if method is not None:
+            found = next(m for m in methods_of(sample) if method in (m.label, m.key))
+            self.method_box.setCurrentText(found.label)
+        if mode is not None:
+            self.mode_box.setCurrentText(mode)
 
     def mode_changed(self, mode: str) -> None:
-        """A mode chosen: the method in it, or the pupil model where the chosen one has no such mode."""
-        if for_mode(self.chosen, mode) is None:
-            self.chosen = next(m for m in METHODS if m.key == "pupil")
-            self.method_box.blockSignals(True)
-            self.method_box.setCurrentText(self.chosen.label)
-            self.method_box.blockSignals(False)
+        """A mode chosen: the method in it (the mode box offers only the modes it has)."""
+        if not mode:
+            return
         self.method = for_mode(self.chosen, mode)
         self._forget("mode changed; files and settings kept - calibrate again")
         self._show_optics()
@@ -574,6 +611,7 @@ class PSFCalibrationWindow(QMainWindow):
         if not hasattr(self, "method") or not hasattr(self, "fourpi_form"):     # still being built
             return
         in_situ = self.method.sections.get("in situ", False)
+        kind = "insitu" if in_situ else "molecules" if self.method.sections.get("molecules", False) else "beads"
         try:
             optics = self.optics_form.value()
             na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
@@ -586,8 +624,7 @@ class PSFCalibrationWindow(QMainWindow):
         except ValueError:
             magnitude = "minimal"
         layered = self.method.sections.get("microscope", False) and self._coverslip_matters()
-        self.model_form.set_shown(model_shown("insitu" if in_situ else "beads", magnitude, self.is_dual, layered,
-                                              ring))
+        self.model_form.set_shown(model_shown(kind, magnitude, self.is_dual, layered, ring))
         self._show_fourpi()
 
     def _sample_index(self, optics, fourpi: bool) -> float:
@@ -657,7 +694,7 @@ class PSFCalibrationWindow(QMainWindow):
         return ", ".join(bits)
 
     def _update_buttons(self) -> None:
-        ready = not ((self.method.key in ("pupil", "insitu") or getattr(self.method, "needs_torch", False))
+        ready = not ((self.method.key in ("pupil", "insitu", "molecules") or getattr(self.method, "needs_torch", False))
                      and torch_missing() is not None)
         done = self.run_result is not None
         self.toggle_button.setEnabled(done or self.detected is not None)
@@ -757,6 +794,8 @@ class PSFCalibrationWindow(QMainWindow):
         memory and ended in a refusal long enough to widen the window.  4Pi scans (DCIMG, quadrant .mat)
         switch the window to the 4Pi mode, the only one that reads them."""
         if paths and not self.is_fourpi and all(is_fourpi_scan(p) for p in paths):
+            if "4Pi" not in modes_of(self.chosen):
+                self.choose(SAMPLES[0], "pupil")
             self.mode_box.setCurrentText("4Pi")
             return
         movies = getattr(self.method, "files", "") == "movies"
@@ -768,19 +807,20 @@ class PSFCalibrationWindow(QMainWindow):
         if not wrong:
             return
         names = "\n".join(Path(p).name for p, _ in wrong[:5]) + ("\n..." if len(wrong) > 5 else "")
-        other = next(m for m in METHODS if (getattr(m, "files", "") == "movies") != movies)
+        # a movie for in situ; z stacks for beads (or molecules: which, the user says by the sample box)
+        other = next(m for m in METHODS if m.key == ("pupil" if movies else "insitu"))
         what = ("bead z-stacks, not blinking movies" if movies else
                 f"blinking movies ({wrong[0][1]} frames, no z steps), not bead z-stacks")
         box = QMessageBox(QMessageBox.Warning, "PSF calibration",
                           f"{'This looks like' if len(wrong) == 1 else 'These look like'} {what}:\n\n{names}\n\n"
                           f"{self.method.label} cannot learn from {'it' if len(wrong) == 1 else 'them'}.", parent=self)
-        switch = box.addButton(f"Use {other.label}", QMessageBox.AcceptRole)
+        switch = box.addButton(f"Use {sample_of(other)}", QMessageBox.AcceptRole)
         remove = box.addButton("Remove", QMessageBox.DestructiveRole)
         box.addButton("Keep", QMessageBox.RejectRole)
         box.setDefaultButton(switch)
         self._ask(box)
         if box.clickedButton() is switch:
-            self.method_box.setCurrentText(other.label)
+            self.sample_box.setCurrentText(sample_of(other))
         elif box.clickedButton() is remove:
             for path, _ in wrong:
                 self.paths.remove(path)
@@ -965,6 +1005,8 @@ class PSFCalibrationWindow(QMainWindow):
             inputs["insitu"] = self.insitu_form.value()
         if self.method.sections.get("elliptical", False):
             inputs["elliptical"] = self.elliptical_form.value()
+        if self.method.sections.get("molecules", False):
+            inputs["molecules"] = self.molecule_form.value()
         if self.method.sections.get("4Pi", False):
             inputs["fourpi"] = self.fourpi_form.value()
         if self.paths:

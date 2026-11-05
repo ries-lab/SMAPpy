@@ -180,8 +180,22 @@ def _records(folder: Path, start: int, files: List[str]) -> Dict[str, list]:
     return out
 
 
+def _on_disk(folder: Path, name: str) -> str:
+    """The stack file the index calls ``name``, as it is named on disk.  The index records the names a
+    dataset's files had when written, so a dataset folder renamed with its files (``x_3D_1`` to ``x_2D_1``,
+    M5's AF647, November 2026) lists files that are no longer there, and every image read as not yet
+    written: the one file in the folder with the same ending (``_NDTiffStack.tif``, ``_NDTiffStack_1.tif``)
+    is the one meant."""
+    if (folder / name).exists() or "_NDTiffStack" not in name:
+        return name
+    tail = name[name.rindex("_NDTiffStack"):]
+    found = [f.name for f in folder.glob("*" + tail) if f.name.endswith(tail)]
+    return found[0] if len(found) == 1 else name
+
+
 def _build(folder: Path, files: List[str], found: Dict[str, list],
            bytes_per_pixel: np.ndarray) -> NDTiffIndex:
+    files[:] = [_on_disk(folder, name) for name in files]
     return NDTiffIndex(
         folder=folder, files=files,
         file_index=np.array(found["file_index"], np.int64),

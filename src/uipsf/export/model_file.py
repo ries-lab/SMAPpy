@@ -82,7 +82,7 @@ from ..model import (
     ZernikePupil,
 )
 from ..model.channels import Channel, prefix, unpack_transform, view
-from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, InSituGeometry
+from ..model.geometry import TILT_PRIOR_RAD, BeadStackGeometry, CoverslipStackGeometry, InSituGeometry
 from ..model.mask import config as mask_config
 from ..model.mask import make_mask
 from ..optics import Optics, PupilGrid
@@ -121,7 +121,9 @@ def _describe_channel(ch: Channel) -> dict:
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
                          sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma,
-                         round_sigma=psf.round_sigma, pixel_blur=psf.pixel_blur, learn_n_med=psf.learn_n_med),
+                         round_sigma=psf.round_sigma, pixel_blur=psf.pixel_blur, learn_n_med=psf.learn_n_med,
+                         **(dict(saf_only_depth=True) if psf.saf_only_depth else {}),
+                         **(dict(phase_reference_nm=psf.phase_reference_nm) if psf.phase_reference_nm else {})),
                 transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform,
                 **({} if getattr(ch, "field", None) is None else dict(field=ch.field.config())))
 
@@ -131,6 +133,10 @@ def describe(model: ForwardModel) -> dict:
     g = model.geometry
     if isinstance(g, InSituGeometry):
         geometry = dict(kind="in situ", focus_nm=g.focus_nm, focus_prior_nm=g.focus_prior_nm, fit_focus=g.fit_focus)
+    elif isinstance(g, CoverslipStackGeometry):
+        geometry = dict(kind="coverslip stack", sweeps=g.sweeps, focus_nm=g.focus_nm.tolist(),
+                        centre_px=list(g.centre_px), pixel_nm=list(g.pixel_nm), height_nm=g.height_nm,
+                        fit_plane=g.fit_plane, focus_prior_nm=g.focus_prior_nm, plane_prior=g.plane_prior)
     else:
         geometry = dict(kind="bead stack", drift=g.drift, drift_axes=g.drift_axes, drift_prior_nm=g.drift_prior_nm,
                         z_scale=g.z_scale, z_scale_prior=g.z_scale_prior)
@@ -172,7 +178,9 @@ def _build_channel(config: dict, device, dtype) -> Channel:
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
                     analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
                     fit_sigma=s.get("fit_sigma", True), round_sigma=s.get("round_sigma", False),
-                    pixel_blur=s["pixel_blur"], learn_n_med=s.get("learn_n_med", False))
+                    pixel_blur=s["pixel_blur"], learn_n_med=s.get("learn_n_med", False),
+                    saf_only_depth=s.get("saf_only_depth", False),
+                    phase_reference_nm=s.get("phase_reference_nm", 0.0))
     field = None if config.get("field") is None else FieldPolynomial.from_config(config["field"])
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
                    name=config.get("name"), fit_transform=config.get("fit_transform", True), field=field)
@@ -187,6 +195,10 @@ def build(config: dict, device=None, dtype=torch.float32) -> ForwardModel:
                 tilt_prior_rad=g.get("tilt_prior_rad", TILT_PRIOR_RAD))
     if g.get("kind") == "in situ":
         geometry = InSituGeometry(g["focus_nm"], g["focus_prior_nm"], g["fit_focus"], **tilt)
+    elif g.get("kind") == "coverslip stack":
+        geometry = CoverslipStackGeometry(g["sweeps"], g["focus_nm"], g["centre_px"], g["pixel_nm"], g["height_nm"],
+                                          g["fit_plane"], focus_prior_nm=g["focus_prior_nm"],
+                                          plane_prior=g["plane_prior"])
     else:
         geometry = BeadStackGeometry(g["drift"], g["drift_prior_nm"], g["z_scale"], g["z_scale_prior"], **tilt,
                                      drift_axes=g["drift_axes"])
@@ -289,7 +301,8 @@ def sample_psf(model: ForwardModel, shared: dict, xyz_nm, roi_px=None, depth_nm=
     roi = base.roi_shape if roi_px is None else (roi_px, roi_px) if np.isscalar(roi_px) else tuple(roi_px)
     up = base.upsample if upsample is None else int(upsample)
     # the point-emitter view (`VectorPSF.for_emitters`), or with ``include_bead`` the beads' own
-    psf = base.resized(roi, up) if include_bead else base.for_emitters(roi, up)
+    height = shared.get("geometry.height") if base.saf_only_depth else None    # molecules on the coverslip
+    psf = base.resized(roi, up) if include_bead else base.for_emitters(roi, up, height_nm=height)
     dev, dt = base.grid.rho.device, base.grid.rho.dtype
     xyz = torch.as_tensor(xyz_nm, dtype=dt, device=dev).reshape(1, -1, 3)
     shared = {k: torch.as_tensor(v, device=dev) for k, v in shared.items()}

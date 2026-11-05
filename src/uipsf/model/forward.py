@@ -187,9 +187,7 @@ class ForwardModel:
                            (-two_pi_i * g.ky)[:, None].expand_as(g.kz_imm), two_pi_i * g.kz_imm]
                 n_med = pc.get("optics.n_med")            # a learnt sample index (`VectorPSF.medium`)
                 if depth is not None:                     # in situ: the height in the sample, through k_z,med
-                    c_h = (layers.coefficients(g, p.get("geometry.tilt"), n_med=n_med)[0] if layers.layered(g, p)
-                           else ch.psf.medium(pc)[4])
-                    factors.append(two_pi_i * c_h)
+                    factors.append(two_pi_i * ch.psf.depth_number(pc))
                 if tilted:
                     dc_h, dc_0 = layers.derivatives(g, p["geometry.tilt"], n_med)    # [2, P, P] each
                     factors += [two_pi_i * dc_0[0], two_pi_i * dc_0[1]]
