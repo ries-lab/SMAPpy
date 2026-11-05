@@ -60,7 +60,8 @@ def shared_values(params: Params) -> dict:
     return {n: v for n, v in params.physical().items() if params.specs[n].scope == "shared"}
 
 
-def localise(model, shared: dict, batch, noise, start: dict | None = None, solver=None, chunk_size=None):
+def localise(model, shared: dict, batch, noise, start: dict | None = None, solver=None, chunk_size=None,
+             cancel=None):
     """Every bead's stack fit on a fixed pupil: (`FitResult`, `Problem`).
 
     `BlockLM` by default: with the pupil fixed every bead is its own problem, and one shared damping let
@@ -73,7 +74,7 @@ def localise(model, shared: dict, batch, noise, start: dict | None = None, solve
     p = Params(specs, batch.n_emitters, dtype=batch.data.dtype, device=batch.data.device, values=values)
     p = p.fix(*[s.name for s in specs if s.scope == "shared"])
     problem = Problem(model, noise, batch, chunk_size)
-    return (solver or BlockLM()).solve(problem, p), problem
+    return (solver or BlockLM()).solve(problem, p, cancel=cancel), problem
 
 
 def _single_frames(model):

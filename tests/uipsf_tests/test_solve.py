@@ -391,7 +391,8 @@ def test_every_stop_is_reported_and_a_cancelled_fit_stops_before_it_starts(optic
     problem = Problem(model, Poisson(), batch)
     seen = []
     res = LevenbergMarquardt(max_iter=2).solve(problem, truth, progress=seen.append, cancel=lambda: True)
-    assert res.stop_reason == "cancelled" and res.iterations == 0 and len(seen) == 1
+    assert res.stop_reason == "cancelled" and res.iterations == 0 and seen == []      # not even a first matrix
+    assert res.params is truth and problem.cancel is None
     res = LevenbergMarquardt(max_iter=1, xtol=0.0, tol=0.0).solve(problem, truth)
     assert res.stop_reason == "max_iter" and not res.converged
     res = LevenbergMarquardt().solve(problem, truth)

@@ -4,8 +4,8 @@ from .blocks import BlockLM
 from .cg import GaussNewtonCG
 from .lbfgs import GaussNewtonLBFGS
 from .lm import LevenbergMarquardt, schur_solve
-from .problem import Normal, Problem
+from .problem import MemoryPlan, Normal, Problem, memory_plan
 from .result import FitResult
 
 __all__ = ["Problem", "Normal", "LevenbergMarquardt", "GaussNewtonLBFGS", "GaussNewtonCG", "BlockLM", "FitResult",
-           "schur_solve"]
+           "schur_solve", "MemoryPlan", "memory_plan"]

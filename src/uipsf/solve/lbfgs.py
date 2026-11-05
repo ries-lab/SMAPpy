@@ -32,8 +32,9 @@ import time
 
 import torch
 
-from .lm import _cancelled, _clamped, _diagonals, _floor, _gain, _largest, schur_solve
+from .lm import _clamped, _diagonals, _floor, _gain, _largest, schur_solve
 from .result import FitResult, covariance
+from .stop import _cancelled, stoppable
 
 
 class _Vec:
@@ -64,6 +65,7 @@ class GaussNewtonLBFGS:
         self.tol, self.xtol, self.damping = float(tol), float(xtol), float(damping)
         self.max_backtracks = int(max_backtracks)
 
+    @stoppable
     def solve(self, problem, params, progress=None, cancel=None) -> FitResult:
         t0 = time.perf_counter()
         history, it, reason, lam = [], 0, "max_iter", self.damping

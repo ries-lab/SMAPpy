@@ -23,6 +23,7 @@ weights (review §E).  ``first_order=None`` skips the first stage.
 from __future__ import annotations
 
 import copy
+import dataclasses
 from dataclasses import dataclass, field
 
 import torch
@@ -92,6 +93,8 @@ def first_stage(model, batch, noise, start: Params, first_order: int | None, sol
         tagged = None if progress is None else (lambda e: progress(dict(e, localise=True)))
         loc = LevenbergMarquardt(max_iter=LOCALISE_ITERATIONS).solve(
             Problem(low, noise, batch, chunk_size), p1.fix(*shared), progress=tagged, cancel=cancel)
+        if loc.stop_reason == "cancelled":
+            return start, loc
         p1 = p1.replace(emitter=loc.params.emitter_matrix())
     first = _loosened(solver).solve(Problem(low, noise, batch, chunk_size), p1, progress=progress, cancel=cancel)
     phys = first.params.physical()
@@ -234,7 +237,9 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         shape = {s.name: s.shape for s in model.specs(sub) if s.scope == "shared"}
         shared = {n: torch.as_tensor(v, dtype=dtype, device=device) for n, v in start.items()
                   if n in shape and tuple(torch.as_tensor(v).shape) == tuple(shape[n])}
-        loc, _ = localise(model, shared, sub, noise, chunk_size=chunk_size)
+        loc, _ = localise(model, shared, sub, noise, chunk_size=chunk_size, cancel=cancel)
+        if loc.stop_reason == "cancelled":
+            return _stopped(model, loc, E, held, decisions, rejection, geometry)
         scores = merged(E, [(pool, score_beads(model, loc.params, sub, noise, chunk_size))])
         fitted, fit = pool, loc.params
     else:
@@ -253,6 +258,8 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
             first = solver.solve(Problem(model, noise, sub, chunk_size), start, progress=_tagged(progress, 1),
                                  cancel=cancel)
             full = first.params
+        if first.stop_reason == "cancelled":
+            return _stopped(model, first, E, held, decisions, rejection, geometry)
         shared = shared_values(full)
         scores = merged(E, [(pool, score_beads(model, full, sub, noise, chunk_size))])
         fitted, fit = pool, full
@@ -268,6 +275,8 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
                           cancel=cancel)
     result.history = ([] if first is None else [dict(h, stage=1) for h in first.history]) + \
         [dict(h, stage=2) for h in result.history]
+    if result.stop_reason == "cancelled":    # stopped: no scores, atlas or report, which cost minutes
+        return Calibration(model, result, table, scores, held, first, rejection, None, None, geometry)
     final = score_beads(model, result.params, sub, noise, chunk_size)
     for j, b in enumerate(used):
         table.rows[b].final = {n: float(getattr(final, n)[j]) for n in ("deviance", "photons")}
@@ -279,6 +288,13 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         report = heldout_report(model, shared_values(result.params), batch.subset(torch.tensor(ids)), noise, ids,
                                 localiser=localiser)
     return Calibration(model, result, table, scores, held, first, rejection, atlas, report, geometry)
+
+
+def _stopped(model, first, E, held, decisions, rejection, geometry) -> Calibration:
+    """The `Calibration` of a run stopped in stage 1: its fit, every bead unscored and none judged."""
+    scores = merged(E, [])
+    table = decide(scores, dataclasses.replace(rejection, enabled=False), held, decisions)
+    return Calibration(model, first, table, scores, held, first, rejection, None, None, geometry)
 
 
 def _stage2_start(model, sub, used, shared, fitted, fit, dtype, device) -> Params:

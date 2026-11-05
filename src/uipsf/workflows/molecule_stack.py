@@ -44,8 +44,8 @@ Z_REJECT_NM = 100.0
 BEND_STEP_NM, BEND_MIN = 100.0, 10
 #: memory one molecule of a 25-pixel region takes in a chunk on the device: at chunk 256 the learning held
 #: about 31 GB on an M-series GPU (M5's AF647, 2 November 2026), into swap; 64 was safe.  It scales with
-#: the region's pixels.  The solver's own cap (`solve.problem.HOST_BYTES_PER_VALUE`, 16 kB a value) is a
-#: tenth of this model's, whose vector PSF at a fine pupil grid costs ~190 kB per pixel of a region.
+#: the region's pixels.  The solver caps this chunk again by what one molecule is measured to hold
+#: (`solve.problem._measured_bytes`); this rule sizes it where nothing can be measured.
 BYTES_PER_MOLECULE_25 = 0.12e9
 #: the share of the available memory a chunk may take, and its bounds
 CHUNK_SHARE, CHUNK_MIN, CHUNK_MAX = 0.5, 8, 256

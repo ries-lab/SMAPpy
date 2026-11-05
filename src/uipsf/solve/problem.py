@@ -31,11 +31,13 @@ and the Gauss–Newton matrix (`Params.prior_residuals`).
 from __future__ import annotations
 
 import platform
+import weakref
 from dataclasses import dataclass
 
 import torch
 
 from ..device import to_cpu64
+from .stop import Cancelled, _cancelled
 
 
 @dataclass
@@ -87,20 +89,85 @@ CUDA_SHARE = 0.5
 # budget above sizes a batch of Jacobian columns for speed, not the chunk's own images, which grow with every
 # value in it.  Uncapped, 60 beads of 40 × 27² went into one chunk (2²¹ // 29 160 = 71) and a 16 GB machine
 # killed the fit (Zenodo `1ch_FD_bead`, docs/uipsf/field-dependence.md §9); in chunks of 8 it took 3.5 GB.
-# A value costs more on the CPU than CUDA's 6000 bytes.  Measured on 4 x86 cores, the field-dependent model of
-# those beads (one pupil per emitter), one `normal_equations` of 60 beads: chunks of 8 peaked at 4.3 GB and of
-# 29 at 13.8 GB, 0.45 GB per bead, 15.5 kB per value; `slice_fits` (every slice an emitter of 27² pixels) about
-# 11 kB per value.  Chunks of 8 were also faster than 29 (108 s against 141 s): a smaller chunk costs no speed.
-HOST_SHARE = 0.5
-HOST_BYTES_PER_VALUE = 16000
+#
+# What an emitter costs is measured, not assumed (`uipsf.memory`, `_measured_bytes`): a rule in bytes per pixel
+# value was 16 kB on 4 x86 cores for the field-dependent model of 27² regions, and 30 to 57 kB on Apple's GPU
+# for M6's default model of 100 slices of 27² (its pupil grid, 160² per slice, is what costs; the more
+# tangents, the more): 19 beads at that rule went into chunks of 6, took 32 GB and swapped (November 2026).
+# One emitter's normal equations are measured, at the tangents a chunk of one would take, and a chunk of n
+# is taken to cost `MEASURED_MARGIN` times n times that.  Per emitter a chunk held 1.01 times the one
+# emitter on M6 (chunks of 4: 8.6 GB; the whole run peaked at 12.3 GB where 12.2 was expected), and 1.06 to
+# 1.21 times on a small model of 75 MB an emitter, where what does not grow with the chunk counts (6 beads of
+# 21 × 15², the CPU).  Smaller chunks cost little speed (M6: 0.40 s a bead in chunks of 1, 0.29 in chunks of
+# 4).  The measurement costs one emitter's normal equations, once per model and region shape, and is made
+# only where `HOST_BYTES_ROUGH` per value says the beads might not all fit in one chunk.
+MEASURED_MARGIN = 1.25
+HOST_SHARE = 0.8
+HOST_BYTES_PER_VALUE = 16000     # where nothing can be measured (Windows' CPU): the x86 measurement above
+HOST_BYTES_ROUGH = 100000        # above anything measured: below this, every emitter in one chunk is safe
 
 
-def _host_chunk_values(device) -> int | None:
-    """Values one chunk may hold on the CPU or MPS (`HOST_SHARE` of the available memory at
-    `HOST_BYTES_PER_VALUE`); None when the system does not say how much is available."""
+def _host_available(device) -> int | None:
+    """Bytes a chunk may take on the CPU or MPS: `HOST_SHARE` of what the system has available, counting what
+    torch's MPS allocator holds unused (it hands that out again, and empties it before measuring); None when
+    the system does not say."""
     from ..device import available_memory_bytes
     free = available_memory_bytes()
-    return None if free is None else int(max(1, HOST_SHARE * free // HOST_BYTES_PER_VALUE))
+    if free is None:
+        return None
+    if device.type == "mps":
+        free += max(0, torch.mps.driver_allocated_memory() - torch.mps.current_allocated_memory())
+    return int(HOST_SHARE * free)
+
+
+# What one emitter's normal equations held, per model: {(region shape, device, tangents): bytes or None}.
+_MEASURED = weakref.WeakKeyDictionary()
+
+
+def _measured_bytes(model, noise, batch, device, tangents) -> int | None:
+    """The most one emitter's normal equations hold at once, bytes (`uipsf.memory.measure`), measured on the
+    first emitter of ``batch`` at its starting values (the memory does not depend on them); None where the
+    system cannot say or the model cannot be measured so."""
+    from ..memory import measure
+    from ..params import Params
+    key = (tuple(batch.data.shape[1:]), str(device), int(tangents))
+    try:
+        known = _MEASURED.setdefault(model, {})
+    except TypeError:                       # a model that cannot be weakly referenced: measured every time
+        known = {}
+    if key not in known:
+        try:
+            one = batch.subset(slice(0, 1))
+            params = Params(model.specs(one), 1, dtype=one.data.dtype, device=device)
+            single = Problem(model, noise, one, chunk_size=1, tangents=tangents, device=device, measure=False)
+            _, known[key] = measure(lambda: single.normal_equations(params), device)
+        except Exception:                   # noqa: BLE001 -- the measurement only sizes chunks; the rule then does
+            known[key] = None
+    return known[key]
+
+
+@dataclass
+class MemoryPlan:
+    """What a fit of a batch will hold, before it runs (`memory_plan`)."""
+    chunk: int                  # emitters computed at once
+    peak_bytes: int | None      # the most one chunk's normal equations hold, above what is in use now
+    available_bytes: int | None  # what the system had available when asked
+
+
+def memory_plan(model, noise, batch, device=None) -> MemoryPlan:
+    """The chunk a `Problem` of ``batch`` will take and what it will hold at most, measured on one emitter
+    (`_measured_bytes`) even where all the emitters fit: the figure a window shows before a run.  On CUDA
+    the allocator's figure for one emitter times the chunk; None where nothing can be measured."""
+    from ..device import available_memory_bytes
+    device = batch.data.device if device is None else torch.device(device)
+    problem = Problem(model, noise, batch, device=device)
+    if problem.peak_bytes is not None:
+        return MemoryPlan(problem.chunk_size, problem.peak_bytes, available_memory_bytes())
+    one = max(1, min(TANGENT_MAX if device.type == "cpu" else 16,
+                     TANGENT_BUDGET.get(device.type, 2 ** 21) // batch.data[0].numel()))
+    each = _measured_bytes(model, noise, batch, device, one)
+    peak = None if not each else int(MEASURED_MARGIN * each) * problem.chunk_size
+    return MemoryPlan(problem.chunk_size, peak, available_memory_bytes())
 
 
 def _cuda_budget(device) -> int:
@@ -119,7 +186,7 @@ TANGENT_MAX = 2 if platform.machine().lower() in ("x86_64", "amd64", "i386", "i6
 
 class Problem:
     def __init__(self, model, noise, batch, chunk_size: int | None = None, tangents: int | None = None,
-                 device=None, linearise: bool = True):
+                 device=None, linearise: bool = True, measure: bool = True):
         """``chunk_size`` emitters are computed at once, ``tangents`` Jacobian columns per batch; both
         are memory only, the sums do not depend on them (tests/uipsf_tests/test_solve.py).  The batch may stay on
         the CPU; each chunk is moved to ``device`` (default: the batch's).
@@ -127,7 +194,9 @@ class Problem:
         Defaults: as many tangents as keep a chunk's tangent images under `TANGENT_BUDGET` values for
         the device (on CUDA what the card has free, `_cuda_budget`), at most 16 (`TANGENT_MAX` on the
         CPU); all emitters in one chunk unless even one tangent would exceed it, or the chunk the memory
-        available (`_host_chunk_values` on the CPU and MPS, the card's on CUDA).
+        available: on the CPU and MPS what one emitter is measured to hold (`_measured_bytes`; ``measure=False``
+        skips it, the rule `HOST_BYTES_PER_VALUE` then), on CUDA the card's free memory.  ``peak_bytes`` is
+        what a chunk is expected to hold at most, where it was measured (None otherwise).
         Measured on an M1 Pro (dim beads, 41 slices of 21², n_max 6, one `normal_equations`):
 
         ======  =========  ==================  ==================  =============================
@@ -151,21 +220,36 @@ class Problem:
         self.chunk_size = chunk_size or min(batch.n_emitters, fits)
         if self.device.type == "cuda":      # a caller's chunk too (in situ's 256): what the card holds
             self.chunk_size = min(self.chunk_size, fits)
-        else:                               # what the system's memory holds, a caller's chunk too
-            host = _host_chunk_values(self.device)
-            if host is not None:
-                self.chunk_size = max(1, min(self.chunk_size, host // per_emitter))
+        cap = TANGENT_MAX if self.device.type == "cpu" else 16
+        self.peak_bytes = None
+        if self.device.type != "cuda":      # what the system's memory holds, a caller's chunk too
+            room = _host_available(self.device)
+            if room is not None and min(self.chunk_size, batch.n_emitters) * per_emitter * HOST_BYTES_ROUGH > room:
+                one = (tangents or max(1, min(cap, budget // per_emitter))) if measure else None
+                each = _measured_bytes(model, noise, batch, self.device, one) if measure else None
+                if each:
+                    each = int(MEASURED_MARGIN * each)
+                    room = _host_available(self.device)         # after the measurement emptied MPS' cache
+                    self.chunk_size = max(1, min(self.chunk_size, room // each))
+                    self.peak_bytes = self.chunk_size * each
+                else:
+                    self.chunk_size = max(1, min(self.chunk_size, room // (HOST_BYTES_PER_VALUE * per_emitter)))
         if tangents is None:
-            cap = TANGENT_MAX if self.device.type == "cpu" else 16
             tangents = max(1, min(cap, budget // (min(self.chunk_size, batch.n_emitters) * per_emitter)))
             # a model whose columns barely use JVPs can take more at once than the JVPs' budget allows
             tangents = max(tangents, min(cap, getattr(model, "tangents", 0)))
         self.tangents = int(tangents)
         self.linearise = linearise          # pupil columns from the model's linearisation (False: all JVPs)
+        self.cancel = None                  # a solver's Stop, while it runs (`chunks`, `stoppable`)
 
     def chunks(self):
+        """(slice, the batch's chunk on the device), checking before each whether the fit was stopped
+        (``cancel``, set by a solver for the time it runs: `stoppable`): one chunk of a Gauss–Newton matrix
+        took seconds on real beads, a whole matrix minutes, too long to wait for the iteration's end."""
         E = self.batch.n_emitters
         for a in range(0, E, self.chunk_size):
+            if _cancelled(self.cancel):
+                raise Cancelled
             sl = slice(a, min(a + self.chunk_size, E))
             yield sl, self.batch.subset(sl).to(self.device)
 

@@ -141,6 +141,17 @@ class LearningProgress:
         return (self.clock() - self.started) * (1 - self.fraction) / self.fraction
 
 
+def memory_text(plan, dual: bool = False) -> str:
+    """", at most 8.5 GB of the 14 GB free, 4 beads at a time": what `pupil.estimate_memory` found, for the
+    line after *Detect beads*; empty where nothing could be measured."""
+    if plan is None or plan.peak_bytes is None:
+        return ""
+    what = "pairs" if dual else "beads"
+    free = "" if plan.available_bytes is None else f" of the {plan.available_bytes / 1e9:.0f} GB free"
+    held = plan.peak_bytes / 1e9
+    return f", at most {held:.1f} GB{free}, {plan.chunk} {what if plan.chunk != 1 else what[:-1]} at a time"
+
+
 def duration(seconds: float) -> str:
     """"40 s", "3 min", "1.5 h": a duration as one reads it at a glance."""
     if seconds < 90:
@@ -406,15 +417,21 @@ class PupilModel:
         return halves
 
     def detect(self, paths, dual, inputs, progress=None) -> Detected:
-        from .pupil import bead_rois, estimate_seconds
+        from .pupil import bead_rois, estimate_memory, estimate_seconds
         tell = progress or (lambda entry: None)
         tell({"message": "reading the stacks and finding the beads", "fraction": 0.0})
         rois = bead_rois(paths, inputs.get("camera"), dual=dual, settings=inputs["detection"])
         tell({"message": "timing the model on a few beads", "fraction": 0.7})
         seconds = estimate_seconds(rois, inputs["optics"], inputs["model"])
+        tell({"message": "measuring the memory one bead takes", "fraction": 0.85})
+        try:
+            memory = memory_text(estimate_memory(rois, inputs["optics"], inputs["model"]), dual)
+        except Exception:                # an estimate, never a reason not to offer the run
+            memory = ""
         what = "pairs" if dual else "beads"
         return Detected(rois, f"{rois.batch.n_emitters} {what} to learn from ({'; '.join(rois.messages)}); "
-                              f"learning takes about {duration(seconds)}", _positions(rois.records), seconds)
+                              f"learning takes about {duration(seconds)}{memory}", _positions(rois.records),
+                        seconds)
 
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found.records, marks,

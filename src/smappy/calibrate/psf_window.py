@@ -330,7 +330,7 @@ class PSFCalibrationWindow(QMainWindow):
                                    "the fit quality and the model against the data follow")
         self.run_button.clicked.connect(self.run)
         self.stop_button = QPushButton("Stop")
-        self.stop_button.setToolTip("stop the pupil model's learning after the current iteration; nothing is saved")
+        self.stop_button.setToolTip("stop the pupil model's learning within seconds; nothing is saved")
         self.stop_button.clicked.connect(self._cancel.set)
         self.found_label = QLabel("")
         self.found_label.setWordWrap(True)

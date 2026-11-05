@@ -76,9 +76,10 @@ CRLBs, the **scatter**.  A molecule farther off than max(3 CRLB, 100 nm) is drop
 
 ## Memory and time
 
-At chunk 256 the prototype held 31 GB on an M-series GPU: about 120 MB per molecule of a 25-pixel region, a tenth
-of what the solver's own cap assumes (`HOST_BYTES_PER_VALUE`).  The chunk is half the free memory at that rate,
-8 to 256 (`molecule_chunk`): 84 on a 34 GB laptop with 20 GB free.  A run of 4000 molecules took 12.9 min over
+At chunk 256 the prototype held 31 GB on an M-series GPU: about 120 MB per molecule of a 25-pixel region.  The
+chunk is half the free memory at that rate, 8 to 256 (`molecule_chunk`): 84 on a 34 GB laptop with 20 GB free;
+the solver caps it again at what one molecule is measured to hold (`solve.problem._measured_bytes`,
+architecture.md, "Chunks sized by a measured emitter").  A run of 4000 molecules took 12.9 min over
 three rounds there, the first most of it.
 
 ## M5's AF647, the prototype against the method

@@ -2512,6 +2512,34 @@ about 11 kB per value.  Available memory is psutil's where installed, else ``Mem
 ``GlobalMemoryStatusEx`` on Windows and the reclaimable pages of ``vm_stat`` on macOS, asked at most every
 5 s; unknown, the chunk stays as before.  The sums do not depend on the chunk (`test_memory.py`).
 
+## Chunks sized by a measured emitter (November 2026; `uipsf/memory.py`, `solve/problem.py`)
+
+The rule above was off by a factor of four for another model: M6's default bead model (100 slices of 27²,
+a pupil grid of 160² per slice) holds 30 to 57 kB per value on Apple's GPU, the more the more tangents, so
+19 beads went into chunks of 6, filled 32 GB and swapped.  What an emitter costs depends on the pupil grid,
+the slices and the device, so `Problem` now measures it, where the rough bound (`HOST_BYTES_ROUGH`, 100 kB
+per value) says all the emitters might not fit at once: one emitter's normal equations at the tangents a
+chunk of one takes, its peak read from the system (`memory.measure`: CUDA's allocator; on Apple's GPU what
+Metal's driver holds after the work, its cache emptied before; on the CPU the footprint's interval maximum
+on macOS or ``VmHWM`` after ``clear_refs`` on Linux, the allocator's free pages released first -- without
+that a second measurement read 0).  A chunk of n is taken to hold `MEASURED_MARGIN` (1.25) × n × that, and
+takes `HOST_SHARE` (0.8) of the available memory, counting what MPS' allocator holds unused.  Measured,
+one emitter cached per model, region shape, device and tangents (one normal equations of one bead, ~0.5 s):
+
+| | per emitter, one alone | chunk held, per emitter |
+|---|---|---|
+| M6, MPS, 4 tangents | 2.2 GB | chunks of 2: 2.1 GB; of 4: 1.6 GB |
+| M6, MPS, chunk of 4 at 14 tangents, a whole run | 2.1 GB at 16 | 8.6 GB a chunk; the run's peak 12.3 GB, 12.2 expected |
+| 6 beads of 21 × 15², P 48, CPU | 75 MB | 1.06 to 1.21 × |
+| 6 beads of 31 × 15², P 64, CPU | 214 MB | 0.94 to 0.97 × |
+
+Smaller chunks cost little speed (M6: 0.40 s a bead in chunks of 1, 0.29 in chunks of 4); more than 4 tangents
+gained nothing there and doubled the memory at 16.  Windows' CPU, where nothing is measured, keeps the rule.
+`memory_plan` is the same figure before a run, measured even where the beads fit: the PSF calibration window
+shows it after *Detect beads* (`smappy.calibrate.pupil.estimate_memory`).  A solver's ``cancel`` is the
+`Problem`'s while it runs (`solve.stop.stoppable`) and is checked before every chunk, so *Stop* ends a fit
+within a chunk: M6's whole matrix took minutes before, and the check between iterations let a stopped run go on.
+
 ## Phase masks in the pupil (November 2026; `model/mask.py`, S1 of `docs/uipsf/scanned-psfs.md`)
 
 A mask is an analytic design Φ(u′, v′) in units of the objective's pupil radius, placed on the pupil by

@@ -45,6 +45,7 @@ import time
 import torch
 
 from .result import FitResult, covariance
+from .stop import _cancelled, stoppable
 
 
 def schur_solve(ne, lam: float, D_s: torch.Tensor, D_e: torch.Tensor):
@@ -92,17 +93,14 @@ def _gain(ne, lam, D_s, D_e) -> tuple[torch.Tensor, torch.Tensor, float]:
     return ds, de, -(g + 0.5 * h)
 
 
-def _cancelled(cancel) -> bool:
-    return cancel is not None and (cancel.is_set() if hasattr(cancel, "is_set") else bool(cancel()))
-
-
 class LevenbergMarquardt:
     def __init__(self, max_iter: int = 100, tol: float = 1e-3, xtol: float = 1e-3, damping: float = 1e-3):
         self.max_iter, self.tol, self.xtol, self.damping = int(max_iter), float(tol), float(xtol), float(damping)
 
+    @stoppable
     def solve(self, problem, params, progress=None, cancel=None) -> FitResult:
         """Fit ``params`` (a `Params`) to ``problem``; ``progress(entry)`` after every iteration,
-        ``cancel`` (a callable or an Event) checked between iterations."""
+        ``cancel`` (a callable or an Event) checked between iterations and between chunks (`stoppable`)."""
         t0 = time.perf_counter()
         ne = problem.normal_equations(params)
         D_s, D_e = _diagonals(ne)

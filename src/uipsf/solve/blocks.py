@@ -20,15 +20,17 @@ import time
 
 import torch
 
-from .lm import _cancelled, _clamped, _diagonals
+from .lm import _clamped, _diagonals
 from .problem import Problem
 from .result import FitResult, covariance
+from .stop import _cancelled, stoppable
 
 
 class BlockLM:
     def __init__(self, max_iter: int = 100, tol: float = 1e-3, xtol: float = 1e-3, damping: float = 1e-3):
         self.max_iter, self.tol, self.xtol, self.damping = int(max_iter), float(tol), float(xtol), float(damping)
 
+    @stoppable
     def solve(self, problem, params, progress=None, cancel=None) -> FitResult:
         if params.shared_vector().numel():
             raise ValueError("BlockLM needs every shared parameter fixed (a localisation problem)")
@@ -107,6 +109,8 @@ class BlockLM:
 
 def _sub(problem, idx) -> Problem:
     """The same problem on some emitters only."""
-    return Problem(problem.model, problem.noise, problem.batch.subset(idx), chunk_size=problem.chunk_size,
-                   tangents=problem.tangents, device=problem.device, linearise=problem.linearise)
+    sub = Problem(problem.model, problem.noise, problem.batch.subset(idx), chunk_size=problem.chunk_size,
+                  tangents=problem.tangents, device=problem.device, linearise=problem.linearise, measure=False)
+    sub.cancel = problem.cancel
+    return sub
 

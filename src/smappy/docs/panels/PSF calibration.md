@@ -59,8 +59,15 @@ data disagree.  Untick *save model* to only look.
 
 A calibration goes in two steps.  *Detect beads* finds the beads, rings them
 on the *Stacks* page and says how many there are and, for the pupil model,
-about how long learning them will take -- so a run of an afternoon is never
-started by accident.  *Calibrate* then learns from them; pressed first, it
+about how long learning them will take and how much memory it will hold at
+most -- so a run of an afternoon is never started by accident.  The memory is
+measured, not guessed: the model's work for one bead is run once and what it
+held is read from the system (the graphics card's own count on a Mac's GPU
+or a CUDA card), and learning then takes as many beads at a time as fit in
+80 % of the memory free at that moment, counting each at 1.25 times what one
+bead held.  More memory only lets more beads go at once, which is hardly
+faster: 19 beads of 100 slices of 27 × 27 pixels on a laptop's GPU took 40 s
+in fours, about 2 GB a bead, where all at once had filled 32 GB and swapped.  *Calibrate* then learns from them; pressed first, it
 detects too.  Pressed again after a change, it calibrates with the settings
 as they are then.  A bar shows how far the run is and about how long it has left.
 
@@ -1153,8 +1160,8 @@ bead covers (*The ends of the stacks*).
 frames and counts them by state in the table; the *Stacks* page then steps
 through the frames molecules were found on, and before it shows a movie's
 first frame only.  For beads: finds the beads, lists them in the table, rings them on the *Stacks* page and
-says how many there are and how long calibrating them will take (*How it
-works*).  A new detection drops an earlier calibration from the window; its
+says how many there are, how long calibrating them will take and how much
+memory it will hold at most, of how much is free (*How it works*).  A new detection drops an earlier calibration from the window; its
 files stay.  Changing the files,
 the *mode*, the *method* or a setting under *beads* drops the detection.
 
@@ -1171,8 +1178,10 @@ the data follow at once.  The bar under the buttons shows the fraction done
 and the time left; the status line counts the iterations.
 
 ### Stop
-Pupil model: stops the learning after the current iteration.  Nothing is
-saved.
+Pupil model: stops the learning within a few seconds -- before the next bead's
+share of the iteration it is in, not at the iteration's end, which on many
+beads can be minutes away.  Nothing is saved, and the beads are neither
+scored nor drawn against the model.
 
 ### Install PyTorch
 Shown with the pupil model while PyTorch is missing or too old: installs it

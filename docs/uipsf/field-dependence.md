@@ -232,7 +232,7 @@ immersion 1.515, medium 1.406, 110 nm pixels) and conversion, 0.47 e⁻/ADU: the
 residuals' photon transfer gave 1.08 with the field on a first set of beads and 0.62 on the second, so it is
 not well pinned.  60 beads spread over the chip were learnt from, in chunks of 8 (60 at once took more than
 15 GB: the solver's chunks were sized for speed, not memory -- since capped by the memory available on
-every system, `solve.problem._host_chunk_values`).
+every system, and since by what one emitter is measured to hold, `solve.problem._measured_bytes`).
 
 | | without field | with field |
 |---|---|---|

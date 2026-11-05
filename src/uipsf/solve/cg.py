@@ -29,8 +29,9 @@ import math
 import time
 
 from .lbfgs import _moved, _saturates, _Vec
-from .lm import _cancelled, _clamped, _diagonals, _floor, _gain, _largest, schur_solve
+from .lm import _clamped, _diagonals, _floor, _gain, _largest, schur_solve
 from .result import FitResult, covariance
+from .stop import _cancelled, stoppable
 
 
 class GaussNewtonCG:
@@ -40,6 +41,7 @@ class GaussNewtonCG:
         self.tol, self.xtol, self.damping = float(tol), float(xtol), float(damping)
         self.trace = bool(trace)                           # `Problem.gauss_newton_operator`
 
+    @stoppable
     def solve(self, problem, params, progress=None, cancel=None) -> FitResult:
         t0 = time.perf_counter()
         ne = problem.normal_equations(params)

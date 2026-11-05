@@ -891,6 +891,31 @@ def learns_tilt(model: BeadSettings, optics) -> BeadSettings:
     return model
 
 
+def _learnt_model(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings):
+    """The model a run on ``rois`` learns (`calibrate_beads`' `bead_model`), for the estimates before it."""
+    from uipsf.workflows.calibrate import bead_model
+    batch = rois.batch
+    channels = batch.data.shape[1]
+    found = optics.optics(rois.camera, channels, main_half(rois))
+    return bead_model(found, learns_tilt(model, found), tuple(batch.data.shape[-2:]),
+                      [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()),
+                      field_centre_px=field_centre(batch))
+
+
+def estimate_memory(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings):
+    """What learning ``rois`` will hold at most, before it runs: a `uipsf.solve.MemoryPlan` -- the beads
+    computed at once (as many as fit in the memory the system has free, `uipsf.solve.problem`), the most one
+    such chunk holds above what is in use now, measured on one bead of this model (`uipsf.memory`), and
+    what is free.  M6's 19 beads of 100 slices: chunks of 4, 8.5 GB expected, a run's peak 8.6 GB above the
+    3.7 GB it started from."""
+    from uipsf.device import on_model_device
+    from uipsf.noise import ShiftedPoisson
+    from uipsf.solve import memory_plan
+    from uipsf.workflows.beads import MAX_DZ_NM
+    learnt = _learnt_model(rois, optics, model)
+    return memory_plan(learnt, ShiftedPoisson(), on_model_device(rois.batch, learnt).thinned(MAX_DZ_NM))
+
+
 def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings) -> float:
     """About how long learning ``rois`` will take, seconds, in well under a second: the model's forward pass
     on one bead, timed (`TIMED_PASSES`), times the beads, the parameters and `PASSES_PER_PARAMETER`.  A
@@ -903,13 +928,8 @@ def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings
     from uipsf.device import on_model_device
     from uipsf.params import Params
     from uipsf.workflows.beads import MAX_DZ_NM
-    from uipsf.workflows.calibrate import bead_model
     batch = rois.batch
-    channels = batch.data.shape[1]
-    found = optics.optics(rois.camera, channels, main_half(rois))
-    learnt = bead_model(found, learns_tilt(model, found), tuple(batch.data.shape[-2:]),
-                        [None, rois.transform] if channels == 2 else None, float(batch.z_nm.abs().max()),
-                        field_centre_px=field_centre(batch))
+    learnt = _learnt_model(rois, optics, model)
     one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
     start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
     values = start.physical()
