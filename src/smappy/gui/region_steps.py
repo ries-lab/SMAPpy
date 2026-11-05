@@ -82,6 +82,9 @@ class RegionSteps(QWidget):
         try:
             inner.form.changed.connect(self.store, Qt.UniqueConnection)
             inner.ended.connect(self._ended, Qt.UniqueConnection)
+            # the run's progress, which went only into the hidden box: over
+            # hundreds of ROIs of a slow step the tab looked stuck
+            inner.progressed.connect(self._progressed, Qt.UniqueConnection)
         except (RuntimeError, TypeError):
             pass
 
@@ -100,35 +103,47 @@ class RegionSteps(QWidget):
         self.refresh_counts()
 
     def refresh_counts(self) -> None:
+        text = self._counts()
+        if text is not None:
+            self.status.setText(text)
+
+    def _counts(self) -> Optional[str]:
+        """What is left to measure, or None when that cannot be said."""
         project = self.session.rois
         if project.block.regions != BLOCK_ROIS:
-            self.status.setText(f"for each {project.block.regions}")
-            return
+            return f"for each {project.block.regions}"
         from .roi_window import COUNT_LIMIT
         if len(project.rois) > COUNT_LIMIT:
             # whether each is current means cutting out every ROI's data, and
             # this runs after every ROI the manager measures
-            self.status.setText(f"{len(project.rois)} ROIs")
-            return
+            return f"{len(project.rois)} ROIs"
         try:
             steps = project.block_steps()
             waiting = len(project.needs_evaluation(steps=steps)) if steps else 0
         except Exception:
-            return
-        self.status.setText(f"{waiting} ROI(s) to measure" if waiting
-                            else "every ROI is up to date")
+            return None
+        return f"{waiting} ROI(s) to measure" if waiting else "every ROI is up to date"
+
+    def _progressed(self, text: str) -> None:
+        # the last line only: "37% (37 of 100 ROIs), 2.1 a second, ..."
+        self.status.setText(text.splitlines()[-1] if text.strip() else text)
 
     def run(self):
         """Run the block on the session now, on this thread: what the Run
         button does in a worker, for a script and a test."""
         self.store()
         cls = self.panel.cls
-        result = self.session.run(cls(), self.panel.form.value())
+        result = self.session.run(cls(), self.panel.form.value(),
+                                  progress=self._progressed)
         self._ended("done", result)
         return result
 
     def _ended(self, how: str, result) -> None:
         if how != "done" or result is None:
+            # not the last percentage, which would read as a run still going:
+            # how it ended, and what is left to measure after it
+            counts = self._counts()
+            self.status.setText(f"{how}; {counts}" if counts else how)
             return
         self.store()
         self.status.setText(result.text.splitlines()[0] if result.text else "done")
