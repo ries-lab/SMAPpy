@@ -25,15 +25,18 @@ def main():
                                    smooth_z_nm=args.smooth_z)
     if args.layout:
         from dataclasses import replace
-        from ..calibrate.dual import DualColorSettings, bead_registration, calibrate_dual
-        given = {'layout': args.layout, 'main_channel': args.main_channel,
-                 'split_position': args.split_position, 'min_pairs': args.min_pairs,
+        from ..calibrate.dual import (ArrangementSettings, DualColorSettings, bead_registration,
+                                      calibrate_dual)
+        placed = {'layout': args.layout, 'main_channel': args.main_channel,
+                  'split_position': args.split_position}
+        given = {'min_pairs': args.min_pairs,
                  'reprojection_threshold_px': args.reprojection_threshold,
                  'transform_axis_limit_px': args.transform_axis_limit}
         registration = replace(bead_registration(),
                                **{k: v for k, v in given.items() if v is not None})
+        channels = ArrangementSettings(**{k: v for k, v in placed.items() if v is not None})
         settings = DualColorSettings(dz_nm=args.dz, roi_size=args.roi_size, smooth_z_nm=args.smooth_z,
-                                     registration=registration)
+                                     channels=channels, registration=registration)
         calibrate = calibrate_dual
     elif args.main_channel or args.split_position is not None:
         p.error('--main-channel and --split-position require --layout')

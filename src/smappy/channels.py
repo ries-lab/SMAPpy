@@ -59,6 +59,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .params import param
+
 
 @dataclass
 class ChannelLayout:
@@ -364,6 +366,79 @@ def from_corners(x: Sequence[int], y: Sequence[int], width: int, height: int,
 #: ``mirror4pi=[0 0 1 1]``).
 YALE_4PI = from_corners([151, 389, 1474, 1713], [0, 0, 0, 0], 168, 168,
                         flip_x=[False, False, True, True], name="4Pi-SMS (Yale)")
+
+
+# ----------------------------------------------------------------- 4Pi's channels part
+#: where a 4Pi's phase channels are on the chip, in the words its *channels* part offers
+FOURPI_LAYOUTS = (("auto", "the file's, else the microscope's"), ("microscope", "the microscope's"),
+                  ("file", "as the file lays them out"), ("typed", "typed corners"),
+                  ("yale", "4Pi-SMS (Bewersdorf lab)"))
+FOURPI_TYPED = ("x_corners", "y_corners", "width", "height", "mirrored")
+
+
+@dataclass
+class FourPiChannelsSettings:
+    """Where a 4Pi's phase channels are on the chip: the *channels* part of Spline 4Pi and of the PSF
+    calibration window's 4Pi beads, one part so that the two read a chip alike (`fourpi_layout`).
+    The maps between the channels are not here: they are the model's, learnt with the PSF."""
+    layout: str = param("auto", label="layout", choices=FOURPI_LAYOUTS,
+                        help="where the phase channels are: the file's own layout, the "
+                             "microscope's (the database), typed, or the 4Pi-SMS design")
+    x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
+                           help="each channel's left edge on the chip, comma-separated")
+    y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
+                           help="each channel's top edge on the chip")
+    width: int = param(200, label="width", unit="px", min=8,
+                       help="one channel's width")
+    height: int = param(200, label="height", unit="px", min=8, beside=True,
+                        help="one channel's height")
+    mirrored: str = param("", label="mirrored in x",
+                          help="the channels mirrored left-right, by number from 1, "
+                               "comma-separated; empty: none")
+
+    def choice(self, own) -> str:
+        """The layout chosen, *auto* spelt out: the file's own where it lays its channels out."""
+        if self.layout == "auto":
+            return "file" if own is not None else "microscope"
+        return self.layout
+
+    def title(self) -> str:
+        return "channels: " + dict(FOURPI_LAYOUTS).get(self.layout, self.layout)
+
+    def shown(self) -> dict:
+        """The typed corners only while the channels are typed."""
+        typed = self.layout == "typed"
+        return {name: typed for name in FOURPI_TYPED}
+
+
+def _numbers(text: str) -> list:
+    return [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
+
+
+def fourpi_layout(part: FourPiChannelsSettings, own=None, roi=(0, 0), microscope=None) -> ChannelLayout:
+    """The phase channels on the frames: the file's own layout ``own`` (quadrant files), the microscope's
+    (``microscope``, the chip layout its database entry gives, or None), typed, or 4Pi-SMS -- the last three
+    on the chip, put on the frames of a camera ROI with corner ``roi``."""
+    choice = part.choice(own)
+    if choice == "file":
+        if own is None:
+            raise ValueError("this file does not lay out its channels itself (only the "
+                             "quadrant .mat files do): use the microscope's, or type them")
+        return own
+    if choice == "microscope":
+        if microscope is None:
+            raise ValueError("the microscope database gives no channel rectangles for this "
+                             "file's microscope and camera: add them to its entry (a region "
+                             "per channel), or type the corners")
+        return microscope.on_camera(roi)
+    if choice == "yale":
+        return YALE_4PI.on_camera(roi)
+    x, y = _numbers(part.x_corners), _numbers(part.y_corners)
+    if len(x) != len(y) or not 1 <= len(x) <= 4:
+        raise ValueError("give one x and one y corner per channel, one to four of them")
+    mirrored = set(_numbers(part.mirrored))
+    return from_corners(x, y, part.width, part.height,
+                        flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
 
 
 def maps_from_uipsf_v1(T, centre, transpose: bool = True) -> List[np.ndarray]:

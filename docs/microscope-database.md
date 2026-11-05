@@ -623,6 +623,25 @@ the model's *registration* -- `model.registration` in the two-colour fitters
 *measuring*, `measure`) and in Spline 4Pi (`FourPiRegistrationSettings`: the model's, beads, a
 file, none).  The two-colour fitters' *transform* part is gone.
 
+### Built: where the channels are, apart from how they are registered (2026-11-05)
+
+Decided with Jonas, no compatibility with older saved settings.  `RegisterSettings` mixed the
+arrangement (layout, main channel, split) with how a registration is measured (the vote, the
+pairing, the fit), so the PSF window's dual beads and *Calibrate transform* showed the
+microscope's facts among the pairing numbers, and the fitters hid its copies.  Now the
+arrangement is `calibrate.dual.ArrangementSettings`, asked in the same words everywhere
+(`layout_param` and its siblings, which the fitters' `ChannelsSettings` declares too), drawn
+the same way (`arrangement_line`, `arrangement_shown`: one line on *microscope*, the main
+channel and the split only by hand), and `RegisterSettings` is the measuring only;
+`register_channels` takes the resolved arrangement for its record (`arrangement=`).  Every
+place with a split chip has a *channels* part: the fitters, *Calibrate transform*, the PSF
+window's dual beads (`DualColorSettings.channels`) and dual molecule stacks
+(`MoleculeStackSettings.channels`).  The 4Pi bead scan reads Spline 4Pi's own
+`channels.FourPiChannelsSettings` through one `channels.fourpi_layout`, no copy of its fields.
+A registration's source stays where it was: the beads' map is always measured from them, the
+molecules' a file or measured; a *from the starting model* source joins when a model start can
+hold parts of the model fixed, and in situ dual colour will need one too.
+
 ### Built: step 4 (2026-11-04), the microscope's PSF
 
 Decided with Jonas: the kept pupils are the default PSF, and one builder serves every use -- no second

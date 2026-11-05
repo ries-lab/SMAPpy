@@ -25,6 +25,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from ..plugins import param
+from ..channels import FourPiChannelsSettings
 from .pupil import PSFModelSettings
 
 
@@ -189,25 +190,12 @@ def save(fit, path, z_range_nm: float = 600.0, dz_nm: float = 25.0, roi_px: Opti
 # refines the maps itself.
 
 
-LAYOUTS = (("file", "as the file lays them out"), ("microscope", "the microscope's"),
-           ("typed", "typed corners"), ("yale", "4Pi-SMS (Bewersdorf lab)"))
-
-
 @dataclass
 class FourPiBeadSettings:
     """The *4Pi beads* section of the PSF calibration window: the PSF model a section of its own
     (`PSFModelSettings`), as in every other workflow, and 4Pi's own fields."""
-    layout: str = param("file", label="channels", choices=LAYOUTS,
-                        help="where the phase channels are: the quadrant files' own layout, the microscope "
-                             "database's, typed, or the 4Pi-SMS design")
-    x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
-                           help="each channel's left edge on the chip, comma-separated")
-    y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
-                           help="each channel's top edge on the chip")
-    width: int = param(200, label="width", unit="px", min=8, help="one channel's width")
-    height: int = param(200, label="height", unit="px", min=8, beside=True, help="one channel's height")
-    mirrored: str = param("", label="mirrored in x",
-                          help="the channels mirrored left-right, by number from 1; empty: none")
+    # where the channels are: Spline 4Pi's own *channels* part, so a scan and the fit read the chip alike
+    channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings, label="channels")
     z_step_nm: float = param(0.0, label="z step", unit="nm", min=0.0,
                              help="the stage's step between slices; 0: from the scan's own record")
     mirror_steps: str = param("2, 0, -2", label="mirror steps", unit="rad",
@@ -253,8 +241,7 @@ def fourpi_shown(settings: FourPiBeadSettings, ring: bool = False) -> dict:
     only with ``ring``, a buffer's index typed below the NA (on *auto* the sample is index-matched, `learn`);
     *learn sample index* always; the *magnitude modes* only for a Zernike magnitude, whose modes they are."""
     from .pupil import model_shown
-    typed = settings.layout == "typed"
-    shown = {n: typed for n in ("x_corners", "y_corners", "width", "height", "mirrored")}
+    shown = {f"channels.{n}": flag for n, flag in settings.channels.shown().items()}
     beads = model_shown("beads", settings.psf.magnitude, ring=ring)
     for name in ("psf.saf_damping", "psf.learn_na", "psf.learn_n_med"):
         shown[name] = beads[name]
@@ -263,34 +250,20 @@ def fourpi_shown(settings: FourPiBeadSettings, ring: bool = False) -> dict:
 
 
 def scan_layout(settings: FourPiBeadSettings, source, camera=None):
-    """The layout of a scan's frames: the source's own, the microscope's for ``camera``, typed or 4Pi-SMS,
-    the last three on the chip and put on the camera's ROI."""
-    from ..channels import YALE_4PI, from_corners
+    """The layout of a scan's frames (`channels.fourpi_layout`, as Spline 4Pi reads a movie's): the source's
+    own, the microscope's for ``camera``, typed or 4Pi-SMS, the last three on the chip and put on the camera's
+    ROI."""
+    from ..channels import fourpi_layout
+    part = settings.channels
     roi = camera.roi_offset if camera is not None else (0, 0)
-    if settings.layout == "file":
-        layout = getattr(source, "layout", None)
-        if layout is None:
-            raise ValueError("this file does not lay out its channels itself (only the quadrant .mat files "
-                             "do): use the microscope's channels, or type them")
-        return layout
-    if settings.layout == "yale":
-        return YALE_4PI.on_camera(roi)
-    if settings.layout == "microscope":
+    own = getattr(source, "layout", None)
+    entry = None
+    if part.choice(own) == "microscope":
         from ..microscope_db import database
         scope = (getattr(camera, "microscope", None) or {}).get("name") if camera is not None else None
-        entry = database().get(scope) if scope else None
-        layout = entry.channel_layout(getattr(camera, "camera_name", "") or "") if entry else None
-        if layout is None:
-            raise ValueError("the microscope database gives no channel rectangles for these stacks' "
-                             "microscope: choose one that has them, or type the corners")
-        return layout.on_camera(roi)
-    numbers = lambda text: [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
-    x, y = numbers(settings.x_corners), numbers(settings.y_corners)
-    if len(x) != len(y) or not 1 <= len(x) <= 4:
-        raise ValueError("give one x and one y corner per channel, one to four of them")
-    mirrored = set(numbers(settings.mirrored))
-    return from_corners(x, y, settings.width, settings.height,
-                        flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
+        found = database().get(scope) if scope else None
+        entry = found.channel_layout(getattr(camera, "camera_name", "") or "") if found else None
+    return fourpi_layout(part, own, roi, entry)
 
 
 def scan_step_nm(path, given: float = 0.0) -> float:
@@ -319,7 +292,7 @@ def read_scan(path, settings: FourPiBeadSettings, camera):
     from ..channels import ChannelSource
     from ..io.quadrants import is_quadrant_mat, read_quadrant_mat
     from ..io.tiff import open_stack
-    if is_quadrant_mat(path) and settings.layout == "file":
+    if is_quadrant_mat(path) and settings.channels.layout in ("auto", "file"):
         from ..channels import side_by_side
         raw = read_quadrant_mat(path)                                          # (C, J, M, y, x)
         C, J, M, H, W = raw.shape

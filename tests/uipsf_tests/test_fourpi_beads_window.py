@@ -7,7 +7,7 @@ import pytest
 from smappy import fourpi
 from smappy.calibrate.fourpi_beads import FourPiBeadSettings, bead_fits, scan_beads, scan_step_nm
 from smappy.calibrate.pupil import PSFModelSettings
-from smappy.channels import from_corners
+from smappy.channels import FourPiChannelsSettings, from_corners
 from smappy.metadata import CameraMetadata
 
 CAMERA = CameraMetadata(conversion=0.5, offset=100.0, pixelsize_um=0.1)
@@ -32,8 +32,9 @@ def _dcimg_scan(folder, cal, layout, beads_xy, step_nm=20.0, n=31, seed=0):
 
 
 def _settings():
-    return FourPiBeadSettings(layout="typed", x_corners="4, 54, 104, 154", y_corners="2, 2, 2, 2",
-                              width=44, height=44, mirrored="3, 4", roi_size=13)
+    return FourPiBeadSettings(channels=FourPiChannelsSettings(layout="typed", x_corners="4, 54, 104, 154",
+                                                              y_corners="2, 2, 2, 2", width=44, height=44,
+                                                              mirrored="3, 4"), roi_size=13)
 
 
 def test_a_dcimg_bead_scan_gives_its_beads_its_registration_and_its_z_step(tmp_path):
@@ -77,16 +78,17 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
     assert window.use_button.text() == "Use in Spline 4Pi"
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert window.method.key == "fourpi_pupil"
-    assert not window.fourpi_form.fields["x_corners"].isVisibleTo(window)
-    window.fourpi_form.set(FourPiBeadSettings(layout="typed"))
+    assert not window.fourpi_form.fields["channels"].fields["x_corners"].isVisibleTo(window)
+    window.fourpi_form.set(FourPiBeadSettings(channels=FourPiChannelsSettings(layout="typed")))
     window._show_fourpi()
-    assert window.fourpi_form.fields["x_corners"].isVisibleTo(window)
+    assert window.fourpi_form.fields["channels"].fields["x_corners"].isVisibleTo(window)
     # the magnitude modes are a Zernike magnitude's: hidden for the minimal model, shown for Zernikes (a row
     # under "more", folded, so its row's visibility is asked)
     form = window.fourpi_form
     modes_row = lambda: form.row_layouts["magnitude_modes"].isRowVisible(form.fields["magnitude_modes"])  # noqa: E731
     assert not modes_row()
-    form.set(FourPiBeadSettings(layout="typed", psf=PSFModelSettings(magnitude="symmetric")))
+    form.set(FourPiBeadSettings(channels=FourPiChannelsSettings(layout="typed"),
+                                psf=PSFModelSettings(magnitude="symmetric")))
     window._show_fourpi()
     assert modes_row()
     # in situ has no 4Pi mode yet: its sample offers one channel only
@@ -284,7 +286,7 @@ def test_the_4pi_form_learns_the_minimal_model_with_one_gamma_and_shows_what_it_
     assert settings.psf == PSFModelSettings() and settings.psf.magnitude == "minimal"
     assert settings.psf.blur == "round" and settings.psf.pixel_blur and settings.same_magnitude
     shown = fourpi_shown(settings)
-    assert not shown["psf.saf_damping"] and not shown["magnitude_modes"] and not shown["x_corners"]
+    assert not shown["psf.saf_damping"] and not shown["magnitude_modes"] and not shown["channels.x_corners"]
     for magnitude, modes in (("symmetric", True), ("free", True), ("fixed", False)):
         assert fourpi_shown(FourPiBeadSettings(psf=PSFModelSettings(magnitude=magnitude)))["magnitude_modes"] is modes
     assert shown["psf.learn_n_med"] and fourpi_shown(settings, ring=True)["psf.saf_damping"]

@@ -6,7 +6,7 @@ from .dual import (DualColorSettings, DualColorCalibration, DualColorResult,
                    ChannelTransform, collect_dual_beads, build_dual_calibration,
                    calibrate_dual, load_dual_color_calibration,
                    save_dual_color_calibration)
-from .transform import (RegisterSettings, RegistrationResult, register_channels,
+from .transform import (ArrangementSettings, RegisterSettings, RegistrationResult, register_channels,
                         load_channel_transform, load_transform,
                         save_channel_transform)
 
@@ -15,6 +15,6 @@ __all__ = ['BeadStack', 'CalibrationSettings', 'CalibrationResult',
            'build_calibration', 'calibrate', 'DualColorSettings', 'DualColorCalibration',
            'DualColorResult', 'collect_dual_beads', 'build_dual_calibration',
            'calibrate_dual', 'load_dual_color_calibration', 'save_dual_color_calibration',
-           'ChannelTransform', 'RegisterSettings', 'RegistrationResult',
+           'ChannelTransform', 'ArrangementSettings', 'RegisterSettings', 'RegistrationResult',
            'register_channels', 'load_channel_transform', 'load_transform',
            'save_channel_transform']

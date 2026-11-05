@@ -5,7 +5,7 @@ import pytest
 
 from smappy.calibrate.dual import (DualColorSettings, LAYOUTS, map_points, fit_projective,
     robust_projective, calibrate_dual, build_dual_calibration, load_dual_color_calibration,
-    fit_dual_transform, collect_dual_beads, bead_registration)
+    fit_dual_transform, collect_dual_beads, bead_registration, ArrangementSettings)
 from smappy.calibrate.input import BeadStack
 from smappy.calibrate.core import positive_pair_models, estimate_pair_shift
 from smappy.io.calibration import load_spline_calibration, evaluate_spline
@@ -124,8 +124,7 @@ def synthetic(layout, main):
                 else:
                     py = 439-cy if mirrored else cy+220
             images[:, py-11:py+12, px-11:px+12] += volume.astype(np.float32)
-    s = DualColorSettings(registration=replace(bead_registration(), layout=layout,
-                                               main_channel=main), roi_size=15, padding=4,
+    s = DualColorSettings(channels=ArrangementSettings(layout=layout, main_channel=main), roi_size=15, padding=4,
             max_xy_shift_px=2, max_z_shift_nm=100, smooth_z_nm=0,
             rejection_mad=10, registration_iterations=1, brightness_range=None)
     return BeadStack(images, np.arange(41)*20., roi=(91, 0, shape[1], shape[0])), s
@@ -164,8 +163,7 @@ def scattered(layout, main, n=12, seed=0):
                 else:
                     px, py = cx+1, (399-cy if mirrored else cy+200)
             images[:, py-11:py+12, px-11:px+12] += volume.astype(np.float32)
-    s = DualColorSettings(registration=replace(bead_registration(), layout=layout,
-                                               main_channel=main), roi_size=15, padding=4,
+    s = DualColorSettings(channels=ArrangementSettings(layout=layout, main_channel=main), roi_size=15, padding=4,
             max_xy_shift_px=2, max_z_shift_nm=100, smooth_z_nm=0,
             rejection_mad=10, registration_iterations=1, brightness_range=None)
     return BeadStack(images, np.arange(41)*20., roi=(0, 0, shape[1], shape[0])), s
@@ -184,8 +182,7 @@ def test_the_layout_is_the_microscopes_and_calibrates_as_if_it_were_chosen(layou
                        channels=[Channel('transmitted', side=main), Channel('reflected', side=other,
                                                                            mirror=mirror)])
     stack, given = scattered(layout, main)
-    told = replace(given, registration=replace(given.registration, layout='microscope',
-                                               main_channel='microscope'))
+    told = replace(given, channels=ArrangementSettings())
     said = []
     found = calibrate_dual([stack], told, progress=said.append, microscope=scope)
     assert found.calibration.geometry['layout'] == layout
@@ -196,7 +193,7 @@ def test_the_layout_is_the_microscopes_and_calibrates_as_if_it_were_chosen(layou
                                   chosen.calibration.transformation)
     np.testing.assert_array_equal(found.calibration.main.coeff, chosen.calibration.main.coeff)
     # what was resolved is what the beads carry, for a rebuild and the pages
-    assert found.beads.settings.registration.layout == layout
+    assert found.beads.settings.channels.layout == layout
     with pytest.raises(ValueError, match='choose the layout'):
         calibrate_dual([stack], told)
 
@@ -257,20 +254,17 @@ def test_the_channels_are_recorded_on_the_chip_where_the_fitter_reads_them(layou
     assert chip.regions[1][0] == 91+220
     assert (chip.channel_at(*result.beads.main_points.T) == 0).all()
     assert (chip.channel_at(*result.beads.secondary_points.T) == 1).all()
-    given = calibrate_dual([stack], replace(settings, registration=replace(
-        settings.registration, split_position=91+220)))
+    given = calibrate_dual([stack], replace(settings, channels=replace(settings.channels, split_position=91+220)))
     np.testing.assert_array_equal(given.calibration.transformation,
                                   result.calibration.transformation)
     with pytest.raises(ValueError, match='outside the frame'):
-        calibrate_dual([stack], replace(settings, registration=replace(
-            settings.registration, split_position=60)))   # left of the image
+        calibrate_dual([stack], replace(settings, channels=replace(settings.channels, split_position=60)))   # left of the image
 
 
 def test_roi_fallback_warning_shape_error_and_unequal_split():
     stack, settings = synthetic('up-down', 'upper')
     stack = replace(stack, roi=None)
-    settings = replace(settings, registration=replace(settings.registration,
-                                                      split_position=219))
+    settings = replace(settings, channels=replace(settings.channels, split_position=219))
     with pytest.warns(UserWarning, match='Missing camera ROI'):
         result = calibrate_dual([stack], settings)
     assert result.calibration.geometry['coordinate_system'] == 'roi-local'
@@ -366,9 +360,7 @@ def dim_secondary():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")            # ROI-local: no camera ROI
         return calibrate_dual([BeadStack(stacks[0].astype(np.float32), z)],
-                              DualColorSettings(registration=replace(
-                                                    bead_registration(), layout="up-down",
-                                                    main_channel="upper"),
+                              DualColorSettings(channels=ArrangementSettings(layout="up-down", main_channel="upper"),
                                                 dz_nm=50.0, roi_size=17,
                                                 smooth_z_nm=40.0)).calibration
 

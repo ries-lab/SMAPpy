@@ -39,6 +39,7 @@ from typing import Optional
 import numpy as np
 
 from ..plugins import param
+from .dual import ArrangementSettings
 from .insitu import InSituROIs, Units, cut, gaussian, quotas
 
 #: *region* on auto, nm of the sample: the widest spots at ±1 µm have σ ≈ 9 px of 105 nm (M5)
@@ -87,6 +88,9 @@ class MoleculeStackSettings:
                                             "from the metadata")
     sweep_frames: Optional[int] = param(None, label="frames per sweep", min=2, advanced=True,
                                         help="with a typed z step: the frames of one sweep, all upwards")
+    # dual colour: where the two channels lie, as every form with a split chip asks it
+    channels: ArrangementSettings = param(default_factory=ArrangementSettings, label="channels",
+                                          collapsed=True)
     registration: str = param("", label="registration", kind="open_file",
                               file_filter="Registration or dual calibration (*.h5);;All files (*)",
                               help="dual colour: the halves' map, a dual bead calibration or a registration "

@@ -91,7 +91,7 @@ def make(d) -> None:
     d.place(window, 30, 20)
     window.add_paths([str(p) for p in stacks])
     form = window.detection_form
-    geometry = form.fields["registration"]      # the split: a part of its own
+    geometry = form.fields["channels"]          # where the channels lie: as the fitters ask it
     # set by hand: the simulated beads name no microscope whose entry would give the split
     for part, name, value in ((geometry, "layout", "up-down"),
                               (geometry, "main_channel", "upper"),

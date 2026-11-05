@@ -27,40 +27,76 @@ LAYOUTS = ('right-left', 'right-left mirrored', 'up-down', 'up-down mirrored')
 MIN_LOSS_SCALE_PX = 1e-3
 
 
+# How a split chip lies, in the words a microscope's entry gives it (`microscope_db.Microscope.
+# arrangement`).  Fields of their own so that every form that asks it -- a fitter's *channels* part
+# (`plugins.fit.ChannelsSettings`), *Calibrate transform*, the dual-colour samples of the PSF
+# calibration window -- asks it in the same words.
+LAYOUT_CHOICES = (("microscope", "the microscope's"), *LAYOUTS)
+HALF_CHOICES = (("microscope", "the microscope's"), "left", "right", "upper", "lower")
+
+
+def layout_param():
+    return param('microscope', label="layout", choices=LAYOUT_CHOICES,
+                 help="how the chip is split: the microscope's entry, or chosen by hand with the "
+                      "main channel and the split")
+
+
+def main_channel_param():
+    return param('microscope', label="main channel", choices=HALF_CHOICES,
+                 help="the channel the other is registered onto, for a layout chosen by hand")
+
+
+def split_position_param():
+    return param(None, label="split position", unit="px", min=1, advanced=True,
+                 help="the first pixel of the second channel, on the chip, for a layout "
+                      "chosen by hand; empty: the middle of the frame")
+
+
+@dataclass
+class ArrangementSettings:
+    """Where a split chip's two channels lie: the microscope's entry, or chosen by hand.
+
+    Not detected: it is a fact about the microscope and its camera, kept in its entry
+    (`microscope_db.Microscope.arrangement`), and *microscope* takes it from there
+    (`resolve_arrangement`).  Detection voted for every layout and kept the sharpest, and on a
+    wide, low camera ROI it chose the wrong axis (M5's MotorPAINT, 2026-10: up-down, 78 pairs).
+    Kept apart from how a registration is measured (`RegisterSettings`): the one is the
+    instrument's, the other the method's, and a form that mixed them showed the microscope's
+    facts among the pairing numbers.
+    """
+    layout: str = layout_param()
+    main_channel: str = main_channel_param()
+    split_position: Optional[int] = split_position_param()
+
+    def validate(self):
+        validate_arrangement(self)
+
+
+def validate_arrangement(settings):
+    """The arrangement's own checks, for `ArrangementSettings` and a fitter's *channels* part."""
+    if settings.layout != 'microscope' and settings.layout not in LAYOUTS:
+        raise ValueError(f'layout must be microscope or one of {LAYOUTS}')
+    if settings.main_channel != 'microscope':
+        # with the layout still the microscope's, any of the four names is allowed here and
+        # one that does not fit it is refused when it is resolved, by name
+        halves = (('left', 'right', 'upper', 'lower') if settings.layout == 'microscope'
+                  else ('left', 'right') if 'right-left' in settings.layout
+                  else ('upper', 'lower'))
+        if settings.main_channel not in halves:
+            raise ValueError('main channel must match the split layout')
+    if settings.split_position is not None and settings.split_position < 1:
+        raise ValueError('split_position must be a positive integer or None')
+
+
 @dataclass
 class RegisterSettings:
-    """How the chip is split, how hard to look, and what is already known.
+    """How a registration between two channels is measured: the vote, the pairing and the fit.
 
-    The one registration geometry: a movie registration
-    (`transform.register_channels`) and a bead calibration
-    (`DualColorSettings.registration`) both read it.  The defaults are a
-    movie's, which has thousands of pairs; a bead calibration has tens and
-    sets its own (`bead_registration`).
-
-    How the chip is split is not detected: it is a fact about the microscope
-    and its camera, kept in its entry (`microscope_db.Microscope.arrangement`),
-    and *microscope* takes it from there (`resolve_arrangement`).  A microscope
-    without an entry has it chosen here.  Detection voted for every layout and
-    kept the sharpest, and on a wide, low camera ROI it chose the wrong axis
-    (M5's MotorPAINT, 2026-10: up-down, 78 pairs).
+    A movie registration (`transform.register_channels`) and a bead calibration
+    (`DualColorSettings.registration`) both read it.  The defaults are a movie's, which has
+    thousands of pairs; a bead calibration has tens and sets its own (`bead_registration`).
+    Where the channels lie is not here: it is the arrangement's (`ArrangementSettings`).
     """
-    layout: str = param('microscope', label="layout",
-                        choices=(("microscope", "the microscope's"),
-                                 "right-left",
-                                 "right-left mirrored",
-                                 "up-down",
-                                 "up-down mirrored"),
-                        help="how the chip is split: the microscope's entry, "
-                             "or chosen for a microscope without one")
-    main_channel: str = param('microscope', label="main channel",
-                              choices=(("microscope", "the microscope's"),
-                                       "left",
-                                       "right",
-                                       "upper",
-                                       "lower"),
-                              help="the half the other is mapped onto, the "
-                                   "reference; the microscope's, else the "
-                                   "left or upper half")
     # 'projective' is eight coefficients and extrapolates gracefully;
     # 'polynomial' is twenty and describes a distorted field far better where
     # the pairs reach, and not at all where they do not.  See `Polynomial`.
@@ -71,12 +107,6 @@ class RegisterSettings:
                             "polynomial describes a distorted field far "
                             "better where the pairs reach, and is refused "
                             "when they do not reach far enough")
-    split_position: Optional[int] = param(None, label="split position",
-                                          unit="px", min=1,
-                                          help="the first pixel of the second "
-                                               "channel, on the chip, where the "
-                                               "microscope's arms have no regions; "
-                                               "empty: the middle of the frame")
     # the vote
     vote_bin_px: float = param(2.0, label="vote bin", unit="px", min=0.1,
                                advanced=True,
@@ -154,30 +184,9 @@ class RegisterSettings:
                                                 "widens with the matching "
                                                 "tolerance")
 
-    def __post_init__(self):
-        # *auto* (detect) was the default until 2026-11; a saved form or chain with it
-        # takes the microscope's arrangement, which is what detection was guessing at
-        if self.layout == 'auto':
-            self.layout = 'microscope'
-        if self.main_channel == 'auto':
-            self.main_channel = 'microscope'
-
     def validate(self):
-        if self.layout != 'microscope' and self.layout not in LAYOUTS:
-            raise ValueError(f'layout must be microscope or one of {LAYOUTS}')
         if self.model not in ('projective', 'polynomial'):
             raise ValueError("model must be 'projective' or 'polynomial'")
-        if self.main_channel != 'microscope':
-            # with the layout still the microscope's, any of the four names is
-            # allowed here and one that does not fit it is refused when it is
-            # resolved, by name
-            halves = (('left', 'right', 'upper', 'lower') if self.layout == 'microscope'
-                      else ('left', 'right') if 'right-left' in self.layout
-                      else ('upper', 'lower'))
-            if self.main_channel not in halves:
-                raise ValueError('main channel must match the split layout')
-        if self.split_position is not None and self.split_position < 1:
-            raise ValueError('split_position must be a positive integer or None')
         if self.vote_bin_px <= 0 or self.vote_smooth_px <= 0:
             raise ValueError('the vote bin and smoothing must be positive')
         if self.coarse_tolerance_px <= 0:
@@ -195,9 +204,8 @@ class RegisterSettings:
                              'and finite')
 
 
-def resolve_arrangement(settings: RegisterSettings, microscope=None,
-                        camera: str = "") -> RegisterSettings:
-    """``settings`` with *microscope* spelt out: the layout and the main channel from
+def resolve_arrangement(settings, microscope=None, camera: str = ""):
+    """``settings`` (an `ArrangementSettings`, or a fitter's *channels* part) with *microscope* spelt out: the layout and the main channel from
     the microscope's entry (`microscope_db.arrangement_of`; ``microscope`` a summary, a
     `MicroscopeResolution` or an entry's name), what is chosen by hand kept as it is.
 
@@ -214,7 +222,7 @@ def resolve_arrangement(settings: RegisterSettings, microscope=None,
                 (f"{name}'s entry does not say how its chip is split" if name else
                  "no microscope recognised, so nothing says how the chip is split")
                 + ": choose the layout (right-left or up-down, mirrored or not) in the "
-                  "registration settings, or add the arms' sides to the microscope's entry")
+                  "channels settings, or add the arms' sides to the microscope's entry")
         layout = found['layout']
     halves = ('left', 'right') if 'right-left' in layout else ('upper', 'lower')
     # the entry's arrangement is all the entry's: a main channel is chosen with a layout by hand
@@ -228,7 +236,32 @@ def resolve_arrangement(settings: RegisterSettings, microscope=None,
     return replace(settings, layout=layout, main_channel=main)
 
 
-def entry_regions(settings: RegisterSettings, microscope=None, camera: str = ""):
+def arrangement_line(settings, microscope=None, camera: str = ""):
+    """How the chip is split, in one line -- a *channels* part's title wherever it is asked: the
+    microscope's entry on *microscope* (``M2's: right-left mirrored, main right, at its arms'
+    regions``), or what is chosen by hand; None where nothing can be said yet (no file, no entry)."""
+    if settings.layout != 'microscope':
+        return (f"{settings.layout}, main {settings.main_channel}"
+                + (f", split at {settings.split_position} px" if settings.split_position else ""))
+    from .. import microscope_db
+    name = microscope_db.name_of(microscope)
+    if not name:
+        return None
+    found = microscope_db.arrangement_of(microscope, camera)
+    if found is None:
+        return f"{name}'s entry does not say: choose it"
+    return (f"{name}'s: {found['layout']}, main {found['main_channel']}, "
+            + ("at its arms' regions" if found.get('regions') else "the frame halved"))
+
+
+def arrangement_shown(settings) -> dict:
+    """Which of a *channels* part's fields a form shows: on *microscope* the entry says it all, in
+    the title; the main channel and the split are fields only for an arrangement chosen by hand."""
+    by_hand = settings.layout != 'microscope'
+    return {'main_channel': by_hand, 'split_position': by_hand}
+
+
+def entry_regions(settings, microscope=None, camera: str = ""):
     """The microscope's arms' regions by half (`microscope_db.Microscope.arrangement`) when the
     split is the entry's -- *layout* on *microscope* and the entry giving them on this axis --
     else None.  Where they are, they are where the channels lie, and the *split position* is not
@@ -240,7 +273,7 @@ def entry_regions(settings: RegisterSettings, microscope=None, camera: str = "")
     return (found or {}).get('regions')
 
 
-def chip_channels(settings: RegisterSettings, roi, microscope=None, camera: str = ""):
+def chip_channels(settings, roi, microscope=None, camera: str = ""):
     """``(resolved settings, the two channels on the chip)`` for frames at camera ROI ``roi`` (x0,
     y0, width, height): the arrangement spelt out (`resolve_arrangement`), the channels the arms'
     regions where the entry gives them (`entry_regions`), else the frame cut at the *split
@@ -263,7 +296,7 @@ def chip_channels(settings: RegisterSettings, roi, microscope=None, camera: str 
 def bead_registration() -> RegisterSettings:
     """`RegisterSettings` with a bead calibration's defaults.
 
-    The geometry is the same as a movie's; the numbers are not, because a
+    The method is the same as a movie's; the numbers are not, because a
     bead slide gives tens of pairs, all of them bright, where a movie gives
     thousands spanning orders of magnitude in precision.  So fewer pairs are
     enough (8, not 20), the first round's RANSAC radius can be looser (2 px,
@@ -278,16 +311,13 @@ def bead_registration() -> RegisterSettings:
 
 # What of `RegisterSettings` a bead calibration does not read: it fits the
 # projective map once, without a second matching round or a polynomial, over
-# tens of pairs that need no cap, and its layout is the microscope's or chosen,
-# so nothing votes.  The bead window leaves these off its form.
+# tens of pairs that need no cap, and votes for its offset on a fixed 2 px grid.
+# The bead forms leave these off.
 BEAD_UNUSED = ('model', 'fine_tolerance_px', 'adapt_fine_tolerance', 'max_pairs',
                'vote_bin_px', 'vote_smooth_px')
 # ...and where it reads a field differently from a movie registration, what
 # the bead window's tooltip says instead.
 BEAD_HELP = {
-    'split_position': "the first pixel of the second channel, on the chip, "
-                      "where the microscope's arms have no regions; empty: the "
-                      "middle of the first bead image",
     'coarse_tolerance_px': "how far a bead may lie from where the offset the "
                            "beads voted for puts its partner",
     'reprojection_threshold_px': "the first round's robust (RANSAC) inlier "
@@ -299,15 +329,17 @@ BEAD_HELP = {
 
 @dataclass
 class DualColorSettings(CalibrationSettings):
-    """A single-channel calibration's settings, and the arrangement of the two
-    channels: the same `RegisterSettings` a movie registration reads, with a
-    bead slide's defaults.  The arrangement is the microscope's or chosen,
-    never detected."""
+    """A single-channel calibration's settings, where the two channels lie (*channels*, the
+    microscope's or chosen, never detected) and how the beads are paired and their map fitted
+    (*registration*: the same `RegisterSettings` a movie registration reads, with a bead slide's
+    defaults).  The map is always measured from these beads: no source has asked for another yet."""
+    channels: ArrangementSettings = param(default_factory=ArrangementSettings, label="channels")
     registration: RegisterSettings = param(default_factory=bead_registration,
-                                           label="registration")
+                                           label="registration", collapsed=True)
 
     def validate(self):
         super().validate()
+        self.channels.validate()
         self.registration.validate()
 
 
@@ -826,13 +858,13 @@ def resolved_geometry(settings, stacks, report=None, microscope=None) -> DualCol
     beads carry (`DualBeads.settings`), so a rebuild with beads excluded, the pages and the saved
     file all read the layout that was used, not the word *microscope*.
     """
-    g = settings.registration
-    if 'microscope' in (g.layout, g.main_channel) and microscope is None:
+    g = settings.channels
+    if g.layout == 'microscope' and microscope is None:
         microscope = beads_microscope(stacks)
     resolved = resolve_arrangement(g, microscope)
     if report and g.layout == 'microscope':
         report(f"Layout: {resolved.layout}, main channel {resolved.main_channel}, the microscope's")
-    return replace(settings, registration=resolved)
+    return replace(settings, channels=resolved)
 
 
 def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
@@ -857,11 +889,11 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         # recorded it, and the warning the fitters call could not fire
         from .core import _em_on
         em_states = [_em_on(p) for p in paths]
-    asked = s.registration
-    if 'microscope' in (asked.layout, asked.main_channel) and microscope is None:
+    asked = s.channels
+    if asked.layout == 'microscope' and microscope is None:
         microscope = beads_microscope(stacks)
     s = resolved_geometry(s, stacks, report, microscope)
-    g = s.registration
+    g, pairing = s.channels, s.registration
     shape = stacks[0].images.shape[-2:]
     if any(st.images.shape[-2:] != shape for st in stacks):
         raise ValueError('bead acquisitions must share split-frame image dimensions')
@@ -939,11 +971,11 @@ def collect_dual_beads(inputs, settings=None, progress=None, microscope=None):
         distance, index = cKDTree(approx[ib]).query(points[0][ia])
         _, reverse = cKDTree(points[0][ia]).query(approx[ib])
         for k, (d, j) in enumerate(zip(distance, index)):
-            if d <= g.coarse_tolerance_px and reverse[j] == k:
+            if d <= pairing.coarse_tolerance_px and reverse[j] == k:
                 pairs.append((ia[k], ib[j]))
     pairs = np.asarray(pairs, int).reshape(-1, 2)
-    if len(pairs) < g.min_pairs:
-        raise ValueError(f'only {len(pairs)} automatic pairs; require {g.min_pairs}')
+    if len(pairs) < pairing.min_pairs:
+        raise ValueError(f'only {len(pairs)} automatic pairs; require {pairing.min_pairs}')
     records = []
     for i, (a, b) in enumerate(pairs):
         ra, rb = channels[0].records[a], channels[1].records[b]

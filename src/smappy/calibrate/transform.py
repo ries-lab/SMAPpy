@@ -48,7 +48,7 @@ import warnings
 import numpy as np
 from scipy import ndimage
 
-from .dual import (ChannelTransform, Polynomial, RegisterSettings,
+from .dual import (ArrangementSettings, ChannelTransform, Polynomial, RegisterSettings,
                    fit_dual_transform, map_points, n_polynomial_terms,
                    point_coverage_area, polynomial_terms)
 
@@ -209,12 +209,12 @@ def _centroid(hist, ex, ey, i, j, radius):
                      float(window.sum(axis=0) @ cy / weight)])
 
 
-def _geometry(layout, settings: RegisterSettings, image_shape, roi) -> dict:
+def _geometry(layout, arrangement, image_shape, roi) -> dict:
     """What a registration applies to: the two channels on the chip (`channels.ChannelLayout`, the
     record `ChannelTransform.layout` reads), the arrangement's words, and the frames it was
     measured on."""
     height, width = int(image_shape[0]), int(image_shape[1])
-    return {'layout': settings.layout, 'main_channel': settings.main_channel,
+    return {'layout': arrangement.layout, 'main_channel': arrangement.main_channel,
             'channels': layout.to_dict(),
             'image_shape': [height, width],
             'coordinate_system': 'camera-chip' if roi is not None else 'roi-local',
@@ -429,12 +429,13 @@ def _polynomial_round(x, y, frame, ref_ids, sec_ids, is_reference, is_secondary,
 
 
 def register_channels(x, y, frame, channel, layout, image_shape, roi=None, settings=None,
-                      progress=None, precision=None) -> RegistrationResult:
+                      progress=None, precision=None, *, arrangement) -> RegistrationResult:
     """The map from the second channel onto the first, from the localizations of a two-channel fit.
 
     ``x`` and ``y`` are chip pixels, ``frame`` the frame each was found in and ``channel`` the
     channel it was found in (``camera_channel``: 0 the main channel, 1 the other), ``layout`` the
-    two channels on the chip (`channels.split_halves`), ``image_shape`` the frame's ``(height,
+    two channels on the chip (`channels.split_halves`) and ``arrangement`` its words, resolved
+    (`dual.resolve_arrangement`: the layout and the main channel the record keeps), ``image_shape`` the frame's ``(height,
     width)`` and ``roi`` the camera ROI ``(x0, y0, width, height)`` -- None when it is unknown,
     which makes the result ROI-local, exactly as for a bead calibration.
 
@@ -491,7 +492,7 @@ def register_channels(x, y, frame, channel, layout, image_shape, roi=None, setti
            f'{fitted.accepted.sum():,} inliers, '
            f'dx {np.std(fitted.dxdy[fitted.accepted, 0]):.3f} px, '
            f'dy {np.std(fitted.dxdy[fitted.accepted, 1]):.3f} px')
-    geometry = _geometry(layout, s, image_shape, roi)
+    geometry = _geometry(layout, arrangement, image_shape, roi)
 
     # How well the coarse round actually fits, so that the tight round is not
     # tightened past it -- which is what strips the edges of the field, where

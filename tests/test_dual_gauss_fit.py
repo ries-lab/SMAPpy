@@ -25,8 +25,8 @@ WIDTHS = (1.1, 1.4)   # the two halves see different wavelengths
 def chosen():
     """The split these movies have, chosen as for a microscope without an entry: their files name
     none, and the arrangement is never detected."""
-    from smappy.calibrate.dual import RegisterSettings
-    return RegisterSettings(layout="up-down", main_channel="upper")
+    from smappy.calibrate.dual import ArrangementSettings
+    return ArrangementSettings(layout="up-down", main_channel="upper")
 
 
 def split_chosen(settings):
@@ -484,7 +484,7 @@ def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
     assert np.median(np.abs(y - locs["peak_y_pix"])) < 0.5
 
     found = CalibrateChannelTransform().preview(
-        Context(locs=locs), RegisterLocsSettings(save=False, registration=chosen())).data["transform"]
+        Context(locs=locs), RegisterLocsSettings(save=False, channels=chosen())).data["transform"]
     probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
     np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)
 

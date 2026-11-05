@@ -456,9 +456,9 @@ regions or the frame's halves -- and the part says it in one line; a file no
 entry recognises stops with a message asking for it.  All the Ries lab's
 microscopes are *right-left mirrored*.  Choose a layout by hand and *main
 channel* and *split position* appear.  *channels* says where the two channels
-are on the chip; the map between them is the model's *registration*.  The
-*measuring* settings' own *layout*, *main channel* and *split position* are
-not shown here: they serve *Calibrate transform* and the bead calibration.
+are on the chip; the map between them is the model's *registration*, whose
+*measuring* settings are only how it is measured.
+
 ### channels.main_channel
 For two far-red dyes split by a long-pass dichroic, the transmitted arm is
 the brighter and the usual main channel; on *microscope* the entry names it.

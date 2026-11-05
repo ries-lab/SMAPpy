@@ -11,8 +11,8 @@ mirror), so that what is learnt saves as a dual bead model does (`pupil.dual_cal
 **The registration** is a file's -- a dual bead calibration or a registration measured from a movie
 (`transform.load_transform`) -- or, with none given, measured here from the molecules' own detections
 (`transform.register_channels`, the movie registration: thousands of spots at many defocus, which a bead
-slide does not have), on the channels the microscope's entry cuts the chip into (`dual.chip_channels`):
-which channel a spot is in is the arrangement's, never guessed.  uipsf learns it further either way (``ch1.transform``).
+slide does not have), on the channels the *channels* part cuts the chip into -- the microscope's entry or
+chosen by hand (`dual.chip_channels`): which channel a spot is in is the arrangement's, never guessed.  uipsf learns it further either way (``ch1.transform``).
 
 **The selection** judges each channel that carries at least `CHANNEL_SHARE` of the pair's light by the
 single-channel rules (centred, its widths those of its half's curve, no bright neighbour), the brightness
@@ -43,9 +43,9 @@ def halves(transform, origin=(0, 0)) -> list:
 
 def registration_from_molecules(paths, camera, settings: MoleculeStackSettings):
     """The channels' registration measured from every file's spots over the whole chip (module docstring):
-    the chip split as the microscope's entry says (`dual.chip_channels`), each spot in the channel whose
+    the chip split as the *channels* say -- the microscope's entry or chosen (`dual.chip_channels`) -- each spot in the channel whose
     rectangle it lies in, then the movie registration between them."""
-    from .dual import RegisterSettings, chip_channels
+    from .dual import chip_channels
     from .transform import register_channels
     x, y, frame, shape, base = [], [], [], None, 0
     for path in paths:
@@ -61,7 +61,7 @@ def registration_from_molecules(paths, camera, settings: MoleculeStackSettings):
     roi = getattr(camera, "roi", None)
     frame_roi = tuple(int(v) for v in roi) if roi is not None else (0, 0, shape[1], shape[0])
     try:
-        _, chip = chip_channels(RegisterSettings(), frame_roi, getattr(camera, "microscope", None))
+        told, chip = chip_channels(settings.channels, frame_roi, getattr(camera, "microscope", None))
     except ValueError as error:
         raise ValueError(f"{error} -- or, for molecule stacks, give a registration: a dual bead "
                          f"calibration or one measured from a movie") from None
@@ -70,7 +70,7 @@ def registration_from_molecules(paths, camera, settings: MoleculeStackSettings):
     channel = chip.channel_at(x, y)
     keep = channel >= 0
     found = register_channels(x[keep], y[keep], np.concatenate(frame)[keep], channel[keep], chip, shape,
-                              roi=roi)
+                              roi=roi, arrangement=told)
     return found.transform
 
 

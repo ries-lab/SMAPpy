@@ -24,7 +24,8 @@ import numpy as np
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
 from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
-from ..calibrate.transform import RegisterSettings
+from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
+                              split_position_param)
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
@@ -271,13 +272,6 @@ def draw_region(ax, shapes) -> None:
         ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
 
 
-#: how a split chip lies, in the words a microscope's entry gives it (`microscope_db.Microscope.
-#: arrangement`); *microscope* reads the entry, and a microscope without one has it chosen
-LAYOUT_CHOICES = (("microscope", "the microscope's"), "right-left", "right-left mirrored",
-                  "up-down", "up-down mirrored")
-HALF_CHOICES = (("microscope", "the microscope's"), "left", "right", "upper", "lower")
-
-
 @dataclass
 class ChannelsSettings:
     """How the camera chip is read: whole, or as a split camera's two channels, and how the split
@@ -292,28 +286,14 @@ class ChannelsSettings:
     split: str = param("whole chip", label="read", choices=("whole chip", "two channels"),
                        help="two channels: a split camera, each channel detected and fitted on "
                             "its own; whether the dichroic was in, no file says")
-    layout: str = param("microscope", label="layout", choices=LAYOUT_CHOICES,
-                        help="how the chip is split: the microscope's entry, or chosen by "
-                             "hand with the main channel and the split")
-    main_channel: str = param("microscope", label="main channel", choices=HALF_CHOICES,
-                              help="the channel positions are registered onto, for a layout "
-                                   "chosen by hand")
-    split_position: Optional[int] = param(None, label="split position", unit="px", min=1,
-                                          advanced=True,
-                                          help="the first pixel of the second channel, on "
-                                               "the chip, for a layout chosen by hand; "
-                                               "empty: the middle of the frame")
+    # the arrangement in the words every form asks it in (`calibrate.dual.ArrangementSettings`)
+    layout: str = layout_param()
+    main_channel: str = main_channel_param()
+    split_position: Optional[int] = split_position_param()
 
     @property
     def two(self) -> bool:
         return self.split == "two channels"
-
-    def arrangement(self, camera: Optional[CameraMetadata]) -> dict:
-        """The layout, main channel, mirror and split this file is read with."""
-        from ..calibrate.dual import resolve_arrangement
-        told = resolve_arrangement(self, getattr(camera, "microscope", None))
-        return {"layout": told.layout, "mirrored": told.layout.endswith("mirrored"),
-                "main_channel": told.main_channel, "split_position": told.split_position}
 
     def chip_layout(self, camera: Optional[CameraMetadata], shape):
         """The two channels as a `channels.ChannelLayout` on the chip (`calibrate.dual.chip_channels`),
@@ -816,18 +796,13 @@ class _FitPlugin(Plugin):
                 said = self._arrangement_line(settings) if two else None
                 state.titles["channels"] = ("two channels" if two else "whole chip") + (
                     f", {said or channels.layout}" if two else "")
-                # on *microscope* the entry says it all, in the title and the layout's hint; the
-                # main channel and the split are fields only for an arrangement chosen by hand
-                by_hand = channels.layout != "microscope"
-                state.shown["channels.main_channel"] = by_hand
-                state.shown["channels.split_position"] = by_hand
-                if two and said and not by_hand:
+                # on *microscope* the entry says it all, in the title and the layout's hint
+                from ..calibrate.dual import arrangement_shown
+                for name, flag in arrangement_shown(channels).items():
+                    state.shown[f"channels.{name}"] = flag
+                if two and said and channels.layout == "microscope":
                     state.hints["channels.layout"] = said
                 if self.channel_part == "two":
-                    # the arrangement is the *channels* part's; the registration's copies of it
-                    # serve Calibrate transform and the bead calibration, not this form
-                    for name in ("layout", "main_channel", "split_position"):
-                        state.shown[f"model.registration.measure.{name}"] = False
                     registration = settings.model.registration
                     measured = registration.calibrate
                     state.titles["model.registration"] = "registration: " + (
@@ -967,27 +942,18 @@ class _FitPlugin(Plugin):
                 "sources": sources}, shown
 
     def _arrangement_line(self, settings) -> Optional[str]:
-        """How the chip is split, in one line: the microscope's entry (`microscope_db.arrangement_of`)
-        on *microscope* -- ``M2's: right-left mirrored, main right, at its arms' regions`` -- or what is
-        chosen by hand; None where nothing can be said yet (no file, no entry)."""
-        channels = settings.channels
-        if channels.layout != "microscope":
-            return (f"{channels.layout}, main {channels.main_channel}"
-                    + (f", split at {channels.split_position} px" if channels.split_position
-                       else ""))
-        try:
-            from ..microscope_db import arrangement_of
-            resolved = self.resolution(settings)
-            scope = resolved.microscope if resolved is not None else None
-            found = arrangement_of(scope.summary()) if scope is not None else None
-        except Exception:
-            return None
-        if scope is None:
-            return None
-        if found is None:
-            return f"{scope.name}'s entry does not say: choose it"
-        return (f"{scope.name}'s: {found['layout']}, main {found['main_channel']}, "
-                + ("at its arms' regions" if found.get("regions") else "the frame halved"))
+        """How the chip is split, in one line (`calibrate.dual.arrangement_line`), for this file's
+        microscope."""
+        from ..calibrate.dual import arrangement_line
+        scope = None
+        if settings.channels.layout == "microscope":
+            try:
+                resolved = self.resolution(settings)
+                found = resolved.microscope if resolved is not None else None
+                scope = found.summary() if found is not None else None
+            except Exception:
+                return None
+        return arrangement_line(settings.channels, scope)
 
     def unknown_camera(self, settings) -> Optional[str]:
         """The question at Run for a camera that is in no database and
@@ -1601,8 +1567,8 @@ class ChannelTransformSettings:
                                   help="the frames are taken as this many "
                                        "evenly spaced blocks across the whole "
                                        "movie, not as one run at the start")
-    # how a registration is measured, from the movie here and by *Calibrate transform*: the
-    # arrangement fields in it are the *channels* part's in a fitter's form, and hidden there
+    # how a registration is measured, from the movie here and by *Calibrate transform*; where
+    # the channels lie is the fitter's *channels* part's
     measure: RegisterSettings = param(default_factory=RegisterSettings, label="measuring",
                                       collapsed=True)
     calibrate_skip: int = param(500, label="skip the first", unit="frames", min=0,
@@ -2126,15 +2092,13 @@ class _TwoChannelFit(_FitPlugin):
         source = _open(replace(src, live=False), watch=False)
         camera = settings.camera.resolve(source)
         # how the chip is split: the *channels* part's -- the microscope's, or chosen -- never
-        # detected; the registration's own fields of the same names are not read here
+        # detected
+        from ..calibrate.dual import resolve_arrangement
         channels = replace(settings.channels, split="two channels")
-        told = channels.arrangement(camera)
-        registration = replace(settings.model.registration.measure, layout=told["layout"],
-                               main_channel=told["main_channel"],
-                               split_position=told["split_position"])
+        told = resolve_arrangement(channels, getattr(camera, "microscope", None))
         chip = channels.chip_layout(camera, source.shape[-2:])
-        ctx.report(f"the chip split {registration.layout}, the main channel "
-                   f"{registration.main_channel}"
+        ctx.report(f"the chip split {told.layout}, the main channel "
+                   f"{told.main_channel}"
                    + ("" if settings.channels.layout != "microscope"
                       else f", as {camera.microscope.get('name')}'s entry says"))
         last = min(src.stop, source.n_frames) if src.stop else source.n_frames
@@ -2200,8 +2164,8 @@ class _TwoChannelFit(_FitPlugin):
         x, y = in_pixels(locs, "x_pix", "y_pix")
         result = register_channels(
             x, y, np.asarray(locs["frame"]), np.asarray(locs["camera_channel"]), chip,
-            source.shape[-2:], camera.roi, settings=registration,
-            progress=ctx.report,
+            source.shape[-2:], camera.roi, settings=settings.model.registration.measure,
+            progress=ctx.report, arrangement=told,
             precision=(in_pixels(locs, "xy_err_pix")
                        if "xy_err_nm" in locs else None))
         return result

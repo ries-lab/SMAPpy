@@ -27,37 +27,14 @@ from typing import Optional
 
 import numpy as np
 
+from ..channels import FourPiChannelsSettings
 from . import Context, FormState, Notice, Plot, Result, param, register
 from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata)
 
 MODEL_FILTER = "4Pi models (*.h5)"
 REGISTRATION_FILTER = "Channel registrations (*.json)"
-LAYOUTS = (("auto", "the file's, else the microscope's"), ("microscope", "the microscope's"),
-           ("file", "as the file lays them out"), ("typed", "typed corners"),
-           ("yale", "4Pi-SMS (Bewersdorf lab)"))
 REGISTRATIONS = (("model", "the model's"), ("beads", "from beads"),
                  ("file", "from a registration file"), ("none", "none"))
-
-
-@dataclass
-class FourPiChannelsSettings:
-    """Where the phase channels are on the chip: every fitter's *channels* part, here four
-    rectangles rather than a two-way split.  The maps between them are the model's part
-    (`FourPiRegistrationSettings`): they are learnt with the PSF and belong with it."""
-    layout: str = param("auto", label="layout", choices=LAYOUTS,
-                        help="where the phase channels are: the file's own layout, the "
-                             "microscope's (the database), or typed")
-    x_corners: str = param("0, 200, 400, 600", label="x corners", unit="px",
-                           help="each channel's left edge on the chip, comma-separated")
-    y_corners: str = param("0, 0, 0, 0", label="y corners", unit="px",
-                           help="each channel's top edge on the chip")
-    width: int = param(200, label="width", unit="px", min=8,
-                       help="one channel's width")
-    height: int = param(200, label="height", unit="px", min=8, beside=True,
-                        help="one channel's height")
-    mirrored: str = param("", label="mirrored in x",
-                          help="the channels mirrored left-right, by number from 1, "
-                               "comma-separated; empty: none")
 
 
 @dataclass
@@ -106,10 +83,6 @@ class FourPiFitSettings(_Finishing, _Writing, _Reading):
     channels: FourPiChannelsSettings = param(default_factory=FourPiChannelsSettings,
                                              label="channels", collapsed=True)
     model: FourPiModelSettings = field(default_factory=FourPiModelSettings)
-
-
-def _numbers(text: str) -> list:
-    return [int(round(float(w))) for w in str(text).replace(";", ",").split(",") if w.strip()]
 
 
 _REGISTERED = {}       # (bead paths, layout) -> Registration: beads are read once a session
@@ -169,35 +142,13 @@ def layout_of(settings: FourPiFitSettings, base=None, calibration=None, camera=N
     last three on the chip, put on the camera ROI's frames.  The maps: the
     model's, the beads', a registration file's, or none.
     """
-    from ..channels import YALE_4PI, from_corners, load_registration
+    from ..channels import fourpi_layout, load_registration
     part = settings.channels
     registration = settings.model.registration
     own = getattr(base, "layout", None)
     roi = camera.roi_offset if camera is not None else (0, 0)
-    choice = part.layout
-    if choice == "auto":
-        choice = "file" if own is not None else "microscope"
-    if choice == "file":
-        if own is None:
-            raise ValueError("this file does not lay out its channels itself (only the "
-                             "quadrant .mat files do): use the microscope's, or type them")
-        layout = own
-    elif choice == "microscope":
-        chip = microscope_layout(resolution)
-        if chip is None:
-            raise ValueError("the microscope database gives no channel rectangles for this "
-                             "file's microscope and camera: add them to its entry (a region "
-                             "per channel), or type the corners")
-        layout = chip.on_camera(roi)
-    elif choice == "yale":
-        layout = YALE_4PI.on_camera(roi)
-    else:
-        x, y = _numbers(part.x_corners), _numbers(part.y_corners)
-        if len(x) != len(y) or not 1 <= len(x) <= 4:
-            raise ValueError("give one x and one y corner per channel, one to four of them")
-        mirrored = set(_numbers(part.mirrored))
-        layout = from_corners(x, y, part.width, part.height,
-                              flip_x=[c + 1 in mirrored for c in range(len(x))]).on_camera(roi)
+    entry = microscope_layout(resolution) if part.choice(own) == "microscope" else None
+    layout = fourpi_layout(part, own, roi, entry)
     maps = None
     if registration.source == "beads":
         maps = registration_from_beads(registration.beads, layout)
@@ -342,13 +293,10 @@ class FourPiFit(_FitPlugin):
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
         part, registration = settings.channels, settings.model.registration
-        typed = part.layout == "typed"
         state.shown.update({"model.registration.beads": registration.source == "beads",
                             "model.registration.path": registration.source == "file",
-                            **{f"channels.{n}": typed
-                               for n in ("x_corners", "y_corners", "width", "height",
-                                         "mirrored")}})
-        state.titles["channels"] = "channels: " + dict(LAYOUTS).get(part.layout, part.layout)
+                            **{f"channels.{n}": flag for n, flag in part.shown().items()}})
+        state.titles["channels"] = part.title()
         state.titles["model.registration"] = "registration: " + dict(REGISTRATIONS).get(
             registration.source, registration.source)
         state.active.update({"model.drift_blocks": settings.model.channel_drift,

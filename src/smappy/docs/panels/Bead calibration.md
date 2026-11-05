@@ -68,8 +68,7 @@ own as `smappy-calibrate`.
 import warnings
 from smappy.calibrate.core import (CalibrationSettings, build_calibration, collect_beads,
                                    find_stack_beads, FOCAL_PLANES)
-from dataclasses import replace
-from smappy.calibrate.dual import DualColorSettings, bead_registration, calibrate_dual
+from smappy.calibrate.dual import ArrangementSettings, DualColorSettings, calibrate_dual
 from smappy.calibrate.input import BeadStack
 from smappy.calibrate.validation import fit_bead_diagnostics
 from smappy.simulate import bead_stacks, dual_bead_stacks
@@ -86,8 +85,7 @@ dstacks, dz_objective = dual_bead_stacks(1, seed=0, dz_nm=70.0, z_range_nm=(-700
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")        # no camera ROI in a simulation: ROI-local
     dual = calibrate_dual([BeadStack(dstacks[0].astype(np.float32), dz_objective)],
-                          DualColorSettings(registration=replace(bead_registration(),
-                                                                 layout="up-down"),
+                          DualColorSettings(channels=ArrangementSettings(layout="up-down"),
                                             dz_nm=70.0, roi_size=17, smooth_z_nm=40.0))
 ```
 
@@ -543,14 +541,11 @@ centred on the median; auto disables the check.
 The camera value at which a bead counts as saturated; auto takes the file's
 integer maximum (65535 for 16-bit).
 
-### registration
-The split between the halves and how the beads are paired: the same
-settings as a movie registration's
-([Calibrate transform](plugin:Analysis/Register/Calibrate transform)), with a
-bead slide's defaults -- tens of bright pairs rather than thousands of
-localizations, so fewer pairs are enough and the screen is tighter.  The
-settings a bead calibration does not use (the second matching round, the
-polynomial) are not shown.
+### channels
+Where the two channels lie on the chip, in the same words as the two-colour
+fitters' *channels* part: the microscope's entry, or chosen by hand for a
+microscope without one.  It is a fact about the microscope, kept apart from
+how the beads are paired (*registration*).
 
 ### layout
 How the camera chip is split: *right-left* or *up-down*, and whether the
@@ -561,16 +556,26 @@ entry, look at a bead frame: if the pattern of beads in one half is the
 other's mirror image, choose a *mirrored* layout.
 
 ### main channel
-Which half is the reference that positions are reported in.  It must match
-the layout: *left*/*right* for right-left, *upper*/*lower* for up-down;
-*microscope* is the entry's main arm, else the left or the upper half.
+Which half is the reference that positions are reported in, for a layout
+chosen by hand.  It must match the layout: *left*/*right* for right-left,
+*upper*/*lower* for up-down.  On the microscope's layout it is the entry's
+main arm.
 
 ### split position
-The first pixel of the second half, on the camera chip (the bead image's
-camera ROI corner added), as the two-colour fitters read it; empty is the
-microscope's, else the middle of the first bead image.  Each acquisition is cut where that chip
-position falls in it, so acquisitions taken with different ROIs share one
-seam.
+For a layout chosen by hand: the first pixel of the second half, on the
+camera chip (the bead image's camera ROI corner added), as the two-colour
+fitters read it; empty is the middle of the first bead image.  Each
+acquisition is cut where that chip position falls in it, so acquisitions
+taken with different ROIs share one seam.
+
+### registration
+How the beads are paired and their map fitted: the same settings as a movie
+registration's
+([Calibrate transform](plugin:Analysis/Register/Calibrate transform)), with a
+bead slide's defaults -- tens of bright pairs rather than thousands of
+localizations, so fewer pairs are enough and the screen is tighter.  The
+settings a bead calibration does not use (the second matching round, the
+polynomial) are not shown.  Where the channels lie is *channels*, not this.
 
 ### coarse matching
 How far a bead may lie from where the most common offset between the halves

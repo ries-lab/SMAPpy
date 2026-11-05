@@ -12,23 +12,26 @@ frame in one global fit, pages under Help > Plugin documentation.
 ## Use
 
 Open the *Bead calibration* section of the Localize tab,
-or run `smappy-calibrate`. Set **mode → Dual colour**. The *registration*
-section holds the split: the layout, the main channel and optionally a split
-position. Supported layouts are right-left and up-down, each with or without
-reflection of the secondary channel along the split axis; the default,
-*detect*, finds which from the beads (below). The main channel selector names
-the actual half, left/right or upper/lower; its default is the left or upper
-half.
+or run `smappy-calibrate`. Set **mode → Dual colour**. The *channels*
+section says where the two channels lie (`ArrangementSettings`, the same
+part the two-colour fitters, *Calibrate transform* and the dual molecule
+stacks ask it in): on *the microscope's*, the microscope's entry -- its arms'
+sides or regions, never detected from the beads -- and for a microscope
+without one, the layout, the main channel and optionally a split position
+chosen by hand. Supported layouts are right-left and up-down, each with or
+without reflection of the secondary channel along the split axis. The main
+channel names the actual half, left/right or upper/lower.
 
-The section is `RegisterSettings`, the same settings the movie registration
-(`smappy.calibrate.transform`, *Calibrate transform* and the 2D two-colour
-fit's *calibrate from this movie*) reads -- one geometry, with each its own
-defaults. A bead calibration has tens of bright pairs, a movie thousands of
-localizations of every brightness, so `bead_registration()` asks for 8 pairs
-rather than 20, a 2 px rather than 1 px RANSAC radius, a 0.15 px rather than
-0.5 px dx/dy screen, and pairs within 12 px rather than 20. The settings a bead
-calibration does not read -- the second matching round, its adaptation, the
-polynomial model and the cap on pairs -- are left off the window's form.
+The *registration* section is `RegisterSettings`, how the movie registration
+(`smappy.calibrate.transform`, *Calibrate transform* and the two-colour
+fitters' *registration > from this movie*) pairs and fits -- one method, with
+each its own defaults. A bead calibration has tens of bright pairs, a movie
+thousands of localizations of every brightness, so `bead_registration()` asks
+for 8 pairs rather than 20, a 2 px rather than 1 px RANSAC radius, a 0.15 px
+rather than 0.5 px dx/dy screen, and pairs within 12 px rather than 20. The
+settings a bead calibration does not read -- the second matching round, its
+adaptation, the polynomial model and the cap on pairs -- are left off the
+window's form.
 
 The split is the first zero-based pixel index in the second half, on the
 camera chip -- the coordinates the fitter and a movie registration read it in.

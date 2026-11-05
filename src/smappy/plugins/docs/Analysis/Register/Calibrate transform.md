@@ -33,8 +33,8 @@ it does need is how the chip is split -- left and right or upper and lower,
 whether one half is mirrored, which half is the main one.  That is a fact
 about the microscope, and it comes from the microscope's entry in the
 [Microscope manager](plugin:Panels/Microscope manager) for the microscope
-the table was fitted on; for a microscope without one, choose it (*layout*,
-*main channel*), in the fit and here.  It is never guessed.  It also needs a
+the table was fitted on; for a microscope without one, choose it (*channels*:
+*layout*, *main channel*), in the fit and here.  It is never guessed.  It also needs a
 table with `frame` and `camera_channel` columns and positions that can be
 put back into camera pixels, and enough molecules seen in both channels: a
 few hundred pairs at the least, from frames spread over the movie.
@@ -50,7 +50,7 @@ on.
 import warnings
 from smappy.simulate import simulate, dual_transformation
 from smappy.calibrate.dual import map_points
-from smappy.calibrate.transform import RegisterSettings, register_channels
+from smappy.calibrate.transform import ArrangementSettings, register_channels
 from smappy.channels import split_halves
 from smappy.plugins.registration import _draw_vote, _draw_residuals, _draw_coverage
 # a two-channel fit of a split chip, 100 x 100 pixels a half: every molecule
@@ -72,10 +72,10 @@ frames = np.r_[frame[seen[0]], frame[seen[1]]]
 channel = np.r_[np.zeros(seen[0].sum(), int), np.ones(seen[1].sum(), int)]   # camera_channel
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    told = RegisterSettings(layout="up-down", main_channel="upper")   # the split, as an entry says
+    told = ArrangementSettings(layout="up-down", main_channel="upper")   # the split, as an entry says
     layout = split_halves({"layout": "up-down", "main_channel": "upper"}, (0, 0, 100, 200))
     result = register_channels(points[:, 0], points[:, 1], frames, channel, layout, (200, 100),
-                               settings=told, precision=sigma_all)
+                               arrangement=told, precision=sigma_all)
 ```
 
 **1. Positions in camera pixels.**  A transformation is a property of the
@@ -277,26 +277,26 @@ which means the map is an extrapolation over the rest.
 
 ## Parameters
 
-### registration.layout
+### channels.layout
 Leave it on *microscope* for a microscope in the database whose entry gives
 its arms' sides; choose it for any other.  A wrong layout finds no clear
 peak, and the run says so.
 
-### registration.main_channel
+### channels.main_channel
 The half the other is mapped onto.  For two far-red dyes imaged
 ratiometrically it is the transmitted arm, the brighter one; the
 microscope's entry names it.
+
+### channels.split_position
+Read only for a table that does not record its channels: set it as the fit
+had it.  A two-channel fit records its rectangles, and they win; so do the
+microscope's arms' regions, where its entry gives them and the layout is the
+microscope's.
 
 ### registration.model
 Stay with projective unless the residual grows towards the edges of the
 field (the warning, or the residual panel) and the pairs cover the whole
 chip.
-
-### registration.split_position
-Read only for a table that does not record its channels: set it as the fit
-had it.  A two-channel fit records its rectangles, and they win; so do the
-microscope's arms' regions, where its entry gives them and the layout is the
-microscope's.
 
 ### registration.coarse_tolerance_px
 The first thing to raise if no pairs are found and the halves are strongly

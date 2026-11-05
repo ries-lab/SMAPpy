@@ -32,7 +32,7 @@ from typing import Optional
 
 import numpy as np
 
-from ..calibrate.transform import RegisterSettings, register_channels
+from ..calibrate.transform import ArrangementSettings, RegisterSettings, register_channels
 from ..locs import frames_apart, in_pixels
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
@@ -41,8 +41,10 @@ TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
 
 @dataclass
 class RegisterLocsSettings:
-    """The registration, plus where to put it."""
-    registration: RegisterSettings = param(default_factory=RegisterSettings)
+    """Where the channels lie, how the registration is measured, and where to put it."""
+    # where the channels lie only where the table does not record it: a two-channel fit does
+    channels: ArrangementSettings = param(default_factory=ArrangementSettings, label="channels")
+    registration: RegisterSettings = param(default_factory=RegisterSettings, collapsed=True)
     save: bool = param(True, label="save transformation",
                        help="write it to a file a two-colour fit can read")
     path: str = param("", label="file", kind="save_file",
@@ -150,12 +152,13 @@ class CalibrateChannelTransform(Plugin):
                              "channels > read: two channels, so that each localization keeps "
                              "the channel it was found in (camera_channel)")
         # the channels the fit read, on the chip; the arrangement's words for the record
-        registration, layout = table_channels(locs, settings.registration, shape, roi)
+        told, layout = table_channels(locs, settings.channels, shape, roi)
         # a pair is two channels of one frame of one file: files opened
         # together share frame numbers, and beads from several files pool
         return register_channels(x, y, frames_apart(locs), np.asarray(locs["camera_channel"]),
-                                 layout, shape, roi, settings=registration,
-                                 progress=ctx.report, precision=precision), locs
+                                 layout, shape, roi, settings=settings.registration,
+                                 progress=ctx.report, precision=precision,
+                                 arrangement=told), locs
 
     def run(self, ctx: Context, settings) -> Result:
         result, locs = self._register(ctx, settings)

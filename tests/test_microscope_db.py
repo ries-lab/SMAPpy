@@ -609,12 +609,12 @@ def test_the_arms_regions_are_where_the_split_lies_whatever_the_frame_and_say_th
 
 
 def test_the_fitters_cut_the_channels_at_the_arms_regions_and_read_a_typed_split_only_without():
-    from smappy.calibrate.dual import RegisterSettings, chip_channels
+    from smappy.calibrate.dual import ArrangementSettings, chip_channels
     from smappy.plugins.fit import ChannelsSettings
     m2 = microscope_db.database(reload=True).get("M2")
     m2.channels[0].region, m2.channels[1].region = [240, 0, 272, 512], [0, 0, 236, 512]
     for typed in (None, 300):                                 # the entry's regions win
-        told, chip = chip_channels(RegisterSettings(split_position=typed), (0, 0, 512, 512), m2)
+        told, chip = chip_channels(ArrangementSettings(split_position=typed), (0, 0, 512, 512), m2)
         assert chip.regions == [(240, 0, 272, 512), (0, 0, 236, 512)]
         assert chip.flips == [(False, False), (True, False)] and told.main_channel == "right"
     # a layout chosen by hand is not the entry's: its split is the typed one, else the middle

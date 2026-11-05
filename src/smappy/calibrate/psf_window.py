@@ -391,7 +391,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.sections["in situ"].setVisible(insitu)
         molecules = reads.get("molecules", False)
         self.sections["molecules"].setVisible(molecules)
-        self.molecule_form.set_shown({"registration": self.is_dual})
+        self.molecule_form.set_shown({"registration": self.is_dual, "channels": self.is_dual})
         self.sections["elliptical"].setVisible(reads.get("elliptical", False))
         fourpi = reads.get("4Pi", False)
         self.sections["4Pi"].setVisible(fourpi)
@@ -441,6 +441,7 @@ class PSFCalibrationWindow(QMainWindow):
         except Exception:                            # no stacks, or values that do not read: index-matched
             ring = False
         self.fourpi_form.set_shown(fourpi_shown(settings, ring))
+        self.fourpi_form.set_titles({"channels": settings.channels.title()})
 
     def _forget(self, message: str) -> None:
         """A change of method or mode makes the result another calibration's: dropped, settings kept."""
@@ -529,15 +530,38 @@ class PSFCalibrationWindow(QMainWindow):
         elif name in ("n_immersion", "n_coverslip", "NA", "n_medium"):   # the coverslip's rows, the SAF damping's
             self._show_optics()
 
+    def _sample_form(self) -> SettingsForm:
+        """The form of the sample being calibrated: the one whose *channels* part a dual calibration reads."""
+        return self.molecule_form if getattr(self.method, "sections", {}).get("molecules") else self.detection_form
+
     def _main_half(self):
-        """The dual calibration's main half as set, or None on *auto*."""
+        """The dual calibration's main half as chosen by hand, or None on the microscope's (`OpticsSettings`
+        then reads the entry's)."""
         if not self.is_dual:
             return None
         try:
-            main = self.detection_form.value().registration.main_channel
+            channels = self._sample_form().value().channels
         except (ValueError, AttributeError):
             return None
-        return None if main == "auto" else main
+        return None if channels.layout == "microscope" else channels.main_channel
+
+    def _show_channels(self) -> None:
+        """A dual sample's *channels* part as the fitters' is: one line on the microscope's
+        (`dual.arrangement_line`), the main channel and the split only for a layout chosen by hand."""
+        from .dual import arrangement_line, arrangement_shown
+        if not self.is_dual:
+            return
+        for form in (self.detection_form, self.molecule_form):
+            try:
+                channels = form.value().channels
+            except (ValueError, AttributeError):
+                continue
+            form.set_shown({f"channels.{k}": v for k, v in arrangement_shown(channels).items()})
+            try:
+                line = arrangement_line(channels, getattr(self.optics_camera, "microscope", None))
+            except Exception:
+                line = None
+            form.set_titles({"channels": f"channels: {line or channels.layout}"})
 
     def _stacks_camera(self, require: bool = False):
         """The first stack's camera, resolved with the microscope and the camera chosen here and the
@@ -601,6 +625,7 @@ class PSFCalibrationWindow(QMainWindow):
                                     "emgain": bool(self.optics_camera is not None
                                                    and self.optics_camera.is_em)})
         self._show_model()
+        self._show_channels()
 
     def _show_model(self) -> None:
         """The model's fields the method reads, and only those (`pupil.model_shown`): in situ without the

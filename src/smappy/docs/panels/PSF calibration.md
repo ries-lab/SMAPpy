@@ -560,11 +560,10 @@ percentiles of the molecules' defocus).
 curve and detection, and the molecules are paired through the map between
 the channels: a dual bead calibration or a registration file
 (*registration*), or, left empty, measured from the molecules themselves, as
-a movie's registration is -- the chip cut into its channels as the
-microscope's entry says (the arms' sides or regions, in the
-[Microscope manager](plugin:Panels/Microscope manager)), each spot in the
-channel it lies in.
-A microscope without an entry that says it needs a registration file.  A
+a movie's registration is -- the chip cut into its channels as *channels*
+says (the microscope's entry, the arms' sides or regions in the
+[Microscope manager](plugin:Panels/Microscope manager), or a layout chosen
+by hand), each spot in the channel it lies in.  A
 molecule seen in one channel only keeps the region the map puts in the
 other.  One focus per sweep is shared by both channels; each
 channel learns its own pupil, and the map is refined.  It saves as a dual
@@ -938,9 +937,17 @@ The elliptical Gaussian method's own settings (*Elliptical Gaussian*).
 The 4Pi mode's own settings (*4Pi*).
 
 ### channels
-*the microscope's* reads the rectangles from the microscope database entry
-of the stacks' microscope (each channel's `region` and `mirror`).  The
-shipped *4Pi-SMS example* is one.
+Where the channels lie on the chip, as the fitters' *channels* part says it
+-- in dual colour for beads and molecules alike, and in the *4Pi* mode,
+whose part is Spline 4Pi's own.  On *the microscope's* it is one line, the
+microscope's entry as the
+[Microscope manager](plugin:Panels/Microscope manager) keeps it: the arms'
+sides or regions for dual colour, each channel's `region` and `mirror` for
+4Pi (the shipped *4Pi-SMS example* is one).  Choose the layout by hand for a
+microscope without an entry; only then are the *main channel* and the
+*split position* shown, and a different main channel for one calibration is
+chosen there too.  On *auto*, 4Pi takes the layout quadrant files give
+themselves, else the microscope's.
 
 ### x corners
 On the chip, as SMAP's 4Pi settings give them (`x4pi`).
@@ -1120,8 +1127,11 @@ With a typed *z step*: how many frames one sweep has.
 ### registration
 Dual colour: the file holding the map between the channels, a dual bead
 calibration or a registration from a movie.  Empty, it is measured from the
-molecules' own detections, on the channels the microscope's entry cuts the
-chip into; the learning refines it either way.
+molecules' own detections, on the channels *channels* cuts the chip into;
+the learning refines it either way.  Dual-colour beads have a *registration*
+too, folded: how they are paired and their map fitted, always from the beads
+themselves (the [Bead calibration](plugin:Panels/Bead calibration)'s
+*registration*).
 
 ### z proxy
 *astigmatism* for an astigmatic PSF; *size* for one without astigmatism,

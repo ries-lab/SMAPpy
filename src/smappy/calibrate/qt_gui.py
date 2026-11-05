@@ -56,7 +56,7 @@ class _Worker(QObject):
 def _bead_specs(cls):
     """The form of a calibration's settings, as a bead calibration reads them.
 
-    Dual colour's *registration* is the movie registration's settings
+    Dual colour's *registration* is how a movie registration is measured
     (`RegisterSettings`); the fields a bead calibration does not read are
     left off, and those it reads differently say so in their tooltips.
     """
@@ -545,7 +545,7 @@ class CalibrationWindow(QMainWindow):
             from .dual import geometry_layout
             chip = geometry_layout(geometry)
             along = 0 if 'right-left' in geometry['layout'] else 1
-            hints['registration.split_position'] = max(r[along] for r in chip.regions)
+            hints['channels.split_position'] = max(r[along] for r in chip.regions)
         self.form.set_hints({k: v for k, v in hints.items() if v is not None})
 
     # -------------------------------------------------------- stack viewer
