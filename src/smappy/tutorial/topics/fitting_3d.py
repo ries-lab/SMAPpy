@@ -180,9 +180,11 @@ def make(d) -> None:
            "one calibration, so more beads make a smoother model.",
            spot=[window.file_list], point=window.file_list,
            zoom=d.around(window.file_list, 760))
-    d.shot("The method: the bead average aligns the beads and averages them. "
-           "The pupil model learns the optics instead.",
-           spot=[window.method_box], point=window.method_box,
+    window.method_box.setCurrentText("bead average")
+    d.settle()
+    d.shot("The method: the pupil model, the default, learns the optics. Here "
+           "the bead average, which is quicker: it aligns the beads and averages them.",
+           spot=[window.method_box], point=window.method_box, click=True,
            zoom=d.around(window.method_box, 700))
     form = window.detection_form
     dz = form.fields["dz_nm"]

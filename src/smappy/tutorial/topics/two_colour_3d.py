@@ -85,6 +85,8 @@ def make(d) -> None:
            click=True, zoom=d.around(panel, 700))
     panel.run_button.click()
     window = control.psf_calibration_window
+    # the bead average, which this chapter narrates and which is quick; the pupil model is the default
+    window.method_box.setCurrentText("bead average")
     window.mode_box.setCurrentText("Dual colour")
     assert window.is_dual, "the calibration window is not in dual-colour mode"
     window.resize(1540, 860)

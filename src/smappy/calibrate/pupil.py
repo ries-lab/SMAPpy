@@ -151,6 +151,11 @@ class BeadSettings:
     heldout: float = param(0.0, label="held out", min=0.0, max=0.5, advanced=True,
                            help="the fraction of beads kept out of learning and localised for the "
                                 "held-out report")
+    # uipsf's M7: at most 50 nm apart loses phase precision only as the CRLB says, for a fraction of the time
+    max_dz_nm: float = param(50.0, label="largest z step", unit="nm", min=1.0, advanced=True,
+                             help="learn from every n-th slice, n the most whose step stays within this")
+    z_range_nm: Optional[float] = param(None, label="learn z range", unit="nm", min=100.0, advanced=True,
+                                        help="± about focus learnt from; auto: the whole stack")
 
     def __post_init__(self):
         if self.drift not in dict(DRIFTS):
@@ -187,12 +192,12 @@ def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, lay
     if method == "molecules":
         return {"psf.magnitude": True, "psf.saf_damping": False, "psf.learn_na": magnitude == "minimal",
                 "psf.learn_n_med": True, "bead_diameter_nm": False, "drift": False, "field_dependence": False,
-                "fit_tilt": False, "heldout": False}
+                "fit_tilt": False, "heldout": False, "max_dz_nm": False, "z_range_nm": False}
     beads = method != "insitu"
     return {"psf.magnitude": beads, "psf.saf_damping": beads and magnitude == "minimal" and ring,
             "psf.learn_na": magnitude == "minimal", "psf.learn_n_med": True,
             "bead_diameter_nm": beads, "drift": beads, "field_dependence": beads and not dual,
-            "fit_tilt": not beads or layered, "heldout": True}
+            "fit_tilt": not beads or layered, "heldout": True, "max_dz_nm": beads, "z_range_nm": beads}
 
 
 @dataclass
@@ -893,8 +898,8 @@ def learns_tilt(model: BeadSettings, optics) -> BeadSettings:
 
 def _learnt_model(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings):
     """The model a run on ``rois`` learns (`calibrate_beads`' `bead_model`), for the estimates before it."""
-    from uipsf.workflows.calibrate import bead_model
-    batch = rois.batch
+    from uipsf.workflows.calibrate import bead_model, learning_batch
+    batch = learning_batch(rois.batch, model)          # its z reach sizes the pupil grid, as in a run
     channels = batch.data.shape[1]
     found = optics.optics(rois.camera, channels, main_half(rois))
     return bead_model(found, learns_tilt(model, found), tuple(batch.data.shape[-2:]),
@@ -911,9 +916,9 @@ def estimate_memory(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings)
     from uipsf.device import on_model_device
     from uipsf.noise import ShiftedPoisson
     from uipsf.solve import memory_plan
-    from uipsf.workflows.beads import MAX_DZ_NM
+    from uipsf.workflows.calibrate import learning_batch
     learnt = _learnt_model(rois, optics, model)
-    return memory_plan(learnt, ShiftedPoisson(), on_model_device(rois.batch, learnt).thinned(MAX_DZ_NM))
+    return memory_plan(learnt, ShiftedPoisson(), learning_batch(on_model_device(rois.batch, learnt), model))
 
 
 def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings) -> float:
@@ -927,10 +932,10 @@ def estimate_seconds(rois: BeadROIs, optics: OpticsSettings, model: BeadSettings
     import torch
     from uipsf.device import on_model_device
     from uipsf.params import Params
-    from uipsf.workflows.beads import MAX_DZ_NM
+    from uipsf.workflows.calibrate import learning_batch
     batch = rois.batch
     learnt = _learnt_model(rois, optics, model)
-    one = on_model_device(batch.subset(torch.arange(1)), learnt).thinned(MAX_DZ_NM)
+    one = learning_batch(on_model_device(batch.subset(torch.arange(1)), learnt), model)
     start = Params(learnt.specs(one), 1, dtype=one.data.dtype, device=one.data.device)
     values = start.physical()
     times = []
@@ -1018,9 +1023,9 @@ def covered_z_nm(cal, batch) -> tuple[float, float]:
     the range all of them cover, as the bead average crops its average (`core.build_calibration`)."""
     import torch
     from uipsf.device import on_model_device
-    from uipsf.workflows.beads import MAX_DZ_NM
+    from uipsf.workflows.calibrate import learning_batch
     used = list(cal.beads.used)
-    sub = on_model_device(batch, cal.model).thinned(MAX_DZ_NM).subset(torch.tensor(used))
+    sub = learning_batch(on_model_device(batch, cal.model), cal.options).subset(torch.tensor(used))
     with torch.no_grad():
         p = {k: v.to(sub.data.device) for k, v in cal.result.params.physical().items()}
         z = cal.model.geometry(p, sub)[..., 2].cpu().double().numpy()            # [E, K]

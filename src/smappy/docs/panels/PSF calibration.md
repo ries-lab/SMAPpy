@@ -228,7 +228,8 @@ rather than reading without the tilt.
 
 The likelihood is Poisson with the camera's read noise added as a shifted
 Poisson, SMAPpy's own fitters' likelihood; with EM gain, the excess noise
-factor 2.  Slices closer than 50 nm are thinned for learning.  The first
+factor 2.  Slices closer than *largest z step* (50 nm) are thinned for learning,
+and with *learn z range* only the slices that near the focus are kept.  The first
 stage frees the modes up to radial order 4 and stops early; the second frees
 all of them up to *Zernike order* (auto: 6).
 
@@ -930,6 +931,23 @@ that still cost nothing measurable.  On M5's fields of about 25 µm the
 astigmatism changed by 0.09 rad from the centre to the edge, and a spline
 for the whole field put spots there 4–13 nm off in z
 ([the study](https://github.com/ries-lab/SMAPpy/blob/main/docs/uipsf/field-dependence.md)).
+
+### largest z step
+Learning takes every n-th slice, n the largest whole number whose step stays
+within this: stacks at 20 nm learn from every 2nd slice at 50 nm (40 nm
+apart), every 3rd at 60 nm.  The slice at the stack's middle, its focus, is
+always kept.  On dim beads at 10 nm, learning at 50 nm lost phase precision
+only as the fewer photons say (0.0047 rad against 0.0077), in a sixth of the
+time; the memory a run takes falls with the slices too.  Lower it for stacks
+whose PSF changes fast in z (an engineered PSF); the spline is still sampled
+at *spline z step*.
+
+### learn z range
+The whole stack on *auto*.  A value learns from the slices within ± that of
+the focus only: ±1 µm of a ±2 µm stack, where the far slices are mostly
+background.  The model is drawn over the range it learnt; *spline z range*
+on *auto* then stays within it.  A narrower range also needs a smaller pupil
+grid, so the run takes less memory and time.
 
 ### beads
 How beads are found, and for the bead average how they are aligned and

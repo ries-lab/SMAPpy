@@ -94,6 +94,28 @@ class Batch:
             self.z_nm.device)), s=along_k(self.s), mask=along_k(self.mask),
             frame=None if self.frame is None else self.frame.index_select(-1, idx.to(self.frame.device)))
 
+    def within(self, z_range_nm: float | None) -> Batch:
+        """The slices whose nominal z is within ± ``z_range_nm`` of the focus for every emitter (None: every
+        slice): a ±2 µm stack learnt over ±1 µm, where the far slices hold little but background."""
+        if not z_range_nm:
+            return self
+        z = self.z_nm.abs() if self.z_nm.dim() == 1 else self.z_nm.abs().amax(0)
+        idx = (z <= float(z_range_nm) + 1e-3).nonzero()[:, 0]
+        K = self.data.shape[2]
+        if len(idx) == K:
+            return self
+        if len(idx) < 2:
+            raise ValueError(f"fewer than two slices within ±{z_range_nm:g} nm of the focus")
+        idx = idx.to(self.data.device)
+
+        def along_k(t):
+            if isinstance(t, torch.Tensor) and t.dim() == self.data.dim() and t.shape[2] == K:
+                return t.index_select(2, idx)
+            return t
+        return replace(self, data=self.data.index_select(2, idx), z_nm=self.z_nm.index_select(-1, idx.to(
+            self.z_nm.device)), s=along_k(self.s), mask=along_k(self.mask),
+            frame=None if self.frame is None else self.frame.index_select(-1, idx.to(self.frame.device)))
+
     def to(self, device=None, dtype=None) -> Batch:
         def move(t, keep_dtype=False):
             if not isinstance(t, torch.Tensor):

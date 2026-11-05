@@ -151,7 +151,9 @@ def test_two_colour_pores_as_a_split_camera_are_fitted_by_the_two_colour_fitter(
     fit.camera = CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1)
     updates = fitter.react("source.path", fit)
     assert updates["model.registration.path"] == str(tmp_path / "pores_2ct.h5")
+    assert updates["model.registration.calibrate"] is False           # taken, not measured
     fit.model.registration.path = updates["model.registration.path"]
+    fit.model.registration.calibrate = updates["model.registration.calibrate"]
     locs = fitter.run(Context(), fit).locs
     got, want = [], []
     for f in np.unique(locs["frame"]):

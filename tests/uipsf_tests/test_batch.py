@@ -15,3 +15,36 @@ def test_thinning_keeps_the_largest_multiple_of_the_step_not_above_the_maximum_a
         assert torch.equal(t.data[0, 0, :, 0, 0], -t.z_nm / 20 + 50)            # data and z stay paired
         assert t.mask.shape[2] == t.data.shape[2]
     assert b.thinned(None) is b
+
+
+def _stack_2um():
+    import torch
+
+    from uipsf import Batch
+    z = Batch.z_from_objective(torch.arange(-2000.0, 2001.0, 20.0))              # 201 slices, 20 nm, ±2 µm
+    data = torch.arange(201.0)[None, None, :, None, None].expand(2, 1, 201, 3, 3)
+    return Batch(data=data, z_nm=z, mask=torch.ones(2, 1, 201, 3, 3, dtype=torch.bool))
+
+
+def test_a_z_range_keeps_the_slices_within_it_of_the_focus():
+    b = _stack_2um()
+    t = b.within(1000.0)
+    assert t.z_nm.abs().max() == 1000.0 and t.data.shape[2] == 101 == t.mask.shape[2]
+    assert t.z_nm.tolist() == b.z_nm[50:151].tolist()
+    assert b.within(None) is b and b.within(5000.0) is b
+
+
+def test_learning_takes_every_slice_within_the_largest_z_step_and_the_z_range():
+    """The bead calibration's *largest z step* and *learn z range*: 20 nm stacks learnt at 50 nm keep every
+    2nd slice, at 60 nm every 3rd; ±1 µm of a ±2 µm stack keeps that much, the focus always among them."""
+    from smappy.calibrate.pupil import BeadSettings
+
+    from uipsf.workflows.calibrate import learning_batch
+    b = _stack_2um()
+    for max_dz, step, z_range, reach in ((50.0, 40.0, None, 2000.0), (60.0, 60.0, None, 1980.0),
+                                         (50.0, 40.0, 1000.0, 1000.0), (20.0, 20.0, 600.0, 600.0)):
+        t = learning_batch(b, BeadSettings(max_dz_nm=max_dz, z_range_nm=z_range))
+        z = t.z_nm.tolist()
+        assert all(abs(abs(b2 - a) - step) < 1e-4 for a, b2 in zip(z, z[1:], strict=False)), max_dz
+        assert 0.0 in z and max(abs(v) for v in z) == reach
+    assert learning_batch(b, None).z_step_nm == 40.0         # settings without them: 50 nm, the whole stack

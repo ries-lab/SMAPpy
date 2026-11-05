@@ -215,6 +215,17 @@ def pixel_converted(sigma, old, new):
     return torch.sqrt(torch.clamp(total - px(new) ** 2, min=1.0))
 
 
+def learning_batch(batch, settings=None):
+    """The slices a bead calibration learns from: every n-th, n·Δz at most the settings' *largest z step*
+    (`Batch.thinned`, the middle slice kept), then those within their *learn z range* of the focus
+    (`Batch.within`).  Settings without these (a model file of before November 2026, or None) learnt
+    every 50 nm over the whole stack.  Whatever reads a calibration's beads back takes the same slices,
+    from ``cal.options``: per-slice parameters (a drift per slice) belong to them."""
+    from .beads import MAX_DZ_NM
+    max_dz = getattr(settings, "max_dz_nm", MAX_DZ_NM)
+    return batch.thinned(max_dz).within(getattr(settings, "z_range_nm", None))
+
+
 def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, transforms=None,
                     geometry: dict | None = None, start=None, noise=None, decisions: dict | None = None,
                     warm_start: Calibration | None = None, progress=None, cancel=None, device=None,
@@ -229,6 +240,7 @@ def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, tran
     ``warm_start`` is the window's *Recalculate*: the same beads, the previous fit
     of this calibration.  ``decisions``, ``progress`` and ``cancel`` as in `learn_beads`."""
     settings = settings if settings is not None else BeadSettings()
+    batch = learning_batch(batch, settings)
     if warm_start is not None:
         model = warm_start.model
     else:
@@ -249,7 +261,7 @@ def calibrate_beads(batch, optics, settings: BeadSettings | None = None, *, tran
             values.pop(prefix(c) + "transform", None)
     rejection = RejectionSettings(k=settings.rejection_k)
     cal = learn_beads(model, batch, noise, decisions=decisions, warm_start=warm_start, rejection=rejection,
-                      heldout=settings.heldout, progress=progress, cancel=cancel, geometry=geometry,
+                      heldout=settings.heldout, progress=progress, cancel=cancel, geometry=geometry, max_dz_nm=None,
                       start=values, start_stage1=values is not None)
     cal.options = settings
     if warm_start is None and model.n_channels > 1:

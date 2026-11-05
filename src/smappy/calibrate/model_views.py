@@ -26,7 +26,7 @@ alignment puts every slice where its emitter was -- z from the fitted
 geometry (stage drift and z scale included), x and y from each channel's own
 position (`ForwardModel.positions`, the transform included) -- by linear
 interpolation onto the nominal slices, so the average is centred whatever
-the beads' offsets.  On the slices learnt from (every n-th, `Batch.thinned`).
+the beads' offsets.  On the slices learnt from (every n-th within the learnt range, `uipsf.workflows.calibrate.learning_batch`).
 """
 from __future__ import annotations
 
@@ -168,11 +168,11 @@ def pupil_views(run) -> ModelViews:
     import torch
 
     from uipsf.device import on_model_device
-    from uipsf.workflows.beads import MAX_DZ_NM
+    from uipsf.workflows.calibrate import learning_batch
     from uipsf.workflows.scoring import localise, shared_values
     cal, batch, noise = run.cal, run.rois.batch, run.rois.noise
     model = cal.model
-    batch = on_model_device(batch, model).thinned(MAX_DZ_NM)
+    batch = learning_batch(on_model_device(batch, model), cal.options)
     used = list(cal.beads.used)
     parts = [(used, cal.result.params)]
     others = [r.bead for r in cal.beads.rows if r.bead not in used]
