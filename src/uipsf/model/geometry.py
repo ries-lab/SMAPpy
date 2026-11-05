@@ -94,7 +94,7 @@ class BeadStackGeometry(_Tilted):
                ParamSpec("geometry.z_scale", (), init=1.0, prior=Gaussian(1.0, self.z_scale_prior),
                          fixed=not self.z_scale)]
         if self.drift == "linear":
-            stacks = 1 if batch.stack_id is None else int(batch.stack_id.max()) + 1
+            stacks = batch.n_stacks                 # the acquisition's, whichever beads are at hand
             out.append(ParamSpec("geometry.drift_rate", (stacks, 2), init=0.0, prior=Gaussian(0.0, DRIFT_RATE_PRIOR)))
         return out + self._tilt_specs()
 

@@ -59,3 +59,27 @@ def test_by_default_learning_keeps_1_5_um_about_the_focus_and_a_shorter_stack_wh
     short = b.within(1000.0)
     assert learning_batch(short, BeadSettings()).z_nm.abs().max() == 1000.0     # ±1 µm: whole
     assert BeadSettings.from_options({}).z_range_nm is None   # a model file of before: the whole stack
+
+
+def test_beads_of_a_few_stacks_are_fitted_with_the_drift_of_every_stack():
+    """M6's five stacks: the beads left out, all from the first two, were localised with the learnt drift of
+    five stacks and failed ("expanded size (2) must match (5)"); a subset keeps the acquisition's stacks."""
+    import torch
+
+    import uipsf
+    from uipsf.model.geometry import BeadStackGeometry
+    from uipsf.noise import Poisson
+    from uipsf.workflows.scoring import localise
+    from uipsf_tests.conftest import small_beads
+    optics = uipsf.Optics(NA=1.43, wavelength_nm=680, n_imm=1.518, n_med=1.33, pixel_size_nm=(110, 110))
+    model, truth, batch = small_beads(optics, n=6, geometry=BeadStackGeometry(drift="linear"))
+    from dataclasses import replace
+    batch = replace(batch, stack_id=torch.tensor([0, 1, 2, 3, 4, 4]))
+    few = batch.subset(torch.tensor([0, 1]))
+    assert few.n_stacks == 5 and few.subset(torch.tensor([0])).n_stacks == 5
+    spec = {s.name: s for s in model.specs(few)}["geometry.drift_rate"]
+    assert spec.shape == (5, 2)
+    shared = {"geometry.drift_rate": torch.zeros(5, 2, dtype=batch.data.dtype)}
+    shared.update({n: v for n, v in truth.physical().items() if n.startswith(("pupil.", "psf."))})
+    fit, _ = localise(model, shared, few, Poisson())
+    assert fit.params.n_emitters == 2

@@ -35,6 +35,29 @@ class Batch:
                                              # numbers are the same frame of the same stack (`PerFrameFactor`)
     start: dict | None = None                # each emitter's start (`model.start.rough_start`'s keys) when the
                                              # data's rough one will not do (`model.astig.gaussian_start`)
+    # How many stacks and frames the acquisition had, kept by `subset`: a parameter per stack or frame is sized
+    # by them, not by the emitters at hand -- the excluded beads of M6's five stacks, all in the first two, were
+    # localised with the learnt drift of five stacks against specs of two, and failed.
+    stack_count: int | None = None
+    frame_count: int | None = None
+
+    @property
+    def n_stacks(self) -> int:
+        """Stacks of the acquisition (`stack_id` numbers them); 1 without stack ids."""
+        if self.stack_id is None:
+            return 1
+        if self.stack_count is not None:
+            return self.stack_count
+        return 1 if self.stack_id.numel() == 0 else int(self.stack_id.max()) + 1
+
+    @property
+    def n_frames(self) -> int:
+        """Camera frames of the acquisition (`frame` numbers them)."""
+        if self.frame is None:
+            return 0
+        if self.frame_count is not None:
+            return self.frame_count
+        return 0 if self.frame.numel() == 0 else int(self.frame.max()) + 1
 
     @staticmethod
     def z_from_objective(objective_nm) -> torch.Tensor:
@@ -65,7 +88,9 @@ class Batch:
             for k, v in self.start.items()}
         return replace(self, data=self.data[index], z_nm=z, s=pick(self.s), mask=pick(self.mask),
                        field_xy=rows(self.field_xy), stack_id=rows(self.stack_id), roi_xy=rows(self.roi_xy),
-                       frame=rows(self.frame), start=start)
+                       frame=rows(self.frame), start=start,
+                       stack_count=None if self.stack_id is None else self.n_stacks,
+                       frame_count=None if self.frame is None else self.n_frames)
 
     def thinned(self, max_dz_nm: float | None) -> Batch:
         """Every n-th slice, n the largest whole number with n·Δz ≤ ``max_dz_nm`` (None: every slice).

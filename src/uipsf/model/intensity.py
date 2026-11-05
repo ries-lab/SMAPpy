@@ -77,7 +77,7 @@ class PerFrameFactor(Bleaching):
         if batch.frame is None:
             raise ValueError("a factor per frame needs each observation's frame (Batch.frame)")
         return super().specs(batch, start) + [
-            ParamSpec("intensity.frame_factor", (int(batch.frame.max()) + 1,), init=1.0, transform=Exp(),
+            ParamSpec("intensity.frame_factor", (batch.n_frames,), init=1.0, transform=Exp(),
                       prior=Gaussian(1.0, self.prior_sigma))]
 
     def __call__(self, p, batch) -> torch.Tensor:
