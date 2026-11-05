@@ -158,6 +158,25 @@ def test_dual_colour_pairs_the_halves_molecules_and_learns_both_channels_with_th
     assert cal.main.parameters["sample"] == "molecules on the coverslip in a z stack"
 
 
+@pytest.mark.slow
+def test_without_a_registration_dual_colour_measures_one_on_the_microscopes_split(tmp_path):
+    from dataclasses import replace
+
+    from smappy.calibrate.molecule_dual import registration_from_molecules
+    from smappy.microscope_db import Channel, Microscope
+
+    from uipsf_tests.molecule_sweeps import DUAL_SHIFT_PX, write_dual_sweeps
+    truth = write_dual_sweeps(tmp_path, OPTICS)
+    settings = MoleculeStackSettings(molecules=50, roi_px=15, max_rounds=1)
+    # no entry says how the chip is split: asked for, never guessed
+    with pytest.raises(ValueError, match="give a registration"):
+        registration_from_molecules(truth["paths"], CAMERA, settings)
+    scope = Microscope(name="split", channels=[Channel("main", side="left"), Channel("other", side="right")])
+    found = registration_from_molecules(truth["paths"], replace(CAMERA, microscope=scope), settings)
+    main = found.to_reference(np.array([[128 + 40 + DUAL_SHIFT_PX[0], 60 + DUAL_SHIFT_PX[1]]]))
+    assert np.allclose(main, [[40, 60]], atol=0.3)
+
+
 def test_the_elliptical_gaussian_from_molecules_gives_back_their_z(tmp_path):
     from smappy.astigmatic_z import z_from_widths
     from smappy.calibrate.elliptical import EllipticalCalibrationSettings, calibrate_widths

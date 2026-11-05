@@ -556,12 +556,17 @@ defocus bin.  On M5's AF647 (November 2026) the bend was about 5 nm rms over
 which the spline's range on *auto* leaves out (it reaches to the 2nd and 98th
 percentiles of the molecules' defocus).
 
-**Dual colour.**  On a chip split in two, each half gets its own width curve
-and detection, and the molecules are paired through the halves' map: a dual
-bead calibration or a registration file (*registration*), or, left empty,
-measured from the molecules themselves over the whole chip, as a movie's
-registration is.  A molecule seen in one half only keeps the region the map
-puts in the other.  One focus per sweep is shared by both channels; each
+**Dual colour.**  On a chip split into two channels, each gets its own width
+curve and detection, and the molecules are paired through the map between
+the channels: a dual bead calibration or a registration file
+(*registration*), or, left empty, measured from the molecules themselves, as
+a movie's registration is -- the chip cut into its channels as the
+microscope's entry says (the arms' sides or regions, in the
+[Microscope manager](plugin:Panels/Microscope manager)), each spot in the
+channel it lies in.
+A microscope without an entry that says it needs a registration file.  A
+molecule seen in one channel only keeps the region the map puts in the
+other.  One focus per sweep is shared by both channels; each
 channel learns its own pupil, and the map is refined.  It saves as a dual
 bead calibration does, for [Spline 3D 2C](plugin:Localize/Spline 3D 2C).
 
@@ -1113,10 +1118,10 @@ Only for files that do not record the stage's z for each frame; with
 With a typed *z step*: how many frames one sweep has.
 
 ### registration
-Dual colour: the file holding the map between the halves, a dual bead
+Dual colour: the file holding the map between the channels, a dual bead
 calibration or a registration from a movie.  Empty, it is measured from the
-molecules' own detections over the whole chip; the learning refines it
-either way.
+molecules' own detections, on the channels the microscope's entry cuts the
+chip into; the learning refines it either way.
 
 ### z proxy
 *astigmatism* for an astigmatic PSF; *size* for one without astigmatism,

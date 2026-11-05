@@ -97,10 +97,9 @@ DUAL_SHIFT_PX = (3.0, -2.0)
 def dual_transform(height: int = 128, width: int = 128):
     """The `dual.ChannelTransform` of `write_dual_sweeps`' chip: secondary (right) chip pixels onto the main
     (left) half's."""
-    from smappy.calibrate.dual import ChannelTransform
+    from smappy.calibrate.dual import ChannelTransform, split_geometry
     H = np.array([[1.0, 0.0, -width - DUAL_SHIFT_PX[0]], [0.0, 1.0, -DUAL_SHIFT_PX[1]], [0.0, 0.0, 1.0]])
-    geometry = {"image_shape": [height, 2 * width], "coordinate_system": "roi-local", "split_position": width,
-                "layout": "right-left", "main_channel": "left", "mirror_axis_xy": None, "sources": []}
+    geometry = split_geometry("right-left", "left", (height, 2 * width), roi_local=True)
     return ChannelTransform(H, geometry, {})
 
 

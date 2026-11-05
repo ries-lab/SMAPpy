@@ -46,7 +46,7 @@ def test_a_movie_added_for_a_bead_method_is_said_and_in_situ_offered(app, tmp_pa
 
     def click(box):
         asked.append(box.text())
-        pick = {"switch": "Use in situ", "remove": "Remove", "keep": "Keep"}[answer]
+        pick = {"switch": "Use blinking molecules", "remove": "Remove", "keep": "Keep"}[answer]
         box.buttons()                       # the box as shown
         next(b for b in box.buttons() if b.text().startswith(pick)).click()
     monkeypatch.setattr(window, "_ask", click)

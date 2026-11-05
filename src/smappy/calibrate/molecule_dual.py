@@ -9,9 +9,10 @@ channel's region is cut about its own position on the chip, in the camera's orie
 mirror), so that what is learnt saves as a dual bead model does (`pupil.dual_calibration`), for Spline 3D 2C.
 
 **The registration** is a file's -- a dual bead calibration or a registration measured from a movie
-(`transform.load_transform`) -- or, with none given, measured here from the molecules' own detections over
-the whole chip (`transform.register_channels`, the movie registration: thousands of spots at many
-defocus, which a bead slide does not have).  uipsf learns it further either way (``ch1.transform``).
+(`transform.load_transform`) -- or, with none given, measured here from the molecules' own detections
+(`transform.register_channels`, the movie registration: thousands of spots at many defocus, which a bead
+slide does not have), on the channels the microscope's entry cuts the chip into (`dual.chip_channels`):
+which channel a spot is in is the arrangement's, never guessed.  uipsf learns it further either way (``ch1.transform``).
 
 **The selection** judges each channel that carries at least `CHANNEL_SHARE` of the pair's light by the
 single-channel rules (centred, its widths those of its half's curve, no bright neighbour), the brightness
@@ -33,17 +34,20 @@ CHANNEL_SHARE = 0.25
 
 
 def halves(transform, origin=(0, 0)) -> list:
-    """The main and the secondary half as image rectangles (x, y, width, height): the registration's chip
-    halves (`dual.chip_halves`) less the file's camera-ROI ``origin``."""
-    from .dual import chip_halves
+    """The main and the secondary channel as image rectangles (x, y, width, height): the registration's
+    channels on the chip (`dual.geometry_layout`) less the file's camera-ROI ``origin``."""
+    from .dual import geometry_layout
     ox, oy = origin
-    return [(x - ox, y - oy, w, h) for x, y, w, h in chip_halves(transform.geometry)]
+    return [(x - ox, y - oy, w, h) for x, y, w, h in geometry_layout(transform.geometry).regions]
 
 
 def registration_from_molecules(paths, camera, settings: MoleculeStackSettings):
-    """The halves' registration measured from every file's spots over the whole chip (module docstring)."""
+    """The channels' registration measured from every file's spots over the whole chip (module docstring):
+    the chip split as the microscope's entry says (`dual.chip_channels`), each spot in the channel whose
+    rectangle it lies in, then the movie registration between them."""
+    from .dual import RegisterSettings, chip_channels
     from .transform import register_channels
-    x, y, frame, shape, base, roi = [], [], [], None, 0, None
+    x, y, frame, shape, base = [], [], [], None, 0
     for path in paths:
         f = read_file(path, camera, settings)
         shape = f.frames.shape[1:]
@@ -54,8 +58,19 @@ def registration_from_molecules(paths, camera, settings: MoleculeStackSettings):
         y.append(s["y"][ok] + s["y_roi"][ok] - h)
         frame.append(s["frame"][ok] + base)
         base += len(f.frames)
-        roi = getattr(camera, "roi", None)
-    found = register_channels(np.concatenate(x), np.concatenate(y), np.concatenate(frame), shape, roi=roi)
+    roi = getattr(camera, "roi", None)
+    frame_roi = tuple(int(v) for v in roi) if roi is not None else (0, 0, shape[1], shape[0])
+    try:
+        _, chip = chip_channels(RegisterSettings(), frame_roi, getattr(camera, "microscope", None))
+    except ValueError as error:
+        raise ValueError(f"{error} -- or, for molecule stacks, give a registration: a dual bead "
+                         f"calibration or one measured from a movie") from None
+    x = np.concatenate(x) + frame_roi[0]                 # chip pixels, as a two-channel fit's
+    y = np.concatenate(y) + frame_roi[1]
+    channel = chip.channel_at(x, y)
+    keep = channel >= 0
+    found = register_channels(x[keep], y[keep], np.concatenate(frame)[keep], channel[keep], chip, shape,
+                              roi=roi)
     return found.transform
 
 
@@ -99,7 +114,7 @@ def dual_molecule_rois(paths, settings: MoleculeStackSettings | None = None, cam
         from .transform import load_transform
         transform = load_transform(s.registration)
     if transform is None:
-        tell({"message": "the registration of the halves, from the molecules", "fraction": 0.0})
+        tell({"message": "the registration of the channels, from the molecules", "fraction": 0.0})
         transform = registration_from_molecules(paths, camera, s)
     origin = tuple(int(v) for v in (getattr(camera, "roi", None) or (0, 0, 0, 0))[:2])
     rects = halves(transform, origin)
