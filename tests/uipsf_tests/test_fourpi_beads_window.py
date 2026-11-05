@@ -73,9 +73,11 @@ def test_4pi_is_a_mode_whose_methods_are_the_pupil_model_and_the_bead_average():
     window = PSFCalibrationWindow([])
     window.show()
     window.mode_box.setCurrentText("4Pi")
-    assert window.method.key == "fourpi_average"                      # the bead average, in 4Pi
+    assert window.method.key == "fourpi_pupil"                        # the pupil model, the default, in 4Pi
     assert not window.sections["4Pi"].isHidden() and window.sections["beads"].isHidden()
     assert window.use_button.text() == "Use in Spline 4Pi"
+    window.method_box.setCurrentText("bead average")
+    assert window.method.key == "fourpi_average"
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert window.method.key == "fourpi_pupil"
     assert not window.fourpi_form.fields["channels"].fields["x_corners"].isVisibleTo(window)

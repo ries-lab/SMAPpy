@@ -460,6 +460,10 @@
         "M6 Fusion BT"
       ],
       "prefix": "HamamatsuHam_DCAM",
+      "identify": {
+        "tag": "{prefix}-CameraID",
+        "value": "S/N: 501540"
+      },
       "parameters": {
         "em_on": {
           "fixed": false
@@ -492,7 +496,7 @@
           "read": "number"
         }
       },
-      "comment": "M6's Orca Fusion BT: no file yet gives its serial (chosen by hand). The pixel on the sample 102 x 108 nm (the lab, 2026-11-04); conversion and offset M5's Fusion BT's until measured."
+      "comment": "M6's Orca Fusion BT: S/N 501540 (Zhaojun's bead stacks, 2026-10-05). The pixel on the sample 102 x 108 nm (the lab, 2026-11-04); conversion and offset M5's Fusion BT's until measured."
     },
     {
       "name": "4Pi-SMS example camera",
@@ -961,8 +965,10 @@
     },
     {
       "name": "M6",
-      "comment": "From M6's EMU configuration (Setups/M6/config.uicfg, 2026-10-14): M5's arrangement, an Olympus 100x NA 1.49 oil objective, a serial iChrome MLE (no -TCP in the tags), its own filter-wheel tags -- the Micro-Manager wheel ending in -2 is the transmitted (top) one -- 700/100 at the reflected wheel's position 3 where M5 has 685/70, the 3D lens reversed (on at 44317 um, off at 0) and TIRF at 19040/21040. Its camera an Orca Fusion BT, 102 x 108 nm on the sample. No file of M6 was on the share (2025, 2026) to identify it by: chosen by hand until one gives its camera's serial. astigmatism_nm M5's, a start for in situ learning until beads say better.",
-      "identify": {},
+      "comment": "From M6's EMU configuration (Setups/M6/config.uicfg, 2026-10-14): M5's arrangement, an Olympus 100x NA 1.49 oil objective, a serial iChrome MLE (no -TCP in the tags), its own filter-wheel tags -- the Micro-Manager wheel ending in -2 is the transmitted (top) one -- 700/100 at the reflected wheel's position 3 where M5 has 685/70, the 3D lens reversed (on at 44317 um, off at 0) and TIRF at 19040/21040. Its camera an Orca Fusion BT, 102 x 108 nm on the sample. Identified by its MLE's serial (iCHROME-MLE-L-HP-CD_30748), and its camera by S/N 501540, from Zhaojun's bead stacks of 2026-10-05. astigmatism_nm M5's, a start for in situ learning until beads say better.",
+      "identify": {
+        "iChrome-MLE-System: Serial Number": "iCHROME-MLE-L-HP-CD_30748"
+      },
       "objective": {
         "name": "Olympus 100x NA1.49",
         "NA": 1.49,

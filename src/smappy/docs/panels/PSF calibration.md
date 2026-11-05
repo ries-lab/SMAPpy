@@ -719,8 +719,9 @@ methods *method* offers.  Switching keeps the files and settings and clears
 the result.
 
 ### method
-What the sample offers: for beads the *bead average*, the *pupil model
-(uiPSF)* and the *elliptical Gaussian*; for molecules on the coverslip the
+What the sample offers: for beads the *pupil model (uiPSF)*, the default,
+which models the PSF rather than averaging the beads' noise, the *bead
+average* and the *elliptical Gaussian*; for molecules on the coverslip the
 pupil model and the elliptical Gaussian; in situ, the *pupil model (in situ)*.
 The window shows only what the method reads.
 

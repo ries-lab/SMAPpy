@@ -122,8 +122,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.setWindowTitle("SMAPpy - PSF calibration")
         self.setAcceptDrops(True)           # stacks dropped on it are added (`add_dropped`)
         self.paths: List[str] = [str(p) for p in paths]
-        self.chosen = METHODS[0]           # as the method box names it
-        self.method = METHODS[0]           # what runs: the chosen method in the chosen mode (`for_mode`)
+        self.chosen = methods_of(SAMPLES[0])[0]     # as the method box names it
+        self.method = self.chosen                   # what runs: the chosen method in the chosen mode (`for_mode`)
         self.run_result = None
         self.detected = None                # what Detect beads found, until a setting it read changes
         self.marks: dict = {}
@@ -249,7 +249,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.sample_box.setToolTip("what the files show: beads stepped through focus, single molecules on the "
                                    "coverslip stepped through focus, or a blinking sample imaged at one focus")
         self.method_box = choice("method", [m.label for m in methods_of(SAMPLES[0])], self.method_changed)
-        self.mode_box = choice("mode", list(modes_of(METHODS[0])), self.mode_changed)
+        self.mode_box = choice("mode", list(modes_of(methods_of(SAMPLES[0])[0])), self.mode_changed)
 
         # one RunSettings, two forms: *start from* is a choice of the model, *save model* of the run
         self.run_form = SettingsForm(RunSettings)

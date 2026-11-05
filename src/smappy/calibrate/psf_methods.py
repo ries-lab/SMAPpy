@@ -1324,8 +1324,9 @@ MODES = ("Single channel", "Dual colour", "4Pi")
 
 METHODS = (BeadAverage(), PupilModel(), InSitu(), EllipticalGaussian(), MoleculeStack(), MoleculeElliptical())
 
-#: the methods each sample offers, by key, as the method box lists them
-SAMPLE_METHODS = {SAMPLES[0]: ("average", "pupil", "elliptical"),
+#: the methods each sample offers, by key, as the method box lists them -- the first the default: for beads
+#: the pupil model (the user's, 2026-11-05), which models the PSF rather than averaging the beads' noise
+SAMPLE_METHODS = {SAMPLES[0]: ("pupil", "average", "elliptical"),
                   SAMPLES[1]: ("molecules", "molecules elliptical"),
                   SAMPLES[2]: ("insitu",)}
 

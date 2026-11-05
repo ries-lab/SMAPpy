@@ -41,6 +41,7 @@ def test_a_movie_added_for_a_bead_method_is_said_and_in_situ_offered(app, tmp_pa
     monkeypatch.setattr(calibrate_input, "MOVIE_FRAMES", 50)
     movie = _tiff(tmp_path / "movie_MMStack_Pos0.ome.tif", 60)
     window = PSFCalibrationWindow()
+    window.method_box.setCurrentText("bead average")     # a bead method that is not the default
     width = window.width()
     asked = []
 
