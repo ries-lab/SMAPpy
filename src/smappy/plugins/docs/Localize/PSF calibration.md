@@ -27,8 +27,8 @@ Saved, it is turned into the same kind of
 model file is kept beside it.
 
 This section only opens the [PSF calibration window](plugin:Panels/PSF calibration),
-whose page explains the methods, their settings and what they show.  It
-replaces the *Bead calibration* section in the shipped GUI; *Bead calibration*
+with the *Open* button in its title bar; the window's page explains the
+methods, their settings and what they show.  It replaces the *Bead calibration* section in the shipped GUI; *Bead calibration*
 is still in the plugin tree (Plugins > Localize) for now.
 The pupil model, from beads or in situ, needs PyTorch, an optional part of
 SMAPpy; without it the window says what to type to install it.

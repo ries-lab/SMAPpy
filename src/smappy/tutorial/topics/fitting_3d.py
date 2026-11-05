@@ -165,11 +165,11 @@ def make(d) -> None:
 
     d.chapter("The calibration window")
     localize = show_tab(d, "Localize")
-    _, panel = open_section(d, localize, "PSF calibration")
+    section, panel = open_section(d, localize, "PSF calibration")
     d.shot("The PSF calibration section of the Localize tab, beside the "
            "fitters, opens its window.",
            spot=[panel.run_button], point=panel.run_button, click=True,
-           zoom=d.around(panel, 700))
+           zoom=d.around(section, 700))
     panel.run_button.click()
     window = control.psf_calibration_window
     window.resize(1540, 860)

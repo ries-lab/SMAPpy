@@ -5,8 +5,9 @@ covers: [smappy.plugins.file.Open]
 
 ## What it does
 
-The first line of the File tab, open when the program starts: two buttons
-that show the file dialog.  *Open* opens the files chosen in place of the
+The first line of the File tab: two buttons in its title bar, beside the
+name, that show the file dialog.  The section has nothing else in it, so it
+does not unfold.  *Open* opens the files chosen in place of the
 ones open; *Add* adds them as more files of the same table, for instance the
 next field of view.  File > Open, and a file dropped on the window, ask
 which of the two when localizations are already open.

@@ -8,7 +8,9 @@ menu.
 
 A panel is built the first time its section is opened, so a tab of thirty
 plugins imports none of them until one is used.  Together with the scanner
-that means starting smappy imports no plugin at all.
+that means starting smappy imports no plugin but the launchers pinned
+(`Plugin.window`: *Load*, *PSF calibration*), small modules whose panels are
+built at once, so that their buttons can stand in the section's title bar.
 """
 from __future__ import annotations
 
@@ -160,6 +162,7 @@ class PluginTab(QWidget):
     def rebuild(self) -> None:
         opened = self.open_instance()
         for section in self.sections:            # keep the slots, drop the frames
+            section.release_title()              # a launcher's buttons are the panel's
             if section.content.parent() is section.frame:
                 section.detach()
         while self.stack.count():
@@ -184,6 +187,12 @@ class PluginTab(QWidget):
                 lambda p=instance.plugin: show_help(p, self.window()))
             if ref is None and inline is None:
                 section.button.setToolTip(f"{instance.plugin} is not installed")
+            elif inline is None and ref.window:
+                # a launcher: built now, so that its buttons, if it has
+                # nothing to set, stand in the title bar
+                panel = slot.ensure()
+                if isinstance(panel, PluginPanel) and panel.title_buttons:
+                    section.put_in_title(panel.title_buttons, ref.description)
             section.toggled.connect(lambda on, s=section, i=instance:
                                     self._toggled(s, i, on))
             section.detach_requested.connect(
@@ -216,6 +225,8 @@ class PluginTab(QWidget):
         """Into a window of its own -- the panel made first: one that was
         never opened is an empty slot, and its window came up blank."""
         self.slots[instance.id].ensure()
+        if section.title_widgets:                # a launcher: nothing to move
+            return
         detach_to_window(section, self.window())
 
     def open_section(self, instance_id: str) -> None:

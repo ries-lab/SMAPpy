@@ -14,12 +14,14 @@ experimental PSF model -- that
 [Spline 3D](plugin:Localize/Spline 3D) and
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C) read.
 
-This section only opens the [bead calibration window](plugin:Panels/Bead calibration);
+This section only opens the [bead calibration window](plugin:Panels/Bead calibration),
+with the *Open* button in its title bar;
 everything else -- single channel or dual colour, the bead stacks, the
 settings, excluding beads and checking the result -- happens in that window,
 and its page explains how the calibration is made.  The window opens as it
 was last left.  The section is here so that the calibration sits beside the
-fitters that use it; like any other section it can be taken out of the tab.
+fitters that use it; like any other section it can be moved or taken out of
+the tab (right-click its title).
 
 Choose *Dual colour* in the window for a camera whose chip is split into two
 halves, each seeing one dye (a [splitter](plugin:Panels/Glossary), also

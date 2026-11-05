@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QDoubleSpinBox, QFrame, QHBoxLayout, QLayout,
-                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QToolButton, QVBoxLayout,
+                               QWidget)
 
 # The control window's width.  A tab whose content would ask for more (a long
 # file name in a wrapping label) caps its own hint at this, so one tab never
@@ -199,12 +201,15 @@ class CollapsibleSection(QWidget):
                  major: bool = False, parent=None):
         super().__init__(parent)
         self.content = content
+        # the widgets `put_in_title` moved into the title bar; while there are
+        # any, the section has nothing to unfold
+        self.title_widgets: List[QWidget] = []
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         # kept, for a title that adds a colour to it (`microscope_form`)
         self.title_style = section_title_style(self.button, major)
         self.button.setStyleSheet(f"QToolButton {{ {self.title_style} }}")
-        header = QHBoxLayout()
+        header = self._header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)
         header.addStretch(1)
@@ -271,7 +276,54 @@ class CollapsibleSection(QWidget):
         detached = self.button.text().endswith(" (window)")
         self.button.setText(title + (" (window)" if detached else ""))
 
+    def put_in_title(self, widgets: List[QWidget], tip: str = "") -> None:
+        """Put ``widgets`` beside the title, and stop the section unfolding.
+
+        For a launcher with nothing to set (*Load*, *PSF calibration*): its
+        section held one row of buttons and nothing else, so opening it was a
+        click that only showed where the next click went.  The buttons are
+        made as tall as the title, so the row is no taller than its
+        neighbours, and the title keeps the arrow's room, so it stays in line
+        with theirs.  No detach arrow: a window for one row of buttons is
+        nothing a person wants.
+        """
+        self.set_expanded(False)
+        self.button.setCheckable(False)
+        self.button.setToolTip(tip)
+        # a blank icon the arrow's size, not a computed indent: the text then
+        # starts where the arrows' does, in any style (a spacing of the size
+        # hints' difference put it 5 px to the right in Fusion)
+        blank = QPixmap(self.button.iconSize())
+        blank.fill(Qt.transparent)
+        self.button.setArrowType(Qt.NoArrow)
+        self.button.setIcon(QIcon(blank))
+        height = self.button.sizeHint().height()
+        at = self._header.indexOf(self.button) + 1
+        self._header.insertSpacing(at, 6)
+        for k, widget in enumerate(widgets):
+            if isinstance(widget, QPushButton):
+                widget.setFixedHeight(height)
+                widget.setStyleSheet("QPushButton { padding: 0 8px; }")
+                widget.setMinimumWidth(
+                    widget.fontMetrics().horizontalAdvance(widget.text()) + 18)
+            self._header.insertWidget(at + 1 + k, widget)
+            widget.show()
+        self.title_widgets = list(widgets)
+        if self.detach_button:
+            self.detach_button.hide()
+
+    def release_title(self) -> None:
+        """Hand the title's widgets back, unparented, before the section is
+        deleted: they belong to the panel, which outlives its sections."""
+        for widget in self.title_widgets:
+            self._header.removeWidget(widget)
+            widget.setParent(None)
+        self.title_widgets = []
+
     def set_expanded(self, on: bool) -> None:
+        if self.title_widgets:               # nothing to unfold, and no arrow
+            self.frame.hide()
+            return
         self.button.setChecked(on)
         self.button.setArrowType(Qt.DownArrow if on else Qt.RightArrow)
         self.frame.setVisible(on and self.content.parent() is self.frame)

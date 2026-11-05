@@ -60,9 +60,10 @@ def pin(d, plugin_tab, path: str, title: str) -> None:
 
 
 def open_section(d, plugin_tab, title: str):
-    """Expand a plugin's section and return it and its panel."""
+    """Expand a plugin's section and return it and its panel.  A launcher's
+    has nothing to expand: its buttons are in the title bar."""
     found = section(plugin_tab, title)
-    if not found.button.isChecked():
+    if found.button.isCheckable() and not found.button.isChecked():
         found.button.click()
     d.settle()
     panel = next(p for p in plugin_tab.panels()

@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 import traceback
-from typing import Optional, Type
+from typing import List, Optional, Type
 
 from PySide6.QtCore import QElapsedTimer, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
@@ -105,6 +105,8 @@ class PluginPanel(QWidget):
         self._job = "run"
         # the running run's `Context.stop`, while Run is Stop; None otherwise
         self._stop: Optional[threading.Event] = None
+        # a launcher's buttons, when the section's title bar may hold them
+        self.title_buttons: List[QPushButton] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -245,6 +247,11 @@ class PluginPanel(QWidget):
                 buttons.insertWidget(buttons.indexOf(self.run_button) + 1
                                      + len(self.window_buttons), extra)
                 self.window_buttons.append(extra)
+            # nothing to set: the buttons can stand in the section's title
+            # bar (`title_buttons`, `CollapsibleSection.put_in_title`)
+            self.title_buttons = ([self.run_button] + self.window_buttons
+                                  if not dataclasses.fields(plugin_cls.Settings)
+                                  else [])
             if not dataclasses.fields(plugin_cls.Settings):
                 # nothing to set: the buttons are the panel, one row, and the
                 # summary is their tooltip rather than lines above them
@@ -584,6 +591,10 @@ class PluginPanel(QWidget):
         opener = self.session.window_openers.get(window)
         if opener is None:
             self.status.setText(f"no {window} window in this program")
+            if not self.isVisible():
+                # the buttons are in the title bar and the status with the
+                # panel, which is never shown: said where it is seen
+                QMessageBox.warning(self, self.plugin.name, self.status.text())
             return
         self.status.setText("")
         opener(settings, **self._reply_to(opener))

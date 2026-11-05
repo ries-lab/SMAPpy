@@ -1007,7 +1007,8 @@ class Plugin:
     window: Optional[str] = None
     # More buttons beside *Open*, each ``(label, window)``: another window of
     # the GUI's, opened the same way.  *Load*'s *Add* is the window's File >
-    # Open adding rather than replacing.
+    # Open adding rather than replacing.  A launcher with nothing to set has
+    # these and *Open* in its section's title bar, and no section to unfold.
     window_buttons: Tuple[Tuple[str, str], ...] = ()
     # Buttons inside a part of the form, each ``(part, label, path)``: the
     # plugin at ``path`` run on the session with that part's settings, as if
