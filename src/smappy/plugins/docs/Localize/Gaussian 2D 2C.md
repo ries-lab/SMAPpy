@@ -438,8 +438,12 @@ Worth ticking only to test whether the two halves really differ in width.
 Ignored when *registration* > *from this movie* is ticked.
 
 ### model.registration.calibrate
-The calibration pass fits at most *at most* frames with a plain Gaussian;
-then the real fit runs over the whole movie.
+On by default: this fitter has no bead calibration to bring a map along, and
+a movie's thousands of pairs measure it where the splitter is today.  Untick
+it to use a *transformation* file instead -- for a movie too sparse to
+register on, or to fit several movies with one map.  The calibration pass
+fits at most *at most* frames with a plain Gaussian; then the real fit runs
+over the whole movie.
 
 ### model.registration.calibrate_locs
 10,000 in the dim channel is usually plenty; a sparse movie runs out of frames

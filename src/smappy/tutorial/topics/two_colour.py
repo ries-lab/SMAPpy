@@ -160,10 +160,10 @@ def make(d) -> None:
     expand(calibrate)
     type_into(panel, "model.registration.calibrate", True)
     d.settle()
-    d.shot("Under the model's registration, from this movie measures the "
-           "transformation from the movie's own molecules, which appear in both "
-           "halves. No beads needed.",
-           spot=[calibrate], point=calibrate, click=True,
+    d.shot("Under the model's registration, from this movie is ticked: the "
+           "transformation is measured from the movie's own molecules, which appear "
+           "in both halves. No beads needed.",
+           spot=[calibrate], point=calibrate,
            zoom=d.around(calibrate, 760))
     path = field(panel, "model.registration.path")
     d.shot("It is saved beside the result, to use again here. A dual-colour bead "

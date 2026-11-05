@@ -281,7 +281,7 @@ def test_the_2c_fit_saves_the_table_with_its_colours_on_it(tmp_path):
         source=SourceSettings(path=str(stack), chunk=40),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(given))),
+        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(given), calibrate=False)),
         fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(out)))
 

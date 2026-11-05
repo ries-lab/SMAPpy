@@ -362,7 +362,7 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
         source=SourceSettings(path=str(stack), chunk=10),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(path))),
+        model=DualGaussianModelSettings(sigma=1.2, registration=ChannelTransformSettings(path=str(path), calibrate=False)),
         fit=FitSettings(roisize=13),
         output=OutputSettings(save=False)))
 
@@ -405,7 +405,7 @@ def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all
         source=SourceSettings(path=str(stack), chunk=4),
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
-        model=DualGaussianModelSettings(registration=ChannelTransformSettings(path=str(path))),
+        model=DualGaussianModelSettings(registration=ChannelTransformSettings(path=str(path), calibrate=False)),
         fit=FitSettings(roisize=13), output=OutputSettings(save=False)))
     plugin = DualGaussianFit()
     assert len(plugin.run(Context(), settings).locs) > 10
@@ -423,6 +423,7 @@ def test_it_says_so_when_there_is_no_transformation_at_all(tmp_path):
     from smappy.plugins.fit import (DualGaussianFit, DualGaussianFitSettings,
                                     SourceSettings)
     settings = DualGaussianFitSettings(source=SourceSettings(path=str(tmp_path / "x.tif")))
+    settings.model.registration.calibrate = False                     # unticked, and no file
     assert "this movie" in DualGaussianFit().preflight(Context(), settings).text
     with pytest.raises(ValueError, match="needs a transformation"):
         settings.model.registration.load()
@@ -434,6 +435,7 @@ def test_without_a_transformation_the_question_offers_calibrating_not_a_doomed_r
     from smappy.plugins import PreflightQuestion
     from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
     settings = DualGaussianFitSettings()
+    settings.model.registration.calibrate = False                     # unticked, and no file
     question = DualGaussianFit().preflight(None, settings)
     assert isinstance(question, PreflightQuestion) and question.run_label == ""
     (choice,) = question.choices

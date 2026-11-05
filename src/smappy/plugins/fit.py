@@ -1550,7 +1550,10 @@ class ChannelTransformSettings:
                       file_filter=TRANSFORM_FILTER,
                       help="from Register/Calibrate transform, or a dual-colour "
                            "bead calibration")
-    calibrate: bool = param(False, label="from this movie",
+    # on by default (the user's, 2026-11-05): a Gaussian fit has no bead calibration to bring a
+    # map along, and the movie's own thousands of pairs measure it where the splitter is today;
+    # Spline 3D 2C, whose calibration carries one, keeps it off (`SplineTransformSettings`)
+    calibrate: bool = param(True, label="from this movie",
                             help="ignore the file: fit the first frames with a "
                                  "plain Gaussian and register them")
     # A cap, not a target: what is wanted is enough *pairs*, and how many
