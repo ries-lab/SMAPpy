@@ -422,6 +422,187 @@ unchanged.
 **The loader also reads v1's `psfmodel_*_4pi.h5`.**  It renormalises, and
 reorders A, B, I into I, A, B.
 
+### D9. The sample between the coverslips: what to hold and what to free (proposed, 2026-10-30)
+
+**The problem.**  In a 4Pi the sample is a sandwich: coverslip 1, a layer of sample (index n_s, gap D,
+often about 10 µm) and coverslip 2.  An emitter at height h above coverslip 1 is seen by objective 1
+through h of sample and by objective 2 through D − h.  Beads lie on one coverslip, so in a bead
+calibration objective 2 alone looks through the whole layer.  Where the sample's index differs from the
+immersion's, the layer adds an aberration to that arm.  How far today's Zernikes can take it up (NA 1.35,
+silicone 1.406, 600 nm, 10 µm, after refocusing; radial Zernikes fitted to the rest):
+
+| sample index | aberration | left beyond n ≤ 6 | beyond n ≤ 8 | beyond n ≤ 12 |
+|---|---|---|---|---|
+| 1.406 (matched) | 0 | 0 | 0 | 0 |
+| 1.39 | 0.35 rad rms | 0.12 | 0.08 | 0.05 |
+| 1.38 | 0.64 | 0.23 | 0.15 | 0.09 |
+| 1.37 | 1.00 | 0.39 | 0.26 | 0.15 |
+| 1.36 | 1.49 | 0.64 | 0.43 | 0.25 |
+
+The aberration is steepest at the pupil's edge, where low orders fail; bead fits resolve a few
+hundredths of a radian.  With water (1.33) the light above NA 1.33 does not cross 10 µm at all
+(3 % of the aperture's area), so the far arm works at a lower NA than the near one and the two
+interfere only inside it; Zernike magnitudes cannot make that edge.  A deformable mirror correcting the
+spherical removes the smooth part, not the edge and not the lost light, and it is set for one depth.
+For molecules the layers change with h, in opposite directions in the two arms.  So the layers are
+modelled, and the Zernikes keep the instrument and the DM.
+
+**How much each uncertainty matters**, as the wavefront moves after refocusing (the rule: above about
+0.05 rad it is known or fitted, below it is held):
+
+| uncertainty | 2 µm of sample | 10 µm of sample |
+|---|---|---|
+| index +0.005, n_s 1.36 | 0.05 rad | 0.27 rad |
+| index +0.005, n_s 1.38 | 0.03 | 0.15 |
+| index +0.005, n_s 1.406 | 0.02 | 0.09 |
+| thickness +1 µm, n_s 1.36 / 1.38 | 0.15 / 0.06 | the same |
+| thickness +100 nm, n_s 1.36 | 0.015 | the same |
+
+The index matters mostly in the far arm; the gap must be known to about 0.3 µm when the index is
+mismatched; 100 nm never matters.  The index also sets the phase's z scale: 0.005 is 0.4 % of z.
+
+**The model.**  Each arm's wave is the in situ one (`InSituGeometry`: the height through the sample's
+k_z, the focus through the immersion's):
+
+    arm 1:  exp 2πi [k_z,med·h − k_z,imm·f]
+    arm 2:  exp 2πi [k_z,med·(D − h) − k_z,imm·(D_imm − f)],  mirrored as now
+
+f is the common focus, what a stage movement changes; the arms' foci stay Δz apart (`fourpi.offset`).
+For beads (h = 0, the stage moving the whole sandwich) arm 1 is today's model and arm 2 carries one
+constant layer D_bead; with a matched index it vanishes and today's `FourPiModel` is the special case,
+which is the regression test.  uiPSF has the pieces: `VectorPSF`'s depth term, `InSituGeometry`'s focus,
+`optics/layers.py` for a coverslip's index and thickness.
+
+**The parameters, and where each is held or free:**
+
+| parameter | what it is | beads | sample, in situ | SMLM fit |
+|---|---|---|---|---|
+| n_s (`Optics.n_med`) | sample index | held, measured | held, measured; checked by the period | held |
+| `fourpi.gap` D | sample between the coverslips | held, measured | free, prior from measurement (±1 µm), per field of view | held |
+| `geometry.focus` f | focus above coverslip 1 | none (h = 0, stage z) | free, from the lowest heights | held; its drift is z drift |
+| `fourpi.cover` (2) | each arm's coverslip against the beads' sample | held at 0 | arm 1 free with a prior (±5 µm); arm 2 inside D | held |
+| `fourpi.offset` Δ | arms' misalignment | free | Δz free with a prior (realigned per sample); Δx, Δy held | held |
+| coherence α_c | per channel | free | free | in the spline |
+| pupils, blur, channel offsets | the instrument | free | held | in the spline |
+
+**Why this split.**
+- **Beads learn the instrument only.**  With the layers held, the pupils are the objectives' and the
+  DM's.  An index-matched bead sample makes D_bead drop out.  Mismatched, n_bead and D_bead are held at
+  measured values: fitted, they trade with the lower pupil's spherical, D and n acting almost as one
+  scalar, D·(k_med − k_imm).  Beads on both coverslips (or a second sample, flipped) separate them
+  cleanly: each arm then sees the gap in turn.
+- **Per sample, a layer is one scalar of known shape, not free Zernikes.**  Arm 2's constant term is
+  k_med·D: one number times an exact shape, freed on top of held pupils.  Freeing Z11 or Z22 instead
+  would let the pupil absorb anything spherical.  A coverslip off the beads' thickness has a similar
+  shape, (k_cov − k_imm); in arm 2 it cannot be told from D and is part of an effective D, in arm 1 it is
+  the only constant term and is freed there.  For silicone objectives that is the term their correction
+  collars exist for (±5 µm of glass), and a collar setting falls into it.
+- **The heights make the sample identifiable.**  Molecules at many h see k_med·h, which pins n_s and f
+  together; the lowest give f, as `calibrate.depth.auto_focus` does for Spline 3D.  Molecules on
+  coverslip 2 too (an upper membrane) would give D from their edge.
+- **The DM is part of the instrument.**  A setting that differs between beads and sample enters as the
+  commanded difference, held (`ZernikePupil`'s held modes), the commands kept in the metadata.  Learnt
+  from the sample it would trade with D.
+- **Δ is realigned with every sample.**  Its lateral direction was not stable even from beads (§8;
+  the single-step models put it along three directions), so Δx and Δy are held; Δz, which realigning
+  for the best interference moves, is free with a prior.
+- **The coherence stays free in situ**: it is what changes most with the sample (scattering, depth,
+  the cavity drifting during an exposure).
+
+**Fitting molecules.**  The fitter keeps x, y, z, N, Φ and the backgrounds.  The geometry enters through
+the spline: the export samples I, A and B as functions of h for given (n_s, D, f, Δz, cover), z the
+height above coverslip 1 -- a 4Pi depth spline, as `calibrate.depth.depth_spline` is for Spline 3D.  The
+fringe follows k_med·(2h − D), so its period, about λ/(2 n_s cos θ), is the same at every h; the export
+measures it from the model at that n_s.  Another field of view in the same sample keeps n_s and the
+coverslips, finds the focus again and refits D with the last value as its prior (the gap varies over
+millimetres); another sample repeats the in situ step with its own measured n_s and D.
+
+**n_s and D from beads on both coverslips.**  Beads on coverslip 1 alone cannot give n_s: the stage
+moves the whole sandwich, so a stack changes only the immersion's paths.  With beads on both coverslips,
+a stack around each and the stage offset Δs between the two stacks recorded, they can:
+- **The aberration measures one number.**  After refocusing, the gap's and the index's aberrations in
+  the far arm have nearly the same shape (correlation −0.985 at n_s 1.36, −0.998 at 1.38, −0.9999 at
+  1.40): +0.001 of index looks like −390 nm of gap at 1.36 (−490 nm at 1.38).  So the stacks measure the
+  optical mismatch, about D·(n_s − n_imm).
+- **The stage travel measures the rest.**  Moving from one coverslip's beads into focus to the other's
+  takes Δs = D + c(D, n_s), c the focal shift through the sample: about 11.1 µm for D = 10 µm at n_s
+  1.36.  Along the direction the aberration cannot see (+0.001 of index with +390 nm of gap) Δs moves by
+  about 400 nm.
+- **Together** (n_s 1.36, D = 10 µm, the far arm's aberration to ±0.01 rad, Δs to ±20 nm): n_s to about
+  ±0.0002 and D to about ±20 nm.  At 1.38–1.40 the aberration weakens but Δs keeps its lever.  At a
+  matched index nothing separates them, and nothing in the PSF needs to; only the phase's z scale
+  (∝ n_s) does, which the refined period or a refractometer gives.
+
+The joint fit, in this model: coverslip-1 beads at h = 0 (arm 1 sees no sample, arm 2 sees D),
+coverslip-2 beads at h = D (the other way round), so each pupil is seen once clean and once behind the
+layer, which separates the instrument from the layer too.  Free and shared: both pupils, the blur, the
+channels, Δ, the coherences, D and n_s (k_z,med then computed from a parameter, not read from the grid).
+Held: n_imm, NA, the beads' λ and Δs.  Each coverslip's coverslip thickness acts alike on both bead sets
+in its arm and stays in that arm's pupil.
+
+- **The focus is the model's, not a criterion's.**  With 1–1.5 rad of spherical in the far arm, peak
+  intensity, the sharpest image and the least-squares focus differ by tens to a hundred nm, the size of
+  the lever.  So Δs is the recorded offset between the two stacks, each bead's z coming from the joint
+  fit; a focus found beforehand by eye or autofocus enters only as a prior of about ±100 nm.
+- **Each coverslip's beads lie on one plane**, a height and a tilt per coverslip, not a free z per bead:
+  free z would take up Δs and lose the lever.
+- **The stage's scale over the offset** is the other systematic (0.1 % of 10 µm is 10 nm).  Each stack's
+  fringe calibrates the piezo locally (2 k_z,imm per nm of stage, λ and n_imm known); its linearity
+  across the offset needs the stage's specification or a check.
+- The cavity phase between the two sets would give the optical thickness to a fraction of a fringe, but
+  across about 75 fringes and with the cavity drifting between the stacks; left out.
+- **What it measures** is the index of the medium the beads sit in, and D at that position.  Inside a
+  cell the index differs (1.36–1.39, unevenly), so this value is the in situ prior, not the answer.
+
+**A cheaper scheme: the stage travel from dirt, beads on one coverslip.**  The travel between the two
+coverslips' inner surfaces is focused on dirt, and beads lie on coverslip 1 only.  Two things change: Δs
+comes from a focus criterion instead of the fit, and arm 2's pupil is never seen without the layer, so
+its Zernikes take up the layer's low orders and only the steep remainder at the pupil's edge still
+measures the index.  Idealised (the layer's shape the only unknown, 10 µm gap, the far arm's aberration
+to the rms given):
+
+| scheme | n_s 1.36: σ(n_s), σ(D) | n_s 1.38: σ(n_s), σ(D) |
+|---|---|---|
+| beads on both coverslips, Δs from the fit (±20 nm) | 0.0002, 20 nm | 0.0003, 21 nm |
+| dirt focus ±50 nm, beads on one coverslip | 0.0003, 48 nm | 0.0008, 53 nm |
+| dirt focus ±100 nm, beads on one coverslip | 0.0004, 95 nm | 0.0009, 100 nm |
+| dirt focus ±200 nm, beads on one coverslip | 0.0005, 187 nm | 0.0009, 198 nm |
+| dirt ±100 nm, one coverslip, pupil to n ≤ 8 | 0.0005, 95 nm | 0.0014, 103 nm |
+| dirt ±100 nm, one coverslip, aberration to ±0.03 rad | 0.0010, 99 nm | 0.0025, 114 nm |
+| dirt focus alone, no aberration | not determined | not determined |
+
+On paper 2–3× worse in the index, and the gap as good as the dirt focus; the index stays well below the
+0.005 that matters.  In practice it is worse than the table:
+- **The index rests on the pupil's edge**, where sampling, apodisation and the magnitude model are least
+  sure.  At ±0.03 rad there the index is 0.001–0.0025; more Zernikes make it worse, absorbing more of
+  the edge.
+- **The dirt focus is biased, not only scattered**: through 1–1.5 rad of spherical the sharpest image sits
+  tens to a hundred nm from the model's focus, differently for reflected, scattered or fluorescent dirt.
+  At about 400 nm of travel per 0.001 of index, 100 nm of bias is 0.00025.  The criterion could be
+  modelled, at the cost of an assumption about how the dirt is imaged.  The travel enters as a prior of
+  honest width, never held, and the dirt must be on the sample side of each coverslip.
+- **Instrument and layer stay mixed in arm 2**: its pupil holds what the gap and index got wrong, carried
+  to a sample of another gap at the wrong scale.
+
+So: beads on both coverslips once, as the instrument's reference (arm 2's pupil clean, and a check of the
+dirt focus's bias); dirt and beads on one coverslip for routine samples after that.  These numbers come
+from the radial model of the layer alone; the joint fit of simulated stacks is the check, once the model
+exists.
+
+**n_s, checked by the data.**  In situ, *4Pi z*'s `refine_period` measures the phase's slope against the
+envelope's z.  If the model's index is off by a fraction ε, the envelope reads h·(1 + ε) and the phase
+h/(1 + ε) (paraxially: the envelope's defocus goes as 1/(n_s λ), the fringe as n_s/λ), so the slope is
+off by about 2ε while λ cancels; no known height is needed.  0.005 of index at 1.36 is 0.74 % of slope,
+and the refined period came within 0.3 % on M3's 5000 simulated molecules: about ±0.002 in n_s from the
+statistics.  The limit is the bead model's own consistency: on the M5 beads, in a matched medium, the
+envelope's z runs 1.016 and the phase's 1.007 per nm of stage, a 0.9 % gap that would read as about 0.006
+of index.  So the bead model's two scales are put on one ruler first (the fringe, through a free stage
+scale, `geometry.z_scale`), and what bends the envelope is found (§8's open shared pattern).  The refined
+period is reported as an implied n_s beside the measured one, not fitted, unless the sample spans several
+µm in h.
+
+**Not covered:** the pupils changing over the field.
+
 ## 4. Plan
 
 The milestones are ordered so that a fitter exists early, on v1's ready-made
@@ -491,7 +672,18 @@ models, and the risky refactor happens behind tests.
 
 **M6. uiPSF v2 4Pi in situ** on the Nup96 data, compared with v1's in-situ
 result files.  This comes after the bead model, and after the in-situ learning
-work in progress elsewhere, which it builds on.
+work in progress elsewhere, which it builds on.  It holds and frees what D9
+says, in this order:
+- each arm its own depth in `FourPiModel` (h, D − h), with `fourpi.gap`,
+  `fourpi.cover` and `geometry.focus`; a matched index gives today's model;
+- a simulation study of what can be told apart: n_s against D, `cover`
+  against D, Δz; and the joint fit of beads on both coverslips with the
+  stage offset between the stacks;
+- the bead model's envelope and phase z scales made to agree (§8: 1.016
+  against 1.007), before any n_s is read from the refined period;
+- the 4Pi depth spline for a given geometry, and the fitter's *sample index*,
+  *gap* and *focus* (auto), as Spline 3D's *focus*;
+- the implied n_s from the refined period, in *4Pi z*.
 
 **M7. Later, as needed**
 - The uiPSF 4Pi model made vectorial: dipole fields and the s and p
