@@ -99,6 +99,21 @@ _AVAILABLE: list = [None, -1e9]          # (bytes, when): one answer per few sec
 AVAILABLE_SECONDS = 5.0
 
 
+def release_memory() -> None:
+    """Hand back what torch's allocators keep after a run: freed GPU blocks are kept for reuse and never
+    returned otherwise (3.3 GB after one M6 calibration on Apple's GPU, 4.2 after a second, counted as the
+    program's memory), and macOS' malloc keeps freed pages (the footprint stayed at 2.7 GB with every
+    tensor gone).  For the end of a run, not inside one: the next run allocates them again."""
+    if torch.backends.mps.is_available():
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+    if torch.cuda.is_available() and torch.cuda.is_initialized():
+        torch.cuda.empty_cache()
+    from .memory import _METER
+    if _METER is not None:
+        _METER.release()
+
+
 def available_memory_bytes() -> int | None:
     """`_available_memory`, asked at most once per `AVAILABLE_SECONDS`: a `Problem` is made per fit and per
     localisation, and on macOS asking runs ``vm_stat``."""

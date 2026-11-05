@@ -2540,6 +2540,13 @@ shows it after *Detect beads* (`smappy.calibrate.pupil.estimate_memory`).  A sol
 `Problem`'s while it runs (`solve.stop.stoppable`) and is checked before every chunk, so *Stop* ends a fit
 within a chunk: M6's whole matrix took minutes before, and the check between iterations let a stopped run go on.
 
+On Apple's GPU the measurement is what Metal's driver holds after the work less what was *in use* before it, not
+less what the driver held: emptying the cache keeps a heap that still holds a live tensor, and the work fits partly
+into its free space.  After the window's estimates an M6 bead measured 1.0 GB that way instead of 2.1, 11 beads
+went at once, and a calibration through the window peaked at 35.6 GB and took 442 s; measured so, 9.2 GB and 44 s.
+After every job the PSF calibration window hands back what torch's allocators kept (`device.release_memory`:
+Metal's or CUDA's cache, the CPU allocator's free pages): 3-4 GB stayed counted as the program's after a run.
+
 ## Phase masks in the pupil (November 2026; `model/mask.py`, S1 of `docs/uipsf/scanned-psfs.md`)
 
 A mask is an analytic design Φ(u′, v′) in units of the objective's pupil radius, placed on the pupil by

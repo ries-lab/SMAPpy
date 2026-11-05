@@ -67,7 +67,8 @@ or a CUDA card), and learning then takes as many beads at a time as fit in
 80 % of the memory free at that moment, counting each at 1.25 times what one
 bead held.  More memory only lets more beads go at once, which is hardly
 faster: 19 beads of 100 slices of 27 × 27 pixels on a laptop's GPU took 40 s
-in fours, about 2 GB a bead, where all at once had filled 32 GB and swapped.  *Calibrate* then learns from them; pressed first, it
+in fours, about 2 GB a bead, where all at once had filled 32 GB and swapped.
+When a run ends, the memory it used is handed back to the computer.  *Calibrate* then learns from them; pressed first, it
 detects too.  Pressed again after a change, it calibrates with the settings
 as they are then.  A bar shows how far the run is and about how long it has left.
 

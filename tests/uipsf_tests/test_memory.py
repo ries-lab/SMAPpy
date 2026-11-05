@@ -90,3 +90,34 @@ def test_an_unknown_amount_of_memory_leaves_the_chunks_as_before(monkeypatch):
     model, _, batch = small_beads(OPTICS, n=6)
     monkeypatch.setattr(device, "available_memory_bytes", lambda: None)
     assert Problem(model, Poisson(), batch).chunk_size == 6
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Apple's GPU only")
+def test_work_that_fits_into_a_half_used_heap_is_counted_on_apples_gpu():
+    """Emptying Metal's cache keeps a heap that still holds a live tensor, and work fits into its free space
+    without the driver growing: measured against the driver's start, 32 MB read 0 (and an M6 bead 1.0 GB
+    instead of 2.1, so 11 beads went at once and took the Mac past 35 GB)."""
+    from uipsf.memory import measure
+    keep = [torch.ones(256 * 1024, device="mps") for _ in range(64)]          # 1 MB each, sharing heaps
+    del keep[::2]
+
+    def work():
+        made = [torch.ones(256 * 1024, device="mps") for _ in range(32)]     # 32 MB
+        torch.mps.synchronize()
+        return len(made)
+    _, held = measure(work, "mps")
+    assert held >= 32 * 2 ** 20
+
+
+def test_what_the_allocators_keep_after_a_run_is_handed_back():
+    """After a calibration Apple's GPU kept 3-4 GB of freed blocks, counted as the program's, until the next
+    run swapped (`device.release_memory`, called when the PSF calibration window's work ends)."""
+    if not torch.backends.mps.is_available():
+        device.release_memory()                  # nothing to hand back, and no error
+        return
+    x = torch.ones(64 * 2 ** 20 // 4, device="mps")
+    del x
+    torch.mps.synchronize()
+    assert torch.mps.driver_allocated_memory() >= 64 * 2 ** 20
+    device.release_memory()
+    assert torch.mps.driver_allocated_memory() < 64 * 2 ** 20

@@ -103,9 +103,23 @@ class _Worker(QObject):
 
     def run(self):
         try:
-            self.done.emit(self.kind, self.function(self.progress.emit))
+            value = self.function(self.progress.emit)
         except Exception as error:                       # shown, never fatal
-            self.done.emit("error", error)
+            value, self.kind = error, "error"
+        release_memory()
+        self.done.emit(self.kind, value)
+
+
+def release_memory() -> None:
+    """What torch's allocators kept from a run handed back to the system, where torch is loaded at all
+    (`uipsf.device.release_memory`): after a calibration Apple's GPU kept 3-4 GB and the next run swapped."""
+    if "torch" not in sys.modules:
+        return
+    try:
+        from uipsf.device import release_memory as release
+        release()
+    except Exception as error:                           # noqa: BLE001 -- tidying, never a reason to fail a run
+        print(f"releasing memory: {error}", file=sys.stderr)
 
 
 class PSFCalibrationWindow(QMainWindow):

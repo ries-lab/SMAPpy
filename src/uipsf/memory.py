@@ -10,7 +10,8 @@ measured on the model itself: one emitter's work, its peak above the start.
 The peak is the system's own count where there is one -- no sampling thread, which misses short peaks:
 
 - CUDA: torch's allocator, `max_memory_allocated` after `reset_peak_memory_stats`;
-- Apple's GPU: what Metal's driver holds after the work, its cache emptied before (`measure`);
+- Apple's GPU: what Metal's driver holds after the work, its cache emptied before, less what was in use
+  before (`measure`);
 - macOS' CPU: the process's physical footprint since `proc_reset_footprint_interval` (libproc);
 - Linux: ``VmHWM`` of /proc/self/status after writing 5 to /proc/self/clear_refs (the high-water mark reset).
 
@@ -44,10 +45,13 @@ def measure(fn, device) -> tuple[object, int | None]:
     if device.type == "mps":
         # Metal's memory is not always counted when it is taken (the footprint missed whole GBs that the driver
         # had held before), so the allocator's own count: emptied of its cache, it keeps every block the work
-        # freed, and what the driver holds after it is the most the work held at once.
+        # freed, and what the driver holds after it, less what was in use before, bounds what the work held at
+        # once.  Not less what the driver held before: emptying keeps a heap that still holds a live tensor,
+        # and the work fits partly into its free space -- after the window's estimates one M6 bead measured
+        # 1.0 GB that way where a chunk took 2.1 GB a bead, and 11 beads at once took the Mac past 35 GB.
         torch.mps.synchronize()
         torch.mps.empty_cache()
-        start = torch.mps.driver_allocated_memory()
+        start = torch.mps.current_allocated_memory()
         out = fn()
         torch.mps.synchronize()
         peak = torch.mps.driver_allocated_memory() - start

@@ -112,3 +112,16 @@ def test_delete_removes_the_selected_file_and_selects_the_next_and_clear_empties
     window.clear_paths()
     assert window.paths == [] and window.file_list.count() == 0
     window.close()
+
+
+def test_every_job_of_the_window_hands_back_what_the_allocators_kept(monkeypatch):
+    """A calibration left 3-4 GB in Apple's GPU cache, and the next run swapped: the worker releases after each
+    job, whether it ended or failed."""
+    from smappy.calibrate import psf_window
+    released, done = [], []
+    monkeypatch.setattr(psf_window, "release_memory", lambda: released.append(1))
+    for function in (lambda progress: 42, lambda progress: 1 / 0):
+        worker = psf_window._Worker("run", function)
+        worker.done.connect(lambda kind, value: done.append(kind))
+        worker.run()
+    assert released == [1, 1] and done == ["run", "error"]
