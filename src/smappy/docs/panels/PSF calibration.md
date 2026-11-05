@@ -943,9 +943,9 @@ whose PSF changes fast in z (an engineered PSF); the spline is still sampled
 at *spline z step*.
 
 ### learn z range
-The whole stack on *auto*.  A value learns from the slices within ± that of
-the focus only: ±1 µm of a ±2 µm stack, where the far slices are mostly
-background.  The model is drawn over the range it learnt; *spline z range*
+±1.5 µm by default: the slices within that of the focus are learnt from, and
+a shorter stack is used whole; on *auto* the whole stack always.  On a ±2 µm
+stack the far slices are mostly background.  The model is drawn over the range it learnt; *spline z range*
 on *auto* then stays within it.  A narrower range also needs a smaller pupil
 grid, so the run takes less memory and time.
 

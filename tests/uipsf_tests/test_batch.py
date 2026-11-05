@@ -48,3 +48,14 @@ def test_learning_takes_every_slice_within_the_largest_z_step_and_the_z_range():
         assert all(abs(abs(b2 - a) - step) < 1e-4 for a, b2 in zip(z, z[1:], strict=False)), max_dz
         assert 0.0 in z and max(abs(v) for v in z) == reach
     assert learning_batch(b, None).z_step_nm == 40.0         # settings without them: 50 nm, the whole stack
+
+
+def test_by_default_learning_keeps_1_5_um_about_the_focus_and_a_shorter_stack_whole():
+    from smappy.calibrate.pupil import BeadSettings
+
+    from uipsf.workflows.calibrate import learning_batch
+    b = _stack_2um()
+    assert learning_batch(b, BeadSettings()).z_nm.abs().max() == 1480.0         # every 2nd of 20 nm slices
+    short = b.within(1000.0)
+    assert learning_batch(short, BeadSettings()).z_nm.abs().max() == 1000.0     # ±1 µm: whole
+    assert BeadSettings.from_options({}).z_range_nm is None   # a model file of before: the whole stack

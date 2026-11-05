@@ -154,8 +154,10 @@ class BeadSettings:
     # uipsf's M7: at most 50 nm apart loses phase precision only as the CRLB says, for a fraction of the time
     max_dz_nm: float = param(50.0, label="largest z step", unit="nm", min=1.0, advanced=True,
                              help="learn from every n-th slice, n the most whose step stays within this")
-    z_range_nm: Optional[float] = param(None, label="learn z range", unit="nm", min=100.0, advanced=True,
-                                        help="± about focus learnt from; auto: the whole stack")
+    # ±1.5 µm by default (November 2026): the far slices of a ±2 µm stack are mostly background
+    z_range_nm: Optional[float] = param(1500.0, label="learn z range", unit="nm", min=100.0, advanced=True,
+                                        help="± about focus learnt from, a shorter stack whole; auto: the whole "
+                                             "stack")
 
     def __post_init__(self):
         if self.drift not in dict(DRIFTS):
@@ -165,7 +167,9 @@ class BeadSettings:
     def from_options(cls, options: dict) -> "BeadSettings":
         """The settings a model file kept (`Calibration.options`, written by `asdict`: the PSF model nested)."""
         from ..plugins import settings_from
-        return settings_from(cls, options or {})
+        options = dict(options or {})
+        options.setdefault("z_range_nm", None)      # a model of before the range learnt from the whole stack
+        return settings_from(cls, options)
 
     @property
     def order(self) -> int:
