@@ -511,9 +511,31 @@ Each one ends, as uipsf's do, in parameters recovered from simulated data to the
 | S2 | excitation focusing: fields, input beam, Jones pupil, normalisation; the oracle.  **Built** (`model/excitation.py`) | Leutenegger's library through SimuFLUX, as fixtures (`scripts/uipsf/make_oracles_focus.py`) | S1 for the masks |
 | S3 | beam scans with an open detector: Gaussian, vortex, top-hat, half-moon; bead size; w_z; ε's causes.  **First: the single-plane study (§7a)** -- which parameters one plane determines, with and without held even modes and with SLM defocus diversity, by Fisher information on simulations.  **Model and single-plane study built** (November 2026, `model/scanned.py`, §7a); real scans next | simulated, then 20–40 nm fluorescent and 80 nm gold scans | S2 |
 | S4 | scanned single molecules: one shared height, a factor per line, blinking and bleaching masked, fixed dipoles as an option | simulated, then molecules on glass | S3 |
-| S5 | confocal: pinhole, product, λ_em, shared OPD Zernikes, scanner geometry, dead time | Abberior confocal bead scans (`.msr`) | S3 |
+| S5 | confocal: pinhole, product, λ_em, shared OPD Zernikes, scanner geometry; dead time later.  **Next, before S4** (C1-C4 below) | Abberior confocal bead scans (`.msr`) and a custom microscope without metadata | S3 |
 | S6 | ISM: SPAD elements as channels on a lattice | a SPAD-array dataset (Vicidomini lab, BrightEyes) | S5 |
 | later | user masks as images | | S1 |
+
+**Confocal raster scans first (decided November 2026).**  The next application is confocal-like raster scans,
+and its purpose is **characterising the beam** -- its aberrations, polarisation, fill and the pinhole's
+alignment -- not localising molecules in raster images; that may stay the only use.  So S5's confocal model
+comes before S4, and the output is a report of the beam, not a spline for SMAPpy's fitter.  The steps:
+
+- **C1, the confocal model:** μ(r_s) = N·I_exc(r_e − r_s)·D(r_e − r_s) + b, D the emission PSF at λ_em (a
+  `VectorPSF` intensity) convolved with the pinhole's disc back-projected into the sample (its size in Airy
+  units of λ_em/NA, its offset learnable), descanned.  One pupil for both paths, Zernikes in nm of OPD turned
+  into phase at each wavelength; path terms only if the data ask.  Checked in its limits (pinhole → 0:
+  I_exc·I_em; pinhole → ∞: S3's open detector) and against SimuFLUX's confocal model with its E_z and its
+  wavelength corrected.
+- **C2, reading scans:** Abberior `.msr` images with their scan step from the metadata, and a custom microscope
+  with **no metadata**, whose scan step (and wavelengths, NA, pinhole) are typed: every acquisition setting
+  must be enterable by hand.  Beads found by SMAPpy's bead detection and cut out; one plane or an xyz stack;
+  the bidirectional line shift as a parameter.  The detectors are APDs with dead times under 100 ns, run
+  below saturation: **dead time is not modelled** for now (scanned-psfs.md §5 keeps it as a later option).
+- **C3, simulations, then the lab's example data** (to come): recovered to the CRLB with §7a's rules -- the
+  even modes held from a widefield calibration or two to three planes for linear light, one plane for
+  circular light of known handedness.
+- **C4, the report:** the beam's parameters with their CRLBs, the pupil, the scan against the model and the
+  residuals, the pinhole's offset.  The PSF calibration window's *modality* choice comes with it, not before.
 
 **S1 paused (November 2026).**  The mask machinery is built and tested (`model/mask.py`, the model file,
 `start_from`, the twin study §7a), and fitted on real double-helix beads (§6), but it is not in the GUI.  The
