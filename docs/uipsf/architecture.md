@@ -2666,6 +2666,27 @@ constant n_imm/n_med, which the normalisation takes up (module docstring).
   the aplanatic √cos θ_imm / cos θ_med of detection, which the reciprocity argument gives.  The difference is about
   1 % of the peak for Gaussian beams and fills a top-hat's zero to 0.12 of the peak against 0.06; the objective's
   transmission is learnt (γ, a Zernike magnitude), so it is only the start.
-- **Not yet:** the scan (beam against emitter positions, S3), the detection and its pinhole (S5), a learnt
-  n_med or a tilted coverslip for the beam (the layered model), shared OPD Zernikes between excitation and
-  detection.
+- **Not yet:** the detection and its pinhole (S5), a learnt n_med or a tilted coverslip for the beam (the
+  layered model), shared OPD Zernikes between excitation and detection.  The scan is the next section.
+
+## A beam scanned over an emitter, open detector (November 2026; `model/scanned.py`, S3 of `docs/uipsf/scanned-psfs.md`)
+
+μ(r_s) = N·I(r_e − r_s) + b: with the detector open, a scan's count is the excitation the emitter absorbs.
+
+- **A `VectorPSF` with the beam's spectrum mirrored.**  The scan is the beam point-reflected about the emitter,
+  which is the widefield image of s(−k); the pupil grid is symmetric, so that is a flip.  `ScannedBeamPSF`
+  replaces only the six dipole fields by the beam's three components (the Jones vector in them, √w_d on each)
+  and the pupil field by the beam's (`ExcitationBeam.objective · amplitude`, not rescaled), and keeps the rest:
+  the matrix DFT, z, the forward model, `fit_beads`, the solver's pupil tangents (checked against autograd) and
+  the CRLBs.  The scan step is the optics' pixel size; point samples, no upsampling.
+- **The sample** (`sample_weights`): Σ_d w_d |E_d|² with w = 1 for a rotating dye, η_d for gold (the open
+  detector's collection of a dipole along d, `collection`), Σ η + 2η_d for a fluorescent bead's fixed random
+  dyes (the average over the sphere, checked by quadrature).  w_z = 0.65 for gold and 0.85 for a bead at NA 1.4
+  in oil.
+- **The polarisation** is read from the parameters on every call, held or free, so a held ellipticity given the
+  other handedness is honoured; ``beam.*`` parameters are differentiated through the whole model.
+- **A bead** is convolved with the sphere in a stack (as widefield's) and with its projection in one plane, the
+  scan computed with a margin of the radius and cropped: an FFT's wrap had put 6 % of the peak on the edges.
+- **Not yet:** reading real scans (Abberior `.msr` images), the scanner's geometry (scale, rotation, the
+  bidirectional shift), dead time, a factor per scan line and one shared height for molecules (S4), an
+  incoherent floor ε, the model file's modality and the GUI.

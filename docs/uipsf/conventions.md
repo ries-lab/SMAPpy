@@ -43,6 +43,8 @@ E(x, y) = Σ_k  P(k) · h_f(k) · exp(iW(k)) · exp(2πi k_z,imm z) · exp(2πi 
 
 **An excitation beam** (`model.excitation`) uses the same sign for light travelling the other way, into the sample: `E(r) = Σ_k a(k)·J(k)·exp(2πi[k_x x + k_y y + k_z z]) Δk²`, the beam travelling towards +z, so z is again the height above the focus and a mask at `(u, v)` sits at the wave vector `(k_x, k_y)` it shapes.  Leutenegger's library transforms with `exp(−i k·r)`: its pupil x is uipsf's −u. [`test_excitation.py::test_the_focal_field_is_leuteneggers_when_weighted_as_his`]
 
+**A scan image** (`model.scanned`) is indexed by the beam's position r_s, x and y as a camera image's, and the emitter's position r_e is in the same frame (relative to the scan's centre).  The count at r_s is the beam's intensity at the emitter, `I(r_e − r_s)`: the beam point-reflected about the emitter, not `I(r_s − r_e)` as a camera images a PSF.  So a beam whose coma or decentred mask pushes its light towards +x gives a scan whose light is towards −x of the emitter.  The model is the widefield one with the beam's spectrum mirrored, s(−k). [`test_scanned.py::test_the_scan_is_the_beams_intensity_point_reflected_about_the_emitter`]
+
 Above the critical angle, the axial wave numbers take the `+i·|·|` branch of the square root, so `exp(2πi k_z d)` decays. [`test_optics.py::test_above_the_critical_angle_kz_in_the_medium_is_positive_imaginary_so_depth_decays`]
 
 **The pupil grid.** P × P samples at `u, v = (i − (P−1)/2)·2/P`:

@@ -151,6 +151,12 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
 - **Built (November 2026, S2 of scanned-psfs.md):** the focused excitation field, `model/excitation.py` --
   reciprocity from the detection's fields, the input beam's fill, centre and polarisation, the masks of S1,
   power-normalised; checked against Leutenegger's library (whose E_z is n_m too small).  Next the scan (S3).
+- **Built (November 2026, S3's start):** the scan of a beam over an emitter with an open detector,
+  `model/scanned.py` -- the widefield PSF with the beam's spectrum mirrored, so the forward model, fitting and
+  CRLBs are the bead pipeline's; what dyes, fluorescent beads and gold make of E_z; a bead's size in one plane.
+  The single-plane study (scanned-psfs.md §7a): a known circular handedness breaks the twin, linear light keeps
+  it, a 40 nm bead fills a vortex's zero beyond SimuFLUX's ε.  Next: real bead and gold scans (reading them,
+  the scanner's geometry, dead time), then single molecules (S4).
 - **Confocal and ISM:** the focused excitation field (reversed apodisation; the input beam's fill,
   decentration and polarisation; a known phase mask such as a vortex, a top-hat or the SLM pattern; an
   incoherent floor ε), times detection convolved with the pinhole.  For SPAD-array ISM and ISM-FLUX each

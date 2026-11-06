@@ -338,8 +338,10 @@ twin from the model:
   one way or the other depending on the astigmatism's sign relative to the charge, so a 2-D donut in focus
   should see astigmatism's sign.  Not spherical's or defocus's, which are rotationally symmetric.
 
-Vectorial light adds little: the twin also conjugates the polarisation (circular L ↔ R), which changes
-nothing for linear input and, for a vortex with circular light, flips both together.
+Vectorial light: the twin also conjugates the polarisation (circular L ↔ R).  That changes nothing for
+linear input.  For circular input it matters as soon as the handedness is known: a model with the λ/4
+held cannot reach the twin, and the measurements below show that this alone breaks it for a Gaussian beam
+(an expectation of this section that S3 corrected: it had said vectorial light adds little).
 
 **Measured** (November 2026, `benchmarks/uipsf/synthetic/single_plane_twin.py`, results in
 `benchmarks/uipsf/results/single_plane_twin.jsonl`).  The detection PSF -- vectorial, unpolarised, NA 1.45 --
@@ -377,7 +379,60 @@ mirrored).  Δ is what the twin start's optimum is worse by, over the 20 beads:
   4× worse than three planes (8 against 2 mrad), as their first-order effect on a focused image vanishes at
   zero; the vortex keeps them at 4 mrad.  So precision is not what a single plane lacks; it is the sign.
 
+**Measured for scanned beams** (S3, November 2026, `benchmarks/uipsf/synthetic/scanned_single_plane.py`,
+results in `benchmarks/uipsf/results/scanned_single_plane.jsonl`; the model is `model/scanned.py`).  The
+excitation at 640 nm through NA 1.4 oil, SimuFLUX's fill, the same aberrations and mask offset as above; dyes
+behind an open detector, scanned 33 × 33 at 25 nm, N = 3·10⁴ (about 10⁴ counts in a Gaussian's scan), one
+background count per position.  KL is nats per emitter between the truth's expected scan and the
+alternative's, in one plane at focus; the fits are 20 emitters, the phase (order 4), the mask's centre and the
+emitters free, started from the truth and from the twin with the λ/4 held:
+
+| beam | twin, handedness flipped | twin, λ/4 held | fit from the twin (oil): Δ, nats | water: Δ |
+| --- | --- | --- | --- | --- |
+| Gaussian, circular | 0 | 327 | 0, **back at the truth** | 0, back at the truth |
+| vortex, circular | 2791 | 2865 | 0, back at the truth | 0, back at the truth |
+| top-hat, circular | 0.9 | 25 | 208, a poor local optimum | 366, poor local optimum |
+| half-moon, x along its line | 0 | 0 | 0, **at the twin** | 55, stays at the twin |
+
+- *The exact twin includes the handedness*: with it flipped, a Gaussian, a top-hat and a half-moon give the
+  same scan in focus (0–0.9 nats per emitter in oil; 8–29 in water, the mismatch breaking it weakly).
+- *A known circular handedness breaks it.*  A model with the λ/4 held cannot flip it, and that alone costs the
+  twin 327 nats per emitter for a Gaussian and 25 for a top-hat: from the twin the Gaussian's fit walks back to
+  the truth.  The handedness is known when the vortex's zero is dark (a vortex is dark only with one of the two,
+  below) or from the setup.  The top-hat's fit from the twin stops in a poor local optimum, as the tetrapod's
+  did above: **fit from both starts**.
+- *Linear polarisation keeps the twin*: the half-moon with x light ends at the twin, the even modes flipped and
+  the centre at −c, at the truth's objective.  It needs the even modes held, a vortex or circular scan of the
+  same path, or planes.
+- *The vortex breaks it outright* (its charge cannot flip), as in widefield; but in one plane its centre
+  trades with coma (CRLB 8·10⁻³ of the pupil radius against 2·10⁻³ in three planes; coma 14 against 4 mrad), so
+  a fit lands near the truth, not on it.
+- *Precision* (CRLB, 20 emitters): one plane determines every mode to 4–15 mrad and spherical to 14–22, about 2–4
+  × the CRLB of three planes at −300, 0, +300 nm of known beam defocus (the SLM's diversity; on the coverslip
+  the same as a stage).  Holding the even modes leaves the odd modes' CRLB unchanged except for the top-hat's
+  coma (6–8 → 4 mrad).  A half-moon's centre along its step line is not determined at all, the mask being the
+  same all along it: only the centre across the line (2·10⁻³) means anything.
+
+**What fills a vortex's zero** (`--zero`, the minimum within 100 nm of the axis against the crest, one cause at
+a time from a perfect beam; SimuFLUX's ε = 0.005 is the scale):
+
+| cause | zero / crest |
+| --- | --- |
+| none, or spherical 0.1 rad (symmetric) | 0 |
+| wrong handedness: dye, fluorescent bead, gold | 0.86, 0.76, 0.61 |
+| λ/4 off by 5° (χ = 40°) | 0.0069 |
+| 20, 40, 100 nm bead | 0.0029, 0.012, 0.073 |
+| astigmatism 0.1 rad | 0.0047 |
+| coma 0.1 rad | 0.0014 |
+| mask 0.05 of the pupil radius off | 0.0086 |
+
+So a 40 nm bead already fills the zero beyond SimuFLUX's ε: 20 nm beads are what the zero needs, or the bead's
+size fitted.  The three samples differ through E_z's weight (`model.scanned.sample_weights`: gold 0.65 of the
+in-plane components', a fluorescent bead's fixed dyes 0.85, a rotating dye 1).
+
 **Ways to break it without moving the stage**, in order of preference:
+0. **Circular light of known handedness** (measured above): free for a Gaussian beam and a vortex; a top-hat
+   needs both starts.
 1. **Hold the even modes from a widefield calibration of the objective** (step 1 above).  The twin is
    then not in the model, and the single plane learns the mask's parameters, the odd modes and
    corrections.  The diagnostic use (is the mask centred?) needs no more than this.
@@ -454,7 +509,7 @@ Each one ends, as uipsf's do, in parameters recovered from simulated data to the
 | --- | --- | --- | --- |
 | S1 | analytic phase masks, detection side: tetrapod and double helix; centre, rotation, scale, α held, each freeable as a diagnostic | simulated z stacks; widefield beads with a mask | the builder |
 | S2 | excitation focusing: fields, input beam, Jones pupil, normalisation; the oracle.  **Built** (`model/excitation.py`) | Leutenegger's library through SimuFLUX, as fixtures (`scripts/uipsf/make_oracles_focus.py`) | S1 for the masks |
-| S3 | beam scans with an open detector: Gaussian, vortex, top-hat, half-moon; bead size; w_z; ε's causes.  **First: the single-plane study (§7a)** -- which parameters one plane determines, with and without held even modes and with SLM defocus diversity, by Fisher information on simulations | simulated, then 20–40 nm fluorescent and 80 nm gold scans | S2 |
+| S3 | beam scans with an open detector: Gaussian, vortex, top-hat, half-moon; bead size; w_z; ε's causes.  **First: the single-plane study (§7a)** -- which parameters one plane determines, with and without held even modes and with SLM defocus diversity, by Fisher information on simulations.  **Model and single-plane study built** (November 2026, `model/scanned.py`, §7a); real scans next | simulated, then 20–40 nm fluorescent and 80 nm gold scans | S2 |
 | S4 | scanned single molecules: one shared height, a factor per line, blinking and bleaching masked, fixed dipoles as an option | simulated, then molecules on glass | S3 |
 | S5 | confocal: pinhole, product, λ_em, shared OPD Zernikes, scanner geometry, dead time | Abberior confocal bead scans (`.msr`) | S3 |
 | S6 | ISM: SPAD elements as channels on a lattice | a SPAD-array dataset (Vicidomini lab, BrightEyes) | S5 |

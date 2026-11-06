@@ -1,0 +1,48 @@
+{"study": "table", "optics": "oil, matched", "pattern": "Gaussian", "planes": "one plane", "twin": 0.0, "twin, λ/4 held": 326.633, "centre mirrored": 0.0}
+{"study": "table", "optics": "oil, matched", "pattern": "Gaussian", "planes": "three planes", "twin": 3256.827, "twin, λ/4 held": 3894.268, "centre mirrored": 0.0}
+{"study": "table", "optics": "oil, matched", "pattern": "vortex", "planes": "one plane", "twin": 2791.424, "twin, λ/4 held": 2864.694, "centre mirrored": 56.789}
+{"study": "table", "optics": "oil, matched", "pattern": "vortex", "planes": "three planes", "twin": 6241.098, "twin, λ/4 held": 6428.325, "centre mirrored": 236.255}
+{"study": "table", "optics": "oil, matched", "pattern": "top-hat", "planes": "one plane", "twin": 0.942, "twin, λ/4 held": 25.357, "centre mirrored": 75.51}
+{"study": "table", "optics": "oil, matched", "pattern": "top-hat", "planes": "three planes", "twin": 2094.476, "twin, λ/4 held": 2374.315, "centre mirrored": 683.061}
+{"study": "table", "optics": "oil, matched", "pattern": "half-moon", "planes": "one plane", "twin": 0.0, "twin, λ/4 held": 0.0, "centre mirrored": 26.314}
+{"study": "table", "optics": "oil, matched", "pattern": "half-moon", "planes": "three planes", "twin": 1701.639, "twin, λ/4 held": 1701.639, "centre mirrored": 148.284}
+{"study": "table", "optics": "water", "pattern": "Gaussian", "planes": "one plane", "twin": 17.24, "twin, λ/4 held": 606.296, "centre mirrored": 0.0}
+{"study": "table", "optics": "water", "pattern": "Gaussian", "planes": "three planes", "twin": 1993.519, "twin, λ/4 held": 3117.187, "centre mirrored": 0.0}
+{"study": "table", "optics": "water", "pattern": "vortex", "planes": "one plane", "twin": 2207.726, "twin, λ/4 held": 2347.331, "centre mirrored": 30.006}
+{"study": "table", "optics": "water", "pattern": "vortex", "planes": "three planes", "twin": 4660.032, "twin, λ/4 held": 5014.438, "centre mirrored": 132.46}
+{"study": "table", "optics": "water", "pattern": "top-hat", "planes": "one plane", "twin": 7.758, "twin, λ/4 held": 85.857, "centre mirrored": 56.972}
+{"study": "table", "optics": "water", "pattern": "top-hat", "planes": "three planes", "twin": 1250.323, "twin, λ/4 held": 1722.333, "centre mirrored": 347.421}
+{"study": "table", "optics": "water", "pattern": "half-moon", "planes": "one plane", "twin": 29.205, "twin, λ/4 held": 29.205, "centre mirrored": 21.891}
+{"study": "table", "optics": "water", "pattern": "half-moon", "planes": "three planes", "twin": 1222.04, "twin, λ/4 held": 1222.04, "centre mirrored": 103.267}
+{"study": "fits", "optics": "oil, matched", "pattern": "Gaussian", "emitters": 20, "truth start": {"objective": 11721.89, "phase": {"5": 0.195, "6": 0.307, "7": 0.154, "8": -0.102, "9": 0.085, "11": 0.119}, "centre": null}, "twin start": {"objective": 11721.89, "phase": {"5": 0.195, "6": 0.307, "7": 0.154, "8": -0.102, "9": 0.085, "11": 0.119}, "centre": null}, "twin minus truth (nats)": 0.0}
+{"study": "fits", "optics": "oil, matched", "pattern": "vortex", "emitters": 20, "truth start": {"objective": 11587.67, "phase": {"5": 0.209, "6": 0.301, "7": 0.125, "8": -0.088, "9": 0.083, "11": 0.089}, "centre": [0.03, 0.026]}, "twin start": {"objective": 11587.67, "phase": {"5": 0.209, "6": 0.301, "7": 0.125, "8": -0.088, "9": 0.083, "11": 0.089}, "centre": [0.03, 0.026]}, "twin minus truth (nats)": 0.0}
+{"study": "fits", "optics": "oil, matched", "pattern": "top-hat", "emitters": 20, "truth start": {"objective": 11605.48, "phase": {"5": 0.199, "6": 0.304, "7": 0.139, "8": -0.103, "9": 0.086, "11": 0.147}, "centre": [0.05, 0.037]}, "twin start": {"objective": 11812.99, "phase": {"5": -0.072, "6": -0.163, "7": 0.212, "8": -0.297, "9": 0.066, "11": -0.098}, "centre": [-0.077, -0.103]}, "twin minus truth (nats)": 207.51}
+{"study": "fits", "optics": "oil, matched", "pattern": "half-moon", "emitters": 20, "truth start": {"objective": 11703.86, "phase": {"5": 0.196, "6": 0.307, "7": 0.151, "8": -0.095, "9": 0.083, "11": 0.128}, "centre": [0.05, 0.029]}, "twin start": {"objective": 11703.86, "phase": {"5": -0.196, "6": -0.307, "7": 0.151, "8": -0.095, "9": 0.083, "11": -0.128}, "centre": [-0.05, -0.029]}, "twin minus truth (nats)": 0.0}
+{"study": "fits", "optics": "water", "pattern": "Gaussian", "emitters": 20, "truth start": {"objective": 11809.84, "phase": {"5": 0.219, "6": 0.302, "7": 0.149, "8": -0.102, "9": 0.08, "11": 0.046}, "centre": null}, "twin start": {"objective": 11809.84, "phase": {"5": 0.219, "6": 0.302, "7": 0.149, "8": -0.102, "9": 0.08, "11": 0.046}, "centre": null}, "twin minus truth (nats)": 0.0}
+{"study": "fits", "optics": "water", "pattern": "vortex", "emitters": 20, "truth start": {"objective": 11510.88, "phase": {"5": 0.198, "6": 0.3, "7": 0.144, "8": -0.093, "9": 0.078, "11": 0.125}, "centre": [0.041, 0.03]}, "twin start": {"objective": 11510.88, "phase": {"5": 0.198, "6": 0.3, "7": 0.144, "8": -0.093, "9": 0.078, "11": 0.124}, "centre": [0.04, 0.03]}, "twin minus truth (nats)": 0.0}
+{"study": "fits", "optics": "water", "pattern": "top-hat", "emitters": 20, "truth start": {"objective": 11753.68, "phase": {"5": 0.191, "6": 0.311, "7": 0.14, "8": -0.105, "9": 0.08, "11": 0.153}, "centre": [0.048, 0.032]}, "twin start": {"objective": 12119.69, "phase": {"5": 0.232, "6": -0.683, "7": 0.432, "8": -0.771, "9": 0.247, "11": -0.06}, "centre": [-0.182, -0.11]}, "twin minus truth (nats)": 366.01}
+{"study": "fits", "optics": "water", "pattern": "half-moon", "emitters": 20, "truth start": {"objective": 11714.12, "phase": {"5": 0.206, "6": 0.306, "7": 0.146, "8": -0.098, "9": 0.079, "11": 0.133}, "centre": [0.05, 0.031]}, "twin start": {"objective": 11769.26, "phase": {"5": -0.197, "6": -0.319, "7": 0.154, "8": -0.105, "9": 0.076, "11": 0.096}, "centre": [-0.05, -0.024]}, "twin minus truth (nats)": 55.14}
+{"study": "precision", "pattern": "Gaussian", "case": "one plane", "emitters": 20, "crlb_rad": {"5": 0.0049, "6": 0.0049, "7": 0.0038, "8": 0.0034, "9": 0.0043, "11": 0.0138}, "crlb_centre": null}
+{"study": "precision", "pattern": "Gaussian", "case": "one plane, even held", "emitters": 20, "crlb_rad": {"7": 0.0038, "8": 0.0034, "9": 0.0042}, "crlb_centre": null}
+{"study": "precision", "pattern": "Gaussian", "case": "three planes", "emitters": 20, "crlb_rad": {"5": 0.0022, "6": 0.0023, "7": 0.0022, "8": 0.0019, "9": 0.002, "11": 0.0027}, "crlb_centre": null}
+{"study": "precision", "pattern": "vortex", "case": "one plane", "emitters": 20, "crlb_rad": {"5": 0.005, "6": 0.0043, "7": 0.0141, "8": 0.0126, "9": 0.006, "11": 0.0221}, "crlb_centre": [0.0081, 0.0077]}
+{"study": "precision", "pattern": "vortex", "case": "one plane, even held", "emitters": 20, "crlb_rad": {"7": 0.0144, "8": 0.0122, "9": 0.0059}, "crlb_centre": [0.0084, 0.0071]}
+{"study": "precision", "pattern": "vortex", "case": "three planes", "emitters": 20, "crlb_rad": {"5": 0.002, "6": 0.002, "7": 0.0037, "8": 0.0035, "9": 0.0019, "11": 0.0043}, "crlb_centre": [0.0023, 0.0024]}
+{"study": "precision", "pattern": "top-hat", "case": "one plane", "emitters": 20, "crlb_rad": {"5": 0.0106, "6": 0.0115, "7": 0.0061, "8": 0.008, "9": 0.0076, "11": 0.0205}, "crlb_centre": [0.004, 0.0041]}
+{"study": "precision", "pattern": "top-hat", "case": "one plane, even held", "emitters": 20, "crlb_rad": {"7": 0.0038, "8": 0.0037, "9": 0.0072}, "crlb_centre": [0.0034, 0.0041]}
+{"study": "precision", "pattern": "top-hat", "case": "three planes", "emitters": 20, "crlb_rad": {"5": 0.003, "6": 0.0031, "7": 0.002, "8": 0.0024, "9": 0.0031, "11": 0.0046}, "crlb_centre": [0.0008, 0.0009]}
+{"study": "precision", "pattern": "half-moon", "case": "one plane", "emitters": 20, "crlb_rad": {"5": 0.0061, "6": 0.0086, "7": 0.0057, "8": 0.0062, "9": 0.0053, "11": 0.0193}, "crlb_centre": [null, 0.0022]}
+{"study": "precision", "pattern": "half-moon", "case": "one plane, even held", "emitters": 20, "crlb_rad": {"7": 0.0054, "8": 0.0058, "9": 0.005}, "crlb_centre": [null, 0.0023]}
+{"study": "precision", "pattern": "half-moon", "case": "three planes", "emitters": 20, "crlb_rad": {"5": 0.0024, "6": 0.0038, "7": 0.0023, "8": 0.0029, "9": 0.0028, "11": 0.0041}, "crlb_centre": [null, 0.0007]}
+{"study": "zero", "cause": "none", "zero": -0.0}
+{"study": "zero", "cause": "wrong handedness, dye", "zero": 0.86323}
+{"study": "zero", "cause": "wrong handedness, bead", "zero": 0.76157}
+{"study": "zero", "cause": "wrong handedness, gold", "zero": 0.60596}
+{"study": "zero", "cause": "bead of 20 nm", "zero": 0.00292}
+{"study": "zero", "cause": "bead of 40 nm", "zero": 0.01166}
+{"study": "zero", "cause": "bead of 100 nm", "zero": 0.0725}
+{"study": "zero", "cause": "astigmatism 0.1 rad", "zero": 0.00471}
+{"study": "zero", "cause": "coma 0.1 rad", "zero": 0.00135}
+{"study": "zero", "cause": "spherical 0.1 rad", "zero": -0.0}
+{"study": "zero", "cause": "mask 0.05 of the pupil off", "zero": 0.00856}
+{"study": "zero", "cause": "λ/4 off: χ = 40° instead of 45°", "zero": 0.00689}
