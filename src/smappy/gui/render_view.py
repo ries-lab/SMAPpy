@@ -242,7 +242,7 @@ class RenderView(QWidget):
         self.frame_source = FrameSource()
         session.view_frames["2D"] = self.frame_source
 
-        # pan/zoom fires many range changes; render once they settle
+        # pan/zoom fires many range changes; render at most every 40 ms
         self._timer = QTimer(singleShot=True, interval=40)
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
@@ -534,7 +534,12 @@ class RenderView(QWidget):
         return images
 
     def schedule(self) -> None:
-        self._timer.start()
+        # A throttle, not a debounce: restarting the timer on every range
+        # change drew nothing while a scroll or pinch went on, only once it
+        # stopped.  The render is on a thread and the newest view wins
+        # (`_pending`), so asking every 40 ms keeps the picture following.
+        if not self._timer.isActive():
+            self._timer.start()
 
     def reset(self) -> None:
         """Show everything."""
