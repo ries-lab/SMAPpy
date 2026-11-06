@@ -2690,3 +2690,27 @@ constant n_imm/n_med, which the normalisation takes up (module docstring).
 - **Not yet:** reading real scans (Abberior `.msr` images), the scanner's geometry (scale, rotation, the
   bidirectional shift), dead time, a factor per scan line and one shared height for molecules (S4), an
   incoherent floor ε, the model file's modality and the GUI.
+
+## A confocal raster scan (November 2026; `model/confocal.py`, C1 of `docs/uipsf/scanned-psfs.md` §9)
+
+μ(r_s) = N·I_exc(r_e − r_s)·D(r_s − r_e) + b: the open-detector scan times D, the share of the collected photons
+through the pinhole.
+
+- **D** is the widefield `VectorPSF` at λ_em (not mirrored: an image is drawn where the emitter is), of an emitter
+  at r_e − r_ph, convolved by FFT with the disc's transform (π R² jinc per pixel area) on a scan with a margin of
+  the pinhole's radius and 400 nm of the PSF's tails, then cropped.  The pinhole's diameter is typed in Airy
+  units of 1.22 λ_em/NA; its offset ``pinhole.offset`` (nm) is held unless freed.
+- **One optical path:** the detection reads the excitation's pupil with its phase scaled by λ_exc/λ_em and without
+  the mask (`_SharedPath`); the pupil coordinates are in units of the NA at both wavelengths.
+- **Checks** (`tests/uipsf_tests/test_confocal.py`): wide open (20 AU) it is the open detector's scan to 1 %; a
+  point pinhole gives I_exc·I_em; 1 AU passes 0.76 of an on-axis emitter's collected light; the disc integral
+  agrees with quadrature to 1 %; a pinhole 100 nm off moves the scan 47 nm the other way.  SimuFLUX is not used
+  as an oracle: its pinhole convolves the excitation's circular-light intensity at λ_exc with a pixel disc.
+- **Samples:** a rotating dye exactly; a fluorescent bead as the open detector's weights times the unpolarised
+  detection (each dye's absorption-emission correlation dropped); gold refused (coherent behind a pinhole).  A
+  bead's size convolves the product, per plane.
+- **The solver** differentiates it by JVPs through the whole model: `ForwardModel.linearisable` is False when a
+  PSF says ``linearisable = False``, and `Problem` then skips the pupil and emitter linearisations, which assume an
+  image linear in one pupil field.  A fit of 6 beads in one plane takes 5 s on the CPU.
+- **Not yet:** paths that differ after the dichroic, a pinhole's diameter learnt, a blur of the product (scan
+  jitter), the scan's geometry and reading real scans (C2), the report (C4).

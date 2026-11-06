@@ -520,7 +520,7 @@ and its purpose is **characterising the beam** -- its aberrations, polarisation,
 alignment -- not localising molecules in raster images; that may stay the only use.  So S5's confocal model
 comes before S4, and the output is a report of the beam, not a spline for SMAPpy's fitter.  The steps:
 
-- **C1, the confocal model:** μ(r_s) = N·I_exc(r_e − r_s)·D(r_e − r_s) + b, D the emission PSF at λ_em (a
+- **C1, the confocal model** (**built**, `model/confocal.py`; architecture.md): μ(r_s) = N·I_exc(r_e − r_s)·D(r_e − r_s) + b, D the emission PSF at λ_em (a
   `VectorPSF` intensity) convolved with the pinhole's disc back-projected into the sample (its size in Airy
   units of λ_em/NA, its offset learnable), descanned.  One pupil for both paths, Zernikes in nm of OPD turned
   into phase at each wavelength; path terms only if the data ask.  Checked in its limits (pinhole → 0:

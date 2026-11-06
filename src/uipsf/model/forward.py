@@ -70,6 +70,13 @@ class ForwardModel:
         return (specs + self.geometry.specs(batch, start) + self.intensity.specs(batch, start)
                 + self.background.specs(batch, start))
 
+    @property
+    def linearisable(self) -> bool:
+        """Whether the solver may build Jacobian columns from `pupil_linearisation` and `emitter_linearisation`:
+        every channel's PSF linear in one pupil field's |·|² (a PSF says otherwise by ``linearisable = False``,
+        `model.confocal`); if not, every column is a JVP through the whole model."""
+        return all(getattr(ch.psf, "linearisable", True) for ch in self.channels)
+
     def psf_names(self) -> set[str]:
         """The parameters that enter the PSFs themselves (pupils, blur), as opposed to where the emitter
         is and how bright: the solver differentiates the latter through `emitter_linearisation`.  The

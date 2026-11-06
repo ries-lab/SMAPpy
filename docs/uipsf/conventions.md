@@ -45,6 +45,8 @@ E(x, y) = Σ_k  P(k) · h_f(k) · exp(iW(k)) · exp(2πi k_z,imm z) · exp(2πi 
 
 **A scan image** (`model.scanned`) is indexed by the beam's position r_s, x and y as a camera image's, and the emitter's position r_e is in the same frame (relative to the scan's centre).  The count at r_s is the beam's intensity at the emitter, `I(r_e − r_s)`: the beam point-reflected about the emitter, not `I(r_s − r_e)` as a camera images a PSF.  So a beam whose coma or decentred mask pushes its light towards +x gives a scan whose light is towards −x of the emitter.  The model is the widefield one with the beam's spectrum mirrored, s(−k). [`test_scanned.py::test_the_scan_is_the_beams_intensity_point_reflected_about_the_emitter`]
 
+**A confocal scan's pinhole offset** (`model.confocal`, ``pinhole.offset``, nm) is where the pinhole's centre, back-projected into the sample, sits relative to the beam's focus.  The detection peaks where the pinhole sees the emitter, r_s = r_e − r_ph, so a pinhole at +x pulls the scan towards −x of the emitter (by about half the offset for equal widths). [`test_confocal.py::test_a_pinhole_off_the_axis_pulls_the_scan_the_other_way_by_about_half`]
+
 Above the critical angle, the axial wave numbers take the `+i·|·|` branch of the square root, so `exp(2πi k_z d)` decays. [`test_optics.py::test_above_the_critical_angle_kz_in_the_medium_is_positive_imaginary_so_depth_decays`]
 
 **The pupil grid.** P × P samples at `u, v = (i − (P−1)/2)·2/P`:

@@ -2,6 +2,7 @@
 from .background import Constant, Planar
 from .build import Held, held_from, make_psf, make_pupil, pupil_grid, start_from
 from .channels import Channel
+from .confocal import ConfocalPSF
 from .excitation import BeamSpec, ExcitationBeam
 from .field import FieldPolynomial
 from .forward import ForwardModel
@@ -19,4 +20,4 @@ __all__ = ["Channel", "FieldPolynomial", "Held", "held_from", "make_psf", "make_
            "FourPiModel", "BeadStackGeometry", "CoverslipStackGeometry",
            "InSituGeometry", "Bleaching", "PerSliceFactor", "PerFrameFactor", "PerObservation", "Constant", "Planar",
            "rough_start", "MaskSpec", "PhaseMask", "make_mask", "BeamSpec", "ExcitationBeam",
-           "ScannedBeamPSF", "sample_weights"]
+           "ScannedBeamPSF", "sample_weights", "ConfocalPSF"]

@@ -407,6 +407,10 @@ class Problem:
         objective += float(to_cpu64(params.prior_penalty()))
         return Normal(objective, H_ss, H_se, H_ee, g_s, g_e)
 
+    def _linear_ok(self) -> bool:
+        """The model's linearisations may be used: asked for, and every PSF linear in one pupil field."""
+        return self.linearise and getattr(self.model, "linearisable", True)
+
     def _jacobians(self, pc, b):
         """μ and the Jacobians of the chunk's μ, flattened per emitter: [P_s, E, M] and [P_e, E, M]."""
         us, ue = pc.shared_vector(), pc.emitter_matrix()
@@ -423,7 +427,7 @@ class Problem:
 
         eye_e = torch.eye(Pe, dtype=ue.dtype, device=ue.device)[:, None, :].expand(Pe, E, Pe)
         with torch.no_grad():
-            linear = getattr(self.model, "emitter_linearisation", None) if self.linearise else None
+            linear = getattr(self.model, "emitter_linearisation", None) if self._linear_ok() else None
             free = {n for n, _, _ in pc.layout("shared")}
             lin = linear(pc.physical(), b, shared_free=free) if linear is not None else None
             J_s = self._shared_columns(pc, b, us, ue, mu_of, mu, lin)
@@ -471,7 +475,7 @@ class Problem:
         names = [None] * Ps
         for n, lo, hi in pc.layout("shared"):
             names[lo:hi] = [n] * (hi - lo)
-        linear = getattr(self.model, "pupil_linearisation", None) if self.linearise else None
+        linear = getattr(self.model, "pupil_linearisation", None) if self._linear_ok() else None
         if linear is not None:
             C = b.data.shape[1]
             Jc = J.view(Ps, E, C, -1)

@@ -157,6 +157,10 @@ multi-channel machinery carry over; the forward model and the data's geometry ch
   The single-plane study (scanned-psfs.md §7a): a known circular handedness breaks the twin, linear light keeps
   it, a 40 nm bead fills a vortex's zero beyond SimuFLUX's ε.  Next: real bead and gold scans (reading them,
   the scanner's geometry, dead time), then single molecules (S4).
+- **Built (November 2026, C1):** the confocal scan, `model/confocal.py` -- the open-detector scan times the
+  emission PSF at λ_em through a pinhole (diameter in Airy units, offset learnable), one optical path for both
+  wavelengths, fitted by JVPs through the whole model.  For beam characterisation (scanned-psfs.md §9); next
+  reading scans with typed settings (C2).
 - **Confocal and ISM:** the focused excitation field (reversed apodisation; the input beam's fill,
   decentration and polarisation; a known phase mask such as a vortex, a top-hat or the SLM pattern; an
   incoherent floor ε), times detection convolved with the pinhole.  For SPAD-array ISM and ISM-FLUX each
