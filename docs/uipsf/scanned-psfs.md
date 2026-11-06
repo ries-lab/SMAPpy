@@ -531,6 +531,31 @@ comes before S4, and the output is a report of the beam, not a spline for SMAPpy
   must be enterable by hand.  Beads found by SMAPpy's bead detection and cut out; one plane or an xyz stack;
   the bidirectional line shift as a parameter.  The detectors are APDs with dead times under 100 ns, run
   below saturation: **dead time is not modelled** for now (scanned-psfs.md §5 keeps it as a later option).
+
+  **A first look at real data (2026-11-06,** `benchmarks/uipsf/real/confocal_bead.py`, its runs in
+  `results/confocal_bead.jsonl`): one 120 nm bead on an Abberior system, oil objective NA 1.4, medium 1.38,
+  640 → ~680 nm, 30 nm pixels -- a donut overview and a 7-plane filled-beam stack 200 nm apart, fitted
+  together through one pupil phase (Noll 5-11), each scan its own bead.  What it said:
+  - *Handedness* +1 by 340 nats on the donut alone, the same from three starts: circular light of known
+    handedness is decidable from one plane, as §7a predicts.
+  - *The beam is flat*: a free Gaussian fill ran off to a top-hat; a flat beam beats SimuFLUX's 2.15 by 34-43.
+    With the minimal pupil (γ = 0) the learnt NA is 1.37 at 1 AU (90 nats), just below the medium's 1.38 --
+    a cut by the medium or a smaller aperture, not told apart.
+  - *Pinhole* 1 AU over 0.87 by 70-200, all from the stack; the donut alone prefers 0.87 by 93.
+  - *Aberrations*: coma y 0.3 rad and spherical 0.15-0.23 hold in every fit; coma x and trefoil trade with
+    the pinhole and between the scans.  A learnt vortex centre trades with coma (0.14 pupil radii against
+    0.28 rad) and left the aperture in two of twelve fits: hold it centred until a scan separates them.
+  - *The two scans disagree*: sharing the pupil costs the donut 58-200 nats against fitting it alone -- the
+    donut's own path (the vortex plate) or something the model misses.
+  - *The misfit*: at 400-600 nm defocus the model draws a ring with a dark middle where the data show a
+    filled disc; neither the fill nor the NA nor the pinhole removes it.  Suspects: the thin-bead approximation
+    at 120 nm, too few modes, or the stack's z step.  Line-to-line stripes (the file's "vibrations") remain in
+    the residuals: the line shift is still to model.
+  - *How far a stack is worth taking*: at 1 AU a bead keeps 14-22 % of its in-focus counts at 600 nm, 5-8 % at
+    1 µm and 2-3 % at 1.5 µm, there spread over a few µm against the background: ±1 µm in 100 nm steps carries
+    the information, the planes beyond little.
+  The joint fit is L-BFGS through autograd over two `ForwardModel` s, outside the solver; a model of several
+  scans sharing parameters is the step that brings it in.
 - **C3, simulations, then the lab's example data** (to come): recovered to the CRLB with §7a's rules -- the
   even modes held from a widefield calibration or two to three planes for linear light, one plane for
   circular light of known handedness.
