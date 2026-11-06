@@ -536,6 +536,11 @@ comes before S4, and the output is a report of the beam, not a spline for SMAPpy
   circular light of known handedness.
 - **C4, the report:** the beam's parameters with their CRLBs, the pupil, the scan against the model and the
   residuals, the pinhole's offset.  The PSF calibration window's *modality* choice comes with it, not before.
+  **Later, a check of the descanning** (Jonas, November 2026): the pinhole's offset fitted per bead (an
+  emitter-scope ``pinhole.offset`` beside the shared one) and plotted against where the bead is in the field.
+  A perfect descan gives one offset everywhere; a constant offset is a misaligned pinhole; an offset growing
+  with the distance from the scan's centre is a descan whose gain or rotation does not match the scan's.  It
+  waits for data with beads spread over the field.
 
 **S1 paused (November 2026).**  The mask machinery is built and tested (`model/mask.py`, the model file,
 `start_from`, the twin study §7a), and fitted on real double-helix beads (§6), but it is not in the GUI.  The
