@@ -2,7 +2,8 @@
 # for a file of one's own (in the config folder): this one is never written.
 # The same format File > Workspace > Save writes: to change it, arrange the
 # tabs in the program, save the GUI, and put the tabs here.  A plugin named
-# here that is not installed is left out when it is read.
+# here that is not installed is left out when it is read.  `line_above: true`
+# draws a line above a section (right-click it: *Line above*).
 version: 1
 tabs:
 - name: File
@@ -19,7 +20,10 @@ tabs:
   - plugin: Localize/Gaussian 2D 2C
   - plugin: Localize/Spline 3D
   - plugin: Localize/Spline 3D 2C
-  - plugin: Localize/Spline 4Pi
+  - plugin: Analysis/After fit/Assign colours
+    line_above: true
+  - plugin: Analysis/Drift/RCC
+  - plugin: Analysis/Drift/COMET
 - name: Render
   kind: render
 - name: Analysis

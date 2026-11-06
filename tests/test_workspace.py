@@ -109,6 +109,18 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     assert back.layout["active_tab"] == "Analysis"
 
 
+def test_a_line_above_a_section_is_kept_and_said_only_where_drawn(tmp_path):
+    ws = Workspace.default()
+    localize = next(t for t in ws.tabs if t.name == "Localize")
+    lined = [i.plugin for i in localize.instances if i.line_above]
+    assert lined == ["Analysis/After fit/Assign colours"]
+    path = ws.save(tmp_path / "w.yaml")
+    assert path.read_text().count("line_above") == 1
+    back = next(t for t in load(path).tabs if t.name == "Localize")
+    assert [i.line_above for i in back.instances] == \
+        [i.line_above for i in localize.instances]
+
+
 def shape(ws):
     """Tabs and pins without the ids, which are deliberately random."""
     return [(t.name, t.kind, [i.plugin for i in t.instances]) for t in ws.tabs]

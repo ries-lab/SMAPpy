@@ -32,6 +32,14 @@ from .help_window import show_help
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window, note_style
 
 
+def _rule() -> QFrame:
+    """The line that sets a group of sections apart (`Instance.line_above`)."""
+    line = QFrame()
+    line.setFrameShape(QFrame.HLine)
+    line.setFrameShadow(QFrame.Sunken)
+    return line
+
+
 class _Slot(QWidget):
     """One instance's panel, built the first time it is looked at.
 
@@ -201,6 +209,8 @@ class PluginTab(QWidget):
             section.button.customContextMenuRequested.connect(
                 lambda point, i=instance, s=section: self._menu(i, s, point))
             self.sections.append(section)
+            if instance.line_above:
+                self.stack.addWidget(_rule())
             self.stack.addWidget(section)
         for stale in set(self.slots) - {i.id for i in self.tab.instances}:
             self.slots.pop(stale).deleteLater()
@@ -289,6 +299,9 @@ class PluginTab(QWidget):
         menu.addSeparator()
         rename = menu.addAction("Rename...")
         duplicate = menu.addAction("Duplicate")
+        line = menu.addAction("Line above")
+        line.setCheckable(True)
+        line.setChecked(instance.line_above)
         menu.addSeparator()
         detach = menu.addAction("Open in its own window")
         remove = menu.addAction("Remove from this tab")
@@ -315,6 +328,9 @@ class PluginTab(QWidget):
             copy = instance.copy()
             copy.label = f"{instance.title()} copy"
             self.tab.instances.insert(index + 1, copy)
+            self.rebuild()
+        elif chosen is line:
+            instance.line_above = not instance.line_above
             self.rebuild()
         elif chosen is detach:
             self._detach(section, instance)

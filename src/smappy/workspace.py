@@ -58,6 +58,8 @@ class Instance:
     # None for a plugin, and for a chain that is used as saved: then `plugin`
     # is its path and the file is the chain.
     chain: Optional[Dict[str, Any]] = None
+    # a line drawn above it in its tab, to set a group of plugins apart
+    line_above: bool = False
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -134,6 +136,8 @@ class Workspace:
             for instance in tab["instances"]:
                 if instance.get("chain") is None:
                     instance.pop("chain", None)
+                if not instance.get("line_above"):
+                    instance.pop("line_above", None)
         data = {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
         if self.filters is not None:
             data["filters"] = {f: [None if v is None else float(v) for v in b]
@@ -164,7 +168,8 @@ class Workspace:
                     label=str(item.get("label") or ""),
                     values=values if isinstance(values, dict) else {},
                     enabled=bool(item.get("enabled", True)),
-                    chain=chain if isinstance(chain, dict) else None))
+                    chain=chain if isinstance(chain, dict) else None,
+                    line_above=bool(item.get("line_above", False))))
             tabs.append(Tab(name=str(raw["name"]), kind=str(raw.get("kind") or "plugins"),
                             header=str(raw.get("header") or ""), instances=instances))
         layout = data.get("layout")
