@@ -183,10 +183,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..frc import (FPC, FRC, THRESHOLD as THRESHOLD_LINE, blur_envelope,
-                   envelope_resolution, fpc_resolution, frc_resolution)
+from ..frc import (FPC, FRC, LOCAL_TILE_NM, MIN_LOCS as MIN_FRC_LOCS, FRCMap,
+                   THRESHOLD as THRESHOLD_LINE, blur_envelope,
+                   envelope_resolution, fpc_resolution, frc_resolution,
+                   local_frc)
 from ..locs import Localizations, frames_apart
-from . import Context, Plot, Plugin, Result, param, register
+from . import Context, FormState, Plot, Plugin, Result, param, register
 from .statistics import (MIN_FOR_FIT, PRECISION_FIELDS, PRECISION_Z_FIELDS,
                          precision_density, precision_model)
 
@@ -673,6 +675,7 @@ class Measurement:
     crlb: Dict[str, Dict[str, float]] = field(default_factory=dict)
     frc: Optional[FRC] = None
     fpc: Optional[FPC] = None                  # the resolution along each axis
+    frc_map: Optional[FRCMap] = None           # the resolution of each tile
     photons: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
     unit: str = "nm"                           # "pixels" for a pixel table
@@ -702,6 +705,8 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
             reach_z: float = 0.0, max_gap: int = 5, pairwise: bool = True,
             crlb: bool = True, frc: bool = False, frc_pixel: float = 0.0,
             frc_blocks: int = 20, frc_repeats: int = 5, frc_axes: bool = False,
+            frc_map: bool = False, frc_tile_nm: float = LOCAL_TILE_NM,
+            frc_tile_locs: int = MIN_FRC_LOCS,
             bounds: Optional[Dict[str, Tuple]] = None,
             max_frame_pairs: int = 20000, max_pairs: int = 2_000_000,
             seed: int = 0, slab_nm: Optional[float] = None,
@@ -724,6 +729,15 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
         out.frc = _frc_of(locs, frc_pixel, frc_blocks, frc_repeats, seed, report)
         if out.frc is not None and out.frc.message:
             out.notes.append(f"FRC: {out.frc.message}")
+    if frc_map:
+        # the whole field's pixel when it was just measured: the coarse pass
+        # that finds one is not worth paying twice
+        pixel = (out.frc.pixelsize if out.frc is not None and out.frc.ok
+                 else frc_pixel)
+        out.frc_map = _frc_map_of(locs, pixel, frc_tile_nm, frc_tile_locs,
+                                  frc_blocks, frc_repeats, seed, report)
+        if out.frc_map is not None and out.frc_map.message:
+            out.notes.append(f"local FRC: {out.frc_map.message}")
     if frc_axes:
         # three splits at least: the spread over them is the error bar, and a
         # 3D transform is dear enough that more than a few is not worth it
@@ -852,6 +866,19 @@ def _frc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
                           np.asarray(locs["frame"]), pixelsize=pixel,
                           n_blocks=blocks, repeats=repeats, seed=seed,
                           report=report)
+
+
+def _frc_map_of(locs: Localizations, pixel: float, tile_nm: float,
+                min_locs: int, blocks: int, repeats: int, seed: int, report
+                ) -> Optional[FRCMap]:
+    """The local FRC of this table, or None when it has nothing to render."""
+    if "x_nm" not in locs or "y_nm" not in locs or "frame" not in locs:
+        return None
+    return local_frc(np.asarray(locs["x_nm"], dtype=float),
+                     np.asarray(locs["y_nm"], dtype=float),
+                     np.asarray(locs["frame"]), pixelsize=pixel,
+                     tile_nm=tile_nm, min_locs=min_locs, n_blocks=blocks,
+                     repeats=repeats, seed=seed, report=report)
 
 
 def _fpc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
@@ -1004,6 +1031,18 @@ def summary(found: Sequence[Measurement]) -> str:
                 lines.append(f"            the blur of {sigma:.2f} {u} alone "
                              f"crosses 1/7 at {envelope_resolution(sigma):.1f} {u} "
                              "-- read the curves, not the ratio")
+        local = measurement.frc_map
+        if local is not None and local.ok:
+            values = local.resolution[np.isfinite(local.resolution)]
+            ny, nx = local.resolution.shape
+            lines.append(
+                f"  local FRC {np.median(values):.1f} {u} median over "
+                f"{local.n_measured} of {nx}x{ny} tiles of "
+                f"{local.tile_nm / 1000:.3g} um (10th to 90th percentile "
+                f"{np.percentile(values, 10):.1f} to "
+                f"{np.percentile(values, 90):.1f} {u}); "
+                f"{local.n_sparse} too sparse, {local.n_uncrossed} never "
+                "crossed 1/7")
         planes = measurement.fpc
         if planes is not None and planes.ok:
             per_axis = "  ".join(
@@ -1307,6 +1346,39 @@ def draw_frc(ax, found: Sequence[Measurement]) -> None:
                  fontsize=7.5, color="0.25")
 
 
+def draw_frc_map(ax, measurement: Measurement) -> None:
+    """The resolution of each tile, with the tiles that have none in grey."""
+    import matplotlib
+
+    local = measurement.frc_map
+    if local is None or not local.resolution.size:
+        ax.set_axis_off()
+        ax.set_title("no local FRC", fontsize=7.5, color="0.25")
+        return
+    ny, nx = local.resolution.shape
+    extent = (local.x0 / 1000, (local.x0 + nx * local.tile_nm) / 1000,
+              (local.y0 + ny * local.tile_nm) / 1000, local.y0 / 1000)
+    # grey for a tile with localizations and no value, nothing for empty space
+    cmap = matplotlib.colormaps["viridis"].with_extremes(
+        bad="0.6" if np.any(local.n_locs > 0) else "white")
+    shown = np.where(local.n_locs > 0, local.resolution, np.nan)
+    image = ax.imshow(np.ma.masked_invalid(shown), cmap=cmap, extent=extent,
+                      interpolation="nearest")
+    empty = np.where(local.n_locs > 0, np.nan, 1.0)
+    ax.imshow(np.ma.masked_invalid(empty), cmap="Greys", vmin=0, vmax=10,
+              extent=extent, interpolation="nearest")
+    ax.figure.colorbar(image, ax=ax, label=f"FRC resolution ({measurement.unit})",
+                       shrink=0.85)
+    ax.set_xlabel("x (um)")
+    ax.set_ylabel("y (um)")
+    ax.set_aspect("equal")
+    note = (f"{local.n_measured} tiles of {local.tile_nm / 1000:.3g} um measured"
+            + (f", grey: {local.n_sparse + local.n_uncrossed} without a value"
+               if local.n_sparse + local.n_uncrossed else ""))
+    ax.set_title(f"local FRC of {measurement.name}: {note}", fontsize=7.5,
+                 color="0.25")
+
+
 AXIS_COLORS = {"x": "#1f77b4", "y": "#2ca02c", "z": "#d62728"}
 
 
@@ -1353,7 +1425,69 @@ def draw_planes(ax, found: Sequence[Measurement]) -> None:
                  fontsize=7.5, color="0.25")
 
 
+# ------------------------------------------------------- the map, handed back
+
+LOCAL_COLUMN = "frc_local_nm"
+LOCAL_ERROR_COLUMN = "frc_local_err_nm"
+
+
+def with_local_frc(locs: Localizations, mask, local: FRCMap,
+                   smooth: bool = False) -> Localizations:
+    """A new table with the map's value on every measured localization.
+
+    NaN outside ``mask`` -- the localizations the map was not measured on --
+    and wherever the tile has no value.  Averaged per blink on a grouped
+    layer, as a precision is.
+    """
+    from ..mathparse import remember
+
+    mask = np.asarray(mask, dtype=bool)
+    x = np.asarray(locs["x_nm"], dtype=float)[mask]
+    y = np.asarray(locs["y_nm"], dtype=float)[mask]
+    value = np.full(len(locs), np.nan, np.float32)
+    error = np.full(len(locs), np.nan, np.float32)
+    value[mask] = local.at(x, y, smooth=smooth)
+    error[mask] = local.at(x, y, smooth=smooth, values=local.error)
+    out = Localizations({**locs.columns, LOCAL_COLUMN: value,
+                         LOCAL_ERROR_COLUMN: error}, dict(locs.metadata))
+    remember(out, LOCAL_COLUMN, "", grouped="mean")
+    remember(out, LOCAL_ERROR_COLUMN, "", grouped="mean")
+    return out
+
+
+def local_frc_image(local: FRCMap, name: str = "local FRC"):
+    """The map as an image layer: one pixel per tile, placed on the table.
+
+    A tile without a value is 0 rather than NaN, which an image layer's
+    contrast would take for its maximum; read 0 as "not measured".
+    """
+    from ..images import ImageData
+
+    data = np.nan_to_num(local.resolution, nan=0.0).astype(np.float32)
+    return ImageData(data, pixelsize=float(local.tile_nm), x0=float(local.x0),
+                     y0=float(local.y0), name=name)
+
+
 # ----------------------------------------------------------------- the plugin
+
+@dataclass
+class LocalFRCSettings:
+    tile_um: float = param(LOCAL_TILE_NM / 1000, label="tile size", unit="µm",
+                           min=0.2, max=50.0,
+                           help="the side of the squares the FRC is measured in")
+    min_locs: int = param(MIN_FRC_LOCS, label="per tile at least", min=100,
+                          help="localizations a tile needs for a value; fewer "
+                               "is NaN")
+    smooth: bool = param(False, label="smooth",
+                         help="the attribute interpolated between the tile "
+                              "centres, not constant in a tile")
+    write_column: bool = param(True, label="write to localizations",
+                               help="frc_local_nm and frc_local_err_nm, NaN "
+                                    "outside the selection")
+    image_layer: bool = param(True, label="add image layer",
+                              help="the map as an image layer, one pixel per "
+                                   "tile, 0 where there is no value")
+
 
 @dataclass
 class PrecisionSettings:
@@ -1379,6 +1513,9 @@ class PrecisionSettings:
                                 "from planes of the 3D transform rather than "
                                 "rings of a 2D one.  3D data, and a ROI rather "
                                 "than a whole field of view")
+    frc_map: bool = param(False, label="local FRC map",
+                          help="the FRC resolution of each tile of the field: "
+                               "where the picture is good and where not")
     diagnostics: bool = param(False, label="diagnostic plots",
                               help="NeNA per axis and against the frame gap: "
                                    "drift, motion and an anisotropic PSF")
@@ -1406,6 +1543,8 @@ class PrecisionSettings:
     seed: int = param(0, label="seed", advanced=True,
                       help="which pairs are kept when there are more than the "
                            "limit")
+    frc_local: LocalFRCSettings = param(default_factory=LocalFRCSettings,
+                                        label="local FRC map")
 
 
 @register("Analysis/Measure/Localization Precision")
@@ -1416,16 +1555,25 @@ class LocalizationPrecision(Plugin):
     changes_locs = False
     # NeNA pairs a localization with the next frame's: the repeats grouping merges
     grouping = "ungrouped"
-    version = "5"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
+    version = "6"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
     #                      3: a filter cut honoured by the CRLB fit; the FRC's
     #                         automatic pixel on a large field; motion only
     #                         when the slope is significant
     #                      4: the selection only, never the whole table beside it
     #                      5: NeNA pairs within one file, never across two
+    #                      6: the local FRC map, written to the localizations
+    #                         and as an image layer
+
+    def changes_locs_for(self, settings: PrecisionSettings) -> bool:
+        return bool(settings.frc_map and settings.frc_local.write_column)
+
+    def describe(self, ctx: Optional[Context], settings: PrecisionSettings
+                 ) -> FormState:
+        return FormState(shown={"frc_local": settings.frc_map})
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
         if not (settings.pairwise or settings.crlb or settings.frc
-                or settings.frc_axes):
+                or settings.frc_axes or settings.frc_map):
             raise ValueError("nothing to measure: tick a method")
         # What is plotted, and only that: the filter, the ROI and the slab.
         # The whole table beside it was a second answer to a question the
@@ -1445,7 +1593,9 @@ class LocalizationPrecision(Plugin):
                 pairwise=settings.pairwise, crlb=settings.crlb,
                 frc=settings.frc, frc_pixel=settings.frc_pixel_nm,
                 frc_blocks=settings.frc_blocks, frc_repeats=settings.frc_repeats,
-                frc_axes=settings.frc_axes,
+                frc_axes=settings.frc_axes, frc_map=settings.frc_map,
+                frc_tile_nm=settings.frc_local.tile_um * 1000,
+                frc_tile_locs=settings.frc_local.min_locs,
                 bounds=bounds if filtered else {},
                 max_frame_pairs=settings.max_frame_pairs,
                 max_pairs=settings.max_pairs, seed=settings.seed,
@@ -1470,6 +1620,10 @@ class LocalizationPrecision(Plugin):
                                      for m in found):
             plots["FRC per axis"] = Plot(draw=lambda ax: draw_planes(ax, found),
                                          size=(5.5, 3.4))
+        local = found[0].frc_map
+        if settings.frc_map and local is not None and local.resolution.size:
+            plots["local FRC"] = Plot(
+                draw=lambda ax: draw_frc_map(ax, found[0]), size=(5.5, 4.4))
         if settings.diagnostics and settings.pairwise and any(
                 m.displacements for m in found):
             plots["NeNA per axis"] = Plot(
@@ -1486,7 +1640,8 @@ class LocalizationPrecision(Plugin):
                 if first is not None else None)
         methods = [m for m, on in (("NeNA", settings.pairwise),
                                    ("CRLB", settings.crlb),
-                                   ("FRC", settings.frc or settings.frc_axes))
+                                   ("FRC", settings.frc or settings.frc_axes
+                                    or settings.frc_map))
                    if on]
         title = (f"{', '.join(methods)} of {name}, "
                  f"{found[0].n_locs} localizations")
@@ -1504,8 +1659,21 @@ class LocalizationPrecision(Plugin):
                 "amplitude": {m.name: (m.photon_law.amplitude
                                        if m.photon_law and m.photon_law.ok
                                        else float("nan")) for m in found}}
-        return Result(text=summary(found), data=data, plot=main, plots=plots,
-                      settings=settings, title=title)
+        text = summary(found)
+        out_locs, image_layers = None, []
+        if settings.frc_map and local is not None and local.ok:
+            data["frc_map"] = local
+            if settings.frc_local.write_column:
+                out_locs = with_local_frc(ctx.locs, ctx.selection.mask, local,
+                                          smooth=settings.frc_local.smooth)
+                text += ("\nlocal FRC written to the localizations as "
+                         f"{LOCAL_COLUMN} and {LOCAL_ERROR_COLUMN}")
+            if settings.frc_local.image_layer:
+                image_layers = [local_frc_image(local, f"local FRC of {name}")]
+                text += "\nlocal FRC added as an image layer"
+        return Result(text=text, data=data, plot=main, plots=plots,
+                      settings=settings, title=title, locs=out_locs,
+                      image_layers=image_layers)
 
     def keep(self, result: Result):
         """The numbers, without the pairs: a precision is worth reopening.
@@ -1537,6 +1705,12 @@ class LocalizationPrecision(Plugin):
                 entry["frc_per_axis"] = {
                     name: curve.resolution
                     for name, curve in measurement.fpc.axes.items() if curve.ok}
+            local = measurement.frc_map
+            if local is not None and local.ok:
+                values = local.resolution[np.isfinite(local.resolution)]
+                entry.update(frc_local_median=float(np.median(values)),
+                             frc_local_tiles=local.n_measured,
+                             frc_local_tile_nm=local.tile_nm)
             if measurement.frc is not None and measurement.frc.ok:
                 entry.update(frc_resolution=measurement.frc.resolution,
                              frc_error=measurement.frc.error,

@@ -160,6 +160,17 @@ resolution of the picture that is drawn; the planes are the resolution of the
 volume that is measured, and they are the ones to quote for anything read in
 three dimensions.
 
+## The local map
+
+The tiles are also what makes a map cheap to compute: `local_frc` reads each
+tile's ring sums on its own instead of adding them up, which is the block-wise
+FRC map of NanoJ-SQUIRREL (Culley et al., *Nat Methods* 15, 263 (2018)),
+re-implemented from the paper.  Its tiles are its own -- a couple of
+micrometres, where the whole field's are sized for the transform -- so it is
+one more pass, not a free one.  One departure: SQUIRREL splits a stack into
+odd and even frames, and here the halves are the same blocks of frames as
+above, so that a blink stays in one half of every tile too.
+
 Others have gone the isotropic-shell way for 3D SMLM -- particle-fusion work
 reports FSC resolutions on fused 3D volumes, where the averaged particle *is*
 isotropic and a shell is the right question.  For one recorded volume with an
@@ -464,6 +475,47 @@ def _over_tiles(work, indices, threads: int):
         return list(pool.map(work, indices))
 
 
+def _tile_summer(x, y, low, pixelsize: float, size: int, n_tiles, order,
+                 starts, min_locs: int, fft_workers: int):
+    """The three ring sums of one tile under one split, and the ring sizes.
+
+    Shared by the resolution of the whole field, which adds the sums over the
+    tiles, and the local map, which reads each tile's on its own -- one way of
+    drawing a tile, so that the map and the number beside it cannot disagree
+    about what a tile is.  The function returns None for a tile with fewer
+    than ``min_locs`` localizations.
+    """
+    from scipy.fft import fft2, fftshift
+
+    flat_rings, counts = _ring_index(size)
+    flat_rings = flat_rings.ravel()
+    window = np.outer(_window(size), _window(size)).astype(np.float32)
+    tile_nm = size * pixelsize
+
+    def ring_sum(values) -> np.ndarray:
+        return np.bincount(flat_rings, weights=np.asarray(values).ravel(),
+                           minlength=len(counts) + 1)[:len(counts)]
+
+    def tile_sums(index: int, side: np.ndarray):
+        rows = order[starts[index]:starts[index + 1]]
+        if len(rows) < max(int(min_locs), 1):
+            return None
+        origin = low + np.array([index // n_tiles[1], index % n_tiles[1]]) * tile_nm
+        halves = []
+        for half in (rows[~side[rows]], rows[side[rows]]):
+            column = ((x[half] - origin[0]) / pixelsize).astype(np.int64)
+            row = ((y[half] - origin[1]) / pixelsize).astype(np.int64)
+            inside = (column >= 0) & (column < size) & (row >= 0) & (row < size)
+            image = _counted(column[inside] * size + row[inside], size * size)
+            halves.append(image.reshape(size, size) * window)
+        a = fftshift(fft2(halves[0], workers=fft_workers))
+        b = fftshift(fft2(halves[1], workers=fft_workers))
+        return (ring_sum(np.real(a * np.conj(b))), ring_sum(np.abs(a) ** 2),
+                ring_sum(np.abs(b) ** 2))
+
+    return tile_sums, counts
+
+
 def frc_resolution(x, y, frame, pixelsize: float = 0.0,
                    n_blocks: int = DEFAULT_BLOCKS, assignment: str = "alternating",
                    repeats: int = 5, seed: int = 0, tile_pixels: int = TILE_PIXELS,
@@ -531,7 +583,7 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
         if report:
             report(f"FRC: about {rough.resolution:.0f} nm on a coarse grid, "
                    f"measuring again at {pixelsize:.1f} nm")
-    from scipy.fft import fft2, fftshift, next_fast_len
+    from scipy.fft import next_fast_len
 
     # a transform of 3346 pixels costs ten times one of 3360, because 3346 is
     # 2 x 7 x 239 and the algorithm wants small factors
@@ -548,32 +600,9 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
         report(f"FRC: {n_tiles[0]}x{n_tiles[1]} tiles of {size} x {size} pixels "
                f"of {pixelsize:.1f} nm, {n_blocks} blocks, {repeats} split(s)")
 
-    flat_rings, counts = _ring_index(size)
-    flat_rings = flat_rings.ravel()
-    window = np.outer(_window(size), _window(size)).astype(np.float32)
     order, starts = _tile_buckets(x, y, low, tile_nm, n_tiles)
-
-    def ring_sum(values) -> np.ndarray:
-        return np.bincount(flat_rings, weights=np.asarray(values).ravel(),
-                           minlength=len(counts) + 1)[:len(counts)]
-
-    def tile_sums(index: int, side: np.ndarray):
-        """The three ring sums of one tile, or None when it holds too little."""
-        rows = order[starts[index]:starts[index + 1]]
-        if len(rows) < MIN_TILE_LOCS:
-            return None
-        origin = low + np.array([index // n_tiles[1], index % n_tiles[1]]) * tile_nm
-        halves = []
-        for half in (rows[~side[rows]], rows[side[rows]]):
-            column = ((x[half] - origin[0]) / pixelsize).astype(np.int64)
-            row = ((y[half] - origin[1]) / pixelsize).astype(np.int64)
-            inside = (column >= 0) & (column < size) & (row >= 0) & (row < size)
-            image = _counted(column[inside] * size + row[inside], size * size)
-            halves.append(image.reshape(size, size) * window)
-        a = fftshift(fft2(halves[0], workers=fft_workers))
-        b = fftshift(fft2(halves[1], workers=fft_workers))
-        return (ring_sum(np.real(a * np.conj(b))), ring_sum(np.abs(a) ** 2),
-                ring_sum(np.abs(b) ** 2))
+    tile_sums, counts = _tile_summer(x, y, low, pixelsize, size, n_tiles,
+                                     order, starts, MIN_TILE_LOCS, fft_workers)
 
     curves, singles, halves, used = [], [], (0, 0), 0
     for repeat in range(repeats):
@@ -612,6 +641,201 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
         out.error = float(np.std(singles, ddof=1))
     return out
 
+
+
+
+# ---------------------------------------------------------------- the local map
+
+@dataclass
+class FRCMap:
+    """The FRC resolution of each tile of the field: a map, not a number.
+
+    ``resolution`` and ``error`` are ``(ny, nx)``, rows along y as an image
+    is, NaN where a tile held too few localizations or its curve never fell
+    through the threshold; ``n_locs`` says which of the two it was.  The grid
+    starts at the outer edge ``(x0, y0)`` and its tiles are ``tile_nm`` square.
+    """
+    resolution: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    error: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    n_locs: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), int))
+    x0: float = 0.0
+    y0: float = 0.0
+    tile_nm: float = float("nan")
+    pixelsize: float = float("nan")
+    size: int = 0                             # one tile's transform, in pixels
+    min_locs: int = 0
+    repeats: int = 0
+    message: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return bool(np.any(np.isfinite(self.resolution)))
+
+    @property
+    def n_measured(self) -> int:
+        return int(np.isfinite(self.resolution).sum())
+
+    @property
+    def n_sparse(self) -> int:
+        """Tiles with localizations, but too few for a curve."""
+        return int(((self.n_locs > 0) & (self.n_locs < self.min_locs)).sum())
+
+    @property
+    def n_uncrossed(self) -> int:
+        """Tiles with enough localizations whose curve never crossed 1/7."""
+        return int(((self.n_locs >= self.min_locs)
+                    & ~np.isfinite(self.resolution)).sum())
+
+    def tile_of(self, x, y) -> Tuple[np.ndarray, np.ndarray]:
+        """The (row, column) of the tile each position falls in, clipped to
+        the grid as the tiles were filled."""
+        ny, nx = self.resolution.shape
+        column = np.clip(np.floor((np.asarray(x, float) - self.x0) / self.tile_nm),
+                         0, max(nx - 1, 0)).astype(np.int64)
+        row = np.clip(np.floor((np.asarray(y, float) - self.y0) / self.tile_nm),
+                      0, max(ny - 1, 0)).astype(np.int64)
+        return row, column
+
+    def at(self, x, y, smooth: bool = False, values=None) -> np.ndarray:
+        """The map's value at each position.
+
+        The tile's own value, by default: that is what was measured.  With
+        ``smooth`` the value is interpolated linearly between the centres of
+        the measured tiles around it, so the map has no steps at the tile
+        edges -- but a position still reads NaN where its own tile does,
+        because a value spread into a tile that could not be measured would
+        claim a resolution there that nobody saw.
+        """
+        grid = self.resolution if values is None else np.asarray(values, float)
+        if not grid.size:
+            return np.full(len(np.asarray(x)), np.nan)
+        row, column = self.tile_of(x, y)
+        own = grid[row, column]
+        if not smooth:
+            return own.astype(float)
+        from scipy.ndimage import map_coordinates
+
+        known = np.isfinite(grid)
+        where = [(np.asarray(y, float) - self.y0) / self.tile_nm - 0.5,
+                 (np.asarray(x, float) - self.x0) / self.tile_nm - 0.5]
+        total = map_coordinates(np.where(known, grid, 0.0), where, order=1,
+                                mode="nearest")
+        weight = map_coordinates(known.astype(float), where, order=1,
+                                 mode="nearest")
+        out = np.divide(total, weight, out=np.full(len(total), np.nan),
+                        where=weight > 1e-9)
+        out[~np.isfinite(own)] = np.nan
+        return out
+
+
+LOCAL_TILE_NM = 2000.0
+
+
+def local_frc(x, y, frame, pixelsize: float = 0.0, tile_nm: float = LOCAL_TILE_NM,
+              min_locs: int = MIN_LOCS, n_blocks: int = DEFAULT_BLOCKS,
+              repeats: int = 5, seed: int = 0, workers: int = 0,
+              threshold: float = THRESHOLD, report=None) -> FRCMap:
+    """The FRC resolution of every ``tile_nm`` square of the field.
+
+    The same recipe as `frc_resolution`, the same split in time and the same
+    tiles drawn the same way (`_tile_summer`); only the ring sums of each tile
+    are read on their own instead of added up.  This is the block-wise FRC map
+    of NanoJ-SQUIRREL (Culley et al. 2018), re-implemented: it shows where in
+    the field the picture is good and where it is not -- a region that
+    drifted, one sparsely labelled, one out of focus.
+
+    A small tile is a noisy curve, which is the price of locality: a tile is
+    measured only with ``min_locs`` localizations (MIN_LOCS by default, what a
+    whole-field FRC asks for too), and the spread of its resolution over the
+    ``repeats`` splits is its error bar, as for the whole field.  ``pixelsize``
+    0 finds it as `frc_resolution` does, at a fifth of the whole field's
+    resolution; a caller that has just measured that passes its pixel.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    out = FRCMap(min_locs=int(min_locs))
+    if len(x) < max(int(min_locs), 1):
+        out.message = (f"{len(x)} localizations: fewer than one tile needs "
+                       f"({int(min_locs)})")
+        return out
+    low = np.array([x.min(), y.min()])
+    span = np.array([x.max() - low[0], y.max() - low[1]])
+    if not np.all(span > 0):
+        out.message = "the localizations have no extent"
+        return out
+    if pixelsize <= 0:
+        whole = frc_resolution(x, y, frame, n_blocks=n_blocks, repeats=1,
+                               seed=seed, workers=workers, threshold=threshold)
+        pixelsize = (whole.pixelsize if whole.ok
+                     else float(span.max()) / DEFAULT_PIXELS)
+    from scipy.fft import next_fast_len
+
+    wanted = int(np.ceil(float(tile_nm) / pixelsize))
+    # at least 16 rings to smooth and read, at most what fits
+    size = int(next_fast_len(min(max(wanted, 32), MAX_PIXELS)))
+    tile = size * pixelsize
+    n_tiles = tuple(max(int(np.ceil(span[k] / tile)), 1) for k in range(2))
+    repeats = max(int(repeats), 1)
+    assignment = "random" if repeats > 1 else "alternating"
+    threads, fft_workers = _workers(workers)
+    if report:
+        report(f"local FRC: {n_tiles[0]}x{n_tiles[1]} tiles of {tile / 1000:.2g} um "
+               f"({size} pixels of {pixelsize:.1f} nm), {repeats} split(s)")
+
+    order, starts = _tile_buckets(x, y, low, tile, n_tiles)
+    tile_sums, counts = _tile_summer(x, y, low, pixelsize, size, n_tiles,
+                                     order, starts, min_locs, fft_workers)
+    n_cells = n_tiles[0] * n_tiles[1]
+    filled = [index for index in range(n_cells)
+              if starts[index + 1] - starts[index] >= max(int(min_locs), 1)]
+    curves: Dict[int, list] = {index: [] for index in filled}
+    used = 0
+    for repeat in range(repeats):
+        side = time_blocks(frame, n_blocks, assignment, seed + repeat)
+        if not side.any() or side.all():
+            continue
+        used += 1
+        got = _over_tiles(lambda index: tile_sums(index, side), filled, threads)
+        for index, sums in zip(filled, got):
+            if sums is None:
+                continue
+            denominator = np.sqrt(sums[1] * sums[2])
+            curves[index].append(np.clip(np.divide(
+                sums[0], denominator, out=np.zeros(len(counts)),
+                where=denominator > 0), -1.0, 1.0))
+
+    # tile index = column * ny + row (`_tile_buckets`); the map is (row, column)
+    nx, ny = n_tiles
+    out.resolution = np.full((ny, nx), np.nan)
+    out.error = np.full((ny, nx), np.nan)
+    out.n_locs = np.diff(starts).reshape(nx, ny).T.astype(np.int64)
+    for index, found in curves.items():
+        if not found:
+            continue
+        row, column = index % ny, index // ny
+        mean = resolution_from_curve(np.mean(found, axis=0), counts, size,
+                                     pixelsize, threshold)
+        if not mean.ok:
+            continue
+        out.resolution[row, column] = mean.resolution
+        singles = [one.resolution for one in
+                   (resolution_from_curve(curve, counts, size, pixelsize,
+                                          threshold) for curve in found)
+                   if one.ok]
+        out.error[row, column] = (float(np.std(singles, ddof=1))
+                                  if len(singles) >= 3 else mean.error)
+    out.x0, out.y0 = float(low[0]), float(low[1])
+    out.tile_nm, out.pixelsize, out.size = float(tile), float(pixelsize), size
+    out.repeats = used
+    if not used:
+        out.message = "every localization landed in one half of the split"
+    elif not filled:
+        out.message = (f"no tile of {tile / 1000:.2g} um held {int(min_locs)} "
+                       "localizations: take larger tiles")
+    elif not out.ok:
+        out.message = ("no tile's curve fell through 1/7: take larger tiles, "
+                       "or a finer pixel")
+    return out
 
 
 # ------------------------------------------------- the third dimension: planes
