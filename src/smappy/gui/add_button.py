@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFileDialog, QMenu, QToolButton
+from PySide6.QtCore import QSize, Signal
+from PySide6.QtWidgets import QFileDialog, QMenu, QPushButton, QSizePolicy, QToolButton
 
 from . import folders
 
@@ -30,6 +30,7 @@ class AddButton(QToolButton):
 
     def __init__(self, title: str = "Add", file_filter: str = "All files (*)", parent=None):
         super().__init__(parent)
+        self._push = None               # a push button's size, measured once
         self.title, self.file_filter = title, file_filter
         self.setText(ADD)
         self.setPopupMode(QToolButton.MenuButtonPopup)
@@ -40,6 +41,21 @@ class AddButton(QToolButton):
         self.several = menu.addAction(SEVERAL_FOLDERS, self.choose_folders)
         self.setMenu(menu)
         self.clicked.connect(self.choose)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+    def sizeHint(self) -> QSize:
+        """A push button's size, and room for the arrow: a tool button is
+        drawn smaller than the push buttons beside it, and this one is the
+        list's most important."""
+        own = super().sizeHint()
+        if self._push is None:
+            self._push = QPushButton(self.text()).sizeHint()
+        push = self._push
+        return QSize(max(own.width(), push.width() + own.height() // 2),
+                     max(own.height(), push.height()))
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
 
     def choose(self) -> None:
         from . import mac_panel

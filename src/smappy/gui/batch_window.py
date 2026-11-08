@@ -237,8 +237,8 @@ class BatchWindow(QMainWindow):
         column = QVBoxLayout(run_box)
         column.setContentsMargins(0, 0, 0, 0)
         buttons = QHBoxLayout()
-        self.job_button = QToolButton(text="job")
-        self.job_button.setPopupMode(QToolButton.InstantPopup)
+        # push buttons with a menu: as large as Run beside them
+        self.job_button = QPushButton("job")
         self.job_button.setToolTip("the files, the chain and the output as one "
                                    ".batch.yaml file, which smappy-batch runs from a terminal")
         menu = QMenu(self.job_button)
@@ -253,8 +253,7 @@ class BatchWindow(QMainWindow):
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop)
-        self.results_button = QToolButton(text="results")
-        self.results_button.setPopupMode(QToolButton.InstantPopup)
+        self.results_button = QPushButton("results")
         self.results_button.setToolTip("what the batch wrote: the summary page, or the "
                                        "output folder")
         menu = QMenu(self.results_button)
@@ -266,6 +265,7 @@ class BatchWindow(QMainWindow):
         column.addLayout(buttons)
         self.progress = QProgressBar()
         self.progress.setTextVisible(True)
+        self.progress.hide()                # an empty bar before any run read as a field
         column.addWidget(self.progress)
         self.log = QPlainTextEdit(readOnly=True, maximumBlockCount=5000)
         self.log.setMinimumHeight(120)
@@ -607,6 +607,7 @@ class BatchWindow(QMainWindow):
         # afresh, not on top
         self.refresh_inputs()
         self.progress.setRange(0, 0)
+        self.progress.show()
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.MergedChannels)
         self.process.readyReadStandardOutput.connect(self._read)
