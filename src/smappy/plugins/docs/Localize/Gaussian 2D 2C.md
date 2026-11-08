@@ -484,6 +484,11 @@ strips the edges of the field.
 Both fit boxes of a pair have this size, and both must lie inside the frame, each
 on its own half.
 
+### fit.per_pixel_noise
+Each channel's pixels weighted by their own read noise, from the camera's noise map
+([Camera noise calibration](plugin:Localize/Camera noise calibration)), cut and
+mirrored into the channels as the frames are.  The map must cover both channels.
+
 ### finish.drift
 Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 [COMET](plugin:Analysis/Drift/COMET), say which to choose; the settings under

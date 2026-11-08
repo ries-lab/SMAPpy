@@ -10,8 +10,7 @@ filter -> peak finding -> ROI cutting -> MLE fit -> HDF5.  Single channel,
 Poisson noise, with the camera's read noise as one variance added to data and
 model (see "Read noise" below).  Fit models: `gauss_free`, `gauss_xy`, `cspline`.
 
-Deliberately **not** ported: sCMOS per-pixel variance (one variance for the
-chip is used instead), the Anscombe transform
+Deliberately **not** ported: the Anscombe transform
 and probability cutoff, background estimation, minimum-distance filtering,
 mean-PSF / MIP-PSF detection filters, ROI masks, Zernike and
 astigmatic-Gaussian z models, multiple z start values.  Two-channel global
@@ -30,6 +29,33 @@ in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
   0.53.  It also floors each pixel's weight, 1 / (model + variance), which is
   what keeps a spline's near-zero tail from dominating a fit of a bright spot
   at a low background.
+
+* **sCMOS noise maps, an option.**  Per-pixel offset and variance came later
+  (2026-11), off by default (*per-pixel noise*, `FitSettings.per_pixel_noise`),
+  so the fit without a map is what it was.  With it the offset map comes off
+  before detection and the variance is added to data and model pixel by pixel
+  inside the fitter (`lm.hpp`'s `PerPixel`, a template switch so the code
+  without it is unchanged); the background then stays the background.  The map
+  is made from dark frames only (`smappy/scmos.py`, *Camera noise
+  calibration*): no gain map -- the pixels' gains differ by 1-3 %, and a
+  per-pixel gain to 1 % takes ~20 000 frames per intensity -- and no
+  exposure dependence, since the dark current is small at SMLM exposures.  It
+  is a value of the camera's readout mode in the database (`noise_map`), keeps
+  the chip region it covers, and a file is cut at its camera ROI or refused.
+  Measured: a constant map gives the chip-wide fit to 1e-4 px and costs
+  nothing measurable (~1 % either way, 20 000 ROIs, one thread); on a
+  simulated chip with 3 % hot pixels, isolated 1000-photon spots near a hot
+  pixel scattered 4.4 nm with the map against 4.9 nm without, and the fitted
+  background read 4.98 against 5.16 (true 5).  The channel layer takes it
+  too (split chips, 2C, 4Pi): the map is cut and mirrored with the frames by
+  the layout's own `cut` (`scmos.for_layout`), so a mirrored channel's pixel
+  keeps its noise, and the global fit adds each channel's variance pixel by
+  pixel (`global.hpp`, the same switch).  Measured: a two-colour Gaussian fit
+  on a split frame with 3 % hot pixels, 6.9 -> 5.8 nm median distance to the
+  truth; 4Pi with a 20 e- pixel beside every emitter in all four channels,
+  x 0.051 -> 0.045 px and z 22.5 -> 19.5 nm, the bound then matching the
+  scatter.  A pixel noisy in one 4Pi channel only hardly moves x: the other
+  three carry it.
 
 * **No module chain.**  SMAP's WorkflowModules exist to serve a GUI (parameter
   synchronisation, per-frame data packets, global-variable accumulators).  Here

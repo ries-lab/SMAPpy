@@ -180,6 +180,14 @@ always runs at one rate.  *Not set*, a file's frame time is the time-lapse
 interval it records, if it is longer than the exposure, and else the
 exposure.
 
+### noise map (file)
+An sCMOS's offset and read noise pixel by pixel: the file
+[Camera noise calibration](plugin:Localize/Camera noise calibration) makes
+from a dark movie and enters here itself, *per readout mode*, as the noise of
+one mode is not another's.  Typed by hand, it is the path of such a file.  A
+fit reads it only with its *per-pixel noise* on; the *offset* and *read
+noise* above still serve every other fit.
+
 ### this file, read with this entry
 What the entry, as it stands, makes of the file: value and source of every
 parameter, red where a value the fit needs is missing.

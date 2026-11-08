@@ -41,6 +41,19 @@ std::pair<py::ssize_t, int> check_rois(const Array& rois) {
     return {rois.shape(0), static_cast<int>(rois.shape(1))};
 }
 
+// The read-noise variance per pixel of every ROI (`lm.hpp`), or None: the
+// array must have the ROIs' own shape.  Kept alive by the caller's frame.
+Array variance_of(const py::object& variance, const Array& rois) {
+    if (variance.is_none()) return Array();
+    Array var = variance.cast<Array>();
+    if (var.ndim() != rois.ndim())
+        throw std::invalid_argument("variance must have the ROIs' shape");
+    for (py::ssize_t k = 0; k < rois.ndim(); ++k)
+        if (var.shape(k) != rois.shape(k))
+            throw std::invalid_argument("variance must have the ROIs' shape");
+    return var;
+}
+
 struct NoSetup {
     template <class Model>
     void operator()(Model&, py::ssize_t) const {}
@@ -50,7 +63,7 @@ struct NoSetup {
 // field-dependent spline's nodes and weights); by default nothing.
 template <class Model, class Setup = NoSetup>
 Output run(const Model& model, const Array& rois, int iterations, int n_threads,
-           Setup setup = Setup()) {
+           Setup setup = Setup(), const py::object& variance = py::none()) {
     constexpr int NV = Model::NV;
     // (structured bindings cannot be captured by a lambda in C++17)
     const auto dims = check_rois(rois);
@@ -61,6 +74,9 @@ Output run(const Model& model, const Array& rois, int iterations, int n_threads,
                Array(n), py::array_t<int>(n)};
 
     const float* data = rois.data();
+    const Array var_array = variance_of(variance, rois);
+    // (a default-made array is an empty one, not a null handle)
+    const float* var = variance.is_none() ? nullptr : var_array.data();
     float* theta = out.theta.mutable_data();
     float* crlb = out.crlb.mutable_data();
     float* logl = out.logl.mutable_data();
@@ -77,8 +93,13 @@ Output run(const Model& model, const Array& rois, int iterations, int n_threads,
         Model local = model;  // per-thread copy (the spline keeps scratch space)
         for (py::ssize_t i = begin; i < end; ++i) {
             setup(local, i);
-            lm_fit(local, data + i * sz * sz, sz, iterations, theta + i * NV,
-                   crlb + i * NV, logl + i, iters + i);
+            if (var)
+                lm_fit<Model, true>(local, data + i * sz * sz, sz, iterations,
+                                    theta + i * NV, crlb + i * NV, logl + i, iters + i,
+                                    var + i * sz * sz);
+            else
+                lm_fit(local, data + i * sz * sz, sz, iterations, theta + i * NV,
+                       crlb + i * NV, logl + i, iters + i);
         }
     };
 
@@ -106,17 +127,19 @@ py::tuple as_tuple(Output&& o) {
 }
 
 py::tuple fit_gauss_free(const Array& rois, float sigma, int iterations,
-                         int n_threads) {
-    return as_tuple(run(smappy::GaussFree(sigma), rois, iterations, n_threads));
+                         int n_threads, const py::object& variance) {
+    return as_tuple(run(smappy::GaussFree(sigma), rois, iterations, n_threads,
+                        NoSetup(), variance));
 }
 
 py::tuple fit_gauss_xy(const Array& rois, float sigma, int iterations,
-                       int n_threads) {
-    return as_tuple(run(smappy::GaussXY(sigma), rois, iterations, n_threads));
+                       int n_threads, const py::object& variance) {
+    return as_tuple(run(smappy::GaussXY(sigma), rois, iterations, n_threads,
+                        NoSetup(), variance));
 }
 
 py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
-                      int iterations, int n_threads) {
+                      int iterations, int n_threads, const py::object& variance) {
     if (coeff.ndim() != 4 || coeff.shape(0) != 64)
         throw std::invalid_argument(
             "spline coefficients must have shape (64, nz, ny, nx)");
@@ -124,7 +147,7 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
     const int ny = static_cast<int>(coeff.shape(2));
     const int nx = static_cast<int>(coeff.shape(3));
     smappy::CSpline model(coeff.data(), nx, ny, nz, z_start);
-    return as_tuple(run(model, rois, iterations, n_threads));
+    return as_tuple(run(model, rois, iterations, n_threads, NoSetup(), variance));
 }
 
 // A field-dependent spline: coeff (G, 64, nz, ny, nx), the splines of G field
@@ -132,7 +155,8 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
 // for it and their weights (`smappy.field_splines.bilinear`).
 py::tuple fit_cspline_field(const Array& rois, const Array& coeff,
                             const py::array_t<int, py::array::c_style | py::array::forcecast>& nodes,
-                            const Array& weights, float z_start, int iterations, int n_threads) {
+                            const Array& weights, float z_start, int iterations, int n_threads,
+                            const py::object& variance) {
     if (coeff.ndim() != 5 || coeff.shape(1) != 64)
         throw std::invalid_argument(
             "field spline coefficients must have shape (G, 64, nz, ny, nx)");
@@ -151,7 +175,7 @@ py::tuple fit_cspline_field(const Array& rois, const Array& coeff,
     smappy::CSplineField model(coeff.data(), nx, ny, nz, z_start);
     const float* w = weights.data();
     auto setup = [nd, w](smappy::CSplineField& m, py::ssize_t i) { m.use(nd + 4 * i, w + 4 * i); };
-    return as_tuple(run(model, rois, iterations, n_threads, setup));
+    return as_tuple(run(model, rois, iterations, n_threads, setup, variance));
 }
 
 // Global (multi-channel) fits.  One emitter, one ROI per channel, with the
@@ -183,13 +207,32 @@ GlobalDims check_global_rois(const Array& rois) {
     return {rois.shape(0), channels, static_cast<int>(rois.shape(2))};
 }
 
+// One fit's read-noise planes per channel and its data without them (`light`,
+// what the starts read), for a global fit with a variance map.  Kept per
+// thread, filled per ROI.
+struct NoisePlanes {
+    std::vector<const float*> var, light;
+    std::vector<float> buffer;
+    NoisePlanes(int channels, int sz)
+        : var(channels), light(channels), buffer(std::size_t(channels) * sz * sz) {}
+    void fill(const float* data, const float* variance, long long i, int channels, int sz) {
+        for (int c = 0; c < channels; ++c) {
+            const std::size_t at = (std::size_t(i) * channels + c) * sz * sz;
+            var[c] = variance + at;
+            float* mine = buffer.data() + std::size_t(c) * sz * sz;
+            for (int k = 0; k < sz * sz; ++k) mine[k] = data[at + k] - variance[at + k];
+            light[c] = mine;
+        }
+    }
+};
+
 // The body every global fit shares: validate the link, plan the layout of the
 // global vector and drive the per-ROI loop.  `models` holds one PSF per
 // channel and is copied per thread, as in `run` -- the spline keeps scratch.
 template <class Model>
 Output run_global(const std::vector<Model>& models, const Array& rois,
                   const Array& link, const IntArray& shared, int iterations,
-                  int n_threads) {
+                  int n_threads, const py::object& variance = py::none()) {
     constexpr int P = Model::NV;
     const GlobalDims dims = check_global_rois(rois);
     const py::ssize_t n = dims.n;
@@ -215,6 +258,8 @@ Output run_global(const std::vector<Model>& models, const Array& rois,
                Array(n), py::array_t<int>(n)};
 
     const float* data = rois.data();
+    const Array var_array = variance_of(variance, rois);
+    const float* var = variance.is_none() ? nullptr : var_array.data();
     const float* links = link.data();
     float* theta = out.theta.mutable_data();
     float* crlb = out.crlb.mutable_data();
@@ -226,14 +271,22 @@ Output run_global(const std::vector<Model>& models, const Array& rois,
         smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
             std::vector<Model> local(models);   // the spline keeps scratch
             std::vector<const float*> planes(channels);
+            NoisePlanes noise(var ? channels : 0, sz);
             smappy::Link mine = plan;
             for (long long i = begin; i < end; ++i) {
                 for (int c = 0; c < channels; ++c)
                     planes[c] = data + ((i * channels + c) * sz) * sz;
                 mine.offset = links + i * 2 * channels * P;
                 mine.factor = mine.offset + channels * P;
-                smappy::global_fit(local.data(), planes.data(), sz, mine, iterations,
-                                   theta + i * nv, crlb + i * nv, logl + i, iters + i);
+                if (var) {
+                    noise.fill(data, var, i, channels, sz);
+                    smappy::global_fit<Model, true>(
+                        local.data(), planes.data(), sz, mine, iterations, theta + i * nv,
+                        crlb + i * nv, logl + i, iters + i, noise.var.data(), noise.light.data());
+                } else {
+                    smappy::global_fit(local.data(), planes.data(), sz, mine, iterations,
+                                       theta + i * nv, crlb + i * nv, logl + i, iters + i);
+                }
             }
         });
     }
@@ -245,7 +298,7 @@ Output run_global(const std::vector<Model>& models, const Array& rois,
 // is why z needs no offset in the link.
 py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array& link,
                              const IntArray& shared, float z_start, int iterations,
-                             int n_threads) {
+                             int n_threads, const py::object& variance) {
     const int channels = check_global_rois(rois).channels;
     if (coeff.ndim() != 5 || coeff.shape(0) != channels || coeff.shape(1) != 64)
         throw std::invalid_argument(
@@ -260,7 +313,7 @@ py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array&
     models.reserve(channels);
     for (int c = 0; c < channels; ++c)
         models.emplace_back(coeff.data() + c * plane, nx, ny, nz, z_start);
-    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads));
+    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads, variance));
 }
 
 // The 4Pi start.  For a fixed z the IAB model is linear in N, N cos(phase)
@@ -353,7 +406,8 @@ int phasor_starts(const std::vector<smappy::CSpline4Pi>& models,
 // as the other global fits, iterations summed over the starts.
 py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Array& link,
                                 const IntArray& shared, int n_starts, int phase_starts,
-                                int z_step, int iterations, int n_threads) {
+                                int z_step, int iterations, int n_threads,
+                                const py::object& variance) {
     using smappy::CSpline4Pi;
     constexpr int P = CSpline4Pi::NV;
     const GlobalDims dims = check_global_rois(rois);
@@ -389,6 +443,8 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
     Output out{Array({n, py::ssize_t(nv)}), Array({n, py::ssize_t(nv)}),
                Array(n), py::array_t<int>(n)};
     const float* data = rois.data();
+    const Array var_array = variance_of(variance, rois);
+    const float* var = variance.is_none() ? nullptr : var_array.data();
     const float* links = link.data();
     float* theta = out.theta.mutable_data();
     float* crlb = out.crlb.mutable_data();
@@ -403,12 +459,16 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
             std::vector<const float*> planes(channels);
             std::vector<Start4Pi> starts(n_starts);
             std::vector<float> g(nv), e(nv);
+            NoisePlanes noise(var ? channels : 0, sz);
             smappy::Link mine = plan;
             for (long long i = begin; i < end; ++i) {
                 for (int c = 0; c < channels; ++c)
                     planes[c] = data + ((i * channels + c) * sz) * sz;
                 mine.offset = links + i * 2 * channels * P;
                 mine.factor = mine.offset + channels * P;
+                if (var) noise.fill(data, var, i, channels, sz);
+                // the starts read the light alone, without the variance
+                const float* const* seen = var ? noise.light.data() : planes.data();
 
                 float* best = theta + i * nv;
                 float* best_crlb = crlb + i * nv;
@@ -417,7 +477,7 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
                 for (int k = 0; k < nv; ++k) best[k] = best_crlb[k] = nan;
                 logl[i] = nan;
 
-                const int found = phasor_starts(local, planes.data(), sz, z_step,
+                const int found = phasor_starts(local, seen, sz, z_step,
                                                 n_starts, starts.data());
                 for (int s = 0; s < found; ++s)
                     for (int q = 0; q < phase_starts; ++q) {
@@ -428,8 +488,13 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
                         }
                         float ll;
                         int used;
-                        smappy::global_fit(local.data(), planes.data(), sz, mine,
-                                           iterations, g.data(), e.data(), &ll, &used);
+                        if (var)
+                            smappy::global_fit<CSpline4Pi, true>(
+                                local.data(), planes.data(), sz, mine, iterations, g.data(),
+                                e.data(), &ll, &used, noise.var.data(), noise.light.data());
+                        else
+                            smappy::global_fit(local.data(), planes.data(), sz, mine,
+                                               iterations, g.data(), e.data(), &ll, &used);
                         total += used;
                         if (ll > best_logl) {
                             best_logl = ll;
@@ -453,7 +518,8 @@ py::tuple fit_cspline4pi_global(const Array& rois, const Array& coeff, const Arr
 // where the two halves see different wavelengths.  `sigma` is each channel's
 // starting width, which for the same reason is per channel too.
 py::tuple fit_gauss_global(const Array& rois, const Array& sigma, const Array& link,
-                           const IntArray& shared, int iterations, int n_threads) {
+                           const IntArray& shared, int iterations, int n_threads,
+                           const py::object& variance) {
     const int channels = check_global_rois(rois).channels;
     if (sigma.ndim() != 1 || sigma.shape(0) != channels)
         throw std::invalid_argument("sigma must have one starting width per channel");
@@ -462,7 +528,7 @@ py::tuple fit_gauss_global(const Array& rois, const Array& sigma, const Array& l
     models.reserve(channels);
     for (int c = 0; c < channels; ++c)
         models.emplace_back(sigma.data()[c]);
-    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads));
+    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads, variance));
 }
 
 // Difference-of-Gaussians / Gaussian filtering of a block of images.
@@ -590,11 +656,13 @@ PYBIND11_MODULE(_fit3d, m) {
 
     m.def("fit_gauss_free", &fit_gauss_free, py::arg("rois"),
           py::arg("sigma") = 1.0f, py::arg("iterations") = 50,
-          py::arg("n_threads") = 0,
-          "Fit (x, y, photons, background, sigma).");
+          py::arg("n_threads") = 0, py::arg("variance") = py::none(),
+          "Fit (x, y, photons, background, sigma); `variance` (n, sz, sz): the read "
+          "noise per pixel, already added to the ROIs.");
 
     m.def("fit_gauss_xy", &fit_gauss_xy, py::arg("rois"), py::arg("sigma") = 1.0f,
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          py::arg("variance") = py::none(),
           "Fit (x, y, photons, background, sigma_x, sigma_y).");
 
     m.def("filter_images", &filter_images, py::arg("images"), py::arg("sigma"),
@@ -613,15 +681,18 @@ PYBIND11_MODULE(_fit3d, m) {
 
     m.def("fit_cspline", &fit_cspline, py::arg("rois"), py::arg("coeff"),
           py::arg("z_start"), py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          py::arg("variance") = py::none(),
           "Fit (x, y, photons, background, z) with a cubic-spline PSF.");
 
     m.def("fit_cspline_field", &fit_cspline_field, py::arg("rois"), py::arg("coeff"),
           py::arg("nodes"), py::arg("weights"), py::arg("z_start") = 0.0f,
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          py::arg("variance") = py::none(),
           "Fit (x, y, N, bg, z) with splines blended per ROI over the field.");
     m.def("fit_cspline_global", &fit_cspline_global, py::arg("rois"),
           py::arg("coeff"), py::arg("link"), py::arg("shared"), py::arg("z_start"),
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          py::arg("variance") = py::none(),
           "Fit one emitter across several channels with a spline PSF each, "
           "sharing the parameters marked in `shared`.");
 
@@ -629,12 +700,13 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("coeff"), py::arg("link"), py::arg("shared"),
           py::arg("n_starts") = 2, py::arg("phase_starts") = 1, py::arg("z_step") = 1,
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          py::arg("variance") = py::none(),
           "Fit one emitter in every 4Pi phase channel with the IAB spline model "
           "-- (x, y, photons, background, z, phase) -- from the phasor start.");
 
     m.def("fit_gauss_global", &fit_gauss_global, py::arg("rois"), py::arg("sigma"),
           py::arg("link"), py::arg("shared"), py::arg("iterations") = 50,
-          py::arg("n_threads") = 0,
+          py::arg("n_threads") = 0, py::arg("variance") = py::none(),
           "Fit one emitter across several channels with a free-width Gaussian "
           "each -- (x, y, photons, background, sigma) -- sharing the parameters "
           "marked in `shared`.");

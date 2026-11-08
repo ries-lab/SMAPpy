@@ -457,6 +457,15 @@ beyond the grid the model would only repeat its edge.  Large enough for the wide
 most defocused spot; the default 13 holds the spots of the figures above, over
 $\pm$600 nm.
 
+### fit.per_pixel_noise
+For an sCMOS: each pixel's own offset and read noise, from the noise map of
+the file's camera and readout mode, which
+[Camera noise calibration](plugin:Localize/Camera noise calibration) makes from
+a dark movie.  It helps most at low backgrounds and near hot pixels, costs
+about 1 % of the fitting time, and the precisions then account for each
+pixel's noise.  Without a map for the readout mode, or with frames outside the
+map, the fit is refused and the form says why.
+
 ### model.focus
 *auto* is right for most data, and costs a second or two before the fit.
 *in situ* for a measurement where the depth matters more than a few minutes:

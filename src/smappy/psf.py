@@ -39,7 +39,10 @@ class PSFModel:
     name = "psf"
 
     def fit(self, rois: np.ndarray, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
+        """``variance`` (n, sz, sz): the read noise's variance per pixel of
+        each ROI, already added to ``rois`` (`scmos`); None: one variance for
+        the chip, taken by the background (`pipeline.with_readout`)."""
         raise NotImplementedError
 
     def unpack(self, result: FitResult) -> Dict[str, np.ndarray]:
@@ -65,10 +68,10 @@ class GaussianPSF(PSFModel):
     name = "gauss"
 
     def fit(self, rois: np.ndarray, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
         fn = _fit3d.fit_gauss_xy if self.elliptical else _fit3d.fit_gauss_free
         return FitResult(*fn(rois, float(self.sigma), int(iterations),
-                             int(n_threads)))
+                             int(n_threads), variance))
 
     def unpack(self, result: FitResult) -> Dict[str, np.ndarray]:
         p, crlb = result.theta, np.clip(result.crlb, 0, None)
@@ -310,7 +313,8 @@ class GlobalSplinePSF(_GlobalPSF):
         return self.calibrations[0]
 
     def fit(self, rois: np.ndarray, link: np.ndarray = None, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
+        """``variance`` (n, C, sz, sz) as `PSFModel.fit`'s, per channel."""
         if link is None:
             raise ValueError("a global fit needs the link between its channels")
         z_start = float(self.calibration.z_nm_to_index(self.z_start_nm))
@@ -318,7 +322,7 @@ class GlobalSplinePSF(_GlobalPSF):
             np.ascontiguousarray(rois, np.float32), self._coeff,
             np.ascontiguousarray(link, np.float32),
             np.array(self.shared, np.int32), z_start, int(iterations),
-            int(n_threads)))
+            int(n_threads), variance))
 
     def _fifth(self, value, error):
         cal = self.calibration
@@ -386,13 +390,13 @@ class GlobalGaussianPSF(_GlobalPSF):
         return len(self.sigma)
 
     def fit(self, rois: np.ndarray, link: np.ndarray = None, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
         if link is None:
             raise ValueError("a global fit needs the link between its channels")
         return FitResult(*_fit3d.fit_gauss_global(
             np.ascontiguousarray(rois, np.float32), self._sigma,
             np.ascontiguousarray(link, np.float32),
-            np.array(self.shared, np.int32), int(iterations), int(n_threads)))
+            np.array(self.shared, np.int32), int(iterations), int(n_threads), variance))
 
     def __str__(self) -> str:
         widths = ", ".join(f"{s:g}" for s in self.sigma)
@@ -445,7 +449,7 @@ class Global4PiPSF(_GlobalPSF):
         return self.calibration.n_channels
 
     def fit(self, rois: np.ndarray, link: np.ndarray = None, iterations: int = 50,
-            n_threads: int = 0) -> FitResult:
+            n_threads: int = 0, variance: Optional[np.ndarray] = None) -> FitResult:
         if link is None:
             from .fourpi import link as plain
             link = plain(len(rois), self.n_channels)
@@ -453,7 +457,7 @@ class Global4PiPSF(_GlobalPSF):
             np.ascontiguousarray(rois, np.float32), self.calibration.coeff,
             np.ascontiguousarray(link, np.float32), np.array(self.shared, np.int32),
             int(self.n_starts), int(self.phase_starts), int(self.z_step),
-            int(iterations), int(n_threads)))
+            int(iterations), int(n_threads), variance))
 
     def _fifth(self, value, error):
         cal = self.calibration
@@ -519,20 +523,23 @@ class SplinePSF(PSFModel):
         return getattr(self.calibration, "field_splines", None) is not None
 
     def fit(self, rois: np.ndarray, iterations: int = 50,
-            n_threads: int = 0, chip_xy: Optional[np.ndarray] = None) -> FitResult:
+            n_threads: int = 0, chip_xy: Optional[np.ndarray] = None,
+            variance: Optional[np.ndarray] = None) -> FitResult:
         """``chip_xy`` (n, 2), each ROI's centre on the camera chip in pixels:
         with a field-dependent calibration each ROI is fitted with the splines
-        blended there; without it, with the grid's centre."""
+        blended there; without it, with the grid's centre.  ``variance`` as
+        `PSFModel.fit`."""
         z_start = float(self.calibration.z_nm_to_index(self.z_start_nm))
         field = getattr(self.calibration, "field_splines", None)
         if field is not None and chip_xy is not None:
             from .field_splines import bilinear
             nodes, weights = bilinear(field, chip_xy)
             return FitResult(*_fit3d.fit_cspline_field(
-                rois, field.coeff, nodes, weights, z_start, int(iterations), int(n_threads)))
+                rois, field.coeff, nodes, weights, z_start, int(iterations), int(n_threads),
+                variance))
         return FitResult(*_fit3d.fit_cspline(rois, self.calibration.coeff,
                                              z_start, int(iterations),
-                                             int(n_threads)))
+                                             int(n_threads), variance))
 
     def unpack(self, result: FitResult) -> Dict[str, np.ndarray]:
         p, crlb = result.theta, np.clip(result.crlb, 0, None)

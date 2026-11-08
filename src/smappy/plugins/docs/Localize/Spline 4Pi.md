@@ -294,6 +294,13 @@ A registration that beads left, used for another acquisition.  It is
 readable as text: each channel's map is also given as its shift at the
 channel's centre, its scale and its rotation.
 
+### fit.per_pixel_noise
+Each phase channel's pixels weighted by their own read noise, from the camera's
+noise map ([Camera noise calibration](plugin:Localize/Camera noise calibration)),
+cut into the four channels as the frames are.  The map must cover all four
+rectangles; record the dark frames with the camera ROI of the data, or the
+whole chip.
+
 ### model.channel_drift
 It costs a second fit of *drift blocks* × *frames per block* frames,
 5000 by default.  Worth it for every long acquisition, and whenever the
