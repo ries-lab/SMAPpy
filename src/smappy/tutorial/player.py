@@ -337,7 +337,7 @@ _PAGE = r"""<title>__TITLE__</title>
   --ink: #18202b;
   --muted: #5b6878;
   --line: #d3d9e1;
-  --accent: #e8900c;          /* the 'hot' LUT's amber: the spotlight, the pointer */
+  --accent: #e8900c;          /* the 'red hot' LUT's amber: the spotlight, the pointer */
   --accent-ink: #8a4f00;
   --roi: #1a8f7a;
   --stage: #1f2833;

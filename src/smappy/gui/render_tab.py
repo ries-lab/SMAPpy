@@ -1678,7 +1678,7 @@ class RenderTab(QWidget):
 
     def _colour_by_track(self) -> None:
         """The first time a layer draws tracks, and only if it is not coloured
-        by a column already: each track its own colour, by its id on *turbo*.
+        by a column already: each track its own colour, by its id on *rainbow*.
         One intensity LUT made every track the same colour, and which line
         was which track could not be told where they cross.  Once per layer,
         so a colouring chosen afterwards is not undone by a mode switch."""
