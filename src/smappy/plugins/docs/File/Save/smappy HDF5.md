@@ -170,7 +170,7 @@ column left out takes its recipe with it, and so does one whose expression
 reads a column left out; a filter bound the table keeps on a column left out
 goes too.  The session keeps every column: it stays marked unsaved, and
 File > Save goes on saving to the file it had.  To take columns out of the
-session itself, use [Edit columns](plugin:Analysis/Process/Edit columns).
+session itself, use [Edit attributes](plugin:Analysis/Process/Edit attributes).
 
 ## Output
 

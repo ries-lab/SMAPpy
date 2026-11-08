@@ -133,7 +133,7 @@ order written, so a later one may read an earlier one (`maths.rel`); when
 an evaluation they read is measured again they are all evaluated again, and
 a region whose inputs are out of date gets no current row, as a block's
 would not.  The column written onto the localizations is a snapshot, as
-*Regions to column*'s is.
+*Regions to attribute*'s is.
 
 **Which table.**  The localizations, whatever the layer shows: the
 column is computed for each localization, and *the selection* is the

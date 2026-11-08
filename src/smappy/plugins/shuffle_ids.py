@@ -18,7 +18,7 @@ none", not an id (SMAP set a negative one to 0).
 
 **A new column**, ``<column>_shuffled`` by default, rather than the column
 rewritten: an id is a name other things refer to -- the region results are
-kept by it, Regions to column writes by it -- and only its colour is meant
+kept by it, Regions to attribute writes by it -- and only its colour is meant
 to change.  The column is a recipe with the rule ``max`` (`mathparse`), as
 `cluster_id` is, so a merged blink keeps one value.  A new seed each run
 unless one is given: run it again for another order.

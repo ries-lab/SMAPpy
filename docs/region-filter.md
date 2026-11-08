@@ -49,7 +49,7 @@ selection, as it honours `use`.
 What stays a column of the localizations: what is not a region analysis
 (`n_in_group`, the grouping's own), the ids themselves (`cluster_id`,
 `tid`, `track_id`), and what someone writes there on purpose (*Math parser*
-with *to localization table*, *Regions to column*) -- to colour by a value,
+with *to localization table*, *Regions to attribute*) -- to colour by a value,
 to compute with it per localization, or to compare two filters in two
 layers.
 
@@ -226,7 +226,7 @@ does not use it, finding regions by a lookup table on the ids.
 | *Filter ROIs* (`roi_order.py`) | conditions on ROIs in the region filter; its parser and its rule for missing values (an unmeasured ROI makes a comparison false) are kept.  *Use* stays an annotation -- which ROIs are measured at all -- that the filter can read. |
 | *Sort ROIs* | stays; picks its columns with the tree selector |
 | *results from* (`SiteAnalysisPlugin`: *Histograms*, *Curves*) | the tree selector, and honours the pass column |
-| *Regions to column*, a block's *write values* | *Math parser* on a region source with *to localization table*; *Regions to column* a small plugin on top, for chains |
+| *Regions to attribute*, a block's *write values* | *Math parser* on a region source with *to localization table*; *Regions to attribute* a small plugin on top, for chains |
 | `track_D_um2_per_s`, `track_alpha` (*Tracking analysis*, *write per track*) | a region table per track, from the vectorised fit it already does |
 | *Stability* per bead | a region table per bead |
 | MINFLUX per-trace statistics | a region table per `tid` (the first client) |
@@ -307,7 +307,7 @@ Steps 1-3 stand on their own and can be one change.
   `region_filter`; a value is written onto the rows to colour by it, to
   compute with it per localization, or to compare filters between layers.
 * **"a snapshot until written again"**: no longer true of the flag, nor of
-  values written by a recipe; true of *Regions to column*'s columns only.
+  values written by a recipe; true of *Regions to attribute*'s columns only.
 * **"Where results live"**: a plugin may hand back a whole table
   (`Result.id_regions`, `region_runs.column_table`), stored under the label
   a block would give it.  *Done.*

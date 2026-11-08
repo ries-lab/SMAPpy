@@ -39,7 +39,7 @@ def test_the_region_plugins_are_registered_under_regions():
     found = plugins.refs("Analysis/Regions/")
     assert set(found) == {"Analysis/Regions/Segment regions",
                           "Analysis/Regions/Find clusters",
-                          "Analysis/Regions/Regions to column",
+                          "Analysis/Regions/Regions to attribute",
                           "Analysis/Regions/Sort ROIs",
                           "Analysis/Regions/Filter ROIs",
                           "Analysis/Regions/Filter regions",

@@ -1,4 +1,4 @@
-"""Edit columns, Collapse by id and Save's columns: `smappy.table_edit`."""
+"""Edit attributes, Collapse by id and Save's columns: `smappy.table_edit`."""
 import re
 
 import h5py
@@ -14,7 +14,7 @@ from smappy.session import Session
 from smappy.table_edit import (MERGED, collapse, keep_columns, remove_columns,
                                rename_column)
 
-EDIT = "Analysis/Process/Edit columns"
+EDIT = "Analysis/Process/Edit attributes"
 COLLAPSE = "Analysis/Process/Collapse by id"
 
 

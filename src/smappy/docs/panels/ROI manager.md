@@ -50,7 +50,7 @@ nearest it, and *Add* keeps it.  The list shows *all* ROIs, only the
 
 Any ROI can also be cut in time and in depth: a frame range and a z range,
 set under *frames and z* in *annotate*, are part of what the ROI holds, so
-what is measured in it -- and what *Regions to column* writes -- is that
+what is measured in it -- and what *Regions to attribute* writes -- is that
 part only.  Every frame and every z, the default, is no cut.
 
 What the Regions tab holds is what an ROI *is*: its shape and size, shared by all
@@ -205,7 +205,7 @@ Each line gives two numbers in the ROI's row of the results table:
 `<name>_angle_deg`, its angle, and `<name>_length_nm`, its length.  So
 [Filter ROIs](plugin:Analysis/Regions/Filter ROIs),
 [Sort ROIs](plugin:Analysis/Regions/Sort ROIs), the summaries and
-[Regions to column](plugin:Analysis/Regions/Regions to column) read them
+[Regions to attribute](plugin:Analysis/Regions/Regions to attribute) read them
 like anything measured.  The keys: L draws the chosen line, Shift+L chooses
 the next name, R reverses it.
 
@@ -388,7 +388,7 @@ Deletes the selected ROI.  To keep an ROI out of the analysis without
 losing it, untick *use* instead.  The other ROIs keep their numbers: an ROI
 is given its number when it is made and keeps it, and a number is never given
 again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
-column of *Regions to column*, whatever was removed before it.  *Undo*
+column of *Regions to attribute*, whatever was removed before it.  *Undo*
 brings a removed ROI back under its own number.
 
 ### Undo ROI edit

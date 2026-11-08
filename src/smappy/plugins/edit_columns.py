@@ -61,7 +61,7 @@ def _filters_lost(ctx: Context, names) -> List[str]:
     return out
 
 
-@register("Analysis/Process/Edit columns")
+@register("Analysis/Process/Edit attributes")
 class EditColumns(Plugin):
     """Rename a column of the localizations, or remove columns."""
 

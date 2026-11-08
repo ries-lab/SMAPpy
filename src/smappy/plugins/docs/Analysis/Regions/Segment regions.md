@@ -640,7 +640,7 @@ ROIs.
 
 ### ids.column
 Any column of whole numbers: `cluster_id`, an id a dropped-in clusterer
-wrote, or `roi_id` from *Regions to column* to bring ROIs back from a table.
+wrote, or `roi_id` from *Regions to attribute* to bring ROIs back from a table.
 
 ### ids.min_size
 Large clusters are usually the interesting ones and small ones are noise:

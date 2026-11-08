@@ -752,7 +752,7 @@ def with_columns_of(locs: Localizations, settings: RenderSettings) -> RenderSett
     """The settings without a colour or weight column the table does not have.
 
     A layer keeps the column it colours by while the table changes under it
-    -- *Edit columns* renames or removes one, an undo brings back a table
+    -- *Edit attributes* renames or removes one, an undo brings back a table
     without it -- and the picture then is the plain one, not a KeyError on
     every redraw.  An empty table (a live fit before its first block) has no
     columns yet and is left alone: it draws nothing either way.
