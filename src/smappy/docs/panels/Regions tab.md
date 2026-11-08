@@ -24,7 +24,8 @@ it.  By default these are
 the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by a circle
 template (a ring for nuclear pores, a disc for pits and other compact
 structures), beads, an id [attribute](plugin:Panels/Glossary) (one value
-every localization carries) or positions from a file -- and
+every localization carries), positions from a file, or like a few ROIs
+put on good examples -- and
 [Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
 what was measured in every ROI to a file.  The summaries, such as
 [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), and

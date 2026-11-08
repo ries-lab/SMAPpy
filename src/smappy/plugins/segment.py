@@ -18,9 +18,23 @@ model of the structure:
   column, the cluster's hull or the project's shape
   (`region_column.column_regions`);
 * **positions from a file** -- an ROI at each x, y of a csv
-  (`segmentation.read_positions`), such as *Export table* writes.
+  (`segmentation.read_positions`), such as *Export table* writes;
+* **like examples** -- Picasso's *pick similar*: the ROIs the user put on
+  a few good structures are the examples, each measured on everything it
+  holds, whatever its shape (`segmentation.measure_rows`); an ROI of the
+  manager's shape and size settles on every structure of the field
+  (`segmentation.similar_candidates`), and those whose values lie within
+  the examples' mean plus or minus a few standard deviations are kept
+  (`segmentation.similarity_window`).  Which ROIs are examples is
+  *examples*: the used ones (by default), all, or those with a keyword --
+  never the ones this method made, so a second run with *replace* learns
+  from the same examples (decided with Jonas, 2026-11-08: place a few ROIs
+  and go, with no keyword to give first).  The window is written as a
+  *keep* condition and joined to the user's own, so the histograms show it
+  and the run's text says it; Picasso keeps it out of sight.  The examples
+  stay as they are and keep the candidates off them.
 
-Every candidate of the first two is measured -- the shared values and its
+Every candidate of the circle template, beads and like examples is measured -- the shared values and its
 model's own, `segmentation.VALUES` -- and **keep**, one condition in *Filter
 ROIs*' syntax, decides which become ROIs (`segmentation.judge`): one field
 in place of the ring template's five checks, and the structure's knowledge
@@ -59,7 +73,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -72,9 +86,10 @@ from .roi import SegmenterPlugin, current_file, replace_param
 PATH = "Analysis/Regions/Segment regions"
 
 METHODS = (("circle", "circle template"), ("beads", "beads"),
-           ("ids", "from an id attribute"), ("file", "positions from a file"))
+           ("ids", "from an id attribute"), ("file", "positions from a file"),
+           ("similar", "like examples"))
 #: the methods that measure each candidate and judge it by *keep*
-MEASURED = ("circle", "beads")
+MEASURED = ("circle", "beads", "similar")
 
 SHIPPED = Path(__file__).resolve().parent.parent / "data" / "segment_presets"
 SUFFIX = ".yaml"
@@ -170,6 +185,30 @@ class BeadSegmentSettings:
                         help="frames a bead may be missing from its track")
 
 
+def _keyword_lists():
+    return [("", "-")]
+
+
+EXAMPLES = (("used", "used ROIs"), ("all", "all ROIs"), ("keyword", "a keyword"))
+
+
+@dataclass
+class SimilarSettings:
+    examples: str = param("used", label="examples", choices=EXAMPLES,
+                          help="which ROIs are the examples; never those this "
+                               "method made")
+    keyword_list: str = param("", label="keyword list", choices=_keyword_lists,
+                              help="the ROI keyword list that marks the examples")
+    keyword: str = param("", label="keyword",
+                         help="the keyword the examples have in that list")
+    compare: str = param("n_locs, rmsd_nm", label="compare",
+                         help="the values a candidate must share with the "
+                              "examples, comma separated")
+    spread: float = param(2.0, label="spread", unit="SD", min=0.1,
+                          help="a candidate's values lie within the examples' "
+                               "mean plus or minus this many standard deviations")
+
+
 @dataclass
 class PositionsSettings:
     path: str = param("", label="file", kind="open_file",
@@ -193,6 +232,8 @@ class SegmentSettings:
                                     label="from an id attribute")
     file: PositionsSettings = param(default_factory=PositionsSettings,
                                     label="positions from a file")
+    similar: SimilarSettings = param(default_factory=SimilarSettings,
+                                     label="like examples")
     keep: str = param("n_locs >= 10", label="keep", kind="text",
                       help='which candidates become ROIs, e.g. n_ring >= 4 and '
                            '40 <= radius_nm <= 70; empty: all')
@@ -224,13 +265,106 @@ def provided(settings: SegmentSettings) -> tuple:
 unavailable = segmentation.unavailable
 
 
-def candidates(locs, settings: SegmentSettings, existing: Sequence = ()
-               ) -> List[Dict[str, Any]]:
-    """Every candidate of the circle template or beads on a table, measured
-    and judged by *keep* (each with ``use`` and ``failed``), strongest
-    first.  *keep* is checked before the search, which can take a while."""
+# ------------------------------------------------------------------ like examples
+
+def compared(settings: SegmentSettings) -> List[str]:
+    """The values *compare* names, each one the method measures."""
+    names = [n.strip() for n in settings.similar.compare.split(",") if n.strip()]
+    if not names:
+        raise ValueError("compare names no value: name at least one of "
+                         + ", ".join(segmentation.VALUES["similar"]))
+    known = segmentation.VALUES["similar"]
+    unknown = [n for n in names if n not in known or n == "touching"]
+    if unknown:
+        raise ValueError(f"compare names {', '.join(unknown)}; it can name "
+                         + ", ".join(n for n in known if n != "touching"))
+    return names
+
+
+def similar_shape(project) -> Tuple[str, float]:
+    """``(shape, half-width)`` of a candidate: the ROI manager's own shape
+    and size, the ROIs the user puts down -- Picasso's picks are its pick
+    size too."""
+    return project.shape, float(project.size_nm) / 2
+
+
+def examples_of(project, settings: SegmentSettings) -> List[Any]:
+    """The example ROIs of every file: the used ones, all, or those with
+    the keyword -- never one this method made, whose numbers came from the
+    examples in the first place.  An ROI of an id alone is a track or a
+    cluster, not a structure's place, and is left out."""
+    s = settings.similar
+    if s.examples not in dict(EXAMPLES):
+        raise ValueError(f"examples are {', '.join(dict(EXAMPLES))}, not {s.examples!r}")
+    if s.examples == "keyword":
+        if not s.keyword_list:
+            raise ValueError("choose the keyword list that marks the examples, and "
+                             "give them a keyword in the ROI manager")
+        if s.keyword_list not in (project.annotation_lists or {}):
+            raise ValueError(f"the ROI manager has no keyword list {s.keyword_list!r}")
+        if not s.keyword:
+            raise ValueError(f"give the examples' keyword in {s.keyword_list!r}")
+    return [roi for roi in project.rois.values()
+            if roi.spatial and roi.file_id in project.sources
+            and not made_by(roi, "similar") and is_example(roi, settings)]
+
+
+def is_example(roi, settings: SegmentSettings) -> bool:
+    """Whether the ROI is one *examples* names, made by this method or not."""
+    s = settings.similar
+    if s.examples == "keyword":
+        return bool(s.keyword_list) and roi.annotations.get(s.keyword_list) == s.keyword
+    return s.examples == "all" or roi.use
+
+
+def learn(project, settings: SegmentSettings
+          ) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[float, float]], Tuple[str, float]]:
+    """``(examples, window, (shape, half-width))``: each example ROI
+    measured on everything it holds, of the table the manager shows and as
+    it filters it (`ROIProject.indices`), and the window of values a
+    candidate must fall in."""
+    shape = similar_shape(project)
+    rois = examples_of(project, settings)
+    if len(rois) < 2:
+        what = {"used": "used ROIs", "all": "ROIs",
+                "keyword": f"ROIs with the keyword {settings.similar.keyword!r}"}
+        raise ValueError(f"{len(rois)} {what[settings.similar.examples]} as "
+                         "examples: put ROIs on at least 2 good structures, better "
+                         "five or more")
+    measured = [segmentation.measure_rows(project.state(roi.file_id).locs,
+                                          project.indices(roi))
+                for roi in rois]
+    window = segmentation.similarity_window(measured, compared(settings),
+                                            settings.similar.spread)
+    return measured, window, shape
+
+
+def joined_keep(window: Dict[str, Tuple[float, float]], keep: str) -> str:
+    """The window's condition and the user's *keep*, both to hold."""
+    learned = segmentation.window_condition(window)
+    keep = keep.strip()
+    if not keep:
+        return learned
+    return f"{learned} and ({keep})" if " or " in f" {keep} " else f"{learned} and {keep}"
+
+
+def candidates(locs, settings: SegmentSettings, existing: Sequence = (),
+               similar=None) -> List[Dict[str, Any]]:
+    """Every candidate of the circle template, beads or like examples on a
+    table, measured and judged by *keep* (each with ``use`` and
+    ``failed``), strongest -- or most like the examples -- first.  *keep* is
+    checked before the search, which can take a while.  ``similar`` is
+    like examples' ``(window, radius)`` (`learn`), whose window joins
+    *keep*."""
+    keep = settings.keep
+    if settings.method == "similar":
+        if similar is None:
+            raise ValueError("like examples learns from ROIs marked as examples: "
+                             "run the plugin, which reads them")
+        window, (shape, radius) = similar
+        keep = joined_keep(window, settings.keep)
     if settings.method in MEASURED:
-        segmentation.keep_test(settings.keep, provided(settings), unavailable(locs))
+        segmentation.keep_test(keep, provided(settings), unavailable(locs))
     if settings.method == "circle":
         c = settings.circle
         if c.shape not in segmentation.SHAPES:
@@ -252,9 +386,12 @@ def candidates(locs, settings: SegmentSettings, existing: Sequence = ()
             sites = [s for s in sites if not np.any(
                 np.hypot(*(ex - np.asarray(s["center"])).T)
                 < max(3 * s["values"]["spread_nm"], 1.0))]
+    elif settings.method == "similar":
+        sites = segmentation.similar_candidates(locs, radius, window, existing,
+                                                shape=shape)
     else:
         raise ValueError(f"{settings.method} has no candidates to measure")
-    segmentation.judge(sites, settings.keep, provided(settings), unavailable(locs))
+    segmentation.judge(sites, keep, provided(settings), unavailable(locs))
     return sites
 
 
@@ -264,8 +401,8 @@ def candidates(locs, settings: SegmentSettings, existing: Sequence = ()
 @register("Analysis/Regions/Segment regions")
 class SegmentRegions(SegmenterPlugin):
     """Finds regions and makes ROIs of them: rings or discs by a circle
-    template, beads, an id column such as cluster_id, or positions from a
-    file."""
+    template, beads, an id column such as cluster_id, positions from a
+    file, or structures like a few examples marked by hand."""
 
     Settings = SegmentSettings
     changes_locs = False
@@ -290,10 +427,15 @@ class SegmentRegions(SegmenterPlugin):
         state.shown["keep"] = measured
         state.shown["keep_rejected"] = measured
         state.active["circle.ring_width_nm"] = settings.circle.shape == "ring"
+        project = getattr(ctx, "rois", None) if ctx is not None else None
+        lists = list(getattr(project, "annotation_lists", {}) or {})
+        state.choices["similar.keyword_list"] = [("", "-")] + [(n, n) for n in lists]
+        by_keyword = settings.similar.examples == "keyword"
+        state.active["similar.keyword_list"] = by_keyword
+        state.active["similar.keyword"] = by_keyword
         if measured:
             names = provided(settings)
             locs = None
-            project = getattr(ctx, "rois", None) if ctx is not None else None
             if project is not None:
                 file_id = current_file(project)
                 if file_id is not None:
@@ -303,10 +445,24 @@ class SegmentRegions(SegmenterPlugin):
                         locs = None
             try:
                 segmentation.keep_test(settings.keep, names, unavailable(locs))
+                if settings.method == "similar":
+                    compared(settings)
             except ValueError as error:
                 state.notice = Notice(str(error))
             else:
-                state.notice = Notice("keep can name " + ", ".join(names), kind="info")
+                text = "keep can name " + ", ".join(names)
+                if settings.method == "similar" and project is not None:
+                    try:
+                        n = len(examples_of(project, settings))
+                    except ValueError as error:
+                        text = str(error)
+                    else:
+                        shape, half = similar_shape(project)
+                        text = (f"{n} example{'s' * (n != 1)}; candidates are "
+                                f"{shape}s of {2 * half:g} nm, the ROI size; the "
+                                "window learned from the examples joins keep, "
+                                "which can name " + ", ".join(names))
+                state.notice = Notice(text, kind="info")
         return state
 
     def react(self, changed: str, settings: SegmentSettings) -> Optional[Dict[str, Any]]:
@@ -319,8 +475,12 @@ class SegmentRegions(SegmenterPlugin):
         """With *replace*: the ROIs the same method made on the file before."""
         if not settings.replace:
             return []
+        # an ROI an earlier run made and the user then gave the examples'
+        # keyword is an example now, and keeps its place
+        keeps = settings.method == "similar" and settings.similar.examples == "keyword"
         return [roi.id for roi in project.rois.values()
-                if roi.file_id == file_id and made_by(roi, settings.method)]
+                if roi.file_id == file_id and made_by(roi, settings.method)
+                and not (keeps and is_example(roi, settings))]
 
     def propose(self, locs, settings: SegmentSettings, existing: Sequence = ()
                 ) -> List[Dict[str, Any]]:
@@ -330,7 +490,7 @@ class SegmentRegions(SegmenterPlugin):
             raise ValueError(f"{dict(METHODS).get(settings.method, settings.method)} "
                              "makes its ROIs of the whole table, not one file's: "
                              "run the plugin")
-        sites = candidates(locs, settings, existing)
+        sites = candidates(locs, settings, existing, getattr(self, "_similar", None))
         # every candidate, for the run's text and figures: `find` keeps only
         # the ROIs it made, and the rejected ones are what *keep* is tuned on
         self.last = sites
@@ -355,6 +515,18 @@ class SegmentRegions(SegmenterPlugin):
     def _measured(self, ctx: Context, settings: SegmentSettings, commit: bool) -> Result:
         project = ctx.rois
         effect: Dict[str, Any] = {}
+        keep, learned = settings.keep, ""
+        self._similar = None
+        if settings.method == "similar":
+            if project is None:
+                raise ValueError("like examples learns from ROIs marked as examples "
+                                 "in the ROI manager; there is none")
+            examples, window, shape = learn(project, settings)
+            # read by `propose`, which `ROIProject.find` calls with the table alone
+            self._similar = (window, shape)
+            keep = joined_keep(window, settings.keep)
+            learned = (f"; learned from {len(examples)} examples: "
+                       + segmentation.window_condition(window))
         if project is None:
             locs = ctx.locs
             sites = candidates(locs, settings)
@@ -385,18 +557,21 @@ class SegmentRegions(SegmenterPlugin):
                     reasons[f] = reasons.get(f, 0) + 1
             text += "; failing " + ", ".join(f"{k} ({v})" for k, v in
                                              sorted(reasons.items()))
+        text += learned
         if not commit:
             text = "preview: " + text
         xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                               np.asarray(locs["y_nm"], dtype=float)))
-        names = segmentation.keep_test(settings.keep, provided(settings),
+        names = segmentation.keep_test(keep, provided(settings),
                                        unavailable(locs))[1] or ["radius_nm", "n_locs"]
-        limits = segmentation.bounds(settings.keep)
+        limits = segmentation.bounds(keep)
         plots = {}
         if sites:
             plots["keep"] = Plot(lambda f: draw_values(f, sites, names, limits),
                                  panels=len(names), size=(2.7 * min(len(names), 4),
                                                           2.6 * -(-len(names) // 4)))
+        if self._similar is not None:
+            data["window"] = {k: list(v) for k, v in self._similar[0].items()}
         return Result(text=text, settings=settings, data=data, **effect,
                       plot=(lambda ax: draw_sites(ax, xy, sites)) if sites else None,
                       plots=plots)

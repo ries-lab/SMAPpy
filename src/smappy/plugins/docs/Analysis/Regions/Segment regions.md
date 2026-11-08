@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find]
+covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find, smappy.plugins.segment.learn, smappy.plugins.segment.examples_of, smappy.plugins.segment.similar_shape, smappy.plugins.segment.is_example, smappy.segmentation.measure_rows, smappy.plugins.segment.compared, smappy.plugins.segment.joined_keep, smappy.segmentation.mean_shift, smappy.segmentation.measure_at, smappy.segmentation.similarity_window, smappy.segmentation.window_condition, smappy.segmentation.similar_candidates]
 ---
 
 ## What it does
@@ -33,8 +33,12 @@ form shows only the chosen method's settings:
   found.
 * **positions from a file** -- an ROI at each position of a table, such as
   one written by [Export table](plugin:Analysis/Regions/Summarize/Export table).
+* **like examples** -- ROIs on every structure like a few you marked by
+  hand: Picasso's *pick similar* (Schnitzbauer et al. 2017,
+  [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)),
+  for a structure no template describes.
 
-The circle template and beads measure every candidate they find -- its
+The circle template, beads and like examples measure every candidate they find -- its
 radius, how round it is, how many localizations it has, and what its model
 adds -- and **keep** decides which candidates become ROIs: one condition on
 those values, written as in [Filter ROIs](plugin:Analysis/Regions/Filter ROIs),
@@ -143,6 +147,26 @@ Puts an ROI at each position of a table: a csv or tsv with `x_nm` and
 ROI manager's size and shape.  Use it to bring back the sites of an earlier
 analysis -- *Export table* with *ROI position* ticked writes such a table --
 or sites chosen in another program.
+
+### Like examples
+
+Segmentation by example, for a structure that none of the models above
+describes: put ROIs on five or ten good ones in the ROI manager -- clicked
+at its ROI size, or drawn as free shapes -- and the method puts an ROI on
+every other structure of the file that looks like them.  The examples are
+the used ROIs, by default; *examples* can make them all ROIs, or those
+with a keyword, for a project that holds other ROIs too.  "Looks like" is a
+few numbers measured on what each ROI holds: by default how many
+localizations it has (`n_locs`) and how spread out they are (`rmsd_nm`).  A candidate is kept when its numbers lie
+within the examples' mean plus or minus *spread* standard deviations.
+
+There is nothing to tune but the examples.  Choose them as varied as the
+structures you want -- a faint one and a bright one -- since the window
+can only be as wide as they are.  It works best for compact structures of
+one kind, well apart; structures that touch, or whose number of
+localizations varies a lot over the field, are found less reliably.  The
+window it learned is shown in the text and joined to *keep*, so it can be
+read, and narrowed with conditions of your own.
 
 ## How it works
 
@@ -368,6 +392,79 @@ csv loader finds them, in nm unless the header says otherwise.
 *Export table* writes it, for the same session), `file` (the file's name) or
 `filenumber`; without any of these, to the file the ROI manager shows.
 
+### Like examples
+
+**1. The examples.**  The used ROIs of every file (or all of them, or
+those with the keyword, as *examples* says), leaving out the ones this
+method made.  Each is measured on all the localizations it holds, whatever
+its shape: the number, and how far they lie from their centre.
+
+**2. The window.**  For each value in *compare*, the examples' mean plus or
+minus *spread* standard deviations.  It becomes a condition -- for example
+`23.2 <= n_locs <= 46.8 and 26.7 <= rmsd_nm <= 35.9` -- that is joined to
+*keep*.
+
+**3. Circles everywhere, moved onto the structures.**  ROIs of the ROI
+manager's shape and size -- circles or squares -- are laid over the whole
+file on a triangular grid, half an ROI size apart,
+and those with fewer than 3 localizations are dropped.  Each circle is moved
+to the centre of the localizations inside it, again and again, until it
+stops: it climbs onto the nearest structure, so many circles end up on each
+one.
+
+**4. One candidate per structure.**  The candidates are sorted by how
+close their values are to the middle of the window, and one overlapping a
+better one -- or an ROI already in the file, the examples among them -- by
+more than half a radius is dropped.
+
+**5. Keep.**  The window and *keep* are checked on every candidate, as for
+the circle template.
+
+```figure A simulated field of discs of 40 nm (40 localizations each) beside large and small blobs and background, segmented like five example ROIs (orange).  Left: the discs found (blue) and the candidates rejected (grey).  Right: every candidate's values, the examples (orange) and the window learned from them (red): the discs fall inside it, the large blobs above and the small ones below.
+rng = np.random.default_rng(1)
+def blobs(centres, r, n):
+    out = []
+    for c in centres:
+        k = rng.poisson(n); a = rng.uniform(0, 2 * np.pi, k)
+        rr = r * np.sqrt(rng.uniform(0, 1, k))
+        out.append(np.column_stack((c[0] + rr * np.cos(a), c[1] + rr * np.sin(a)))
+                   + rng.normal(0, 8, (k, 2)))
+    return np.vstack(out)
+good, big, small = (rng.uniform(300, 5700, (n, 2)) for n in (20, 6, 8))
+pts = np.vstack([blobs(good, 40, 40), blobs(big, 90, 160), blobs(small, 15, 12),
+                 rng.uniform(0, 6000, (400, 2))])
+from smappy.locs import Localizations
+field = Localizations({"x_nm": pts[:, 0], "y_nm": pts[:, 1], "frame": np.arange(len(pts)),
+                       "xy_err_nm": np.full(len(pts), 8.0)})
+from scipy.spatial import cKDTree
+held = cKDTree(pts).query_ball_point(good[:5], 75)
+examples = [segmentation.measure_rows(field, rows) for rows in held]
+window = segmentation.similarity_window(examples, segmentation.SIMILAR_COMPARED)
+cands = segmentation.similar_candidates(field, 75, window,
+                                        existing=[e["center"] for e in examples])
+judge(cands, segmentation.window_condition(window), VALUES["similar"])
+fig.set_size_inches(8, 3.4)
+left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1.2, 1]})
+left.scatter(pts[:, 0], pts[:, 1], s=0.4, c="k", linewidths=0)
+for s in cands:
+    left.add_patch(Circle(s["center"], 75, fill=False, lw=0.9,
+                          color="#2f7fd0" if s["use"] else "0.65"))
+for e in examples:
+    left.add_patch(Circle(e["center"], 75, fill=False, lw=1.4, color="#e07b00"))
+left.set_aspect("equal"); left.set_xticks([]); left.set_yticks([])
+v = np.array([[s["values"]["n_locs"], s["values"]["rmsd_nm"]] for s in cands])
+use = np.array([s["use"] for s in cands])
+right.plot(v[~use, 0], v[~use, 1], "o", ms=3, color="0.65", label="rejected")
+right.plot(v[use, 0], v[use, 1], "o", ms=3, color="#2f7fd0", label="kept")
+ev = np.array([[e["values"]["n_locs"], e["values"]["rmsd_nm"]] for e in examples])
+right.plot(ev[:, 0], ev[:, 1], "o", ms=5, color="#e07b00", label="examples")
+(n0, n1), (r0, r1) = window["n_locs"], window["rmsd_nm"]
+right.plot([n0, n1, n1, n0, n0], [r0, r0, r1, r1, r0], color="#d62728", lw=1)
+right.set_xscale("log")
+right.set_xlabel("n_locs"); right.set_ylabel("rmsd_nm (nm)")
+right.legend(fontsize=7, frameon=False)
+```
+
 ## In detail
 
 ### Circle template
@@ -574,6 +671,70 @@ or y are skipped.
 file the manager does not have is skipped, and the text says how many were.
 With *replace*, the ROIs this method made in the files it adds to go first.
 
+### Like examples
+
+**Which table.**  The file the ROI manager shows, under its filter, as for
+the circle template; each example on its own file, under that file's filter.
+The examples may lie in any file, the search is in the one shown.
+
+**The examples** are measured on `ROIProject.indices`: the rows of the
+table the ROI manager shows, under its filter, that the ROI holds -- its
+polygon, or the manager's circle or square, narrowed by its frame and z
+ranges.  An ROI of an id alone (a track) is not an example.
+
+**The values.**  `n_locs` counts the localizations inside;
+`rmsd_nm` is Picasso's: the root-mean-square distance of those
+localizations from their centre of mass, which for a candidate is its
+centre once it has stopped moving.  It includes the localization precision.
+`radius_nm` is a disc's radius from the same spread with the precision
+taken out, $\sqrt{2 (\langle d^2 \rangle - \langle \sigma^2 \rangle)}$,
+as for the circle template's discs; `roundness`, `psf_nm` and `touching` as
+above.  *compare* may name any of them but `touching`.
+
+**The candidates** have the ROI manager's shape and size: a circle of
+diameter $d$, or a square of side $d$ (its localizations those within
+$d/2$ in x and in y).  A free shape among the examples is compared with
+them all the same, so for a structure that fills it the counts agree only
+if its area is about the manager's.
+
+**The mean shift** moves every circle at once to the mean position of the
+localizations inside it until it moves less than 0.1 nm, or 100 times.
+Circles that stop within 0.1 nm of each other are one candidate.
+
+**The grid** is triangular with a spacing of one radius $R$, so no point of
+the field is farther than $R/\sqrt{3}$ from a circle's start and even a
+structure much smaller than the circle starts inside one.
+
+**The window** is $\bar{v} \pm k\, s$ for each value, with $k$ the
+*spread* and $s$ the sample standard deviation of the examples (at least 2
+are needed); for `n_locs`, $s$ is at least $\sqrt{\bar{v}}$ -- a count
+cannot vary less than Poisson's -- and the lower end at least 3.
+
+**Order.**  A candidate's distance from the examples is
+$\sum_v \left( (v - m_v) / h_v \right)^2$, with $m_v$ the middle of the
+window and $h_v$ its half-width; candidates are taken nearest first, and
+one whose circle overlaps one already taken, or an ROI already in the file,
+by more than half the radius is dropped (`too_close`, the circle template's
+rule).
+
+**The examples stay.**  They are ROIs already, so no ROI is made on them.
+An ROI this method made is never an example, so a second run, with
+*replace*, learns from the same ones; with *examples* on a keyword, an ROI
+an earlier run made and that you then gave the keyword is an example and
+*replace* leaves it.
+
+**Picasso** finds the same window from $\bar{v} \pm 2\sigma$ with the
+population standard deviation, lays its grid one diameter apart, and
+keeps the first candidate in grid order where two overlap.  Each is changed here for
+a reason.  Five examples underestimate the spread of the structures they
+stand for: on 150 simulated discs of 40 localizations their standard
+deviation of `n_locs` was 3.6 against the true 9.6, and the
+window found 60 % of the discs; with the sample deviation and the Poisson
+floor, 80 %, and still none of the clutter beside them.  A grid a diameter
+apart leaves points $0.58\,d$ from the nearest start, outside every circle.
+And taking the best candidate first
+keeps one on junk from pushing out a good one beside it.
+
 ## Parameters
 
 ### replace
@@ -665,13 +826,37 @@ Read only for *its id alone*.  A track's line shows its direction and its
 steps; an outline is the better picture of a cluster, whose localizations
 have no order.
 
+### similar.examples
+*used ROIs* is the quick way: put ROIs on a few good structures and run;
+untick one to leave it out.  *a keyword* is for a project that holds other
+ROIs too: make a keyword list under *annotate* in the ROI manager (for
+example *kind*, with the keyword *example*) and give the good structures the
+keyword with its number key.
+
+### similar.keyword_list
+Read only for *a keyword*; the list may hold other keywords too.
+
+### similar.keyword
+As written in the list; the examples need not be used ROIs.
+
+### similar.compare
+`n_locs, rmsd_nm` separates structures by size and brightness, which is
+what Picasso compares.  Add `roundness` to tell round structures from
+elongated ones of the same size; leave out `n_locs` where labelling varies
+a lot over the field.
+
+### similar.spread
+2 keeps about 95 % of structures like the examples if their values are
+normally distributed.  Raise it when too few are found, lower it when
+clutter gets in; the *keep* figure shows where the window falls.
+
 ### file.path
 A table written by *Export table* (with *ROI position*), or any csv with
 `x_nm` and `y_nm`.
 
 ## Output
 
-### Circle template and beads
+### Circle template, beads and like examples
 
 * **ROIs**, one per candidate *keep* passes, added to the current file in the
   ROI manager, used from the start; with *keep rejected*, the rejected
@@ -679,14 +864,18 @@ A table written by *Export table* (with *ROI position*), or any csv with
 * **The values** of each -- `n_locs`, `radius_nm`, `roundness`, `psf_nm`,
   `touching`, and the method's own: `n_ring`, `n_inside`, `n_outside`,
   `far_p` for a ring, `centre_ratio` for a disc, `frames_fraction`, `photons`,
-  `spread_nm` for beads -- are columns of the ROI manager's results table
+  `spread_nm` for beads, `rmsd_nm` for like examples -- are columns of the ROI manager's results table
   (`segment.<name>` where a measurement already has the name), so
   [Filter ROIs](plugin:Analysis/Regions/Filter ROIs),
   [Sort ROIs](plugin:Analysis/Regions/Sort ROIs) and the summaries read them.
   They describe the candidate as it was found, and stay when the ROI is
   moved.
 * **The text** says how many were kept of how many candidates, and how often
-  each part of *keep* failed.
+  each part of *keep* failed; for like examples also how many examples there
+  were and the window learned from them, which is in `data["window"]`.
+  Choose the ROI manager's ROI size to hold a whole structure and little
+  around it, about its radius plus two precisions: smaller and an ROI
+  settles on parts of one structure, larger and it takes in its neighbours.
 * **The main figure** shows the localizations with every candidate's circle,
   at its measured radius: kept in blue, rejected in grey.
 * **The *keep* figure** has a histogram of each value *keep* reads (the
@@ -776,6 +965,12 @@ table* among them, and each goes to the file it names.
 New: SMAP has no segmenter that makes sites of clusters; its DBSCAN writes
 the cluster index and makes no ROIs.
 
+### Like examples
+
+New: SMAP has no segmentation by example.  It is ported from Picasso's
+*pick similar* (Render's *Tools*, `postprocess.pick_similar`, MIT licence),
+with the changes in *In detail*.
+
 ### One plugin
 
 SMAP has a segmenter per structure in `ROIManager/Segment` -- `segmentNPC`,
@@ -784,6 +979,11 @@ plugin has a method per model of a structure, and a structure is a preset of
 values, so a structure the methods already find needs a file, not a plugin.
 
 ## References
+
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198 (2017).
+  [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, whose *pick similar* the method *like examples* is.
 
 * Thevathasan JV, Kahnwald M, Cieśliński K, et al. Nuclear pores as
   versatile reference standards for quantitative superresolution

@@ -12,7 +12,15 @@ kept is one condition, *keep*, on what was measured on each of them:
   (`filter_radii`), the maxima are the candidates (`peaks`) and each is
   measured on its own localizations (`measure_ring`, `measure_disc`);
 * **beads** -- the bright, long-lived tracks of `fiducials.find_beads`,
-  measured by `measure_beads`.
+  measured by `measure_beads`;
+* **like examples** -- Picasso's *pick similar* (jungmannlab/picasso,
+  MIT, `postprocess.pick_similar`): the examples are what ROIs hold
+  (`measure_rows`), a circle is moved onto the localizations from every
+  point of a lattice over the field (`similar_candidates`), each measured
+  the same way (`measure_at`), and kept where its values
+  lie within the examples' mean plus or minus a few standard deviations
+  (`similarity_window`, written as a *keep* condition by
+  `window_condition`).
 
 Every candidate gets the same shared values -- ``n_locs``, ``radius_nm``,
 ``roundness``, ``psf_nm``, ``touching`` -- and its model's own (`VALUES`).
@@ -122,7 +130,15 @@ RING_SPREAD_NM = 5.0
 SHARED = ("n_locs", "radius_nm", "roundness", "psf_nm", "touching")
 VALUES = {"ring": SHARED + ("n_ring", "n_inside", "n_outside", "far_p"),
           "disc": SHARED + ("centre_ratio",),
-          "beads": SHARED + ("frames_fraction", "photons", "spread_nm")}
+          "beads": SHARED + ("frames_fraction", "photons", "spread_nm"),
+          "similar": SHARED + ("rmsd_nm",)}
+#: what *like examples* compares a candidate with the examples on, unless told
+#: otherwise: Picasso's two numbers
+SIMILAR_COMPARED = ("n_locs", "rmsd_nm")
+#: the mean shift stops when a circle moves less than this, or after so many
+#: steps (Picasso: 0.001 camera pixels, 500 steps)
+SHIFT_TOL_NM = 0.1
+SHIFT_STEPS = 100
 
 
 # ------------------------------------------------------------------ geometry
@@ -588,6 +604,219 @@ def measure_beads(locs, min_photons: float = 5000.0, min_fraction: float = 0.25,
                   "spread_nm": float(np.sqrt((np.var(bx) + np.var(by)) / 2))}
         found.append({"center": c.tolist(), "values": values, "rows": rows})
     found.sort(key=lambda s: -s["values"]["n_locs"])
+    return found
+
+
+# ------------------------------------------------------------------ like examples
+
+#: the shapes a candidate of *like examples* can have, the ROI manager's two,
+#: as the Minkowski norm of a circle (p=2) or a square (p=inf) of half-width R
+SIMILAR_SHAPES = {"circle": 2.0, "square": np.inf}
+
+
+def _norm(shape: str) -> float:
+    if shape not in SIMILAR_SHAPES:
+        raise ValueError(f"no shape {shape!r}: one of {', '.join(SIMILAR_SHAPES)}")
+    return SIMILAR_SHAPES[shape]
+
+
+def mean_shift(xy: np.ndarray, centres, radius_nm: float, tree=None,
+               steps: int = SHIFT_STEPS, tol_nm: float = SHIFT_TOL_NM,
+               shape: str = "circle") -> np.ndarray:
+    """Each circle (or square) of half-width ``radius_nm`` moved to the
+    centre of mass of the localizations inside it, again and again until it
+    moves less than ``tol_nm``: it climbs onto the nearest structure.  All
+    at once; one that holds nothing stays where it is."""
+    from itertools import chain
+    from scipy.spatial import cKDTree
+    p = _norm(shape)
+    tree = cKDTree(xy) if tree is None else tree
+    c = np.array(centres, dtype=float).reshape(-1, 2)
+    moving = np.arange(len(c))
+    for _ in range(steps):
+        if not len(moving):
+            break
+        lists = tree.query_ball_point(c[moving], radius_nm, p=p)
+        n = np.fromiter(map(len, lists), dtype=np.int64, count=len(lists))
+        flat = np.fromiter(chain.from_iterable(lists), dtype=np.int64, count=int(n.sum()))
+        owner = np.repeat(np.arange(len(moving)), n)
+        held = n > 0
+        new = c[moving].copy()
+        for k in (0, 1):
+            total = np.bincount(owner, xy[flat, k], minlength=len(moving))
+            new[held, k] = total[held] / n[held]
+        moved = np.hypot(*(new - c[moving]).T)
+        c[moving] = new
+        moving = moving[held & (moved > tol_nm)]
+    return c
+
+
+def _values_of(xy, sigma, psf, precise, rows) -> Dict[str, float]:
+    """The values of one set of localizations (``rows`` of ``xy``), about
+    their own centre of mass: `VALUES["similar"]`."""
+    near = np.zeros(len(xy), bool)
+    near[rows] = True
+    values = _shared(xy[:, 0], xy[:, 1], psf, near, precise, float("nan"))
+    values["rmsd_nm"] = float("nan")
+    if len(rows):
+        d2 = np.sum((xy[rows] - xy[rows].mean(axis=0)) ** 2, axis=1)
+        values["rmsd_nm"] = float(np.sqrt(d2.mean()))
+        blur = float(np.mean(sigma[rows] ** 2)) if sigma is not None else 0.0
+        values["radius_nm"] = float(np.sqrt(2 * max(d2.mean() - blur, 0.0)))
+    return values
+
+
+def measure_rows(locs, rows, precision_nm: float = 20.0) -> Dict[str, Any]:
+    """An example: the localizations ``rows`` of ``locs`` -- everything an
+    ROI holds, whatever its shape -- measured as a candidate is
+    (`measure_at`).  ``center`` is their centre of mass."""
+    xy, finite, sigma, psf = positions(locs)
+    # rows of the table, as `positions` drops the non-finite ones
+    where = np.cumsum(finite) - 1
+    rows = np.asarray(rows, dtype=np.int64)
+    rows = where[rows[finite[rows]]] if len(rows) else rows
+    precise = (np.ones(len(xy), bool) if sigma is None
+               else np.asarray(sigma, float) < precision_nm)
+    centre = xy[rows].mean(axis=0).tolist() if len(rows) else [float("nan")] * 2
+    return {"center": centre, "values": _values_of(xy, sigma, psf, precise, rows)}
+
+
+def measure_at(locs, centres, radius_nm: float, shift: bool = True,
+               precision_nm: float = 20.0, shape: str = "circle"
+               ) -> List[Dict[str, Any]]:
+    """The values of a circle (or square) of half-width ``radius_nm`` at
+    each centre, after the mean shift onto the localizations (`mean_shift`)
+    unless ``shift`` is off: one dict per centre, ``center``, ``values``
+    (`VALUES["similar"]`) and ``template_nm``, the half-width.
+
+    ``rmsd_nm`` is Picasso's: the RMS distance of the localizations inside
+    from their centre of mass -- a structure's size, with the precision in
+    it.  ``radius_nm`` is a disc's radius from the same spread, the
+    precision taken out, as `measure_disc` takes it:
+    ``sqrt(2 (<d^2> - <sigma^2>))``."""
+    from scipy.spatial import cKDTree
+    p = _norm(shape)
+    xy, _, sigma, psf = positions(locs)
+    centres = np.array(centres, dtype=float).reshape(-1, 2)
+    if not len(xy):
+        return [{"center": c.tolist(), "template_nm": float(radius_nm),
+                 "values": {**{k: float("nan") for k in VALUES["similar"]},
+                            "n_locs": 0, "touching": 0}} for c in centres]
+    tree = cKDTree(xy)
+    if shift:
+        centres = mean_shift(xy, centres, radius_nm, tree, shape=shape)
+    precise = (np.ones(len(xy), bool) if sigma is None
+               else np.asarray(sigma, float) < precision_nm)
+    return [{"center": c.tolist(), "template_nm": float(radius_nm),
+             "values": _values_of(xy, sigma, psf, precise,
+                                  np.asarray(rows, dtype=np.int64))}
+            for c, rows in zip(centres, tree.query_ball_point(centres, radius_nm, p=p))]
+
+
+def similarity_window(examples: Sequence[Dict[str, Any]], names: Sequence[str],
+                      spread: float = 2.0) -> Dict[str, Tuple[float, float]]:
+    """``{name: (low, high)}``: the examples' mean of each value plus or
+    minus ``spread`` standard deviations, as Picasso's *std range*; at least
+    3 localizations (`MIN_LOCS`), the fewest a candidate has.  Needs two
+    examples with the value, for a spread to be taken at all.
+
+    Two departures from Picasso, both because a handful of examples
+    underestimates the spread of the structures they stand for: the standard
+    deviation is the sample one (``ddof=1``), and that of ``n_locs`` is at
+    least ``sqrt(mean)``, a count's Poisson spread, which labelling and
+    blinking only widen.  On 150 simulated discs of 40 localizations, five
+    examples gave a spread of 3.6 against the true 9.6, and Picasso's window
+    found 60 % of the others; with both, 80 %, and still none of the
+    clutter beside them (`tests/test_segment_similar.py`)."""
+    out: Dict[str, Tuple[float, float]] = {}
+    for name in names:
+        values = np.array([e["values"].get(name, np.nan) for e in examples], float)
+        values = values[np.isfinite(values)]
+        if len(values) < 2:
+            raise ValueError(f"{len(values)} example{'s' * (len(values) != 1)} "
+                             f"with {name}: at least 2 are needed to learn its range")
+        mean, sd = float(values.mean()), float(values.std(ddof=1))
+        if name == "n_locs":
+            sd = max(sd, float(np.sqrt(mean)))
+        low, high = mean - spread * sd, mean + spread * sd
+        if name == "n_locs":
+            low = max(low, float(MIN_LOCS))
+        out[name] = (low, high)
+    return out
+
+
+def window_condition(window: Dict[str, Tuple[float, float]]) -> str:
+    """The window as a *keep* condition, ``12.5 <= n_locs <= 30.1 and ...``,
+    which a person can read, `judge` applies and `bounds` draws."""
+    return " and ".join(f"{low:.4g} <= {name} <= {high:.4g}"
+                        for name, (low, high) in window.items())
+
+
+def similar_candidates(locs, radius_nm: float,
+                       window: Optional[Dict[str, Tuple[float, float]]] = None,
+                       existing: Sequence = (), precision_nm: float = 20.0,
+                       shape: str = "circle") -> List[Dict[str, Any]]:
+    """Every structure a circle (or square) of half-width ``radius_nm``
+    settles on, measured (`measure_at`), the ones most like the examples
+    first.
+
+    The circles start on a triangular lattice of spacing ``radius_nm`` over
+    the localizations -- no point of the field further than ``R/sqrt(3)``
+    from one, so a structure smaller than the circle is never missed between
+    them; Picasso's spacing of one diameter leaves gaps of ``0.58 d`` --
+    those with fewer than 3 localizations dropped, and each is moved onto
+    the localizations by the mean shift.  Many settle on the same
+    structure.  They are ranked by how far their values lie from the middle
+    of ``window`` (the sum of each value's distance in half-widths, squared;
+    unranked without one), and a candidate overlapping a better one or an
+    ``existing`` centre too much (`too_close`, the circle template's rule)
+    is left out -- so a candidate on junk never pushes out a good one beside
+    it, as Picasso's first-come order on its grid can.  ``use`` is unset
+    until `judge`."""
+    from scipy.spatial import cKDTree
+    p = _norm(shape)
+    R = float(radius_nm)
+    if not R > 0:
+        raise ValueError("the radius must be positive")
+    xy, _, _, _ = positions(locs)
+    if len(xy) < MIN_LOCS:
+        return []
+    (x0, y0), (x1, y1) = xy.min(axis=0), xy.max(axis=0)
+    rows = np.arange(y0, y1 + R, R * np.sqrt(3) / 2)
+    columns = np.arange(x0, x1 + R, R)
+    if len(rows) * len(columns) > MAX_PIXELS:
+        raise ValueError(f"an ROI of {2 * R:g} nm puts {len(rows) * len(columns):,} "
+                         "circles on this field: choose a larger ROI size")
+    gx = (columns[None, :] + (np.arange(len(rows)) % 2)[:, None] * R / 2).ravel()
+    gy = np.repeat(rows, len(columns))
+    grid = np.column_stack((gx, gy))
+    tree = cKDTree(xy)
+    held = tree.query_ball_point(grid, R, p=p, return_length=True)
+    starts = grid[held >= MIN_LOCS]
+    if not len(starts):
+        return []
+    settled = mean_shift(xy, starts, R, tree, shape=shape)
+    # the circles that settled on one structure agree to the tolerance
+    settled = np.unique(np.round(settled / SHIFT_TOL_NM), axis=0) * SHIFT_TOL_NM
+    sites = [s for s in measure_at(locs, settled, R, shift=False,
+                                   precision_nm=precision_nm, shape=shape)
+             if s["values"]["n_locs"] >= MIN_LOCS]
+    if window:
+        def distance(site) -> float:
+            total = 0.0
+            for name, (low, high) in window.items():
+                v = site["values"].get(name, np.nan)
+                half = (high - low) / 2 or 1.0
+                total += ((v - (low + high) / 2) / half) ** 2
+            return total if np.isfinite(total) else np.inf
+        sites.sort(key=distance)
+    accepted = Accepted(existing)
+    found = []
+    for site in sites:
+        if accepted.blocks(site["center"], R):
+            continue
+        accepted.add(site["center"], R)
+        found.append(site)
     return found
 
 

@@ -60,8 +60,8 @@ def test_the_region_plugins_are_registered_under_regions():
 
 def test_the_defaults_dict_became_a_typed_settings_class():
     specs = plugins.get("Analysis/Regions/Segment regions").specs()
-    assert set(specs) == {"preset", "method", "circle", "beads", "ids", "file", "keep",
-                          "keep_rejected", "replace"}
+    assert set(specs) == {"preset", "method", "circle", "beads", "ids", "file", "similar",
+                          "keep", "keep_rejected", "replace"}
     circle = specs["circle"].children
     assert set(circle) == {"shape", "min_radius_nm", "max_radius_nm", "ring_width_nm",
                            "precision_nm", "bin_nm"}
