@@ -11,6 +11,15 @@ went, **Update 2026-10-14** what the regions restructuring changed,
 at the end**: 19 numbered steps in five waves.  The sections A–J before it
 are the backlog by area.
 
+**Status 2026-11-08**: the live list, with every row's state, your decisions
+and comments, is the artifact page
+[SMAP Porting List](https://claude.ai/artifact/Ckr2GE9pyzsjthFCsivDmy); the
+backlog tables A–J below were brought up to date with it and with the code
+that day.  What is still open there: LocMoFit (H) and NPC geometry (E5), the
+counting fit (B4), MINFLUX analysis plugins (G: stepping, dual tracking),
+channel alignment against frame (C3), SMAP `_sml.mat` export, image intensity
+at localizations, and the J list.
+
 **Updated 2026-10-14** (and the segmentation/density split decided the same day) against `origin/main` `c9f650a`, after the regions
 restructuring (`docs/regions.md`).  What it settled, as far as this plan is
 concerned:
@@ -53,13 +62,13 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 
 | | what | rows | status |
 |---|---|---|---|
-| A1 | **Export**: one plugin with a format choice: CSV/TXT, Picasso HDF5, and SMAP `_sml.mat` as an optional, low-priority format; choose the fields; all or filtered | #53 #54 (#55) | open. There is still only *Save smappy HDF5* and *Export Image*. |
-| A2 | **Loaders**: Picasso HDF5 and DECODE, as two more `Reader`s in `io/formats.py` (the single loader's *format* list picks them up) | #51 #52 | open. Smaller than before: a reader, not a plugin. |
-| A3 | **Fit region** (`RoiAdder`): fit only inside, or exclude, drawn regions of the chip | #7 | open |
-| A4 | **Histogram of any column**, per layer, with mean/median/std | #86 | open. *Regions/Summarize/Histograms* is the histogram over regions; the one over localizations is still missing. Make it `per_region` as well, and the same plugin gives a histogram per ROI for free. |
-| A5 | **Time course**: any columns against frame, several in one graph, merged with Image Tags | #87 | open |
-| A6 | **Vibrations**: spectrum of x, y, z, with zoom-ins and filters | #88 | open. Still needs: which filters, which zoom-ins. |
-| A7 | **Export the region table** to CSV: the user picks the columns; ROIs or clusters through `region_results` | #130 | open. A summary plugin under `Regions/Summarize/`. Nothing writes the table to CSV yet. |
+| A1 | **Export**: one plugin with a format choice: CSV/TXT, Picasso HDF5, and SMAP `_sml.mat` as an optional, low-priority format; choose the fields; all or filtered | #53 #54 (#55) | **done** (step 2): *File/Export/Localizations*, csv and Picasso HDF5 `Writer`s; the `_sml.mat` writer is still open (low priority) |
+| A2 | **Loaders**: Picasso HDF5 and DECODE, as two more `Reader`s in `io/formats.py` (the single loader's *format* list picks them up) | #51 #52 | **done** (step 3): the Picasso and DECODE `Reader`s |
+| A3 | **Fit region** (`RoiAdder`): fit only inside, or exclude, drawn regions of the chip | #7 | **done** (step 8): the fitters' *fit region*, drawn on the Preview's frame |
+| A4 | **Histogram of any column**, per layer, with mean/median/std | #86 | **done** (step 4): `Measure/Histogram` |
+| A5 | **Time course**: any columns against frame, several in one graph, merged with Image Tags | #87 | **done** (step 5): `Measure/Time Course` |
+| A6 | **Vibrations**: spectrum of x, y, z, with zoom-ins and filters | #88 | **done** (5e): `Measure/Stability`, *vibrations* |
+| A7 | **Export the region table** to CSV: the user picks the columns; ROIs or clusters through `region_results` | #130 | **done** (step 6): `Regions/Summarize/Export table` |
 
 ## B. Segmentation, local density, spatial statistics (P1)
 
@@ -100,19 +109,21 @@ that name `Regions/Find/DBSCAN` or `Regions/Find/NPC` (the shipped
 
 ## C. Transformations and channels (P2), unchanged
 
-| | what | rows |
-|---|---|---|
-| C1 | **Transform**: apply a saved transformation, a shift (typed in, or from C2), mirror, rotate, scale; to tables and image layers | #40 #69 #74 |
-| C2 | **Register layers**: shift between layers, rendered or images, by cross-correlation; feeds C1 | #41 #119 |
-| C3 | Channel alignment against frame (diagnostic) | #41 #42 |
-| C4 | Assign colours for more than 2 colours (**done**: up to six) | #47 |
-| later | single-channel fits → dual colour by pairing (#46); Calibrate transform from separate camera files (#39) | |
+| | what | rows | status |
+|---|---|---|---|
+| C1 | **Transform**: apply a saved transformation, a shift (typed in, or from C2), mirror, rotate, scale; to tables and image layers | #40 #69 #74 | **done** (5a): `Process/Transform` |
+| C2 | **Register layers**: shift between layers, rendered or images, by cross-correlation; feeds C1 | #41 #119 | **done** (5b): `Register/Register layers` |
+| C3 | Channel alignment against frame (diagnostic) | #41 #42 | open (4Pi has it: `multichannel.measure_channel_drift`) |
+| C4 | Assign colours for more than 2 colours | #47 | **done**: up to six |
+| later | single-channel fits → dual colour by pairing (#46); Calibrate transform from separate camera files (#39) | | open |
 
 ## D. Drift (P2), unchanged
 
-D1 apply an existing drift curve from another file (#35) · D2 fiducial
-drift (#34) · D3 time-dependent transformation (magnification) in COMET
-(#38) · later: Picasso drift (#36).
+D1 apply an existing drift curve from another file (#35): **done** (5a,
+*Transform* with another file's drift) · D2 fiducial drift (#34): **done**
+(5c, `Drift/Fiducials`; and `Drift/MBM` for MINFLUX) · D3 time-dependent
+transformation (magnification) in COMET (#38): **done** (5d) · later: Picasso
+drift (#36), open.
 
 ## E. ROI manager and regions
 
@@ -125,13 +136,13 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E1 | Remove double sites | #129 | **done** (`Regions/Remove double ROIs`, step 14) |
 | E1 | Remove localizations outside the ROIs | #107 | **done** (Remove Localizations, *region* = *all included ROIs*, step 14); for clusters, a filter on `cluster_id > 0` |
 | E1 | Use only the ROIs inside the drawn ROI | #106 | **done** (*Filter ROIs*: `in_drawn_roi`, step 14) |
-| E1 | Import site positions | #135 | open, P3 |
+| E1 | Import site positions | #135 | **done** (wave 6): *Segment regions*, *positions from a file* |
 | E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
 | E2 | **Annotate ROIs** | new | **done** (`gui/roi_annotate.py`; the named lines step 13): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. Any number of named lines per ROI (step 13): drawn in the ROI manager, reversed, `<name>_angle_deg` and `<name>_length_nm` columns of the results table. |
 | E3 | **Segment regions** with presets (NPC, Density Peaks, CME, beads, other templates); see B | #104 #105 #109 #111 | decided: one plugin, see B. NPC and Density Peaks exist as separate Find plugins, to be folded in. *Centre all* (#116): **done** (`Regions/Centre ROIs`, step 15). |
 | E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`; Line Profile too, step 15) |
 | E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | Circle fit **done** (`Measure/Circle fit`, step 15); NPC geometry open |
-| E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | open, P3. Now a Summarize-style plugin that reads the ROI order (Sort ROIs) and annotations. |
+| E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | **done**: `File/Export/ROI images` (a PDF gallery or a TIFF stack, in the ROI order); single TIFFs per ROI open |
 | E7 | **Average ROIs**: centre plus an orientation from a measured value or a drawn line → a new table | #134 | **done** (step 16, `Regions/Average ROIs`) |
 
 ## F. Single-particle tracking (P1, own project)
@@ -165,17 +176,18 @@ extra code.
 
 ## I. Rendering and movies (P3), unchanged
 
-z-stack export (#76) · Voronoi renderer (#77) · movie export (#139 #140 #141;
-with the tracks as an option: step 19b's render mode with a *tail*, over the
-raw frames)
-· image processing for image layers (#81).
+All **done**: z-stack export (#76, `File/Export/Stack`) · Voronoi renderer
+(#77, a render mode) · movie export (#139 #140 #141; tracks with a *tail*,
+raw frames beside the view, the Render tab's player and view path) · image
+processing for image layers (#81, `Process/Process image`).
 
 ## J. Later / when needed, unchanged
 
-GPU fitter (#10) · background before fitting (#6) · astigmatic z (#11) ·
-4Pi (#13) · DECODE / DECODE-plex (#15) · sCMOS maps (#22) · uiPSF robustness
+GPU fitter (#10) · background before fitting (#6) · astigmatic z (#11,
+**done**: `After fit/Astigmatic z`) · 4Pi (#13, **done**: Spline 4Pi, 4Pi z) ·
+DECODE / DECODE-plex (#15) · sCMOS maps (#22) · uiPSF robustness
 (#24) · depth-dependent aberrations (#26) · GainOffsetFFT (#27) · DHPSF (#29) ·
-Register3Dstacks (#44) · combine files (#65) · alternating excitation (#71) ·
+Register3Dstacks (#44) · combine files (#65, **done**: `Process/Combine files`) · alternating excitation (#71) ·
 TIFF intensity at sites (#124).
 
 **Done (2026-10): #66, #67, #68.**  *Collapse by id*

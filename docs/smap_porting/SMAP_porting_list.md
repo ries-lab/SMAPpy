@@ -2,7 +2,10 @@
 
 > **Snapshot of 2026-10-11, before the regions restructuring.**  The current
 > state is in `SMAP_porting_list.xlsx` (column *Update 2026-10-14*) and
-> `SMAP_porting_plan.md`.
+> `SMAP_porting_plan.md`.  The live list, one row per SMAP plugin with its state,
+> decision and comments, is the artifact page
+> [SMAP Porting List](https://claude.ai/artifact/Ckr2GE9pyzsjthFCsivDmy)
+> (status checked against the code 2026-11-08); the marks below are not kept up.
 
 A list to make choices from, not a plan.  Compiled 2026-10-11 from `jries/SMAP`
 (`plugins/`, 345 plugin files, plus `fit3Dcspline`, `LocMoFit` and the GUI) and
