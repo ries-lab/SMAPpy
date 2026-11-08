@@ -229,7 +229,7 @@ To colour localizations by what was measured in their region, to compute
 with it per localization, or to compare two filters in two layers, a
 region's number is written onto its rows as a column
 (`region_runs.write_values`): by *write values* on a block, at the end of
-every run so a chain keeps it current, or by *Regions to column* for results
+every run so a chain keeps it current, or by *Regions to attribute* for results
 already there, the ROIs' own numbers (`roi_id`) among them.  NaN outside any
 region or where the region has no value; where ROIs overlap, the last, the
 first or the mean (*any* is for write back, and refused here).  Everything that reads a column then works on it: each layer's
@@ -268,7 +268,7 @@ Analysis/Measure/...                every measurement: on the view, per ROI, per
 Analysis/Regions/Segment regions    ROIs: a circle template (ring, disc), beads, an id column, a file
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, Curves, NPC labelling efficiency, qPAINT: read a region table
-Analysis/Regions/Regions to column  what was measured per region onto the table
+Analysis/Regions/Regions to attribute  what was measured per region onto the table
 Analysis/Regions/Filter regions     keep the regions whose results pass: one flag, region_filter
 Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block

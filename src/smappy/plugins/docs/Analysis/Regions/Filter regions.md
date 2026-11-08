@@ -61,7 +61,7 @@ again.  An ROI's values are its newest stored ones, current or not, as
 
 A region is always measured whatever the filter says: neither
 `region_filter` nor a value written from region results onto the
-localizations (*Regions to column*) narrows a region's measurement, or
+localizations (*Regions to attribute*) narrows a region's measurement, or
 counts among what its results depend on.  Otherwise a filter on a result,
 applied while the result is measured again, would empty the regions that
 failed it, and the next run would drop them for good.

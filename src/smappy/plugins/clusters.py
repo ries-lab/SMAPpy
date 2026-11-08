@@ -60,7 +60,7 @@ none.
 All three write the same columns through `with_clusters`, numbered by size
 (`by_size`), one file at a time, blinks or localizations as the layer shows.
 What was measured per cluster goes back onto its localizations with
-*Regions to column* (`region_column.py`).
+*Regions to attribute* (`region_column.py`).
 """
 from __future__ import annotations
 

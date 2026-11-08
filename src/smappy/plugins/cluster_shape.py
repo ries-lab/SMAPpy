@@ -29,7 +29,7 @@ Where SMAP differs, and why:
 * the angle is in **degrees**, 0 to 180 from the x axis, not radians;
 * every value goes to the region table under a plain name; SMAP wrote the
   standard deviations, angle and extents onto the localizations
-  (``c_stds`` ...) -- *Regions to column* does that here, for any value;
+  (``c_stds`` ...) -- *Regions to attribute* does that here, for any value;
 * no *min number of locs* or *skip first*: a filter on ``n_in_cluster``
   before the block, or *Filter ROIs* on ``n_locs`` after it, decides which
   clusters count; values that need more points than a region has are NaN;

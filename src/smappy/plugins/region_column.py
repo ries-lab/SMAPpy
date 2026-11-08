@@ -109,7 +109,7 @@ def own_rows(project) -> List[Dict[str, Any]]:
     return out
 
 
-@register("Analysis/Regions/Regions to column")
+@register("Analysis/Regions/Regions to attribute")
 class RegionsToColumn(Plugin):
     """Writes what was measured per region onto the localizations in it."""
 

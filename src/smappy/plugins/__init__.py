@@ -853,7 +853,7 @@ class Result:
     # (`Session.set_layer_configs`): the Render tab's work done by a plugin
     # (`Analysis/Process/Layers`).
     layers: Optional[List[Dict[str, Any]]] = None
-    # Columns this run renamed, ``{old: new}`` (*Edit columns*): each
+    # Columns this run renamed, ``{old: new}`` (*Edit attributes*): each
     # layer's filter bound and colour column follow (`Session.apply`).
     renamed_columns: Dict[str, str] = field(default_factory=dict)
     # The ROIs this run added to the ROI manager's project (a segmenter: in

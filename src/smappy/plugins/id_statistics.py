@@ -10,7 +10,7 @@ What it hands back is a region table, not columns: the table of every
 region (`region_runs.column_table`), signed as a block's run would sign it
 and stored with the column (`Session.id_regions`) under the plugin's name --
 "per tid: Id statistics" -- where *Summarize/Histograms*, *results from* and
-the region filter (`docs/region-filter.md`) find it; *Regions to column*
+the region filter (`docs/region-filter.md`) find it; *Regions to attribute*
 writes a value onto the localizations where one is wanted there.
 
 The localizations are the layer's own (its filter, not the drawn ROI, which

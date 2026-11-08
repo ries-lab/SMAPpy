@@ -1226,7 +1226,7 @@ class Session:
 
     def _follow_renames(self, renamed: Dict[str, str],
                         bounds: List[Dict[str, Tuple]]) -> None:
-        """Columns renamed (*Edit columns*): each layer's bounds, read before
+        """Columns renamed (*Edit attributes*): each layer's bounds, read before
         the table changed (`_renamed_bounds`), and the columns it colours and
         weighs by follow the column.  An undo brings the old name back
         without its bound: a layer keeps no bound on a column its table does

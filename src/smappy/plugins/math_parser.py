@@ -37,7 +37,7 @@ what was measured per region, one row per region, and the result goes into
 the source's ``maths`` region table as a recipe computed again when its
 inputs are measured again (`smappy.region_maths`, which has the names: an
 evaluation by its alias, ``npc_corners.n_corners``); *also onto the
-localizations* writes it onto each region's rows as *Regions to column*
+localizations* writes it onto each region's rows as *Regions to attribute*
 does.  SMAP had no such thing.
 """
 from __future__ import annotations

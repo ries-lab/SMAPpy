@@ -1,6 +1,6 @@
 """Columns renamed, removed or kept, and a table collapsed to one row per id.
 
-What *Edit columns*, *Collapse by id* and *Save smappy HDF5*'s *columns*
+What *Edit attributes*, *Collapse by id* and *Save smappy HDF5*'s *columns*
 do, on a table and without a session, so that a script gets the same
 table the GUI does.
 

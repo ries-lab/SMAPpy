@@ -775,7 +775,7 @@ def write_values(ctx, locs: Localizations, regions: str,
                  origin: Optional[Dict[str, Any]] = None, prefix: str = "",
                  numbers: bool = False) -> Tuple[Localizations, List[Tuple[str, np.ndarray]]]:
     """``locs`` with each region's ``values`` written onto its rows: what a
-    block's *write values* and *Regions to column* both do.
+    block's *write values* and *Regions to attribute* both do.
 
     ``values`` is ``{name: {region: value}}``, a region named as its results'
     rows name it: an ROI by its number (`ROI.number`, the ``roi_id`` a user

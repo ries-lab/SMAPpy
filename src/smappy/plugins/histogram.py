@@ -236,7 +236,7 @@ class Histogram(Plugin):
     standard deviation and mode."""
 
     Settings = HistogramSettings
-    name = "Histogram of a column"
+    name = "Histogram of an attribute"
     changes_locs = False
     per_region = True
     version = "1"

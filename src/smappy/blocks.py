@@ -335,7 +335,7 @@ class BlockPlugin(ChainPlugin):
 
     def _write_values(self, ctx, settings, tables, names, locs):
         """The steps' numbers ``names`` onto the rows of their regions
-        (`region_runs.write_values`, as *Regions to column* writes them); a
+        (`region_runs.write_values`, as *Regions to attribute* writes them); a
         number two steps return is the later step's."""
         from .region_runs import table_values, write_values
         values: Dict[str, Dict[str, float]] = {}
