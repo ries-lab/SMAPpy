@@ -2,7 +2,7 @@
 
 The render modes (and what each says about the data), contrast, the colour
 table and a white background for a figure, saving, a picture whose axes are
-other columns, and the 3D view with its slab.  On the tour's simulated ring
+other attributes, and the 3D view with its slab.  On the tour's simulated ring
 and lines, which have a z to show in 3D; the table comes from File ->
 Simulate, as in the tour, without showing it again.
 
@@ -84,11 +84,11 @@ def make(d) -> None:
     if ll is not None:
         ll.click()
         d.settle()
-        d.shot("The histogram shows the column, and the shaded range is what is "
+        d.shot("The histogram shows the attribute, and the shaded range is what is "
                "kept. Here fit quality: fits worse than the bound are left out.",
                spot=[ll, d.rect(filt.plot)], point=ll, click=True,
                zoom=d.around(filt, 700))
-    d.shot("Any column can be filtered: the list below the buttons has them "
+    d.shot("Any attribute can be filtered: the list below the buttons has them "
            "all, and each layer keeps its own bounds.",
            spot=[filt.field], point=filt.field, zoom=d.around(filt, 700))
     ring = (6400, 8200), (3600, 5400)
@@ -198,7 +198,7 @@ def make(d) -> None:
            spot=[d.union(axes.fields["x"], axes.fields["y"]),
                  d.rect(render.view.graphics, pad=-2)],
            point=axes.fields["y"])
-    d.shot("Any column works: photons against frame, say, to see bleaching. "
+    d.shot("Any attribute works: photons against frame, say, to see bleaching. "
            "Reset brings back the ordinary picture.",
            spot=[axes.reset], point=axes.reset, click=True,
            zoom=d.around(axes.reset, 760))
