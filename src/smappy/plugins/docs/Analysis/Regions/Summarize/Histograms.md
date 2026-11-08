@@ -59,13 +59,13 @@ run, and are a snapshot.
 
 A table of clusters goes out of date as a whole, since the clusters change
 together: when the table, its `cluster_id` or a layer's
-[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+[filter](plugin:Panels/Glossary) (the lowest and highest values of attributes a
 localization must lie between) is no longer
 what the clusters were measured on -- three clusters relabelled as one, say
 -- the plugin says the results are out of date instead of drawing clusters
 that are not there any more, and *results from* stops offering them.  Run the
-block again.  A column written from the results themselves (*Regions to
-column*, a block's *write values*) does not count as a change.
+block again.  An attribute written from the results themselves (*Regions to
+attribute*, a block's *write values*) does not count as a change.
 
 **2. The columns.**  With *columns* empty, every column that holds a number
 in every row is drawn, except the ROI and file identifiers.  Otherwise the

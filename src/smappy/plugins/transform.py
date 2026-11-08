@@ -152,7 +152,7 @@ def target_rows(locs: Localizations, file: int = -1, channel: int = -1) -> np.nd
         raise ValueError(f"the table has one file, not a file {file + 1}")
     if channel >= 0:
         if "channel" not in locs:
-            raise ValueError("the table has no channel column")
+            raise ValueError("the table has no channel attribute")
         rows &= np.asarray(locs["channel"]) == channel
     return rows
 
@@ -387,7 +387,7 @@ class Transform(Plugin):
         if not settings.drift_path:
             raise ValueError("choose the drift-corrected file whose drift to apply")
         if "frame" not in locs:
-            raise ValueError("the table has no frame column to apply a drift by")
+            raise ValueError("the table has no frame attribute to apply a drift by")
         drift = drift_of(settings.drift_path)
         name = Path(settings.drift_path).name
         check_same_frames(len(drift), np.asarray(locs["frame"])[rows],

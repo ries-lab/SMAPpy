@@ -317,7 +317,7 @@ added -- as every fitter reports positions.  The raw frames kept with the
 table are the first channel's, on its rectangle of the chip.  A fit region
 is drawn on the Preview's *sum* panel, shown where the first channel lies on
 the frame.  Besides the usual
-columns:
+attributes:
 
 - `z_nm`, `z_err_nm`: the envelope's z.  After *4Pi z*, z from the phase.
 - `z_env_nm`, `z_env_err_nm`: the envelope's z, kept.
@@ -340,7 +340,7 @@ SMAP's 4Pi fitter is `MLE_4Pi`, which ran uiPSF's closed-source fitter
   of the circle.  Here the phasor start covers all of it.
 - **Photons.**  SMAP left a photon number free in each channel by default,
   which leaves the phase poorly determined.  Here it is linked.
-- **The combined columns.**  SMAP combined the channels' positions with
+- **The combined attributes.**  SMAP combined the channels' positions with
   weights of one over the error but an error formula for one over its
   square, from channels 1 and 2 only.  There is nothing to combine here: the
   position is one fitted number.

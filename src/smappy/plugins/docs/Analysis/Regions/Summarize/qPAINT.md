@@ -24,7 +24,7 @@ Mark the calibration regions with an ROI keyword (*Annotate ROIs*: a list
 such as "kind" with "calibration" and "sample"), or calibrate on every
 region when they all have the same known number.  The influx it finds is
 then typed into *Binding kinetics*' *influx*, which writes `n_sites` into
-each region's row -- for *Filter ROIs*, *Histograms* or a column.
+each region's row -- for *Filter ROIs*, *Histograms* or an attribute.
 
 ## How it works
 
@@ -87,7 +87,7 @@ A whole number for designed structures; for single docking strands 1.
 
 ### keyword_list
 The calibration regions are those with *keyword* in this list.  The
-keywords are ROIs' only: regions of an id column (clusters) are calibrated
+keywords are ROIs' only: regions of an id attribute (clusters) are calibrated
 on all of them, or with a typed *influx*.
 
 ### influx

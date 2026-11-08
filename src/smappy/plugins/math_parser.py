@@ -170,8 +170,8 @@ def check_field(field: str, locs: Localizations) -> str:
         raise ValueError(f"{name!r} is the name of a function an expression "
                          "can call; choose another")
     if name in CONSTANTS:
-        raise ValueError(f"{name!r} is a constant in an expression, and a "
-                         "column of that name would change what it means; "
+        raise ValueError(f"{name!r} is a constant in an expression, and an "
+                         "attribute of that name would change what it means; "
                          "choose another")
     if name in ("group_id", "n_in_group"):
         raise ValueError(f"{name!r} is written by merge blinks itself and "
@@ -198,12 +198,12 @@ def _source_choices():
 class MathSettings:
     source: str = param(LOCS, label="on", choices=_source_choices,
                         help="the localizations, or the regions -- ROIs or an id "
-                             "column -- whose measured values the expression reads")
+                             "attribute -- whose measured values the expression reads")
     field: str = param("within", label="new field",
-                       help="the column the result is written to")
+                       help="the attribute the result is written to")
     expression: str = param("(xy_err_nm < 25) & (sigma_nm > 100)",
                             label="=", kind="text",
-                            help="an expression in the column names; `&` and "
+                            help="an expression in the attribute names; `&` and "
                                  "`|` combine comparisons, each in brackets")
     where: str = param("all", label="apply to",
                        choices=[("all", "all localizations"),
@@ -308,7 +308,7 @@ class MathParser(Plugin):
                 hint = ("; on-time and group id are written by merge blinks -- "
                         "tick merge blinks on a layer once and they are there")
             raise ExpressionError(
-                f"no column {', '.join(missing)}; the table has: "
+                f"no attribute {', '.join(missing)}; the table has: "
                 f"{', '.join(sorted(locs.keys()))}{hint}")
         mask = None
         if settings.where == "selection":

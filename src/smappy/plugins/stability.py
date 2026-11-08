@@ -106,7 +106,7 @@ class StabilitySettings:
     scatter: bool = param(False, label="random scatter",
                           help="the noise that averages away, from point-to-point "
                                "steps, against the precision")
-    id_column: str = param("track_id", label="id column", choices=_id_choices,
+    id_column: str = param("track_id", label="id attribute", choices=_id_choices,
                            help="which localizations are one bead")
     traces: str = param("each", label="traces",
                         choices=(("each", "each bead"),
@@ -171,7 +171,7 @@ class Stability(Plugin):
         locs = ctx.locs
         column = settings.id_column
         if column not in locs:
-            raise ValueError(f"no column {column!r}: link the beads first "
+            raise ValueError(f"no attribute {column!r}: link the beads first "
                              "(Analysis/Tracking/Link tracks), or choose one of "
                              + ", ".join(_integer_columns(locs)))
         for c in ("x_nm", "y_nm", "frame"):

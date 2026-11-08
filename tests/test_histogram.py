@@ -81,9 +81,9 @@ def test_each_visible_layer_is_its_own_histogram_on_the_same_bins():
 
 
 def test_a_missing_column_is_named_with_the_ones_there_are():
-    with pytest.raises(ValueError, match="no column 'prob'.*photons"):
+    with pytest.raises(ValueError, match="no attribute 'prob'.*photons"):
         run(normal_table(), column="prob")
-    with pytest.raises(ValueError, match="choose a column"):
+    with pytest.raises(ValueError, match="choose an attribute"):
         run(normal_table())
 
 

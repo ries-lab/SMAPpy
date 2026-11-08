@@ -380,10 +380,10 @@ def block_class(block: Block) -> type:
         ("regions", str, param(
             block.regions, label="for each",
             help="rois: every included ROI of the ROI manager; or the name of "
-                 "an id column, such as cluster_id")),
+                 "an id attribute, such as cluster_id")),
         ("write_back", str, param(
             ", ".join(block.write_back), label="write back",
-            help="columns the steps make that go into the real table, comma "
+            help="attributes the steps make that go into the real table, comma "
                  "separated; empty: nothing changes the table")),
         ("write_values", str, param(
             ", ".join(block.write_values), label="write values",

@@ -188,14 +188,14 @@ Based on the shape half of SMAP's `Analyze/cluster/ClusterStatistics`
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which, despite its
 description, computed no pair correlation.  The main changes:
 
-* SMAP loops over a `clusterindex`, `groupindex` or `tid` column itself;
+* SMAP loops over a `clusterindex`, `groupindex` or `tid` attribute itself;
   here the per-region steps run the plugin once per region, over any id
-  column or the ROIs.
+  attribute or the ROIs.
 * SMAP wrote the standard deviations, angle and extents onto the
   localizations (`c_stds`, `c_stdl`, `c_angle`, `c_extl`, `c_exts`) and the
   area and volume into a separate table only with *advanced analysis*
   ticked; here every value goes into the region table, and *Regions to
-  column* writes any of them onto the localizations.
+  attribute* writes any of them onto the localizations.
 * SMAP also gave the area and volume of MATLAB's `boundary` (an alpha shape
   with a shrink factor of 0.5); it is left out, since its area depends on
   a shrink factor with no physical meaning.

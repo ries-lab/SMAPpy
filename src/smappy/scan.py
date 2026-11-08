@@ -81,7 +81,7 @@ def values(locs, coordinate: str, line=None) -> np.ndarray:
         y = np.asarray(locs["y_nm"], np.float64)
         return (x - mid[0]) * unit[0] + (y - mid[1]) * unit[1]
     if coordinate not in locs:
-        raise KeyError(f"no column {coordinate!r}; the table has "
+        raise KeyError(f"no attribute {coordinate!r}; the table has "
                        + ", ".join(locs.columns))
     return np.asarray(locs[coordinate], np.float64)
 

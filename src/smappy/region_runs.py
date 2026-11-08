@@ -371,7 +371,7 @@ def regions_of(ctx, regions: str):
     if regions == BLOCK_ROIS:
         if ctx.per_region:
             raise ValueError("a block over the ROIs cannot run inside another "
-                             "block's region: repeat over an id column there")
+                             "block's region: repeat over an id attribute there")
         if ctx.rois is None:
             raise ValueError("there is no ROI manager project to repeat over")
         return ROIRegions(ctx.rois)
@@ -807,7 +807,7 @@ def write_values(ctx, locs: Localizations, regions: str,
         raise ValueError("there is nothing to write")
     for name in columns:
         if not name.isidentifier():
-            raise ValueError(f"{name!r} is not usable as a column name")
+            raise ValueError(f"{name!r} is not usable as an attribute name")
     out = with_region_columns(locs, columns, {"regions": regions, **(origin or {})})
     return out, members
 
@@ -845,7 +845,7 @@ def check_writable(locs: Localizations, names: Sequence[str]) -> None:
     taken = [c for c in names if c in locs and c not in own]
     if taken:
         raise ValueError(f"the table already has {', '.join(taken)}, which was not "
-                         "written from regions: give the columns a prefix")
+                         "written from regions: give the attributes a prefix")
 
 
 def with_region_columns(locs: Localizations, columns: Dict[str, np.ndarray],

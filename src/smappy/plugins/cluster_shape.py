@@ -223,7 +223,7 @@ class ClusterShape(Plugin):
         for i, (name, colour, (table, selection)) in enumerate(_layers(ctx)):
             for column in ("x_nm", "y_nm"):
                 if column not in table:
-                    raise ValueError(f"layer {name} has no column {column!r}; it has "
+                    raise ValueError(f"layer {name} has no attribute {column!r}; it has "
                                      + ", ".join(sorted(table.keys())))
             locs = selection.apply(table)
             x = np.asarray(locs["x_nm"], dtype=float)

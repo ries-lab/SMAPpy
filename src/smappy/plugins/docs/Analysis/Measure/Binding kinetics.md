@@ -28,7 +28,7 @@ It links the localizations of the site into
   lost or appeared half way shows here, and *Filter ROIs* can then drop it.
 
 It runs **once per region** -- an [ROI](plugin:Panels/Glossary) of the ROI
-manager, or a cluster of an id column, as a per-region step or a chain's
+manager, or a cluster of an id attribute, as a per-region step or a chain's
 block -- or **on the view**, where the selection (a drawn ROI round one
 site) is taken as one site.  A region is one structure: its localizations
 are linked in time alone, whatever their positions, so draw the ROIs round

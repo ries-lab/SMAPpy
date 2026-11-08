@@ -75,7 +75,7 @@ class Localizations:
             return
         if set(self.columns) != set(other.columns):
             raise ValueError(
-                f"column mismatch: {sorted(set(self.columns) ^ set(other.columns))}")
+                f"attribute mismatch: {sorted(set(self.columns) ^ set(other.columns))}")
 
         n, m = len(self), len(other)
         if m == 0:
@@ -286,7 +286,7 @@ def table_pixel_sizes(locs: Localizations) -> Tuple[float, float]:
         sizes = None if micron is None else (micron[0] * 1e3, micron[1] * 1e3)
     if sizes is None or not all(np.isfinite(sizes)) or min(sizes) <= 0:
         raise ValueError("the table does not record its pixel size, so its nm "
-                         "columns cannot be put back into camera pixels")
+                         "attributes cannot be put back into camera pixels")
     return sizes
 
 
@@ -306,7 +306,7 @@ def in_pixels(locs: Localizations, *names: str):
             continue
         target = _nm_name(name)
         if target is None:
-            raise KeyError(f"{name} is not a column in pixels")
+            raise KeyError(f"{name} is not an attribute in pixels")
         if target not in locs:
             raise KeyError(f"no {name} or {target} in the table; it has "
                            f"{', '.join(sorted(locs.keys()))}")

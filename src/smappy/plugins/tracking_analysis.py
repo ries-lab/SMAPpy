@@ -77,7 +77,7 @@ class TrackingAnalysisSettings:
     jumps: bool = param(True, label="jump distances",
                         help="the distribution of jumps, as diffusive states")
     id_column: str = param("", label="track id", choices=_id_choices,
-                           help="the column naming the tracks; auto: track_id, "
+                           help="the attribute naming the tracks; auto: track_id, "
                                 "else tid, else track_id_true")
     use_z: bool = param(True, label="in 3D", help="x, y and z when the table has z_nm")
     frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",

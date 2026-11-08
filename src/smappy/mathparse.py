@@ -147,7 +147,7 @@ def parse(expression: str) -> ast.Expression:
     for node in ast.walk(tree):
         if isinstance(node, ast.BoolOp):
             raise ExpressionError(
-                "`and` / `or` ask a whole column whether it is true; write "
+                "`and` / `or` ask a whole attribute whether it is true; write "
                 "`&` and `|` between the comparisons, each in brackets"
                 + _where(node, text))
         if isinstance(node, ast.Compare):
@@ -160,7 +160,7 @@ def parse(expression: str) -> ast.Expression:
                         "brackets" + _where(node, text))
             if len(node.ops) > 1:
                 raise ExpressionError(
-                    "a chained comparison asks a column whether it is true; "
+                    "a chained comparison asks an attribute whether it is true; "
                     "write `(0 < x) & (x < 5)`" + _where(node, text))
     return tree
 
@@ -205,7 +205,7 @@ def _evaluate_node(node: ast.AST, names: Dict[str, Any], expression: str) -> Any
             raise ExpressionError(f"`{node.id}` is a function; call it, "
                                   f"`{node.id}(...)`")
         known = ", ".join(sorted(names)) or "none"
-        raise ExpressionError(f"no column `{node.id}`; the table has: {known}")
+        raise ExpressionError(f"no attribute `{node.id}`; the table has: {known}")
     if isinstance(node, ast.BinOp):
         op = _BINARY.get(type(node.op))
         if op is None:
@@ -223,7 +223,7 @@ def _evaluate_node(node: ast.AST, names: Dict[str, Any], expression: str) -> Any
             if isinstance(node.op, _BITWISE):
                 raise ExpressionError(
                     "`&`, `|` and `^` work on comparisons and whole numbers, "
-                    "not on measured values; a flag column is 0/1, so compare "
+                    "not on measured values; a flag attribute is 0/1, so compare "
                     "it first: `(flag > 0) & (other > 0)`"
                     + _where(node, expression)) from None
             raise ExpressionError(f"{error}{_where(node, expression)}") from None
@@ -231,7 +231,7 @@ def _evaluate_node(node: ast.AST, names: Dict[str, Any], expression: str) -> Any
         op = _UNARY.get(type(node.op))
         if op is None:
             raise ExpressionError(
-                "`not` asks a whole column whether it is true; write `~`"
+                "`not` asks a whole attribute whether it is true; write `~`"
                 + _where(node, expression))
         return op(_evaluate_node(node.operand, names, expression))
     if isinstance(node, ast.Compare):

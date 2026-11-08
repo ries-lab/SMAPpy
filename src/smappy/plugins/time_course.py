@@ -206,10 +206,10 @@ class TimeCourseSettings:
     series: list = param(default_factory=lambda: [COUNT, "photons"], label="series",
                          kind="columns",
                          help="what to draw against time: the localization rate, "
-                              "columns (their median per window), image tags")
+                              "attributes (their median per window), image tags")
     statistic: str = param("median", label="statistic",
                            choices=(("median", "median"), ("mean", "mean")),
-                           help="of a column in each window")
+                           help="of an attribute in each window")
     x: str = param("frame", label="x",
                    choices=(("frame", "frame"), ("seconds", "time (s)"),
                             ("file", "file number")),

@@ -55,7 +55,7 @@ def test_a_new_seed_each_run_and_it_is_recorded():
 def test_refused_on_a_column_of_floats_or_over_the_ids_themselves():
     with pytest.raises(ValueError, match="whole numbers"):
         run(table(), column="x_nm")
-    with pytest.raises(ValueError, match="new column"):
+    with pytest.raises(ValueError, match="new attribute"):
         run(table(), column="cluster_id", name="cluster_id")
     with pytest.raises(ValueError, match="integer ones are.*cluster_id"):
         run(table(), column="tid")

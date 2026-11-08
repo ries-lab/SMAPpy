@@ -44,7 +44,7 @@ for c in truth + offsets:
 
 **1. Each ROI's localizations.**  For each used ROI, the localizations
 inside it as the ROI manager shows them: the layer's
-[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+[filter](plugin:Panels/Glossary) (the lowest and highest values of attributes a
 localization must lie between), and merged blinks where the layer merges
 them.
 

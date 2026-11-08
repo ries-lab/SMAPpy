@@ -26,7 +26,8 @@ what a plugin measures: the localizations that pass the layer's filter, inside
 the drawn ROI (*plugins use the slab*).  A measurement then sees only what is inside the box, for example
 one ring of a pore picked out by its depth.
 
-Use it on tables with a `z_nm` column.  A 2D table can be opened too, but it
+Use it on tables with a `z_nm` [attribute](plugin:Panels/Glossary) (one
+value every localization carries).  A 2D table can be opened too, but it
 is flat: from the side it is a line.
 
 ## How it works
@@ -357,10 +358,10 @@ that drives the GPU -- Metal on a Mac, Vulkan or DirectX elsewhere --
 installed with SMAPpy since 0.5.8; for an older install, `pip install
 wgpu`), or *no GPU here*, with the reason on hover.
 
-**Other axes.**  When the Render tab draws one column against another (its
+**Other axes.**  When the Render tab draws one attribute against another (its
 *axes* section), the slab is a box in those units and is rebuilt over the
 whole field when the axes change.  The scale bar is then hidden, and each arm
-of the tripod is labelled with its own column and a round length in its
+of the tripod is labelled with its own attribute and a round length in its
 units.
 
 ## Controls

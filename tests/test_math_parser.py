@@ -92,14 +92,14 @@ def test_a_flag_column_has_to_be_compared_before_it_is_combined():
     locs = table()
     locs.columns["bright"] = (np.asarray(locs["photons"]) > 500).astype(np.float32)
     locs.columns["near"] = (np.asarray(locs["x_nm"]) < 600).astype(np.float32)
-    with pytest.raises(ExpressionError, match=r"flag column is 0/1"):
+    with pytest.raises(ExpressionError, match=r"flag attribute is 0/1"):
         evaluate(locs, "bright & near")
     assert np.array_equal(evaluate(locs, "(bright > 0) & (near > 0)"),
                           [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0])
 
 
 def test_a_missing_column_says_what_the_table_has():
-    with pytest.raises(ExpressionError, match="no column `z_nm`.*photons"):
+    with pytest.raises(ExpressionError, match="no attribute `z_nm`.*photons"):
         evaluate(table(), "z_nm * 2")
 
 

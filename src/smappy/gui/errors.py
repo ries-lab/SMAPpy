@@ -50,7 +50,7 @@ def save_bug_report(parent, session, details: str = "") -> Optional[Path]:
     QMessageBox.information(
         parent, "Bug report",
         f"Written to\n{written}\n\nIt has the log, the environment and a "
-        "description of the open table (its columns, files and history), "
+        "description of the open table (its attributes, files and history), "
         "not the localizations.  File names and folders are in it.")
     return written
 

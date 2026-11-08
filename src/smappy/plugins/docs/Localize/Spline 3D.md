@@ -178,7 +178,7 @@ right.legend(frameon=False, fontsize=8)
 
 **5. The table.**  Positions are converted to nanometres with the *pixel
 size* (which the file records, so a position in camera pixels is `x_nm`
-divided by it; no pixel columns are kept), fits that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
+divided by it; no pixel attributes are kept), fits that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
 
 **6. The focus in the sample.**  A bead calibration is the PSF of a bead
 *on the coverslip*.  A molecule some way into a watery sample looks
@@ -485,7 +485,7 @@ coverslip.
 
 ### fit.iterations
 Defocused spots can take more steps than in 2D; 50 is usually plenty, and
-the `iterations` column shows a fit that ran out.
+the `iterations` attribute shows a fit that ran out.
 
 ### camera.em_on
 Also compared with the calibration's EM setting; see *EM gain* above.
@@ -517,10 +517,10 @@ workspace, a chain or a batch they apply to every file.
 
 ## Output
 
-The table has the columns of [Gaussian 2D](plugin:Localize/Gaussian 2D) with
+The table has the attributes of [Gaussian 2D](plugin:Localize/Gaussian 2D) with
 z instead of the PSF width:
 
-| column | meaning |
+| attribute | meaning |
 | --- | --- |
 | `x_nm`, `y_nm` | the position on the camera chip (the camera ROI's corner added) |
 | `camera_channel` | on *two channels*: which channel saw it, 0 the main one |

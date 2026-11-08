@@ -558,7 +558,7 @@ def measure_beads(locs, min_photons: float = 5000.0, min_fraction: float = 0.25,
     from .fiducials import find_beads
     for name in ("x_nm", "y_nm", "frame", "photons"):
         if name not in locs:
-            raise ValueError(f"beads need a {name} column; the table has "
+            raise ValueError(f"beads need a {name} attribute; the table has "
                              + ", ".join(locs.columns))
     x = np.asarray(locs["x_nm"], float)
     y = np.asarray(locs["y_nm"], float)
@@ -749,7 +749,7 @@ def bounds(text: str) -> Dict[str, List[float]]:
 def unavailable(locs) -> Dict[str, str]:
     """Values a method names but cannot measure on this table, and why."""
     if locs is not None and "sigma_nm" not in locs:
-        return {"psf_nm": "the table has no sigma_nm column, whose mean psf_nm is"}
+        return {"psf_nm": "the table has no sigma_nm attribute, whose mean psf_nm is"}
     return {}
 
 

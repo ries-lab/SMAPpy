@@ -17,7 +17,7 @@ what the fitter claimed.  It reports three kinds of number, and they are
 meant to disagree -- the way they disagree is the diagnosis:
 
 * **The CRLB histogram** -- what the fitter believes.  The distribution of the
-  precision column, with its typical value $\sigma_c$.
+  precision attribute, with its typical value $\sigma_c$.
 * **The pairwise displacement** (NeNA,
   [Endesfelder et al. 2014](https://doi.org/10.1007/s00418-014-1192-3)) --
   what the experiment did.  A
@@ -34,7 +34,7 @@ meant to disagree -- the way they disagree is the diagnosis:
 
 It measures the localizations as they are shown: the layer's
 [filter](plugin:Panels/Glossary) (also called bounds: the lowest and highest
-values of columns a localization must lie between), the drawn
+values of attributes a localization must lie between), the drawn
 [ROI](plugin:Panels/Glossary) (region of interest) and, while the 3D view's
 slab (a slice of fixed thickness in z) is used by plugins, the slab.  To
 measure all of them, clear the filter and the ROI.  A filter on precision or photons does not
@@ -43,8 +43,8 @@ survive it, and the first and last frames of a blink are the dim ones, so a
 hard cut removes true pairs preferentially.  The fitted signal fraction shows
 it, and $\kappa$ survives a cut better than the plain $\sigma$.
 
-**What it needs.**  A `frame` column and positions for the pairwise
-displacement; a precision column (`xy_err_nm`, and `z_err_nm` for 3D) for the
+**What it needs.**  A `frame` attribute and positions for the pairwise
+displacement; a precision attribute (`xy_err_nm`, and `z_err_nm` for 3D) for the
 CRLB histogram and for comparing each pair with its bound; `photons` for the
 photon law (below).  The displacement fit wants at least 200 pairs in the
 search radius.  FRC wants at least 1000 localizations.
@@ -187,7 +187,7 @@ ax.plot(g, np.sqrt(series[0].by_gap[1].sigma ** 2 + 2.0 ** 2 * g / 2), color="0.
 draw_gaps(ax, series)
 ```
 
-**6. The CRLB histogram.**  The precision column is histogrammed and the
+**6. The CRLB histogram.**  The precision attribute is histogrammed and the
 distribution that exponentially distributed photons imply is fitted over it,
 exactly as in [Localization Statistics](plugin:Analysis/Measure/Localization Statistics):
 the single number $\sigma_c$ is the precision at the mean photon count.  The
@@ -250,7 +250,7 @@ neighbour hides its true partner.
 **The scaled fits.**  For the photon law each pair has its own variance
 $v_k = A\,(1/N_i + 1/N_j)$, for the CRLB fit
 $v_k = \kappa^2 (\sigma_i^2 + \sigma_j^2)$, with $N$ the photons and $\sigma$
-the precision column of the two members.  The density is the same mixture,
+the precision attribute of the two members.  The density is the same mixture,
 one Rayleigh per pair.  The photon law assumes shot noise dominates; with a
 heavy background the dim end wants an extra term in $1/N^2$, and that is
 where a deviation from the law shows (the red curve above, at the dim
@@ -285,7 +285,7 @@ $p(\sigma) = (2a/\sigma^3)\, e^{-a/\sigma^2}$, $a = \sigma_c^2$, to the
 histogram from zero to its 99.5th percentile.  If $\sigma_c$ lands outside 0.3
 to 3 times the median, the photons are not exponential and the text says to
 read the median instead.  When the selection is measured and the layer's
-filter cuts the precision column, the histogram is fitted between the cuts
+filter cuts the precision attribute, the histogram is fitted between the cuts
 only: a lower cut would otherwise leave empty bins the model reads as a
 distribution moved up (11.3 nm for a true 8.9 nm, with a cut at 7 nm), and
 the fit of the part that survived recovers the whole.
@@ -357,7 +357,7 @@ wrong calibration, and the only one that needs molecules on in consecutive
 frames.
 
 ### crlb
-Needs a precision column; without one the histogram is left out.
+Needs a precision attribute; without one the histogram is left out.
 
 ### frc
 The slowest part of a run on a large field; untick it when only the
@@ -408,7 +408,7 @@ Only a speed limit: the default covers most acquisitions whole.
 The **text** names what was measured and how many localizations, then a
 line per number:
 
-* *CRLB*: $\sigma_c$ and the median of the precision column, lateral and
+* *CRLB*: $\sigma_c$ and the median of the precision attribute, lateral and
   axial.
 * *pairwise*: $\sigma$ at gap 1, the number of pairs and the percentage in
   its peak (the signal fraction $f$, see below); then $\sigma_x$, $\sigma_y$, $\sigma_z$ and
@@ -430,7 +430,7 @@ line per number:
 Besides the text:
 
 * **Figures**, a tab per method, each named after it: *NeNA*, the distance
-  histogram with the fit; *CRLB*, the histograms of the precision column;
+  histogram with the fit; *CRLB*, the histograms of the precision attribute;
   *FRC*; *FRC per axis* (with *FRC per axis (3D)*); and, with *diagnostic
   plots*, *NeNA per axis* and *NeNA vs frame gap* (when *frame gaps to* is
   above 1).  Each panel's title says first which method it shows and what is

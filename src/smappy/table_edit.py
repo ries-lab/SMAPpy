@@ -79,9 +79,9 @@ def check_name(name: str, locs: Localizations) -> str:
     """A new column name, refused now rather than half-written later."""
     name = (name or "").strip()
     if not name:
-        raise ValueError("name the new column")
+        raise ValueError("name the new attribute")
     if not name.isidentifier():
-        raise ValueError(f"{name!r} cannot be read in an expression: a column "
+        raise ValueError(f"{name!r} cannot be read in an expression: an attribute "
                          "name is a word of letters, digits and underscores, "
                          "not starting with a digit")
     if name in FUNCTIONS or name in CONSTANTS:
@@ -90,7 +90,7 @@ def check_name(name: str, locs: Localizations) -> str:
     if name in STRUCTURAL:
         raise ValueError(f"{name!r} is {STRUCTURAL[name]}; choose another")
     if name in locs:
-        raise ValueError(f"the table already has a column {name!r}")
+        raise ValueError(f"the table already has an attribute {name!r}")
     return name
 
 
@@ -103,7 +103,7 @@ def rename_column(locs: Localizations, old: str, new: str
     its place; the arrays are shared, so the copy costs a dictionary.
     """
     if old not in locs:
-        raise ValueError(f"no column {old!r}; the table has: "
+        raise ValueError(f"no attribute {old!r}; the table has: "
                          + ", ".join(locs.keys()))
     _refuse_structural([old])
     new = check_name(new, locs)
@@ -129,7 +129,7 @@ def remove_columns(locs: Localizations, names: Sequence[str]
     names = list(dict.fromkeys(names))
     missing = [n for n in names if n not in locs]
     if missing:
-        raise ValueError(f"no column {', '.join(missing)}; the table has: "
+        raise ValueError(f"no attribute {', '.join(missing)}; the table has: "
                          + ", ".join(locs.keys()))
     _refuse_structural(names)
     gone = set(names)
@@ -150,7 +150,7 @@ def _forget_columns(out: Localizations, gone) -> List[str]:
             forget(out, field)
     if readers:
         notes.append(f"{', '.join(readers)} read{'s' * (len(readers) == 1)} a "
-                     "removed column: kept as values, no longer recomputed "
+                     "removed attribute: kept as values, no longer recomputed "
                      "when blinks are merged")
     kept = dict(out.metadata.get(KEPT_BOUNDS) or {})
     dropped = [n for n in kept if n in gone]
@@ -162,7 +162,7 @@ def _forget_columns(out: Localizations, gone) -> List[str]:
         else:
             out.metadata.pop(KEPT_BOUNDS, None)
         notes.append(f"the filter the file kept on {', '.join(dropped)} is gone "
-                     "with the column")
+                     "with the attribute")
     return notes
 
 
@@ -210,11 +210,11 @@ def collapse_index(locs: Localizations, column: str, unassigned: str = "keep"
     is not in the result.
     """
     if column not in locs:
-        raise ValueError(f"no column {column!r}; the table has: "
+        raise ValueError(f"no attribute {column!r}; the table has: "
                          + ", ".join(locs.keys()))
     ids = np.asarray(locs[column])
     if ids.dtype.kind not in "iu":
-        raise ValueError(f"{column} is not a column of whole numbers: ids are")
+        raise ValueError(f"{column} is not an attribute of whole numbers: ids are")
     ids = ids.astype(np.int64)
     n = len(ids)
     has = ids > 0
@@ -262,7 +262,7 @@ def collapse(locs: Localizations, column: str, unassigned: str = "keep",
         forget(out, field)
     if readers:
         notes.append(f"{', '.join(readers)} kept as values: "
-                     "read the grouping columns, which are not kept")
+                     "read the grouping attributes, which are not kept")
     order = np.argsort(index, kind="stable")
     starts = np.concatenate(([0], np.flatnonzero(np.diff(index[order])) + 1))
     first = order[starts]                       # a row of each group, in group order

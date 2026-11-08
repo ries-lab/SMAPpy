@@ -50,7 +50,7 @@ NUMBERS = "the ROIs' numbers"
 class RegionColumnSettings:
     source: str = param("", label="results from", choices=auto_only,
                         help="what was measured on the ROIs, or per region of "
-                             "an id column; empty: the ROIs, for their numbers")
+                             "an id attribute; empty: the ROIs, for their numbers")
     values: str = param("", label="values",
                         help="comma separated; empty: every number the "
                              "measurement has (no measurement: roi_id and the "
@@ -58,7 +58,7 @@ class RegionColumnSettings:
                              "<line>_angle_deg, <line>_length_nm: its lines; "
                              "<list>_keyword: its keyword's number")
     prefix: str = param("", label="prefix", advanced=True,
-                        help="put before each column's name")
+                        help="put before each attribute's name")
     merge: str = param("last", label="overlaps", choices=VALUE_RULES, advanced=True,
                        help="a localization in two ROIs takes the later ROI's "
                             "value, the first's, or their mean")
@@ -192,8 +192,8 @@ class RegionsToColumn(Plugin):
 
 @dataclass
 class ColumnROIsSettings:
-    column: str = param("cluster_id", label="column",
-                        help="an id column of the table; 0 and below is in no region")
+    column: str = param("cluster_id", label="attribute",
+                        help="an id attribute of the table; 0 and below is in no region")
     min_size: int = param(10, label="at least", unit="locs", min=1,
                           help="the localizations an id needs to become an ROI")
     outline: bool = param(True, label="the cluster's own outline",
@@ -210,7 +210,7 @@ class ColumnROIsSettings:
                                ("outline", "an outline")],
                       help="in the ROI manager: a line through its localizations "
                            "in frame order, or the hull round them; auto: a track "
-                           "for a track column")
+                           "for a track attribute")
 
 
 def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
@@ -241,7 +241,7 @@ def column_regions(locs, column: str, min_size: int = 1, outline: bool = True
     values = np.asarray(locs[column])
     if values.dtype.kind not in "iub" and not (
             values.dtype.kind == "f" and np.all(np.mod(values[np.isfinite(values)], 1) == 0)):
-        raise ValueError(f"{column} is not an id column: its values are not whole numbers")
+        raise ValueError(f"{column} is not an id attribute: its values are not whole numbers")
     x = np.asarray(locs["x_nm"], dtype=float)
     y = np.asarray(locs["y_nm"], dtype=float)
     files = (np.asarray(locs["filenumber"]) if "filenumber" in locs

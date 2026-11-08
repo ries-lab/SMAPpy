@@ -33,7 +33,7 @@ Use it on **fixed** samples: anything that moves by itself is taken for
 drift.  It needs a few thousand localizations in the selection at the least
 (it warns below 5000), and does better with many more.  The drift is
 estimated from the [selection](plugin:Panels/Glossary) -- the localizations
-that pass the layer's filter (the lowest and highest values of columns such
+that pass the layer's filter (the lowest and highest values of attributes such
 as precision, set in the Render tab), inside the drawn
 [ROI](plugin:Panels/Glossary) (region of interest) if there is one -- and
 subtracted from **every** localization of the table,
@@ -202,7 +202,7 @@ axes[0].legend(fontsize=7, frameon=False)
 ```
 
 **6. Correcting.**  The drift of each frame is subtracted from `x_nm`,
-`y_nm` and `z_nm` (or the pixel columns) of every localization in that
+`y_nm` and `z_nm` (or the pixel attributes) of every localization in that
 frame, whether or not it was selected.
 
 **7. The error bar.**  With *error bar* on (the default), the field is cut
@@ -613,7 +613,7 @@ and the run refuses the combination.
 
 ## Output
 
-* **The table**, with the drift subtracted from the position columns of every
+* **The table**, with the drift subtracted from the position attributes of every
   localization.  The run is recorded in the file's history.  *Stop* ends the
   fit at its next step and leaves the table as it was: a curve refined half
   way is not one to subtract.

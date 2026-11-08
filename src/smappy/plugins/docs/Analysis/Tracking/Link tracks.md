@@ -10,7 +10,7 @@ localized again in frame after frame as it moves, and its
 [track](plugin:Panels/Glossary) -- the localizations of one particle in
 time order -- shows how it moves: freely, slowly, confined, or switching
 between the two.  This plugin decides which localizations belong to one
-particle and names each track, writing two columns onto the table:
+particle and names each track, writing two attributes onto the table:
 `track_id` (1, 2, ... in the order the tracks start, 0 for a localization
 in no track) and `track_length` (how many localizations the track has).
 
@@ -37,13 +37,13 @@ On sparse tracks the two give the same links to within a few in a
 thousand, and the simple one is several times faster (the benchmark
 below).
 
-A track is a [region](plugin:Panels/Glossary): `track_id` is an id column
+A track is a [region](plugin:Panels/Glossary): `track_id` is an id attribute
 like `cluster_id`, so any measurement offered per region runs once per
 track (a **block** of a [chain](plugin:Panels/Glossary) set to *for each*
 `track_id`, or the [per-region steps](plugin:Panels/Regions tab)), a
 filter on `track_length` keeps the long tracks, and
 [Segment regions](plugin:Analysis/Regions/Segment regions), *from an id
-column*, makes an ROI of each track to review.
+attribute*, makes an ROI of each track to review.
 
 It links the localizations the layer's [filter](plugin:Panels/Glossary) and
 ROI keep; the rest get `track_id` 0.  It always links the single
@@ -233,10 +233,10 @@ changes nothing about the links, only which tracks get an id.
 `track_id` unless there is a reason: link a second time with other
 settings into `track_id_strict`, say, to compare the two, or link a MINFLUX
 file without touching its `tid`.  The lengths go to the same name with
-`_length` for `_id` (`track_id_strict_length`).  It writes a new column,
-`track_id`, or one it wrote before -- never over a column of the table's
+`_length` for `_id` (`track_id_strict_length`).  It writes a new attribute,
+`track_id`, or one it wrote before -- never over an attribute of the table's
 own, so a typo cannot overwrite `frame`.  What reads tracks (the *tracks*
-render mode, Tracking analysis) has a *track id* to choose the column.
+render mode, Tracking analysis) has a *track id* to choose the attribute.
 
 ## Output
 
@@ -246,7 +246,7 @@ a figure: the tracks drawn as lines (at most 3000 of them), and how many
 localizations the tracks have.  Good tracking shows long tracks with a
 length distribution that falls off smoothly; many tracks of 2-3
 localizations, where long ones are expected, mean the maximum jump or the
-memory is too small.  Both columns keep their value on merged blinks (the
+memory is too small.  Both attributes keep their value on merged blinks (the
 largest, a recipe with the rule `max`), so a layer that merges blinks
 still shows the tracks.
 

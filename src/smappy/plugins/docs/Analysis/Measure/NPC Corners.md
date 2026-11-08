@@ -128,7 +128,7 @@ is lost, so it does not have to be exact.
 with a precision better than 0.4 of the arc between two corners at 50 nm
 (15.7 nm), around the same centre and with the rotation found the same way.
 
-**Without a precision column** every localization is counted, for the
+**Without a precision attribute** every localization is counted, for the
 corners and for N, and the analysis can only use SMAP's method.
 
 ## Parameters

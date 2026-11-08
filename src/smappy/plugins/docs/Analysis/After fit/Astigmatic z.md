@@ -105,7 +105,7 @@ uncertain.  A spot whose widths match no height gets a correspondingly
 larger error, and one whose best height is the end of the calibrated range
 -- whose true z could be anywhere beyond it -- gets the whole range as its
 error.  So a filter on `z_err_nm` in the Render tab removes them without a
-flag column of their own.
+flag attribute of their own.
 
 ```figure The z found from the widths against the true z, the isolated spots of the same simulation: on the line, with no offset and no change of scale.  The bars are each one's z_err_nm.
 fig.set_size_inches(6, 3.4)

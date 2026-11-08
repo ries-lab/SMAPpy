@@ -63,7 +63,7 @@ the open localizations, it looks at the table rather than at a fitter.
 Colours need two channels' photons (`photons_ch0` and `photons_ch1`, or
 MINFLUX's `dcr`).  Astigmatic z needs `sigma_x_nm` and `sigma_y_nm`.  4Pi z
 needs `phase_rad` and `phase_err_rad`.  A step
-whose columns are missing is skipped without a word, so the default
+whose attributes are missing is skipped without a word, so the default
 *assign colours* does nothing to a one-colour table.
 
 **A step that fails is a line in the output.**  These steps run after a fit

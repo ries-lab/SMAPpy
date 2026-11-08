@@ -886,7 +886,7 @@ class SpatialStatistics(Plugin):
         for name, colour, (table, selection) in found:
             for c in ("x_nm", "y_nm"):
                 if c not in table:
-                    raise ValueError(f"layer {name} has no column {c!r}; it has "
+                    raise ValueError(f"layer {name} has no attribute {c!r}; it has "
                                      + ", ".join(sorted(table.keys())))
             mask = np.asarray(selection.mask, dtype=bool)
             x = np.asarray(table["x_nm"], dtype=float)

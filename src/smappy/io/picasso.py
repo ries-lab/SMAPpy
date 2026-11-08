@@ -173,7 +173,7 @@ def records(locs: Localizations, group: Optional[str] = None
             fields["lpz"] = np.zeros(len(locs))
     if group:
         if group not in locs:
-            raise ValueError(f"no column {group!r} to write as Picasso's group")
+            raise ValueError(f"no attribute {group!r} to write as Picasso's group")
         fields["group"] = np.asarray(locs[group]).astype(np.int32)
 
     width, height = _extent(locs, x, y)
@@ -211,5 +211,5 @@ def save(locs: Localizations, path: Path, metadata=None, group: Optional[str] = 
             report(f"{dropped} localizations left out: Picasso refuses a NaN, a "
                    "negative position, width or precision, or a position off the image")
         if filled:
-            report(f"no column for {', '.join(filled)}: written as 0")
+            report(f"no attribute for {', '.join(filled)}: written as 0")
     return path

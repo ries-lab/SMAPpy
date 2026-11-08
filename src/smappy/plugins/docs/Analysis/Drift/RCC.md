@@ -24,7 +24,7 @@ each image to show structure: a few thousand in the
 [selection](plugin:Panels/Glossary) at the very least (below 5000 the plugin
 warns), and many more for a precise curve.  The selection is what the plugin
 measures: the localizations that pass the layer's filter -- the lowest and
-highest values of columns such as precision or photons, set in the Render
+highest values of attributes such as precision or photons, set in the Render
 tab -- inside the drawn [ROI](plugin:Panels/Glossary) (region of interest),
 if there is one.
 
@@ -278,7 +278,7 @@ as in a batch of many files.
 ## Output
 
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
-  the pixel columns) of every localization.  The correction is recorded in the
+  the pixel attributes) of every localization.  The correction is recorded in the
   file's history and can be undone.
 * **The drift curve**, x, y and z against frame (*Show result*), one per
   file when the selection holds several, with the halves' curves dashed in

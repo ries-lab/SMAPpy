@@ -868,9 +868,9 @@ class AxesSection(QWidget):
         self.scales: Dict[str, _Bound] = {}
         for axis, label in (("x", "x"), ("y", "y"), ("z", "z (3D)")):
             combo = QComboBox()
-            combo.setToolTip(f"the column the {axis} axis of the render grid is")
+            combo.setToolTip(f"the attribute the {axis} axis of the render grid is")
             scale = _Bound()
-            scale.setToolTip("units of that column per render unit: the two "
+            scale.setToolTip("units of that attribute per render unit: the two "
                              "scales are what makes the pixels non-square, and "
                              "the grid itself stays square so that the zoom, "
                              "the ROIs and the 3D box are unchanged")
@@ -953,7 +953,7 @@ class AxesSection(QWidget):
             self.note.hide()
             return
         self.note.setText(f"{x_name} across, {y_name} up.  ROIs and anything "
-                          "that measures nanometres read the columns, not the "
+                          "that measures nanometres read the attributes, not the "
                           "picture; the scale bars are in the axes' own units.")
         self.note.show()
 
@@ -1233,7 +1233,7 @@ class RenderTab(QWidget):
                              "its track, or the density of its Voronoi cell")
         # the tracks mode's two settings, shown only while it is chosen
         self.track_column = QComboBox()
-        self.track_column.setToolTip("the id column whose localizations are one "
+        self.track_column.setToolTip("the id attribute whose localizations are one "
                                      "track; auto: track_id, else tid (MINFLUX), "
                                      "else track_id_true (a simulation)")
         self.line_width = CompactSpinBox(minimum=0.2, maximum=20, singleStep=0.5,
@@ -1243,7 +1243,7 @@ class RenderTab(QWidget):
         self.color.addItem("intensity", None)
         self.color.addItem("field", "field")
         self.color_field = QComboBox()
-        self.color_field.setToolTip("the column the colour encodes")
+        self.color_field.setToolTip("the attribute the colour encodes")
         color_row = QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
         color_row.addWidget(self.color)
@@ -1267,7 +1267,7 @@ class RenderTab(QWidget):
         self.invert = QCheckBox("invert")
         self.invert.setToolTip("as SMAP: colouring by intensity, the opposite colour "
                                "at the same brightness (red becomes cyan); "
-                               "colouring by a column, the LUT turned round.  For "
+                               "colouring by an attribute, the LUT turned round.  For "
                                "black on white use white background")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)

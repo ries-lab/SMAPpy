@@ -34,8 +34,8 @@ table loaded from another program has no image tags.
 
 **Recording, during the fit.**  The metadata of a frame is read together
 with its pixels, so recording it costs no extra pass over the files.  Each
-frame is compared with the first frame.  A tag gets a column the first time
-its value differs, and that column is filled backwards with the first
+frame is compared with the first frame.  A tag gets an attribute the first time
+its value differs, and that attribute is filled backwards with the first
 frame's value.  You don't have to name anything in advance, and a tag nobody
 thought of still turns up.  Values that change by construction and say
 nothing the frame number does not (the image number, a UUID, the file name,
@@ -55,7 +55,7 @@ the acquisition has one.  This plugin prints the note above its summary.
 **Drawing.**  Each tag is drawn against the frame number.  A state is drawn
 as steps between its values.  The localizations in the current
 [selection](plugin:Panels/Glossary) -- those that pass the layer's filter, the
-lowest and highest values of columns set in the Render tab, inside the drawn
+lowest and highest values of attributes set in the Render tab, inside the drawn
 [ROI](plugin:Panels/Glossary) (region of interest) -- are counted in at most
 500 bins across the frames and drawn as the mean number per frame.
 

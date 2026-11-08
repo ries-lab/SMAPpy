@@ -72,7 +72,7 @@ class ScanPlayer(QWidget):
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         self.coordinate = QComboBox()
-        self.coordinate.setToolTip("what the window moves through: a column, or the "
+        self.coordinate.setToolTip("what the window moves through: an attribute, or the "
                                    "position along or across the line ROI")
         self.coordinate.setMinimumContentsLength(10)
         self.coordinate.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)

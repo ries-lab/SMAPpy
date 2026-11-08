@@ -335,7 +335,7 @@ class Blinking(Plugin):
         from ..metadata import file_frame_time, table_frame_time
         locs, blink = _localizations(ctx)
         if "frame" not in locs:
-            raise ValueError("the table has no frame column: "
+            raise ValueError("the table has no frame attribute: "
                              f"it has {', '.join(sorted(locs.keys()))}")
         frame = np.asarray(locs["frame"])
         if ctx.per_region:

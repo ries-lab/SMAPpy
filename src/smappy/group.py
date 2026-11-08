@@ -831,7 +831,7 @@ def _link_precision(locs: Localizations) -> np.ndarray:
         return xy_err(locs[f"x_err_{unit}"], locs[f"y_err_{unit}"]).astype(np.float64)
     errs = sorted(n for n in locs.keys() if "_err" in n)
     raise KeyError(f"linking by precision needs '{name}' (positions are {x_name}); "
-                   f"the table has {', '.join(errs) or 'no precision column'}")
+                   f"the table has {', '.join(errs) or 'no precision attribute'}")
 
 
 def group(locs: Localizations, settings: Optional[GroupSettings] = None,
@@ -880,7 +880,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
         return grouped, group_index
     x, y = positions(locs)
     if "frame" not in locs:
-        raise KeyError("grouping needs a 'frame' column")
+        raise KeyError("grouping needs a 'frame' attribute")
     dx, by_precision = settings.dx, {}
     if settings.link == "precision":
         try:

@@ -756,7 +756,7 @@ def _save_csv(locs, path: Path, metadata=None, columns: Optional[Sequence[str]] 
     the other columns under their own names."""
     columns = [c for c in (columns or locs.keys()) if c in locs]
     if not columns:
-        raise ValueError("no columns to write")
+        raise ValueError("no attributes to write")
     thunder = names.lower() == "thunderstorm"
     delimiter = "," if path.suffix.lower() == ".csv" else "\t"
     headers, arrays, formats = [], [], []

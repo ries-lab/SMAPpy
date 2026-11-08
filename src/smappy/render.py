@@ -463,7 +463,7 @@ def _pick(locs: Localizations, names, what: str):
         if (all(n in locs for n in name) if isinstance(name, tuple)
                 else name in locs):
             return name
-    raise KeyError(f"no {what} column in the table; looked for {names}")
+    raise KeyError(f"no {what} attribute in the table; looked for {names}")
 
 
 def positions(locs: Localizations, select=None):
@@ -591,7 +591,7 @@ class RenderAxes:
     @staticmethod
     def _values(locs: Localizations, name: str, scale: float, select):
         if name not in locs:
-            raise KeyError(f"no column {name!r} in the table; it has "
+            raise KeyError(f"no attribute {name!r} in the table; it has "
                            f"{', '.join(sorted(locs.keys()))}")
         values = locs[name]
         if select is not None:
@@ -732,7 +732,7 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
         field_name = precision_for(locs, name) if settings.mode == "precision" else None
         if field_name is None:
             if settings.mode == "precision" and is_position(name):
-                raise KeyError("no localization precision column in the table; "
+                raise KeyError("no localization precision attribute in the table; "
                                f"looked for {PRECISION_FIELDS}")
             out.append(np.float32(explicit))          # already in render units
         else:

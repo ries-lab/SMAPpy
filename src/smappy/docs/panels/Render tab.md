@@ -51,8 +51,9 @@ measured.
 From top to bottom the tab has: a small *overview* of the whole field, the
 layer strip, the *filter*, the *image* section (only for a layer that is a
 pixel image), the *display* -- how the localizations are drawn -- and, closed
-by default, the *axes*, which turn the picture into a plot of any column
-against any other.
+by default, the *axes*, which turn the picture into a plot of any
+[attribute](plugin:Panels/Glossary) (one value every localization carries,
+such as photons or frame) against any other.
 
 ## How it works
 
@@ -102,10 +103,10 @@ shows one plane, or the planes of a range taken together: their maximum
 sum.  In the [3D view](plugin:Panels/3D view) a z-stack can be a volume.
 
 **2. The filter.**  A [filter](plugin:Panels/Glossary) (also called bounds)
-is a range per column: keep the localizations
+is a range per attribute: keep the localizations
 whose precision is at most 25 nm, whose z lies within 500 nm of focus, and so
 on.  A localization is shown only if it is inside every range.  The tab shows
-one column at a time, as a histogram with the kept range shaded, and the
+one attribute at a time, as a histogram with the kept range shaded, and the
 range can be dragged or typed.  A new layer opens with a few bounds already
 set (see *In detail*), so that fits which are clearly bad are left out from
 the start -- and are left out visibly, in the shaded histogram, rather than
@@ -184,11 +185,11 @@ wide as its fitted [PSF](plugin:Panels/Glossary) (point spread function: the
 image one molecule makes on the camera), on the camera's own pixels -- the widefield picture
 of the same molecules, to set beside the super-resolved one.  *tracks* draws
 [tracks](plugin:Panels/Glossary) instead of spots: each track -- the
-localizations sharing a value of the *track id* column, on *auto*
+localizations sharing a value of the *track id* attribute, on *auto*
 `track_id` from [Link tracks](plugin:Analysis/Tracking/Link tracks), else
 MINFLUX's `tid`, else a simulation's `track_id_true` -- as the line through
-its localizations in time order, *line width* pixels wide.  Coloured by a
-column, the line takes the colour of each step: by `frame`, a track runs
+its localizations in time order, *line width* pixels wide.  Coloured by an
+attribute, the line takes the colour of each step: by `frame`, a track runs
 through the LUT as it goes on; by `track_D_um2_per_s` from
 [Tracking analysis](plugin:Analysis/Tracking/Tracking analysis), slow tracks
 and fast ones stand apart.  *Voronoi density* (SharpViSu,
@@ -252,7 +253,7 @@ Switched from *quantile* to *absolute*, full scale is instead a set density,
 in localizations per µm², which keeps a structure equally bright as one
 zooms and from one dataset to the next of the same kind.  *gamma* below 1 lifts the faint parts further.  The *LUT* (look-up table,
 also called a colour map) is the colour scale brightness is shown in.  Instead of brightness alone, the
-colour can also encode a column (*colour by*, e.g. z), with the brightness
+colour can also encode an attribute (*colour by*, e.g. z), with the brightness
 still showing density.
 
 ```figure The same crossing at three contrasts, and with gamma 0.5.
@@ -273,7 +274,7 @@ draw(axes[1], "colour by z_nm, white background", whole, white_background=True, 
 draw(axes[2], "hot, inverted", whole, invert=True, contrast=2.0)
 ```
 
-**6. Any column against any other.**  The *axes* section says which column
+**6. Any attribute against any other.**  The *axes* section says which attribute
 each axis of the picture is.  Normally that is x and y, and the picture is a
 picture of the sample.  Choose z for the vertical axis and it is a side view;
 choose frame and photons and it is a plot of brightness over the acquisition
@@ -310,7 +311,7 @@ state.settings = kept
 
 **7. Moving through the data.**  The *player* shows only a window of one
 coordinate at a time and moves it: the frames (how a structure builds up,
-or bleaches), the time, z (slices through a cell), any column, or the
+or bleaches), the time, z (slices through a cell), any attribute, or the
 position along or across a line ROI.  It narrows what the 2D and the 3D
 windows draw, nothing else: the filters stay as they are, and a plugin run
 meanwhile sees the whole table.  A window wider than the step makes the
@@ -422,10 +423,10 @@ whole line, a slow track piled up into a blob hundreds of times brighter than
 a line, and the quantile contrast, set by those blobs, dimmed every other
 track.)  A segment of no length -- a track along the line of sight in the 3D
 view -- is a round dot.  A segment weighs one
-(or the mean of its ends' weight column) and, coloured by a column, takes
+(or the mean of its ends' weight attribute) and, coloured by an attribute, takes
 the mean of its two ends' values.  Unless *lines add up* is ticked, a pixel's
 weight is then capped at one line's (the heaviest segment's, with a weight
-column) and its colour scaled with it: a joint of two segments, or a crossing
+attribute) and its colour scaled with it: a joint of two segments, or a crossing
 of two tracks, is no brighter than the line, and the quantile contrast is
 set by the lines.  The view culls whole tracks by their
 bounding boxes rather than localizations by position, since a segment
@@ -456,9 +457,9 @@ $$v = \frac{N + \rho_c \max(a - S, 0)}{a},$$
 
 where $\rho_c$ is the density of the cell at the centre if it is larger
 than the pixel, and 0 if it is small or open.  On a uniform field the
-picture is flat at the field's density at any zoom.  Coloured by a column,
+picture is flat at the field's density at any zoom.  Coloured by an attribute,
 a counted localization brings its own colour and a cell the mean of its
-localizations' values.  The *weight* column is not used: the density is of
+localizations' values.  The *weight* attribute is not used: the density is of
 localizations.
 
 The cells are computed once for a layer's table and filter (about 12 µs a
@@ -502,12 +503,12 @@ number of lines over one pixel, and for an image layer one of its own
 values.  Switching from *quantile* to *absolute* sets $M$ to the value that
 shows the view as it is, so the picture does not jump.
 
-**Colour by a column.**  Each localization gets the LUT colour of its value
+**Colour by an attribute.**  Each localization gets the LUT colour of its value
 $u$ in the *colour range* $[u_{\mathrm{lo}}, u_{\mathrm{hi}}]$ (values outside
 take the end colours).  Colours are added up during rendering, together with
 the plain count; the displayed hue is the average colour of the pixel and its
 brightness the count, put through contrast and gamma as above.  A dense pixel
-therefore keeps its hue instead of bleaching to white.  Choosing a column
+therefore keeps its hue instead of bleaching to white.  Choosing an attribute
 starts its range at its 0.5th to 99.5th percentile and switches the LUT to
 turbo; going back to intensity switches it to hot.  Because the colour is part
 of the rendering here, changing the LUT of a coloured layer renders it again.
@@ -515,8 +516,8 @@ of the rendering here, changing the LUT of a coloured layer renders it again.
 **Inverting, and the white background.**  As in SMAP, *invert* depends on
 what the colour codes.  Colouring by intensity, with $c = (r, g, b)$ a LUT
 colour, it gives $\min(r + g + b - c, 1)$ per channel (SMAP's `lutinvert`):
-red becomes cyan, and hot runs black through cyan to white.  Colouring by a
-column, the LUT is turned round, so the low values take its top end; the sum
+red becomes cyan, and hot runs black through cyan to white.  Colouring by an
+attribute, the LUT is turned round, so the low values take its top end; the sum
 of a rainbow's channels would be no colour of it.  *white background* turns the brightness over and
 keeps the hue, $c + 1 - \max(c) - \min(c)$: black becomes white, a saturated
 red stays red.  It is applied once, to the sum of the layers.
@@ -525,20 +526,20 @@ red stays red.  It is applied once, to the sum of the layers.
 clipped at 1.  Two layers in red and green therefore show yellow where both
 are bright.
 
-**The filter.**  A bound $(\mathrm{lo}, \mathrm{hi})$ on a column keeps
+**The filter.**  A bound $(\mathrm{lo}, \mathrm{hi})$ on an attribute keeps
 $\mathrm{lo} \leq u \leq \mathrm{hi}$; an empty end is no bound.  A
 localization with no value there (NaN) is excluded by any bound on that
-column -- a localization without a z is not in a z slab (a slice of fixed
+attribute -- a localization without a z is not in a z slab (a slice of fixed
 thickness in z, as the 3D view uses).  The shown set is
 the intersection of all bounds and of the file choice.  A new layer starts
 with `xy_err_nm` at most 25 nm, `logl_rel` at least -2 and `z_nm`
 between -500 and 500 nm, plus `sigma_nm` at most 180 nm on a 2D table (in 3D the PSF width changes with z by design), each only if the
-table has that column, and any bounds the file carries from
+table has that attribute, and any bounds the file carries from
 [Remove Localizations](plugin:Analysis/Process/Remove Localizations).
 Those are the shipped defaults.  A file opened in place of the last one
 starts instead from the bounds of the last table's first layer, on the
-columns that table had -- a bound removed there stays removed -- and from
-the defaults on the columns it did not have; the `sigma_nm` bound of a 2D
+attributes that table had -- a bound removed there stays removed -- and from
+the defaults on the attributes it did not have; the `sigma_nm` bound of a 2D
 table is not carried onto a 3D one.  A workspace file stores the same set
 (`filters`), which replaces the shipped defaults for new files and new
 layers and is set on the first layer when the workspace is opened; the
@@ -547,9 +548,9 @@ layer has one set of bounds, applied to the table it shows: on a layer that
 merges blinks a bound on `xy_err_nm` or `photons` is a bound on a blink's combined
 precision or summed photons, so the same bound keeps more blinks than it
 keeps frames.  The histogram spans the bulk of the
-column in 120 bins (of a random sample of two million, for a larger table):
+attribute in 120 bins (of a random sample of two million, for a larger table):
 the 1st to 99th percentile, cut to three interquartile ranges beyond the
-quartiles, so that the long tail of a precision column -- a few faint spots
+quartiles, so that the long tail of a precision attribute -- a few faint spots
 with errors of hundreds of nanometres -- does not squeeze the rest into one
 bar.  As in SMAP, dragging an edge of the shaded range to the end of
 the histogram removes that end of the bound, so the tail is not cut off, and
@@ -577,7 +578,7 @@ one emitter $r^2 / (\sigma_h^2 + \sigma^2)$ follows a chi-squared
 distribution with two degrees of freedom, so a link is kept with
 probability $1 - e^{-k^2/2}$: 96% at $k = 2.5$, 99.97% at $k = 4$.  A
 localization without a precision may link up to *at most*; a table without
-a precision column is linked by the fixed box, with a warning.  Unlike
+a precision attribute is linked by the fixed box, with a warning.  Unlike
 SMAP, which took the first localization's precision for both terms, the
 precision of the candidate and of the running position are used, and the
 bounds clamp $r$ itself rather than each $k \sigma$.  Files and channels
@@ -596,22 +597,22 @@ opens, a table is changed, *merge blinks* is ticked or the merge settings
 change.  A plugin run started meanwhile waits for it and starts by itself
 when it is done.
 
-**Leaving localizations out of the merge.**  Where the table has a column
+**Leaving localizations out of the merge.**  Where the table has an attribute
 `group_use`, a localization with 0 there takes no part in merging: it is in
 no blink (`group_id` 0, `n_in_group` 0), a blink or trace of nothing but
 such localizations is not in the merged table at all, and the rest are
 merged without it.  It stays in the localizations, for every layer that
 shows them and every plugin that reads them.  [Math Parser](plugin:Analysis/Process/Math Parser)
-makes the column -- *new field* `group_use`, an expression such as
+makes the attribute -- *new field* `group_use`, an expression such as
 `trace_index > 20` merges each [MINFLUX](plugin:Panels/Glossary) trace
 without its first 20 localizations, where a still emitter is still creeping
 into place -- and the merge follows it: changed or undone, the blinks are
 merged again.
 
-**The axes.**  A coordinate is the column divided by that axis's scale,
+**The axes.**  A coordinate is the attribute divided by that axis's scale,
 $u / s$, and the render grid stays square in these units -- so the zoom, the
 ROIs and the 3D box work unchanged, and the two scales are what makes a pixel
-represent, say, 5 frames across and 20 photons up.  Choosing a column (or
+represent, say, 5 frames across and 20 photons up.  Choosing an attribute (or
 *fit*) sets each scale that is not a position to a round 1, 2 or 5 times a
 power of ten, at or below its 1-99 % span divided by 1000 (or by the span of a
 position axis shown beside it), and frames the view on that span.  A position
@@ -669,14 +670,14 @@ two.
 
 ### filter
 The quick buttons (*precision*, *fit quality*, *frame*, *z*, *photons*,
-*PSF*, *channel*, *file*) pick the usual columns -- `xy_err_nm`, `logl_rel`,
+*PSF*, *channel*, *file*) pick the usual attributes -- `xy_err_nm`, `logl_rel`,
 `frame`, `z_nm`, `photons`, `sigma_nm`, `channel`, `filenumber`, each where
-the table has it, and named in the button's tooltip; the drop-down has every numeric column.  A
-bounded column without a quick button gets one, named by the column, for as
-long as the bound is there.  A column
+the table has it, and named in the button's tooltip; the drop-down has every numeric attribute.  A
+bounded attribute without a quick button gets one, named by the attribute, for as
+long as the bound is there.  An attribute
 with a bound on it is bold and marked with a dot, and the line under the
 quick buttons lists every bound of the layer (`xy_err_nm ≤ 25`): click one to
-edit it, × to remove it, so a bound on a column not on show is not
+edit it, × to remove it, so a bound on an attribute not on show is not
 forgotten.  The status bar says how much the filters hide.  The count reads
 *shown / all*, and how many are in the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
 list of the files to tick; right-click a file to remove it from the session.
@@ -693,14 +694,14 @@ The lower bound; empty is none.
 The upper bound; empty is none.
 
 ### clear
-Removes the bounds on the column shown.
+Removes the bounds on the attribute shown.
 
 ### regions
 Shown while the Regions tab's [region filter](plugin:Analysis/Regions/Filter regions)
 has conditions, and ticked: the layer shows only the localizations of the
 regions that pass them.  Untick it to see every localization of this layer
 again without losing the conditions; tick it to filter again.  It is the
-layer's bound on the `region_filter` column, which is why it is per layer --
+layer's bound on the `region_filter` attribute, which is why it is per layer --
 one layer filtered beside one that is not shows what the filter takes away.
 
 ### all
@@ -763,7 +764,7 @@ ends of a z range set, the layer keeps its own plane.
 ### frame
 For a stack shown as a slice, which plane is shown; the label beside it
 says which -- *z 250 nm* in a z-stack, *t 1.5 s* in a time series,
-*average of 2000 frames* or *frame 17* (the number the `frame` column uses)
+*average of 2000 frames* or *frame 17* (the number the `frame` attribute uses)
 for the frames a fit kept.  Each layer has its own, so two layers can show
 the average and one frame.
 
@@ -791,8 +792,8 @@ the tracks are linked.  *Voronoi density* to see structures of very
 different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
-The first time a layer is set to *tracks*, and if it is not coloured by a
-column already, it is coloured by its track id on the *turbo* LUT, so that
+The first time a layer is set to *tracks*, and if it is not coloured by an
+attribute already, it is coloured by its track id on the *turbo* LUT, so that
 each track has a colour of its own; choose *intensity* to draw them all in
 one.  Choosing *tracks* also unticks *merge blinks* on that layer: merging joins a
 slow particle's localizations in consecutive frames into one, and the line
@@ -800,11 +801,11 @@ through the blinks is coarser than the track.  Tick it again to draw the
 blinks.
 
 ### track id
-The id column of the tracks, in *tracks* only.  *auto* takes the first of
+The id attribute of the tracks, in *tracks* only.  *auto* takes the first of
 `track_id`, `tid` and `track_id_true` the table has, and says which; any
-integer column can be chosen instead -- a second linking, `group_id` to
+integer attribute can be chosen instead -- a second linking, `group_id` to
 join each blink's localizations, `cluster_id` for each cluster's in time
-order.  When the column is missing the picture says so over the view.
+order.  When the attribute is missing the picture says so over the view.
 
 ### line width
 1 pixel is crisp at any zoom; 2 to 3 for a figure at a coarse pixel size, or
@@ -812,11 +813,11 @@ to make sparse tracks visible zoomed out.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
-column chosen beside it.  A visible layer coloured by a column puts a
+attribute chosen beside it.  A visible layer coloured by an attribute puts a
 colour bar in the render window's top right corner: the LUT over the
 *colour range*, its ends rounded, and above it the layer and, on the line
-under it, the column, whose name carries the unit (*z_nm*).  Each scale has its own bar,
-stacked one under the other; layers with the same column, LUT, inversion
+under it, the attribute, whose name carries the unit (*z_nm*).  Each scale has its own bar,
+stacked one under the other; layers with the same attribute, LUT, inversion
 and range share one, labelled with all of them.  A picture saved or copied
 from the render window draws the same bars into it (*Save image*).  The
 toolbar's *options* menu hides the bar, on screen and in what is saved or
@@ -828,19 +829,19 @@ colours over the part of the range that matters -- for z, the depth of the
 structure rather than of the outliers.
 
 ### auto
-Sets the colour range to the column's 0.5th to 99.5th percentile of what the
+Sets the colour range to the attribute's 0.5th to 99.5th percentile of what the
 picture shows: the localizations that pass the filter, inside the ROI if one
 is drawn, and in view.  Zoom in on a part and press it to spread the colours
-over that part.  Choosing a column in *colour by* starts from the same
+over that part.  Choosing an attribute in *colour by* starts from the same
 percentiles over all the layer's localizations.
 
 ### LUT
-Hot for intensity, turbo for a column.  For several layers, one pure colour
+Hot for intensity, turbo for an attribute.  For several layers, one pure colour
 each (red, green, cyan, magenta) adds up legibly.
 
 ### invert
 By intensity, the opposite colour at the same brightness: red becomes cyan.
-By a column, the LUT turned round: on z, near and far swap colours.  For black
+By an attribute, the LUT turned round: on z, near and far swap colours.  For black
 on white, pick the gray_inverted LUT or *white background* instead.
 
 ### contrast
@@ -922,7 +923,7 @@ its recording (*How it works*, 7).
 What the window moves through: *frame*, *time_s* and *z_nm* first, where
 the table has them; *along the line* and *across the line*, in nm from the
 middle of the line ROI, which must be drawn; then every other numeric
-column.  Along or across the line, it runs over the line's length or width.
+attribute.  Along or across the line, it runs over the line's length or width.
 
 ### window
 How much of the coordinate is shown at once, in its unit (frames, nm, ...).
@@ -1035,16 +1036,16 @@ Adds the turn and the zoom to the path, from its last key -- or from the
 another: a turn about z, then a zoom in.
 
 ### axes
-Which column each axis of the picture is.  Set on all layers at once; closed,
+Which attribute each axis of the picture is.  Set on all layers at once; closed,
 it is the ordinary picture.  While a custom pair is shown, a note says what
 is across and up, and the scale bars are in the axes' own units.
 
 ### x
-The horizontal axis, and after *scale* how many units of that column one
+The horizontal axis, and after *scale* how many units of that attribute one
 render unit is.  *auto* is the table's x position.
 
 ### scale
-Units of the axis's column per render unit.  For positions leave it at 1;
+Units of the axis's attribute per render unit.  For positions leave it at 1;
 for photons against frame, *fit* picks scales that make each axis's 1-99 %
 fill the picture.
 
@@ -1060,7 +1061,7 @@ stay true; x against z stretched would misrepresent the structure.
 
 ### fit
 Scales each axis so its 1-99 % fills the picture, and frames the view on it.
-It is done by itself when a column is chosen.
+It is done by itself when an attribute is chosen.
 
 ### reset
 Back to x against y, the ordinary picture.
@@ -1087,10 +1088,10 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
   0.5, the floor is 0.7 pixels alone, and the cap is ten times the median
   width.  The Gaussian is integrated over each pixel instead of looked up in
   a sampled template.
-* **Colour by a column** keeps the hue of a dense pixel, where SMAP adds the
+* **Colour by an attribute** keeps the hue of a dense pixel, where SMAP adds the
   colours and a dense region of mixed colours bleaches towards white.
-* **The filter** shows one column at a time with its histogram, over every
-  numeric column.  It opens with a precision bound of 25 nm (SMAP 30),
+* **The filter** shows one attribute at a time with its histogram, over every
+  numeric attribute.  It opens with a precision bound of 25 nm (SMAP 30),
   `logl_rel` from -2 (SMAP -1 to 0) and a PSF bound of 180 nm (SMAP 175) only
   for 2D data; z within 500 nm is the same.
 * **Contrast** is SMAP's quantile contrast with the same meaning; the default

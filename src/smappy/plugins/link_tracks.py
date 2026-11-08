@@ -69,7 +69,7 @@ class LinkTracksSettings:
                                                   "table has z_nm")
     per_channel: bool = param(True, label="per channel",
                               help="link each channel on its own")
-    column: str = param("track_id", label="output column", advanced=True,
+    column: str = param("track_id", label="output attribute", advanced=True,
                         help="where the ids go; the lengths go to the same name "
                              "with _length for _id")
 
@@ -86,13 +86,13 @@ def check_output(locs, column: str) -> str:
     MINFLUX trace (``tid``) or ``frame``."""
     column = (column or "").strip()
     if not column.isidentifier():
-        raise ValueError(f"output column {column!r}: a name of letters, digits "
+        raise ValueError(f"output attribute {column!r}: a name of letters, digits "
                          "and underscores")
     ours = set(locs.metadata.get(WRITTEN, [])) | {"track_id"}
     for name in (column, length_column(column)):
         if name in locs and column not in ours:
-            raise ValueError(f"{name!r} is a column of the table's own; choose a "
-                             "new output column")
+            raise ValueError(f"{name!r} is an attribute of the table's own; choose a "
+                             "new output attribute")
     return column
 
 

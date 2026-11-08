@@ -124,7 +124,7 @@ def check_field(field: str, locs: Optional[Localizations] = None) -> str:
     """
     name = (field or "").strip()
     if not name.isidentifier():
-        raise ValueError(f"{name!r} is not usable as a column name: a word of "
+        raise ValueError(f"{name!r} is not usable as an attribute name: a word of "
                          "letters, digits and underscores, not starting with "
                          "a digit")
     if name in ("group_id", "n_in_group"):
@@ -135,7 +135,7 @@ def check_field(field: str, locs: Optional[Localizations] = None) -> str:
         flag = any(r["field"] == name and not r.get("expression")
                    for r in recipes(locs))
         if not flag:
-            raise ValueError(f"{name!r} is a column of the table; hiding would "
+            raise ValueError(f"{name!r} is an attribute of the table; hiding would "
                              "write 0 and 1 over it.  Choose another flag name")
     return name
 
@@ -174,11 +174,11 @@ class RemoveSettings:
     action: str = param("remove", label="action",
                         choices=(("remove", "remove them from the table"),
                                  ("hide", "keep them, flagged and filtered out")),
-                        help="hiding writes a column and sets the filter on "
+                        help="hiding writes an attribute and sets the filter on "
                              "it, so the decision is reversible and is saved "
                              "with the file")
     field: str = param("use", label="flag", advanced=True,
-                       help="the column hiding writes: 1 visible, 0 hidden")
+                       help="the attribute hiding writes: 1 visible, 0 hidden")
 
 
 @register("Analysis/Process/Remove Localizations")

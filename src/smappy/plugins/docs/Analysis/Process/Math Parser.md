@@ -5,8 +5,8 @@ covers: [smappy.mathparse.parse, smappy.mathparse.names_in, smappy.mathparse.eva
 
 ## What it does
 
-The Math Parser makes a new column of the localization table from an
-expression in the columns it already has:
+The Math Parser makes a new attribute of the localization table from an
+expression in the attributes it already has:
 
 ```
 on_time_ms = n_in_group * 20
@@ -14,50 +14,50 @@ z_true_nm  = z_nm * 0.8
 within     = (xy_err_nm < 25) & (sigma_nm > 100)
 ```
 
-The result is an ordinary column.  The [filter](plugin:Panels/Glossary)
-(also called bounds: the lowest and highest values of columns a localization
+The result is an ordinary attribute.  The [filter](plugin:Panels/Glossary)
+(also called bounds: the lowest and highest values of attributes a localization
 must lie between to be shown), the renderer, the colour
-coding and every other plugin use it like any column the fitter wrote.  That
+coding and every other plugin use it like any attribute the fitter wrote.  That
 is what makes the plugin useful for everything there is no button for: a
 refractive-index correction on z, an on-time in milliseconds, a ratio of two
 fitted quantities, or a flag (0 or 1) marking the localizations that a range
-filter on one column cannot express.
+filter on one attribute cannot express.
 
 The expression is kept with the table, as a *recipe*.  That matters once the
 blinks are merged -- [merge blinks](plugin:Panels/Glossary), also called
 grouping or linking, combines the localizations in consecutive frames that
-come from one blinking event into one: the recipe says what the new column
+come from one blinking event into one: the recipe says what the new attribute
 means for a blink, so it is not averaged by accident, and it is still there,
 with how it was computed, when the file is opened again.
 
 ## How it works
 
 **1. Reading the expression.**  The text after *=* is read as a formula, not
-run as a program: only the column names, numbers, operators and functions of
+run as a program: only the attribute names, numbers, operators and functions of
 the table under *In detail* are allowed, and anything else is refused with a
-message pointing at the piece that is wrong.  Every column the expression
-names must be in the table; if one is missing, the message lists the columns
+message pointing at the piece that is wrong.  Every attribute the expression
+names must be in the table; if one is missing, the message lists the attributes
 the table does have.
 
-**2. Computing it.**  The formula is evaluated over whole columns at once,
+**2. Computing it.**  The formula is evaluated over whole attributes at once,
 one value per localization.  A comparison gives 1 where it holds and 0 where
 it does not, so `within` above is a flag.  A result that is a single number
 -- a constant, or `median(z_nm)` -- is copied to every localization.
 
-**3. Writing it.**  With *apply to* set to *all localizations*, the column is
+**3. Writing it.**  With *apply to* set to *all localizations*, the attribute is
 written for the whole table.  With *the selection*, only the localizations
 of the current [selection](plugin:Panels/Glossary) get the new value (the
 layer's filter, the drawn [ROI](plugin:Panels/Glossary) -- region of interest
--- and the 3D view's slab together); the others keep what the column had, or get no value
-(NaN) if the column is new.
+-- and the 3D view's slab together); the others keep what the attribute had, or get no value
+(NaN) if the attribute is new.
 
 **4. The recipe.**  The expression is stored in the table together with
-*merged blinks*, the rule for what the column is once blinks are merged.
+*merged blinks*, the rule for what the attribute is once blinks are merged.
 Running again into the same *new field* replaces its recipe.  An expression
 that reads the field it writes -- `photons = photons * 2` -- is applied once
 and kept as no recipe at all: evaluated again at every merge it would
 compound.
-The column then goes on being combined per blink by its own rule (photons are
+The attribute then goes on being combined per blink by its own rule (photons are
 summed).
 
 ```figure-setup
@@ -76,8 +76,8 @@ n = np.asarray(grouped["n_in_group"])
 ```
 
 **5. On merged blinks.**  When the localizations of a blink are merged,
-each ordinary column is combined by a fixed rule (positions averaged,
-photons summed).  A computed column instead follows its recipe:
+each ordinary attribute is combined by a fixed rule (positions averaged,
+photons summed).  A computed attribute instead follows its recipe:
 
 * *recompute the expression* evaluates the formula again on the merged
   blinks, with the blink's own values.  This is right for a statement about a
@@ -86,9 +86,9 @@ photons summed).  A computed column instead follows its recipe:
   for a measurement made per localization.
 * *any localization* and *all localizations* are for a flag: the blink is 1
   if any (or all) of its localizations are.
-* *leave it off* keeps the column off the merged blinks.
+* *leave it off* keeps the attribute off the merged blinks.
 
-The same column can mean quite different things per blink, which is why the
+The same attribute can mean quite different things per blink, which is why the
 choice is asked for rather than guessed:
 
 ```figure The flag `bright = photons > 1000` on a simulated table, taken to the merged blinks by four rules.  Left: the fraction of blinks that come out bright -- recomputing asks whether the blink's summed photons exceed 1000, which more blinks do than have all their frames above 1000.  Right: with *mean*, the flag becomes the fraction of a blink's frames that were bright, shown for the blinks of more than one frame.
@@ -107,7 +107,7 @@ for ax in (left, right):
     ax.tick_params(labelsize=7)
 ```
 
-**On regions.**  With *on* set to the ROIs or to an id column such as
+**On regions.**  With *on* set to the ROIs or to an id attribute such as
 `cluster_id` or `tid`, the expression is over what was measured per
 [region](plugin:Panels/Glossary), one row per region instead of one per
 localization: `rel = id_statistics.n_locs / median(n_locs)` gives each
@@ -118,7 +118,7 @@ form lists the names there are.  A value only one evaluation has may be
 written bare.  The result goes into the regions' `maths`
 [region table](plugin:Panels/Glossary), where the summaries, the
 [region filter](plugin:Analysis/Regions/Filter regions) and *Regions to
-column* find it, and is computed again whenever what it reads is measured
+attribute* find it, and is computed again whenever what it reads is measured
 again.  *also onto the localizations* writes it onto each region's rows as
 well, to colour by it.
 
@@ -132,15 +132,15 @@ with.  The expressions are kept with the `maths` table as recipes, in the
 order written, so a later one may read an earlier one (`maths.rel`); when
 an evaluation they read is measured again they are all evaluated again, and
 a region whose inputs are out of date gets no current row, as a block's
-would not.  The column written onto the localizations is a snapshot, as
+would not.  The attribute written onto the localizations is a snapshot, as
 *Regions to attribute*'s is.
 
 **Which table.**  The localizations, whatever the layer shows: the
-column is computed for each localization, and *the selection* is the
+attribute is computed for each localization, and *the selection* is the
 layer's bounds applied to each localization.  The merged blinks take the
-column by the *merged blinks* rule (below) when they are merged again.
+attribute by the *merged blinks* rule (below) when they are merged again.
 
-**What an expression may contain.**  Column names are the table's own
+**What an expression may contain.**  Attribute names are the table's own
 (`x_nm`, `photons`, `xy_err_nm`, ...; the *new field* of an earlier run
 counts as one).  Everything else:
 
@@ -168,7 +168,7 @@ theirs.
 answer with either a crash far from the cause or, worse, a plausible wrong
 number, so it is caught with a message instead:
 
-* `and`, `or`, `not` -- they ask a whole column whether it is true.  Write
+* `and`, `or`, `not` -- they ask a whole attribute whether it is true.  Write
   `&`, `|`, `~`.
 * `0 < x_nm < 5`, a chained comparison -- the same question in disguise.
   Write `(0 < x_nm) & (x_nm < 5)`.
@@ -176,7 +176,7 @@ number, so it is caught with a message instead:
   would read as `xy_err_nm < (25 & sigma_nm) > 100`.  Put each comparison
   in brackets.  (In MATLAB, and so in SMAP, the precedence is the other way
   round.)
-* `&`, `|`, `^` on a measured, non-integer column: a flag written by this
+* `&`, `|`, `^` on a measured, non-integer attribute: a flag written by this
   plugin is stored as 0.0 and 1.0, so compare it first, `(within > 0) & ...`.
 * A function that is not in the table above, a function named but not
   called, arguments given by name (`clip(a_min=...)`), text in quotes,
@@ -189,7 +189,7 @@ The expression is walked piece by piece rather than handed to Python's
 travels between people, and evaluating a string from someone else's file
 would let it do anything.
 
-**The result as a column.**  A boolean result is stored as 0/1 in float32,
+**The result as an attribute.**  A boolean result is stored as 0/1 in float32,
 so the filter can take a range of it and merging blinks can reduce it.  A
 floating-point result is stored as float32, like the rest of the table.  An
 integer result -- `frame // 100` -- keeps its integer type, since a frame
@@ -205,17 +205,17 @@ and `n_in_group`, which merging blinks writes and would overwrite.
 **The recipe.**  Stored in the table's metadata, `metadata["derived"]`, in
 the order the fields were defined (a field may be computed from an earlier
 one), as the field, the expression and the rule.  It is saved in the file
-with the table.  When blinks are merged, a computed column is left out of
-the usual per-column rules and either reduced by its rule -- *mean* is the
+with the table.  When blinks are merged, a computed attribute is left out of
+the usual per-attribute rules and either reduced by its rule -- *mean* is the
 plain average of the localizations' values, not weighted by their precision
 as the positions are; *any* and *all* give 1 where the largest or smallest
 value is not zero -- or recomputed from the expression on the merged blinks.
 Each time blinks are merged, the expressions are also evaluated again on
 the single localizations, which is what keeps a field in `n_in_group` up to
 date with the latest merge.  An expression in `n_in_group` or `group_id`
-needs the blinks to have been merged once, since merging writes those columns;
+needs the blinks to have been merged once, since merging writes those attributes;
 before that the plugin says so.  A recipe that cannot be recomputed because a
-column is missing is skipped with a message, and the table is still built.
+attribute is missing is skipped with a message, and the table is still built.
 
 **A field computed for the selection** is not a function of the table, so its
 expression is never recomputed.  If *merged blinks* is *recompute the expression*,
@@ -252,17 +252,17 @@ Picking an entry also restores the *merged blinks* rule it was used with.
 
 ### source
 Every source that has been measured is offered: the ROIs once an
-evaluation has run on them, an id column once a block or *Id statistics*
+evaluation has run on them, an id attribute once a block or *Id statistics*
 has.  On regions, *apply to* and *merged blinks* do not apply.
 
 ### to_locs
 Only for colouring by the value or using it per localization: to keep or
 drop regions by it, filter on `maths.<field>` in the region filter, which
-counts regions and writes no column per value.
+counts regions and writes no attribute per value.
 
 ## Output
 
-* **The table**, with the new column.  The run is recorded in the file's
+* **The table**, with the new attribute.  The run is recorded in the file's
   history with its settings and can be undone (*File > Undo*), which also
   takes the recipe back.
 * **The text**, the one line the history keeps: how many finite values were
@@ -274,7 +274,7 @@ A result whose range is not what was expected -- all zeros for a flag, or
 values a thousand times too large -- is the sign of a mistake in the
 expression; *Preview* shows it before the table has it.
 
-**During a live fit** the column follows the table as it grows: it is
+**During a live fit** the attribute follows the table as it grows: it is
 computed for the localizations so far and then for every block the fit
 adds, and once more for the finished table.  An expression with a reduction
 (`median(z_nm)`) is computed again over the whole table with every block, so
@@ -290,12 +290,12 @@ Based on SMAP's `Process/Modify/MathParser`
 
 * **Parsed, not evaluated.**  SMAP puts `locs.` in front of every field name
   in the string and runs it with MATLAB's `eval`, so any MATLAB is allowed.
-  Here only arithmetic over columns is run (see *In detail*), and a missing
-  column or a precedence mistake is reported before anything is computed.
+  Here only arithmetic over attributes is run (see *In detail*), and a missing
+  attribute or a precedence mistake is reported before anything is computed.
 * **Precedence.**  `&` and `|` bind tighter than a comparison here and looser
   in MATLAB, which is why an unbracketed comparison is refused.
 * **Merging blinks.**  SMAP has a *regroup and filter* checkbox that links
-  the whole table again after the calculation.  Here the column carries a
+  the whole table again after the calculation.  Here the attribute carries a
   rule for the merged blinks instead, so recomputing an on-time or reducing a
   flag does not depend on merging again.
 

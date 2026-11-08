@@ -8,7 +8,7 @@ covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.dense_codes, s
 Gives a few numbers for every [trace](plugin:Panels/Glossary), track or
 [cluster](plugin:Panels/Glossary) at once: how many localizations it has,
 where its centre is, how far its localizations spread around it, how long
-it lasted, and the mean, median or maximum of any column -- a MINFLUX
+it lasted, and the mean, median or maximum of any attribute -- a MINFLUX
 trace's `cfr` or `efo`, the photons, the precision.
 
 A MINFLUX microscope measures a molecule many times in a row, and calls
@@ -17,11 +17,11 @@ its numbers: one emitter gives a tight spread close to the
 [localization precision](plugin:Panels/Glossary); two emitters at once, or a
 molecule that jumped between sites, give a spread several times wider; a
 trace of two or three localizations is often background.  The same holds
-for any [id column](plugin:Panels/Glossary) -- a linked track's
+for any [id attribute](plugin:Panels/Glossary) -- a linked track's
 `track_id`, a cluster's `cluster_id`, a blink's `group_id`.
 
 The numbers are kept as a [region table](plugin:Panels/Glossary), a row per
-trace, named "per tid: Id statistics", not as columns of the localizations.
+trace, named "per tid: Id statistics", not as attributes of the localizations.
 *Summarize/Histograms* then shows how they are distributed over the traces,
 and *Regions to attribute* writes one onto the localizations where it is wanted
 there, to colour by it or to filter on it.
@@ -61,7 +61,7 @@ two = enough & (v["emitter_min"] != v["emitter_max"])
 ratio = v["std_xy_nm"] / np.sqrt(v["err2_mean"])
 ```
 
-**1. The regions.**  Every distinct value above 0 of the id column is one
+**1. The regions.**  Every distinct value above 0 of the id attribute is one
 region; a localization with 0 (DBSCAN's noise, say) is in none.  Only the
 localizations the layer's filter keeps count, and a region with none kept
 is left out.
@@ -75,7 +75,7 @@ precisions.
 **3. Time.**  With a clock (`time_s`, MINFLUX) the first and last time and
 the duration; with frames, the first and last frame and the span.
 
-**4. Columns.**  For each chosen column, the chosen statistics of the
+**4. Attributes.**  For each chosen attribute, the chosen statistics of the
 values that were measured -- a localization whose `cfr` is missing counts
 for neither the mean nor the median.
 
@@ -112,7 +112,7 @@ A region's median is the middle value of its finite values, or the mean of
 the two middle ones.  All regions' values are put in order with one sort,
 of the region's number plus the value scaled into [0, 0.5]; two values of a
 region closer than $2^{-52}$ times the number of regions times the
-column's whole range can swap, which moves a median by no more than that.
+attribute's whole range can swap, which moves a median by no more than that.
 Every other statistic needs no sort: the rows are put in region order once
 (not at all for a MINFLUX file, whose traces follow each other), and the
 regions are found by a lookup table on the ids, not by sorting them.
@@ -125,7 +125,7 @@ one column are listed together in the table, so a reader can show
 `cfr › median` as a level of its own.
 
 The table is signed as a block's run would sign it: by the table, the id
-column and every layer's filter.  Once any of those changes it is out of
+attribute and every layer's filter.  Once any of those changes it is out of
 date, as a block's would be, and *Summarize* no longer offers it until it
 is run again.
 
@@ -133,7 +133,7 @@ is run again.
 
 ### id_column
 *auto* takes MINFLUX's `tid`, else a linked `track_id`, else `cluster_id`;
-choose `group_id` for blinks, or any other id column.
+choose `group_id` for blinks, or any other id attribute.
 
 ### columns
 Names the table does not have are refused with the list of those it has.
@@ -146,18 +146,18 @@ file has z at ~10^-13 m).
 
 ### statistics.median
 Leave it on for `cfr` and `efo`, whose distributions within a trace have a
-long tail; it is the slowest statistic, a sort per column.
+long tail; it is the slowest statistic, a sort per attribute.
 
 ### statistics.mean
-The mean of a column with a long tail is pulled by its few large values;
+The mean of an attribute with a long tail is pulled by its few large values;
 the median is the safer summary there.
 
 ### statistics.std
-The spread of a column within a region: a trace whose `efo` jumps between
+The spread of an attribute within a region: a trace whose `efo` jumps between
 two levels has a large one.
 
 ### statistics.min
-Mostly for times and frames written as columns of their own.
+Mostly for times and frames written as attributes of their own.
 
 ### statistics.max
 A trace's worst `cfr`: one bad iteration in a trace shows here and not in
@@ -169,12 +169,12 @@ The text gives the number of regions and localizations, the median count
 per region, the median spread and duration, and the name the table is
 kept under.  The figure shows the distribution over the regions of the
 count, the spread, the duration (or the span in frames), and of the median
-(else the mean) of each chosen column.
+(else the mean) of each chosen attribute.
 
 The table has, per region: `n_locs`; `centre_x_nm`, `centre_y_nm`
 (`centre_z_nm`); `std_x_nm`, `std_y_nm` (`std_z_nm`) and `std_xy_nm`;
 `start_s`, `end_s` and `duration_s`, or `first_frame`, `last_frame` and
-`frames`; and for each column its statistics, `cfr_mean`, `cfr_median`,
+`frames`; and for each attribute its statistics, `cfr_mean`, `cfr_median`,
 `cfr_max`, ...  A good MINFLUX measurement has a narrow peak of `std_xy_nm`
 near the precision with a tail of a few wide traces; a second peak at twice
 the first is two emitters measured as one.

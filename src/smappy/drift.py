@@ -1813,7 +1813,7 @@ def _positions_nm(locs: Localizations, pixelsize_nm: Optional[float],
                   use_z: Optional[bool]):
     """x, y, z of the whole table in nm; z is zero for a 2D table."""
     if "x_nm" not in locs or "y_nm" not in locs:
-        raise ValueError("no position columns x_nm, y_nm; the table has "
+        raise ValueError("no position attributes x_nm, y_nm; the table has "
                          + ", ".join(sorted(locs.keys())))
     x = np.asarray(locs["x_nm"], dtype=np.float64)
     y = np.asarray(locs["y_nm"], dtype=np.float64)
@@ -1822,6 +1822,6 @@ def _positions_nm(locs: Localizations, pixelsize_nm: Optional[float],
     if use_z is None:
         use_z = has_z
     elif use_z and not has_z:
-        raise ValueError("use_z=True but the table has no z_nm column")
+        raise ValueError("use_z=True but the table has no z_nm attribute")
     z = np.asarray(locs["z_nm"], dtype=np.float64) if use_z else np.zeros_like(x)
     return x, y, z

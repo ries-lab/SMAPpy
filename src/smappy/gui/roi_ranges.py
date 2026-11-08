@@ -187,7 +187,7 @@ class RangePanel(QWidget):
             if good.any():
                 self._band(self.side_plot, roi.z, float(z[good].min()),
                            float(z[good].max()))
-        self.note.setText("" if has_z else "no z column: the z range cuts nothing")
+        self.note.setText("" if has_z else "no z attribute: the z range cuts nothing")
 
     def _band(self, plot, bounds, lo, hi) -> None:
         """The band at the range, or over all of it when there is none."""

@@ -77,7 +77,7 @@ class MsrImportDialog(QDialog):
         options = QFormLayout()
         self.merge = QCheckBox("merge into one file")
         self.merge.setToolTip("one table for the ticked measurements, one after "
-                              "another in time, with a measurement column; "
+                              "another in time, with a measurement attribute; "
                               "otherwise a file each")
         self.keep_invalid = QCheckBox("keep invalid")
         self.keep_invalid.setToolTip("every final iteration, with vld and sta, "

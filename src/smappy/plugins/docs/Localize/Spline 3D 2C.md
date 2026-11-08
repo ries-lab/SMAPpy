@@ -497,10 +497,10 @@ without one the Preview shows the frame as the camera wrote it.
 
 ## Output
 
-The table has the columns of [Spline 3D](plugin:Localize/Spline 3D), with the
+The table has the attributes of [Spline 3D](plugin:Localize/Spline 3D), with the
 photons of each half beside the totals:
 
-| column | meaning |
+| attribute | meaning |
 | --- | --- |
 | `x_nm`, `y_nm`, `z_nm` | the linked position on the camera chip, where the main channel saw it, and the height |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm`, `z_err_nm` | their precision (CRLB), from both halves |

@@ -9,7 +9,7 @@ Writes the localizations to an HDF5 file (`.hdf5` or `.h5`), together with
 the record of what was done to them, so that the file can be opened again
 here -- by File > Open or [Load from path](plugin:File/Load/Auto) -- and still
 says how it was made.  HDF5 is
-an open format; any language can read the columns (in Python with `h5py`,
+an open format; any language can read the attributes (in Python with `h5py`,
 in MATLAB with `h5read`).
 
 It is the only format this program writes localizations in.  Saving is also
@@ -40,19 +40,19 @@ with tempfile.TemporaryDirectory() as folder:
         extra = [name for name in ("results/saved", "gui/state", "gui/session") if name in f]
 ```
 
-**1. The table.**  Every column of the current table is written as it is
--- or those ticked under *columns* --
-one dataset per column under `/locs`, with its own type, compressed.  It is
+**1. The table.**  Every attribute of the current table is written as it is
+-- or those ticked under *attributes* --
+one dataset per attribute under `/locs`, with its own type, compressed.  It is
 the single localizations: the merged blinks -- [merge
 blinks](plugin:Panels/Glossary), also called grouping or linking, combines
 the localizations in consecutive frames that come from one blinking event
 into one -- are made again when the file
 is opened.  If blinks have been merged, `group_id` and `n_in_group` are
-among the columns.
+among the attributes.
 
 **2. The record.**  The table's metadata goes into one attribute of the
 file, as JSON: the history (every change made to the table, with its
-settings), the recipes of derived columns, the bounds a plugin asked to
+settings), the recipes of derived attributes, the bounds a plugin asked to
 keep with the table, a drift correction's summary, the camera and the fit
 settings of a table that came from a fit, the simulation's settings for a
 simulated one, the [ROI](plugin:Panels/Glossary) (region of interest) that is drawn, and the ROI manager's project if it
@@ -127,8 +127,8 @@ localizations takes
 
 $$S = N \sum_c b_c$$
 
-bytes, $b_c$ the bytes per value of column $c$: 4 for most columns, 8 for
-`frame`.  A fitted 3D table with a dozen or so columns is some 60 bytes per
+bytes, $b_c$ the bytes per value of attribute $c$: 4 for most attributes, 8 for
+`frame`.  A fitted 3D table with a dozen or so attributes is some 60 bytes per
 localization, 600 MB for ten million; the compression takes part of that
 off.
 
@@ -162,14 +162,14 @@ drawn by running its step again, which for most plugins takes
 milliseconds and for a slow one is the reason to keep it.
 
 ### columns
-Untick what nobody will read again -- a simulation's truth columns, the
-four `bg*` columns of a MINFLUX file -- for a smaller file that opens
+Untick what nobody will read again -- a simulation's truth attributes, the
+four `bg*` attributes of a MINFLUX file -- for a smaller file that opens
 faster.  The positions (`x_nm`, `y_nm`, `z_nm`) and `filenumber` are saved
 whatever is ticked, or the file would not open as the same files.  A derived
-column left out takes its recipe with it, and so does one whose expression
-reads a column left out; a filter bound the table keeps on a column left out
-goes too.  The session keeps every column: it stays marked unsaved, and
-File > Save goes on saving to the file it had.  To take columns out of the
+attribute left out takes its recipe with it, and so does one whose expression
+reads an attribute left out; a filter bound the table keeps on an attribute left out
+goes too.  The session keeps every attribute: it stays marked unsaved, and
+File > Save goes on saving to the file it had.  To take attributes out of the
 session itself, use [Edit attributes](plugin:Analysis/Process/Edit attributes).
 
 ## Output
@@ -178,9 +178,9 @@ The file.  The text says how many localizations went where.
 
 With *save the ROI results* or *save the ROI figures' data* off, a line
 under the settings says what the session has that the save will leave out
--- "The results measured in 40 ROIs and 2000 regions of id columns will not
+-- "The results measured in 40 ROIs and 2000 regions of id attributes will not
 be saved" -- as soon as there is any, and the text after the save says it
-again, so it reaches the history.  The regions of id columns are the
+again, so it reaches the history.  The regions of id attributes are the
 clusters a block measured in; ROIs and clusters are both
 [regions](plugin:Panels/Glossary), sets of localizations measured
 together.  The save is

@@ -70,7 +70,7 @@ def test_structural_columns_and_taken_names_are_refused():
         rename_column(locs, "photons", "cluster_id")
     with pytest.raises(ValueError, match="function or a constant"):
         rename_column(locs, "photons", "max")
-    with pytest.raises(ValueError, match="no column"):
+    with pytest.raises(ValueError, match="no attribute"):
         remove_columns(locs, ["nothing"])
 
 

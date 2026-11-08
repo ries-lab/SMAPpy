@@ -49,10 +49,10 @@ def id_column(locs, chosen: str = "") -> str:
     if column and column in locs:
         return column
     have = integer_columns(locs)
-    start = (f"no column {chosen!r}" if chosen else
+    start = (f"no attribute {chosen!r}" if chosen else
              "no regions: the table has none of " + ", ".join(AUTO_IDS))
-    raise ValueError(start + "; choose the id column among "
-                     + (", ".join(have) if have else "(no integer column)"))
+    raise ValueError(start + "; choose the id attribute among "
+                     + (", ".join(have) if have else "(no integer attribute)"))
 
 
 def summarised_columns(locs, text: str = "") -> List[str]:
@@ -64,14 +64,14 @@ def summarised_columns(locs, text: str = "") -> List[str]:
         return [c for c in AUTO_COLUMNS if c in locs]
     missing = [n for n in names if n not in locs]
     if missing:
-        raise ValueError(f"no column {', '.join(missing)}: the table has "
+        raise ValueError(f"no attribute {', '.join(missing)}: the table has "
                          + ", ".join(sorted(locs.keys())))
     return names
 
 
 @dataclass
 class StatisticsSettings:
-    mean: bool = param(True, label="mean", help="of each column's finite values")
+    mean: bool = param(True, label="mean", help="of each attribute's finite values")
     median: bool = param(True, label="median",
                          help="robust to a few outliers; the one statistic that sorts")
     std: bool = param(False, label="standard deviation", help="ddof 1; NaN for one value")
@@ -85,15 +85,15 @@ class StatisticsSettings:
 
 @dataclass
 class IdStatisticsSettings:
-    id_column: str = param("", label="id column", choices=_id_choices,
+    id_column: str = param("", label="id attribute", choices=_id_choices,
                            help="the regions; auto: tid, else track_id, else "
                                 "cluster_id")
-    columns: str = param("", label="columns",
-                         help="columns to summarise, separated by commas; empty: "
+    columns: str = param("", label="attributes",
+                         help="attributes to summarise, separated by commas; empty: "
                               "cfr, efo, dcr, photons, xy_err_nm where present")
     use_z: bool = param(True, label="use z", help="z_nm's centre and spread too")
     statistics: StatisticsSettings = param(default_factory=StatisticsSettings,
-                                           label="statistics of the columns")
+                                           label="statistics of the attributes")
 
 
 @register("Analysis/Measure/Id statistics")
@@ -130,12 +130,12 @@ class IdStatistics(Plugin):
         column = id_column(locs, settings.id_column)
         for c in ("x_nm", "y_nm"):
             if c not in locs:
-                raise ValueError(f"no column {c}: the table has "
+                raise ValueError(f"no attribute {c}: the table has "
                                  + ", ".join(sorted(locs.keys())))
         names = summarised_columns(locs, settings.columns)
         stats = settings.statistics.chosen()
         if names and not stats:
-            raise ValueError("tick at least one statistic of the columns")
+            raise ValueError("tick at least one statistic of the attributes")
         keep = self._kept(ctx)
         positions = {"x": locs["x_nm"], "y": locs["y_nm"]}
         if settings.use_z and "z_nm" in locs:

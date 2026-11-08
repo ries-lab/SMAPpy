@@ -189,7 +189,7 @@ by the per-region steps window or a [chain](plugin:Panels/Glossary)
 (plugins run one after another as one).  With one set of NPC Corners
 results, it is used whatever its step is called; in a chain, the one the
 chain itself made.  *results from* lists every current set of NPC Corners
-results, on the ROIs and then per region of an id column (*per cluster_id:
+results, on the ROIs and then per region of an id attribute (*per cluster_id:
 NPC Corners*, from a block over the clusters), after *auto*, which says
 which one it would take.  With several -- NPC Corners renamed and run with
 other settings, to compare -- and *auto* chosen, the plugin asks before it
@@ -206,7 +206,7 @@ method.  The joint model needs the precisions of every localization of the
 files the pores are in, and a cluster has no file of its own in the ROI
 manager: it refuses, and says so.  Neither is a cluster's pore found in the
 simulation's truth.  For either, make ROIs of the clusters
-([Segment regions](plugin:Analysis/Regions/Segment regions), *from an id column*) and count their
+([Segment regions](plugin:Analysis/Regions/Segment regions), *from an id attribute*) and count their
 corners there.
 
 **Simulated data.**  When the pores come from a simulated table, the plugin
