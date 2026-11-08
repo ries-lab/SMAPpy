@@ -284,8 +284,8 @@ chain: ~/.config/smappy/chains/npc_standard.chain.yaml   # or a mapping: an inli
 overrides: {drift.segments: 8}
 inputs:
   - folder: /data/2026-09-20
-    pattern: "**/*.h5"          # default: by the chain's input kind
-    exclude: ["*bead*"]
+    filter: "*640* & !*bead*"   # default: every data set of the chain's input kind
+    exclude: [cell2/cell2.h5]   # data sets left out (unticked in the window)
   - file: /data/extra/cell3.h5
     overrides: {layers.layers: [...]}   # per file
   - file: /data/extra/cell4.h5
@@ -309,12 +309,21 @@ rerun: skip_identical           # skip_identical | always
   A file named twice -- by a folder rule, and again to give it overrides --
   keeps its place and gains the overrides.  The output folder is never
   searched, so a second run does not take its own results for input.
-* A folder rule's default patterns are `*.tif`, `*.tiff` for images and
-  `*.h5`, `*.hdf5`, `*_sml.mat`, `*.csv` for localizations, in every
-  subfolder.  An acquisition written as a multi-file OME series
-  (`..._MMStack_Pos0.ome.tif`, `..._1.ome.tif`, ...) is opened from its first
-  file; exclude the rest (`exclude: ["*_[0-9].ome.tif"]`) or name the first
-  files one by one.
+* A folder rule gives every **data set** of the chain's input kind in the
+  folder and its subfolders (`smappy.datasets.find`, which the PSF and bead
+  calibration windows use too): for images a TIFF file, a Micro-Manager
+  series once however many files it fills (`..._MMStack_Pos0.ome.tif`,
+  `..._1.ome.tif`, ...), an NDTiff folder, a DCIMG or 4Pi quadrant series;
+  for localizations `*.h5`, `*.hdf5`, `*_sml.mat`, `*.csv`.  A file of the
+  other kind is left out -- a file named on its own too, with a warning --
+  so one folder holding raw stacks and their fits serves both kinds of
+  chain.
+* `filter` narrows a folder by name: shell patterns matched, regardless of
+  case, against the path inside the folder and against the name, joined by
+  `,` or `|` (OR), `&` (AND) and `!` (NOT) -- or the words `OR`, `AND`,
+  `NOT` -- and grouped by parentheses, NOT binding tightest, then AND:
+  `(*640* & !*647*), *600*`.  `exclude` lists data sets (or patterns) left
+  out: what is unticked in the window.
 * Overrides, the job's and each file's, use the chain's settings names,
   `<step key>.<field>` (a part may be given as a mapping, `drift: {n_timepoints: 8}`).
   A file's own override wins over the job's.
@@ -441,15 +450,20 @@ to nothing.  `run` validates first.
 ## The batch window
 
 `smappy-batch-gui`, or *Plugins -> Batch…* in SMAPpy: the same window class
-either way.  A table of inputs (add files, add folder with a pattern, drag and
-drop, remove, an include tick, a status column), the chain panel (the same
-widget as in the plugin tabs, so a chain is edited the same way everywhere),
-the output options, and **Run**, which writes the job file and starts
+either way.  A list of inputs (*Add...* -- files and, on a Mac, folders --
+with *Select several folders...* in its menu, drag and drop, remove; a
+folder unfolds into its data sets, each with a tick, with a *filter* and a
+status; the chain's input kind said above it; *watch the folders* beside
+it), the chain panel (the same widget as in the plugin tabs, so a chain is
+edited the same way everywhere), the output options (the ones most batches
+leave alone under *more*), and **Run**, which writes the job file and starts
 `smappy-batch run` as a subprocess -- so a crash or an exhausted memory costs
-the batch and never the GUI -- and reads its progress lines.  With *watch*
-ticked, Run starts `smappy-batch watch` instead; Stop then asks it to end
-after the file in hand, and a second Stop ends it at once.  **open summary**
-opens `index.html` in the browser.
+the batch and never the GUI -- and reads its progress lines.  With *watch
+the folders* ticked, Run starts `smappy-batch watch` instead; Stop then asks
+it to end after the file in hand, and a second Stop ends it at once.
+*results* opens `index.html` in the browser, or the output folder; *job*
+opens and saves the job file.  Overrides per file are the job file's alone:
+the window keeps those it loaded, and has no column for them.
 
 ## Not yet
 

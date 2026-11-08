@@ -18,30 +18,39 @@ only saved and run over the files.
 """
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QInputDialog,
-                               QLabel, QLineEdit, QMainWindow, QMessageBox,
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
+                               QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
+                               QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
                                QPlainTextEdit, QProgressBar, QPushButton,
-                               QSplitter, QTableWidget, QTableWidgetItem,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QSplitter, QToolButton, QTreeWidget, QTreeWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from .. import batch, chain as chains, plugins
-from ..batch import Input, Job, Output
+from ..batch import Input, Job, Output, _resolve
 from ..chain import ChainSpec
 from ..session import Session
 from ..workspace import Instance
 from . import drops, folders
+from .add_button import AddButton
 from .chain_panel import ChainPanel
+from .widgets import CollapsibleSection, note_style
 
-COLUMNS = ("use", "input", "pattern", "overrides", "status")
+COLUMNS = ("data", "filter", "status")
+ERROR = "#e0453a"          # reads on a light and a dark window
+
+
+def _count(n: int, what: str) -> str:
+    return f"{n} {what}{'' if n == 1 else 's'}"
 
 # The runner's pipe in UTF-8.  It prints paths, and this window finds a
-# file's row by the path it prints back (`_row_for`).  On Windows a pipe is
+# file's row by the path it prints back (`_item_for`).  On Windows a pipe is
 # written in the ANSI code page, so a folder called ``Jürgen`` came back as
 # bytes that are not UTF-8 and matched no row, and a name outside cp1252
 # (Greek, Chinese) raised UnicodeEncodeError in the runner.  ``cli.batch``
@@ -100,28 +109,51 @@ class BatchWindow(QMainWindow):
         split = QSplitter(Qt.Vertical)
         root.addWidget(split, 1)
 
-        # ---- inputs
+        # ---- inputs: what was added, a folder unfolding into its data sets
         inputs = QGroupBox("files")
         column = QVBoxLayout(inputs)
-        self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(COLUMNS)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for c in (0, 2, 3, 4):
+        self.kind_line = QLabel()
+        self.kind_line.setWordWrap(True)
+        self.kind_line.setStyleSheet(note_style())
+        column.addWidget(self.kind_line)
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(len(COLUMNS))
+        self.tree.setHeaderLabels(COLUMNS)
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for c in (1, 2):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setToolTip("a file, or a folder and the pattern its files match; "
-                              "overrides are `key.field: value`, as in the job file")
-        column.addWidget(self.table)
+        header.setStretchLastSection(False)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setToolTip("a file, or a folder and the data sets found in it; untick one "
+                             "to leave it out.  A folder's filter narrows it by name: "
+                             "*640*, !*bead*, (*640* & !*647*), *600*")
+        self.tree.setMinimumHeight(110)
+        self.tree.itemChanged.connect(self._item_changed)
+        # only a folder's filter is typed in, on a double-click
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tree.itemDoubleClicked.connect(
+            lambda item, column: self.tree.editItem(item, 1)
+            if column == 1 and item.parent() is None and item.data(0, Qt.UserRole).folder
+            else None)
+        column.addWidget(self.tree)
         row = QHBoxLayout()
-        for label, slot in (("add files...", self.add_files),
-                            ("add folder...", self.add_folder),
-                            ("remove", self.remove_selected),
-                            ("clear", lambda: self.table.setRowCount(0))):
+        self.add_button = AddButton("Add data")
+        self.add_button.chosen.connect(self.add_paths)
+        row.addWidget(self.add_button)
+        for label, slot in (("remove", self.remove_selected), ("clear", self.clear_inputs)):
             button = QPushButton(label)
             button.clicked.connect(slot)
             row.addWidget(button)
         row.addStretch(1)
+        self.subfolders = QCheckBox("search subfolders", checked=True)
+        self.subfolders.setToolTip("a folder's data sets in its subfolders too")
+        self.subfolders.toggled.connect(self._subfolders_toggled)
+        row.addWidget(self.subfolders)
+        self.watch = QCheckBox("watch the folders")
+        self.watch.setToolTip("run on the data there is, then on each new data set in the "
+                              "folders as soon as it is complete, until Stop")
+        row.addWidget(self.watch)
         column.addLayout(row)
         split.addWidget(inputs)
 
@@ -154,9 +186,11 @@ class BatchWindow(QMainWindow):
         self.chain_panel: Optional[ChainPanel] = None
         split.addWidget(chain_box)
 
-        # ---- output
+        # ---- output: where and what; the rest under "more"
         out_box = QGroupBox("output")
-        form = QFormLayout(out_box)
+        out_column = QVBoxLayout(out_box)
+        form = QFormLayout()
+        out_column.addLayout(form)
         self.out_folder = QLineEdit()
         self.out_folder.setPlaceholderText("beside the job file: <job>_output")
         browse = QToolButton(text="...")
@@ -165,12 +199,15 @@ class BatchWindow(QMainWindow):
         line.addWidget(self.out_folder, 1)
         line.addWidget(browse)
         form.addRow("folder", line)
-        self.suffix = QLineEdit(Output.suffix)
-        form.addRow("file suffix", self.suffix)
-        self.save_locs = QCheckBox("save the processed localizations", checked=True)
-        form.addRow("", self.save_locs)
         self.figures = self._combo(batch.FIGURES, "png")
         form.addRow("figures", self.figures)
+        self.save_locs = QCheckBox("save the processed localizations", checked=True)
+        form.addRow("", self.save_locs)
+        more = QWidget()
+        form = QFormLayout(more)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.suffix = QLineEdit(Output.suffix)
+        form.addRow("file suffix", self.suffix)
         self.fitted = self._combo(batch.FITTED, "beside_image")
         self.fitted.setToolTip("for a chain that starts with a fit: where the fit "
                                "writes its own file")
@@ -191,6 +228,8 @@ class BatchWindow(QMainWindow):
                                "summary page, comma-separated; patterns allowed "
                                "(stats.*)")
         form.addRow("trend columns", self.trends)
+        self.more = CollapsibleSection("more", more)
+        out_column.addWidget(self.more)
         split.addWidget(out_box)
 
         # ---- running
@@ -198,29 +237,31 @@ class BatchWindow(QMainWindow):
         column = QVBoxLayout(run_box)
         column.setContentsMargins(0, 0, 0, 0)
         buttons = QHBoxLayout()
-        for label, slot in (("open job...", self.open_job), ("save job...", self.save_job),
-                            ("validate", self.validate)):
-            button = QPushButton(label)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
+        self.job_button = QToolButton(text="job")
+        self.job_button.setPopupMode(QToolButton.InstantPopup)
+        self.job_button.setToolTip("the files, the chain and the output as one "
+                                   ".batch.yaml file, which smappy-batch runs from a terminal")
+        menu = QMenu(self.job_button)
+        menu.addAction("Open job...", self.open_job)
+        menu.addAction("Save job...", self.save_job)
+        self.job_button.setMenu(menu)
+        buttons.addWidget(self.job_button)
         buttons.addStretch(1)
         self.try_one = QCheckBox("first file only")
-        self.watch = QCheckBox("watch")
-        self.watch.setToolTip("run on the files there are, then on each new one in "
-                              "the folders as soon as it is complete, until Stop")
         self.run_button = QPushButton("Run")
         self.run_button.clicked.connect(self.run)
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop)
-        self.results_button = QPushButton("open output")
-        self.results_button.clicked.connect(self.open_output)
-        self.page_button = QPushButton("open summary")
-        self.page_button.setToolTip("the summary page in the browser: a row per file "
-                                    "with its figures and numbers, and plots across files")
-        self.page_button.clicked.connect(self.open_page)
-        for w in (self.try_one, self.watch, self.run_button, self.stop_button,
-                  self.results_button, self.page_button):
+        self.results_button = QToolButton(text="results")
+        self.results_button.setPopupMode(QToolButton.InstantPopup)
+        self.results_button.setToolTip("what the batch wrote: the summary page, or the "
+                                       "output folder")
+        menu = QMenu(self.results_button)
+        menu.addAction("Open summary", self.open_page)
+        menu.addAction("Open output folder", self.open_output)
+        self.results_button.setMenu(menu)
+        for w in (self.try_one, self.run_button, self.stop_button, self.results_button):
             buttons.addWidget(w)
         column.addLayout(buttons)
         self.progress = QProgressBar()
@@ -230,7 +271,7 @@ class BatchWindow(QMainWindow):
         self.log.setMinimumHeight(120)
         column.addWidget(self.log, 1)
         split.addWidget(run_box)
-        for index, stretch in enumerate((1, 3, 0, 1)):
+        for index, stretch in enumerate((1, 2, 0, 1)):
             split.setStretchFactor(index, stretch)
 
         self.setCentralWidget(central)
@@ -247,92 +288,191 @@ class BatchWindow(QMainWindow):
         return box
 
     # ---------------------------------------------------------------- inputs
-    def add_input(self, entry: Input, status: str = "") -> None:
-        n = self.table.rowCount()
-        self.table.insertRow(n)
-        use = QTableWidgetItem()
-        use.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-        use.setCheckState(Qt.Checked if entry.include else Qt.Unchecked)
-        self.table.setItem(n, 0, use)
-        where = QTableWidgetItem(entry.file or entry.folder)
-        where.setData(Qt.UserRole, "file" if entry.file else "folder")
-        where.setToolTip(("folder, recursive: " if entry.folder else "file: ")
-                         + (entry.file or entry.folder))
-        self.table.setItem(n, 1, where)
-        pattern = QTableWidgetItem(", ".join(entry.pattern) if entry.folder else "")
-        if entry.file:
-            pattern.setFlags(Qt.ItemIsEnabled)
-        self.table.setItem(n, 2, pattern)
-        overrides = "; ".join(f"{k}: {v}" for k, v in entry.overrides.items())
-        self.table.setItem(n, 3, QTableWidgetItem(overrides))
-        state = QTableWidgetItem(status)
-        state.setFlags(Qt.ItemIsEnabled)
-        self.table.setItem(n, 4, state)
+    # A top-level item is an input as the job keeps it (`batch.Input`, in its
+    # UserRole); a folder's children are the data sets it gives now, each a
+    # path in its UserRole, unticked when the input excludes it.  Everything
+    # under a folder is found again whenever what decides it changes: the
+    # chain's input kind, the filter, *search subfolders*.
+
+    def _base(self) -> Path:
+        return self.job_path.parent if self.job_path is not None else Path.cwd()
+
+    def add_input(self, entry: Input) -> QTreeWidgetItem:
+        item = QTreeWidgetItem([entry.file or entry.folder, entry.filter if entry.folder else "", ""])
+        flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
+        if entry.folder:
+            flags |= Qt.ItemIsEditable          # the filter, column 1 (`_edit_filter`)
+        item.setFlags(flags)
+        item.setData(0, Qt.UserRole, entry)
+        item.setToolTip(0, ("folder: " if entry.folder else "file: ") + (entry.file or entry.folder))
+        if entry.folder:
+            item.setToolTip(1, "narrows the folder by name: *640*, !*bead*, beads/*, "
+                               "(*640* & !*647*), *600* -- double-click to edit")
+        blocked = self.tree.blockSignals(True)
+        item.setCheckState(0, Qt.Checked if entry.include else Qt.Unchecked)
+        self.tree.addTopLevelItem(item)
+        self.tree.blockSignals(blocked)
+        self._fill(item)
+        return item
+
+    def add_paths(self, paths) -> None:
+        """Files and folders, chosen or dropped: a folder stays a folder (its
+        data sets found now, and again on every run and look of a watch); a
+        folder that is one data set (NDTiff) and a file are inputs of their
+        own.  What is there already is not added twice."""
+        from .. import datasets
+        have = {(e.file or e.folder) for e in self.inputs()}
+        for path in map(Path, paths):
+            if str(path) in have:
+                continue
+            have.add(str(path))
+            if path.is_dir() and not datasets.is_ndtiff(path):
+                self.add_input(Input(folder=str(path), recursive=self.subfolders.isChecked()))
+            else:
+                self.add_input(Input(file=str(path)))
 
     def inputs(self) -> List[Input]:
-        import yaml
-        found = []
-        for r in range(self.table.rowCount()):
-            where = self.table.item(r, 1)
-            if where is None or not where.text().strip():
-                continue
-            text = where.text().strip()
-            overrides = {}
-            written = self.table.item(r, 3).text().strip() if self.table.item(r, 3) else ""
-            if written:
-                # `key.field: value; key.field: value`, read as YAML so a number
-                # is a number and a list is a list
-                for part in written.split(";"):
-                    if ":" in part:
-                        key, value = part.split(":", 1)
-                        overrides[key.strip()] = yaml.safe_load(value.strip())
-            include = self.table.item(r, 0).checkState() == Qt.Checked
-            if where.data(Qt.UserRole) == "folder":
-                pattern = self.table.item(r, 2).text() if self.table.item(r, 2) else ""
-                found.append(Input(folder=text, include=include, overrides=overrides,
-                                   pattern=[p.strip() for p in pattern.split(",")
-                                            if p.strip()]))
-            else:
-                found.append(Input(file=text, include=include, overrides=overrides))
-        return found
+        out = []
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            entry = dataclasses.replace(item.data(0, Qt.UserRole))
+            entry.include = item.checkState(0) == Qt.Checked
+            out.append(entry)
+        return out
 
-    def add_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add files", folders.start())
-        folders.remember(paths, stack=True)
-        for path in paths:
-            self.add_input(Input(file=path))
-
-    def add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Add folder", folders.start())
-        if not folder:
-            return
-        folders.remember(folder)
-        kind = self._kind()
-        pattern, ok = QInputDialog.getText(
-            self, "Pattern", "files matching (comma-separated):",
-            text=", ".join(batch.PATTERNS[kind]))
-        if ok:
-            self.add_input(Input(folder=folder, pattern=[p.strip() for p in pattern.split(",")
-                                                         if p.strip()]))
+    def clear_inputs(self) -> None:
+        self.tree.clear()
 
     def remove_selected(self) -> None:
-        for r in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
-            self.table.removeRow(r)
+        """Removes the selected inputs; a data set selected inside a folder is
+        unticked instead, since the folder would find it again."""
+        for item in self.tree.selectedItems():
+            parent = item.parent()
+            if parent is None:
+                self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+            else:
+                item.setCheckState(0, Qt.Unchecked)
+
+    def refresh_inputs(self) -> None:
+        """Every input found again: the chain, and so the kind it reads, changed."""
+        kind = self._kind()
+        from ..datasets import DESCRIPTIONS
+        steps = self.chain_panel.cls.steps if self.chain_panel is not None else ()
+        first = (getattr(steps[0][2], "name", "") or steps[0][2].path.rsplit("/", 1)[-1]
+                 if steps else "")
+        self.kind_line.setText(f"The chain{f' starts with {first}: it' if first else ''} "
+                               f"reads {DESCRIPTIONS[kind]}.")
+        for i in range(self.tree.topLevelItemCount()):
+            self._fill(self.tree.topLevelItem(i))
+
+    def _fill(self, item: QTreeWidgetItem) -> None:
+        """An input's data sets as the job would run them now, and its line:
+        how many a folder gives, or why a file is skipped."""
+        from .. import datasets
+        entry: Input = item.data(0, Qt.UserRole)
+        kind = self._kind()
+        blocked = self.tree.blockSignals(True)
+        try:
+            item.takeChildren()
+            item.setForeground(0, self.palette().text())
+            item.setForeground(1, self.palette().text())
+            item.setToolTip(2, "")
+            try:
+                runs, left = batch.entry_datasets(entry, kind, self._base(), self._output())
+            except datasets.FilterError as error:
+                item.setForeground(1, QColor(ERROR))
+                item.setText(2, "filter error")
+                item.setToolTip(2, str(error))
+                return
+            except OSError as error:
+                item.setText(2, "unreadable")
+                item.setToolTip(2, str(error))
+                return
+            if entry.file:
+                if runs:
+                    item.setText(2, "")
+                else:
+                    item.setForeground(0, self.palette().placeholderText())
+                    there = _resolve(entry.file, self._base()).exists()
+                    item.setText(2, "skipped" if there else "not found")
+                    item.setToolTip(2, f"this chain reads {datasets.DESCRIPTIONS[kind]}"
+                                    if there else "")
+                return
+            folder = _resolve(entry.folder, self._base())
+            if not folder.is_dir():
+                item.setText(2, "not found")
+                return
+            for path in sorted(runs + left, key=lambda p: str(p).lower()):
+                child = QTreeWidgetItem([datasets.relative(path, folder), "", ""])
+                child.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                child.setData(0, Qt.UserRole, str(path))
+                child.setToolTip(0, str(path))
+                child.setCheckState(0, Qt.Unchecked if path in left else Qt.Checked)
+                item.addChild(child)
+            item.setText(2, _count(len(runs), "data set"))
+            item.setExpanded(item.childCount() <= 12)
+        finally:
+            self.tree.blockSignals(blocked)
+
+    def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        """A data set ticked or unticked (the folder's exclude), or a folder's
+        filter edited."""
+        parent = item.parent()
+        if parent is not None and column == 0:
+            entry: Input = parent.data(0, Qt.UserRole)
+            folder = _resolve(entry.folder, self._base())
+            from ..datasets import relative
+            name = relative(Path(item.data(0, Qt.UserRole)), folder)
+            out = [x for x in entry.exclude if x != name]
+            if item.checkState(0) != Qt.Checked:
+                out.append(name)
+            entry.exclude = out
+            runs = sum(parent.child(i).checkState(0) == Qt.Checked
+                       for i in range(parent.childCount()))
+            blocked = self.tree.blockSignals(True)
+            parent.setText(2, _count(runs, "data set"))
+            self.tree.blockSignals(blocked)
+        elif parent is None and column == 1:
+            entry = item.data(0, Qt.UserRole)
+            if entry.folder and item.text(1).strip() != entry.filter:
+                entry.filter = item.text(1).strip()
+                self._fill(item)
+        elif parent is None and column == 0 and item.text(0) != (
+                item.data(0, Qt.UserRole).file or item.data(0, Qt.UserRole).folder):
+            blocked = self.tree.blockSignals(True)        # the path is not edited here
+            entry = item.data(0, Qt.UserRole)
+            item.setText(0, entry.file or entry.folder)
+            self.tree.blockSignals(blocked)
+
+    def _subfolders_toggled(self, on: bool) -> None:
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            entry = item.data(0, Qt.UserRole)
+            if entry.folder and entry.recursive != on:
+                entry.recursive = on
+                self._fill(item)
+
+    def _output(self) -> Optional[Path]:
+        try:
+            return Job(chain=ChainSpec(), output=Output(folder=self.out_folder.text().strip()),
+                       origin=self.job_path).output_folder()
+        except Exception:
+            return None
 
     def dragEnterEvent(self, event) -> None:
         if drops.accepts(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
+        data = []
         for path in drops.local_paths(event.mimeData()):
-            if path.is_dir():
-                self.add_input(Input(folder=str(path)))
-            elif path.name.endswith(chains.SUFFIX):
+            if path.name.endswith(chains.SUFFIX):
                 self.set_chain(chains.read(path))
             elif path.name.endswith((".batch.yaml", ".batch.json")):
                 self.load_job(path)
             else:
-                self.add_input(Input(file=str(path)))
+                data.append(str(path))
+        self.add_paths(data)
 
     # ----------------------------------------------------------------- chain
     def refresh_chains(self) -> None:
@@ -373,9 +513,11 @@ class BatchWindow(QMainWindow):
         self.chain_panel = ChainPanel(instance, self.session, cls)
         self.chain_panel.runnable(False)
         self.chain_panel.changed.connect(self.refresh_chains)
+        self.chain_panel.changed.connect(self.refresh_inputs)
         self.chain_holder.insertWidget(0, self.chain_panel)
         if not spec.steps:
             self.chain_panel.edit.setChecked(True)
+        self.refresh_inputs()
 
     def current_chain(self) -> ChainSpec:
         return self.chain_panel.current_spec()
@@ -405,10 +547,10 @@ class BatchWindow(QMainWindow):
     def load_job(self, path) -> None:
         job = batch.read_job(path)
         self.job_path = Path(path)
-        self.table.setRowCount(0)
+        self.tree.clear()
+        self.set_chain(job.chain)          # first: what the inputs give depends on it
         for entry in job.inputs:
             self.add_input(entry)
-        self.set_chain(job.chain)
         out = job.output
         self.out_folder.setText(out.folder)
         self.suffix.setText(out.suffix)
@@ -461,10 +603,9 @@ class BatchWindow(QMainWindow):
         path = self.save_job(ask=self.job_path is None)
         if path is None:
             return
-        for r in range(self.table.rowCount()):
-            # a folder's counts too: a second run counts afresh, not on top
-            self.table.item(r, 4).setText("")
-            self.table.item(r, 4).setData(Qt.UserRole, None)
+        # found again, which also clears the statuses: a second run counts
+        # afresh, not on top
+        self.refresh_inputs()
         self.progress.setRange(0, 0)
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.MergedChannels)
@@ -526,42 +667,68 @@ class BatchWindow(QMainWindow):
         elif event in ("START", "DONE", "SKIP", "FAILED") and len(fields) > 1:
             where = fields[1]
             if event == "START" and len(fields) > 2:
-                self._running[where] = self._row_for(fields[2])
-            row = self._running.get(where, self._row_for(fields[2]) if len(fields) > 2 else -1)
-            if row >= 0:
+                self._running[where] = fields[2]
+            # a file skipped as done before has no START: its SKIP names it
+            path = (fields[2] if event == "START" else self._running.get(where)
+                    or (fields[2] if event == "SKIP" and len(fields) > 2 else ""))
+            if path:
                 text = {"START": "running", "DONE": "done", "SKIP": "skipped",
                         "FAILED": "failed"}[event]
-                self._mark(row, text, fields[-1] if event in ("FAILED", "SKIP") else "")
+                self._mark(path, text, fields[-1] if event in ("FAILED", "SKIP") else "")
             if event != "START" and "/" in where:
                 self.progress.setValue(int(where.split("/")[0]))
         elif event == "REPORT":
             self.report_path = Path(fields[1])
 
-    def _row_for(self, path: str) -> int:
-        """The input row a file came from: its own, or its folder's."""
+    def _item_for(self, path: str) -> Optional[QTreeWidgetItem]:
+        """The item a data set the runner names is shown by: a file input's
+        own, or its line under its folder -- added there if the folder had
+        not found it yet, as a watched folder's new data sets are not."""
         target = Path(path).resolve()
-        folder_row = -1
-        for r in range(self.table.rowCount()):
-            text = self.table.item(r, 1).text().strip()
-            where = Path(text).expanduser().resolve()
-            if self.table.item(r, 1).data(Qt.UserRole) == "file" and where == target:
-                return r
-            if where in target.parents and folder_row < 0:
-                folder_row = r
-        return folder_row
+        folder_item = None
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            entry = item.data(0, Qt.UserRole)
+            where = _resolve(entry.file or entry.folder, self._base()).resolve()
+            if entry.file and where == target:
+                return item
+            if entry.folder and where in target.parents and folder_item is None:
+                folder_item = item
+        if folder_item is None:
+            return None
+        for i in range(folder_item.childCount()):
+            child = folder_item.child(i)
+            if Path(child.data(0, Qt.UserRole)).resolve() == target:
+                return child
+        from ..datasets import relative
+        folder = _resolve(folder_item.data(0, Qt.UserRole).folder, self._base())
+        child = QTreeWidgetItem([relative(target, folder), "", ""])
+        child.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+        child.setData(0, Qt.UserRole, str(target))
+        child.setToolTip(0, str(target))
+        blocked = self.tree.blockSignals(True)
+        child.setCheckState(0, Qt.Checked)
+        folder_item.addChild(child)
+        self.tree.blockSignals(blocked)
+        return child
 
-    def _mark(self, row: int, status: str, why: str) -> None:
-        item = self.table.item(row, 4)
-        if self.table.item(row, 1).data(Qt.UserRole) == "folder":
-            counts = dict(item.data(Qt.UserRole) or {})
-            if status != "running":
-                counts[status] = counts.get(status, 0) + 1
-            item.setData(Qt.UserRole, counts)
-            item.setText(", ".join(f"{n} {s}" for s, n in counts.items()) or "running")
-        else:
-            item.setText(status)
-        if why:
-            item.setToolTip(why)
+    def _mark(self, path: str, status: str, why: str) -> None:
+        """A data set's status, and its folder's counts."""
+        item = self._item_for(path)
+        if item is None:
+            return
+        blocked = self.tree.blockSignals(True)
+        item.setText(2, status)
+        item.setToolTip(2, why)
+        folder = item.parent()
+        if folder is not None:
+            counts: Dict[str, int] = {}
+            for i in range(folder.childCount()):
+                text = folder.child(i).text(2)
+                if text in ("done", "skipped", "failed"):
+                    counts[text] = counts.get(text, 0) + 1
+            folder.setText(2, ", ".join(f"{n} {s}" for s, n in counts.items()) or "running")
+        self.tree.blockSignals(blocked)
 
     def _finished(self, code: int, _status) -> None:
         if self._buffer:

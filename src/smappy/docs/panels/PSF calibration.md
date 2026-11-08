@@ -691,23 +691,25 @@ status bar warns: the start's sign may have been wrong.
 ### bead stacks
 The files or folders of bead z-stacks, all learnt from together; for *in situ*
 the section is *movies*, the measurements' movies.  Several at once -- the
-folders of a few z-stacks, say -- with *Add folder...* (Cmd- or
-Ctrl-click), by dropping files or folders from the Finder or Explorer on the
-window, or on a Mac with *Add files...*, which takes files and folders
-together.  A blinking movie added for a bead method, or a bead z-stack for
-*in situ*, is said at once -- told apart by what Micro-Manager wrote, z
-slices or time points, else by length -- with the method that reads it
-offered, or the file removed.
+folders of a few z-stacks, say -- with *Add...* on a Mac, with *Select
+several folders...* (Cmd- or Ctrl-click), or by dropping files or folders
+from the Finder or Explorer on the window.  A folder gives every
+acquisition in it, as the batch finds them (a Micro-Manager series once, an
+NDTiff folder as one).  A blinking movie added for a bead method, or a bead
+z-stack for *in situ*, is said at once -- told apart by what Micro-Manager
+wrote, z slices or time points, else by length -- with the method that
+reads it offered, or the file removed.
 
-### Add files...
+### Add...
 Adds stacks.  On a Mac the system's open panel takes files and folders
 together, several at once (Cmd- or Shift-click), so the folders of a few
-z-stacks are added in one go, each searched as *Add folder...* searches it.
-On Windows and Linux it takes files only; drop folders on the window instead.
+z-stacks are added in one go.  On Windows and Linux it takes files only;
+add folders with the arrow beside it, or drop them on the window.
 
-### Add folder...
-Adds folders, several at once; with *search subdirectories* ticked, every
-acquisition inside them.
+### Select several folders...
+In the arrow beside *Add...*: adds folders, several at once (Cmd- or
+Ctrl-click); with *search subdirectories* ticked, every acquisition inside
+them.
 
 ### Remove
 Removes the selected entries.  Delete (or Backspace) on the list does the
@@ -718,8 +720,8 @@ list from there.
 Empties the list.
 
 ### search subdirectories
-Whether *Add folder...*, and a folder dropped on the window, looks inside the
-folder's subfolders.
+Whether a folder added -- by *Add...*, *Select several folders...* or a
+drop -- is searched in its subfolders too.
 
 ### sample
 What the files show: *beads in a z stack*, *molecules on the coverslip in a z

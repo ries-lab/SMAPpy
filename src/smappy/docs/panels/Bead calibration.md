@@ -450,19 +450,20 @@ and the joint normalisation of the two halves.
 The files or folders of bead z-stacks (TIFF or OME-TIFF).  All stacks are
 pooled into one calibration, so they must share the z step.
 
-### Add files...
-Adds stacks one by one.
+### Add...
+Adds stacks.  On a Mac it takes files and folders together, several at
+once; elsewhere files only.  Files and folders can also be dropped on the
+window.
 
-### Add folder...
-Adds a folder; with *search subdirectories* ticked, every acquisition found
-inside it.
+### Select several folders...
+In the arrow beside *Add...*: adds folders, several at once.
 
 ### Remove
 Removes the selected entries from the list.
 
 ### search subdirectories
-Whether *Add folder...* looks for acquisitions inside the folder's
-subfolders, or adds the folder as it is.
+Whether an added folder is searched for acquisitions in its subfolders
+too, or only at its top.
 
 ### mode
 *Single channel* or *Dual colour*.  Switching keeps the files and the

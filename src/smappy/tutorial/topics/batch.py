@@ -72,7 +72,8 @@ def _run_batch(d, window) -> None:
 
 
 def _statuses(window):
-    return [window.table.item(r, 4).text() for r in range(window.table.rowCount())]
+    return [window.tree.topLevelItem(r).text(2)
+            for r in range(window.tree.topLevelItemCount())]
 
 
 def make(d) -> None:
@@ -156,15 +157,19 @@ def make(d) -> None:
     window.resize(900, 860)
     d.place(window, 350, 20)
     d.settle()
-    add_folder = _button(window, "add folder...")
-    d.shot("Add the files: one by one, or a whole folder, searched for "
-           "localization files.",
-           spot=[add_folder, window.table], point=add_folder, click=True,
-           zoom=d.around(window.table, 800))
+    add = window.add_button
+    d.shot("Add the data: files, or whole folders. On a Mac Add takes both; "
+           "its arrow selects several folders at once.",
+           spot=[add, window.tree], point=add, click=True,
+           zoom=d.around(window.tree, 800))
     with answering(folder=str(cells)):
-        add_folder.click()
+        add.choose_folders()          # what "Select several folders..." does
     d.settle()
-    assert window.table.rowCount() == 1, "the folder was not added"
+    assert window.tree.topLevelItemCount() == 1, "the folder was not added"
+    assert window.tree.topLevelItem(0).childCount() == 4, "the folder's cells were not found"
+    d.shot("A folder stays a folder, and shows the data sets in it. Untick one to "
+           "leave it out; the filter narrows the folder by name.",
+           spot=[window.tree, window.kind_line], zoom=d.around(window.tree, 800))
     window.refresh_chains()
     index = next(i for i in range(window.chooser.count())
                  if "Drift And Statistics" in window.chooser.itemText(i).title())
@@ -204,7 +209,7 @@ def make(d) -> None:
                        for f in figures) for _, label in STEPS), figures
     d.shot("Each file is loaded, run and saved in turn. The status says which "
            "are done; the log below says what each step did.",
-           spot=[window.table, window.log], zoom=None)
+           spot=[window.tree, window.log], zoom=None)
     d.card("What is written",
            "<p>A folder per file, with its processed table, its figures and "
            "every number each step gave; and one summary with a row per "
@@ -218,7 +223,7 @@ def make(d) -> None:
     assert all("skipped" in s for s in _statuses(window)), _statuses(window)
     d.shot("Run again, and the files already done with the same settings are "
            "skipped. Change a setting, and those files are redone.",
-           spot=[window.table, window.rerun], point=window.rerun, zoom=None)
+           spot=[window.tree], zoom=None)
     d.card("Without the window",
            "<p>The job is a small text file. <code>smappy-batch run</code> runs "
            "it on a server, with no window at all.</p>"

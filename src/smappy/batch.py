@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import csv
 import dataclasses
-import fnmatch
 import hashlib
 import json
 import math
@@ -40,9 +39,6 @@ PREFLIGHT = ("skip", "proceed", "abort")
 RERUN = ("skip_identical", "always")
 FIGURES = ("png", "pdf", "svg", "none")
 FITTED = ("beside_image", "output")
-# what a folder rule looks for when it does not say
-PATTERNS = {"images": ["*.tif", "*.tiff"],
-            "localizations": ["*.h5", "*.hdf5", "*_sml.mat", "*.csv"]}
 # the files a step's data is cut down to before it is written: enough for a
 # curve or a histogram's counts, not a column of a million localizations
 MAX_LIST = 1000
@@ -56,10 +52,16 @@ class BatchError(ValueError):
 
 @dataclass
 class Input:
-    """Files to process: one file, or a folder and the patterns to look for."""
+    """Files to process: one data set, or a folder of them.
+
+    A folder gives every data set of the chain's input kind in it
+    (`datasets.find`), searched again on every run and every look of a watch,
+    narrowed by ``filter`` (`datasets.parse_filter`) and with ``exclude``
+    left out: data sets by their path inside the folder, unticked one by one
+    in the batch window."""
     file: str = ""
     folder: str = ""
-    pattern: List[str] = field(default_factory=list)     # [] : by input kind
+    filter: str = ""
     exclude: List[str] = field(default_factory=list)
     recursive: bool = True
     overrides: Dict[str, Any] = field(default_factory=dict)
@@ -68,8 +70,8 @@ class Input:
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"file": self.file} if self.file else {"folder": self.folder}
         if self.folder:
-            if self.pattern:
-                out["pattern"] = list(self.pattern)
+            if self.filter:
+                out["filter"] = self.filter
             if self.exclude:
                 out["exclude"] = list(self.exclude)
             if not self.recursive:
@@ -86,9 +88,15 @@ class Input:
             return cls(file=raw)
         if not isinstance(raw, dict) or not (raw.get("file") or raw.get("folder")):
             raise BatchError(f"an input needs `file` or `folder`: {raw!r}")
+        unknown = sorted(set(raw) - {"file", "folder", "filter", "exclude", "recursive",
+                                     "overrides", "include"})
+        if unknown:
+            # `pattern` was the folder rule's file patterns before the filter
+            raise BatchError(f"an input has no {', '.join(map(repr, unknown))}; a folder "
+                             "is narrowed by `filter`, e.g. \"*640* & !*bead*\"")
         listed = lambda v: [v] if isinstance(v, str) else list(v or [])
         return cls(file=str(raw.get("file") or ""), folder=str(raw.get("folder") or ""),
-                   pattern=listed(raw.get("pattern")), exclude=listed(raw.get("exclude")),
+                   filter=str(raw.get("filter") or ""), exclude=listed(raw.get("exclude")),
                    recursive=bool(raw.get("recursive", True)),
                    overrides=dict(raw.get("overrides") or {}),
                    include=bool(raw.get("include", True)))
@@ -224,34 +232,22 @@ class Item:
 
 
 def resolve_inputs(job: Job, kind: str) -> List[Item]:
-    """The files the job names, in order, each once; excluded ones left out.
+    """The data sets the job names, in order, each once; excluded ones and
+    ones not of ``kind`` left out.
 
-    A file named twice -- by a folder rule and again on its own, to give it
-    overrides -- keeps its first place and gains the later entry's
+    A data set named twice -- by a folder rule and again on its own, to give
+    it overrides -- keeps its first place and gains the later entry's
     overrides.  The output folder is never searched: a second run of a job
     whose output sits inside its input folder would otherwise pick up its own
     `_proc.h5` files as input.
     """
-    out_folder = job.output_folder().resolve()
     base = job.origin.parent if job.origin is not None else Path.cwd()
     found: List[Tuple[Path, Dict[str, Any]]] = []
     seen: Dict[Path, int] = {}
     for entry in job.inputs:
         if not entry.include:
             continue
-        if entry.file:
-            paths = [_resolve(entry.file, base)]
-        else:
-            folder = _resolve(entry.folder, base)
-            paths = []
-            for pattern in entry.pattern or PATTERNS[kind]:
-                walker = folder.rglob if entry.recursive else folder.glob
-                paths += [p for p in walker(pattern) if p.is_file()]
-            paths = sorted(set(paths), key=lambda p: str(p).lower())
-            paths = [p for p in paths
-                     if not _excluded(p, folder, entry.exclude)
-                     and out_folder not in p.resolve().parents]
-        for p in paths:
+        for p in entry_datasets(entry, kind, base, job.output_folder())[0]:
             key = p.resolve()
             if key in seen:
                 found[seen[key]][1].update(entry.overrides)
@@ -262,10 +258,33 @@ def resolve_inputs(job: Job, kind: str) -> List[Item]:
             for (p, o), n in zip(found, _names([p for p, _ in found]))]
 
 
-def _excluded(path: Path, folder: Path, patterns: Sequence[str]) -> bool:
-    relative = str(path.relative_to(folder)) if folder in path.parents else path.name
-    return any(fnmatch.fnmatch(path.name, x) or fnmatch.fnmatch(relative, x)
-               for x in patterns)
+def entry_datasets(entry: Input, kind: str, base: Path,
+                   output: Optional[Path] = None) -> Tuple[List[Path], List[Path]]:
+    """What one input gives: the data sets it runs, and those it leaves out.
+
+    A file is its data set when it is of ``kind`` (a part of a series names
+    the series), else left out -- a file of the other kind stays in the job,
+    for the chain it was added for; a folder gives `datasets.find`'s through
+    its filter, its unticked ones left out.  A filter that cannot be read
+    raises `datasets.FilterError`; a folder that is not there gives nothing.
+    """
+    from . import datasets
+    if entry.file:
+        path = _resolve(entry.file, base)
+        if path.exists() and datasets.kind_of(path) == kind:
+            return [datasets.canonical(path)], []
+        return [], [path]
+    folder = _resolve(entry.folder, base)
+    if not folder.is_dir():
+        return [], []
+    keep = datasets.parse_filter(entry.filter)
+    skip = [output] if output is not None else []
+    every = datasets.find([folder], kind, recursive=entry.recursive, keep=keep, skip=skip)
+    # a data set unticked in the window is its own path; a job file may also
+    # leave out a pattern (``beads/*``)
+    tests = [datasets.parse_filter(f'"{x}"') for x in entry.exclude]
+    out = {p for p in every if any(t(datasets.relative(p, folder)) for t in tests)}
+    return [p for p in every if p not in out], [p for p in every if p in out]
 
 
 def _stem(path: Path) -> str:
@@ -443,13 +462,25 @@ def validate(job: Job, need_files: bool = True) -> List[Problem]:
                 problems.append(Problem("error", where, f"{entry.file} does not exist"))
             if entry.folder and not _resolve(entry.folder, base).is_dir():
                 problems.append(Problem("error", where, f"{entry.folder} is not a folder"))
+            if entry.folder:
+                from .datasets import filter_error
+                why = filter_error(entry.filter)
+                if why:
+                    problems.append(Problem("error", where, f"filter {entry.filter!r}: {why}"))
+            if entry.file and entry.include and _resolve(entry.file, base).exists():
+                from .datasets import DESCRIPTIONS, kind_of
+                if kind_of(_resolve(entry.file, base)) != kind:
+                    problems.append(Problem(
+                        "warning", where, f"{Path(entry.file).name} is skipped: this chain "
+                                          f"reads {DESCRIPTIONS[kind]}"))
             if entry.overrides:
                 _check_values(entry.overrides, fields, f"{where}: overrides", problems)
         if need_files and not any(p.level == "error" and p.where.startswith("inputs")
                                   for p in problems):
             if not resolve_inputs(job, kind):
+                from .datasets import DESCRIPTIONS
                 problems.append(Problem("error", "inputs",
-                                        f"no {kind} files: nothing to process"))
+                                        f"no {DESCRIPTIONS[kind]}: nothing to process"))
     return sorted(problems, key=lambda p: p.level != "error")
 
 
@@ -778,18 +809,19 @@ def is_complete(path: Path, seen: Dict[Path, Tuple[Any, float]], settle: float,
     ``writing`` until it closes it (`io.hdf5.LocalizationWriter`), and that
     word wins over any silence, since a live fit can wait minutes for the
     next frames.  Any other file is complete once neither its size nor its
-    modification time -- of every file of a Micro-Manager series, which fills
-    one file and then begins the next -- has changed for ``settle`` seconds,
+    modification time -- of every file it is written in (`datasets.parts`): a
+    Micro-Manager series fills one file and then begins the next, an NDTiff
+    folder writes several -- has changed for ``settle`` seconds,
     by its modification time or by what was seen of it.  ``seen`` holds each
     file's sizes and times, and when they were first seen as they are.
     """
     now = time.time() if now is None else now
     try:
-        from .io.tiff import _series_files
-        files = (_series_files(path) if path.name.lower().endswith((".ome.tif", ".ome.tiff"))
-                 else [path])
-        stats = [f.stat() for f in files]
+        from .datasets import parts
+        stats = [f.stat() for f in parts(path)]
     except OSError:
+        return False
+    if not stats:
         return False
     state = tuple((s.st_size, s.st_mtime) for s in stats)
     if seen.get(path, (None,))[0] != state:

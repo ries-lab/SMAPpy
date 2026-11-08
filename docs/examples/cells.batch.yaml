@@ -7,9 +7,8 @@ chain: filter_drift_statistics.chain.yaml
 overrides:
   drift.n_timepoints: 8                # <step key>.<field>, as `describe` lists them
 inputs:
-  - folder: /data/2026-09-20           # every file matching, in every subfolder
-    pattern: ["*_locs.hdf5"]
-    exclude: ["*bead*"]
+  - folder: /data/2026-09-20           # every localization file, in every subfolder
+    filter: "*_locs.hdf5 & !*bead*"    # , | OR  & AND  ! NOT  ( )
   - file: /data/2026-09-20/cell7/cell7_locs.hdf5
     overrides:                         # this file only
       filter.layers:
