@@ -199,7 +199,7 @@ class MathSettings:
     source: str = param(LOCS, label="on", choices=_source_choices,
                         help="the localizations, or the regions -- ROIs or an id "
                              "attribute -- whose measured values the expression reads")
-    field: str = param("within", label="new field",
+    field: str = param("within", label="new attribute",
                        help="the attribute the result is written to")
     expression: str = param("(xy_err_nm < 25) & (sigma_nm > 100)",
                             label="=", kind="text",

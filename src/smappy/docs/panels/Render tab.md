@@ -603,7 +603,7 @@ no blink (`group_id` 0, `n_in_group` 0), a blink or trace of nothing but
 such localizations is not in the merged table at all, and the rest are
 merged without it.  It stays in the localizations, for every layer that
 shows them and every plugin that reads them.  [Math Parser](plugin:Analysis/Process/Math Parser)
-makes the attribute -- *new field* `group_use`, an expression such as
+makes the attribute -- *new attribute* `group_use`, an expression such as
 `trace_index > 20` merges each [MINFLUX](plugin:Panels/Glossary) trace
 without its first 20 localizations, where a still emitter is still creeping
 into place -- and the merge follows it: changed or undone, the blinks are
@@ -812,7 +812,7 @@ order.  When the attribute is missing the picture says so over the view.
 to make sparse tracks visible zoomed out.
 
 ### colour by
-*intensity* colours by brightness through the LUT; *field* colours by the
+*intensity* colours by brightness through the LUT; *attribute* colours by the
 attribute chosen beside it.  A visible layer coloured by an attribute puts a
 colour bar in the render window's top right corner: the LUT over the
 *colour range*, its ends rounded, and above it the layer and, on the line

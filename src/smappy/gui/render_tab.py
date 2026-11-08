@@ -1241,7 +1241,7 @@ class RenderTab(QWidget):
         self.line_width.setToolTip("the tracks' lines, in pixels of the picture")
         self.color = QComboBox()
         self.color.addItem("intensity", None)
-        self.color.addItem("field", "field")
+        self.color.addItem("attribute", "field")
         self.color_field = QComboBox()
         self.color_field.setToolTip("the attribute the colour encodes")
         color_row = QHBoxLayout()
