@@ -2,7 +2,7 @@
 
 The quickstart fits once with the defaults; this one opens the fitter up.
 The camera and where its numbers come from, detection and what a wrong
-cutoff looks like, the PSF model, and -- after the fit -- the two columns
+cutoff looks like, the PSF model, and -- after the fit -- the two attributes
 that say whether a localization is a good one.  3D, with its bead
 calibration, is `fitting_3d`: the same fitter form, with a measured PSF.
 """
