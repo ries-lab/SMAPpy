@@ -53,7 +53,7 @@ layer's filter, the drawn [ROI](plugin:Panels/Glossary) -- region of interest
 
 **4. The recipe.**  The expression is stored in the table together with
 *merged blinks*, the rule for what the attribute is once blinks are merged.
-Running again into the same *new field* replaces its recipe.  An expression
+Running again into the same *new attribute* replaces its recipe.  An expression
 that reads the field it writes -- `photons = photons * 2` -- is applied once
 and kept as no recipe at all: evaluated again at every merge it would
 compound.
@@ -141,7 +141,7 @@ layer's bounds applied to each localization.  The merged blinks take the
 attribute by the *merged blinks* rule (below) when they are merged again.
 
 **What an expression may contain.**  Attribute names are the table's own
-(`x_nm`, `photons`, `xy_err_nm`, ...; the *new field* of an earlier run
+(`x_nm`, `photons`, `xy_err_nm`, ...; the *new attribute* of an earlier run
 counts as one).  Everything else:
 
 | what | allowed |
@@ -197,7 +197,7 @@ number stops being exact in float32 above $2^{24}$.  A single number is
 copied to every row; a result of the wrong length, or one that is not a
 number, is refused.
 
-**The new field's name.**  It must be a word of letters, digits and
+**The new attribute's name.**  It must be a word of letters, digits and
 underscores that does not start with a digit, so that a later expression can
 use it.  The name of one of the functions is refused, and so are `group_id`
 and `n_in_group`, which merging blinks writes and would overwrite.

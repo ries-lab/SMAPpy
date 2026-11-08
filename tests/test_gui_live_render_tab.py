@@ -87,4 +87,4 @@ def test_a_table_the_overview_cannot_draw_is_reported_not_raised(app, capfd):
     session.add_file(bare, FileInfo("t.hdf5", "/t.hdf5", "smappy"))
     app.processEvents()
     assert tab.overview.image.image is None
-    assert "no localization precision column" in capfd.readouterr().err
+    assert "no localization precision attribute" in capfd.readouterr().err
