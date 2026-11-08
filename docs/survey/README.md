@@ -91,7 +91,7 @@ Ranked by value for the effort; sizes S ≤ a day, M a few days, L a week+.
 | 12 | **PC-PALM fit of g(r)** (Sengupta) | GDSC SMLM, papers | M | re-implement | a model in *Spatial statistics* |
 | 13 | **SPINNA**: oligomer proportions from k-NN distances against masked simulations | Picasso | M–L | MIT | `per_region` with `smappy.simulate` |
 | 14 | **Depth-dependent z correction** from beads in gel (*decided: skip*; Spline 3D's *focus* draws the PSF at depth instead) | fit3Dcspline | M | own | a calibration plus a table operation |
-| 15 | smaller: GLRT p-value per localization (photonpy, S; *skip*), sCMOS maps (Picasso, M), local FRC map (S), *pick similar* (S), drift from tracks (trackpy, S; *skip*), ToMATo (S–M, re-implement), automatic merge dark time (S), G/F functions (S; *skip*), AnDi test data (S) | | | | |
+| 15 | smaller: GLRT p-value per localization (photonpy, S; *skip*), sCMOS maps (Picasso, M), local FRC map (S; *done*), *pick similar* (S), drift from tracks (trackpy, S; *skip*), ToMATo (S–M, re-implement), automatic merge dark time (S), G/F functions (S; *skip*), AnDi test data (S) | | | | |
 
 ## User experience and automation
 

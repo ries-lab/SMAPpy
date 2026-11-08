@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.plugins.precision.measure, smappy.plugins.precision.displacement_pairs, smappy.plugins.precision.fit_radial, smappy.plugins.precision.fit_axis, smappy.plugins.precision.radial_density, smappy.plugins.precision.axis_density, smappy.plugins.precision.drift_free_sigma, smappy.plugins.precision.sigma_at_photons, smappy.plugins.precision.crlb_statistics, smappy.plugins.precision.summary, smappy.plugins.precision.draw_radial, smappy.plugins.precision.draw_gaps, smappy.plugins.precision.draw_crlb, smappy.plugins.precision.draw_frc, smappy.frc.frc_resolution, smappy.frc.blur_envelope, smappy.frc.envelope_resolution]
+version: "6"
+covers: [smappy.plugins.precision.measure, smappy.plugins.precision.displacement_pairs, smappy.plugins.precision.fit_radial, smappy.plugins.precision.fit_axis, smappy.plugins.precision.radial_density, smappy.plugins.precision.axis_density, smappy.plugins.precision.drift_free_sigma, smappy.plugins.precision.sigma_at_photons, smappy.plugins.precision.crlb_statistics, smappy.plugins.precision.summary, smappy.plugins.precision.draw_radial, smappy.plugins.precision.draw_gaps, smappy.plugins.precision.draw_crlb, smappy.plugins.precision.draw_frc, smappy.frc.frc_resolution, smappy.frc.blur_envelope, smappy.frc.envelope_resolution, smappy.frc.local_frc, smappy.frc.FRCMap.at, smappy.plugins.precision.draw_frc_map, smappy.plugins.precision.with_local_frc, smappy.plugins.precision.local_frc_image]
 ---
 
 ## What it does
@@ -31,6 +31,14 @@ meant to disagree -- the way they disagree is the diagnosis:
   halves, both are rendered, and the plugin finds up to which level of detail
   the two images still agree.  This folds in the labelling density, the drift
   and the number of localizations as well as the precision.
+
+With *local FRC map* the FRC is also measured **in each square tile of the
+field** on its own, the block-wise map of NanoJ-SQUIRREL
+([Culley et al. 2018](https://doi.org/10.1038/nmeth.4605)).  One number for
+the whole field hides where the picture is good and where it is not: a region
+that drifted, one sparsely labelled, one out of focus.  The map shows it, and
+writes each localization's local resolution to the table, as `frc_local_nm`,
+so the render can be coloured by it, filtered on it or measured per region.
 
 It measures the localizations as they are shown: the layer's
 [filter](plugin:Panels/Glossary) (also called bounds: the lowest and highest
@@ -218,7 +226,63 @@ fig.set_size_inches(6.0, 3.0)
 draw_frc(fig.subplots(), [found])
 ```
 
+**8. The local FRC map** (with *local FRC map*).  The field is cut into
+squares of *tile size*, and the FRC of step 7 is measured in each square on
+its own: the same split in time, the same rendering, the same 1/7 threshold.
+The whole-field FRC is computed from tiles too -- it adds up their ring sums
+-- so the map is that computation with each tile's sums read on their own.
+A tile needs *per tile at least* localizations for a value; a tile with fewer,
+or whose curve never falls through 1/7, has none and is drawn grey.  The
+spread over the *FRC splits* is each tile's error bar, as for the whole field.
+
+```figure A field whose left half was localized with a precision of 6 nm and its right half with 24 nm.  Left: the map, tiles of 2 µm; the two halves are told apart at once.  Right: each tile's resolution against the FRC of its own half measured as one field (dashed).
+from smappy.frc import local_frc, frc_resolution
+from smappy.plugins.precision import draw_frc_map
+rng = np.random.default_rng(0)
+ex, ey = rng.uniform(0, 8000, 6000), rng.uniform(0, 4000, 6000)
+k = np.repeat(np.arange(6000), 12)
+s = np.where(ex[k] < 4000, 6.0, 24.0)
+mx = np.clip(ex[k] + rng.normal(0, 1, len(k)) * s, 0, 8000)
+my = np.clip(ey[k] + rng.normal(0, 1, len(k)) * s, 0, 4000)
+mf = rng.integers(0, 4000, len(k))
+local = local_frc(mx, my, mf, pixelsize=3.0, tile_nm=2000.0, repeats=3)
+fig.set_size_inches(7.4, 2.6)
+a, b = fig.subplots(1, 2, gridspec_kw={"width_ratios": [2.2, 1], "wspace": 0.6})
+draw_frc_map(a, Measurement(name="two halves", n_locs=len(k), frc_map=local))
+a.set_title("local FRC, tiles of 2 um", fontsize=7.5, color="0.25")
+centres = (np.arange(local.resolution.shape[1]) + 0.5) * local.tile_nm + local.x0
+for i, (half, colour) in enumerate(((mx < 4000, "C0"), (mx >= 4000, "C3"))):
+    whole = frc_resolution(mx[half], my[half], mf[half], pixelsize=3.0, repeats=1)
+    tiles = local.resolution[:, (centres < 4000) if i == 0 else (centres > 4000)]
+    b.plot(np.full(tiles.size, i) + rng.uniform(-0.1, 0.1, tiles.size),
+           tiles.ravel(), "o", color=colour)
+    b.hlines(whole.resolution, i - 0.3, i + 0.3, colors=colour, linestyles="--")
+b.set_xticks([0, 1], ["6 nm", "24 nm"])
+b.set_xlim(-0.6, 1.6)
+b.set_ylabel("tile (nm)")
+b.set_title("tiles against each half", fontsize=7.5, color="0.25")
+```
+
 ## In detail
+
+**The local map.**  A tile is a square of `size` pixels of the whole field's
+FRC pixel (a fifth of its resolution, or *FRC pixel*), rounded up to a size
+the Fourier transform is fast at, so the tile is a little larger than *tile
+size* asks; the run says how large.  The grid starts at the lowest x and y of
+the selection.  Each tile is tapered at its edges as the whole field is
+(a Tukey window over the outer eighth of each side), so a structure near a
+tile's edge counts for less in that tile; the map is a map of regions, not of
+single structures.  A small tile means few localizations and a noisy curve:
+1000 localizations is the least the whole-field FRC accepts, and the default
+for a tile.  With *smooth* the value written to a localization is interpolated
+linearly between the centres of the tiles around it, from the measured ones
+only; a localization whose own tile has no value stays NaN, so no value is
+spread into a tile that could not be measured.  The map adds one more pass
+over the tiles to the run, about as long again as the whole-field FRC.
+
+The difference from NanoJ-SQUIRREL's map: SQUIRREL splits an image stack into
+odd and even frames, here the halves are the same blocks of frames as for the
+whole field, so that a blink stays in one half (see step 7).
 
 **Several files.**  Files opened together keep their own frame numbers, and
 lie in the same camera coordinates, so frame 120 of one file and frame 121
@@ -400,8 +464,33 @@ Leave it at 0 unless two measurements must be compared at the same pixel.  A
 pixel coarser than about a fifth of the resolution reads the resolution too
 large; one much finer only costs time.
 
+### frc_map
+A tile's curve is noisier than the whole field's, so read the map for
+differences between regions larger than the tiles' error bars, not for single
+tiles.
+
 ### max_frame_pairs
 Only a speed limit: the default covers most acquisitions whole.
+
+### frc_local.tile_um
+Choose it so that most tiles hold a few thousand localizations: smaller tiles
+show more detail, but more of them are grey and the rest noisier.  Between 1
+and 5 µm suits most dSTORM and PAINT data.
+
+### frc_local.min_locs
+Below about 1000 a curve crosses 1/7 by chance; raise it if the map is
+speckled by single tiles far from their neighbours.
+
+### frc_local.smooth
+For a picture coloured by the attribute; leave it off to keep the measured
+value of each tile.
+
+### frc_local.write_column
+Off, the table is left alone and the run is a measurement only.
+
+### frc_local.image_layer
+The layer is added after the others; give it a colour table and an overlay
+in the Render tab, or remove it like any other layer.
 
 ## Output
 
@@ -422,6 +511,9 @@ line per number:
 * *FRC*: the resolution and its error, and where the blur of the pairwise
   $\sigma$ alone crosses 1/7; *per axis*: the resolutions and the
   axial-to-lateral ratio.
+* *local FRC*: the median of the tiles, how many were measured, the 10th to
+  90th percentile, and how many had too few localizations or never crossed
+  1/7.
 * *gap -> 0*: $\sigma_0$ and the motion per root frame, or that there is no
   motion beyond the scatter of the gaps.
 * Notes: the search radius used, too few pairs, a cut-off axial search or a
@@ -431,12 +523,22 @@ Besides the text:
 
 * **Figures**, a tab per method, each named after it: *NeNA*, the distance
   histogram with the fit; *CRLB*, the histograms of the precision attribute;
-  *FRC*; *FRC per axis* (with *FRC per axis (3D)*); and, with *diagnostic
+  *FRC*; *FRC per axis* (with *FRC per axis (3D)*); *local FRC*, the map
+  (with *local FRC map*); and, with *diagnostic
   plots*, *NeNA per axis* and *NeNA vs frame gap* (when *frame gaps to* is
   above 1).  Each panel's title says first which method it shows and what is
   plotted, then the numbers; the window's title says which methods were run,
   on what, and on how many localizations.
 * The numbers (not the pairs) are kept with the result.
+* With *local FRC map*: the attributes `frc_local_nm` and `frc_local_err_nm`
+  on the localizations that were measured (NaN on the others and in tiles
+  without a value; averaged per blink on a layer that merges blinks), and an
+  image layer of the map, one pixel per tile, 0 where there is no value.
+
+A good map is even over the structure, with values close to the whole-field
+FRC.  A patch much worse than its neighbours is a region the picture does not
+resolve as well: look there for drift that was not corrected, a focus that
+wandered, or labelling that is sparser.
 
 **Reading them.**  Pairwise $\sigma$ close to the CRLB median and $\kappa$
 near 1: the data are as good as the fitter says.  $\kappa$ well above 1: the
@@ -489,6 +591,11 @@ displacement (NeNA) and the comparison with the CRLB are new.
   optical nanoscopy. *Nat Methods* 10, 557 (2013).
   [doi:10.1038/nmeth.2448](https://doi.org/10.1038/nmeth.2448) -- FRC, the
   1/7 threshold.
+* Culley S, Albrecht D, Jacobs C, Pereira PM, Leterrier C, Mercer J,
+  Henriques R. Quantitative mapping and minimization of super-resolution
+  optical imaging artifacts. *Nat Methods* 15, 263 (2018).
+  [doi:10.1038/nmeth.4605](https://doi.org/10.1038/nmeth.4605) --
+  NanoJ-SQUIRREL, the block-wise FRC map.
 * Mortensen KI, Churchman LS, Spudich JA, Flyvbjerg H. Optimized
   localization analysis for single-molecule tracking and super-resolution
   microscopy. *Nat Methods* 7, 377 (2010).

@@ -201,6 +201,7 @@ This is Smith et al. 2015's threshold-free detection.
 
 #### 8. A local FRC map from the tiles SMAPpy already computes -- NanoJ-SQUIRREL `FRCMap_`  (S; re-implement)
 `frc_resolution` already transforms the field in square tiles and sums the ring statistics over them (`frc.py:467-560`, `_tile_buckets`, `_over_tiles`). Keeping each tile's ring sums and taking each tile's crossing gives a resolution map at no extra transform cost: the shape of NanoJ's FRC map (and of rFRC, Zhao et al. 2023 *(unverified)*). It returns an image layer, or values per ROI. Small tiles have noisy curves, so require a minimum count and mark tiles with no crossing.
+*Done 2026-11:* `frc.local_frc` and Localization Precision's *local FRC map*. Its tiles are its own (*tile size*, 2 µm by default) rather than the whole field's, which are sized for the transform, so it is one more pass over the tiles; the map is written to the localizations (`frc_local_nm`, `frc_local_err_nm`) and added as an image layer.
 
 #### 9. Multi-emitter fitting -- 3D-DAOSTORM (storm-analysis), ZOLA-3D  (L; re-implement)
 *What it does.* `sa_library/fitting.py:984-1019`, `:819-908`:
