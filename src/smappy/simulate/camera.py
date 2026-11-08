@@ -244,6 +244,59 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     return render(truth), camera_truth(truth)
 
 
+# ------------------------------------------------------------------ sCMOS
+#: the base offset `scmos_frames` draws before each pixel's own is put on
+_SCMOS_BASE = 100.0
+
+
+def scmos_maps(shape=(100, 100), seed: int = 0, conversion: float = 0.5,
+               median_noise_e: float = 1.0, hot_fraction: float = 0.01,
+               offset: float = 100.0, offset_spread: float = 2.0):
+    """An sCMOS's offset and read noise per pixel, in ADU: ``(offset, noise)``.
+
+    The read noise is log-normal about ``median_noise_e`` (a quarter in log, as
+    a modern sCMOS's 0.7 to 1.4 e-), and ``hot_fraction`` of the pixels are
+    random-telegraph or hot ones at 5 to 30 e-, spread evenly in log; the
+    offsets scatter by ``offset_spread`` ADU.  For `scmos_frames` and
+    `dark_frames`, and the truth a calibration (`smappy.scmos`) should find.
+    """
+    rng = np.random.default_rng([seed, 11])
+    noise_e = median_noise_e * np.exp(rng.normal(0.0, 0.25, shape))
+    hot = rng.random(shape) < hot_fraction
+    noise_e[hot] = np.exp(rng.uniform(np.log(5.0), np.log(30.0), int(hot.sum())))
+    offsets = offset + rng.normal(0.0, offset_spread, shape)
+    return offsets.astype(np.float32), (noise_e / conversion).astype(np.float32)
+
+
+def dark_frames(offset_adu, noise_adu, n_frames: int = 1000, seed: int = 0) -> np.ndarray:
+    """A dark movie of the camera ``scmos_maps`` describes: uint16 ADU."""
+    rng = np.random.default_rng([seed, 12])
+    out = np.empty((n_frames,) + np.shape(offset_adu), np.uint16)
+    for k in range(n_frames):
+        adu = offset_adu + rng.normal(0.0, 1.0, np.shape(offset_adu)) * noise_adu
+        out[k] = np.clip(np.round(adu), 0, 65535)
+    return out
+
+
+def scmos_frames(offset_adu, noise_adu, seed: int = 0, **options):
+    """`camera_frames` on a camera with each pixel's own offset and read noise
+    (`scmos_maps`): ``(frames, truth)``.  The frames are drawn without read
+    noise and each pixel's noise and offset put on after, which rounds twice
+    -- a hundredth of an electron."""
+    shape = np.shape(offset_adu)
+    if shape[0] != shape[1]:
+        raise ValueError("the simulated camera is square")
+    frames, truth = camera_frames(seed=seed, size_px=shape[0], offset=_SCMOS_BASE,
+                                  read_noise=0.0, **options)
+    rng = np.random.default_rng([seed, 13])
+    out = np.empty_like(frames)
+    for k in range(len(frames)):
+        adu = (frames[k] + (offset_adu - _SCMOS_BASE)
+               + rng.normal(0.0, 1.0, shape) * noise_adu)
+        out[k] = np.clip(np.round(adu), 0, 65535)
+    return out, truth
+
+
 _SPLINES: dict = {}
 
 

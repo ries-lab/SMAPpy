@@ -35,8 +35,9 @@ on without a microscope.
 from .beads import simulate_bead_tracks, simulate_beads, with_beads
 from .binding import simulate_binding_sites, spot_centres
 from .camera import (ASTIGMATISM, ISOLATED_NM, astigmatic_sigmas, bead_stacks,
-                     camera_frames, camera_truth, dual_bead_stacks, dual_camera_frames,
-                     dual_transformation, render)
+                     camera_frames, camera_truth, dark_frames, dual_bead_stacks,
+                     dual_camera_frames, dual_transformation, render, scmos_frames,
+                     scmos_maps)
 from .kinetics import blink, emission, expected_blinks, label, off_time_for
 from .localizations import (GroundTruth, ground_truth, localizations, mortensen,
                             simulate, unresolvable)
@@ -51,7 +52,7 @@ from .tracks import TrackSimulationSettings, jump_nm, simulate_tracks, spacing_n
 __all__ = [
     "ASTIGMATISM", "ISOLATED_NM", "astigmatic_sigmas", "bead_stacks", "camera_frames",
     "camera_truth", "dual_bead_stacks", "dual_camera_frames", "dual_transformation",
-    "render", "blink", "emission", "expected_blinks", "label", "off_time_for",
+    "render", "scmos_maps", "scmos_frames", "dark_frames", "blink", "emission", "expected_blinks", "label", "off_time_for",
     "GroundTruth", "ground_truth", "localizations", "mortensen", "simulate",
     "unresolvable", "BlinkingSettings", "CameraOutputSettings", "LabellingSettings",
     "LocalizationOutputSettings", "OpticsSettings", "SimulationSettings",

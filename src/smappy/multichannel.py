@@ -270,6 +270,12 @@ class MultiChannelEngine:
     photon_factors: Optional[Tuple[float, ...]] = None
     #: which paired molecules to fit, by their (x, y) on channel 0: a fit region drawn there
     select: Optional[object] = None
+    #: the camera's noise map cut into the channels (`scmos.for_layout`): read on the first
+    #: block when `FitSettings.per_pixel_noise` is on, or given
+    noise: Optional[object] = None
+    #: the frames' (height, width) as the camera wrote them, which the map is cut to; the
+    #: channels' extent if None (`scmos.for_layout`)
+    frame_shape: Optional[Tuple[int, int]] = None
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
@@ -303,7 +309,11 @@ class MultiChannelEngine:
         if frames.ndim != 4 or frames.shape[1:] != (self.layout.n_channels, h, w):
             raise ValueError(f"expected blocks of {self.layout.n_channels} channels of {w} x {h} "
                              f"(a ChannelSource's), got {frames.shape}")
-        channels = to_photons(frames, self.camera) / self.camera.excess_noise
+        noise = self._noise()
+        if noise is None:
+            channels = to_photons(frames, self.camera) / self.camera.excess_noise
+        else:
+            channels = noise.to_photons(frames, self.camera.adu_to_photons)
         candidates = self.find(channels, first_frame)
         roisize = self.settings.roisize
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
@@ -317,11 +327,23 @@ class MultiChannelEngine:
         self.stats["candidates"] += len(keep)
         self.stats["dropped_at_border"] += int((~keep).sum())
         if len(candidates):
-            self._pairs.append(PairedROIs(images, link, candidates, roisize, residual))
+            variance = None
+            if noise is not None:
+                from .scmos import cut_channels
+                variance = cut_channels(noise.variance, positions, roisize)
+            self._pairs.append(PairedROIs(images, link, candidates, roisize, residual, variance))
             self._buffered += len(candidates)
         if self._buffered >= self.settings.block_rois():
             return self.flush()
         return None
+
+    def _noise(self):
+        """The noise map in the channels, read once; None without one."""
+        if self.noise is None and getattr(self.settings, "per_pixel_noise", False):
+            from .scmos import for_layout
+            self.noise = for_layout(self.camera, self.layout, self.frame_shape)
+            self.stats["noise_map"] = self.noise.path
+        return self.noise
 
     def find(self, channels: np.ndarray, first_frame: int = 0) -> Candidates:
         """The molecules of a block of channels in photons, on channel 0's pixels (`detection`)."""
@@ -352,11 +374,17 @@ class MultiChannelEngine:
         pairs = _concat_pairs(self._pairs)
         self._pairs, self._buffered = [], 0
         started = time.perf_counter()
-        variance = self.camera.readout_variance
-        result = self.model.fit(with_readout(pairs.images, variance), pairs.link,
-                                iterations=self.settings.iterations,
-                                n_threads=self.settings.n_threads)
-        without_readout(result, self.model, variance)
+        if pairs.variance is not None:
+            # each pixel's own variance, in the data and, inside the fitter, the model
+            result = self.model.fit(pairs.images + pairs.variance, pairs.link,
+                                    iterations=self.settings.iterations,
+                                    n_threads=self.settings.n_threads, variance=pairs.variance)
+        else:
+            variance = self.camera.readout_variance
+            result = self.model.fit(with_readout(pairs.images, variance), pairs.link,
+                                    iterations=self.settings.iterations,
+                                    n_threads=self.settings.n_threads)
+            without_readout(result, self.model, variance)
         self.stats["fit_seconds"] += time.perf_counter() - started
         self.stats["pairs"] += len(pairs)
 
@@ -414,6 +442,7 @@ class SplitEngine:
         from dataclasses import replace
         from .pipeline import LocalizationEngine
         self.camera, self.layout = camera, layout
+        self.settings = settings
         self.chip = None                           # the layout on the chip, as the table records it
         own = replace(camera, roi=None)            # each channel's own pixels; the chip comes after
         self.engines = [LocalizationEngine(own, finder, model, settings) for finder in finders]
@@ -423,7 +452,8 @@ class SplitEngine:
         out: dict = {}
         for engine in self.engines:
             for key, value in engine.stats.items():
-                out[key] = out.get(key, 0) + value
+                # counts and times add up; a name (the noise map's file) is the channels' one
+                out[key] = value if isinstance(value, str) else out.get(key, 0) + value
         out["frames"] = self.engines[0].stats["frames"]      # one frame, however many channels
         return out
 
@@ -436,7 +466,19 @@ class SplitEngine:
         for c, (w, h) in enumerate(self.layout.sizes):
             yield c, np.ascontiguousarray(block[:, c, :h, :w])
 
+    def _noise(self, frames) -> None:
+        """Each channel's engine given its part of the noise map, cut and flipped
+        as its pixels are (`scmos.for_layout`), on the first block."""
+        if not getattr(self.settings, "per_pixel_noise", False) or self.engines[0].noise is not None:
+            return
+        from .scmos import channel, for_layout
+        whole = for_layout(self.camera, self.layout, np.shape(frames)[-2:])
+        for c, (engine, size) in enumerate(zip(self.engines, self.layout.sizes)):
+            engine.noise = channel(whole, c, size)
+            engine.stats["noise_map"] = whole.path
+
     def push(self, frames: np.ndarray, first_frame: int = 0):
+        self._noise(frames)
         out = []
         for c, own in self._channels(frames):
             found = self.engines[c].push(own, first_frame)

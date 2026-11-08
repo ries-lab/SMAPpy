@@ -50,6 +50,11 @@ class FitSettings:
                                               unit="px", advanced=True,
                                               help="reject fits that ran "
                                                    "off; auto: keep all")
+    # off by default: a map has to be made first (`scmos`), and with it off the
+    # fit is exactly what it was before maps existed
+    per_pixel_noise: bool = param(False, label="per-pixel noise", advanced=True,
+                                  help="an sCMOS's offset and read noise pixel by "
+                                       "pixel, from the camera's noise map")
 
     def block_rois(self) -> int:
         """SMAP scales the block with the ROI area; keep that behaviour."""
@@ -70,7 +75,12 @@ class LocalizationEngine:
     model: PSFModel
     settings: FitSettings = field(default_factory=FitSettings)
 
+    #: the camera's noise map cut to the frames (`scmos.FitNoise`): read on
+    #: the first block when `FitSettings.per_pixel_noise` is on, or given
+    noise: Optional["FitNoise"] = None
+
     _rois: List[np.ndarray] = field(default_factory=list, init=False)
+    _variances: List[np.ndarray] = field(default_factory=list, init=False)
     _candidates: List[Candidates] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
     stats: dict = field(default_factory=dict, init=False)
@@ -85,7 +95,11 @@ class LocalizationEngine:
              ) -> Optional[Localizations]:
         """Process a block of raw frames ``(n, y, x)``."""
         t0 = time.perf_counter()
-        photons = to_photons(frames, self.camera) / self.camera.excess_noise
+        noise = self._noise(frames)
+        if noise is None:
+            photons = to_photons(frames, self.camera) / self.camera.excess_noise
+        else:
+            photons = noise.to_photons(frames, self.camera.adu_to_photons)
         candidates, _ = self.finder(photons, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         rois = cut_rois(photons, candidates, self.settings.roisize,
@@ -98,6 +112,10 @@ class LocalizationEngine:
         if len(rois):
             self._rois.append(rois.images)
             self._candidates.append(rois.candidates)
+            if noise is not None:
+                from .scmos import cut
+                self._variances.append(cut(noise.variance, rois.candidates,
+                                           self.settings.roisize))
             self._buffered += len(rois)
 
         if self._buffered >= self.settings.block_rois():
@@ -111,12 +129,18 @@ class LocalizationEngine:
 
         images = np.concatenate(self._rois) if len(self._rois) > 1 else self._rois[0]
         candidates = _concat_candidates(self._candidates)
-        self._rois, self._candidates, self._buffered = [], [], 0
+        per_pixel = (np.concatenate(self._variances) if self._variances else None)
+        self._rois, self._variances, self._candidates, self._buffered = [], [], [], 0
 
         stack = ROIStack(images, candidates, self.settings.roisize)
         t0 = time.perf_counter()
         variance = self.camera.readout_variance
         extra = {}
+        if per_pixel is not None:
+            # each pixel's own variance, added to the data here and to the
+            # model in the fitter: the background stays the background
+            variance, extra["variance"] = 0.0, per_pixel
+            stack = ROIStack(stack.images + per_pixel, candidates, self.settings.roisize)
         if getattr(self.model, "field_dependent", False):
             # each ROI's centre on the chip, for a PSF that varies over it
             ox, oy = self.camera.roi_offset
@@ -135,6 +159,14 @@ class LocalizationEngine:
         self.stats["localizations"] += len(locs)
 
         return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
+
+    def _noise(self, frames: np.ndarray):
+        """The noise map for these frames, read once; None without one."""
+        if self.noise is None and getattr(self.settings, "per_pixel_noise", False):
+            from .scmos import for_frames
+            self.noise = for_frames(self.camera, np.shape(frames)[-2:])
+            self.stats["noise_map"] = self.noise.path
+        return self.noise
 
     def __str__(self) -> str:
         s = self.stats
@@ -322,6 +354,9 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
         "fit": {"roisize": settings.roisize, "iterations": settings.iterations,
                 "rois_per_block": settings.block_rois(),
                 "max_fit_distance": settings.max_fit_distance},
+        # the map's file, so the table says which pixels' noise it was fitted with
+        "noise_map": (camera.noise_map if getattr(settings, "per_pixel_noise", False)
+                      else None),
         "smappy_version": _version(),
     }
     calibration = getattr(model, "calibration", None)

@@ -460,6 +460,11 @@ Both fit boxes have this size.  As for [Spline 3D](plugin:Localize/Spline 3D) it
 should hold the widest, most defocused spot, and stay inside the
 calibration's lateral size.
 
+### fit.per_pixel_noise
+Each channel's pixels weighted by their own read noise, from the camera's noise map
+([Camera noise calibration](plugin:Localize/Camera noise calibration)), cut and
+mirrored into the channels as the frames are.  The map must cover both channels.
+
 ### finish.drift
 With z in the table, both RCC and COMET correct z as well unless their
 *correct z* says otherwise.

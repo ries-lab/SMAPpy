@@ -46,7 +46,8 @@ from .metadata import CameraMetadata
 #: shown and ignored.  The exposure and the frame time are not read by the
 #: fit; they are kept with the table, where everything in seconds reads them.
 FITTING_PARAMETERS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-                      "read_noise_e", "exposure_ms", "frame_time_ms", "roi")
+                      "read_noise_e", "exposure_ms", "frame_time_ms", "roi",
+                      "noise_map")
 
 #: names a parameter was stored under before, read as the current one: a
 #: user's ``cameras.json`` written before the frame time had its name
@@ -604,7 +605,7 @@ MODE_TAGS = ("ReadoutMode", "ReadoutRate", "Readout Rate", "PixelReadoutRate",
 #: the parameters the editor shows, in its order; anything else an entry
 #: carries is kept as it is
 EDITED = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-          "read_noise_e", "exposure_ms", "frame_time_ms", "roi")
+          "read_noise_e", "exposure_ms", "frame_time_ms", "roi", "noise_map")
 
 
 def device_of(metadata: Dict[str, Any]) -> str:
@@ -766,6 +767,37 @@ def problems(camera: Camera, metadata: Dict[str, Any],
         if missing:
             out.append("still unknown for this file: " + ", ".join(missing))
     return out
+
+
+def with_noise_map(camera: Camera, metadata: Dict[str, Any], path: str) -> Camera:
+    """This camera with ``path`` as the noise map of the readout mode that took
+    ``metadata``'s file (`smappy.scmos`).
+
+    A map belongs to one readout mode: an sCMOS's modes (standard, ultra-quiet,
+    the 12- and 16-bit ones) differ in their noise as they do in their offset.
+    So on a camera with modes it is a value of the file's mode, the mode must
+    be in the database first, and the other modes are left without one -- a
+    file of theirs then has none rather than another mode's.  A camera without
+    modes keeps one map, fixed.
+    """
+    import copy
+    camera = copy.deepcopy(camera)
+    if not camera.states:
+        camera.parameters["noise_map"] = Parameter(fixed=str(path))
+        return camera
+    state = camera.state_for(metadata)
+    if state is None:
+        raise ValueError(f"{camera.name}: the dark frames' readout mode is not in the camera "
+                         f"database -- add it in the camera editor first, so the map "
+                         f"belongs to it")
+    current = camera.parameters.get("noise_map")
+    if current is not None and not current.state and current.fixed:
+        # a map kept for the whole camera stands for the modes that have none
+        for other in camera.states:
+            other.values.setdefault("noise_map", current.fixed)
+    camera.parameters["noise_map"] = Parameter(state=True)
+    state.values["noise_map"] = str(path)
+    return camera
 
 
 def save_camera(camera: Camera, path=None) -> Path:
