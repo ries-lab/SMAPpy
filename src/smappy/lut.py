@@ -106,8 +106,8 @@ _TURBO_ANCHORS = [
     [0.4796, 0.0158, 0.0106],
 ]
 
-# Inferno and plasma (matplotlib's, CC0), sampled at 21 points: 4/255 from the
-# tables, below a step of the ramp.
+# Inferno (purple fire) and plasma (purple-yellow), matplotlib's (CC0),
+# sampled at 21 points: 4/255 from the tables, below a step of the ramp.
 _INFERNO_ANCHORS = [
     [0.0015, 0.0005, 0.0139], [0.0258, 0.0193, 0.1059], [0.0874, 0.0446, 0.2248],
     [0.1696, 0.0425, 0.3409], [0.2582, 0.0386, 0.4065], [0.3415, 0.0623, 0.4294],
@@ -126,8 +126,8 @@ _PLASMA_ANCHORS = [
     [0.9734, 0.5858, 0.2515], [0.9883, 0.6523, 0.2114], [0.9946, 0.7287, 0.1716],
     [0.9886, 0.8096, 0.1454], [0.9684, 0.8946, 0.1470], [0.9400, 0.9752, 0.1313],
 ]
-# Our own blue -> teal -> green -> yellow, after MATLAB's parula (whose table
-# is MathWorks' and is not copied): nine anchors drawn by eye.
+# blue-yellow: our own blue -> teal -> green -> yellow, after MATLAB's parula
+# (whose table is MathWorks' and is not copied): nine anchors drawn by eye.
 _BLUE_GREEN_YELLOW_ANCHORS = [
     [0.208, 0.166, 0.529], [0.012, 0.388, 0.882], [0.078, 0.522, 0.831],
     [0.024, 0.646, 0.765], [0.209, 0.719, 0.604], [0.553, 0.749, 0.396],
@@ -177,7 +177,8 @@ def cyclic(*colors: Sequence[float]) -> np.ndarray:
 # and swaps black with white while keeping saturated colours: so a diverging
 # ramp through black is the same ramp through white on white paper, and one
 # through white goes through black there.  Both are offered, in different
-# colours, so either background has a ramp through its own colour.
+# colours, so either background has a ramp through its own colour.  Names
+# give two colours, the ends, unless the middle is what tells two apart.
 _GROUPS = {
     "one colour": {
         "gray": _gray,
@@ -201,17 +202,19 @@ _GROUPS = {
         # turbo: unlike jet its lightness rises monotonically, unlike hsv the
         # two ends cannot be confused
         "rainbow": full_value(from_anchors(*_TURBO_ANCHORS)),
-        "blue-green-yellow": full_value(from_anchors(*_BLUE_GREEN_YELLOW_ANCHORS)),
-        "blue-magenta-yellow": full_value(from_anchors(*_PLASMA_ANCHORS)),
+        "blue-yellow": full_value(from_anchors(*_BLUE_GREEN_YELLOW_ANCHORS)),
+        "purple-yellow": full_value(from_anchors(*_PLASMA_ANCHORS)),
         "hue circle": _matlab_hsv(),
         # four hues a quarter apart, so the quadrants of an angle read at a
         # glance; hsv's bright yellow, cyan and magenta bands make edges where
         # the data have none
         "four-hue circle": full_value(cyclic([1, 0, 1], [1, .85, 0], [0, .9, .3],
                                              [0, .45, 1])),
-        # no blue, which is dark on black (lightness 32 of 100)
+        # the first two without blue, which is dark on black (lightness 32 of
+        # 100); the third the familiar one
         "magenta-black-green": from_anchors([1, 0, 1], [0, 0, 0], [0, 1, 0]),
         "purple-white-orange": from_anchors([.6, .2, 1], [1, 1, 1], [1, .5, 0]),
+        "blue-white-red": from_anchors([.15, .35, 1], [1, 1, 1], [1, .15, .1]),
     },
 }
 _TABLES: Dict[str, np.ndarray] = {name: table for group in _GROUPS.values()

@@ -71,8 +71,8 @@ def test_attribute_ramps_have_no_darkness_of_their_own_but_the_diverging_middle(
             assert value[0] == 1 and value[-1] == 1
             continue
         assert value.min() > 0.99, name
-    middle = luts.get("purple-white-orange")[127:129]
-    assert np.all(middle > 0.99)
+    for name in ("purple-white-orange", "blue-white-red"):
+        assert np.all(luts.get(name)[127:129] > 0.99), name
 
 
 def test_the_hue_circles_close_without_drawing_a_colour_twice():

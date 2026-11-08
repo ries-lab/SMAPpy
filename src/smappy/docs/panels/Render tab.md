@@ -523,10 +523,10 @@ would read as fewer localizations, so its ordered and circular ramps are
 scaled to full value -- each colour's brightest channel at 1 -- and
 rainbow's two ends, dark in the turbo table it comes from, are as bright as
 its middle.  The hue circles (hue circle, four-hue circle) return to their
-first colour, for angles.  The two diverging ramps go through black
-(magenta-black-green) or white (purple-white-orange) at the middle of the
-range, for a column about a middle value; neither uses blue, which is
-dark on black.
+first colour, for angles.  The diverging ramps go through black
+(magenta-black-green) or white (purple-white-orange, blue-white-red) at the
+middle of the range, for a column about a middle value; the first two avoid
+blue, which is dark on black.
 
 ```figure The LUTs by group.  The intensity ramps rise from black; the attribute ramps are shown as a column colours a picture, the colour across and the density falling from top to bottom, so a ramp with a dark part of its own would look sparse there.  Right: each on white paper, where the ramps of several colours run backwards from white.
 from smappy import lut as luts
