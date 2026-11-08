@@ -39,8 +39,8 @@ def test_merging_a_trace_averages_the_values_it_has_and_none_is_none():
 
 def test_colouring_by_a_column_draws_a_missing_value_grey_and_ranges_over_the_rest():
     values = np.array([0.0, np.nan, 1.0, np.inf])
-    colours = lut.colors(values, "hot", 0.0, 1.0)
-    table = lut.get("hot")
+    colours = lut.colors(values, "red hot", 0.0, 1.0)
+    table = lut.get("red hot")
     assert np.allclose(colours[0], table[0]) and np.allclose(colours[2], table[-1])
     assert np.allclose(colours[[1, 3]], lut.NO_VALUE)
     assert finite_range(values) == (0.0, 1.0) and finite_range([np.nan]) == (0.0, 1.0)

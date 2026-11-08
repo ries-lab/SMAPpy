@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -225,7 +225,7 @@ draw(axes[0], "Gaussian (precision)", fov=whole)
 draw(axes[1], "diffraction-limited", fov=whole, mode="dl")
 ```
 
-```figure Simulated tracks, 6 µm across, drawn as *tracks*: left in one colour, right coloured by frame, so each track runs from blue to red as it goes on and a crossing of two tracks at different times is told apart.
+```figure Simulated tracks, 6 µm across, drawn as *tracks*: left in one colour, right coloured by frame, so each track runs from purple through blue to red as it goes on and a crossing of two tracks at different times is told apart.
 from smappy.simulate import simulate_tracks
 from smappy.render import RenderSettings, DisplaySettings
 moving = simulate_tracks(n_frames=200, field_um=6.0, density_um2=0.1,
@@ -236,7 +236,7 @@ axes = fig.subplots(1, 2)
 for ax, colour in zip(axes, (None, "frame")):
     settings = RenderSettings(mode="tracks", track_column="track_id_true",
                               line_width=1.0, color_field=colour)
-    display = DisplaySettings(lut="hot" if colour is None else "jet", contrast=1.5)
+    display = DisplaySettings(lut="red hot" if colour is None else "rainbow", contrast=1.5)
     ax.imshow(display.apply(render_locs(moving, view, settings, display)),
               extent=view.extent)
     ax.set_title("one colour" if colour is None else "coloured by frame", fontsize=8)
@@ -268,10 +268,10 @@ draw(axes[3], "contrast 3, gamma 0.5", contrast=3.0, gamma=0.5)
 ```figure The whole field coloured by z: the ring is tilted, so its top and bottom lie at different depths, and the two lines are at slightly different heights.  The same on a white background, and the plain picture with the LUT inverted.
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
-by_z = dict(color_field="z_nm", color_range=(-300.0, 300.0), lut="turbo", contrast=2.0)
+by_z = dict(color_field="z_nm", color_range=(-300.0, 300.0), lut="rainbow", contrast=2.0)
 draw(axes[0], "colour by z_nm", whole, **by_z)
 draw(axes[1], "colour by z_nm, white background", whole, white_background=True, **by_z)
-draw(axes[2], "hot, inverted", whole, invert=True, contrast=2.0)
+draw(axes[2], "red hot, inverted", whole, invert=True, contrast=2.0)
 ```
 
 **6. Any attribute against any other.**  The *axes* section says which attribute
@@ -510,17 +510,62 @@ the plain count; the displayed hue is the average colour of the pixel and its
 brightness the count, put through contrast and gamma as above.  A dense pixel
 therefore keeps its hue instead of bleaching to white.  Choosing an attribute
 starts its range at its 0.5th to 99.5th percentile and switches the LUT to
-turbo; going back to intensity switches it to hot.  Because the colour is part
+rainbow; going back to intensity switches it to red hot.  Because the colour is part
 of the rendering here, changing the LUT of a coloured layer renders it again.
+
+**The LUTs.**  The list has three groups, the ones that suit how the layer
+is coloured first.  *One colour* (gray, red, green, ...) runs from black to
+the colour.  *Several colours* (red hot, blue cold, green cold, purple fire)
+runs from black through colours to white, its lightness rising all the way:
+summing the colour differences along the ramp (in CIE Lab), about three times
+as many steps can be told apart as on gray.  *Attribute* is for colouring by an attribute.
+Since the density multiplies the colour there, any darkness of the LUT's own
+would read as fewer localizations, so its ordered and circular ramps are
+scaled to full value -- each colour's brightest channel at 1 -- and
+rainbow's two ends, dark in the turbo table it comes from, are as bright as
+its middle.  The hue circles (hue circle, four-hue circle) return to their
+first colour, for angles.  The two diverging ramps go through black
+(magenta-black-green) or white (purple-white-orange) at the middle of the
+range, for an attribute about a middle value; neither uses blue, which is
+dark on black.
+
+```figure The LUTs by group.  The intensity ramps rise from black; the attribute ramps are shown as they colour a picture, the colour across and the density falling from top to bottom, so a ramp with a dark part of its own would look sparse there.  Right: each on white paper, where the ramps of several colours run backwards from white.
+from smappy import lut as luts
+rows = [(name, heading) for heading, names in luts.groups() for name in names]
+fig.set_size_inches(7.5, 0.24 * len(rows) + 0.3)
+axes = fig.subplots(len(rows), 2, gridspec_kw=dict(width_ratios=[3, 1], hspace=0.25,
+                                                    left=0.22, right=0.98))
+density = np.linspace(1.0, 0.0, 12)[:, None, None]
+for (name, heading), (left, right) in zip(rows, axes):
+    if heading == "attribute":
+        black = luts.get(name)[None] * density
+        white = luts.on_white(black)
+    else:
+        black = np.repeat(luts.get(name)[None], 12, axis=0)
+        white = luts.on_white(np.repeat(luts.intensity_table(name, white=True)[None], 12, axis=0))
+    left.imshow(black, aspect="auto")
+    right.imshow(white, aspect="auto")
+    left.set_ylabel(name, rotation=0, ha="right", va="center", fontsize=7)
+    for ax in (left, right):
+        ax.set_xticks([])
+        ax.set_yticks([])
+```
 
 **Inverting, and the white background.**  As in SMAP, *invert* depends on
 what the colour codes.  Colouring by intensity, with $c = (r, g, b)$ a LUT
 colour, it gives $\min(r + g + b - c, 1)$ per channel (SMAP's `lutinvert`):
-red becomes cyan, and hot runs black through cyan to white.  Colouring by an
+red becomes cyan.  On two layers in a colour and its opposite, equal
+intensities add up to grey.  Colouring by an
 attribute, the LUT is turned round, so the low values take its top end; the sum
 of a rainbow's channels would be no colour of it.  *white background* turns the brightness over and
 keeps the hue, $c + 1 - \max(c) - \min(c)$: black becomes white, a saturated
-red stays red.  It is applied once, to the sum of the layers.
+red stays red.  It is applied once, to the sum of the layers.  A
+*several colours* ramp would come out of it with its bright middle as it is
+-- red hot on white ran white, red, yellow, black -- so on white paper a
+ramp from black to white is drawn backwards instead: white for nothing,
+black for the most, through its colours in the opposite order.  The
+turn-over is its own inverse, which also makes a diverging ramp through
+black go through white on white paper, and the other way round.
 
 **Adding up layers.**  The RGB images of the visible layers are added and
 clipped at 1.  Two layers in red and green therefore show yellow where both
@@ -793,7 +838,7 @@ different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
 The first time a layer is set to *tracks*, and if it is not coloured by an
-attribute already, it is coloured by its track id on the *turbo* LUT, so that
+attribute already, it is coloured by its track id on the *rainbow* LUT, so that
 each track has a colour of its own; choose *intensity* to draw them all in
 one.  Choosing *tracks* also unticks *merge blinks* on that layer: merging joins a
 slow particle's localizations in consecutive frames into one, and the line
@@ -836,13 +881,16 @@ over that part.  Choosing an attribute in *colour by* starts from the same
 percentiles over all the layer's localizations.
 
 ### LUT
-Hot for intensity, turbo for an attribute.  For several layers, one pure colour
-each (red, green, cyan, magenta) adds up legibly.
+Red hot for intensity, rainbow for an attribute.  For several layers, one pure colour
+each (red, green, cyan, magenta) adds up legibly; red hot and blue cold do
+too, with more visible steps.  A diverging ramp suits an attribute with a
+meaningful middle, such as a difference; hue circle and four-hue circle an
+angle.
 
 ### invert
 By intensity, the opposite colour at the same brightness: red becomes cyan.
 By an attribute, the LUT turned round: on z, near and far swap colours.  For black
-on white, pick the gray_inverted LUT or *white background* instead.
+on white, use *white background* instead.
 
 ### contrast
 *quantile*: the default, 3.5, is a good start.  Too low, and the structure saturates into
@@ -907,7 +955,8 @@ brightness proportional to density.
 
 ### white background
 The picture on white paper, the hue kept: for figures and print.  It is set
-on every layer at once.
+on every layer at once.  A ramp of several colours is drawn backwards on it,
+white for no localizations.
 
 ### lines add up
 In *tracks* only, off by default.  Ticked, overlapping lines add as

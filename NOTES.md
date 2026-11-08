@@ -591,7 +591,7 @@ every filter and, online, every block, so an implicit range would give the same
 z a different colour each time.  Choosing a field therefore fills the range in
 from that field's 1--99% quantiles and leaves it there; a range typed for one
 field is not carried to the next, since a z slab means nothing for a frame
-number.  The LUT follows the choice (`hot` for intensity, `turbo` for a field),
+number.  The LUT follows the choice (`red hot` for intensity, `rainbow` for a field),
 because a coded field cannot be read off a brightness ramp.
 
 **Grouping is the one thing that cannot be extended.**  It links localizations

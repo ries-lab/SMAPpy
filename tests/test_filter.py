@@ -95,9 +95,9 @@ def test_field_colouring_uses_the_display_lut():
     f = LocFilter(locs, z_nm=(-400, 400))          # drops the NaN z values
     settings = RenderSettings(mode="hist", color_field="z_nm", color_range=(-400, 400))
 
-    img = render_locs(locs, fov, settings, DisplaySettings(lut="jet"), select=f)
+    img = render_locs(locs, fov, settings, DisplaySettings(lut="rainbow"), select=f)
     assert img.is_colored and img.n_locs == len(f)
-    rgb = DisplaySettings(lut="jet").apply(img)
+    rgb = DisplaySettings(lut="rainbow").apply(img)
     assert rgb.shape == (fov.ny, fov.nx, 3) and rgb.max() <= 1.0
     # an intensity render of the same selection carries the same weight plane
     plain = render_locs(locs, fov, RenderSettings(mode="hist"), select=f)
