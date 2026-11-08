@@ -44,7 +44,8 @@ ROWS = (("conversion", "conversion", "e-/ADU"),
         ("read_noise_e", "read noise", "e-"),
         ("exposure_ms", "exposure", "ms"),
         ("frame_time_ms", "frame time", "ms"),
-        ("roi", "camera ROI", "px"))
+        ("roi", "camera ROI", "px"),
+        ("noise_map", "noise map", "file"))
 
 SOURCES = (("fixed", "fixed"), ("tag", "from a tag"),
            ("state", "per readout mode"), ("none", "not set"))
@@ -161,6 +162,8 @@ class _Row:
             return None
         if self.name == "em_on":
             return camera_db.read_boolean(text)
+        if self.name == "noise_map":
+            return text                                  # a file's path
         if self.name in ("pixelsize_um", "roi"):
             numbers = camera_db.read_numbers(text)
             if numbers is None:
@@ -199,6 +202,9 @@ _VALUE_HELP = {
     "read_noise_e": "rms per pixel, in electrons: about 1 for an sCMOS; "
                     "not set, 1 -- and with EM gain on it is not used",
     "roi": "x, y, width, height on the chip",
+    "noise_map": "an sCMOS's offset and read noise per pixel, a file written by "
+                 "Localize > Camera noise calibration, which also enters it here; "
+                 "used by a fit with per-pixel noise on",
     "frame_time_ms": "from one frame to the next: the exposure plus the "
                      "camera's dead time; not set, the exposure",
 }

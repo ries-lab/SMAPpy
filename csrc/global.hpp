@@ -102,10 +102,14 @@ inline void mirror_upper(float* m, int nv) {
 // sums are accumulated in the reference's order and not merely its value.
 // GlobLoc's `newDudtAll` is (C, nv) and mostly zeros; `g` keeps a channel's
 // P nonzero entries and `at` where they go.
-template <class Model>
+//
+// With `PerPixel`, `var[c]` is channel c's read-noise variance per pixel,
+// added to the model here and to the data by the caller (`lm.hpp`).
+template <class Model, bool PerPixel = false>
 inline void accumulate_global(const Model* models, const float* const* data, int sz,
                               const Link& link, const float* theta, float* err,
-                              float* jacobian, float* hessian) {
+                              float* jacobian, float* hessian,
+                              const float* const* var = nullptr) {
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
     float dudt[P], g[MAX_CHANNELS][P];
@@ -125,6 +129,7 @@ inline void accumulate_global(const Model* models, const float* const* data, int
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
+                if constexpr (PerPixel) mu[c] += var[c][iy * sz + ix];
                 mu[c] = std::max(mu[c], MIN_MODEL);    // see lm.hpp's accumulate
                 chain_sparse<P>(link, dudt, c, g[c]);
                 d[c] = data[c][iy * sz + ix];
@@ -155,10 +160,10 @@ inline void accumulate_global(const Model* models, const float* const* data, int
     mirror_upper(hessian, nv);
 }
 
-template <class Model>
+template <class Model, bool PerPixel = false>
 inline void crlb_and_logl_global(const Model* models, const float* const* data, int sz,
                                  const Link& link, const float* theta, float* crlb,
-                                 float* logl) {
+                                 float* logl, const float* const* var = nullptr) {
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
     float M[MAX_GLOBAL_NV * MAX_GLOBAL_NV] = {0}, Minv[MAX_GLOBAL_NV * MAX_GLOBAL_NV] = {0};
@@ -176,6 +181,7 @@ inline void crlb_and_logl_global(const Model* models, const float* const* data, 
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
+                if constexpr (PerPixel) mu[c] += var[c][iy * sz + ix];
                 mu[c] = std::max(mu[c], MIN_MODEL);    // as in the fit
                 chain_sparse<P>(link, dudt, c, g[c]);
                 d[c] = data[c][iy * sz + ix];
@@ -222,11 +228,15 @@ inline void clamp_global(const Model* models, const Link& link, int sz, float* g
 }
 
 // Fit one emitter across `C` channels.  `global` and `crlb` need `link.nv`
-// entries; `models[c]` and `data[c]` are that channel's PSF and ROI.
-template <class Model>
+// entries; `models[c]` and `data[c]` are that channel's PSF and ROI.  With
+// `PerPixel`, `var[c]` its read-noise variance per pixel, already in `data[c]`;
+// `light[c]`, the data without it, is what the starts and the check read.
+template <class Model, bool PerPixel = false>
 inline void global_fit(const Model* models, const float* const* data, int sz,
                        const Link& link, int iterations, float* global, float* crlb,
-                       float* logl, int* used_iterations) {
+                       float* logl, int* used_iterations,
+                       const float* const* var = nullptr,
+                       const float* const* light = nullptr) {
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
 
@@ -236,9 +246,10 @@ inline void global_fit(const Model* models, const float* const* data, int sz,
     // NaN, which `locs.valid` drops.  This used to happen by accident, the
     // model going non-positive and d / mu^2 dividing by it; the guarded
     // expected information no longer does, so it is asked for here.
+    const float* const* seen = PerPixel ? light : data;
     for (int c = 0; c < C; ++c) {
         float sum = 0.0f;
-        for (int i = 0; i < sz * sz; ++i) sum += data[c][i];
+        for (int i = 0; i < sz * sz; ++i) sum += seen[c][i];
         if (!(sum > 0.0f)) {
             const float nan = std::numeric_limits<float>::quiet_NaN();
             for (int i = 0; i < nv; ++i) global[i] = crlb[i] = nan;
@@ -268,7 +279,7 @@ inline void global_fit(const Model* models, const float* const* data, int sz,
     float start[P * MAX_CHANNELS], jump[P * MAX_CHANNELS];
     for (int c = 0; c < C; ++c) {
         for (int p = 0; p < P; ++p) jump[c * P + p] = 1.0f;
-        models[c].init(data[c], sz, start + c * P, jump + c * P);
+        models[c].init(seen[c], sz, start + c * P, jump + c * P);
     }
     for (int p = 0; p < P; ++p)
         for (int c = 0; c < C; ++c) {
@@ -285,7 +296,8 @@ inline void global_fit(const Model* models, const float* const* data, int sz,
     float new_err = 0.0f, old_err = 1e13f;
     int err_flag = 0;
 
-    accumulate_global(models, data, sz, link, theta, &new_err, jacobian, hessian);
+    accumulate_global<Model, PerPixel>(models, data, sz, link, theta, &new_err, jacobian,
+                                       hessian, var);
 
     int k = 0;
     for (; k < iterations; ++k) {
@@ -334,12 +346,13 @@ inline void global_fit(const Model* models, const float* const* data, int sz,
         clamp_global<Model>(models, link, sz, global);
 
         expand<P>(link, global, theta);
-        accumulate_global(models, data, sz, link, theta, &new_err, jacobian, hessian);
+        accumulate_global<Model, PerPixel>(models, data, sz, link, theta, &new_err, jacobian,
+                                       hessian, var);
     }
 
     *used_iterations = k;
     expand<P>(link, global, theta);
-    crlb_and_logl_global(models, data, sz, link, theta, crlb, logl);
+    crlb_and_logl_global<Model, PerPixel>(models, data, sz, link, theta, crlb, logl, var);
 }
 
 }  // namespace smappy

@@ -21,7 +21,7 @@ remainder goes to the fitter as an offset in its link, which keeps the Poisson l
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -62,6 +62,9 @@ class PairedROIs:
     candidates: Candidates          # the reference channel's integer position
     roisize: int
     residual: np.ndarray            # (n, channels, 2) sub-pixel dx, dy
+    #: the read noise's variance per pixel of every ROI, as ``images``, with a
+    #: noise map (`scmos`); None with one variance for the chip
+    variance: Optional[np.ndarray] = None
 
     def __len__(self) -> int:
         return self.images.shape[0]
@@ -206,4 +209,5 @@ def _concat_pairs(parts: List[PairedROIs]) -> PairedROIs:
         Candidates(*(np.concatenate([getattr(p.candidates, name) for p in parts])
                      for name in ("frame", "x", "y", "value"))),
         parts[0].roisize,
-        np.concatenate([p.residual for p in parts]))
+        np.concatenate([p.residual for p in parts]),
+        None if parts[0].variance is None else np.concatenate([p.variance for p in parts]))

@@ -16,6 +16,12 @@ table.
 NaN is excluded by any range, because a comparison against NaN is false.  That
 is deliberate: a localization with no z should not appear in a z slab.
 
+**Inverted ranges.**  A range can be inverted (`set(..., invert=True)`): it
+then keeps exactly what it would otherwise throw away -- outside the bounds,
+and NaN -- while every other range keeps its usual sense.  It is for looking
+at what one filter removes on the background of the others, and it is a
+property of the range, not a second filter: removing the range removes it.
+
 **Spans.**  A filter can be restricted to row spans (`restrict`): every
 range is then tested on those rows only and the rest are False, without
 reading them.  It is what a layer showing one file of several does
@@ -50,6 +56,7 @@ class LocFilter:
         self._n = len(locs)
         self._ranges: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
         self._masks: Dict[str, np.ndarray] = {}
+        self._inverted: set = set()
         self._combined: Optional[np.ndarray] = None
         self._indices: Optional[np.ndarray] = None
         self._spans: Optional[List[Tuple[int, int]]] = self._clean(spans)
@@ -58,12 +65,17 @@ class LocFilter:
 
     # ------------------------------------------------------------- setting up
     def set(self, field: str, lo: Optional[float] = None,
-            hi: Optional[float] = None) -> "LocFilter":
+            hi: Optional[float] = None, invert: bool = False) -> "LocFilter":
         """Keep localizations with ``lo <= field <= hi``; ``None`` is unbounded.
+        ``invert`` keeps the others instead: outside the range, and NaN.
 
         Only this field's array is recomputed.
         """
         self._ranges[field] = (lo, hi)
+        if invert:
+            self._inverted.add(field)
+        else:
+            self._inverted.discard(field)
         self._masks[field] = self._range_mask(field, lo, hi)
         return self._invalidate()
 
@@ -72,14 +84,15 @@ class LocFilter:
         """The mask for one range, over the rows from ``start`` on -- inside
         the spans only, when the filter is restricted to some."""
         column = self._locs[field]          # raises if the column does not exist
+        invert = field in self._inverted
         if self._spans is not None:
             mask = np.zeros(len(column) - start, dtype=bool)
             for a, b in self._spans:
                 a, b = max(a, start), b
                 if a < b:
-                    mask[a - start:b - start] = _in_range(column[a:b], lo, hi)
+                    mask[a - start:b - start] = _in_range(column[a:b], lo, hi, invert)
             return mask
-        return _in_range(column[start:], lo, hi)
+        return _in_range(column[start:], lo, hi, invert)
 
     @staticmethod
     def _clean(spans) -> Optional[List[Tuple[int, int]]]:
@@ -132,17 +145,20 @@ class LocFilter:
         if mask.shape != (self._n,):
             raise ValueError(f"a mask must have {self._n} entries, got {mask.shape}")
         self._ranges.pop(name, None)
+        self._inverted.discard(name)
         self._masks[name] = mask
         return self._invalidate()
 
     def remove(self, name: str) -> "LocFilter":
         self._masks.pop(name, None)
         self._ranges.pop(name, None)
+        self._inverted.discard(name)
         return self._invalidate()
 
     def clear(self) -> "LocFilter":
         self._masks.clear()
         self._ranges.clear()
+        self._inverted.clear()
         return self._invalidate()
 
     def _invalidate(self) -> "LocFilter":
@@ -215,6 +231,11 @@ class LocFilter:
     def ranges(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
         return dict(self._ranges)
 
+    @property
+    def inverted(self) -> frozenset:
+        """The fields whose range is inverted (`set`'s ``invert``)."""
+        return frozenset(self._inverted)
+
     def __len__(self) -> int:
         if self._spans is not None:
             return int(len(self.indices))
@@ -253,7 +274,7 @@ class LocFilter:
         for name in self._masks:
             lo, hi = self._ranges.get(name, (None, None))
             if name in self._ranges:
-                parts.append(f"{name} "
+                parts.append(f"{'not ' if name in self._inverted else ''}{name} "
                              f"[{'' if lo is None else f'{lo:g}'}"
                              f"..{'' if hi is None else f'{hi:g}'}]")
             else:
@@ -261,12 +282,17 @@ class LocFilter:
         return (f"{len(self)} of {self._n} localizations: " + ", ".join(parts))
 
 
-def _in_range(values: np.ndarray, lo: Optional[float], hi: Optional[float]) -> np.ndarray:
+def _in_range(values: np.ndarray, lo: Optional[float], hi: Optional[float],
+              invert: bool = False) -> np.ndarray:
+    """``lo <= values <= hi``, or -- inverted -- every value that fails it,
+    NaN included: what the range throws away, exactly."""
     mask = np.ones(values.shape[0], dtype=bool)
     if lo is not None:
         mask &= values >= lo
     if hi is not None:
         mask &= values <= hi
+    if invert:
+        np.logical_not(mask, out=mask)
     return mask
 
 

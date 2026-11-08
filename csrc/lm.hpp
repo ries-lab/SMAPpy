@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "linalg.hpp"
 
@@ -25,12 +26,20 @@ constexpr float SCALE_DOWN = 0.1f;
 constexpr float ACCEPTANCE = 1.5f;
 constexpr float MIN_MODEL = 1e-3f;  // photons: the model's floor; see accumulate
 
+// The read noise of an sCMOS, per pixel (Huang et al. 2013): its variance v_i
+// is added to the data by the caller and to the model here, mu_i + v_i, so
+// that the Poisson likelihood approximates Poisson plus Gaussian noise pixel
+// by pixel.  With one variance for the whole chip the fitted background takes
+// it instead (`pipeline.with_readout`), and no map is passed.  A compile-time
+// switch rather than a test of the pointer, so that the fit without a map is
+// the code it was before the map existed.
+//
 // Accumulate the Poisson log-likelihood error, its gradient and the
 // Hessian (the expected information, see below) over all pixels of the ROI.
-template <class Model>
+template <class Model, bool PerPixel = false>
 inline void accumulate(const Model& model, const float* data, int sz,
                        const float* theta, float* err, float* jacobian,
-                       float* hessian) {
+                       float* hessian, const float* var = nullptr) {
     constexpr int NV = Model::NV;
     float dudt[NV], mu;
 
@@ -42,6 +51,7 @@ inline void accumulate(const Model& model, const float* data, int sz,
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             model.value(ix, iy, theta, dudt, &mu);
+            if constexpr (PerPixel) mu += var[iy * sz + ix];
             // A spline may dip a little below zero between knots next to a
             // PSF clipped at zero (`calibrate.core.positive_pair_models`);
             // with the background low, the model would too, and its log is
@@ -76,9 +86,10 @@ inline void accumulate(const Model& model, const float* data, int sz,
 }
 
 // Fisher information -> Cramer-Rao lower bounds, plus the log-likelihood.
-template <class Model>
+template <class Model, bool PerPixel = false>
 inline void crlb_and_logl(const Model& model, const float* data, int sz,
-                          const float* theta, float* crlb, float* logl) {
+                          const float* theta, float* crlb, float* logl,
+                          const float* var = nullptr) {
     constexpr int NV = Model::NV;
     float M[NV * NV] = {0}, Minv[NV * NV] = {0}, dudt[NV], mu;
     float div = 0.0f;
@@ -87,6 +98,7 @@ inline void crlb_and_logl(const Model& model, const float* data, int sz,
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             model.value(ix, iy, theta, dudt, &mu);
+            if constexpr (PerPixel) mu += var[iy * sz + ix];
             mu = std::max(mu, MIN_MODEL);          // as in accumulate
             const float d = data[iy * sz + ix];
 
@@ -109,9 +121,12 @@ inline void crlb_and_logl(const Model& model, const float* data, int sz,
 }
 
 // Fit one ROI.  `theta` and `crlb` must have room for Model::NV values.
-template <class Model>
+// With `PerPixel`, `var` is the ROI's read-noise variance (sz * sz), already
+// added to `data` (see accumulate).
+template <class Model, bool PerPixel = false>
 inline void lm_fit(const Model& model, const float* data, int sz, int iterations,
-                   float* theta, float* crlb, float* logl, int* used_iterations) {
+                   float* theta, float* crlb, float* logl, int* used_iterations,
+                   const float* var = nullptr) {
     constexpr int NV = Model::NV;
 
     float old_theta[NV], maxjump[NV];
@@ -125,14 +140,22 @@ inline void lm_fit(const Model& model, const float* data, int sz, int iterations
         maxjump[i] = 1.0f;
     }
 
-    model.init(data, sz, theta, maxjump);
+    if constexpr (PerPixel) {
+        // the start reads the data as the model sees them: without the
+        // variance, which the background no longer takes
+        std::vector<float> light(data, data + sz * sz);
+        for (int i = 0; i < sz * sz; ++i) light[i] -= var[i];
+        model.init(light.data(), sz, theta, maxjump);
+    } else {
+        model.init(data, sz, theta, maxjump);
+    }
     for (int i = 0; i < NV; ++i) old_theta[i] = theta[i];
 
     float new_lambda = INIT_LAMBDA, old_lambda = INIT_LAMBDA, mu = 1.0f;
     float new_err = 0.0f, old_err = 1e13f;
     int err_flag = 0;
 
-    accumulate(model, data, sz, theta, &new_err, jacobian, hessian);
+    accumulate<Model, PerPixel>(model, data, sz, theta, &new_err, jacobian, hessian, var);
 
     int k = 0;
     for (; k < iterations; ++k) {
@@ -182,11 +205,11 @@ inline void lm_fit(const Model& model, const float* data, int sz, int iterations
         }
         model.clamp(theta, sz);
 
-        accumulate(model, data, sz, theta, &new_err, jacobian, hessian);
+        accumulate<Model, PerPixel>(model, data, sz, theta, &new_err, jacobian, hessian, var);
     }
 
     *used_iterations = k;
-    crlb_and_logl(model, data, sz, theta, crlb, logl);
+    crlb_and_logl<Model, PerPixel>(model, data, sz, theta, crlb, logl, var);
 }
 
 }  // namespace smappy

@@ -353,6 +353,15 @@ corrects z as well.
 Large enough to hold the spot and some background around it: about 7 PSF
 widths.  Larger boxes catch more neighbours.
 
+### fit.per_pixel_noise
+For an sCMOS: each pixel's own offset and read noise, from the noise map of
+the file's camera and readout mode, which
+[Camera noise calibration](plugin:Localize/Camera noise calibration) makes from
+a dark movie.  It helps most at low backgrounds and near hot pixels, costs
+about 1 % of the fitting time, and the precisions then account for each
+pixel's noise.  Without a map for the readout mode, or with frames outside the
+map, the fit is refused and the form says why.
+
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a

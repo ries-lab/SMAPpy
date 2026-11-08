@@ -768,6 +768,11 @@ class _FitPlugin(Plugin):
         except Exception:
             pass
         try:
+            if state.notice is None:
+                state.notice = self._noise_notice(settings)
+        except Exception:
+            pass
+        try:
             self._calibration_form(settings, state)
         except Exception:
             pass
@@ -880,6 +885,23 @@ class _FitPlugin(Plugin):
                      f"{'is' if len(unknown) == 1 else 'are'} not known." if unknown
                      else "; the values below are used.")
             return Notice(text, "Add readout mode...", "camera editor")
+        return None
+
+    def _noise_notice(self, settings) -> Optional[Notice]:
+        """With *per-pixel noise* on, what stands in its way, said before the run:
+        no map for this readout mode, or a map that does not cover the file's frames
+        (every channel of a split chip lies in them)."""
+        if not getattr(settings.fit, "per_pixel_noise", False):
+            return None
+        resolved = self.resolution(settings)
+        if resolved is None:
+            return None
+        camera = resolved.camera_metadata()
+        try:
+            from ..scmos import for_frames
+            for_frames(camera, _open(settings.source, watch=False).shape[-2:])
+        except Exception as error:
+            return Notice(str(error))
         return None
 
     def _camera_title(self, settings) -> str:
@@ -1112,7 +1134,12 @@ class _FitPlugin(Plugin):
         finder = self.region_finder(settings, camera)
 
         raw = source.frame(index)
-        photons = to_photons(raw, camera)/camera.excess_noise
+        if getattr(fit, "per_pixel_noise", False):
+            # as the run reads them: each pixel's own offset off (the frame whole, cut after)
+            from ..scmos import for_frames
+            photons = for_frames(camera, raw.shape).to_photons(raw, camera.adu_to_photons)
+        else:
+            photons = to_photons(raw, camera)/camera.excess_noise
         channels = getattr(settings, "channels", None)
         if self.channel_part == "choice" and channels.two:
             # each channel on its own, drawn back on the frame
@@ -1930,6 +1957,18 @@ def focus_plot(found, settings):
     return draw
 
 
+def channel_photons(frames, camera, settings, source) -> np.ndarray:
+    """A `channels.ChannelSource`'s block (n, C, h, w) in photons, as the run reads it: with
+    *per-pixel noise*, each pixel's own offset off, the map cut into the channels as the frames
+    are (`scmos.for_layout`)."""
+    from ..camera import to_photons
+    if getattr(settings.fit, "per_pixel_noise", False):
+        from ..scmos import for_layout
+        noise = for_layout(camera, source.layout, source.base.shape[-2:])
+        return noise.to_photons(frames, camera.adu_to_photons)
+    return to_photons(frames, camera) / camera.excess_noise
+
+
 def sample_rois(source, camera, finder, roisize: int, src) -> np.ndarray:
     """The spots of `AUTO_FOCUS_BLOCKS` blocks of frames spread over the source's range, as the fit
     cuts them: photons with the read noise's variance added (`pipeline.with_readout`)."""
@@ -2250,7 +2289,7 @@ class _TwoChannelFit(_FitPlugin):
                 return in_region(on[:, 0], on[:, 1], shapes)
         return MultiChannelEngine(camera, finder, model, source.layout, settings.fit,
                                   detection="pairs", photon_factors=self.photon_factors(settings),
-                                  select=select)
+                                  select=select, frame_shape=source.base.shape[-2:])
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """`_layer_preview`; with the registration's *from this movie* ticked, on the registration measured
@@ -2286,7 +2325,6 @@ class _TwoChannelFit(_FitPlugin):
         the second channel's peaks put there by the registration, the cheapest check of it there
         is; and the fitted positions in both.  Without a registration, the frame as the camera
         wrote it."""
-        from ..camera import to_photons
         from . import ShapeEdit
         src = settings.source
         if not src.path:
@@ -2304,7 +2342,7 @@ class _TwoChannelFit(_FitPlugin):
             raise ValueError(f"could not read the camera from {src.path}")
         camera.require("conversion", "offset")
         raw = source.frame(index)
-        channels = to_photons(raw[None], camera) / camera.excess_noise
+        channels = channel_photons(raw[None], camera, settings, source)
         finder = self.finder(settings, camera)
         found, cutoffs = [], []
         for c, (w, h) in enumerate(layout.sizes):

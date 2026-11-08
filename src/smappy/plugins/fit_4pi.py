@@ -29,7 +29,7 @@ import numpy as np
 
 from ..channels import FourPiChannelsSettings
 from . import Context, FormState, Notice, Plot, Result, param, register
-from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata)
+from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata, channel_photons)
 
 MODEL_FILTER = "4Pi models (*.h5)"
 REGISTRATION_FILTER = "Channel registrations (*.json)"
@@ -257,7 +257,8 @@ class FourPiFit(_FitPlugin):
         source = self.open_source(settings)
         drift = (self.channel_drift(settings, camera, finder, source)
                  if settings.model.channel_drift else None)
-        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift)
+        return MultiChannelEngine(camera, finder, model, source.layout, settings.fit, drift,
+                                  frame_shape=source.base.shape[-2:])
 
     def channel_drift(self, settings, camera, finder, source):
         """The channels' drift, from blocks of frames spread over the
@@ -275,7 +276,8 @@ class FourPiFit(_FitPlugin):
         free = Global4PiPSF(self._calibration(settings), shared=(False, False, True, False,
                                                                  True, True),
                             n_starts=int(settings.model.starts))
-        engine = MultiChannelEngine(camera, finder, free, source.layout, settings.fit)
+        engine = MultiChannelEngine(camera, finder, free, source.layout, settings.fit,
+                                    frame_shape=source.base.shape[-2:])
         parts = []
         for first in starts:
             drive(engine, source.frames(chunk=src.chunk, start=int(first),
@@ -312,7 +314,6 @@ class FourPiFit(_FitPlugin):
         panel a fit region is drawn on, drawn where the main channel lies on
         the frame, as for a whole-chip fit -- and each channel with the
         positions fitted there."""
-        from ..camera import to_photons
         from ..multichannel import MultiChannelEngine, detection_image
         from . import ShapeEdit
         src = settings.source
@@ -326,7 +327,7 @@ class FourPiFit(_FitPlugin):
             raise ValueError(f"could not read the camera from {src.path}")
         camera.require("conversion", "offset")
         raw = source.frame(index)
-        channels = to_photons(raw[None], camera) / camera.excess_noise
+        channels = channel_photons(raw[None], camera, settings, source)
         summed = detection_image(channels, layout)
         finder = self.region_finder(settings, camera)
         candidates, _ = finder(summed, first_frame=index)
@@ -338,7 +339,8 @@ class FourPiFit(_FitPlugin):
         except Exception as error:
             text += f"; not fitted -- {error}"
         else:
-            engine = MultiChannelEngine(camera, finder, model, layout, settings.fit)
+            engine = MultiChannelEngine(camera, finder, model, layout, settings.fit,
+                                        frame_shape=source.base.shape[-2:])
             engine.push(raw[None], index)
             fitted = engine.flush()
             text += f", {0 if fitted is None else len(fitted)} fitted"

@@ -62,6 +62,10 @@ class CameraMetadata:
     frame_time_ms: Optional[float] = None
     # rms read noise, e-; None: the default of `readout_variance`
     read_noise_e: Optional[float] = None
+    # the file of this readout mode's sCMOS noise map (`smappy.scmos`): each
+    # pixel's offset and read noise.  Used only when a fit asks for it
+    # (`FitSettings.per_pixel_noise`)
+    noise_map: Optional[str] = None
     camera_name: Optional[str] = None
     comment: str = ""
     # the microscope that took the file, as `microscope_db` resolved it: its

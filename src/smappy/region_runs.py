@@ -472,10 +472,14 @@ def _layer_inputs(lay) -> Dict[str, Any]:
     skip = set(unmeasured(lay.state.tables.locs))
     ranges = {f: b for f, b in lay.ranges.items() if f not in skip}
     grouped = lay.state.tables.peek_grouped() if lay.grouped else None
-    return {"filters": {f: b for f, b in ranges.items() if f in lay.state.tables.locs},
-            "grouped_filters": None if grouped is None else
-            {f: b for f, b in ranges.items() if f in grouped.locs},
-            "shows": "grouped" if lay.grouped else "ungrouped"}
+    out = {"filters": {f: b for f, b in ranges.items() if f in lay.state.tables.locs},
+           "grouped_filters": None if grouped is None else
+           {f: b for f, b in ranges.items() if f in grouped.locs},
+           "shows": "grouped" if lay.grouped else "ungrouped"}
+    turned = sorted(f for f in lay.inverted if f in ranges)
+    if turned:              # only when there is one: older signatures stay current
+        out["inverted"] = turned
+    return out
 
 
 # --------------------------------------------------------------- the runner
@@ -613,10 +617,11 @@ class RegionScratch:
             mask = np.ones(len(new), dtype=bool)
             if self.session is not None and i < len(self.session.layers):
                 ranges = self.session.layers[i].ranges
+                turned = self.session.layers[i].inverted
                 f = LocFilter(new)
                 for name, (lo, hi) in ranges.items():
                     if name in new:
-                        f.set(name, lo, hi)
+                        f.set(name, lo, hi, invert=name in turned)
                 mask = np.asarray(f.mask, dtype=bool)
             old = entry["ungrouped"][1]
             entry.clear()
