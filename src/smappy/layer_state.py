@@ -597,12 +597,16 @@ class ViewState:
         self.use_grouped = False
         # the user's setting: field -> (lo, hi), one dict for both tables
         self._ranges: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        # the bounds turned around: what each throws away is kept instead
+        # (`LocFilter.set`'s ``invert``), only ever of a field in `_ranges`
+        self._inverted: set = set()
         self._files: Optional[List[int]] = None     # file numbers shown; None = all
         # "ungrouped"/"grouped" -> (the LocSet it was built over, its filter):
         # derived from the bounds, never edited on its own
         self._filters: Dict[str, Tuple[LocSet, LocFilter]] = {}
         if filter is not None:
             self._ranges = dict(filter.ranges)
+            self._inverted = set(filter.inverted)
 
     # ------------------------------------------------------------- the bounds
     @property
@@ -614,29 +618,50 @@ class ViewState:
         grouped = self.tables.peek_grouped()
         return field in self.tables.locs or (grouped is not None and field in grouped.locs)
 
-    def set_bound(self, field: str, lo: Optional[float], hi: Optional[float]) -> None:
+    @property
+    def inverted(self) -> frozenset:
+        """The bounded fields whose bound is inverted: the layer keeps what
+        that bound throws away, under the other bounds as they are."""
+        return frozenset(self._inverted)
+
+    def set_bound(self, field: str, lo: Optional[float], hi: Optional[float],
+                  invert: Optional[bool] = None) -> None:
         """Keep ``lo <= field <= hi`` on whichever table is shown.  A field
-        neither table has is ignored, as a filter on it would raise."""
+        neither table has is ignored, as a filter on it would raise.
+        ``invert`` turns the bound around; None leaves it as it was, so a
+        bound dragged while inverted stays inverted."""
         if not self._has(field):
             return
         self._ranges[field] = (lo, hi)
+        if invert is not None:
+            (self._inverted.add if invert else self._inverted.discard)(field)
         self.catch_up()            # a mask over every row, not over the old ones
         for locset, f in self._filters.values():
             if field in locset.locs:
-                f.set(field, lo, hi)
+                f.set(field, lo, hi, invert=field in self._inverted)
+
+    def invert_bound(self, field: str, on: bool) -> None:
+        """Turn a bound around, or back; a field without a bound has
+        nothing to invert and is left alone."""
+        if field in self._ranges:
+            self.set_bound(field, *self._ranges[field], invert=on)
 
     def remove_bound(self, field: str) -> None:
         self._ranges.pop(field, None)
+        self._inverted.discard(field)
         for _locset, f in self._filters.values():
             f.remove(field)
 
-    def set_ranges(self, ranges: Dict[str, Tuple]) -> None:
-        """Replace every bound -- a config, a copy of another layer's.  Nothing
-        is rebuilt when they are the ones already set."""
+    def set_ranges(self, ranges: Dict[str, Tuple], inverted=()) -> None:
+        """Replace every bound -- a config, a copy of another layer's -- and
+        which of them are inverted (none unless named: a config is the whole
+        filter).  Nothing is rebuilt when they are the ones already set."""
         wanted = {f: (lo, hi) for f, (lo, hi) in ranges.items() if self._has(f)}
-        if wanted == self._ranges:
+        turned = {f for f in inverted if f in wanted}
+        if wanted == self._ranges and turned == self._inverted:
             return
         self._ranges = wanted
+        self._inverted = turned
         self._filters.clear()
 
     @property
@@ -697,7 +722,7 @@ class ViewState:
             f = LocFilter(locset.locs, spans=self._spans(locset))
             for field, (lo, hi) in self._ranges.items():
                 if field in locset.locs:
-                    f.set(field, lo, hi)
+                    f.set(field, lo, hi, invert=field in self._inverted)
             self._files_mask(locset, f)
             self._filters[kind] = (locset, f)
             return f
@@ -721,7 +746,7 @@ class ViewState:
         for locset, f in self._filters.values():
             for name in names:
                 if name in self._ranges and name in locset.locs:
-                    f.set(name, *self._ranges[name])
+                    f.set(name, *self._ranges[name], invert=name in self._inverted)
 
     def rebind(self, tables: Tables) -> None:
         """Look at another table, keeping the bounds the user set -- those its
@@ -730,6 +755,7 @@ class ViewState:
         tables._views.add(self)
         self._filters.clear()
         self._ranges = {f: b for f, b in self._ranges.items() if f in tables.locs}
+        self._inverted &= set(self._ranges)
 
     # ------------------------------------------------------- the active table
     @property

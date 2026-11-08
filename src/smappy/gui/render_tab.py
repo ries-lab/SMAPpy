@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QIcon, QImage, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -65,6 +65,12 @@ RENDER_MODES: Tuple[Tuple[str, str], ...] = (
 QUICK_TEXT_WIDTH = 64       # px: a bounded column's button, its name elided to this
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
+# an inverted bound, wherever it is named: a mid red that reads on a light and
+# a dark window alike, so a layer showing what a filter throws away is never
+# mistaken for one showing what it keeps
+INVERTED_COLOUR = "#e0453a"
+REGION_BRUSH = (60, 120, 220, 50)
+INVERTED_BRUSH = (224, 69, 58, 50)
 
 
 
@@ -152,9 +158,11 @@ def widen_handles(region: pg.LinearRegionItem) -> None:
         line.prepareGeometryChange()
 
 
-def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]]) -> str:
+def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]],
+                inverted=()) -> str:
     """The bounds as one line of links: ``xy_err_nm <= 25 x``, ``-500 <= z_nm
-    <= 500 x``; each name edits its bound, each cross removes it."""
+    <= 500 x``; each name edits its bound, each cross removes it.  An
+    inverted bound is ``not (...)``, in red."""
     if not bounds:
         return "<span style='color: gray'>no filter</span>"
     parts = []
@@ -165,7 +173,11 @@ def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]]) -> s
             text = f"{name} \u2264 {hi:g}"
         else:
             text = f"{name} \u2265 {lo:g}"
-        parts.append(f"<a href='edit:{name}' style='text-decoration: none'>{text}</a>"
+        style = "text-decoration: none"
+        if name in inverted:
+            text = f"<b>not</b> ({text})"
+            style += f"; color: {INVERTED_COLOUR}"
+        parts.append(f"<a href='edit:{name}' style='{style}'>{text}</a>"
                      f"&nbsp;<a href='remove:{name}' style='text-decoration: none; "
                      f"color: gray'>\u00d7</a>")
     return "&nbsp;&nbsp; ".join(parts)
@@ -252,7 +264,7 @@ class FilterWidget(QWidget):
                                      brush=(120, 120, 120, 160),
                                      fillLevel=0, stepMode="center")
         self.plot.addItem(self.bars)
-        self.region = pg.LinearRegionItem(brush=(60, 120, 220, 50))
+        self.region = pg.LinearRegionItem(brush=REGION_BRUSH)
         widen_handles(self.region)
         self.plot.addItem(self.region)
         layout.addWidget(self.plot)
@@ -266,6 +278,15 @@ class FilterWidget(QWidget):
         self.clear = QPushButton("clear")
         self.clear.setToolTip("no bounds on this field")
         numbers.addWidget(self.clear)
+        # Turns this field's bound around: the layer then shows what the bound
+        # throws away, under every other bound as it is -- the quickest look
+        # at what a filter costs.  A property of the bound, so clearing the
+        # bound clears it, and moving the range keeps it.
+        self.invert = QCheckBox("invert")
+        self.invert.setToolTip("show what this bound throws away (outside the "
+                               "range, and no value), the other bounds as they are")
+        self.invert.toggled.connect(self._on_invert)
+        numbers.addWidget(self.invert)
         numbers.addStretch(1)
         layout.addLayout(numbers)
 
@@ -317,6 +338,15 @@ class FilterWidget(QWidget):
             self._select(first)
         self._show_field()
 
+    def _quick_style(self, name: str) -> str:
+        """A quick button's look: bold while its field is bounded, red too
+        while that bound is inverted -- seen at a glance on the button row."""
+        if self.layer is None or self.layer.ranges.get(name, (None, None)) == (None, None):
+            return ""
+        if name in self.layer.inverted:
+            return f"font-weight: bold; color: {INVERTED_COLOUR}"
+        return "font-weight: bold"
+
     def _add_quick(self, name: str, label: str) -> QToolButton:
         b = QToolButton(text=label, checkable=True, autoExclusive=True)
         b.setToolTip(name)
@@ -345,7 +375,7 @@ class FilterWidget(QWidget):
         for n in wanted:
             b = self._add_quick(n, "")
             b.setText(b.fontMetrics().elidedText(n, Qt.ElideMiddle, QUICK_TEXT_WIDTH))
-            b.setStyleSheet("font-weight: bold")
+            b.setStyleSheet(self._quick_style(n))
             b.setChecked(n == shown)
 
     def refresh(self) -> None:
@@ -375,8 +405,9 @@ class FilterWidget(QWidget):
         ranges = self.layer.ranges
         bounded = {n for n, r in ranges.items() if r != (None, None)}
         self._sync_bounded_buttons(bounded)
+        inverted = self.layer.inverted
         self.bounds_line.setText(bounds_text(
-            {n: ranges[n] for n in sorted(bounded)}))
+            {n: ranges[n] for n in sorted(bounded)}, inverted))
         from ..region_runs import REGION_FILTER
         self.clear_all.setVisible(bool(bounded - {REGION_FILTER}))
         plain, bold = QFont(self.field.font()), QFont(self.field.font())
@@ -386,9 +417,13 @@ class FilterWidget(QWidget):
             on = name in bounded
             self.field.setItemText(i, f"\u25cf {name}" if on else name)
             self.field.setItemData(i, bold if on else plain, Qt.FontRole)
+            turned = on and name in inverted
+            self.field.setItemData(i, QColor(INVERTED_COLOUR) if turned else None,
+                                   Qt.ForegroundRole)
             lo, hi = ranges.get(name, (None, None))
             self.field.setItemData(
-                i, (f"filtered: {'' if lo is None else f'{lo:g}'} .. "
+                i, (f"filtered{', inverted' if turned else ''}: "
+                    f"{'' if lo is None else f'{lo:g}'} .. "
                     f"{'' if hi is None else f'{hi:g}'}") if on else None,
                 Qt.ToolTipRole)
 
@@ -415,7 +450,7 @@ class FilterWidget(QWidget):
         by_file = name == "filenumber" and self.session is not None
         self.files.setVisible(by_file)
         self.plot.setVisible(not by_file)
-        for w in (self.lo, self.hi, self.clear):
+        for w in (self.lo, self.hi, self.clear, self.invert):
             w.setVisible(not by_file)
         self.all_files.setVisible(by_file)
         self.no_files.setVisible(by_file)
@@ -428,6 +463,17 @@ class FilterWidget(QWidget):
         lo, hi = self.layer.ranges.get(name, (None, None))
         self.lo.set(lo)
         self.hi.set(hi)
+        # inverting needs a bound: with none there is nothing thrown away
+        bounded = (lo, hi) != (None, None)
+        turned = bounded and name in self.layer.inverted
+        self.invert.blockSignals(True)
+        self.invert.setChecked(turned)
+        self.invert.setEnabled(bounded)
+        self.invert.blockSignals(False)
+        self.invert.setStyleSheet(f"color: {INVERTED_COLOUR}; font-weight: bold"
+                                  if turned else "")
+        self.region.setBrush(pg.mkBrush(INVERTED_BRUSH if turned else REGION_BRUSH))
+        self.region.update()
         # the region stands in for an open bound at the histogram's edge
         self.region.blockSignals(True)
         self._shown_region = (edges[0] if lo is None else lo,
@@ -497,10 +543,8 @@ class FilterWidget(QWidget):
                 text += f", {n} in view"
         self.count.setText(text)
         self._show_regions()
-        bounded = set(f.ranges)
         for n, b in self.quick.items():
-            b.setStyleSheet("font-weight: bold" if n in bounded and
-                            f.ranges[n] != (None, None) else "")
+            b.setStyleSheet(self._quick_style(n))
         self._mark_bounded()
 
     def _show_regions(self) -> None:
@@ -559,6 +603,13 @@ class FilterWidget(QWidget):
 
     def _on_clear(self) -> None:
         self._apply(None, None)
+
+    def _on_invert(self, on: bool) -> None:
+        if self.layer is None:
+            return
+        self.layer.invert_bound(self.current_field(), on)
+        self._show_field()
+        self.changed.emit()
 
     def _on_clear_all(self) -> None:
         """Every bound of the layer at once; the region filter's tick and

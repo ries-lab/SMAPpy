@@ -522,6 +522,7 @@ class ROIProject:
         self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
         # the layer's, which `sync` puts here
         self.filters: Dict[str, tuple] = {}
+        self.inverted: frozenset = frozenset()      # the layer's bounds turned around
         self.grouped = False
         # The results, one table per evaluation by its name, a row per ROI
         # (`RegionTable`): the newest result of each evaluation on each ROI,
@@ -1048,6 +1049,9 @@ class ROIProject:
                "group_settings": asdict(self.group_settings) if self.grouped else None}
         out["layers"] = [_layer_inputs(lay) for lay in self.session.layers
                          if not lay.is_image]
+        turned = sorted(f for f in state.filter.inverted if f not in skip)
+        if turned:          # only when there is one: older signatures stay current
+            out["inverted"] = turned
         return out
 
 
@@ -1759,6 +1763,7 @@ class ROIProject:
         if layer.is_image:
             layer = self.session.layers[self.session.first_locs_layer()]
         self.filters = layer.ranges
+        self.inverted = layer.inverted
         self.grouped = layer.grouped
         # so the manager's images look like the main view -- except for the
         # axes, which stay the positions: a site is a place, and a versatile
@@ -1832,7 +1837,7 @@ class ROIProject:
             state.settings, state.display = settings, display
         state.tables.settings = self.session.group_settings
         state.use_grouped = self.grouped
-        state.set_ranges(self.filters)
+        state.set_ranges(self.filters, getattr(self, "inverted", ()))
 
     def _tables(self, source: Source) -> Tables:
         """The tables an ROI of this file looks at.  One file: the session's

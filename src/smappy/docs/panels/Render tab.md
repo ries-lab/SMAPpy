@@ -741,6 +741,20 @@ The upper bound; empty is none.
 ### clear
 Removes the bounds on the attribute shown.
 
+### invert
+The filter's, beside *clear*: turns the bound on the attribute shown around,
+so the layer shows what that bound throws away -- outside the range, and the
+localizations with no value -- while every other bound keeps what it keeps.
+It is the quickest look at what one filter costs: invert the precision bound
+and the picture is the localizations it removes from the ones the other
+bounds pass.  Only an attribute with a bound can be inverted.  An inverted
+bound is red wherever it is named -- its quick button, the drop-down, the
+line of bounds (`not (xy_err_nm ≤ 25)`) and the histogram's range -- so a
+layer showing the rejects is not taken for one showing the data.  Dragging
+or typing the range keeps it inverted; *clear* and × remove the inversion
+with the bound.  Plugins run on the layer see what it shows, inverted bound
+included, and a copied layer takes it along.
+
 ### regions
 Shown while the Regions tab's [region filter](plugin:Analysis/Regions/Filter regions)
 has conditions, and ticked: the layer shows only the localizations of the

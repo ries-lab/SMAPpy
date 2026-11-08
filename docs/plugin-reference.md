@@ -74,6 +74,11 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   bounds (`layer.ranges`), applied to the table it shows --
   `layer.state.filter_for(locset)` is its filter over either -- so on the
   grouped table a bound on `xy_err_nm` is a bound on the combined precision.
+  A bound can be inverted (`layer.inverted`, the Render tab's *invert*): the
+  layer then keeps what that bound throws away, NaN included, under the
+  others -- so `ctx.selection` is the rejects of that one bound, and a plugin
+  that reads `layer.ranges` to rebuild a mask must honour it
+  (`LocFilter.set(..., invert=True)`).
   Linking costs seconds to minutes -- say what is missing instead of doing it
   behind the user's back.  Once it has been
   built once, `group_id` and `n_in_group` are on the *ungrouped* table too
