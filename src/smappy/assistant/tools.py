@@ -223,6 +223,13 @@ def _replaced(settings, values: Dict[str, Any], what: str):
     return dataclasses.replace(settings, **changes)
 
 
+def _inverted(layer) -> Dict[str, Any]:
+    """``{"inverted": [...]}`` for a layer with inverted bounds, else nothing:
+    a filter listed without it would read as keeping what it throws away."""
+    turned = getattr(layer, "inverted", ())
+    return {"inverted": sorted(turned)} if turned else {}
+
+
 def _pick(name: str, value: str, options: Sequence) -> str:
     """The entry of ``options`` -- ``(value, label)`` pairs -- that ``value``
     means (`Assistant._named`)."""
@@ -611,6 +618,7 @@ class Assistant:
             layers.append({"index": i, "grouped": layer.grouped,
                            "files": layer.files, "filter": {
                                k: list(v) for k, v in layer.ranges.items()},
+                           **_inverted(layer),
                            **self._layer_entry(layer), **self._shown(i)})
         rois = getattr(s, "_rois", None)
         extent = None
@@ -1098,29 +1106,37 @@ class Assistant:
 
     @tool("Set a layer's filter on an attribute (a column of the table): keep "
           "lo <= value <= hi; null for no bound.  remove=true takes the "
-          "attribute's filter away.",
+          "attribute's filter away.  invert=true keeps instead what this one "
+          "filter throws away (outside the bounds, and NaN), the others as "
+          "they are -- to look at what it removes; false turns it back, "
+          "omitted leaves it as it is.",
           column={"type": "string", "description": "e.g. 'xy_err_nm'"},
           lo={"type": ["number", "null"]}, hi={"type": ["number", "null"]},
           layer={"type": "integer", "description": "default 0"},
           remove={"type": "boolean"},
+          invert={"type": ["boolean", "null"]},
           reason={"type": "string", "description": "why, for the user (a proposal)"})
     def set_filter(self, column: str, lo: Optional[float] = None,
                    hi: Optional[float] = None, layer: int = 0, remove: bool = False,
+                   invert: Optional[bool] = None,
                    reason: str = "") -> Dict[str, Any]:
         target = self._layer(layer)
         columns = list(self.session.locs.columns)
         if column not in columns and not remove:
             raise ToolError(f"no attribute {column!r}; the table has {', '.join(columns)}")
         if not self._viewing():
-            return self._propose("set_filter", {"column": column, "lo": lo, "hi": hi,
-                                                "layer": layer, "remove": remove}, reason)
+            arguments = {"column": column, "lo": lo, "hi": hi,
+                         "layer": layer, "remove": remove}
+            if invert is not None:
+                arguments["invert"] = invert
+            return self._propose("set_filter", arguments, reason)
         if remove:
             target.remove_bound(column)
         else:
-            target.set_bound(column, lo, hi)
+            target.set_bound(column, lo, hi, invert)
         self.session.changed("filter")
         return {"layer": layer, "filter": {k: list(v) for k, v in target.ranges.items()},
-                **self._shown(layer)}
+                **_inverted(target), **self._shown(layer)}
 
     @tool("Show a layer grouped (one row per blink: localizations in "
           "consecutive frames merged) or not.",

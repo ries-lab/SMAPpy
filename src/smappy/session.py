@@ -193,17 +193,28 @@ class Layer:
         layer, applied to whichever table it shows."""
         return self.state.ranges
 
-    def set_bound(self, field: str, lo: Optional[float], hi: Optional[float]) -> None:
+    def set_bound(self, field: str, lo: Optional[float], hi: Optional[float],
+                  invert: Optional[bool] = None) -> None:
         """One bound, applied to the table the layer shows -- the grouped
-        one's combined values when it is grouped (`layer_state`)."""
-        self.state.set_bound(field, lo, hi)
+        one's combined values when it is grouped (`layer_state`).
+        ``invert`` turns it around (None: as it was)."""
+        self.state.set_bound(field, lo, hi, invert)
+
+    @property
+    def inverted(self) -> frozenset:
+        """The bounds turned around: the layer shows what each of them
+        throws away, under the others (`ViewState.inverted`)."""
+        return frozenset() if self.is_image else self.state.inverted
+
+    def invert_bound(self, field: str, on: bool) -> None:
+        self.state.invert_bound(field, on)
 
     def remove_bound(self, field: str) -> None:
         self.state.remove_bound(field)
 
-    def set_ranges(self, ranges) -> None:
-        """Replace every bound at once."""
-        self.state.set_ranges(ranges)
+    def set_ranges(self, ranges, inverted=()) -> None:
+        """Replace every bound at once, and which are inverted."""
+        self.state.set_ranges(ranges, inverted)
 
     @property
     def locs(self) -> Localizations:
@@ -1164,7 +1175,7 @@ class Session:
             if "filenumber" in self.locs:
                 layer.set_files([])        # starts empty: pick the file(s) it shows
         else:
-            layer.set_ranges(template.ranges)
+            layer.set_ranges(template.ranges, template.inverted)
             layer.set_files(template.files)
         self.layers.append(layer)
         self.changed("layers")
@@ -1193,7 +1204,7 @@ class Session:
             dst.state.settings = dataclasses.replace(src.state.settings)
             dst.set_display(dataclasses.replace(src.get_display()))
         if bounds:
-            dst.set_ranges(src.ranges)
+            dst.set_ranges(src.ranges, src.inverted)
         if files:
             dst.set_files(src.files)
         if grouping and dst.grouped != src.grouped:
@@ -1211,6 +1222,7 @@ class Session:
             ranges = layer.ranges
             out.append({"grouped": bool(layer.grouped),
                         "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
+                        "inverted": sorted(layer.inverted),
                         "files": None if layer.files is None else list(layer.files)})
         return out
 
@@ -1264,7 +1276,8 @@ class Session:
             if "bounds" in config:
                 layer.set_ranges({name: (lo, hi) for name, (lo, hi)
                                   in (config.get("bounds") or {}).items()
-                                  if name in self.locs})
+                                  if name in self.locs},
+                                 config.get("inverted") or ())
             if "files" in config:
                 layer.set_files(config["files"])
             if "grouped" in config and bool(config["grouped"]) != layer.grouped:
@@ -1325,7 +1338,7 @@ class Session:
                          settings=dataclasses.replace(layer.state.settings),
                          display=dataclasses.replace(layer.get_display()),
                          grouped=layer.grouped)
-            made.set_ranges(layer.ranges)
+            made.set_ranges(layer.ranges, layer.inverted)
             made.set_files(layer.files)
             copy.layers.append(made)
         if not any(not l.is_image for l in copy.layers):

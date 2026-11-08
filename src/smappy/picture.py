@@ -632,6 +632,8 @@ def describe_view(session, layers: Sequence[LayerSnapshot], settings: Any,
             entry["grouped"] = bool(layer.grouped)
             entry["files"] = layer.files
             entry["filter"] = {k: list(v) for k, v in layer.ranges.items()}
+            if layer.inverted:
+                entry["inverted"] = sorted(layer.inverted)
         described.append(entry)
     out["layers"] = described
     return _plain(out)

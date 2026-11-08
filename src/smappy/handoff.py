@@ -130,6 +130,7 @@ def layer_states(session) -> list:
             "name": layer.name, "visible": bool(layer.visible),
             "grouped": bool(layer.grouped),
             "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
+            "inverted": sorted(layer.inverted),
             "files": None if layer.files is None else list(layer.files),
             "render": _plain(layer.state.settings),
             "display": _plain(layer.get_display()),
@@ -174,6 +175,7 @@ def apply_layers(session, configs) -> None:
         return
     session.set_layer_configs([{"grouped": c.get("grouped"),
                                 "bounds": c.get("bounds") or {},
+                                "inverted": c.get("inverted") or [],
                                 "files": c.get("files")} for c in locs_configs])
     locs_layers = [l for l in session.layers if not l.is_image]
     for layer, config in zip(locs_layers, locs_configs):
