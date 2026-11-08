@@ -1354,7 +1354,7 @@ def layer_colour(display, index: int = 0, taken: Sequence[str] = ()) -> str:
     from .. import lut as luts
 
     try:
-        table = luts.get(getattr(display, "lut", "hot"),
+        table = luts.get(getattr(display, "lut", luts.INTENSITY_LUT),
                          getattr(display, "invert", False))
         rgb = np.asarray(table[int(0.75 * (len(table) - 1))], float)
     except Exception:

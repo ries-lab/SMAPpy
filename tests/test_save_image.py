@@ -38,10 +38,10 @@ def test_it_reads_a_saved_file_too(tmp_path):
 def test_the_render_and_the_display_are_both_honoured(tmp_path):
     hot = save_image(table(), tmp_path / "hot.png", pixelsize=10.0,
                      settings=RenderSettings(mode="hist"),
-                     display=DisplaySettings(lut="hot"))
+                     display=DisplaySettings(lut="red hot"))
     inverted = save_image(table(), tmp_path / "inv.png", pixelsize=10.0,
                           settings=RenderSettings(mode="hist"),
-                          display=DisplaySettings(lut="hot", invert=True))
+                          display=DisplaySettings(lut="red hot", invert=True))
     assert hot.read_bytes() != inverted.read_bytes()
 
 

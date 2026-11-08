@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from ..images import load_images
-from ..lut import get as lut_table, names as lut_names
+from ..lut import get as lut_table, groups as lut_groups
 from ..render import MODES as RENDER_MODES
 from . import index, knowledge
 
@@ -1032,7 +1032,10 @@ class Assistant:
           layer={"type": "integer", "description": "default 0"},
           image={"type": ["string", "integer"],
                  "description": "an opened image: its name or its index in 'images'"},
-          lut={"type": "string", "description": "the colour map: " + ", ".join(lut_names())},
+          lut={"type": "string", "description": "the colour map, by group (for "
+                 "intensity: one colour, several colours; for colouring by a "
+                 "column: attribute): " + "; ".join(
+                     f"{heading}: {', '.join(names)}" for heading, names in lut_groups())},
           contrast={"type": "number",
                     "description": "saturate 10^-contrast of the pixels: higher, darker"},
           visible={"type": "boolean"},

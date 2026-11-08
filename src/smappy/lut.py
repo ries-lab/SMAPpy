@@ -10,8 +10,11 @@ and they are not the same operation:
   accumulation, because two localizations in one pixel must mix.
 
 Most ramps are defined by a handful of anchor colours interpolated to 256
-entries, which is what SMAP's ``usercolormap`` does.  ``hot``, ``jet``, ``hsv``
-and ``gray`` follow MATLAB's definitions so images look the same as SMAP's.
+entries, which is what SMAP's ``usercolormap`` does.  ``red hot``, ``hue
+circle`` and ``gray`` follow MATLAB's hot, hsv and gray so images look the
+same as SMAP's.  The LUTs come in three groups -- one colour and several
+colours for intensity, attribute for a column (`groups`) -- and the names
+say the colours rather than where a table came from.
 No matplotlib dependency: the tables are small and the interpolation is three
 lines.
 """
@@ -41,14 +44,6 @@ def _matlab_hot() -> np.ndarray:
     g = np.concatenate([np.zeros(n), ramp, np.ones(N - 2 * n)])
     b = np.concatenate([np.zeros(2 * n), np.arange(1, N - 2 * n + 1) / (N - 2 * n)])
     return np.stack([r, g, b], axis=1).astype(np.float32)
-
-
-def _matlab_jet() -> np.ndarray:
-    x = np.linspace(0.0, 1.0, N)
-    def band(center):  # trapezoid of half-width 1/8, plateau 1/8 each side
-        return np.clip(1.5 - np.abs(x - center) * 4.0, 0.0, 1.0)
-    return np.stack([band(0.6875), band(0.5), band(0.3125)],
-                    axis=1).astype(np.float32)
 
 
 def _matlab_hsv() -> np.ndarray:
@@ -111,34 +106,141 @@ _TURBO_ANCHORS = [
     [0.4796, 0.0158, 0.0106],
 ]
 
-# The subset of SMAP's LUTs that is actually used: a few intensity ramps for
-# recolouring, and a few full-hue ramps for field colouring.
-_TABLES: Dict[str, np.ndarray] = {
-    "hot": _matlab_hot(),
-    "gray": _gray,
-    "gray_inverted": _gray[::-1].copy(),
-    "jet": _matlab_jet(),
-    "turbo": from_anchors(*_TURBO_ANCHORS),
-    "hsv": _matlab_hsv(),
-    "red": _single(1, 0, 0),
-    "green": _single(0, 1, 0),
-    "blue": _single(0, 0, 1),
-    "cyan": _single(0, 1, 1),
-    "magenta": _single(1, 0, 1),
-    "yellow": _single(1, 1, 0),
-    "green_cold": from_anchors([0, 0, 0], [0, 1, 0], [0, 1, 1], [1, 1, 1]),
-    "cyan_cold": from_anchors([0, 0, 0], [0, .2, 1], [0, .5, 1], [0, 1, 1],
-                              [.5, 1, 1], [1, 1, 1]),
-    "kgy": from_anchors([0, 0, 0], [.5, .25, 0], [1, .5, 0], [1, 1, 0], [1, 1, 1]),
-    "bgy": from_anchors([0, 0, 1], [0, 1, 0], [1, 1, 0]),
-    "bry": from_anchors([0, 0, 1], [1, 0, 0], [1, 1, 0]),
+# Inferno and plasma (matplotlib's, CC0), sampled at 21 points: 4/255 from the
+# tables, below a step of the ramp.
+_INFERNO_ANCHORS = [
+    [0.0015, 0.0005, 0.0139], [0.0258, 0.0193, 0.1059], [0.0874, 0.0446, 0.2248],
+    [0.1696, 0.0425, 0.3409], [0.2582, 0.0386, 0.4065], [0.3415, 0.0623, 0.4294],
+    [0.4163, 0.0902, 0.4329], [0.4973, 0.1194, 0.4245], [0.5783, 0.1480, 0.4044],
+    [0.6585, 0.1790, 0.3727], [0.7357, 0.2159, 0.3302], [0.8019, 0.2587, 0.2831],
+    [0.8650, 0.3168, 0.2261], [0.9165, 0.3875, 0.1649], [0.9545, 0.4687, 0.0999],
+    [0.9784, 0.5579, 0.0349], [0.9876, 0.6453, 0.0399], [0.9832, 0.7438, 0.1385],
+    [0.9644, 0.8438, 0.2734], [0.9464, 0.9372, 0.4586], [0.9884, 0.9984, 0.6449],
+]
+_PLASMA_ANCHORS = [
+    [0.0504, 0.0298, 0.5280], [0.1641, 0.0202, 0.5775], [0.2546, 0.0139, 0.6154],
+    [0.3377, 0.0056, 0.6430], [0.4176, 0.0006, 0.6584], [0.4949, 0.0120, 0.6579],
+    [0.5627, 0.0515, 0.6415], [0.6310, 0.1077, 0.6083], [0.6928, 0.1651, 0.5645],
+    [0.7483, 0.2227, 0.5168], [0.7982, 0.2802, 0.4695], [0.8402, 0.3336, 0.4275],
+    [0.8814, 0.3925, 0.3832], [0.9181, 0.4536, 0.3395], [0.9492, 0.5178, 0.2957],
+    [0.9734, 0.5858, 0.2515], [0.9883, 0.6523, 0.2114], [0.9946, 0.7287, 0.1716],
+    [0.9886, 0.8096, 0.1454], [0.9684, 0.8946, 0.1470], [0.9400, 0.9752, 0.1313],
+]
+# Our own blue -> teal -> green -> yellow, after MATLAB's parula (whose table
+# is MathWorks' and is not copied): nine anchors drawn by eye.
+_BLUE_GREEN_YELLOW_ANCHORS = [
+    [0.208, 0.166, 0.529], [0.012, 0.388, 0.882], [0.078, 0.522, 0.831],
+    [0.024, 0.646, 0.765], [0.209, 0.719, 0.604], [0.553, 0.749, 0.396],
+    [0.851, 0.729, 0.337], [0.988, 0.808, 0.180], [0.976, 0.984, 0.081],
+]
+
+
+def full_value(table: np.ndarray) -> np.ndarray:
+    """Each entry scaled so its brightest channel is one.
+
+    A LUT that codes a column is multiplied by the density afterwards
+    (`render._to_rgb`), so any darkness of its own reads as fewer
+    localizations: turbo's two ends (brightest channel 0.23 and 0.48) made the
+    lowest and highest z look sparse where they were not.  At full value the
+    colour says the value and only the brightness says the density.
+    """
+    table = np.asarray(table, dtype=np.float32)
+    return table / np.maximum(table.max(axis=1, keepdims=True), 1e-6)
+
+
+def cyclic(*colors: Sequence[float]) -> np.ndarray:
+    """A closed ramp through the anchors and back to the first, the last
+    entry one step short of it -- so 0 and 360 degrees are the same colour
+    and no colour is drawn twice."""
+    anchors = np.asarray(colors + (colors[0],), dtype=np.float64)
+    at = np.linspace(0.0, 1.0, len(anchors))
+    x = np.linspace(0.0, 1.0, N, endpoint=False)
+    return np.stack([np.interp(x, at, anchors[:, k]) for k in range(3)],
+                    axis=1).astype(np.float32)
+
+
+# Three groups, which the Render tab's list shows under their headings.
+#
+# * one colour -- for intensity: black to the colour, brightness the only
+#   dimension;
+# * several colours -- for intensity: black through colours to white, the
+#   lightness rising all the way, so more steps can be told apart than on one
+#   colour (about three times as many as on gray, summing the colour
+#   differences along the ramp in CIE Lab);
+# * attribute -- to colour by a column: the colour is the value and the
+#   density multiplies it, so every one is at full value (`full_value`) or, the
+#   diverging ones, goes through black or white on purpose.  Ordered, cyclic
+#   (a hue circle, for angles -- but nothing stops z on one) and diverging
+#   (about a middle value) are all in it.
+#
+# White paper turns the picture over (`on_white`), which is its own inverse
+# and swaps black with white while keeping saturated colours: so a diverging
+# ramp through black is the same ramp through white on white paper, and one
+# through white goes through black there.  Both are offered, in different
+# colours, so either background has a ramp through its own colour.
+_GROUPS = {
+    "one colour": {
+        "gray": _gray,
+        "red": _single(1, 0, 0),
+        "green": _single(0, 1, 0),
+        "blue": _single(0, 0, 1),
+        "cyan": _single(0, 1, 1),
+        "magenta": _single(1, 0, 1),
+        "yellow": _single(1, 1, 0),
+    },
+    "several colours": {
+        "red hot": _matlab_hot(),           # MATLAB's hot, as SMAP's images
+        "blue cold": from_anchors([0, 0, 0], [0, .2, 1], [0, .5, 1], [0, 1, 1],
+                                  [.5, 1, 1], [1, 1, 1]),
+        "green cold": from_anchors([0, 0, 0], [0, 1, 0], [0, 1, 1], [1, 1, 1]),
+        # inferno, closed to white so that it is a black-to-white ramp like the
+        # rest (white paper draws those backwards, `intensity_table`)
+        "purple fire": from_anchors(*_INFERNO_ANCHORS, [1, 1, 1]),
+    },
+    "attribute": {
+        # turbo: unlike jet its lightness rises monotonically, unlike hsv the
+        # two ends cannot be confused
+        "rainbow": full_value(from_anchors(*_TURBO_ANCHORS)),
+        "blue-green-yellow": full_value(from_anchors(*_BLUE_GREEN_YELLOW_ANCHORS)),
+        "blue-magenta-yellow": full_value(from_anchors(*_PLASMA_ANCHORS)),
+        "hue circle": _matlab_hsv(),
+        # four hues a quarter apart, so the quadrants of an angle read at a
+        # glance; hsv's bright yellow, cyan and magenta bands make edges where
+        # the data have none
+        "four-hue circle": full_value(cyclic([1, 0, 1], [1, .85, 0], [0, .9, .3],
+                                             [0, .45, 1])),
+        # no blue, which is dark on black (lightness 32 of 100)
+        "magenta-black-green": from_anchors([1, 0, 1], [0, 0, 0], [0, 1, 0]),
+        "purple-white-orange": from_anchors([.6, .2, 1], [1, 1, 1], [1, .5, 0]),
+    },
 }
+_TABLES: Dict[str, np.ndarray] = {name: table for group in _GROUPS.values()
+                                  for name, table in group.items()}
 
 LUT = Union[str, np.ndarray]
 
 
 def names() -> list:
-    return sorted(_TABLES)
+    """Every LUT, group by group."""
+    return list(_TABLES)
+
+
+def groups(attribute: bool = False) -> list:
+    """``[(heading, names), ...]`` in the order a list shows them: the groups
+    for intensity first, or with ``attribute`` the one for a column first."""
+    order = list(_GROUPS)
+    if attribute:
+        order = order[-1:] + order[:-1]
+    return [(heading, list(_GROUPS[heading])) for heading in order]
+
+
+def kind(lut: LUT) -> str:
+    """The heading a LUT's name is under ("" for one that was registered or
+    passed as an array)."""
+    for heading, group in _GROUPS.items():
+        if isinstance(lut, str) and lut in group:
+            return heading
+    return ""
 
 
 def invert_sum(table: np.ndarray) -> np.ndarray:
@@ -165,8 +267,8 @@ def invert_sum(table: np.ndarray) -> np.ndarray:
 REVERSE = "reverse"
 
 
-INTENSITY_LUT = "hot"    # an intensity ramp: brightness is the only dimension
-FIELD_LUT = "turbo"      # a full-hue ramp, which is what a coded field needs
+INTENSITY_LUT = "red hot"   # an intensity ramp: brightness is the only dimension
+FIELD_LUT = "rainbow"       # a full-hue ramp, which is what a coded field needs
 
 
 def on_white(rgb: np.ndarray) -> np.ndarray:
@@ -208,6 +310,30 @@ def get(lut: LUT, invert=False) -> np.ndarray:
     if invert == REVERSE:
         return np.ascontiguousarray(table[::-1])
     return invert_sum(table) if invert else table
+
+
+def intensity_table(lut: LUT, invert=False, white: bool = False) -> np.ndarray:
+    """The table an intensity image is looked up in, on a black ground.
+
+    On white paper the finished picture is turned over (`on_white`).  That
+    suits a ramp of one colour -- white to red, ink on paper -- but on a ramp
+    through several colours it keeps the saturated middle as it is, and red
+    hot on white ran white, red, *yellow*, black: the brightness no longer in
+    the order of the intensity.  A ramp from black to white is instead drawn
+    backwards there, white for nothing and black for the most, through the
+    same colours in the opposite order.  Since `on_white` is its own inverse,
+    that is the table ``on_white(t[::-1])`` on the black ground the layers are
+    summed on, and the turn-over of the sum makes it ``t[::-1]``.  On gray it
+    is the same table either way.
+    """
+    table = get(lut, invert)
+    if white and _black_to_white(table):
+        return on_white(table[::-1])
+    return table
+
+
+def _black_to_white(table: np.ndarray) -> bool:
+    return bool(np.all(table[0] < 0.02) and np.all(table[-1] > 0.98))
 
 
 def field_inversion(invert) -> object:

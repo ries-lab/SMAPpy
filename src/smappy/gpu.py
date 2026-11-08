@@ -542,7 +542,7 @@ class GPUEngine:
 
     # ------------------------------------------------------------- render
     def render_planes(self, table_key, selection, fov: FieldOfView, params: np.ndarray,
-                      lut="hot", invert: bool = False, colored: bool = False) -> RenderedImage:
+                      lut="red hot", invert: bool = False, colored: bool = False) -> RenderedImage:
         wgpu, dev = self.wgpu, self.device
         tbuf, _ = self._tables[table_key]
         sbuf, n = selection
@@ -581,7 +581,7 @@ class GPUEngine:
         return RenderedImage(fov, weight, color, n_locs=int(n))
 
     def render_points(self, table_key, selection, fov: FieldOfView, params: np.ndarray,
-                      lut="hot", invert: bool = False) -> np.ndarray:
+                      lut="red hot", invert: bool = False) -> np.ndarray:
         """Alpha sprites over black, in the selection's order; RGB in [0, 1]."""
         wgpu, dev = self.wgpu, self.device
         tbuf, _ = self._tables[table_key]

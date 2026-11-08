@@ -272,7 +272,7 @@ def make(d) -> None:
     render_tab.strip.select(0)
     filt.quick["frame"].click()
     filt.clear.click()
-    render_tab.lut.setCurrentText("hot")
+    render_tab.lut.setCurrentText("red hot")
     render.view.reset()
     d.settle()
 

@@ -27,7 +27,7 @@ def two_layers() -> Session:
     session.add_layer()
     session.layers[1].state.settings.color_field = "z_nm"
     session.layers[1].state.settings.color_range = (-300.0, 300.0)
-    session.layers[1].state.display.lut = "jet"
+    session.layers[1].state.display.lut = "rainbow"
     return session
 
 
@@ -140,7 +140,7 @@ def test_the_description_round_trips_the_settings(tmp_path, suffix):
     assert first["filter"]["xy_err_nm"] == [None, 12.0]
     assert first["render"]["mode"] == session.layers[0].state.settings.mode
     assert second["render"]["color_field"] == "z_nm"
-    assert second["display"]["lut"] == "jet"
+    assert second["display"]["lut"] == "rainbow"
     if suffix != ".jpg":                       # JPEG's density cannot hold nm
         assert pixel_size_of(path) == pytest.approx(12.5, rel=1e-6)
 

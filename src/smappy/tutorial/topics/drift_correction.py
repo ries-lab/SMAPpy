@@ -56,7 +56,7 @@ def _all_frames(d, tab) -> None:
     tab.strip.select(0)
     tab.filter.quick["frame"].click()
     tab.filter.clear.click()
-    tab.lut.setCurrentText("hot")
+    tab.lut.setCurrentText("red hot")
     d.settle()
 
 

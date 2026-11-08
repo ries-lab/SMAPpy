@@ -251,9 +251,10 @@ def absolute_imax(rendered: RenderedImage, maximum: float) -> float:
     return float(maximum) * area / PER_UM2
 
 
-def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
+def to_rgb(rendered: RenderedImage, lut: luts.LUT = luts.INTENSITY_LUT, invert=False,
            imax: Optional[float] = None, contrast: float = DEFAULT_CONTRAST,
-           gamma: float = 1.0, white_background: bool = False) -> np.ndarray:
+           gamma: float = 1.0, white_background: bool = False,
+           paper: Optional[bool] = None) -> np.ndarray:
     """Turn accumulated planes into a float32 ``(ny, nx, 3)`` RGB image in [0, 1].
 
     For an intensity image ``lut`` recolours the normalised weight plane.  For a
@@ -266,18 +267,23 @@ def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
     LUT is baked into the accumulation, is turned over as well -- and, where
     several layers are summed, so that it can be done once to the sum instead
     of once per layer, which would wash the picture out.
+
+    ``paper`` says the picture will end up on white, turned over now or
+    later with the sum (None: ``white_background``): a black-to-white
+    intensity ramp is then looked up backwards (`lut.intensity_table`).
     """
-    rgb = _to_rgb(rendered, lut, invert, imax, contrast, gamma)
+    white = white_background if paper is None else paper
+    rgb = _to_rgb(rendered, lut, invert, imax, contrast, gamma, white)
     return luts.on_white(rgb) if white_background else rgb
 
 
-def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma
-            ) -> np.ndarray:
+def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma,
+            white: bool = False) -> np.ndarray:
     if rendered.color is None:
         norm, _ = normalize(rendered.weight, imax, contrast)
         if gamma != 1.0:
             norm = norm ** gamma
-        table = luts.get(lut, invert)
+        table = luts.intensity_table(lut, invert, white)
         index = np.clip((norm * len(table)).astype(np.int32), 0, len(table) - 1)
         # take, not table[index]: half the time on a view-sized image, which
         # is most of a player step's render on a small view
@@ -638,7 +644,7 @@ class DisplaySettings:
     re-renders -- except ``lut``/``invert`` when colouring by a field, because
     then the colour is baked into the accumulation."""
 
-    lut: luts.LUT = "hot"
+    lut: luts.LUT = luts.INTENSITY_LUT
     # SMAP's: an intensity ramp is inverted (`lut.invert_sum`), a LUT that
     # codes a column is turned round (`lut.field_inversion`)
     invert: bool = False
@@ -662,8 +668,10 @@ class DisplaySettings:
     def apply(self, rendered: RenderedImage,
               white_background: Optional[bool] = None) -> np.ndarray:
         white = self.white_background if white_background is None else white_background
+        # the table follows this layer's paper even when the sum is turned
+        # over later (``white_background=False`` here)
         return to_rgb(rendered, self.lut, self.invert, self.pixel_max(rendered),
-                      self.contrast, self.gamma, white)
+                      self.contrast, self.gamma, white, paper=self.white_background)
 
     def pixel_max(self, rendered: RenderedImage) -> Optional[float]:
         """The value shown at full scale on this render, or None for the

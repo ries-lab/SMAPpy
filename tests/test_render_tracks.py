@@ -246,7 +246,7 @@ def test_tracks_are_coloured_by_their_id_on_turbo_the_first_time_only():
     assert not tab._more_form.isRowVisible(tab.lines_add)
     tab.set_mode("tracks")
     assert state.settings.color_field == "track_id"
-    assert state.display.lut == "turbo"
+    assert state.display.lut == "rainbow"
     assert tab._more_form.isRowVisible(tab.lines_add)
     tab.lines_add.setChecked(True)
     assert state.settings.lines_add

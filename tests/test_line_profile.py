@@ -594,7 +594,7 @@ def test_a_layer_colour_is_read_off_its_lut_and_falls_back_when_it_cannot_be():
 
     @_dataclass
     class Display:
-        lut: str = "hot"
+        lut: str = "red hot"
         invert: bool = False
 
     assert layer_colour(Display(lut="red")) == "#bf0000"

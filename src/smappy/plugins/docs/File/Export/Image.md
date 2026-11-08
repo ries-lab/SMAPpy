@@ -51,7 +51,7 @@ session = Session(simulate(n_frames=1500, seed=3))
 session.add_layer()
 session.layers[1].state.settings.color_field = "z_nm"
 session.layers[1].state.settings.color_range = (-400.0, 400.0)
-session.layers[1].state.display.lut = "jet"
+session.layers[1].state.display.lut = "rainbow"
 layers = snapshot_layers(session.layers)
 fov = FieldOfView.from_range(*session.full_view(), 45.0)    # the whole field
 ```
