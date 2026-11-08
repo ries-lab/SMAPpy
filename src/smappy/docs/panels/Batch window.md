@@ -2,7 +2,7 @@
 title: Batch window
 summary: Runs one chain of plugins over many files, each on its own, and writes every file's table, numbers and figures to an output folder with a summary of all of them.
 widget: smappy.gui.batch_window.BatchWindow
-covers: [smappy.gui.batch_window.BatchWindow, smappy.batch.resolve_inputs, smappy.batch.validate, smappy.batch.settings_for, smappy.batch.fingerprint, smappy.batch.run_one, smappy.batch.run, smappy.batch.write_summary, smappy.batch.summary_rows, smappy.batch.scalars, smappy.batch.json_safe, smappy.batch.publish, smappy.batch.watch, smappy.batch.is_complete, smappy.batch.stop_on_stdin, smappy.batch_page.write_page, smappy.batch_page.trend_columns, smappy.batch_page.draw_trends]
+covers: [smappy.gui.batch_window.BatchWindow, smappy.batch.resolve_inputs, smappy.batch.entry_datasets, smappy.datasets.find, smappy.datasets.parse_filter, smappy.batch.validate, smappy.batch.settings_for, smappy.batch.fingerprint, smappy.batch.run_one, smappy.batch.run, smappy.batch.write_summary, smappy.batch.summary_rows, smappy.batch.scalars, smappy.batch.json_safe, smappy.batch.publish, smappy.batch.watch, smappy.batch.is_complete, smappy.batch.stop_on_stdin, smappy.batch_page.write_page, smappy.batch_page.trend_columns, smappy.batch_page.draw_trends]
 ---
 
 ## What it does
@@ -23,10 +23,12 @@ table, the figures each step drew and a record of each step's numbers; the
 batch as a whole gets a table with one row per file.
 
 The chain can start with a fit (a *Localize* plugin), and then the inputs are
-camera images; otherwise the inputs are localization files.  Either way one
-input is one file.
+raw camera images; otherwise they are localization files.  The line above
+the files says which.  Either way the batch runs once per **data set**: a
+localization file, or one acquisition -- a TIFF stack, a Micro-Manager
+series however many files it fills, an NDTiff folder, a DCIMG series.
 
-With *watch* ticked, the batch does not end with the files there are: it
+With *watch the folders* ticked, the batch does not end with the files there are: it
 keeps looking at the folders and runs the chain on each new file as soon as
 the microscope has finished writing it -- for a folder that fills during a
 day of acquisitions, or the same bead sample measured every week.  A summary
@@ -54,15 +56,21 @@ input.  Errors stop the run and are listed in the log; warnings -- a step
 saved with an older version of its plugin, a second step that makes a table
 of its own -- are listed and the run goes ahead.
 
-**3. The files.**  A row of the *files* table is a file, or a folder with the
-patterns its files must match (searched in every subfolder).  The rows are
-resolved into one list at the start.  A file named twice -- by a folder and
-again on its own -- is processed once, in its first place.  The output
-folder is never searched, so a second run does not take its own results for
-input.
+**3. The files.**  A line of the *files* list is a data set added on its
+own, or a folder.  A folder stays a folder: it unfolds into the data sets
+found in it and its subfolders, of the kind the chain reads, and they are
+found again at every run and, while watching, every two seconds -- so a
+data set written later is run too.  A folder holding raw stacks and their
+fits gives the stacks to a chain that fits and the fits to one that does
+not.  A file of the other kind stays in the list, greyed and marked
+*skipped*: changing the chain back brings it back.  The *filter* narrows a
+folder by name (see *In detail*), and unticking a data set leaves it out.
+A data set named twice -- by a folder and again on its own -- is processed
+once, in its first place.  The output folder is never searched, so a
+second run does not take its own results for input.
 
 **4. One file.**  For each file the chain's settings are put together: the
-chain's values, then the row's *overrides*.  If the chain starts with a fit,
+chain's values, then the job file's overrides, if it has any.  If the chain starts with a fit,
 the file becomes the fit's input; otherwise it is opened as a localization
 file.  The chain then runs as it would in a plugin tab -- one step after the
 other, each seeing what the steps before it did -- and the result is saved.
@@ -82,22 +90,35 @@ one whose code changed without a new version is not.
 **6. The report.**  The output folder holds, per input, a folder named after
 it, and for the whole batch `summary.csv`, `batch_report.json` and the
 summary page, `index.html` (see *Output*), all written again after every
-file, so they can be read while the batch runs.  The table's *status* column follows the run as it goes:
-*running*, *done*, *skipped* or *failed*, with the reason in the tooltip,
-and a folder row counts its files.
+file, so they can be read while the batch runs.  The list's *status*
+follows the run as it goes: *running*, *done*, *skipped* or *failed*, with
+the reason in the tooltip, and a folder counts its data sets.
 
-**7. Watching.**  With *watch* ticked, Run processes the files there are,
-then looks at the folders every 2 seconds.  A new file is run once it is
+**7. Watching.**  With *watch the folders* ticked, Run processes the data
+there is, then looks at the folders every 2 seconds.  A new data set
+appears under its folder and is run once it is
 **complete**: a localization file written by SMAPpy's fitter once the fit
 has closed it -- the file says so itself, so a live acquisition that pauses
 for minutes is never taken half-way -- and any other file once neither its
-size nor its time stamp has changed for 10 seconds (for a Micro-Manager
-series, of all its files).  What is done already is skipped as in step 5,
+size nor its time stamp has changed for 10 seconds (of every file it is
+written in: all of a Micro-Manager series, all of an NDTiff folder).  What is done already is skipped as in step 5,
 so a watch started again on the same folder carries on where it was, and a
 file that changes after it was run is run again.  The watch runs until
 *Stop*.
 
 ## In detail
+
+**The filter** is shell patterns -- `*` any text, `?` one character,
+`[0-9]` one of a set, `[!0-9]` one not in it -- matched, regardless of
+case, against a data set's path inside the folder and against its name, so
+`*640*` finds 640 anywhere and `beads/*` a subfolder.  Patterns are joined
+by `,` or `|` (either), `&` (both) and `!` before one (not), or the words
+`OR`, `AND`, `NOT`, and grouped by parentheses; NOT binds tightest, then
+AND, then OR, as in most search boxes: `(*640* & !*647*), *600*` keeps the
+640 data sets that are not also 647, and every 600 one.  A pattern runs up to
+the next operator, so a name may hold spaces; one holding an operator or a
+parenthesis is quoted, `"cell (2)*"`.  A filter that cannot be read says
+where in the folder's status, and the job does not run.
 
 **The fingerprint** is the first 16 hex digits of a SHA-256 hash of
 
@@ -146,27 +167,41 @@ once stopped.
 ## Controls
 
 ### files
-The inputs, one per row.  *use* includes or leaves out a row without
-deleting it.  *input* is a file or a folder; *pattern*, for a folder, is the
-comma-separated file patterns to look for (it starts from the usual ones for
-the chain's input: `*.tif, *.tiff` for images, `*.h5, *.hdf5, *_sml.mat,
-*.csv` for localizations).  *overrides* changes settings for that file only,
-written `key.field: value` and separated by `;`, as in the job file --
-`drift.n_timepoints: 8` for a step labelled *drift*.  Files, folders, a
+What the batch runs.  The line at the top says what the chain reads.  A
+folder unfolds into the data sets found in it: untick one to leave it out.
+The *filter* column narrows a folder by name -- double-click it to type, for
+example `*640*`, `!*bead*` or `(*640* & !*647*), *600*` (see *In detail*).
+The *status* column says how many data sets a folder gives, why a file is
+skipped, and, while the batch runs, what became of each.  Files, folders, a
 `.chain.yaml` or a `.batch.yaml` can also be dropped onto the window.
 
-### add files...
-Adds files, one row each.
+### Add...
+Adds files.  On a Mac it takes files and folders together, several at
+once; elsewhere the system's dialog takes files only, and a folder is added
+with the arrow beside it.  A folder is added as a folder, and an NDTiff
+folder, which is one acquisition, as a data set.
 
-### add folder...
-Adds a folder, asking for the patterns its files must match.
+### Select several folders...
+In the arrow beside *Add...*: a dialog in which several folders can be
+selected at once (Cmd- or Ctrl-click).  It is not the system's own
+dialog, which takes only one folder.
 
 ### remove
-Removes the selected rows (in the *files* table), or, in the chain's step
-list, the selected step.
+Removes the selected inputs; a data set selected inside a folder is
+unticked instead, since the folder would find it again.  In the chain's
+step list, removes the selected step.
 
 ### clear
-Removes every row.
+Removes every input.
+
+### search subfolders
+Whether a folder's data sets are looked for in its subfolders too.
+
+### watch the folders
+Runs the data there is, then each new data set in the folders as soon as
+it is complete (see *How it works*), until *Stop*.  The folders may be
+empty at the start.  *first file only* does not apply.  Not needed after a
+live fit: a fitter's *after the fit* runs its steps there already.
 
 ### chain
 The chain to run: pick a saved one from the list (the chains in the plugin
@@ -228,6 +263,11 @@ Where the results go and what is written.
 ### folder
 The output folder.  Empty: `<job>_output` beside the job file.
 
+### more
+Folds out the options most batches leave as they are: the file suffix,
+where a fit writes its file, what to do when a step asks, which files are
+re-run, and the trend columns.
+
 ### file suffix
 Added to the input's name for the processed table: `cell3_proc.h5`.  An
 input `.h5` is never overwritten.
@@ -265,30 +305,24 @@ follow over time, the ones that say the instrument is as it was -- the
 precision, the photons, the number of localizations -- and leave out the
 ones that differ because the cells do.
 
-### open job...
+### job
+A menu: *Open job...* opens a `.batch.yaml` file into the window; *Save
+job...* writes the job to one, which `smappy-batch run` can run from a
+terminal.  *Run* saves it too.
+
+### Open job...
 Opens a `.batch.yaml` file into the window.
 
-### save job...
-Writes the job to a `.batch.yaml` file, which `smappy-batch run` can run
-from a terminal.
-
-### validate
-Checks the job and lists every problem in the log, without running
-anything.  The quickest way to learn a plugin's setting names is a failed
-validation, which lists them.
+### Save job...
+Writes the job to a `.batch.yaml` file.
 
 ### first file only
 Runs only the first file: a trial run, to check the numbers and figures
 before the rest.
 
-### watch
-Runs the files there are, then each new one in the folders as soon as it is
-complete (see *How it works*), until *Stop*.  The folders may be empty at
-the start.  *first file only* does not apply.  Not needed after a live fit:
-a fitter's *after the fit* runs its steps there already.
-
 ### Run
-Validates, saves the job (asking for a name the first time) and starts the
+Checks the job -- every setting a step names, every file and folder, every
+filter -- and lists what is wrong in the log, then saves the job (asking for a name the first time) and starts the
 batch.  The progress bar counts files; the status bar shows what the
 current step says.
 
@@ -298,10 +332,13 @@ so the next run does it again; the files already done are kept.  A watch is
 asked to stop instead, and ends once the file in hand is done, with its
 summary written; pressing *Stop* again ends it at once.
 
-### open summary
+### results
+A menu of what the batch wrote.
+
+### Open summary
 Opens the summary page, `index.html`, in the system's browser.
 
-### open output
+### Open output folder
 Opens the output folder in the system's file browser.  Opened from the main
 window, it asks for a processed file instead and opens it there.
 

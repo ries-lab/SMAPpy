@@ -99,29 +99,10 @@ def discover_acquisitions(paths, recursive=True):
     Only TIFF images, NDTiff indexes and 4Pi data -- Hamamatsu DCIMG and
     MATLAB quadrant files, each numbered series one acquisition
     (`io.quadrants.numbered_series`) -- are candidates; outputs are not inputs.
+    The search is `datasets.find`'s, which the batch shares.
     """
-    from ..io.quadrants import is_quadrant_mat, numbered_series
-    if isinstance(paths, (str, Path)):
-        paths = [paths]
-    found = set()
-    for value in paths:
-        path = Path(value).expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(path)
-        candidates = [path]
-        if path.is_dir():
-            candidates = list(path.rglob('*') if recursive else path.iterdir())
-        for p in candidates:
-            if p.name == 'NDTiff.index':
-                found.add(p.parent)
-            elif p.is_file() and p.suffix.lower() in ('.tif', '.tiff'):
-                if (p.parent / 'NDTiff.index').exists():
-                    found.add(p.parent)
-                else:
-                    found.add(_series_files(p)[0].resolve())
-            elif p.is_file() and (p.suffix.lower() == '.dcimg' or is_quadrant_mat(p)):
-                found.add(numbered_series(p)[0].resolve())
-    return sorted(found, key=lambda p: str(p))
+    from ..datasets import find
+    return find(paths, "images", recursive=recursive)
 
 
 def is_fourpi_scan(path) -> bool:

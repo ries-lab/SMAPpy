@@ -184,15 +184,18 @@ def answering(save: str = "", folder: str = ""):
     click run the window's own code, where the path goes on to matter.
     """
     from PySide6.QtWidgets import QFileDialog, QInputDialog
+    from ...gui import folders
     answers = {
         (QFileDialog, "getSaveFileName"): lambda *a, **k: (save, ""),
         (QFileDialog, "getExistingDirectory"): lambda *a, **k: folder,
         (QInputDialog, "getText"): lambda *a, **k: (k.get("text", ""), True),
+        # *Select several folders...*, Qt's own dialog (`gui.add_button`)
+        (folders, "choose_folders"): lambda *a, **k: [folder] if folder else [],
     }
     kept = {key: getattr(*key) for key in answers}
     try:
         for (cls, name), answer in answers.items():
-            setattr(cls, name, staticmethod(answer))
+            setattr(cls, name, staticmethod(answer) if isinstance(cls, type) else answer)
         yield
     finally:
         for (cls, name), original in kept.items():

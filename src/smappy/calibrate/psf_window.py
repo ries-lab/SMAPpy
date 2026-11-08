@@ -237,8 +237,12 @@ class PSFCalibrationWindow(QMainWindow):
             shortcut.activated.connect(self.remove_paths)
         flayout.addWidget(self.file_list)
         brow = QHBoxLayout()
-        for label, slot in (("Add files...", self.add_files), ("Add folder...", self.add_directory),
-                            ("Remove", self.remove_paths), ("Clear", self.clear_paths)):
+        from ..gui.add_button import AddButton
+        self.add_button = AddButton("Bead stacks", "Image stacks (*.tif *.tiff *.ome.tif *.dcimg *.mat);;"
+                                                   "All files (*)")
+        self.add_button.chosen.connect(self.add_dropped)
+        brow.addWidget(self.add_button)
+        for label, slot in (("Remove", self.remove_paths), ("Clear", self.clear_paths)):
             button = QPushButton(label)
             button.clicked.connect(slot)
             brow.addWidget(button)
@@ -868,39 +872,11 @@ class PSFCalibrationWindow(QMainWindow):
         """Show a question and wait (a test replaces it with a click)."""
         box.exec()
 
-    def add_files(self) -> None:
-        """On a Mac the system's open panel, files and folders together, several at once (`mac_panel`),
-        each sorted as a drop is (`add_dropped`); elsewhere, or should the panel fail, Qt's file dialog."""
-        from ..gui import mac_panel
-        chosen = mac_panel.choose_files_and_folders("Bead stacks: files or folders, several at once",
-                                                    folders.start())
-        if chosen is not None:
-            self.add_dropped(chosen)
-            return
-        paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", folders.start(),
-                                                "Image stacks (*.tif *.tiff *.ome.tif *.dcimg *.mat);;All files (*)")
-        folders.remember(paths, stack=True)
-        self.add_paths(paths)
-
-    def add_directory(self) -> None:
-        paths = folders.choose_folders(self, "Folders of bead stacks")
-        if not paths:
-            return
-        if self.subdirectories.isChecked():
-            try:
-                found = [str(p) for p in discover_acquisitions(paths)]
-            except Exception as error:
-                self.error(error)
-                return
-            self.add_paths(found or paths)
-        else:
-            self.add_paths(paths)
-
     def add_dropped(self, paths) -> None:
-        """Files and folders dropped on the window, several at once: what no folder dialog does -- the
-        Mac's and Qt's both take one folder.  Each is searched as *Add folder...* searches (a folder that is
-        a stack is that stack; *search subdirectories* goes deeper); one in which nothing is found is added
-        as it is, for the detection to say what is wrong with it."""
+        """Files and folders dropped on the window or chosen by *Add...* (`gui.add_button`), several at
+        once.  Each is searched for acquisitions (`datasets.find`: a folder that is a stack is that stack;
+        *search subdirectories* goes deeper); one in which nothing is found is added as it is, for the
+        detection to say what is wrong with it."""
         paths = [str(p) for p in paths]
         if not paths:
             return

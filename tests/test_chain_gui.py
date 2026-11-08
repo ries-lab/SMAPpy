@@ -100,12 +100,12 @@ def test_the_batch_window_writes_the_job_it_shows(app, tmp_path):
     window = BatchWindow()
     window.set_chain(ChainSpec(steps=[Step(plugin="Analysis/Measure/Localization Statistics",
                                            label="stats")]))
-    window.add_input(Input(folder=str(tmp_path), pattern=["*.h5"]))
+    window.add_input(Input(folder=str(tmp_path), filter="*640* & !*bead*"))
     window.add_input(Input(file=str(tmp_path / "a.h5"), overrides={"stats.bins": 12}))
     window.figures.setCurrentIndex(window.figures.findData("svg"))
     job = window.job()
     assert [i.to_dict() for i in job.inputs] == [
-        {"folder": str(tmp_path), "pattern": ["*.h5"]},
+        {"folder": str(tmp_path), "filter": "*640* & !*bead*"},
         {"file": str(tmp_path / "a.h5"), "overrides": {"stats.bins": 12}}]
     assert job.output.figures == "svg" and job.chain.steps[0].label == "stats"
     window.job_path = tmp_path / "j.batch.yaml"
@@ -132,8 +132,8 @@ def test_the_batch_window_follows_the_runners_lines(app, tmp_path):
                  f"SMAPPY_DONE\t3/3\t{tmp_path / 'out' / 'x'}",
                  f"SMAPPY_REPORT\t{tmp_path / 'out' / 'batch_report.json'}"]:
         window.handle_line(line)
-    assert window.table.item(0, 4).text() == "1 done, 1 failed"
-    assert window.table.item(1, 4).text() == "done"
+    assert window.tree.topLevelItem(0).text(2) == "1 done, 1 failed"
+    assert window.tree.topLevelItem(1).text(2) == "done"
     assert window.progress.value() == 3
     assert window.report_path.name == "batch_report.json"
 
@@ -148,7 +148,7 @@ def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
              f"SMAPPY_DONE\t1/1\t{tmp_path / 'out' / 'a'}"]
     for line in lines:
         window.handle_line(line)
-    assert window.table.item(0, 4).text() == "1 done"
+    assert window.tree.topLevelItem(0).text(2) == "1 done"
     # the second run, all of it but the subprocess
     import smappy.gui.batch_window as module
 
@@ -176,7 +176,7 @@ def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
     window.run()
     for line in (lines[0], f"SMAPPY_SKIP\t1/1\t{tmp_path / 'd' / 'a.h5'}\tdone before"):
         window.handle_line(line)
-    assert window.table.item(0, 4).text() == "1 skipped"
+    assert window.tree.topLevelItem(0).text(2) == "1 skipped"
 
 
 
@@ -224,7 +224,7 @@ def test_a_watch_is_started_by_the_toggle_and_asked_to_stop_before_it_is_ended(
                  f"SMAPPY_START\t1\t{tmp_path / 'd' / 'a.h5'}",
                  f"SMAPPY_DONE\t1\t{tmp_path / 'out' / 'a'}"):
         window.handle_line(line)
-    assert window.table.item(0, 4).text() == "1 done"
+    assert window.tree.topLevelItem(0).text(2) == "1 done"
     window.stop()
     assert written == [b"stop\n"] and not ended      # asked, after the file in hand
     window.stop()
@@ -271,3 +271,39 @@ def test_a_block_is_built_in_the_panel_with_its_steps_under_it(app, monkeypatch)
     assert "over 3 regions" in panel.checked.text()
     # and the chain's file says it as a block
     assert instance.chain["steps"][0]["regions"] == "cluster_id"
+
+
+def test_the_batch_windows_folders_show_what_the_chain_reads_and_follow_a_change_of_chain(
+        app, tmp_path):
+    """A folder unfolds into the data sets of the chain's kind; another chain,
+    another kind, and the same folder shows the others.  A file of the other
+    kind stays, said to be skipped; the filter and unticking narrow a folder."""
+    import numpy as np
+    import tifffile
+    from PySide6.QtCore import Qt
+    from smappy.gui.batch_window import BatchWindow
+    from smappy.io.formats import save
+    from smappy.simulate import simulate
+    for name in ("a_MMStack.ome.tif", "a_MMStack_1.ome.tif", "b_640.tif"):
+        tifffile.imwrite(tmp_path / name, np.zeros((2, 4, 4), np.uint16))
+    save(simulate(n_frames=50, seed=1), tmp_path / "b_640_locs.h5")
+    window = BatchWindow()
+    window.add_paths([str(tmp_path), str(tmp_path / "b_640.tif")])
+    folder, stack = window.tree.topLevelItem(0), window.tree.topLevelItem(1)
+
+    def children():
+        return [folder.child(i).text(0) for i in range(folder.childCount())]
+    assert "localization files" in window.kind_line.text()
+    assert children() == ["b_640_locs.h5"] and stack.text(2) == "skipped"
+    window.set_chain(ChainSpec(steps=[Step(plugin="Localize/Gaussian 2D", label="fit")]))
+    assert "raw camera images" in window.kind_line.text()
+    assert children() == ["a_MMStack.ome.tif", "b_640.tif"]      # the series once
+    assert folder.text(2) == "2 data sets" and stack.text(2) == ""
+    folder.setText(1, "*640*")
+    assert children() == ["b_640.tif"]
+    folder.setText(1, "(*640*")
+    assert folder.text(2) == "filter error" and "not closed" in folder.toolTip(2)
+    folder.setText(1, "")
+    folder.child(0).setCheckState(0, Qt.Unchecked)
+    assert folder.text(2) == "1 data set"
+    assert window.inputs()[0].exclude == ["a_MMStack.ome.tif"]

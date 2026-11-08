@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
                                QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
-from ..gui import folders
 from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from ..plugins import ParamInfo, param_specs
@@ -85,6 +84,7 @@ class CalibrationWindow(QMainWindow):
         attach_help(self, 'Panels/Bead calibration')
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("SMAPpy - bead calibration")
+        self.setAcceptDrops(True)
         self.paths: List[str] = [str(p) for p in paths]
         self.result = None
         self.diagnostics = None
@@ -174,12 +174,14 @@ class CalibrationWindow(QMainWindow):
         self.file_list.setMaximumHeight(120)
         flayout.addWidget(self.file_list)
         brow = QHBoxLayout()
-        for label, slot in (("Add files...", self.add_files),
-                            ("Add folder...", self.add_directory),
-                            ("Remove", self.remove_paths)):
-            b = QPushButton(label)
-            b.clicked.connect(slot)
-            brow.addWidget(b)
+        from ..gui.add_button import AddButton
+        self.add_button = AddButton("Bead stacks", "Image stacks (*.tif *.tiff *.ome.tif);;"
+                                                   "All files (*)")
+        self.add_button.chosen.connect(self.add_chosen)
+        brow.addWidget(self.add_button)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(self.remove_paths)
+        brow.addWidget(remove)
         flayout.addLayout(brow)
         self.subdirectories = QCheckBox("search subdirectories")
         self.subdirectories.setChecked(True)
@@ -304,26 +306,29 @@ class CalibrationWindow(QMainWindow):
                 self.paths.append(str(path))
         self._refresh_files()
 
-    def add_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", folders.start(),
-                                                "Image stacks (*.tif *.tiff *.ome.tif);;"
-                                                "All files (*)")
-        folders.remember(paths, stack=True)
-        self.add_paths(paths)
-
-    def add_directory(self) -> None:
-        paths = folders.choose_folders(self, "Folders of bead stacks")
-        if not paths:
-            return
-        if self.subdirectories.isChecked():
+    def add_chosen(self, paths) -> None:
+        """Files and folders from *Add...* or a drop: each searched for acquisitions (`datasets.find`),
+        into subfolders with *search subdirectories*; one in which nothing is found is added as it is."""
+        found = []
+        for path in paths:
             try:
-                found = [str(p) for p in discover_acquisitions(paths)]
+                hits = [str(p) for p in discover_acquisitions(
+                    [path], recursive=self.subdirectories.isChecked())]
             except Exception as error:
                 self.error(error)
                 return
-            self.add_paths(found or paths)
-        else:
-            self.add_paths(paths)
+            found += hits or [str(path)]
+        self.add_paths(found)
+
+    def dragEnterEvent(self, event) -> None:
+        from ..gui import drops
+        if drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        from ..gui import drops
+        event.acceptProposedAction()
+        self.add_chosen([str(p) for p in drops.local_paths(event.mimeData())])
 
     def remove_paths(self) -> None:
         for item in self.file_list.selectedItems():
