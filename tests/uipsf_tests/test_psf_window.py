@@ -288,24 +288,32 @@ def test_several_stack_folders_dropped_together_are_each_added(tmp_path):
     window.close()
 
 
-def test_add_files_takes_the_macs_files_and_folders_or_falls_back_to_qts_dialog(tmp_path, monkeypatch):
+def test_add_takes_the_macs_files_and_folders_or_falls_back_to_qts_dialog(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication, QFileDialog
     from smappy.calibrate.psf_window import PSFCalibrationWindow
-    from smappy.gui import mac_panel
+    from smappy.gui import folders, mac_panel
     QApplication.instance() or QApplication([])
     folder = tmp_path / "bead_z1"
     folder.mkdir()
     tifffile.imwrite(folder / "bead_z1.tif", np.zeros((5, 16, 16), np.uint16))
     single = tmp_path / "bead_z2.tif"
     tifffile.imwrite(single, np.zeros((5, 16, 16), np.uint16))
+    other = tmp_path / "other.tif"
+    tifffile.imwrite(other, np.zeros((5, 16, 16), np.uint16))
+    several = tmp_path / "bead_z3"
+    several.mkdir()
+    tifffile.imwrite(several / "bead_z3.tif", np.zeros((5, 16, 16), np.uint16))
     window = PSFCalibrationWindow()
     monkeypatch.setattr(mac_panel, "choose_files_and_folders", lambda title="", start="": [str(folder), str(single)])
-    window.add_files()                                   # a folder and a file in one choice
+    window.add_button.choose()                           # a folder and a file in one choice
     assert len(window.paths) == 2
     asked = []
     monkeypatch.setattr(mac_panel, "choose_files_and_folders", lambda title="", start="": None)
     monkeypatch.setattr(QFileDialog, "getOpenFileNames",
-                        lambda *args, **kwargs: asked.append(args) or ([str(tmp_path / "other.tif")], ""))
-    window.add_files()                                   # no panel: Qt's dialog, as before
+                        lambda *args, **kwargs: asked.append(args) or ([str(other)], ""))
+    window.add_button.choose()                           # no panel: Qt's dialog, as before
     assert len(asked) == 1 and window.paths[-1].endswith("other.tif")
+    monkeypatch.setattr(folders, "choose_folders", lambda *a, **k: [str(several)])
+    window.add_button.several.trigger()                  # the arrow's Select several folders...
+    assert window.paths[-1].endswith("bead_z3.tif")
     window.close()
