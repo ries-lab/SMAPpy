@@ -13,8 +13,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -66,6 +66,55 @@ QUICK_TEXT_WIDTH = 64       # px: a bounded column's button, its name elided to 
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
 
+
+
+LUT_ICON = QSize(48, 12)
+_lut_icons: Dict[str, QIcon] = {}
+
+
+def lut_icon(name: str) -> QIcon:
+    """The LUT's colours as a small strip, drawn once per name; a LUT of one
+    colour as that colour."""
+    if name not in _lut_icons:
+        table = luts.get(name)
+        index = np.linspace(0, len(table) - 1, LUT_ICON.width()).astype(int)
+        if luts.kind(name) == "one colour":
+            # the colour itself, easier to spot than a ramp from black; gray's
+            # white would vanish on a light list
+            top = table[-1] if name != "gray" else np.full(3, 0.6, np.float32)
+            table = np.repeat(top[None], len(table), axis=0)
+        row = np.round(table[index] * 255).astype(np.uint8)
+        strip = np.ascontiguousarray(np.repeat(row[None], LUT_ICON.height(), axis=0))
+        image = QImage(strip.data, strip.shape[1], strip.shape[0], 3 * strip.shape[1],
+                       QImage.Format_RGB888)
+        _lut_icons[name] = QIcon(QPixmap.fromImage(image.copy()))
+    return _lut_icons[name]
+
+
+def fill_luts(combo: QComboBox, attribute: bool) -> None:
+    """The LUTs under their groups' headings (`lut.groups`), the ones for what
+    the layer is coloured by first: intensity, or with ``attribute`` a column.
+    Every LUT is offered either way -- z on a hue circle is a fair choice --
+    only the order says which suit.  The headings cannot be chosen; the
+    choice is kept and no signal fires."""
+    chosen = combo.currentText()
+    blocked = combo.signalsBlocked()
+    combo.blockSignals(True)
+    combo.clear()
+    model = combo.model()
+    for heading, names in luts.groups(attribute):
+        combo.addItem(f"\u2014 {heading} \u2014")
+        item = model.item(combo.count() - 1)
+        item.setFlags(Qt.NoItemFlags)
+        item.setData(True, Qt.UserRole)                 # a heading
+        for name in names:
+            combo.addItem(lut_icon(name), name)
+    combo.setIconSize(LUT_ICON)
+    if chosen:
+        combo.setCurrentText(chosen)
+    if combo.currentIndex() < 0 or combo.itemData(combo.currentIndex(), Qt.UserRole):
+        combo.setCurrentText(FIELD_LUT if attribute else INTENSITY_LUT)
+    combo.blockSignals(blocked)
 
 class _Bound(QLineEdit):
     def __init__(self):
@@ -1263,7 +1312,7 @@ class RenderTab(QWidget):
         self.color_hi.editingFinished.connect(self._on_color_range)
         self.color_auto.clicked.connect(self._auto_color_range)
         self.lut = QComboBox()
-        self.lut.addItems(luts.names())
+        fill_luts(self.lut, attribute=False)
         self.invert = QCheckBox("invert")
         self.invert.setToolTip("as SMAP: colouring by intensity, the opposite colour "
                                "at the same brightness (red becomes cyan); "
@@ -1517,6 +1566,7 @@ class RenderTab(QWidget):
             self._set_combo(self.image_3d, getattr(layer, "image_3d", "plane"))
             self._enable_image_rows(img)
             display = layer.get_display()
+            fill_luts(self.lut, attribute=False)
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self._show_invert(display.invert)
             self.white.setChecked(display.white_background)
@@ -1544,7 +1594,8 @@ class RenderTab(QWidget):
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
         self._show_sigma_rows()
-        self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
+        fill_luts(self.lut, attribute=settings.color_field is not None)
+        self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else INTENSITY_LUT)
         self._show_invert(display.invert)
         self.white.setChecked(display.white_background)
         self._show_scale(display)
@@ -1627,7 +1678,7 @@ class RenderTab(QWidget):
 
     def _colour_by_track(self) -> None:
         """The first time a layer draws tracks, and only if it is not coloured
-        by a column already: each track its own colour, by its id on *turbo*.
+        by a column already: each track its own colour, by its id on *rainbow*.
         One intensity LUT made every track the same colour, and which line
         was which track could not be told where they cross.  Once per layer,
         so a colouring chosen afterwards is not undone by a mode switch."""
@@ -1650,7 +1701,7 @@ class RenderTab(QWidget):
             w.blockSignals(False)
         # through the handlers, so the range and the LUT follow as on a click
         self._on_color()
-        self.lut.setCurrentText("turbo")
+        self.lut.setCurrentText(FIELD_LUT)
 
     def _chosen_track_column(self, fallback: str) -> str:
         """The column the list says: "" for *auto*; ``fallback`` while the
@@ -1694,6 +1745,7 @@ class RenderTab(QWidget):
         self.color_lo.set(lo)
         self.color_hi.set(hi)
         if (was is None) != (field is None):            # switching kind: a fitting LUT
+            fill_luts(self.lut, attribute=field is not None)
             self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
         self.session.changed("layer")
 

@@ -74,14 +74,14 @@ def test_spheres_are_shaded_and_occlude_by_depth():
     assert iy < 100 and ix < 100                          # lit from the upper left
     assert 7000 < (g > 0.05).sum() < 8200                  # a disc of radius 50 px
     # the nearer sphere (larger depth) hides the farther one, whatever the draw order
-    t = luts.get("turbo")
+    t = luts.get("rainbow")
     for zs in ([200.0, -200.0], [-200.0, 200.0]):
         two = Localizations({"x_nm": np.array([500.0, 520.0], np.float32),
                              "y_nm": np.array([500.0, 500.0], np.float32),
                              "z_nm": np.array(zs, np.float32)}, {})
         s2 = Session(two)
         s2.layers[0].state.settings = RenderSettings(color_field="z_nm", color_range=(-200, 200))
-        s2.layers[0].state.display = DisplaySettings(lut="turbo")
+        s2.layers[0].state.display = DisplaySettings(lut="rainbow")
         p2 = Projection(pivot=[510, 500, 0], zoom=2.0, engine="spheres", point_size=100, ssao_strength=0.0)
         mid = render_3d(s2.layers, p2, None, p2.fov(200, 200), engine=ENGINE)[100, 100]
         assert np.abs(mid - t[-1]).sum() < np.abs(mid - t[0]).sum()

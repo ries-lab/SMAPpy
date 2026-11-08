@@ -38,7 +38,7 @@ def arranged(path):
     second.visible = False
     second.state.settings.color_field = "z_nm"
     display = second.get_display()
-    display.lut = "jet"
+    display.lut = "rainbow"
     second.set_display(display)
     image = ImageData(np.arange(400, dtype=np.float32).reshape(20, 20), 250.0,
                       name="widefield")

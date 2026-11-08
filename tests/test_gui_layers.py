@@ -125,6 +125,10 @@ def test_white_background_turns_the_picture_over_once(app):
     view = RenderView(session)
     tab = RenderTab(session, view)
     session.add_layer(like=0)
+    # ramps of one colour, which white paper only turns over; a ramp of several
+    # colours is also drawn backwards there (`lut.intensity_table`)
+    for layer, name in zip(session.layers, ("red", "cyan")):
+        layer.set_display(dataclasses.replace(layer.get_display(), lut=name))
     fov = view.current_fov(200, 160)
 
     dark = view.panel_images(fov, ["overlay"])[0]
@@ -173,12 +177,12 @@ def test_copying_settings_from_another_layer_takes_only_what_is_asked_for():
     session = Session(_layer_table())
     session.add_layer(like=0)
     first, second = session.layers
-    first.set_display(dataclasses.replace(first.get_display(), lut="hot"))
+    first.set_display(dataclasses.replace(first.get_display(), lut="red hot"))
     first.state.settings = dataclasses.replace(first.state.settings, sigma=7.0)
     second.set_bound("photons", 700, None)
 
     session.copy_layer(0, 1)
-    assert second.get_display().lut == "hot"
+    assert second.get_display().lut == "red hot"
     assert second.state.settings.sigma == 7.0
     assert second.ranges["photons"] == (700, None)
 

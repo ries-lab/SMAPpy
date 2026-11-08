@@ -72,23 +72,23 @@ def test_luts_are_well_formed():
 
 def test_invert_is_smaps_lutinvert_on_intensity_and_a_turn_round_on_a_column():
     """SMAP's two inversions.  An intensity ramp: ``sum(c) - c`` (`lutinvert`),
-    which on `hot` runs black through cyan to white.  A LUT coding a column:
+    which on `red hot` runs black through cyan to white.  A LUT coding a column:
     the table turned round, since the sum of a rainbow's channels is no
     colour of it."""
     one_hue = np.array([[0.4, 0.0, 0.0]], np.float32)
     assert np.allclose(luts.invert_sum(one_hue), [[0.0, 0.4, 0.4]])
     yellow = np.array([[1.0, 1.0, 0.0]], np.float32)
     assert np.allclose(luts.invert_sum(yellow), [[1.0, 1.0, 1.0]])
-    assert np.allclose(luts.get("hot", invert=True), luts.invert_sum(luts.get("hot")))
+    assert np.allclose(luts.get("red hot", invert=True), luts.invert_sum(luts.get("red hot")))
     for name in luts.names():
         table = luts.get(name, invert=True)
         assert table.min() >= 0 and table.max() <= 1, name
 
-    turbo = luts.get("turbo")
+    rainbow = luts.get("rainbow")
     values = np.array([0.0, 1.0])
-    plain = luts.colors(values, "turbo", 0.0, 1.0)
-    turned = luts.colors(values, "turbo", 0.0, 1.0, invert=True)
-    assert np.allclose(plain, turbo[[0, -1]]) and np.allclose(turned, turbo[[-1, 0]])
+    plain = luts.colors(values, "rainbow", 0.0, 1.0)
+    turned = luts.colors(values, "rainbow", 0.0, 1.0, invert=True)
+    assert np.allclose(plain, rainbow[[0, -1]]) and np.allclose(turned, rainbow[[-1, 0]])
 
 def test_a_table_with_no_columns_yet_renders_as_an_empty_picture():
     """A live fit's table, before its first block: the view asks for a picture
@@ -173,7 +173,7 @@ def test_a_field_coloured_picture_with_nothing_in_view_is_black_not_the_luts_low
                           "z_nm": np.linspace(-300, 300, n, dtype=np.float32),
                           "frame": np.arange(n), "track_id": np.arange(n) // 10})
     fov = FieldOfView(0, 0, 10, 50, 50)
-    display = DisplaySettings(lut="jet")
+    display = DisplaySettings(lut="rainbow")
     nothing = render_locs(locs, fov, RenderSettings(mode=mode, color_field="z_nm"), display,
                           select=np.zeros(0, np.int64))
     assert nothing.color is not None

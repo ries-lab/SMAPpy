@@ -90,7 +90,7 @@ def test_colouring_by_a_column_shows_its_scale_and_intensity_shows_none(app):
     window.close()
 
 
-def colour(layer, field, lut="turbo", color_range=(0.0, 100.0)):
+def colour(layer, field, lut="rainbow", color_range=(0.0, 100.0)):
     layer.state.settings = dataclasses.replace(
         layer.state.settings, color_field=field, color_range=color_range)
     layer.state.display = dataclasses.replace(layer.state.display, lut=lut)
@@ -121,7 +121,7 @@ def test_each_scale_has_its_bar_and_layers_on_one_scale_share_it(app):
         [f"{first.name}, {second.name}\nz_nm"]
 
     # the same column through another LUT is another scale
-    colour(second, "z_nm", lut="jet", color_range=(-300.0, 300.0))
+    colour(second, "z_nm", lut="hue circle", color_range=(-300.0, 300.0))
     session.changed("layer")
     assert len(bars.bars) == 2
     window.close()

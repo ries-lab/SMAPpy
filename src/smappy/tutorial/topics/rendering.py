@@ -162,7 +162,7 @@ def make(d) -> None:
     d.settle()
     d.shot("The colour table, LUT, maps brightness to colour.",
            spot=[tab.lut, d.rect(render.view.graphics, pad=-2)], point=tab.lut)
-    tab.lut.setCurrentText("hot")
+    tab.lut.setCurrentText("red hot")
     expand(tab.white)
     tab.white.setChecked(True)
     d.settle()
