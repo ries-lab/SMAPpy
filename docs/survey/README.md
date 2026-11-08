@@ -16,7 +16,9 @@ in a survey of their own, [minflux.md](minflux.md).
 | [minflux.md](minflux.md) | MINFLUX: readers, MBM, trace analysis (written earlier, 2026-10) | PYME-extra, MBM-inspector, pyMINFLUX, minflux-viewer, minflux-analysis, napari-storm, Pyflux, matFLUX, MFX_data_analysis, ... |
 | [drift_averaging_fitting.md](drift_averaging_fitting.md) | drift, registration, resolution, averaging, model fitting, fitting | DME / photonpy, NanoJ, ImDecorr, smlm_datafusion2d/3d, smlm_classification2d, LocMoFit, fit3Dcspline, storm-analysis, ZOLA-3D, Gpufit, PERPL |
 
-[candidates.md](candidates.md) lists every candidate from all the files in one table.
+[candidates.md](candidates.md) lists every candidate from all the files in one table, with
+what is done, open or decided against (status of 2026-11-08); the live list, with the
+decisions, is the artifact page [SMLM Survey Candidates](https://claude.ai/artifact/AfBrUYivUQFzcNPjr5n7KE).
 
 Each file has the same sections: the software (licence, port route), worth
 porting (ranked), better than SMAPpy's own, user experience, licence-restricted
@@ -79,8 +81,8 @@ Ranked by value for the effort; sizes S ≤ a day, M a few days, L a week+.
 | 2 | **qPAINT**: sites = 1/(influx · τ_dark), influx calibrated on known picks; an ML dark-time fit. ✅ *Binding kinetics* and *Summarize/qPAINT* (2026-10-28) | Picasso | S | MIT | a per-region plugin of its own, calibration in Summarize |
 | 3 | fixes 1–3 above (fix 4, COMET's weights, done 2026-10-28) | | S–M each | | |
 | 4 | **Colocalisation per localization** (CBC / DoC; Coloc-Tesseler) | Locan; PoCA paper | S | BSD | a *Neighbourhood* quantity (Locan's weighting looks wrong: follow the paper) |
-| 5 | **Single-molecule test per cluster** (hull area against its expectation) and a temporal accumulation check | Locan (Ebert 2022) | S | BSD | values of *Cluster shape*, so *Filter ROIs* drops them |
-| 6 | **Sticky / partial-event filters**: clusters whose frames bunch in time; binding-event cores | Picasso (RESI clusterer) | S | MIT | an option shared by *Find clusters* |
+| 5 | **Single-molecule test per cluster** (hull area against its expectation; *decided: skip*) and a temporal accumulation check | Locan (Ebert 2022) | S | BSD | values of *Cluster shape*, so *Filter ROIs* drops them |
+| 6 | **Sticky / partial-event filters**: clusters whose frames bunch in time; binding-event cores. ◐ *Binding kinetics* flags sticky sites per region; the *Find clusters* option is open | Picasso (RESI clusterer) | S | MIT | an option shared by *Find clusters* |
 | 7 | **G5M**: clusters to molecules by a constrained Gaussian mixture, BIC, Sparrow test | Picasso | M | MIT | a `per_region` measurement or a *Find clusters* stage |
 | 8 | **Per-track diffusive states**: state arrays (posterior per track as a column); HMM with transitions | saSPT; ExTrack | M; M–L | MIT | *Tracking analysis* approaches |
 | 9 | **Step finding** | AutoStepFinder (paper); BNP-Step | S–M | re-implement | a `per_region` *Find steps*; prerequisite for StepsMINFLUX |
@@ -88,8 +90,8 @@ Ranked by value for the effort; sizes S ≤ a day, M a few days, L a week+.
 | 11 | **Template-free particle fusion and classification** | smlm_datafusion2d/3d | L | Apache | data-driven alignment for *Average ROIs* |
 | 12 | **PC-PALM fit of g(r)** (Sengupta) | GDSC SMLM, papers | M | re-implement | a model in *Spatial statistics* |
 | 13 | **SPINNA**: oligomer proportions from k-NN distances against masked simulations | Picasso | M–L | MIT | `per_region` with `smappy.simulate` |
-| 14 | **Depth-dependent z correction** from beads in gel | fit3Dcspline | M | own | a calibration plus a table operation |
-| 15 | smaller: GLRT p-value per localization (photonpy, S), sCMOS maps (Picasso, M), local FRC map (S), *pick similar* (S), drift from tracks (trackpy, S), ToMATo (S–M, re-implement), automatic merge dark time (S), G/F functions (S), AnDi test data (S) | | | | |
+| 14 | **Depth-dependent z correction** from beads in gel (*decided: skip*; Spline 3D's *focus* draws the PSF at depth instead) | fit3Dcspline | M | own | a calibration plus a table operation |
+| 15 | smaller: GLRT p-value per localization (photonpy, S; *skip*), sCMOS maps (Picasso, M), local FRC map (S; *done*), *pick similar* (S), drift from tracks (trackpy, S; *skip*), ToMATo (S–M, re-implement), automatic merge dark time (S), G/F functions (S; *skip*), AnDi test data (S) | | | | |
 
 ## User experience and automation
 
