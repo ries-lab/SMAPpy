@@ -2307,6 +2307,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         control.load_paths(args, reset_view=True)   # and says so as it goes
     control.updates.start()      # once a day at most, and a few seconds in
     control.listen_if_asked()    # the assistant's, if its settings say so
+    from . import warmup         # scipy and matplotlib before the first click
+    warmup.start_later()
     return app.exec()
 
 
