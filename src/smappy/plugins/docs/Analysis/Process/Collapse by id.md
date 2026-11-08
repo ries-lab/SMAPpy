@@ -5,11 +5,11 @@ covers: [smappy.table_edit.collapse, smappy.table_edit.collapse_index, smappy.ta
 
 ## What it does
 
-Replaces the table with one row per value of an id column: a row per
+Replaces the table with one row per value of an id attribute: a row per
 [merged blink](plugin:Panels/Glossary) (`group_id`), per track
 (`track_id`, from [Link tracks](plugin:Analysis/Tracking/Link tracks)), per
 cluster (`cluster_id`, from [Find clusters](plugin:Analysis/Regions/Find clusters)),
-or per value of any other whole-number column.  Each column is combined as
+or per value of any other whole-number attribute.  Each attribute is combined as
 merging blinks combines it: positions averaged, weighted by their
 precision, photons added up.
 
@@ -48,10 +48,10 @@ DBSCAN's noise, a localization in no track.  With *rows without an id* on
 *keep* each is a row of its own, its values as they were; on *remove* they
 are not in the new table.
 
-**3. Each column combined**, by the rule merging blinks uses for it: a
-weighted mean for positions and most columns, the sum for `photons` and
+**3. Each attribute combined**, by the rule merging blinks uses for it: a
+weighted mean for positions and most attributes, the sum for `photons` and
 `background`, the first frame for `frame`, the combined precision for
-`xy_err_nm` and the other errors.  The id column keeps its ids exactly.
+`xy_err_nm` and the other errors.  The id attribute keeps its ids exactly.
 
 **4. The count.**  `n_merged` says how many rows each one was made from.
 
@@ -69,17 +69,17 @@ ax.set_title(f"{len(table)} localizations, {len(rows)} clusters", fontsize=8)
 ## In detail
 
 **What is lost.**  What one row cannot hold: `logl`, which has no value for
-a group; the frames of the members but the first; and every column's
+a group; the frames of the members but the first; and every attribute's
 spread within the group.  The table's own `group_id` and `n_in_group` are
 not kept: they described localizations that are gone, and merging the
 blinks of the collapsed table writes its own.  Collapsed by `group_id`,
-the id column goes too, for the same reason.
+the id attribute goes too, for the same reason.
 
-**Derived columns.**  A column [Math Parser](plugin:Analysis/Process/Math Parser)
+**Derived attributes.**  An attribute [Math Parser](plugin:Analysis/Process/Math Parser)
 defines is combined by its recipe's rule, or computed again from its
 expression.  One whose expression reads `n_in_group` or `group_id` -- an
 on-time in milliseconds, say -- is computed on the groups and then kept
-as values: its expression would read columns that are not kept.
+as values: its expression would read attributes that are not kept.
 
 **Merging again.**  A layer that merges blinks merges the rows of the new
 table as it would localizations: rows in consecutive frames close
@@ -88,13 +88,13 @@ blink started, so two blinks of one molecule are merged only when the
 first frame of the second follows within *dark frames* of the first
 frame of the first.
 
-**The table remembers** that it was collapsed, by which column and from
+**The table remembers** that it was collapsed, by which attribute and from
 how many rows, in its metadata (`collapsed`).
 
 ## Parameters
 
 ### column
-The ids offered are the whole-number columns the table has, the usual ids
+The ids offered are the whole-number attributes the table has, the usual ids
 first.  `group_id` is there once blinks have been merged on a layer.
 
 ### unassigned

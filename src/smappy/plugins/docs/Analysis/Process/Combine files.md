@@ -36,11 +36,11 @@ Render tab lists them.
 files before it. A file with localizations up to frame 9999 takes 10000
 frames, so the next file's frame 0 becomes frame 10000, plus *gap*.
 
-**3. Time continues.** A time column (`time_s`) moves up the same way, by
+**3. Time continues.** A time attribute (`time_s`) moves up the same way, by
 how long the files before it lasted.
 
 **4. Ids stay apart.** Track 5 of the first file and track 5 of the second
-are different tracks. So an id column, such as `track_id` or `cluster_id`,
+are different tracks. So an id attribute, such as `track_id` or `cluster_id`,
 is numbered on from the files before it. An id of 0 means "in none" and
 stays 0.
 
@@ -52,7 +52,7 @@ be a blink that continues, so the next grouping finds them again.
 file, named after the files it was made from ("a.tif + b.tif").
 
 **7. Warnings, not refusals.** Files whose pixel size, frame time, format or
-columns differ are combined anyway. Each difference is a reason to doubt they
+attributes differ are combined anyway. Each difference is a reason to doubt they
 are one acquisition, and is said as a warning.
 
 ## In detail
@@ -65,24 +65,24 @@ $$\Delta f_k = \sum_{j<k} \left( F_j + 1 + g \right)$$
 where $g$ is *gap*. Frames after a file's last localization, recorded but
 empty, are not known to the table and are not counted.
 
-A time column moves up by the summed durations of the files before. A file's
+A time attribute moves up by the summed durations of the files before. A file's
 duration is its frames, $F_j + 1 + g$, times its frame time. If its last time
 stamp is later than that, or the frame time is not known, the last time stamp
 is used instead, so the next file never starts inside this one. The frame
 time is the file's own, as the session recorded it, else the camera's.
 
-Id columns are the whole-number columns whose name ends in `_id`. The
+Id attributes are the whole-number attributes whose name ends in `_id`. The
 numbers above 0 of file $k$ move up by the sum of the highest id of each file
 before it. MINFLUX's trace id `tid` has no "none" value, so all its numbers
-move up, by the highest id + 1 of each earlier file. Some id columns stay as
-they are: `roi_id`, and the columns written from regions' results (*Regions
-to column*). They are an ROI's number, which is the same whichever file a
+move up, by the highest id + 1 of each earlier file. Some id attributes stay as
+they are: `roi_id`, and the attributes written from regions' results (*Regions
+to attribute*). They are an ROI's number, which is the same whichever file a
 localization came from.
 
 The table's metadata (its camera, its fit) is the first file's. The new file
 entry keeps each original file's entry (`combined_from`). Its pixel size is
 the first file's. It has a frame time only if all the files share one, and
-its columns are all the columns any file had.
+its attributes are all the attributes any file had.
 
 The files' camera frames are kept for the first file only. Its frames keep
 their numbers; the other files' frames would need theirs moved too. Layers
@@ -102,5 +102,5 @@ with a pause between them, long enough for the fluorophores to change.
 The table, now one file, and a line saying how many files went into how
 many localizations and frames. Each incompatibility is a warning in the
 same line. "a.tif was read without z_nm: its rows hold padding there"
-means the file had no such column, so its rows hold NaN there, not a
+means the file had no such attribute, so its rows hold NaN there, not a
 measurement.

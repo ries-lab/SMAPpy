@@ -149,7 +149,7 @@ class HistogramSettings:
                              "column but the counts behind the means")
     evaluation: str = param("", label="results from", choices=auto_only,
                             help="the measurement whose columns are drawn, on "
-                                 "the ROIs or per region of an id column; "
+                                 "the ROIs or per region of an id attribute; "
                                  "auto: everything measured on the ROIs")
 
 

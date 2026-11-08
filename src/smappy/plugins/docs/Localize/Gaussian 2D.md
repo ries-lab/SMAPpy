@@ -382,7 +382,7 @@ workspace, a chain or a batch they apply to every file.
 
 The table, with one row per fitted spot:
 
-| column | meaning |
+| attribute | meaning |
 | --- | --- |
 | `frame` | the camera frame |
 | `x_nm`, `y_nm` | the position on the camera chip (the camera ROI's corner added) |
@@ -396,7 +396,7 @@ The table, with one row per fitted spot:
 | `iterations` | how many steps the fit took |
 
 All lengths are in nm.  The fit measures in camera pixels and converts
-at the end; it keeps no pixel copy of these columns, because the file
+at the end; it keeps no pixel copy of these attributes, because the file
 records the pixel size (`pixelsize_nm`, and `pixelsize_nm_xy` for pixels
 that are not square): a position on the camera is `x_nm` divided by it.
 Only the candidate, `peak_x_pix` and `peak_y_pix`, stays in camera pixels.

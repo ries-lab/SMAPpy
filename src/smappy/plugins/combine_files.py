@@ -128,7 +128,7 @@ def combine(locs: Localizations, gap: int = 0) -> Tuple[Localizations, List[str]
         raise ValueError("one file only: there is nothing to combine")
     if "frame" not in locs:
         raise ValueError("combining continues the frames, and the table has no "
-                         "frame column; it has " + ", ".join(sorted(locs.keys())))
+                         "frame attribute; it has " + ", ".join(sorted(locs.keys())))
     files = np.asarray(locs["filenumber"], np.int64)
     numbers = [int(k) for k in np.flatnonzero(np.bincount(files))]
     if len(numbers) < 2:

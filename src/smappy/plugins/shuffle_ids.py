@@ -57,10 +57,10 @@ def _no_column():
 
 @dataclass
 class ShuffleSettings:
-    column: str = param("", label="column", choices=_no_column,
-                        help="an integer column: cluster_id, roi_id, tid, frame, ...")
-    name: str = param("", label="new column",
-                      help="empty: the column's name with _shuffled")
+    column: str = param("", label="attribute", choices=_no_column,
+                        help="an integer attribute: cluster_id, roi_id, tid, frame, ...")
+    name: str = param("", label="new attribute",
+                      help="empty: the attribute's name with _shuffled")
     seed: Optional[int] = param(None, label="seed", advanced=True,
                                 help="auto: a new order each run; a number "
                                      "gives the same order again")
@@ -90,18 +90,18 @@ class ShuffleIds(Plugin):
         locs = ctx.locs
         column = settings.column
         if not column:
-            raise ValueError("choose a column")
+            raise ValueError("choose an attribute")
         if column not in locs:
-            raise ValueError(f"no column {column!r}; the integer ones are "
+            raise ValueError(f"no attribute {column!r}; the integer ones are "
                              + ", ".join(_integer_columns(locs)))
         ids = np.asarray(locs[column])
         if ids.dtype.kind not in "iu":
-            raise ValueError(f"{column} is not a column of whole numbers: ids are")
+            raise ValueError(f"{column} is not an attribute of whole numbers: ids are")
         seed = settings.seed if settings.seed is not None else \
             int(np.random.default_rng().integers(0, 2 ** 31))
         name = settings.name.strip() or f"{column}_shuffled"
         if name == column:
-            raise ValueError("the shuffled ids go into a new column: an id is "
+            raise ValueError("the shuffled ids go into a new attribute: an id is "
                              "what results and regions are kept by")
         out = Localizations({**locs.columns, name: shuffle_ids(ids, seed)},
                             dict(locs.metadata))

@@ -12,7 +12,7 @@ plugin: the nuclear pores with six corners or more, the MINFLUX
 of more than 20 localizations.  The results are those the regions were
 measured with -- by the per-region steps, *Id statistics*, a block of a
 chain -- and stay in their [region table](plugin:Panels/Glossary); what
-reaches the localizations is one column, `region_filter` (1 in, 0 out),
+reaches the localizations is one attribute, `region_filter` (1 in, 0 out),
 and a bound on it in every layer.
 
 This is the step for a chain or a batch.  By hand, the Regions tab's
@@ -32,7 +32,7 @@ flag, the texts it accepts (an ROI's *use*, `true`).  A missing value (not
 measured, NaN) fails.
 
 **2. A region passes** if it passes every condition on its source -- the
-ROIs, or the regions of one id column.  Of two overlapping pores, one with
+ROIs, or the regions of one id attribute.  Of two overlapping pores, one with
 the corners and the other with the diameter, neither passes.
 
 **3. A localization is kept** if it is in any region that passes (an ROI
@@ -47,13 +47,13 @@ on top.
 ## In detail
 
 The conditions are kept with the table, in its metadata, as the recipes of
-derived columns are; a saved file opens filtered, and an undo brings back
+derived attributes are; a saved file opens filtered, and an undo brings back
 the table's own.  The flag is written again from them whenever the table,
 the ROIs or their results change -- never stored as a snapshot.
 
 After a table change that keeps the regions' ids -- a drift correction --
 the regions' results are out of date; the filter keeps applying them, and
-says so, as long as the id column is the one they were applied to (its
+says so, as long as the id attribute is the one they were applied to (its
 hash is remembered).  A new clustering leaves nothing to apply: that
 source's conditions are suspended, with a warning, until it is measured
 again.  An ROI's values are its newest stored ones, current or not, as
@@ -78,7 +78,7 @@ nothing else.
 
 ### evaluation
 The evaluations offered are those the session has: the ROIs' by name, an
-id column's as "per cluster_id: ...", and *annotations*, an ROI's *use*,
+id attribute's as "per cluster_id: ...", and *annotations*, an ROI's *use*,
 keywords and lines.
 
 ### accept

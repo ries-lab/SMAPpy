@@ -9,7 +9,7 @@ Saves the super-resolved picture as a file -- PNG, TIFF or JPEG -- as the
 render window shows it: every visible [layer](plugin:Panels/Glossary) (one
 picture of the localizations with its own filter and colours), the panels
 side by side if the window splits them, and what the window draws over the
-picture: a scale bar, a colour bar for each layer coloured by a column, and
+picture: a scale bar, a colour bar for each layer coloured by an attribute, and
 the panels' names.  Rendered again, at the pixel size the window shows or
 one you set, so a 5 nm pixel over a whole cell gives a file thousands of
 pixels wide however small the window is.
@@ -33,7 +33,7 @@ what to save:
 
 The file says how it was made, as SMAP's did: the pixel size in its
 resolution tags, and the files, the layers, their render settings and
-[filters](plugin:Panels/Glossary) (the lowest and highest values of columns
+[filters](plugin:Panels/Glossary) (the lowest and highest values of attributes
 a localization must lie between), and the merging of blinks, written into
 it as text.  It is a picture, not a measurement -- apart from the 32-bit
 intensity, the brightness is scaled for display.  To analyse the
@@ -73,7 +73,7 @@ length, a fifth of the width or more (the length the window's bar has), or
 the length you set; its length in pixels is that length divided by the
 pixel size.  The *colour bars* sit top right, one per colour scale, as in
 the window: the colour table from the bottom of the *colour range* to its
-top, the two ends written in the column's unit, the layers and the column
+top, the two ends written in the attribute's unit, the layers and the attribute
 above.  The *labels* name each panel, or each layer's file, top left.  The
 text grows with the picture, so a large export does not carry specks.
 
@@ -160,7 +160,7 @@ the screen's pixels instead.
 view* is everything, and *pixel* on *auto* is 10 nm.  Without a session,
 the context's table is drawn as one layer with the default settings.
 
-**On other axes** (the Render tab's *axes*: a picture of one column
+**On other axes** (the Render tab's *axes*: a picture of one attribute
 against another) the pixel is in the x axis's unit and no scale bar is
 drawn: one bar cannot be a length on both axes.
 
@@ -187,7 +187,7 @@ Set it to make the bars of several pictures the same length.  A bar wider
 than the picture is left out.
 
 ### colour_bars
-Only a layer coloured by a column has one; a layer coloured by intensity
+Only a layer coloured by an attribute has one; a layer coloured by intensity
 needs none, as its brightness is what the picture shows.
 
 ### view

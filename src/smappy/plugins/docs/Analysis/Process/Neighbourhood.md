@@ -6,7 +6,7 @@ covers: [smappy.plugins.neighbourhood.count_neighbours, smappy.plugins.neighbour
 ## What it does
 
 Writes one number per localization that describes what is around it, as a
-new column of the table.  The column can then be filtered on (keep the
+new attribute of the table.  The attribute can then be filtered on (keep the
 localizations in dense places, drop the isolated ones), coloured by in the
 Render tab, or measured like any other.  It segments nothing: finding
 clusters is [Find clusters](plugin:Analysis/Regions/Find clusters)'s job.
@@ -19,9 +19,9 @@ Three *quantities*:
   distance instead of counted in a sharp circle.  The count can be
   *expressed as* the count itself, as the **local L(r)**, or **relative to
   the mean density** (below).
-* **A statistic of a column** -- the mean, median, minimum, maximum,
-  standard deviation or a quantile of any column (photons, `z_nm`, the
-  frame) over the neighbours within *r*: a smoothing of that column in
+* **A statistic of an attribute** -- the mean, median, minimum, maximum,
+  standard deviation or a quantile of any attribute (photons, `z_nm`, the
+  frame) over the neighbours within *r*: a smoothing of that attribute in
   space, for a picture coloured by it.
 * **Voronoi density** -- one over the area of the localization's Voronoi
   cell, the region of the plane closer to it than to any other localization
@@ -102,12 +102,12 @@ near has 0.
 **3. The value.**  Their number; or, with *Gaussian weight*, the sum of
 $e^{-d^2/2r^2}$ over them, where $d$ is the distance and $r$ the radius,
 so a neighbour close by counts nearly 1 and one at $2r$ counts 0.14; or the
-chosen statistic of the column over them, the localization's own value
+chosen statistic of the attribute over them, the localization's own value
 included; or, for the Voronoi density, one over the area of its cell.
 
-**4. The column.**  The value goes onto the localizations of the *around*
+**4. The attribute.**  The value goes onto the localizations of the *around*
 layer that passed its filter, and every other localization gets NaN (no
-value), so a filter on the new column also drops them.  A blink's value
+value), so a filter on the new attribute also drops them.  A blink's value
 goes onto each of its localizations.
 
 ```figure The local density brings out the structures: the ring and the lines have tens of neighbours within 50 nm, the scattered molecules a few (left). The Voronoi density (right) sees only the nearest neighbours, so a lone molecule's own repeated localizations make its cells as small as the ring's: merge blinks before using it.
@@ -222,7 +222,7 @@ ax.legend(fontsize=7, frameon=False)
 ```
 
 **The statistic** is over the neighbours with a finite value of the
-column, the localization itself among them (this is a smoothing filter: a
+attribute, the localization itself among them (this is a smoothing filter: a
 localization alone in its circle keeps its own value).  A quantile $q$ is
 linear between the order statistics, as numpy's: with $n$ values sorted,
 the value at position $q(n - 1)$.
@@ -255,7 +255,7 @@ about a minute.  A run expected to take more than 20 s asks first.  The
 panel shows the percentage done, and Stop ends the run and leaves the
 table as it was.
 
-**Merged blinks.**  The column is kept as a recipe with the rule *mean*:
+**Merged blinks.**  The attribute is kept as a recipe with the rule *mean*:
 when blinks are merged again, a blink takes the mean of its localizations'
 values (ignoring NaN), which is the blink's own value when it was computed
 on blinks.
@@ -304,19 +304,19 @@ for data that fill a rectangle.  A drawn ROI is the window when there is
 one.
 
 ### statistic
-*Median* is robust to the few outliers a column like photons has; *std*
+*Median* is robust to the few outliers an attribute like photons has; *std*
 shows where a value varies, such as z across the edge of a structure.
 
 ### name
 Left empty, the name says what was computed: `density_r50`,
 `density_gauss_r50`, `photons_median_r50`, `voronoi_density`, with
 `_from2` when the neighbours came from layer 2.  Running again with the
-same name replaces the column; a column of the localizations' own (such as
+same name replaces the attribute; an attribute of the localizations' own (such as
 `photons`) is never overwritten.
 
 ## Output
 
-The new column on the localizations (`local_l_r50`, `density_rel_r50`
+The new attribute on the localizations (`local_l_r50`, `density_rel_r50`
 when expressed), and a figure: the *around*
 localizations coloured by the value, and its histogram.  The result's line
 says how many localizations got a value and their median.

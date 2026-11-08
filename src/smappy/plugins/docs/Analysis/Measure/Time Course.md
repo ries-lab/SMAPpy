@@ -6,7 +6,7 @@ covers: [smappy.metadata.file_frame_time, smappy.plugins.time_course.frame_windo
 ## What it does
 
 Draws how the data change during the acquisition: the number of
-localizations per frame, the median of any column -- photons, `background`,
+localizations per frame, the median of any attribute -- photons, `background`,
 the [localization precision](plugin:Panels/Glossary) `xy_err_nm`, the PSF
 width `sigma_nm`, `z_nm` -- and the image tags the microscope recorded (the
 piezo position, the activation laser), all against frame, time or file.
@@ -49,7 +49,7 @@ lines = [Line(COUNT, "", "C0", x, rate(frame, edges, covered)),
 frames: 6000 frames in 60 windows are windows of 100 frames.
 
 **2. A value per window.**  For the rate, the localizations in the window
-over the frames it covers.  For a column, the median (or mean, with
+over the frames it covers.  For an attribute, the median (or mean, with
 *statistic*) of the localizations in the window; a window with fewer than
 10 gives no point.  For an image tag, its mean over the window's frames.
 
@@ -122,9 +122,9 @@ moves only as much as the focus lock needs.
 Based on SMAP's `Analyze/measure/StatsVsTime`
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main changes:
 
-* Any column can be a series, and the image tags too; SMAP drew a fixed set
+* Any attribute can be a series, and the image tags too; SMAP drew a fixed set
   (photons, lifetime, background, PSF width, precision, the falloff frame).
-* A column's value in a window is its median; SMAP fitted an exponential to
+* An attribute's value in a window is its median; SMAP fitted an exponential to
   the photons and took the maximum of the background, PSF width and
   precision histograms.
 * Each visible layer is a line, with its own filter and grouping; SMAP drew

@@ -23,7 +23,8 @@ shape and size.  Below the tab's own controls sit the ROI plugins pinned to
 it.  By default these are
 the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by a circle
 template (a ring for nuclear pores, a disc for pits and other compact
-structures), beads, an id column or positions from a file -- and
+structures), beads, an id [attribute](plugin:Panels/Glossary) (one value
+every localization carries) or positions from a file -- and
 [Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
 what was measured in every ROI to a file.  The summaries, such as
 [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), and
@@ -37,7 +38,7 @@ An ROI sees what the image shows: the localizations of its file that pass a
 layer's filter, with blinks merged if that layer merges them.  A
 [layer](plugin:Panels/Glossary) is one picture of the localizations, with its
 own filter and colours; its [filter](plugin:Panels/Glossary) (also called
-bounds) is the lowest and highest values of columns a localization must lie
+bounds) is the lowest and highest values of attributes a localization must lie
 between; [merge blinks](plugin:Panels/Glossary) (also called grouping or
 linking) combines the localizations in consecutive frames that come from one
 blinking event into one localization.  So clean the data in the
@@ -145,9 +146,9 @@ the same plugin as on the whole view.  One row per ROI, the rows together
 are the *results table*, which the summaries such as Histograms of ROI results read.  The
 list is a *block*, as in a [chain](plugin:Panels/Glossary) (also called a
 pipeline or workflow: plugins run one after another as one): it can repeat
-over the [regions](plugin:Panels/Glossary) of an id column instead (a region
-is a set of localizations measured together -- an ROI, or a cluster that a
-column such as `cluster_id` names; *for each*), write columns it makes back
+over the [regions](plugin:Panels/Glossary) of an id attribute instead (a region
+is a set of localizations measured together -- an ROI, or a cluster that an
+attribute such as `cluster_id` names; *for each*), write attributes it makes back
 into the table, and hold a block of its own.  Run measures every ROI; with
 *measure the selected ROI* ticked, an ROI is also measured as soon as it is
 selected or added in the ROI manager, and its numbers appear under the
@@ -189,8 +190,8 @@ polygon its vertices.  The ROI's centre is the mean of the vertices.  Such an
 ROI keeps its outline when the shape or size is changed here.
 
 **What is out of date.**  A stored measurement is signed with a digest of its
-inputs -- the data's fingerprint (row count, columns and a sample of the
-positions; not the columns written from regions' results, such as those of
+inputs -- the data's fingerprint (row count, attributes and a sample of the
+positions; not the attributes written from regions' results, such as those of
 *Regions to attribute*), the ROI's geometry, the filter bounds, whether blinks
 are merged and with which settings -- together with the step's plugin, its
 version and its settings, but not its name.  A step is *current* when that
@@ -263,7 +264,7 @@ neighbour.
 *track* is not an outline: a click in the ROI manager then drafts an ROI of
 the [track](plugin:Panels/Glossary) whose line passes nearest it -- that
 track's localizations and none of those crossing it -- and *Add* keeps it.
-The tracks are those of the column the layer draws them by (the Render
+The tracks are those of the attribute the layer draws them by (the Render
 tab's *track id*), and every ROI that has an outline keeps it.  Until a
 shape is chosen here, *track* is what the list shows whenever the layer is
 rendered as *tracks*, and the shape otherwise.
@@ -300,7 +301,7 @@ in no region of a filtered source is dropped.  Folded when the tab opens.
 From the top: the conditions applied, each with how many regions it keeps
 of how many (click one to show its value, × to remove it); a warning where
 results are out of date; a search box and the tree of everything that can
-be filtered -- the ROIs and each id column, each evaluation, its values,
+be filtered -- the ROIs and each id attribute, each evaluation, its values,
 and the statistics of one quantity (`cfr` › `median`) as a level of their
 own; and the chosen value's distribution over all the regions, with the
 range to keep, or for a keyword or a flag (an ROI's *use*) the texts to

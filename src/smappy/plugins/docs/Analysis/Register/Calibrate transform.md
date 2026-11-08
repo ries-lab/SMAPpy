@@ -35,7 +35,7 @@ about the microscope, and it comes from the microscope's entry in the
 [Microscope manager](plugin:Panels/Microscope manager) for the microscope
 the table was fitted on; for a microscope without one, choose it (*channels*:
 *layout*, *main channel*), in the fit and here.  It is never guessed.  It also needs a
-table with `frame` and `camera_channel` columns and positions that can be
+table with `frame` and `camera_channel` attributes and positions that can be
 put back into camera pixels, and enough molecules seen in both channels: a
 few hundred pairs at the least, from frames spread over the movie.
 
@@ -82,7 +82,7 @@ with warnings.catch_warnings():
 camera, so it is measured in chip pixels.  A table in nanometres is converted
 back with the pixel size the fit recorded.  Only the localizations of the
 current [selection](plugin:Panels/Glossary) are used -- those that pass the
-layer's filter (the lowest and highest values of columns, set in the Render
+layer's filter (the lowest and highest values of attributes, set in the Render
 tab), inside the drawn ROI (region of interest).
 
 **2. The vote.**  The layout alone says roughly where the second channel's

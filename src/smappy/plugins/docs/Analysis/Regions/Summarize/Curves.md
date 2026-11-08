@@ -14,7 +14,7 @@ together -- the **mean curve with its spread** over the regions -- and, with
 "treated"), so conditions are compared in one plot.
 
 It reads the curves of one evaluation (*results from*), the arrays each
-region kept beside its values.  Regions of an id column (clusters) are read
+region kept beside its values.  Regions of an id attribute (clusters) are read
 too, as one group: they carry no keywords.
 
 **Counts are pooled, not averaged.**  Where the measurement is a ratio of

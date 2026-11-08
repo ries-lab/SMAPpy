@@ -737,7 +737,7 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
         return out
 
     if "frame" not in locs:
-        raise ValueError("the pairwise displacement needs a frame column; the "
+        raise ValueError("the pairwise displacement needs a frame attribute; the "
                          f"table has {', '.join(sorted(locs.keys()))}")
     x_name = first_present(locs, ("x_nm",))
     y_name = first_present(locs, ("y_nm",))

@@ -105,7 +105,7 @@ def restrict(layers: Sequence[LayerSnapshot], column: str, step: Step,
             out.append(layer)
             continue
         if column not in layer.locs:
-            raise KeyError(f"layer {layer.name!r} has no column {column!r}; it has "
+            raise KeyError(f"layer {layer.name!r} has no attribute {column!r}; it has "
                            f"{', '.join(layer.locs.columns)}")
         values = np.asarray(layer.locs[column], np.float64)
         lo = step.lo
@@ -125,7 +125,7 @@ def shown_range(layers: Sequence[LayerSnapshot], column: str) -> Tuple[float, fl
         if not layer.visible or layer.is_image or layer.locs is None:
             continue
         if column not in layer.locs:
-            raise KeyError(f"layer {layer.name!r} has no column {column!r}")
+            raise KeyError(f"layer {layer.name!r} has no attribute {column!r}")
         values = np.asarray(layer.locs[column], np.float64)
         if layer.mask is not None:
             values = values[np.asarray(layer.mask, bool)[:len(values)]]

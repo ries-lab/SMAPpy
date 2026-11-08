@@ -34,7 +34,7 @@ double = doubles(centers, counts, 200)
 
 **1. How large each ROI is.**  Each used ROI's localizations are counted,
 as the ROI manager shows them: inside the ROI's shape, under the layer's
-[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+[filter](plugin:Panels/Glossary) (the lowest and highest values of attributes a
 localization must lie between), and as merged blinks when the layer merges
 them.  An excluded ROI takes no part: it neither stays nor removes another.
 

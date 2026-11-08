@@ -5,17 +5,17 @@ covers: [smappy.plugins.histogram.value_range, smappy.plugins.histogram.bin_edge
 
 ## What it does
 
-Counts the values of any column -- the axial position `z_nm`, the fit
+Counts the values of any attribute -- the axial position `z_nm`, the fit
 quality `logl_rel`, the PSF width `sigma_nm`, DECODE's detection
-probability `prob`, a column made with
+probability `prob`, an attribute made with
 [Math Parser](plugin:Analysis/Process/Math Parser) -- and draws them as a
 histogram, with the mean, median, standard deviation and mode.  It is the
-quick look at a column before filtering on it: where most values lie, where
+quick look at an attribute before filtering on it: where most values lie, where
 the tail starts, whether there are two populations.
 
 [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)
 does the same for photons, precision and on-time, and fits the law each of
-them follows; this plugin fits nothing and takes any column.
+them follows; this plugin fits nothing and takes any attribute.
 
 Each visible [layer](plugin:Panels/Glossary) (one picture of the
 localizations with its own filter and colours) gets its own histogram, read
@@ -25,7 +25,7 @@ so two channels, or one channel filtered two ways, are compared on the same
 bins.
 
 It also runs once per [region](plugin:Panels/Glossary) -- in every ROI, or
-every cluster -- giving the numbers of the column in each.
+every cluster -- giving the numbers of the attribute in each.
 
 ## How it works
 
@@ -44,9 +44,9 @@ groups = [("photons > 200", "#1f77b4", err), ("photons > 2000", "#d62728", err[p
 from the 0.1th to the 99.9th percentile, so that a handful of failed fits
 far away do not squeeze everything else into one bin.
 
-**2. The bins.**  A *bin width* you set is used.  Otherwise a column of
+**2. The bins.**  A *bin width* you set is used.  Otherwise an attribute of
 whole numbers (a frame, a count, an id) gets one bin per value, and any
-other column a width that suits the number of values: more values, narrower
+other attribute a width that suits the number of values: more values, narrower
 bins, between 20 and 200 of them.
 
 **3. The numbers.**  Per layer, of the values inside the range: how many,
@@ -72,7 +72,7 @@ $p$ the *leave off* fraction (0.001).  *Smallest to largest* takes the
 minimum and maximum; *from ... to ...* takes what is typed, an empty end
 being the data's.  A range of one value becomes one bin around it.
 
-**Bins.**  A whole-number column (an integer column, or floats that are all
+**Bins.**  A whole-number attribute (an integer attribute, or floats that are all
 whole numbers) over a range of at most 500 values gets the edges
 $k - \frac{1}{2}$, one bin per value.  Otherwise the width is the
 Freedman-Diaconis rule
@@ -88,21 +88,21 @@ the vertex of the parabola through the five bins around the tallest, kept
 within them (otherwise the tallest bin's centre), as SMAP finds it: finer
 than a bin for a smooth peak, and as noisy as the five bins it rests on.
 
-**Per region.**  The values are named after the column:
+**Per region.**  The values are named after the attribute:
 `<column>_n`, `_mean`, `_median`, `_std`, `_mode` for the first layer and
 with `_L2`, `_L3`, ... for the others.  A region with no values of the
-column gives `<column>_n` = 0 and nothing else.
+attribute gives `<column>_n` = 0 and nothing else.
 
 ## Parameters
 
 ### range
-*Without the extremes* suits nearly every column.  Use *smallest to
+*Without the extremes* suits nearly every attribute.  Use *smallest to
 largest* to see the outliers themselves, and *from ... to ...* to compare
 several runs on the same axis.
 
 ### bin_width
 Leave it on *auto*.  Set it to compare histograms of different files
-bin for bin, or when a column of whole numbers is wanted in coarser bins.
+bin for bin, or when an attribute of whole numbers is wanted in coarser bins.
 
 ## Output
 

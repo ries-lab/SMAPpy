@@ -47,7 +47,7 @@ class RegionSteps(QWidget):
             project.block.steps = default_block().steps
         spec = ChainSpec(steps=[project.block], path=PATH,
                          description="Each step runs once in every region -- the "
-                                     "ROIs, or the regions of an id column (for "
+                                     "ROIs, or the regions of an id attribute (for "
                                      "each) -- and what it measures is kept with "
                                      "the region.")
         self.instance = Instance(plugin=PATH, chain=spec.to_dict())

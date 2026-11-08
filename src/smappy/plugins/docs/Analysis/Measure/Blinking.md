@@ -22,7 +22,7 @@ It does two things, depending on where it runs:
   it on a sample of sparse, isolated molecules -- a dye on a coverslip, a
   structure with known single copies -- to characterise a dye.
 * **In a region** -- an [ROI](plugin:Panels/Glossary) of the ROI manager, or
-  a cluster of an id column (*Regions to attribute*, the Regions tab, a chain's
+  a cluster of an id attribute (*Regions to attribute*, the Regions tab, a chain's
   block) -- it counts the localizations, the blinks and the
   [bursts](plugin:Panels/Glossary): the blinks joined across dark times of
   at most the *dark time*.  With a dark time longer than the dye's and

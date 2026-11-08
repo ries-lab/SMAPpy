@@ -39,7 +39,7 @@ length of each line drawn on it (`direction_angle_deg`,
   the render window: the condition `in_drawn_roi` keeps the ROIs in one
   cell out of a field of many.  An ROI of a file the layer does not show is
   never inside, since the files share coordinates.  Without a drawn ROI, or
-  while the picture shows other columns than the positions, a condition
+  while the picture shows other attributes than the positions, a condition
   that reads it is refused.  An ROI with no value for a name fails every comparison with it: an
 unmeasured ROI is left out by `n_corners >= 6`.  A name no ROI has is
 refused, since it is nearly always a typing error that would exclude

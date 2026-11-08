@@ -148,7 +148,7 @@ def test_any_id_column_makes_rois_and_without_outline_only_the_centre():
 
 def test_column_regions_refuses_a_column_that_is_not_an_id():
     xy, truth = blobs()
-    with pytest.raises(ValueError, match="not an id column"):
+    with pytest.raises(ValueError, match="not an id attribute"):
         column_regions(table(xy), "photons")
     with pytest.raises(ValueError, match="has no 'cluster_id'"):
         column_regions(table(xy), "cluster_id")

@@ -438,7 +438,7 @@ drawn afresh for each.  Copies are placed uniformly in the `field` (with a
 `min_distance` between them, if given) or on a grid, turned in the plane
 (`rotation: random`) or in 3D (`random_3d`), tilted by up to `tilt` degrees,
 and moved by up to `jitter` nm.  Each copy's position and turn are kept with
-the table, in `metadata["copies"]`, by its number in the `copy` column, as
+the table, in `metadata["copies"]`, by its number in the `copy` attribute, as
 angles $\alpha, \beta, \gamma$ with the rotation
 $R = R_z(\alpha)\, R_y(\beta)\, R_z(\gamma)$.
 
@@ -519,7 +519,7 @@ ax.legend(fontsize=7, frameon=False); ax.tick_params(labelsize=7)
 pairs.  With *remove both*, every member of a group is dropped.  With *one
 localization, averaged*, a group becomes one localization at the
 photon-weighted mean of its members, with their photons added, carrying the
-identity of the brightest and an `n_merged` column: what a single-emitter fit
+identity of the brightest and an `n_merged` attribute: what a single-emitter fit
 of an unresolved pair converges to.
 
 **The camera.**  A spot's photons are integrated over each pixel (the

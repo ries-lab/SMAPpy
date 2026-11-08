@@ -72,7 +72,7 @@ from .roi import SegmenterPlugin, current_file, replace_param
 PATH = "Analysis/Regions/Segment regions"
 
 METHODS = (("circle", "circle template"), ("beads", "beads"),
-           ("ids", "from an id column"), ("file", "positions from a file"))
+           ("ids", "from an id attribute"), ("file", "positions from a file"))
 #: the methods that measure each candidate and judge it by *keep*
 MEASURED = ("circle", "beads")
 
@@ -190,7 +190,7 @@ class SegmentSettings:
     beads: BeadSegmentSettings = param(default_factory=BeadSegmentSettings,
                                        label="beads")
     ids: ColumnROIsSettings = param(default_factory=ColumnROIsSettings,
-                                    label="from an id column")
+                                    label="from an id attribute")
     file: PositionsSettings = param(default_factory=PositionsSettings,
                                     label="positions from a file")
     keep: str = param("n_locs >= 10", label="keep", kind="text",
@@ -460,7 +460,7 @@ class SegmentRegions(SegmenterPlugin):
     def _ids(self, ctx: Context, settings: SegmentSettings, commit: bool) -> Result:
         if ctx.per_region:
             raise ValueError("ROIs cannot be made inside a block: make them of "
-                             "the column after it")
+                             "the attribute after it")
         project = ctx.rois
         if project is None:
             raise ValueError("there is no ROI manager project to add ROIs to")

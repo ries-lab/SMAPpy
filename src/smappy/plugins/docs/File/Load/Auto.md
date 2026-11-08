@@ -37,7 +37,7 @@ is inside.  It is what File > Open does.  The formats:
   SMAP's names are recognised without being told -- or taken from a saved
   *conversion*.
 
-Every reader keeps every column of the file: the ones this program has a
+Every reader keeps every column of the file as an attribute: the ones this program has a
 name for get that name, and the rest keep their own, so whatever the other
 program wrote can still be filtered on, coloured by or exported again.
 
@@ -151,32 +151,32 @@ every `.csv`, `.txt` or `.tsv` for a table of localizations.  With a
 
 **What opening costs.**  Every reader holds the whole table in memory:
 $N \sum_c b_c$ bytes for $N$ localizations, $b_c$ the bytes per value of
-column $c$ -- 4 for most columns, 8 for `frame` -- so some 60 bytes per
+attribute $c$ -- 4 for most attributes, 8 for `frame` -- so some 60 bytes per
 localization for a fitted 3D table, plus the merged blinks.  Reading is done
 off the window's thread, so the window stays usable and says what it is
 doing.  Merging the blinks -- a few seconds for a few million
 localizations, some 25 s for 57 million -- follows in the background, after
 the file has opened.
 
-**smappy HDF5.**  The columns are read from `/locs`, one dataset each, with
+**smappy HDF5.**  The attributes are read from `/locs`, one dataset each, with
 the types they were saved with, and the file's metadata comes back with
 them: the **history** (the session's log continues from the file's own; an
 entry this version does not understand is dropped, and at most the last 500
-are kept), the **derived columns' recipes** (a column made with
+are kept), the **derived attributes' recipes** (an attribute made with
 [Math Parser](plugin:Analysis/Process/Math Parser) is still recomputed or
 reduced by its rule when blinks are merged), the **kept bounds**, which open
 on every layer, the drawn **ROI** and the ROI manager's project, the camera,
 the fit settings, and what a tool kept with the file -- a drift curve, say
 (`/results/saved`) -- so its figure can be shown again.  A table is opened
 as it was saved: a fit writes nanometres and the pixel size, and a file from
-an earlier version that also has camera-pixel columns (`x_pix`, ...) keeps
+an earlier version that also has camera-pixel attributes (`x_pix`, ...) keeps
 them.  The session that may be saved with the file (`/gui`: tabs, layers,
 views, windows) is left alone: File > Open and restore puts it back on
 request, File > Workspace > From data file the tabs alone.
 An HDF5 file from Picasso or DECODE is read by its own reader, below.
 
-**SMAP.**  SMAP keeps its table in `saveloc.loc`, one field per column.
-Each becomes a column, renamed to this program's name where there is one
+**SMAP.**  SMAP keeps its table in `saveloc.loc`, one field per attribute.
+Each becomes an attribute, renamed to this program's name where there is one
 (`SML_COLUMNS`) and kept under its own name where there is not:
 
 | SMAP | here | | SMAP | here |
@@ -189,12 +189,12 @@ Each becomes a column, renamed to this program's name where there is one
 | `xpix`, `ypix` | `x_pix`, `y_pix` | | `PSFxpix` | `sigma_pix` |
 
 `filenumber` is left behind (it is given again when the file is added), and
-so are the columns nothing here reads (`xnmf`, `ynmf`, `xpixf`, `ypixf`,
+so are the attributes nothing here reads (`xnmf`, `ynmf`, `xpixf`, `ypixf`,
 `xpixerr`, `ypixerr`, `PSFypix`).  SMAP's `numberInGroup` comes across under
 its own name: it is not this program's `n_in_group`, which merging blinks
 writes.  MATLAB counts from 1, so
 $\mathrm{frame} = \mathrm{frame}_{\mathrm{SMAP}} - 1$, as a 64-bit integer;
-`channel` and `iterations` become 32-bit integers and every other column
+`channel` and `iterations` become 32-bit integers and every other attribute
 single precision.  The pixel size (`cam_pixelsize_um`) is read from the
 first file's `info`, and from a `-v7.3` file also the frame count, the
 conversion, the offset and the EM gain, kept in the metadata under `smap`.
@@ -309,7 +309,7 @@ recorded, and Imspector's precision for each.  The measurements chosen are a fil
 file* they are one table, one after another in time: each one's `time_s`
 is moved by when it started after the first one did (to the second, from
 its date), its traces are numbered after the last one's so that every `tid`
-is one trace, and a `measurement` column says which it was.  **Images** --
+is one trace, and a `measurement` attribute says which it was.  **Images** --
 confocal and STED channels -- are read and kept in the session's list of
 images, placed in nanometres by the stack's own offset and pixel size, in
 the frame the localizations are in: no registration is needed to lay one on
@@ -326,7 +326,7 @@ corrected, `x_nc_nm` is not).  With *MBM beads as a file* the beads' tracks
 become a file of their own beside the measurement, on the same clock
 (`time_s`, moved with the measurement when merged), so that they can be
 drawn in a layer, measured like any tracks, and used to correct the drift
-again without a bead that went wrong.  The file has no column the
+again without a bead that went wrong.  The file has no attribute the
 localizations do not have: a bead's id is `tid`, its brightness `photons`,
 Imspector's precision for it `xy_err_nm`; z is scaled by *z scale* like the
 localizations'.  A bead keeps one id within its measurement and a new one
@@ -340,7 +340,7 @@ bead file has just those few points.  Stacks Imspector writes in
 chunks, for very large acquisitions, are not read yet, and say so.
 
 **Picasso.**  Picasso keeps its table as one dataset of records, `/locs`,
-where this program keeps a column per dataset; that is how the two are told
+where this program keeps an attribute per dataset; that is how the two are told
 apart.  Positions, widths and precisions (`x`, `y`, `sx`, `sy`, `lpx`,
 `lpy`) are in camera pixels and become nanometres with the file's
 `Pixelsize`; `z` and `lpz` are in nanometres already:
@@ -352,9 +352,9 @@ apart.  Positions, widths and precisions (`x`, `y`, `sx`, `sy`, `lpx`,
 | `sx`, `sy` | `sigma_nm`, `sigma_y_nm` | | `group` | `pick_id` |
 
 `xy_err_nm` is worked out from `x_err_nm` and `y_err_nm`, and the pixel
-columns are kept beside the nanometre ones.  `group` is Picasso's *pick*,
+attributes are kept beside the nanometre ones.  `group` is Picasso's *pick*,
 read as `pick_id` so it is not taken for merged blinks (`group_id`); like
-any id column it can be measured per region.  Everything else
+any id attribute it can be measured per region.  Everything else
 (`photons`, `frame`, `net_gradient`, `ellipticity`, a linked table's `len`
 and `n`, ...) keeps its name; frames count from 0 in both programs.  The
 metadata is read from the `/metadata` dataset recent Picasso versions
@@ -371,9 +371,9 @@ precision DECODE reports for each localization -- and the bounds are kept
 beside it as standard deviations (`x_crlb_nm`, ...; DECODE stores
 variances).  `phot` is `photons`, `bg` `background`, `frame_ix` `frame`
 (from 0 in both), and `prob`, the probability DECODE gives a detection, is
-kept under its name: it is the column to filter DECODE's localizations by.
+kept under its name: it is the attribute to filter DECODE's localizations by.
 A quantity DECODE did not predict is an empty dataset in the file and
-becomes no column.
+becomes no attribute.
 
 **csv.**  The first line is the header if any of its cells is not a
 number; otherwise the columns are called *column 1*, *column 2*, ...  Cells
@@ -383,7 +383,7 @@ something to this program are found by their header -- cleaned to lower
 case, the unit in square brackets taken off, spaces made underscores, and
 looked up (`CSV_NAMES`):
 
-| column | headers |
+| attribute | headers |
 | --- | --- |
 | `x_nm`, `y_nm`, `z_nm` | `x`, `y`, `z`; `xnm`, ...; `x_nm`, ... |
 | `frame` | `frame`, `t` |
@@ -396,7 +396,7 @@ looked up (`CSV_NAMES`):
 | `channel`, `logl_rel`, `id` | `channel`; `llrel`; `id` |
 
 -- and every other column keeps its header as its name, cleaned the same
-way (`chi2`, `cluster_id`).  When two headers mean the same column the
+way (`chi2`, `cluster_id`).  When two headers mean the same attribute the
 first wins; x and y must be found.  `frame`, `channel` and `id` are read as
 whole numbers, the rest as single precision, and a row whose x or y is
 missing is left out.
@@ -408,7 +408,7 @@ micrometres, millimetres (multiplied by $10^3$ or $10^6$) or camera pixels
 $x_{\mathrm{nm}} = x_{\mathrm{px}}\, p$; z is left in nanometres, as the
 programs that write pixels do).  Frames are made to count from 0: a file
 whose first frame is 1, as ThunderSTORM's and SMAP's are, has 1 taken off.
-Only the columns this program has a name for are converted; a column kept
+Only the attributes this program has a name for are converted; an attribute kept
 under its own name is read as it is.
 
 **Conversions.**  How one program's export is read -- which header is
@@ -455,7 +455,7 @@ at the beads or correct the drift with them.
 
 ### csv.mapping
 Needed only when the headers are not recognised and no saved conversion
-fits.  Each pair is *header in the file* = *column in the table*; the
+fits.  Each pair is *header in the file* = *attribute in the table*; the
 headers not named are still read, under their own names.  Opening such a
 file from the File menu asks in a dialog instead, which can also save what
 was chosen as a conversion.
@@ -469,7 +469,7 @@ channel -- by a frame.
 ## Output
 
 The table, added to the session as a file of its own, or joined to the open
-ones with *add to the open files* (a `filenumber` column tells them apart).
+ones with *add to the open files* (a `filenumber` attribute tells them apart).
 An `.msr` gives a file per measurement (or one, merged), each followed by
 its MBM beads' file where asked for, and its images for the image layers to
 choose from.  Each file keeps its own metadata -- its
@@ -490,9 +490,9 @@ changes:
   manager's sites are read.  SMAP also restores the file's history, the
   sites' evaluations, its cells and the GUI parameters; those describe
   SMAP's own windows and plugins.
-* Frames count from 0, and the columns are renamed to this program's names.
+* Frames count from 0, and the attributes are renamed to this program's names.
 * A csv is read by `Loader_csvAndMore`'s idea -- the mapping, the units and
-  a saved conversion per program -- with two changes: every column is read,
+  a saved conversion per program -- with two changes: every attribute is read,
   not only the ones mapped, and a conversion is found by the file's headers
   rather than chosen from a list each time.
 * A MINFLUX `.npy` or `.zip` export is read, and Imspector's `.msr` with

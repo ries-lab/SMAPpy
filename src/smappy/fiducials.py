@@ -320,7 +320,7 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
     if use_z is None:
         use_z = "z_nm" in locs
     elif use_z and "z_nm" not in locs:
-        raise ValueError("correct z is on but the table has no z_nm column")
+        raise ValueError("correct z is on but the table has no z_nm attribute")
     frame = np.asarray(locs["frame"], np.int64)
     n_frames = int(frame.max()) + 1 if len(frame) else 0
     x = np.asarray(locs["x_nm"], float)

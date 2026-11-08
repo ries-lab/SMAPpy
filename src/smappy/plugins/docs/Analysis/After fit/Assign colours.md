@@ -25,7 +25,7 @@ $$r = \frac{N_1 - N_2}{N_1 + N_2} ,$$
 $N_1$ and $N_2$ the photons in the two halves.  $r$ runs from $-1$ (all light
 in the second half) to $+1$ (all in the first).  Over a sample with two dyes,
 the histogram of $r$ has two peaks, one per dye.  The plugin finds them and
-writes a `channel` column: 1 for the peak at lower $r$, 2 for the next, and 0
+writes a `channel` attribute: 1 for the peak at lower $r$, 2 for the next, and 0
 for a localization it will not decide on.
 
 It offers two ways to decide:
@@ -44,12 +44,12 @@ method), so a two-colour table normally arrives with its colours.  To decide
 differently, change the settings there and press *Run these now* at the foot
 of the section, or pin this plugin to a tab with its +.
 
-**What it needs.**  Two columns of photons per localization: `photons_ch0`
+**What it needs.**  Two attributes of photons per localization: `photons_ch0`
 and `photons_ch1`, as the two-colour fitters write them, or another pair (see
-*channel 1 column*).  The fit's errors on them, `photons_err_ch0` and
+*channel 1 attribute*).  The fit's errors on them, `photons_err_ch0` and
 `photons_err_ch1`, are used when they are there.  The peaks are looked for in
 the **current [selection](plugin:Panels/Glossary)** -- what passes the
-layer's filter (the lowest and highest values of columns, set in the Render
+layer's filter (the lowest and highest values of attributes, set in the Render
 tab), inside the drawn ROI (region of interest) -- and the colours
 are then given to every localization of the table.  A filter on `channel`
 itself is left out of that selection: after a first run the layers are
@@ -59,7 +59,7 @@ dyes.  It warns below 50 selected localizations.
 **MINFLUX** records no photons per channel but their split, the detection
 channel ratio `dcr` (the fraction of a molecule's photons in the first
 channel), beside the photon count.  Where the table has no per-channel
-columns but has `dcr`, the two numbers are `dcr` × `photons` and
+attributes but has `dcr`, the two numbers are `dcr` × `photons` and
 (1 − `dcr`) × `photons`, and everything below applies as to a splitter.  On
 the grouped layer, one row per [trace](plugin:Panels/Glossary), a trace is
 judged on all its photons at once.  This has been checked on simulated
@@ -261,7 +261,7 @@ with probability $p_k = (1 + \rho_k)/2$, then $N_1$ is binomial and the
 variance of $r$ is exactly $(1 - \rho_k^2)/N$.
 
 With the fitted errors $\sigma_1$ and $\sigma_2$ of the two counts (*use
-fitted errors*, and both `photons_err_*` columns present), the variance of
+fitted errors*, and both `photons_err_*` attributes present), the variance of
 $r$ at the measured point is propagated,
 
 $$\sigma_r^2 = \frac{4 \left( N_2^2 \sigma_1^2 + N_1^2 \sigma_2^2 \right)}{N^4} ,$$
@@ -277,7 +277,7 @@ its $1 - \rho^2$ form under each dye's hypothesis instead of the plug-in
 value, which would go to zero at $|r| = 1$ and make the most extreme, dimmest
 localizations look the most certain.  Where $N_{\mathrm{eff}}$ is not a positive
 finite number -- an error missing, or $r$ exactly $\pm 1$ -- the total $N$ is
-used.  Without error columns, $N_{\mathrm{eff}} = N$ throughout.
+used.  Without error attributes, $N_{\mathrm{eff}} = N$ throughout.
 
 **Finding the peaks.**  The histogram has *histogram bins* bins over
 $[-1, 1]$ and is smoothed with a Gaussian of *smoothing* bins (0: not
@@ -459,7 +459,7 @@ One value per colour, in any order; they are sorted.  Use it when the peaks
 are not clear in the histogram, or to keep the ratios fixed between samples.
 
 ### channel1
-The column $r$ counts positive.  Name both columns or neither; auto takes
+The attribute $r$ counts positive.  Name both attributes or neither; auto takes
 the first pair the table has of `photons_ch0`/`photons_ch1`,
 `photons_ch1`/`photons_ch2`, `intensity_ch0`/`intensity_ch1`,
 `intensity_ch1`/`intensity_ch2` and SMAP's `phot1`/`phot2`, then MINFLUX's
@@ -471,7 +471,7 @@ Only the look of the intensity plot.
 
 ## Output
 
-**The table** gains these columns, for every localization, selected or not,
+**The table** gains these attributes, for every localization, selected or not,
 and the run is logged in the file's history:
 
 * `channel` -- the colour, 1 for the peak at the lowest $r$, 2 for the next,
@@ -484,7 +484,7 @@ and the run is logged in the file's history:
 * `channel_p` -- the probability of the colour given; 1 for every assigned
   localization with the minima method, and 0 where `channel` is 0.
 * `channel_sigma` -- how many standard deviations the nearest dye is from
-  this localization's $r$.  This is the column that tells a localization on a
+  this localization's $r$.  This is the attribute that tells a localization on a
   peak from one between the peaks, and a useful filter.
 
 **During a live fit** the colours follow the table as it grows: each block

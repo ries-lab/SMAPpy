@@ -39,10 +39,10 @@ def test_a_save_says_it_leaves_out_the_region_results_before_and_after(tmp_path)
     ctx = session.context()
     assert Save().describe(ctx, Save.Settings()).notice is None      # all of it saved
     notice = Save().describe(ctx, Save.Settings(region_results=False)).notice
-    assert "3 regions of id columns will not be saved" in notice.text
+    assert "3 regions of id attributes will not be saved" in notice.text
     result = session.run(Save(), Save.Settings(path=str(tmp_path / "a.hdf5"),
                                                region_results=False))
-    assert "3 regions of id columns were not saved" in result.text
+    assert "3 regions of id attributes were not saved" in result.text
 
 
 def test_a_save_without_figure_data_counts_the_results_that_kept_some():

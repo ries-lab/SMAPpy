@@ -262,7 +262,7 @@ fit* run over the whole table, in this order
 * **Colour assignment**, on by default:
   [Assign colours](plugin:Analysis/After fit/Assign colours) reads
   `photons_ch0` and `photons_ch1`, finds the peaks of their ratio and writes
-  a `channel` column -- 1 and 2 for the two colours, 0 for what it will not
+  a `channel` attribute -- 1 and 2 for the two colours, 0 for what it will not
   assign.  Its settings are under *colour assignment*, shown while it is
   ticked.
 * **A chain**, none by default: a saved chain of plugins, run last.
@@ -524,7 +524,7 @@ without one the Preview shows the frame as the camera wrote it.
 
 The table, one row per molecule and frame:
 
-| column | meaning |
+| attribute | meaning |
 | --- | --- |
 | `x_nm`, `y_nm` | the position on the camera chip, where the main channel saw it |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm` | its precision (CRLB), from both halves |

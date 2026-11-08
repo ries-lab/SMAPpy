@@ -176,7 +176,7 @@ A table of several files (*File > Open*, *Add*) moves one file at a time by
 default: two cameras opened together are two files.
 
 ### channel
-For a table with a `channel` column, such as the two halves of a split
+For a table with a `channel` attribute, such as the two halves of a split
 chip fitted as one: move only the second.
 
 ### typed.angle_deg

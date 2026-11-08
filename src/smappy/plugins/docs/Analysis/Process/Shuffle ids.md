@@ -5,16 +5,16 @@ covers: [smappy.plugins.shuffle_ids.shuffle_ids, smappy.plugins.shuffle_ids.Shuf
 
 ## What it does
 
-Writes a copy of an integer column with its ids in a random order, for
+Writes a copy of an integer attribute with its ids in a random order, for
 colouring by.  A clusterer numbers its clusters one after the other --
 [Find clusters](plugin:Analysis/Regions/Find clusters) by size -- and coloured by
 `cluster_id` neighbouring clusters often come out in neighbouring colours of
 the colour table ([LUT](plugin:Panels/Glossary), look-up table), so two
-touching clusters look like one.  Coloured by the shuffled column, they are
+touching clusters look like one.  Coloured by the shuffled attribute, they are
 far apart on the LUT.
 
-It takes any whole-number column, not only clusters: an ROI's number
-(`roi_id`), a MINFLUX trace (`tid`), a track, the frame.  The column itself
+It takes any whole-number attribute, not only clusters: an ROI's number
+(`roi_id`), a MINFLUX trace (`tid`), a track, the frame.  The attribute itself
 is left as it is -- results and regions are kept by its ids -- and the
 shuffled ids go into a new one, `<column>_shuffled`; colour the layer by
 that in the Render tab.
@@ -32,15 +32,15 @@ shuffled = shuffle_ids(labels, seed=0)
 inside = labels > 0
 ```
 
-**1. The ids.**  The distinct ids above 0 in the column.  An id of 0 or
+**1. The ids.**  The distinct ids above 0 in the attribute.  An id of 0 or
 below means "in none" -- DBSCAN's noise, a localization in no ROI -- and is
 kept.
 
 **2. A random order.**  The ids are permuted: each id is replaced by
-another of the same ids, each used once.  The shuffled column has the same
-values as the column, so a colour range set for one suits the other.
+another of the same ids, each used once.  The shuffled attribute has the same
+values as the attribute, so a colour range set for one suits the other.
 
-**3. The new column**, with the rule that a [merged blink](plugin:Panels/Glossary)
+**3. The new attribute**, with the rule that a [merged blink](plugin:Panels/Glossary)
 keeps its largest value, as `cluster_id` has.
 
 ```figure Clusters coloured by their id, numbered by size, and by the shuffled id: neighbours that shared a colour are told apart.
@@ -63,17 +63,17 @@ picture can be made again with the same colours.
 
 ## Output
 
-The table with the new column, and a line saying how many ids were
+The table with the new attribute, and a line saying how many ids were
 shuffled and with which seed.
 
 ## Differences from SMAP
 
 Based on SMAP's `ShuffelClusterIndex`
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which also
-writes a new column (`<field>_rnd`).  The main changes:
+writes a new attribute (`<field>_rnd`).  The main changes:
 
 * The ids that are there are permuted among themselves; SMAP permutes all
-  the numbers from 1 to the largest id, so a column with gaps -- frames,
+  the numbers from 1 to the largest id, so an attribute with gaps -- frames,
   ROI numbers after deletions -- gets values it never had, and its colour
   range no longer fits.
 * An id below 0 is kept; SMAP sets it to 0.

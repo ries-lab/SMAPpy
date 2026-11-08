@@ -24,7 +24,7 @@ typical precision $\sigma_c$ and the mean on-time $\tau$.
 
 It describes the localizations of the [layer](plugin:Panels/Glossary) as
 they are shown -- after its [filter](plugin:Panels/Glossary) (also called
-bounds: the lowest and highest values of columns a localization must lie
+bounds: the lowest and highest values of attributes a localization must lie
 between) and inside the drawn [ROI](plugin:Panels/Glossary) (region of
 interest) -- unless *localizations* is set to *all*.
 

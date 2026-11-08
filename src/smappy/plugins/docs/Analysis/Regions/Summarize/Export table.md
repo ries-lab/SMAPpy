@@ -6,7 +6,7 @@ covers: [smappy.plugins.region_export.ExportTable.run, smappy.plugins.region_exp
 ## What it does
 
 Writes the results table -- a row per [ROI](plugin:Panels/Glossary) (region
-of interest), or per [region](plugin:Panels/Glossary) of an id column such
+of interest), or per [region](plugin:Panels/Glossary) of an id attribute such
 as a cluster, and a column per number the per-region steps measured -- to a
 csv file, for the statistics and figures made in a spreadsheet, in Python
 or in R.
@@ -24,7 +24,7 @@ comment: what is needed to find an ROI again from a row of the spreadsheet.
 **1. The rows.**  The included ROIs (*use* ticked) whose results still
 describe them, in the order of the ROI list -- as
 [Sort ROIs](plugin:Analysis/Regions/Sort ROIs) left it -- or the regions of
-the id column the chosen measurement was made per.
+the id attribute the chosen measurement was made per.
 
 **2. The columns.**  `roi_id` (the ROI's number, or the region's id) and
 `file_id` first; with *ROI position* then `x_nm`, `y_nm`, `file` and
@@ -40,7 +40,7 @@ keyword it was not given -- is an empty cell.
 
 ### positions
 Off for a table that only feeds a statistic; on to go back to the ROIs, or
-to draw the sites on a map of the sample.  A region of an id column has no
+to draw the sites on a map of the sample.  A region of an id attribute has no
 position of its own and gets none: its centre is a measurement
 (Localization Statistics' mean position).
 
@@ -60,7 +60,7 @@ cell and its file, to a csv.  The main changes:
 * Every measurement on the ROIs can be written side by side, and the
   ROIs' annotations with them; SMAP wrote one evaluator at a time.
 * The columns are ticked in a list; SMAP wrote all of them.
-* The clusters' results (per region of an id column) are written the same
+* The clusters' results (per region of an id attribute) are written the same
   way.
 * SMAP's `SaveSiteParameters`, which saved the sites with everything they
   held as a MATLAB file, has no counterpart: the ROIs and their results are

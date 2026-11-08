@@ -290,7 +290,7 @@ otherwise, or not wanted.
 ## Output
 
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm`
-  (or the pixel columns) of every localization.  The beads stay in the
+  (or the pixel attributes) of every localization.  The beads stay in the
   table, corrected like everything else.  The correction is recorded in the
   file's history and can be undone.
 * **The drift curve**, x, y and z against frame, the same figure as COMET's

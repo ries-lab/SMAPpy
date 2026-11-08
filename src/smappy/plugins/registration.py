@@ -141,7 +141,7 @@ class CalibrateChannelTransform(Plugin):
             shape = (int(np.ceil(y.max())) + 1, int(np.ceil(x.max())) + 1)
         if "frame" not in locs:
             raise ValueError("registration pairs within a frame, and the table "
-                             "has no frame column")
+                             "has no frame attribute")
         # the fit's own error bars, so a dim pair counts for what it knows --
         # in pixels, as the positions are
         precision = None

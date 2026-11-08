@@ -144,7 +144,7 @@ def test_mismatched_columns_are_refused(tmp_path):
     writer.append(_table(10))
     other = _table(10)
     del other.columns["photons"]
-    with pytest.raises(ValueError, match="columns changed"):
+    with pytest.raises(ValueError, match="attributes changed"):
         writer.append(other)
     writer.close()
 

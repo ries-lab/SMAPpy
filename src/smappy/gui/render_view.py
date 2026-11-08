@@ -1273,7 +1273,7 @@ class RenderToolBar(QToolBar):
         self.colour_bar_action.setCheckable(True)
         self.colour_bar_action.setChecked(view.colour_bar_shown)
         self.colour_bar_action.setToolTip("the colour scale of a layer coloured "
-                                          "by a column, top right")
+                                          "by an attribute, top right")
         self.colour_bar_action.toggled.connect(view.show_colour_bars)
         more.addSeparator()
         more.addAction("Mouse and keys...",

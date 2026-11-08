@@ -281,7 +281,7 @@ rectangle.
 
 **Simulations.**  CSR places $n$ points uniformly in the window's raster.
 *Keep blinks* takes the blinks from `group_id` (merge blinks once on the
-layer, so the column exists), and puts each blink's centre uniformly in
+layer, so the attribute exists), and puts each blink's centre uniformly in
 the window, its localizations keeping their offsets from it; a blink that
 then sticks out of the window is placed again, up to 30 times.  A layer
 that shows merged blinks has one row per blink, and keep blinks is CSR.

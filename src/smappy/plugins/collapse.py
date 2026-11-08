@@ -32,8 +32,8 @@ def _id_choices():
 @dataclass
 class CollapseSettings:
     column: str = param("group_id", label="one row per", choices=_id_choices,
-                        help="an id column: merged blinks (group_id), tracks, "
-                             "clusters, or any whole-number column")
+                        help="an id attribute: merged blinks (group_id), tracks, "
+                             "clusters, or any whole-number attribute")
     unassigned: str = param("keep", label="rows without an id",
                             choices=[("keep", "keep, one row each"),
                                      ("remove", "remove")],

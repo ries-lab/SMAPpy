@@ -102,7 +102,7 @@ are rendered, found through the layer's spatial index: a thousand ROIs of a
 large table take a few seconds, not a thousand renders of the table.
 
 **Axes.**  The pictures are of the positions.  With the Render tab's axes
-set to other columns (photons against frame, say) it refuses rather than
+set to other attributes (photons against frame, say) it refuses rather than
 cutting squares out of a picture that is not of space.
 
 ## Parameters

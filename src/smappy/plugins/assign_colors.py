@@ -108,10 +108,10 @@ def channel_columns(locs: Localizations, first: Optional[str] = None,
     """
     if first or second:
         if not (first and second):
-            raise ValueError("name both channel columns, or neither")
+            raise ValueError("name both channel attributes, or neither")
         for name in (first, second):
             if name not in locs:
-                raise ValueError(f"no column {name!r}; the table has "
+                raise ValueError(f"no attribute {name!r}; the table has "
                                  f"{', '.join(sorted(locs.keys()))}")
         return first, second
     for pair in CHANNEL_COLUMNS:
@@ -119,9 +119,9 @@ def channel_columns(locs: Localizations, first: Optional[str] = None,
             return pair
     if all(name in locs for name in DCR_PAIR):
         return DCR_PAIR
-    raise ValueError("no per-channel photon columns in the table: fit with "
+    raise ValueError("no per-channel photon attributes in the table: fit with "
                      "a two-colour fitter ('Localize/Gaussian 2D 2C' or "
-                     "'Localize/Spline 3D 2C'), or name the columns yourself")
+                     "'Localize/Spline 3D 2C'), or name the attributes yourself")
 
 
 @dataclass
@@ -597,14 +597,14 @@ class AssignColorSettings:
                                          "or computed from the spectra. "
                                          "auto: the histogram's own maxima",
                                     advanced=True)
-    channel1: Optional[str] = param(None, label="channel 1 column",
+    channel1: Optional[str] = param(None, label="channel 1 attribute",
                                     help="auto: photons_ch0, or the first "
-                                         "pair of per-channel columns in "
+                                         "pair of per-channel attributes in "
                                          "the table",
                                     advanced=True)
-    channel2: Optional[str] = param(None, label="channel 2 column",
-                                    help="the column r counts negative; "
-                                         "name both columns or neither",
+    channel2: Optional[str] = param(None, label="channel 2 attribute",
+                                    help="the attribute r counts negative; "
+                                         "name both attributes or neither",
                                     advanced=True)
 
 

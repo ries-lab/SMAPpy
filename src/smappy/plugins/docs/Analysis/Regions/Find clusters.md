@@ -43,12 +43,12 @@ cluster has).  With them
   keeps a row of numbers per cluster, which the block's *write values* or
   [Regions to attribute](plugin:Analysis/Regions/Regions to attribute) puts back
   onto the localizations, to filter or colour by;
-* [Segment regions](plugin:Analysis/Regions/Segment regions), *from an id column*, makes an
+* [Segment regions](plugin:Analysis/Regions/Segment regions), *from an id attribute*, makes an
   [ROI](plugin:Panels/Glossary) (region of interest) of each cluster, to look at, review and annotate in the
   [ROI manager](plugin:Panels/ROI manager).
 
 It clusters the localizations of the layer as it is shown: its
-[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+[filter](plugin:Panels/Glossary) (the lowest and highest values of attributes a
 localization must lie between), its ROI and, on a layer that merges blinks,
 its blinks -- [merge blinks](plugin:Panels/Glossary), also called grouping or
 linking, combines the localizations in consecutive frames that come from one

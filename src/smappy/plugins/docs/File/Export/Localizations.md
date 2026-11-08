@@ -22,7 +22,7 @@ alone, in a form another program reads, and only the part of it asked for:
 * *table*: as the layer shows it, the localizations, or the merged blinks
   ([merge blinks](plugin:Panels/Glossary): the localizations of one
   blinking event in consecutive frames combined into one);
-* *columns*: for a text table, the columns to write, ticked in a list.
+* *attributes*: for a text table, the attributes to write, ticked in a list.
   Picasso's file has a fixed set of columns, so for it the list is hidden.
 
 ## How it works
@@ -43,11 +43,11 @@ beside it.
 
 **Text.**  Whole numbers (`frame`, `channel`, ids) are written as whole
 numbers, everything else with 9 significant digits -- enough to give back
-a single-precision value exactly.  With smappy's names, the columns are
+a single-precision value exactly.  With smappy's names, the attributes are
 written under their names here and frames count from 0, so
 [Load from path](plugin:File/Load/Auto) reads the file back as it was.  With
-ThunderSTORM's names the usual columns are renamed and frames count from 1,
-as ThunderSTORM's own export does; the columns ThunderSTORM has no name for
+ThunderSTORM's names the usual attributes are renamed and frames count from 1,
+as ThunderSTORM's own export does; the attributes ThunderSTORM has no name for
 keep this program's:
 
 | here | ThunderSTORM |
@@ -73,9 +73,9 @@ its pixel size, which a fitted one does -- and z in nanometres:
 | `ellipticity` | $(s_{\max} - s_{\min}) / s_{\max}$ of `sx` and `sy`, as Picasso works it out |
 | `net_gradient` | 0: a number of Picasso's own spot detection, which this program does not have |
 | `z`, `lpz` | `z_nm`, `z_err_nm`, for a 3D table |
-| `group` | the *Picasso group* column, if one is chosen |
+| `group` | the *Picasso group* attribute, if one is chosen |
 
-A field the table has no column for is written as 0, and the text says
+A field the table has no attribute for is written as 0, and the text says
 which.  The metadata Picasso needs -- `Width`, `Height` and `Frames` --
 and the `Pixelsize` go into the file (`/metadata`, as Picasso 0.9 and later
 embed it) and into a `.yaml` beside it (for older versions).  The width
@@ -89,12 +89,12 @@ leaves those out itself and says how many.
 
 ### columns
 Untick what the other program does not need: a table of x, y and frame is
-a third of the size of the whole one.  With every box ticked, every column
+a third of the size of the whole one.  With every box ticked, every attribute
 the table has when it runs is written -- also one a later plugin adds --
 which is what a chain or a batch wants.
 
 ### group
-Picasso shows its *picks* by this column.  Writing `cluster_id` there, for
+Picasso shows its *picks* by this attribute.  Writing `cluster_id` there, for
 example, makes every cluster a pick in Picasso; leave it on *none* for a
 plain table.
 

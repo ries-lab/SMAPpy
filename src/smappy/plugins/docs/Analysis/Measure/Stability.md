@@ -39,7 +39,7 @@ Long-term drift and the drift between two channels are to follow as
 approaches of their own.  To *correct* drift from beads, use
 [Fiducials](plugin:Analysis/Drift/Fiducials).
 
-It needs the beads' localizations with an id column that says which
+It needs the beads' localizations with an id attribute that says which
 belong to one bead: `track_id` from [Link
 tracks](plugin:Analysis/Tracking/Link tracks), by default.  It reads the
 localizations, not merged blinks, those the layer's filter and the drawn
@@ -280,7 +280,7 @@ slow one.
 ## Parameters
 
 ### id_column
-Any integer column whose value is the same on one bead's localizations:
+Any integer attribute whose value is the same on one bead's localizations:
 `track_id` from Link tracks (link with a generous *memory*, so a missed
 frame does not split a bead), `bead_true` of a simulation, or `tid` from a
 MINFLUX file.  Ids of 0 and below are not beads.
@@ -328,7 +328,7 @@ the precision dashed, and a table of the peaks, also in the text.  Up to
 8 traces are drawn over each other.
 
 With *each bead*, run on the view, the same numbers for every bead are
-also kept as a [region table](plugin:Panels/Glossary) of the id column
+also kept as a [region table](plugin:Panels/Glossary) of the id attribute
 ("per track_id: Stability"): per axis `x_sd_nm`, `x_precision_nm`,
 `x_vibration_nm`, `x_peak_hz` and `x_peak_nm` (and y, z), with `n_points`.
 *Summarize/Histograms* then compares the beads, and the
@@ -375,7 +375,7 @@ Ported from SMAP's *Analyze/measure/Vibrations* (Ries 2020).
 * **The SD** is of the trace with the slow drift removed, and the
   vibration's RMS is given beside it; SMAP's SD included the drift.
 * **Several beads**: SMAP analysed one bead per layer in the ROI.  Here
-  every bead of the id column, their mean, or their differences.
+  every bead of the id attribute, their mean, or their differences.
 * **The random scatter** is new: SMAP's plugin had no Allan deviation and
   no comparison of the point-to-point steps with the precision.
 * **Irregular times** are put on a grid at the 20th percentile of the

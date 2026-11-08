@@ -32,8 +32,9 @@ The work goes in four steps:
    [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), pinned to the Regions tab with its **+**.
 
 An ROI need not be a shape.  [Segment
-regions](plugin:Analysis/Regions/Segment regions)' *from an id column*, set
-to *its id alone*, makes an ROI of each id of a column -- each
+regions](plugin:Analysis/Regions/Segment regions)' *from an id attribute*, set
+to *its id alone*, makes an ROI of each id of an
+[attribute](plugin:Panels/Glossary) (one value every localization carries) -- each
 [track](plugin:Panels/Glossary) of `track_id`, say -- which holds that
 track's localizations and none of the tracks crossing it.  Such an ROI is
 drawn as its track's line, selected by a click on the line, and reviewed,
@@ -62,7 +63,7 @@ and whether it merges blinks, set in the
 [Render tab](plugin:Panels/Render tab), apply to every ROI, so a filter on
 precision or photons is set there, once.  (A [layer](plugin:Panels/Glossary)
 is one picture of the localizations; its filter, also called bounds, is the
-lowest and highest values a localization's columns may have; [merge
+lowest and highest values a localization's attributes may have; [merge
 blinks](plugin:Panels/Glossary), also called grouping or linking, combines
 the localizations in consecutive frames that come from one blinking event
 into one.)  The images in this window are drawn with that layer's settings
@@ -307,7 +308,7 @@ tile to the first, and a new file starts at its first tile.
 **What a result depends on.**  For each ROI and each per-region step
 the result is stored with a signature, a hash of
 
-* the data: in the GUI, the number of rows of the ROI's file, the column
+* the data: in the GUI, the number of rows of the ROI's file, the attribute
   names, and the rounded positions of up to 512 localizations spread through
   it, so that a drift correction or a refit changes it and a rename does not;
 * the geometry: the centre, and the global shape and size or the ROI's own
@@ -388,7 +389,7 @@ Deletes the selected ROI.  To keep an ROI out of the analysis without
 losing it, untick *use* instead.  The other ROIs keep their numbers: an ROI
 is given its number when it is made and keeps it, and a number is never given
 again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
-column of *Regions to attribute*, whatever was removed before it.  *Undo*
+attribute of *Regions to attribute*, whatever was removed before it.  *Undo*
 brings a removed ROI back under its own number.
 
 ### Undo ROI edit
@@ -414,7 +415,7 @@ were proposed -- with what was measured on each, and the ROIs a replacing
 run would remove removed -- as one step of *Undo*, without running the
 segmenter again: on a large file a search can take a minute, and the ROIs
 added are the ones looked at even if the filter has changed since.  For *from
-an id column*, the preview and so what is added are the file shown; *Run*
+an id attribute*, the preview and so what is added are the file shown; *Run*
 makes the ROIs of every file.
 
 ### Discard preview

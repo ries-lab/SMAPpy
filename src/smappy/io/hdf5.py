@@ -97,7 +97,7 @@ class LocalizationWriter:
                 self.set_metadata(fill)
         elif set(self._datasets) != set(locs.keys()):
             raise ValueError(
-                "columns changed between blocks: "
+                "attributes changed between blocks: "
                 f"{sorted(set(self._datasets) ^ set(locs.keys()))}")
 
         n = len(locs)

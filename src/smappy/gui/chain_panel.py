@@ -132,7 +132,7 @@ class ChainPanel(QWidget):
         self.check_button = QPushButton("check")
         self.check_button.setToolTip("time the selected block in a few of its "
                                      "regions: what the whole will take, and "
-                                     "the columns it changes without writing "
+                                     "the attributes it changes without writing "
                                      "them back")
         self.check_button.clicked.connect(self.check_block)
         self.check_button.setEnabled(bool(self.root))

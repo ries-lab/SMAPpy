@@ -42,13 +42,13 @@ def track_column(locs, chosen: str = AUTO) -> str:
         return column
     have = integer_columns(locs)
     if chosen:
-        start = f"no column {chosen!r} to take the tracks from"
+        start = f"no attribute {chosen!r} to take the tracks from"
     else:
         start = ("no tracks: the table has none of "
                  + ", ".join(TRACK_COLUMNS))
     raise ValueError(start + ".  Link them (Analysis/Tracking/Link tracks), or "
                      "choose the track id among "
-                     + (", ".join(have) if have else "(no integer column)"))
+                     + (", ".join(have) if have else "(no integer attribute)"))
 
 
 def track_column_choices(locs) -> List[Tuple[str, str]]:

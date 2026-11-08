@@ -33,23 +33,23 @@ an implicit one; this step makes it explicit.
 * *start from* -- `defaults` (the bounds a new layer starts with, then the
   rows), `empty` (only the rows), or `keep` (the layer's current bounds, then
   the rows);
-* rows of bounds -- a column name, a lower and an upper limit, either of which
+* rows of bounds -- an attribute name, a lower and an upper limit, either of which
   may be left empty, and two ticks, *quantile* and *required*.
 
-A row for a column the starting bounds already have replaces that bound.
+A row for an attribute the starting bounds already have replaces that bound.
 
-**Rows rather than settings.**  Which columns a table has is not known until a
+**Rows rather than settings.**  Which attributes a table has is not known until a
 file is open, and in a batch it is a different file each time, so the bounds
-are rows naming a column rather than one setting per column.  In the GUI the
-column box offers the open table's columns, and **from current layers** copies
+are rows naming an attribute rather than one setting per attribute.  In the GUI the
+attribute box offers the open table's attributes, and **from current layers** copies
 what the Render tab shows now.
 
 **Per file.**  When the step runs, each row is resolved against the table in
 front of it.  A *quantile* row takes its limits as fractions and turns them
 into values for this file: 0.1 as the lower limit means "drop the dimmest 10%".
-A row whose column the table does not have is skipped, and the report says
+A row whose attribute the table does not have is skipped, and the report says
 so; if it is *required*, the file is stopped instead, with a message listing
-the columns it does have.
+the attributes it does have.
 
 ```figure-setup
 from smappy.simulate import simulate
@@ -101,7 +101,7 @@ whatever a layer shows.
 **The defaults.**  `defaults` starts from the bounds a freshly opened table
 gets: `xy_err_nm` at most 25 nm, `logl_rel` at least -2, `z_nm` between -500
 and 500 nm, and, for a 2D table (no `z_nm`), `sigma_nm` at most 180 nm -- each
-only where the table has the column -- and then the bounds the table carries
+only where the table has the attribute -- and then the bounds the table carries
 with it, such as the `use` flag Remove Localizations writes when it hides
 localizations, so what the file hides stays hidden.  (Before version 2 the
 carried bounds were left out.)  A new layer merges blinks by default.
@@ -111,13 +111,13 @@ $q_{\mathrm{hi}}$ between 0 and 1.  They become the bound
 
 $$Q(q_{\mathrm{lo}}) \leq v \leq Q(q_{\mathrm{hi}}) ,$$
 
-with $v$ the column's value and $Q$ its empirical quantile function over the
+with $v$ the attribute's value and $Q$ its empirical quantile function over the
 whole table of single localizations -- not over what another bound or the
 drawn [ROI](plugin:Panels/Glossary) (region of interest) keeps, and
 ignoring values that are not finite.  An empty limit stays open.
 
 **Merged blinks.**  A layer's bounds apply to its merged blinks and to its
-single localizations alike.  A bound on a column that means something else
+single localizations alike.  A bound on an attribute that means something else
 per blink -- `photons`, which is summed over the blink, or `n_in_group` -- is
 the same number on both, so on a layer that merges blinks it cuts at a
 different point of the distribution.

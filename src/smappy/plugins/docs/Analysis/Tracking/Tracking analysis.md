@@ -6,7 +6,7 @@ covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, sma
 ## What it does
 
 Measures how [tracks](plugin:Panels/Glossary) move.  It needs tracks, an
-id column that says which localizations belong to one particle -- the
+id attribute that says which localizations belong to one particle -- the
 *track id*: on *auto*, `track_id` from
 [Link tracks](plugin:Analysis/Tracking/Link tracks), else MINFLUX's `tid`,
 else a simulation's `track_id_true`.  Two analyses, each ticked on or off:
@@ -215,8 +215,8 @@ consecutive localizations of a track, each at the nearest step.
 
 ### id_column
 *auto* takes the first of `track_id`, `tid` and `track_id_true` the table
-has, and the list says which.  Choose another integer column to compare
-two linkings (Link tracks' *output column*), or `group_id` to treat each
+has, and the list says which.  Choose another integer attribute to compare
+two linkings (Link tracks' *output attribute*), or `group_id` to treat each
 merged blink as a track.  Id 0 and below is no track.
 
 ### msd_fit.offset
@@ -262,7 +262,7 @@ Tracking analysis"): `n_locs`, `D_um2_per_s`, `alpha`, `lags` and
 track shorter than *minimum length*.  *Summarize/Histograms* shows their
 distributions, and the [region filter](plugin:Analysis/Regions/Filter regions)
 keeps the tracks of one population -- `alpha` below 0.7, say -- without a
-column per value; *write per track* is for colouring the tracks.  Not when
+attribute per value; *write per track* is for colouring the tracks.  Not when
 an ROI is drawn, since the table stands for every track the layer shows.
 
 A good result: the MSD a straight line over its first points, α near 1

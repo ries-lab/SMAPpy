@@ -99,7 +99,7 @@ class ExportTableSettings:
                       help=".csv: commas; .tsv or .txt: tabs")
     evaluation: str = param("", label="results from", choices=auto_only,
                             help="the measurement whose table is written, on the "
-                                 "ROIs or per region of an id column; auto: "
+                                 "ROIs or per region of an id attribute; auto: "
                                  "everything measured on the ROIs")
     positions: bool = param(True, label="ROI position",
                             help="add each ROI's centre, its file and its comment")

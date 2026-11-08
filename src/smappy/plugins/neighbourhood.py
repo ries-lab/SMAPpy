@@ -501,7 +501,7 @@ class NeighbourhoodSettings:
                                       "another layer gives a cross-density")
     quantity: str = param("count", label="quantity",
                           choices=(("count", "neighbours within r"),
-                                   ("statistic", "statistic of a column"),
+                                   ("statistic", "statistic of an attribute"),
                                    ("voronoi", "Voronoi density")),
                           help="what is written per localization")
     radius_nm: float = param(50.0, label="radius", unit="nm", min=0.1,
@@ -524,14 +524,14 @@ class NeighbourhoodSettings:
                         choices=(("occupied", "the occupied area"),
                                  ("box", "the bounding box")),
                         help="where the mean density is taken, without a drawn ROI")
-    column: str = param("", label="column", choices=lambda: [("", "-")],
-                        help="the column whose statistic is taken")
+    column: str = param("", label="attribute", choices=lambda: [("", "-")],
+                        help="the attribute whose statistic is taken")
     statistic: str = param("median", label="statistic",
                            choices=tuple((s, s) for s in STATISTICS),
-                           help="of the column over the neighbours")
+                           help="of the attribute over the neighbours")
     quantile: float = param(0.9, label="quantile", min=0.0, max=1.0,
                             help="0.5 is the median")
-    name: str = param("", label="new column",
+    name: str = param("", label="new attribute",
                       help="empty: a name from the settings")
 
 
@@ -618,9 +618,9 @@ def neighbourhood(around: Tuple[Localizations, np.ndarray],
     values = None
     if s.quantity == "statistic":
         if not s.column:
-            raise ValueError("choose a column")
+            raise ValueError("choose an attribute")
         if s.column not in table_b:
-            raise ValueError(f"no column {s.column!r} in the neighbours' table: it has "
+            raise ValueError(f"no attribute {s.column!r} in the neighbours' table: it has "
                              + ", ".join(sorted(table_b.keys())))
         values = np.asarray(table_b[s.column], dtype=float)
     files_a, files_b = _files(table_a), _files(table_b)
@@ -792,8 +792,8 @@ class Neighbourhood(Plugin):
         name = settings.name.strip() or default_name(settings)
         own = {r["field"] for r in recipes(whole)}
         if name in whole and name not in own:
-            raise ValueError(f"{name} is a column of the localizations' own: "
-                             "choose another name for the new column")
+            raise ValueError(f"{name} is an attribute of the localizations' own: "
+                             "choose another name for the new attribute")
         def progress(fraction: float) -> None:
             # a half-written column is worth nothing: a stop keeps nothing
             if ctx.stopped:

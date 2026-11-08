@@ -585,7 +585,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
                 f"the joint model needs the ROIs' files, for the precisions of the "
                 f"whole field, and {str(ev)!r} was counted per region of "
                 f"{ev.source}, not in ROIs: use the corners (SMAP) method, or make "
-                f"ROIs of the clusters (Segment regions, from an id column) and count "
+                f"ROIs of the clusters (Segment regions, from an id attribute) and count "
                 f"their corners there")
         result = self.analyse(project, rows, settings, count, label)
         if per_cluster and ctx.locs.metadata.get("simulation_settings"):

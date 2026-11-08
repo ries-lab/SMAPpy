@@ -595,7 +595,7 @@ class Assistant:
         return out
 
     # ------------------------------------------------------------------ reading
-    @tool("What is open: the files, the table's columns, where the data lie "
+    @tool("What is open: the files, the table's attributes (`columns`), where the data lie "
           "(extent_nm) and, in the GUI, what the 2D view shows, each layer's "
           "filter and grouping and how many localizations it shows, the ROIs, "
           "what can be undone, the results kept, the mode and the output "
@@ -1093,8 +1093,9 @@ class Assistant:
         self.session.changed("layers" if new else "layer")
         return {"layer": self.session.layers.index(target), **self._layer_entry(target)}
 
-    @tool("Set a layer's filter on a column: keep lo <= value <= hi; null for "
-          "no bound.  remove=true takes the column's filter away.",
+    @tool("Set a layer's filter on an attribute (a column of the table): keep "
+          "lo <= value <= hi; null for no bound.  remove=true takes the "
+          "attribute's filter away.",
           column={"type": "string", "description": "e.g. 'xy_err_nm'"},
           lo={"type": ["number", "null"]}, hi={"type": ["number", "null"]},
           layer={"type": "integer", "description": "default 0"},
@@ -1106,7 +1107,7 @@ class Assistant:
         target = self._layer(layer)
         columns = list(self.session.locs.columns)
         if column not in columns and not remove:
-            raise ToolError(f"no column {column!r}; the table has {', '.join(columns)}")
+            raise ToolError(f"no attribute {column!r}; the table has {', '.join(columns)}")
         if not self._viewing():
             return self._propose("set_filter", {"column": column, "lo": lo, "hi": hi,
                                                 "layer": layer, "remove": remove}, reason)

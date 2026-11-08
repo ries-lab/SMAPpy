@@ -197,7 +197,7 @@ class BindingKinetics(Plugin):
     def run(self, ctx: Context, settings: BindingKineticsSettings) -> Result:
         locs, blink = _localizations(ctx)
         if "frame" not in locs:
-            raise ValueError("the table has no frame column: "
+            raise ValueError("the table has no frame attribute: "
                              f"it has {', '.join(sorted(locs.keys()))}")
         if not len(locs) and not ctx.per_region:
             raise ValueError("no localizations to measure: draw an ROI round a site")

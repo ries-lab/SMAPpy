@@ -149,9 +149,9 @@ def test_the_view_says_why_a_picture_could_not_be_drawn():
     from smappy.gui.render_view import RenderView
     from smappy.session import Session
     view = RenderView(Session(tracks_table([(5, 5), (35, 5)], [1, 1], [0, 1])))
-    view._on_render_failed("ValueError: no column 'tid' to take the tracks from", 0)
+    view._on_render_failed("ValueError: no attribute 'tid' to take the tracks from", 0)
     assert not view.error_hint.isHidden()
-    assert view.error_hint.text().endswith("no column 'tid' to take the tracks from")
+    assert view.error_hint.text().endswith("no attribute 'tid' to take the tracks from")
     assert "ValueError" not in view.error_hint.text()
     view._busy = True
     view._on_rendered([], -1)                # any answer from the renderer

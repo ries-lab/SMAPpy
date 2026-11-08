@@ -28,7 +28,7 @@ form shows only the chosen method's settings:
   structure.
 * **beads** -- bright spots seen in many frames: fiducial beads, for drift
   correction and stability measurements.
-* **from an id column** -- an ROI per region an id column already names,
+* **from an id attribute** -- an ROI per region an id attribute already names,
   such as the clusters [Find clusters](plugin:Analysis/Regions/Find clusters)
   found.
 * **positions from a file** -- an ROI at each position of a table, such as
@@ -112,15 +112,15 @@ set to *ROI manager* then takes each used ROI as a bead, and
 [Stability](plugin:Analysis/Measure/Stability) runs once per ROI -- so the
 beads can be looked at, excluded or annotated before either.
 
-### From an id column
+### From an id attribute
 
-Makes an ROI for every [region](plugin:Panels/Glossary) an id column of the table names -- usually
+Makes an ROI for every [region](plugin:Panels/Glossary) an id attribute of the table names -- usually
 every [cluster](plugin:Panels/Glossary) (localizations lying closer to each
 other than to the rest) a clusterer found (`cluster_id`, from
 [Find clusters](plugin:Analysis/Regions/Find clusters) or any other) -- so the
 clusters can be looked at one by one, reviewed, excluded and annotated.
 
-It works on any column of whole numbers: an id of 0 or below means "in no
+It works on any attribute of whole numbers: an id of 0 or below means "in no
 region" and gets no ROI, and so does an id with fewer than *at least*
 localizations.  Use it when the clusters need a person's eye or a note; to
 measure every cluster, a block of a [chain](plugin:Panels/Glossary) (plugins
@@ -128,7 +128,7 @@ run one after another as one) repeating over `cluster_id` does it without
 ROIs, and is much faster for thousands of clusters.
 
 It is also how **tracks** are explored.  With *an ROI holds* set to *its id
-alone* and the column `track_id` (from
+alone* and the attribute `track_id` (from
 [Link tracks](plugin:Analysis/Tracking/Link tracks)), each
 [track](plugin:Panels/Glossary) becomes an ROI that holds that track's
 localizations and nothing else -- not the other tracks that cross its path,
@@ -325,10 +325,10 @@ fraction of the frames it was seen in (`frames_fraction`), its median
 `photons`, and the spread of its positions (`spread_nm`), which includes the
 drift.  *keep* then decides, as for the circle template.
 
-### From an id column
+### From an id attribute
 
 **The regions.**  The localizations are sorted by their id; each id above
-0 with enough localizations is one region.  Membership is the column alone:
+0 with enough localizations is one region.  Membership is the attribute alone:
 the layers' filters do not decide which localizations a cluster has.
 
 **The outline.**  With *the cluster's own outline* ticked (the default), the
@@ -348,7 +348,7 @@ text says how many did.
 no shape: it holds the localizations with its id, wherever they are, and
 the outline settings do not apply.  The ROI manager draws it from its
 localizations -- with *draw it as* a track, a line through them in frame
-order; as an outline, the hull round them.  On *auto* a column whose name
+order; as an outline, the hull round them.  On *auto* an attribute whose name
 contains `track` (or MINFLUX's `tid`) is drawn as tracks and any other as
 outlines.  Drawing a polygon on such an ROI in the ROI manager makes it the
 part of its id inside the polygon; *Clear shape* makes it the whole id
@@ -356,7 +356,7 @@ again.
 
 **The ROI.**  Its centre is the mean position of the cluster's
 localizations, its file the one its localizations came from, and it
-remembers the column, the id and the number of localizations (`origin`).
+remembers the attribute, the id and the number of localizations (`origin`).
 All the ROIs of a run are one step of the ROI manager's undo.
 
 ### Positions from a file
@@ -440,7 +440,7 @@ $\rho(z) = 2w^2\left(\sqrt{1 + z^2/w^2} - 1\right)$: a localization far from
 the circle counts with its distance, not its square.  They are minimised by
 Gauss-Newton with reweighting, up to 30 iterations, on the localizations
 better than *judge on precision*; when fewer than 3 are, or the table has no
-precision column, on all of them.  `radius_nm` is the same fit with the
+precision attribute, on all of them.  `radius_nm` is the same fit with the
 radius free.  `n_ring`, `n_inside` and `n_outside` count every localization
 in the window in the band $R \pm w$, nearer the centre, and further out.
 
@@ -455,7 +455,7 @@ time.  With $m$ far ones, $\mathrm{far\_p} = P(X \geq m)$ for $X$ binomial
 with $n$ trials and a chance of 1 %.  Two things follow.  The test is the
 same at 500 photons as at 5000, because each localization is judged by its
 own precision; and it needs nothing about how often a fluorophore blinks.
-Without a precision column it is 1.  Two touching pores fail it: each sees
+Without a precision attribute it is 1.  Two touching pores fail it: each sees
 the other's localizations in its window, far from its own ring.
 
 **Why not the fractions inside and outside** as the checks.  Counted on
@@ -486,7 +486,7 @@ localizations in the window,
 $$\hat{R} = \sqrt{2 \left( \langle d^2 \rangle - \langle \sigma^2 \rangle \right)},$$
 
 the radius of a uniform disc with that spread, less the localizations' own
-($\langle \sigma^2 \rangle$; nothing without a precision column).  It is
+($\langle \sigma^2 \rangle$; nothing without a precision attribute).  It is
 taken three times, the last two over the localizations within
 $\hat{R} + 2\sqrt{\langle \sigma^2 \rangle}$ (or $1.1 \hat{R}$ without a
 precision): one background localization at the window's edge, counting with
@@ -504,7 +504,7 @@ computes them: 1 for a round structure, $b/a$ for an ellipse of half-axes
 $a$ and $b$.  A ring's own window takes in some background, which makes it
 read a little rounder than it is.  `psf_nm` is the mean `sigma_nm` in the
 window -- SMAP's check that a structure is in focus -- and NaN without that
-column.  `touching` is 1 when the candidate's circle (of `radius_nm`, or of
+attribute.  `touching` is 1 when the candidate's circle (of `radius_nm`, or of
 the template's radius when that is not a number) overlaps at all the circle
 of another candidate that passes *keep* -- *keep* taken first with every
 `touching` 0.  The rejected candidates are not counted: most are background,
@@ -512,7 +512,7 @@ beside every structure, and would flag them all.
 
 **What it runs on.**  In the ROI manager, the file being shown, on its
 localizations after the layer's filters (the lowest and highest values of
-columns, set in the Render tab) -- so a z or frame range set there limits
+attributes, set in the Render tab) -- so a z or frame range set there limits
 the search -- and on the merged blinks when the layer merges them.  The ROIs
 get the manager's size and shape (a circle of 300 nm by default).
 
@@ -548,15 +548,15 @@ $\sqrt{(\mathrm{var}\, x + \mathrm{var}\, y) / 2}$, drift included;
 `radius_nm` $\sqrt{2 \langle d^2 \rangle}$ about the median position, as a
 disc's; `n_locs` its localizations; `roundness` and `psf_nm` as above.
 
-### From an id column
+### From an id attribute
 
 **Which table.**  The localizations, whatever the layer shows: the id
-column is theirs, and a region's outline is drawn round all of its
+attribute is theirs, and a region's outline is drawn round all of its
 localizations.
 
 **An ROI of its id alone** keeps `{column: id}` (`ROI.ids`) with its shape
 switched off (`ROI.spatial`).  Its rows are found through one sort of the
-column, kept while the column is unchanged, so thousands of such ROIs cost
+attribute, kept while the attribute is unchanged, so thousands of such ROIs cost
 a binary search each rather than a pass over the table.  On a layer that
 merges blinks, it holds the blinks its localizations belong to, through
 `group_id`.
@@ -579,7 +579,7 @@ With *replace*, the ROIs this method made in the files it adds to go first.
 ### replace
 On, a second run gives a fresh answer: the ROIs the same *method* made on
 the file before go first (each ROI's origin says which) -- for *from an id
-column*, those it made of the same column, in every file.  ROIs drawn by
+attribute*, those it made of the same attribute, in every file.  ROIs drawn by
 hand or made by another method stay either way: beads found after the
 pores keep the pores.  Off, a run adds to what is there; for the circle
 template and beads a candidate on an existing ROI is suppressed, so running
@@ -639,12 +639,12 @@ table to sort by.  *Preview* shows them too, dotted, without making them
 ROIs.
 
 ### ids.column
-Any column of whole numbers: `cluster_id`, an id a dropped-in clusterer
+Any attribute of whole numbers: `cluster_id`, an id a dropped-in clusterer
 wrote, or `roi_id` from *Regions to attribute* to bring ROIs back from a table.
 
 ### ids.min_size
 Large clusters are usually the interesting ones and small ones are noise:
-a few times the localizations one fluorophore gives.  The column keeps every
+a few times the localizations one fluorophore gives.  The attribute keeps every
 cluster either way, and a filter on `n_in_cluster` does the same on the
 table.
 
@@ -708,7 +708,7 @@ Run without the ROI manager, from a script (`Context(locs=locs)`), it
 returns every candidate with its values, `use` and what it failed in
 `data["sites"]`, and the centres of those kept in `data["centers"]`.
 
-### From an id column
+### From an id attribute
 
 The ROIs in the ROI manager; the text says how many were made, the smallest
 cluster that became one, and how many clusters had no outline.  It cannot run
@@ -771,7 +771,7 @@ of another SMAP file into the current one, the files matched by their
 order.  Here the positions come from any table, a csv written by *Export
 table* among them, and each goes to the file it names.
 
-### From an id column
+### From an id attribute
 
 New: SMAP has no segmenter that makes sites of clusters; its DBSCAN writes
 the cluster index and makes no ROIs.

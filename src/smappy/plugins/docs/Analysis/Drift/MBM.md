@@ -201,7 +201,7 @@ the first or the last time of the measurement.
 ## Output
 
 The corrected table, as one undo step; `x_nc_nm` and the other uncorrected
-columns stay as they were, so the plugin can be run again with other
+attributes stay as they were, so the plugin can be run again with other
 beads.  The text says how many beads there were, how many were used, how
 many the rule left out and how many were chosen by hand, then the range of
 the drift.  The figures are the drift curve and, per measurement, the

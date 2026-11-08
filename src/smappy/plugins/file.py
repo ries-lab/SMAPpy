@@ -53,7 +53,7 @@ class CsvSettings:
                             help="a saved conversion; auto picks the one whose "
                                  "headers the file has")
     mapping: str = param("", label="columns", kind="text",
-                         help="header=column pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
+                         help="header=attribute pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
                               "empty means the conversion's, or a guess from the header")
     units: str = param("", label="lengths in",
                        choices=(("", "auto"), ("nm", "nm"), ("um", "µm"),
@@ -75,7 +75,7 @@ class MsrSettings:
                                    "pattern of the labels, separated by commas")
     merge: bool = param(False, label="merge into one file",
                         help="one table for all of them, one after another in "
-                             "time, with a measurement column; otherwise a "
+                             "time, with a measurement attribute; otherwise a "
                              "file each")
     keep_invalid: bool = param(False, label="keep invalid",
                                help="every final iteration, with vld and sta, "
@@ -251,10 +251,10 @@ class SaveSettings:
         True, label="save the ROI figures' data",
         help="what each ROI kept to draw its figures again; off keeps the "
              "numbers, and a figure is drawn by measuring again")
-    columns: list = param(default_factory=list, label="columns", kind="columns",
+    columns: list = param(default_factory=list, label="attributes", kind="columns",
                           advanced=True,
-                          help="the columns to save; all ticked saves every "
-                               "column. Positions and the file number are "
+                          help="the attributes to save; all ticked saves every "
+                               "attribute. Positions and the file number are "
                                "always saved")
 
 
@@ -279,7 +279,7 @@ def left_out(session, settings: SaveSettings, done: bool = False) -> Optional[st
         return None
     counts = region_counts(session)
     parts = [f"{n} {what}" for n, what in ((counts["rois"], "ROIs"),
-                                           (counts["regions"], "regions of id columns"))
+                                           (counts["regions"], "regions of id attributes"))
              if n]
     if not settings.region_results and parts:
         return (f"The results measured in {' and '.join(parts)} "
@@ -372,11 +372,11 @@ class ExportSettings:
                                    ("ungrouped", "localizations"),
                                    ("grouped", "merged blinks")),
                           help="the localizations, or one row per blink")
-    columns: list = param(default_factory=list, label="columns", kind="columns",
-                          help="the columns to write; all ticked writes every "
-                               "column, also those a later table adds")
+    columns: list = param(default_factory=list, label="attributes", kind="columns",
+                          help="the attributes to write; all ticked writes every "
+                               "attribute, also those a later table adds")
     group: str = param("", label="Picasso group",
-                       help="an integer column written as Picasso's group, "
+                       help="an integer attribute written as Picasso's group, "
                             "its picks: cluster_id, roi_id, ...")
 
 
@@ -419,7 +419,7 @@ class ExportLocalizations(Plugin):
             locs = locs[selection.mask]
         columns = [c for c in settings.columns if c in locs]
         if settings.columns and not columns:
-            raise ValueError("none of the chosen columns is in the table; it has "
+            raise ValueError("none of the chosen attributes is in the table; it has "
                              + ", ".join(locs.keys()))
         said = []
         if fmt in ("csv", "ThunderSTORM"):
@@ -475,7 +475,7 @@ class ExportImageSettings:
                                                "as the window's")
     colour_bars: bool = param(True, label="colour bars",
                               help="the colour scale of each layer coloured by "
-                                   "a column, top right")
+                                   "an attribute, top right")
     labels: bool = param(True, label="labels",
                          help="each panel's or layer's name, top left")
     view: str = param("2D", label="window", choices=(("2D", "2D picture"),
@@ -713,7 +713,7 @@ class ExportStackSettings:
                             help="a bar of a round length, bottom right")
     colour_bars: bool = param(True, label="colour bars",
                               help="the colour scale of each layer coloured by "
-                                   "a column, top right")
+                                   "an attribute, top right")
     labels: bool = param(True, label="labels",
                          help="each panel's name, top left")
 

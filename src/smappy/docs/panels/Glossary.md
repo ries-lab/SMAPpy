@@ -12,6 +12,9 @@ papers and in other software.
 
 * **localization** (also called a spot, an event or a detection): one
   molecule's position, fitted in one camera frame -- one row of the table.
+* **attribute** (also called a column, or a field in SMAP): one value every
+  localization carries -- its x, its photons, its track id, a value derived
+  from others -- what the localization table stores in one column of a file.
 * **frame**: one camera image of the movie.
 * **blink** (also called an on-event): the consecutive frames in which one
   fluorophore stays on.
@@ -41,7 +44,7 @@ papers and in other software.
   rather than camera counts.
 * **background**: the photons per pixel that do not come from the molecule.
 * **localization precision** (also called localization uncertainty, or the
-  CRLB, Cramér-Rao lower bound; the column `xy_err_nm`): how far a fitted
+  CRLB, Cramér-Rao lower bound; the attribute `xy_err_nm`): how far a fitted
   position is expected to lie from the true one, as one standard deviation,
   computed by the fitter from the photons, the background and the PSF.
 * **NeNA** (nearest-neighbour analysis): the precision measured on the data
@@ -102,7 +105,7 @@ papers and in other software.
 
 * **layer**: one picture of the localizations with its own filter, colours
   and render mode; layers are drawn on top of each other.
-* **filter** (also called bounds): the lowest and highest values of columns
+* **filter** (also called bounds): the lowest and highest values of attributes
   -- photons, precision, frame -- that a localization must lie between to be
   shown and measured.
 * **selection**: what a plugin measures -- the localizations that pass the
@@ -166,8 +169,9 @@ papers and in other software.
 * **ROI** (region of interest): a shape -- rectangle, circle, polygon or line
   -- drawn in the view, or found or drawn in the ROI manager.
 * **region**: a set of localizations measured together -- an ROI, or a
-  cluster that an id column such as `cluster_id` names.
-* **id column**: a column of whole numbers that names regions, the
+  cluster that an id attribute such as `cluster_id` names.
+* **id attribute** (also called an id column): an attribute of whole
+  numbers that names regions, the
   localizations sharing a value above 0 being one region -- `cluster_id`,
   `tid`, `track_id`.
 * **region table**: what was measured in a set of regions, a row per region

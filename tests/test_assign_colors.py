@@ -366,7 +366,7 @@ def test_the_result_carries_both_figures():
 
 def test_a_table_without_two_channels_says_so():
     locs = Localizations({"photons": np.ones(10)}, {})
-    with pytest.raises(ValueError, match="no per-channel photon columns"):
+    with pytest.raises(ValueError, match="no per-channel photon attributes"):
         ratios(locs)
 
 

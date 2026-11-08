@@ -24,7 +24,7 @@ manager), and turn by that line.
 
 The new table is added to the session as a file of its own, beside the data,
 and can be rendered, filtered and measured like any other.  It holds the
-localizations themselves, not merged blinks, with every column they had.
+localizations themselves, not merged blinks, with every attribute they had.
 
 ## How it works
 
@@ -74,12 +74,12 @@ the centre lies at (0, 0), and turned about it by minus the angle.  A line
 at 30° then lies along +x, so every ROI ends up pointing the same way.  The
 localizations are all those inside the ROI's shape, not only those a layer's
 [filter](plugin:Panels/Glossary) (the lowest and highest values a
-localization's columns may have) shows -- unless *only what the layers show*
+localization's attributes may have) shows -- unless *only what the layers show*
 is ticked.
 
 **3. One table.**  The moved localizations of all ROIs go into one table,
 each with `roi_id`, the number of the ROI it came from.  The table keeps
-every other column, so a layer that filters on `channel` still shows one
+every other attribute, so a layer that filters on `channel` still shows one
 colour of a two-colour average.
 
 ```figure Twenty-five copies of an arrow of three labels (circles), each turned at random.  Left: four of them in their ROIs (green), with the line drawn along each (magenta).  Middle: superimposed on their centres only, the arrow is smeared into rings.  Right: turned by their lines as well, the three labels come back where they are.
@@ -171,7 +171,7 @@ session's table with the average; *Edit > Undo* brings the data back.
 ## Output
 
 A new file, *average of N ROIs*, holding the superimposed localizations
-with `roi_id` and `frame_in_file` beside their own columns.  The figure
+with `roi_id` and `frame_in_file` beside their own attributes.  The figure
 shows the average as a 2D histogram, with $x$ along the orientation, and
 its profiles along $x$ and $y$.  A sharp average with the structure's
 features in place is good; rings or a smear where the structure has

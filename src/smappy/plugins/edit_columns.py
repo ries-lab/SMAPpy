@@ -31,18 +31,18 @@ def _no_column():
 @dataclass
 class EditColumnsSettings:
     operation: str = param("rename", label="operation",
-                           choices=[("rename", "rename a column"),
-                                    ("remove", "remove columns")],
-                           help="rename one column, or remove the ticked ones")
-    column: str = param("", label="column", choices=_no_column,
-                        help="the column to rename")
+                           choices=[("rename", "rename an attribute"),
+                                    ("remove", "remove attributes")],
+                           help="rename one attribute, or remove the ticked ones")
+    column: str = param("", label="attribute", choices=_no_column,
+                        help="the attribute to rename")
     new_name: str = param("", label="new name",
                           help="letters, digits and underscores, as an "
                                "expression can read it")
     remove: List[str] = param(default_factory=list, label="remove",
                               kind="columns", empty_is_all=False,
-                              help="the columns to remove; positions, frame, "
-                                   "file and the grouping columns are not offered")
+                              help="the attributes to remove; positions, frame, "
+                                   "file and the grouping attributes are not offered")
 
 
 def _filters_lost(ctx: Context, names) -> List[str]:
@@ -88,14 +88,14 @@ class EditColumns(Plugin):
         from ..table_edit import remove_columns, rename_column
         if settings.operation == "rename":
             if not settings.column:
-                raise ValueError("choose the column to rename")
+                raise ValueError("choose the attribute to rename")
             locs, notes = rename_column(ctx.locs, settings.column, settings.new_name)
             new = settings.new_name.strip()
             text = f"{settings.column} renamed {new}"
             renamed = {settings.column: new}
         elif settings.operation == "remove":
             if not settings.remove:
-                raise ValueError("tick the columns to remove")
+                raise ValueError("tick the attributes to remove")
             locs, notes = remove_columns(ctx.locs, settings.remove)
             notes += _filters_lost(ctx, settings.remove)
             for line in notes:

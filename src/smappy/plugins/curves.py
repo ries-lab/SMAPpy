@@ -365,7 +365,7 @@ class Curves(SiteAnalysisPlugin):
             state.choices["x"] = [("", "auto")] + [(n, n) for n in found.arrays]
             state.hints["curves"] = ", ".join(n for n in found.arrays if not _is_band(n))
         if ev is not None and not ev.on_rois and settings.group_by:
-            state.notice = Notice("regions of an id column have no keywords: "
+            state.notice = Notice("regions of an id attribute have no keywords: "
                                   "one group", kind="info")
         return state
 

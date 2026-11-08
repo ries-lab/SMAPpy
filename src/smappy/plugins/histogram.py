@@ -187,8 +187,8 @@ def _column_choices():
 
 @dataclass
 class HistogramSettings:
-    column: str = param("", label="column", choices=_column_choices,
-                        help="the column whose values are counted")
+    column: str = param("", label="attribute", choices=_column_choices,
+                        help="the attribute whose values are counted")
     range: str = param("quantile", label="range",
                        choices=(("quantile", "without the extremes"),
                                 ("all", "smallest to largest"),
@@ -257,11 +257,11 @@ class Histogram(Plugin):
     def run(self, ctx: Context, settings: HistogramSettings) -> Result:
         column = settings.column
         if not column:
-            raise ValueError("choose a column")
+            raise ValueError("choose an attribute")
         groups = []
         for name, colour, (table, selection) in _layers(ctx):
             if column not in table:
-                raise ValueError(f"layer {name} has no column {column!r}; it has "
+                raise ValueError(f"layer {name} has no attribute {column!r}; it has "
                                  + ", ".join(sorted(table.keys())))
             values = np.asarray(selection.apply(table)[column], dtype=float)
             groups.append((name, colour, values[np.isfinite(values)]))

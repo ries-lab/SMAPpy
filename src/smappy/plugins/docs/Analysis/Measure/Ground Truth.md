@@ -327,7 +327,7 @@ own precision, because an astigmatic spot is narrower in x than in y on one
 side of focus and the other way round on the other: divided by `xy_err_nm`,
 the RMS of the two, a spline fit to frames drawn from its own PSF read an x
 pull of 0.86 to 0.96.  A table with `xy_err_nm` only has both axes divided
-by it.  An axis without a precision column has bias and RMS only.
+by it.  An axis without a precision attribute has bias and RMS only.
 
 **The z slope.**  With more than 10 found pairs, `z_nm` in both tables and
 true z not all equal, the least-squares line $\hat{z} = a z + b$ gives the
