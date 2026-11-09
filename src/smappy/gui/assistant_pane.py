@@ -262,19 +262,25 @@ class AssistantControls(QObject):
             return
         if prefs["client"] == "claude-app" and not self._may_write_project(folder):
             return
-        if client.terminal and launch.raise_terminal():
-            # the terminal of a SMAPpy quit and started again: its conversation
-            # goes on, and its connection comes back by itself
-            # (`attach._Forwarder`) once this listens
+        settings = config.config_dir() / "assistant"
+        running = client.terminal and launch.terminal_running(settings)
+        if running:
+            # one assistant for all the windows: the one running -- in another
+            # window, or waiting since its window quit -- comes here, with its
+            # conversation, and is told so (`attach`, "One assistant")
+            self.server.call_assistant_here()
+            launch.raise_terminal()
+        if running or (client.terminal and launch.raise_terminal()):
+            # (a terminal of a SMAPpy before this version, found on a Mac by
+            # its window: it reconnects by itself once this listens)
             self.show_proposals()
-            self.say("Your assistant's terminal is still open: it reconnects in a moment.")
+            self.say("Your assistant is open already: it comes to this window in a moment.")
             self._about_connecting = True
             self._reconnect_check.start()
             return
         terminal = self._column()
         try:
-            line = launch.start(prefs["client"], folder,
-                                config.config_dir() / "assistant", os.getpid(),
+            line = launch.start(prefs["client"], folder, settings, os.getpid(),
                                 own=prefs["command"], pre_allow=prefs["pre_allow"],
                                 bounds=terminal, also=[self.server.assistant.output])
         except Exception as error:
@@ -288,9 +294,10 @@ class AssistantControls(QObject):
         try:
             if not self.server.clients:
                 self._about_connecting = True     # cleared if it comes late
-                self.say("The open terminal did not reconnect (a Claude started "
-                         "before this version?).  Type /mcp in it and reconnect "
-                         "smappy-gui, or close it and press Start assistant again.")
+                self.say("Your assistant has not come yet: it finishes what it is "
+                         "doing first.  If it does not come, type /mcp in it and "
+                         "reconnect smappy-gui, or close it and press Start "
+                         "assistant again.")
         except Exception:
             traceback.print_exc()
 

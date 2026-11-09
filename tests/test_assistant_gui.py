@@ -221,6 +221,7 @@ def controls(server, app, monkeypatch):
     # never the developer's own Terminal: an assistant open there would be
     # raised by the test, and a start skipped for it
     monkeypatch.setattr(launch, "raise_terminal", lambda: False)
+    monkeypatch.setattr(launch, "terminal_running", lambda *a, **k: False)
     made = assistant_pane.AssistantControls(server.session, server)
     yield made
     for window in made._windows.values():
@@ -384,6 +385,40 @@ def test_start_assistant_brings_a_connected_one_forward_rather_than_a_second(
     assert "connected already" in controls.message
 
 
+def test_start_in_a_second_window_calls_the_running_assistant_there_and_starts_none(
+        controls, monkeypatch):
+    from smappy.assistant import attach, launch
+    from smappy.gui import assistant_pane
+    started = []
+    monkeypatch.setattr(assistant_pane, "preferences",
+                        lambda: {**assistant_pane.DEFAULTS, "client": "claude"})
+    monkeypatch.setattr(launch, "start", lambda *a, **k: started.append(a) or "started")
+    monkeypatch.setattr(launch, "terminal_running", lambda *a, **k: True)
+    controls.session.rename("second")
+    controls.start()
+    asked = attach.handover(controls.server.registry)
+    assert not started and controls.server.listening
+    assert asked["server"] == controls.server.address and asked["session"] == "second"
+    assert "comes to this window" in controls.message
+    controls.server.stop()
+
+
+def test_the_windows_an_assistant_can_go_to_are_the_others_that_listen_and_run(tmp_path):
+    from smappy.assistant import attach
+    where = tmp_path / "gui"
+    attach.announce("here", "this one", where, key="a")
+    attach.announce("there", "the other", where, key="b")
+    gone = json.loads((where / "b.json").read_text())
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    (where / "c.json").write_text(json.dumps({**gone, "server": "crashed", "pid": dead.pid}))
+    assert [e["session"] for e in attach.others("here", where)] == ["the other"]
+    # a hand-over request is not mistaken for a window that listens
+    attach.request_handover("there", "the other", where)
+    assert {e["server"] for e in attach.listening(where)} == {"here", "there", "crashed"}
+    assert attach.handover(where)["server"] == "there"
+
+
 def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
         controls, monkeypatch):
     from smappy.assistant import launch
@@ -395,7 +430,7 @@ def test_after_a_restart_start_brings_the_open_terminal_forward_to_reconnect(
     monkeypatch.setattr(launch, "raise_terminal", lambda: True)
     controls.start()                    # nobody connected, but its terminal is open
     assert not started and controls.server.listening
-    assert "reconnects in a moment" in controls.message
+    assert "comes to this window in a moment" in controls.message
     controls._check_reconnected()       # and if it does not
     assert "/mcp" in controls.message
     client = Client(controls.server.address)    # it comes late, after /mcp say
@@ -594,11 +629,11 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="a shell script; Windows runs a .cmd")
-def test_quitting_smappy_ends_the_assistant_it_started_and_no_other_program(tmp_path):
+def test_quitting_the_last_smappy_ends_the_assistant_and_no_other_program(tmp_path):
     from smappy.assistant import launch
     settings = tmp_path / "settings"
     launch.start("claude", tmp_path / "work", settings, 4242, run=lambda *a, **k: None)
-    record = launch.pid_file(settings, 4242)
+    record = launch.pid_file(settings)
     assert not record.exists()          # written by the script, as it starts the client
     fake = tmp_path / "bin" / "claude"  # a client that runs until it is ended
     fake.parent.mkdir()
@@ -615,17 +650,20 @@ def test_quitting_smappy_ends_the_assistant_it_started_and_no_other_program(tmp_
             time.sleep(0.05)
         assert int(record.read_text().split()[0]) == client.pid    # exec kept it
         time.sleep(0.2)                 # the exec done: its command line the client's
-        # another SMAPpy's quit closes nothing of this one's
-        assert not launch.close_terminal(settings, 4343)
-        assert client.poll() is None
-        assert launch.close_terminal(settings, 4242)
+        # another window's Start finds it running, and moves it rather than
+        # starting a second
+        assert launch.terminal_running(settings)
+        assert launch.close_terminal(settings)
         assert client.wait(timeout=10) != 0 and not record.exists()
+        assert not launch.terminal_running(settings)
+        assert not launch.close_terminal(settings)      # once
     finally:
         if client.poll() is None:
             client.kill()
     # a number taken by another program since: left alone
     record.write_text(f"{os.getpid()} /dev/none\n")
-    assert not launch.close_terminal(settings, 4242)
+    assert not launch.terminal_running(settings)
+    assert not launch.close_terminal(settings)
 
 
 def test_the_windows_script_is_read_in_utf8_keeps_its_percent_signs_and_returns_from_npm(
@@ -752,6 +790,66 @@ def test_the_forwarder_outlives_smappy_and_attaches_again_when_it_is_back(
     assert wait_for(lambda: process.poll() is not None, 20)
     assert process.returncode == 0      # not an abort
     again.stop()
+
+
+@pytest.mark.slow
+def test_the_assistant_moves_to_the_window_that_asks_and_is_told_where_it_is(
+        server, monkeypatch):
+    """Several SMAPpy windows, one assistant: *Start assistant* in another
+    window moves it there, the first window staying open, and the model
+    reads in the next answer which window it is in now -- and again when
+    that window is closed and it goes back."""
+    from smappy.gui.assistant_server import AssistantServer
+    from smappy.session import Session
+    monkeypatch.setattr(server, "registry", None)
+    server.session.rename("first")
+    server.key = "first"
+    server.start()
+    process = _attach()
+    lines = []
+    threading.Thread(target=lambda: lines.extend(process.stdout), daemon=True).start()
+
+    def ask(n, method, params):
+        process.stdin.write((json.dumps({"jsonrpc": "2.0", "id": n, "method": method,
+                                         "params": params}) + "\n").encode())
+        process.stdin.flush()
+        assert wait_for(lambda: len(lines) >= n, 60), process.stderr.read1(4000)
+        result = json.loads(lines[n - 1])["result"]
+        return result.get("content", result)
+
+    def state(content):
+        return json.loads(content[-1]["text"])
+
+    ask(1, "initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "fwd"}})
+    call = {"name": "session_state", "arguments": {}}
+    second = Session()
+    second.rename("second")
+    other = AssistantServer(second)
+    other.key = "second"
+    other.start()
+    try:
+        here = ask(2, "tools/call", call)
+        assert len(here) == 1 and state(here)["window"]["session"] == "first"
+        assert state(here)["window"]["other_windows"] == ["second"]
+        other.call_assistant_here()
+        assert wait_for(lambda: other.client_names() == ["fwd"] and not server.clients, 20)
+        assert server.listening             # the first window stays open
+        moved = ask(3, "tools/call", call)
+        assert state(moved)["window"]["session"] == "second"
+        assert "now connected to the SMAPpy window 'second'" in moved[0]["text"]
+        assert "no longer to 'first'" in moved[0]["text"]
+        assert "started the assistant in this window" in moved[0]["text"]
+        assert len(ask(4, "tools/call", call)) == 1     # said once
+        other.stop()                        # that window is closed: back to the first
+        assert wait_for(lambda: server.client_names() == ["fwd"], 20)
+        back = ask(5, "tools/call", call)
+        assert state(back)["window"]["session"] == "first"
+        assert "'first'" in back[0]["text"] and "which was closed" in back[0]["text"]
+    finally:
+        process.stdin.close()
+        process.wait(timeout=20)
+        other.stop()
+        server.stop()
 
 
 @pytest.mark.slow

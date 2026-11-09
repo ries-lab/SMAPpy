@@ -30,13 +30,18 @@ code is, so it is read without a question each time.  The folder gets an
 plugins are, and a ``CLAUDE.md`` for the user's own notes that imports it
 (`prepare_folder`).
 
-**It is closed when SMAPpy quits**, unless the user unticked that in the
-settings (`close_terminal`): left open, its MCP server -- this Python,
-forwarding -- kept the environment's files busy, so an update or a restart
-of SMAPpy stalled behind a window nobody was looking at.  The start script
-writes its process number and terminal into ``terminal-<GUI pid>.pid``
-before ``exec`` makes it the client (on Windows SMAPpy writes the console's), so
-the SMAPpy that started it, and only that one, finds it at quit.
+**One terminal for all of SMAPpy's windows, closed with the last one.**
+*Start assistant* in a second window moves the running assistant there
+(`attach.request_handover`) rather than opening another, and quitting a
+window leaves the terminal to the others that allow connections, which the
+assistant goes to by itself.  When the last one quits the terminal is
+closed, unless the user unticked that in the settings: left open, its MCP
+server -- this Python, forwarding -- kept the environment's files busy, so
+an update or a restart of SMAPpy stalled behind a window nobody was looking
+at.  The start script writes its process number and terminal into
+``terminal.pid`` before ``exec`` makes it the client (on Windows SMAPpy
+writes the console's): one record, whichever window started it, which
+`terminal_running` reads to know there is an assistant to move.
 
 A script is written and the terminal runs it, rather than a command typed
 into AppleScript or ``cmd``: three layers of quoting (Python, the terminal's
@@ -220,11 +225,10 @@ def welcome(client: Client) -> List[str]:
             "The first time it asks you to sign in and whether to trust this folder."]
 
 
-def pid_file(settings_folder: Path, gui_pid: Optional[int] = None) -> Path:
-    """Where the terminal started by the SMAPpy of process ``gui_pid`` is
-    written down: one per SMAPpy, so that quitting one window never closes
-    the assistant another started."""
-    return Path(settings_folder) / f"terminal-{gui_pid or os.getpid()}.pid"
+def pid_file(settings_folder: Path) -> Path:
+    """Where the terminal SMAPpy started is written down: one for every
+    window, as the assistant is."""
+    return Path(settings_folder) / "terminal.pid"
 
 
 def script(command, folder: Path, client: Client,
@@ -363,20 +367,30 @@ def _ours(pid: int, run=subprocess.run) -> bool:
     return any(mark in str(done.stdout) for mark in _OURS_IN_COMMAND)
 
 
-def _alive(pid: int) -> bool:
+def _recorded(settings_folder: Path, run=subprocess.run) -> Optional[Tuple[int, str]]:
+    """The process number and tty of the terminal SMAPpy started, if its
+    client still runs; None if there is none."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True             # there, but not ours to signal
-    return True
+        fields = pid_file(settings_folder).read_text(encoding="utf-8").split()
+        pid = int(fields[0])
+    except (OSError, ValueError, IndexError):
+        return None
+    if not _ours(pid, run):
+        return None
+    return pid, (fields[1] if len(fields) > 1 and fields[1].startswith("/dev/") else "")
 
 
-def close_terminal(settings_folder: Path, gui_pid: Optional[int] = None,
-                   run=subprocess.run, wait: float = 2.0) -> bool:
-    """The terminal this SMAPpy started (`pid_file`), closed: at quit, with
-    *close the assistant's terminal when SMAPpy quits* on.
+def terminal_running(settings_folder: Path, run=subprocess.run) -> bool:
+    """Whether the assistant SMAPpy started in a terminal is still running:
+    *Start assistant* then moves it to the window instead of starting
+    another."""
+    return _recorded(settings_folder, run) is not None
+
+
+def close_terminal(settings_folder: Path, run=subprocess.run, wait: float = 2.0) -> bool:
+    """The terminal SMAPpy started (`pid_file`), closed: when the last window
+    that allows connections quits, with *close its terminal when SMAPpy
+    quits* on.
 
     The client is sent SIGHUP, as a closed terminal sends it, with its
     process group -- the MCP server it started, and the script of a command
@@ -385,19 +399,15 @@ def close_terminal(settings_folder: Path, gui_pid: Optional[int] = None,
     Terminal keeps the window, with its shell, so the window on that tty is
     closed too; on Windows ``taskkill /T`` ends the console's ``cmd`` and
     everything under it.  False when there was nothing to close."""
-    record = pid_file(settings_folder, gui_pid)
+    found = _recorded(settings_folder, run)
     try:
-        fields = record.read_text(encoding="utf-8").split()
-        pid = int(fields[0])
-    except (OSError, ValueError, IndexError):
-        return False
-    tty = fields[1] if len(fields) > 1 and fields[1].startswith("/dev/") else ""
-    try:
-        record.unlink()
+        pid_file(settings_folder).unlink()
     except OSError:
         pass
-    if not _ours(pid, run):
+    if found is None:
         return False
+    pid, tty = found
+    from .attach import alive
     if sys.platform.startswith("win"):
         try:
             run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
@@ -413,9 +423,9 @@ def close_terminal(settings_folder: Path, gui_pid: Optional[int] = None,
     try:
         send(signal.SIGHUP)
         end = time.monotonic() + wait
-        while _alive(pid) and time.monotonic() < end:
+        while alive(pid) and time.monotonic() < end:
             time.sleep(0.05)
-        if _alive(pid):
+        if alive(pid):
             send(signal.SIGKILL)
     except OSError:
         pass
@@ -562,7 +572,7 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
                 f"the '{NAME}' server it finds ({written.name}).")
     config = write_config(settings_folder, pid)
     command = client_command(key, config, own, pre_allow, also)
-    record = pid_file(settings_folder, pid)
+    record = pid_file(settings_folder)
     try:
         record.unlink()                 # an earlier one's, which has ended
     except OSError:

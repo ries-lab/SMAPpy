@@ -62,12 +62,24 @@ with its maker's own installer and starts it.  The first time, the assistant
 asks you to sign in with your account, in the browser, and whether to trust
 the folder it works in.  Then you type your questions there.
 
-**Quitting SMAPpy closes the assistant's terminal**, which ends the
-assistant and the connection it held: left open, that connection is a
-program running from SMAPpy's installation, which holds up an update or
-starting SMAPpy again (on Windows its files cannot be replaced while it
-runs).  The conversation is not lost: Claude Code keeps it, and
-`claude --resume` in the folder after *works in* picks it up again.
+**One assistant for all of SMAPpy's windows.**  With several SMAPpy
+windows open -- two datasets side by side, say -- there is one assistant,
+working in one window at a time.  *Start assistant* in another window moves
+it there, with its conversation; the window it leaves stays open and simply
+has no assistant connected.  It finishes a call it is making before it
+moves.  The assistant is told: its next answer from SMAPpy begins with a
+line saying which window it is in now and which it left, and it says so to
+you in a few words.  It can always ask SMAPpy which window it is in, and
+which others are open.  Closing the window it works in moves it to another
+window that allows connections, and it is told that too.
+
+**Closing the last SMAPpy window closes the assistant's terminal**, which
+ends the assistant and the connection it held: left open, that connection
+is a program running from SMAPpy's installation, which holds up an update
+or starting SMAPpy again (on Windows its files cannot be replaced while it
+runs).  Windows that do not allow connections do not count: the assistant
+could not go to them.  The conversation is not lost: Claude Code keeps it,
+and `claude --resume` in the folder after *works in* picks it up again.
 
 To keep the assistant open instead, untick *close its terminal when SMAPpy
 quits* in the settings.  Then quitting SMAPpy leaves it running, with its
@@ -234,12 +246,13 @@ lets it use SMAPpy's tools without that question; its shell and its own
 file edits still ask.
 
 ### close its terminal when SMAPpy quits
-Shown for the assistants SMAPpy starts in a terminal; on by default.  At
-quit SMAPpy ends the assistant it started -- only the one this window
-started, not one of another SMAPpy window -- and closes its terminal.
-Untick it to keep the assistant and its conversation running across a
-restart of SMAPpy; quit it yourself before updating SMAPpy, as the update
-cannot replace files the assistant's connection is using.
+Shown for the assistants SMAPpy starts in a terminal; on by default.  When
+the last SMAPpy window that allows connections quits, SMAPpy ends the
+assistant and closes its terminal; while another window allows connections
+the assistant moves there instead.  Untick it to keep the assistant and its
+conversation running across a restart of SMAPpy; quit it yourself before
+updating SMAPpy, as the update cannot replace files the assistant's
+connection is using.
 
 ### connect it with
 For *one I start myself*: *copy command* copies the command your client
