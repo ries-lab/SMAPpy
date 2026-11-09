@@ -50,17 +50,27 @@ measured.
 
 **The same settings for another dataset.**  To compare many datasets --
 the positions of one sample, each opened in a window of its own -- set up
-the layers once, then *Edit > Copy view settings* in that window and
-*Edit > Paste view settings* in each of the others.  What goes across is
-each localization layer's filter, how it is drawn (*render*, *colour by*,
-the LUT, the contrast) and whether blinks are merged, with the settings
-that merge them; what stays is the other window's own: its data, its image
-layers and where it is zoomed.  A layer that showed only some of the files
-shows all of them in a window with a different number of files, where
-those file numbers would mean something else.  A filter on an attribute
-the other table does not have is left out.  Nothing of this is applied
-when a window opens: it is pasted when asked for.  The settings are plain text: paste them
-into a text file to keep a lab's usual view, and copy them from there to
+one window, then *Edit > Copy settings* (Ctrl+Alt+C) there and *Edit >
+Paste settings* (Ctrl+Alt+V) in each of the others.  What is copied is
+what is in front, and nothing else, so copying a plugin's settings never
+changes the other window's picture:
+
+* with this tab in front (or the picture), the layers: each localization
+  layer's filter, how it is drawn (*render*, *colour by*, the LUT, the
+  contrast), whether blinks are merged, and the settings that merge them;
+* with another tab in front, the plugin whose section is open there;
+* with a plugin's own window in front, that plugin.
+
+The status line says what was copied.  A paste puts it where it belongs,
+whatever the other window has in front: layers onto its layers, a plugin's
+settings into that plugin where it is pinned and into its window if one is
+open; the status line says where they went.  The other window keeps its
+data, its image layers and where it is zoomed.  A layer that showed only
+some of the files shows all of them in a window with a different number of
+files, where those file numbers would mean something else, and a filter on
+an attribute the other table does not have is left out.  Nothing of this
+is applied when a window opens.  The settings are plain text: paste them
+into a text file to keep a lab's usual set-up, and copy them from there to
 paste them again.
 
 From top to bottom the tab has: a small *overview* of the whole field, the

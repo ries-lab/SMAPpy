@@ -189,8 +189,8 @@ def test_open_and_restore_brings_back_the_layers_view_and_windows(app, tmp_path)
         uninstall_identity(app)
 
 
-# ------------------------------------------ Edit > Copy / Paste view settings
-def test_view_settings_pasted_onto_another_dataset_draw_it_as_the_first(tmp_path):
+# ----------------------------------------------- Edit > Copy / Paste settings
+def test_layers_pasted_onto_another_dataset_draw_it_as_the_first(tmp_path):
     source = arranged(tmp_path / "a.h5")
     text = handoff.view_settings_text(source)
     other = Session()
@@ -224,41 +224,127 @@ def test_a_layer_restricted_to_a_file_is_shown_whole_where_the_files_differ(tmp_
     assert list(again.layers[0].files) == [1]
 
 
-def test_text_that_is_not_view_settings_is_not_taken_for_them():
+def test_text_that_is_not_copied_settings_is_not_taken_for_them():
     assert handoff.parse_view_settings("") is None
     assert handoff.parse_view_settings("some text someone copied") is None
     assert handoff.parse_view_settings('{"layers": []}') is None
     assert handoff.parse_view_settings("[1, 2]") is None
 
 
-def test_the_edit_menu_copies_view_settings_from_one_window_and_pastes_them_in_another(
-        app, tmp_path):
-    from PySide6.QtGui import QAction
+def _windows(app, *sessions, tabs=None):
+    """A control and render window for each session, each on a workspace of
+    a Render tab and ``tabs`` (copied, so each window has its own)."""
+    import copy
     from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.workspace import Tab, Workspace
+    out = []
+    for session in sessions:
+        render = RenderWindow(session)
+        control = ControlWindow(session, render)
+        control.workspace = Workspace(tabs=[Tab(name="Render", kind="render")]
+                                      + copy.deepcopy(list(tabs or [])))
+        control.build_tabs()
+        out += [control, render]
+    return out
+
+
+def _trigger(control, text):
+    from PySide6.QtGui import QAction
+    next(a for a in control.findChildren(QAction) if a.text() == text).trigger()
+
+
+def _close(app, windows):
     from smappy.gui.identity import uninstall_identity
+    for w in windows:
+        w.close()
+    uninstall_identity(app)
+
+
+def test_the_edit_menu_copies_the_layers_with_the_render_tab_in_front(app, tmp_path):
     source = arranged(tmp_path / "a.h5")
     other = Session()
     other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
-    windows = []
+    windows = _windows(app, source, other)
     try:
-        for session in (source, other):
-            render = RenderWindow(session)
-            windows += [ControlWindow(session, render), render]
-
-        def trigger(control, text):
-            next(a for a in control.findChildren(QAction) if a.text() == text).trigger()
-
-        trigger(windows[0], "Copy view settings")
-        trigger(windows[2], "Paste view settings")
+        windows[0].tabs.setCurrentIndex(0)
+        _trigger(windows[0], "Copy settings")
+        assert windows[0].statusBar().currentMessage().startswith("copied: 2 layers")
+        windows[2].tabs.setCurrentIndex(0)
+        _trigger(windows[2], "Paste settings")
         assert [s for s in summary(other) if s[0] == "locs"] == \
             [s for s in summary(source) if s[0] == "locs"]
     finally:
-        for w in windows:
-            w.close()
-        uninstall_identity(app)
+        _close(app, windows)
 
 
-def test_view_settings_kept_in_a_text_file_paste_as_they_were_copied(tmp_path):
+COMET = "Analysis/Drift/COMET"
+
+
+def test_a_plugins_open_section_is_copied_without_the_layers_and_pasted_into_that_plugin(
+        app, tmp_path):
+    from smappy.workspace import Instance, Tab
+    source = arranged(tmp_path / "a.h5")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    before = summary(other)
+    drift = Tab(name="Drift", instances=[Instance(plugin="Analysis/Drift/RCC"),
+                                         Instance(plugin=COMET, id="comet")])
+    windows = _windows(app, source, other, tabs=[drift])
+    try:
+        control, target = windows[0], windows[2]
+        control.tabs.setCurrentIndex(1)
+        plugin_tab = control.tabs.currentWidget()
+        plugin_tab.open_section("comet")
+        plugin_tab.slots["comet"].panel.form.set_values({"segmentation_var": 777})
+        said = control.copy_settings()
+        assert said == "copied: COMET drift correction, from the Drift tab"
+        # the other window has the Render tab in front and COMET never opened
+        target.tabs.setCurrentIndex(0)
+        said = target.paste_settings()
+        assert said == "pasted: COMET drift correction into the Drift tab"
+        assert summary(other) == before                      # its layers untouched
+        instance = target.workspace.tabs[1].instances[1]
+        assert instance.values["segmentation_var"] == 777
+        panel = target.tabs.widget(1).slots["comet"].ensure()
+        assert panel.form.values()["segmentation_var"] == 777
+        # and into its window, where one is open
+        window = target.open_plugin_window(COMET)
+        window.show()
+        assert target.paste_settings().endswith("into the Drift tab and its window")
+        assert window.panel.form.values()["segmentation_var"] == 777
+    finally:
+        _close(app, windows)
+
+
+def test_a_plugin_this_window_does_not_have_is_named_when_nothing_is_pasted(app, tmp_path):
+    from smappy.workspace import Instance, Tab
+    source = arranged(tmp_path / "a.h5")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    windows = _windows(app, source, other)
+    try:
+        text = handoff.settings_text(handoff.plugin_settings(
+            [(COMET, {"segmentation_var": 5}, "")]))
+        with pytest.raises(ValueError, match="COMET drift correction is pinned to no tab"):
+            windows[2].paste_settings(text)
+    finally:
+        _close(app, windows)
+
+
+def test_nothing_is_copied_from_a_tab_with_every_section_closed(app, tmp_path):
+    from smappy.workspace import Instance, Tab
+    source = arranged(tmp_path / "a.h5")
+    windows = _windows(app, source, tabs=[Tab(name="Drift",
+                                              instances=[Instance(plugin=COMET)])])
+    try:
+        windows[0].tabs.setCurrentIndex(1)
+        with pytest.raises(ValueError, match="nothing to copy"):
+            windows[0].copy_settings()
+    finally:
+        _close(app, windows)
+
+
+def test_settings_kept_in_a_text_file_paste_as_they_were_copied(tmp_path):
     source = arranged(tmp_path / "a.h5")
     kept = tmp_path / "our view.txt"
     kept.write_text("\n" + handoff.view_settings_text(source) + "\n\n")
