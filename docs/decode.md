@@ -105,7 +105,9 @@ Both work, and both are the baselines to beat.  Two things are not settled:
   Where it comes from is not known.  Candidates to test, none of them a
   finding: the per-pixel offsets near a pixel's edge, where two pixels can
   claim one molecule; the offset head's activation and range; how targets are
-  assigned to pixels in training; the extraction's non-maximum suppression.
+  assigned to pixels in training; the extraction's non-maximum suppression;
+  aliasing in the network's downsampling and nearest-neighbour upsampling
+  (§3.3).
 - **Whether they are optimal.**  The architecture, the loss's weights, the
   ranges sampled in training and the training schedule were set once and
   never searched systematically.
@@ -171,6 +173,29 @@ What should not be carried over, and may be part of why it did not work:
 **DECODE Cloud.**  The `DECODE_Cloud_*` repos (a user API, a worker API, a job
 fetcher, AWS infrastructure, some updated in autumn 2026) are a job service for
 DECODE.  Whether it is alive decides whether it is a route for training (§8).
+
+### Other fitters built like DECODE (survey, 2026-11)
+
+All output a probability per pixel with offsets and the other parameters, and
+train on simulation.  The architecture numbers are from their code.  The Li
+lab's code and SHOT's are GPL-3.0 and AGPL-3.0: ideas only, no code.
+
+| fitter | what differs from DECODE | reported |
+| --- | --- | --- |
+| FD-DeepLoc (Fu 2023) | chip coordinates as input maps (CoordConv) into both U-Nets and the heads; a per-pixel occupancy loss (cross-entropy against the nearest pixel) added | field-dependent PSFs over ~180 µm |
+| LiteLoc (Fei 2025) | half resolution, dilated convolutions (2 to 16); each frame encoded alone, joined at half resolution; 1.3 M vs 2.2 M parameters | 3.3× faster; 19 % lower lateral error with a Tetrapod, equal with astigmatism |
+| LUNAR (Fu 2026) | ConvNeXt U-Net; attention along time per pixel, ±3 frames, temporal dropout; *SL* also learns Zernike aberrations from the data | 3D error over 9 frames 7.2 vs 11.1 nm (astigmatism), 10.3 vs 20.1 nm (Tetrapod) |
+| SHOT (Séailles 2026) | offsets up to ±1.5 cells, so cells overlap; an optimal-transport loss (Sinkhorn) instead of the mixture, no non-maximum suppression; refined by rendering its estimate | E3D 0.75 vs 0.71 from the wider offsets alone; lower recall |
+| AttentionUNet (Reinhard 2025) | attention over up to ~50 frames | mixed with density |
+| SIMCODE (Cnossen 2025) | 6 intensities per pixel, then a fit of their modulation | the nearest thing to 4Pi; no deep-learning 4Pi fitter was found |
+
+**On pixelation.**  LUNAR's extraction (a commit of 2025-02) forms a mixture
+of the pixel and the neighbour its offset points to and takes its peak; the
+commit reports far fewer grid artifacts, without retraining.  No paper
+measures sub-pixel bias in a controlled way.
+
+**Image or volume outputs** (Deep-STORM, DeepSTORM3D, diffusion and flow
+reconstructions) are limited by their grid and are not candidates.
 
 ### What SMAPpy and uipsf already have
 
@@ -258,6 +283,34 @@ DECODE-Plex's architecture, parametrised by C, T, the extra maps and the
 output spec.  C = 1 with no extra maps is DECODE.  Two choices stay settings:
 - per-channel or shared weights in the first stage (`separate_ch`);
 - the backbone (the U-Net now; LunarNet if it earns its place).
+
+**Why convolutional.**  The image is, to first order, the molecules convolved
+with the PSF.  A shifted molecule gives a shifted image, and a CNN's output
+shifts with its input, so that physics is built in.  It follows that:
+- **the field of view must cover the PSF**: large kernels or dilations for
+  large PSFs (a Tetrapod), where LiteLoc and LUNAR gained most;
+- **a field-dependent PSF breaks the shift invariance** in a controlled way:
+  chip coordinates as input maps, nothing more;
+- **a CNN is equivariant only to shifts by its stride**: strides, pooling and
+  nearest-neighbour upsampling alias, and sub-pixel position is what is
+  measured.  Anti-aliased downsampling (BlurPool, Zhang 2019), smooth
+  upsampling or a full-resolution path (HRNet, Sun 2019) are cheap tests
+  against pixelation;
+- **time is not a shift** (molecules do not move): attention or a recurrent
+  cell (ConvGRU, which suits live fitting) over frames, convolutions in space.
+
+**Candidates**, compared at matched parameters, FLOPs and training, with the
+same heads, loss and extraction: DECODE's U-Net; a residual or ConvNeXt U-Net;
+HRNet-style full resolution; a restoration network (NAFNet, Restormer); large
+kernels or dilations.  Transformers over pixels (Swin, DETR-type set outputs,
+Mamba scans) must learn the locality a CNN has, and are left last; in 3D
+medical segmentation a tuned CNN U-Net beat most of them (Isensee 2024).
+
+**Representation and decoding** come first, as in keypoint estimation, where
+the sub-pixel bias was traced to decoding from a grid (DARK, Zhang 2020):
+LUNAR's mixture peak, overlapping offsets with an optimal-transport loss
+(SHOT, keeping a σ per localization), coordinates as sub-pixel bins (SimCC,
+Li 2022).
 
 ### 3.4 Loss
 
@@ -457,10 +510,12 @@ the baselines on the benchmark, not reproduce their outputs.
      attempt, the colour codes, LunarNet, the uiPSF loaders.
 3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
    the benchmark.
-4. **Tuning.**  One part at a time on C = 1, where it is cheapest: target
-   assignment, the offset head, the extraction (pixelation first), then the
-   loss's weights, the training ranges and schedule, the backbone.  This
-   needs the cluster or many nights on a 4090 (§8).
+4. **Tuning.**  One part at a time on C = 1, where it is cheapest.
+   Pixelation first: the extraction (LUNAR's mixture peak), anti-aliasing,
+   the offsets' range and the loss (SHOT's), target assignment.  Then time
+   (per-pixel attention against a ConvGRU), the backbones of §3.3, the loss's
+   weights, the training ranges and schedule.  This needs the cluster or many
+   nights on a 4090 (§8).
 5. **C = 2.**  Biplane and colour.  At least DECODE-Plex's numbers on the
    benchmark.
 6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
@@ -487,6 +542,21 @@ the baselines on the benchmark, not reproduce their outputs.
 - Speiser, A. et al. Deep learning enables fast and dense single-molecule
   localization with high accuracy.  *Nat. Methods* 18, 1082-1090 (2021).
   [doi:10.1038/s41592-021-01236-x](https://doi.org/10.1038/s41592-021-01236-x)
+- Fei, Y. et al. Scalable and lightweight deep learning for efficient high
+  accuracy single-molecule localization.  *Nat. Commun.* (2025) -- LiteLoc.
+  [doi:10.1038/s41467-025-62662-5](https://doi.org/10.1038/s41467-025-62662-5)
+- Fu, S. et al. Aberration-aware 3D localization microscopy via
+  self-supervised neural-physics learning.  *Nat. Commun.* (2026) -- LUNAR.
+  [doi:10.1038/s41467-026-73045-9](https://doi.org/10.1038/s41467-026-73045-9)
+- Séailles et al. Optimal transport unlocks end-to-end learning for
+  single-molecule localization.  ICLR (2026) -- SHOT.
+  [arXiv:2512.10683](https://arxiv.org/abs/2512.10683)
+- Reinhard et al. Improving single molecule localisation microscopy
+  reconstruction by extending the temporal context.  bioRxiv (2025).
+  [doi:10.1101/2025.04.05.647262](https://doi.org/10.1101/2025.04.05.647262)
+- Cnossen, J. et al. Patterned illumination enables denser deep-learning
+  based single-molecule localization microscopy.  bioRxiv (2025) -- SIMCODE.
+  [doi:10.1101/2025.03.09.642203](https://doi.org/10.1101/2025.03.09.642203)
 - Sha, H. et al. Multi-channel high-density single-molecule localization.
   bioRxiv (2026).
   [doi:10.64898/2026.07.24.740199](https://doi.org/10.64898/2026.07.24.740199)
