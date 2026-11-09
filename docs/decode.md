@@ -544,11 +544,8 @@ fitter, which then only changes the network, the loss and the extraction.
   - The camera comes from SMAPpy's camera database, not typed.
   - torch 1.7's APIs move to current ones where they broke.
   - The job, the progress file and the model file of §9.3 to §9.5.
-- **Licence.**  DECODE is GPL-3.  Shipping it in the BSD wheel needs its
-  authors (Müller, Speiser, the Turaga and Ries labs) to relicense it, or
-  the package to keep its GPL and its own `LICENSE` as uipsf keeps its
-  own.  To be settled before
-  it is merged.
+- **Licence.**  DECODE is GPL-3; Jonas expects to relicense it for the
+  BSD wheel (2026-11).  Not a blocker for the work.
 - **Accepted when** -- training is stochastic, so not bitwise:
   - the torch renderer draws the PSF `spline` draws, to float precision;
   - a model trained by the original v0.10.2 loads in the port and gives the
