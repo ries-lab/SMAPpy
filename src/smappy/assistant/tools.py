@@ -296,7 +296,9 @@ class Assistant:
     a `Later` of the result, or None where it cannot; None headless.
     ``actions`` what the GUI's menus and buttons do, ``actions()`` -> a
     mapping of name to `Action`, asked at each call so that it follows the
-    window; None headless.
+    window; None headless.  ``window`` which SMAPpy window this is,
+    ``window()`` -> a dict for session_state: an assistant moves between
+    windows (`attach`); None headless.
     """
 
     def __init__(self, session=None, mode: str = "act", output=None,
@@ -316,6 +318,7 @@ class Assistant:
         self.windows = windows
         self.actions = actions
         self.runner = None
+        self.window = None
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
@@ -606,7 +609,9 @@ class Assistant:
           "(extent_nm) and, in the GUI, what the 2D view shows, each layer's "
           "filter and grouping and how many localizations it shows, the ROIs, "
           "what can be undone, the results kept, the mode and the output "
-          "folder.  Call it first, and after anything that changes the session.")
+          "folder, and which SMAPpy window you are connected to ('window').  Call it "
+          "first, after anything that changes the session, and after a note that "
+          "you were moved to another window.")
     def session_state(self) -> Dict[str, Any]:
         s = self.session
         locs = s.locs
@@ -649,6 +654,7 @@ class Assistant:
                         for k in self.results[-10:]],
             "proposals": len(self.proposals),
             **({"windows": list(self.windows)} if self.windows is not None else {}),
+            **({"window": self.window()} if self.window is not None else {}),
         }
 
     @tool("Every plugin and saved chain by path, with its one-line summary.  "

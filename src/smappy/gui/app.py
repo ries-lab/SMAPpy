@@ -634,14 +634,17 @@ class ControlWindow(QMainWindow):
     def _stop_assistant(self) -> None:
         if self.assistant_controls is not None:
             self.assistant_controls.server.stop()
-            # the terminal it started, closed (`launch.close_terminal`):
-            # left open it held up an update or a restart
+            # the assistant's terminal, closed with the last window that allows
+            # connections (`launch.close_terminal`): left open it held up an
+            # update or a restart.  While another listens the assistant goes
+            # there by itself.
             from .assistant_pane import preferences
             if preferences()["close_terminal"]:
                 from .. import config
-                from ..assistant import launch
+                from ..assistant import attach, launch
                 try:
-                    launch.close_terminal(config.config_dir() / "assistant")
+                    if not attach.others():
+                        launch.close_terminal(config.config_dir() / "assistant")
                 except Exception:
                     traceback.print_exc()
 
