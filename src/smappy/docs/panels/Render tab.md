@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.session.Session.carried_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.intensity_table, smappy.lut.full_value, smappy.lut.groups, smappy.lut.field_inversion, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z, smappy.handoff.view_settings, smappy.handoff.apply_view_settings]
 ---
 
 ## What it does
@@ -47,6 +47,21 @@ ROI, if there is one), and
 the ROI manager takes its filter, and whether blinks are merged, from a layer
 too.  So a filter set here to clean up the picture also decides what is
 measured.
+
+**The same settings for another dataset.**  To compare many datasets --
+the positions of one sample, each opened in a window of its own -- set up
+the layers once, then *Edit > Copy view settings* in that window and
+*Edit > Paste view settings* in each of the others.  What goes across is
+each localization layer's filter, how it is drawn (*render*, *colour by*,
+the LUT, the contrast) and whether blinks are merged, with the settings
+that merge them; what stays is the other window's own: its data, its image
+layers and where it is zoomed.  A layer that showed only some of the files
+shows all of them in a window with a different number of files, where
+those file numbers would mean something else.  A filter on an attribute
+the other table does not have is left out.  Nothing of this is applied
+when a window opens: it is pasted when asked for.  The settings are plain text: paste them
+into a text file to keep a lab's usual view, and copy them from there to
+paste them again.
 
 From top to bottom the tab has: a small *overview* of the whole field, the
 layer strip, the *filter*, the *image* section (only for a layer that is a

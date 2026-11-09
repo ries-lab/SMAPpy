@@ -365,6 +365,16 @@ class ControlWindow(QMainWindow):
         copy_window.setToolTip("the window last in front as a picture: its page or figure, "
                                "drawn sharp, else the window as it is shown")
         copy_window.setShortcutContext(Qt.ApplicationShortcut)
+        edit.addSeparator()
+        self._action(edit, "Copy view settings", None,
+                     lambda: self.copy_view_settings()).setToolTip(
+            "how the layers are filtered and drawn, and the merge settings, as "
+            "text on the clipboard: Paste view settings in another window takes them")
+        paste = self._action(edit, "Paste view settings", None,
+                             lambda: self.paste_view_settings())
+        paste.setToolTip("the localization layers made as the copied ones: "
+                         "filters, render and display; this file's data and view stay")
+        self._load_locked.append(paste)
         edit.setToolTipsVisible(True)
         # the window Copy means when it is chosen from this menu, which makes
         # the control window the active one: the last picture that was
@@ -979,6 +989,43 @@ class ControlWindow(QMainWindow):
         # title font that draws the circle in black
         self.statusBar().setStyleSheet(
             f"QStatusBar {{ border-top: 4px solid {colour}; }}" if colour else "")
+
+    # ------------------------------------------- view settings, copied
+    def copy_view_settings(self) -> str:
+        """*Edit > Copy view settings*: the layers' filters and drawing as
+        text on the system clipboard, which every instance shares
+        (`handoff.view_settings`).  Returns the text."""
+        from .. import handoff
+        text = handoff.view_settings_text(self.session)
+        QApplication.clipboard().setText(text)
+        n = sum(1 for l in self.session.layers if not l.is_image)
+        self.statusBar().showMessage(
+            f"copied the settings of {n} layer{'s' if n != 1 else ''}: "
+            "Edit > Paste view settings in another window takes them", 8000)
+        return text
+
+    def paste_view_settings(self, text: Optional[str] = None) -> bool:
+        """*Edit > Paste view settings*: the localization layers made as the
+        copied ones (`handoff.apply_view_settings`).  ``text`` None reads
+        the clipboard.  False, and a word why, if it holds no settings."""
+        from .. import handoff
+        if text is None:
+            text = QApplication.clipboard().text()
+        settings = handoff.parse_view_settings(text)
+        if settings is None:
+            QMessageBox.information(self, "Paste view settings",
+                                    "the clipboard holds no view settings: "
+                                    "Edit > Copy view settings in a window first")
+            return False
+        try:
+            handoff.apply_view_settings(self.session, settings)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.warning(self, "Paste view settings",
+                                f"the settings could not be applied:\n{e}")
+            return False
+        self.statusBar().showMessage("pasted the view settings", 8000)
+        return True
 
     # ------------------------------------------------- a new instance
     def open_in_new_window(self, start: bool = True, run=None) -> Optional[object]:

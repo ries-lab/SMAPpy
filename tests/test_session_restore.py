@@ -187,3 +187,83 @@ def test_open_and_restore_brings_back_the_layers_view_and_windows(app, tmp_path)
         for w in windows:
             w.close()
         uninstall_identity(app)
+
+
+# ------------------------------------------ Edit > Copy / Paste view settings
+def test_view_settings_pasted_onto_another_dataset_draw_it_as_the_first(tmp_path):
+    source = arranged(tmp_path / "a.h5")
+    text = handoff.view_settings_text(source)
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    widefield = other.add_image(ImageData(np.zeros((10, 10), np.float32), 100.0,
+                                          name="its own image"))
+    handoff.apply_view_settings(other, handoff.parse_view_settings(text))
+    locs = [s for s in summary(other) if s[0] == "locs"]
+    assert locs == [s for s in summary(source) if s[0] == "locs"]
+    # its own image layer stays; the copied one's image is not carried over
+    images = [l for l in other.layers if l.is_image]
+    assert images == [widefield]
+    assert len(other.locs) == 3000                         # the data its own
+
+
+def test_a_layer_restricted_to_a_file_is_shown_whole_where_the_files_differ(tmp_path):
+    source = Session()
+    source.add_file(table(), _info(tmp_path / "a.h5"))
+    source.add_file(table(seed=1), _info(tmp_path / "a2.h5"), append=True)
+    source.layers[0].set_files([1])
+    settings = handoff.view_settings(source)
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    handoff.apply_view_settings(other, settings)
+    assert other.layers[0].files is None
+    # between sessions with as many files, the restriction is kept
+    again = Session()
+    again.add_file(table(seed=8), _info(tmp_path / "c.h5"))
+    again.add_file(table(seed=9), _info(tmp_path / "c2.h5"), append=True)
+    handoff.apply_view_settings(again, settings)
+    assert list(again.layers[0].files) == [1]
+
+
+def test_text_that_is_not_view_settings_is_not_taken_for_them():
+    assert handoff.parse_view_settings("") is None
+    assert handoff.parse_view_settings("some text someone copied") is None
+    assert handoff.parse_view_settings('{"layers": []}') is None
+    assert handoff.parse_view_settings("[1, 2]") is None
+
+
+def test_the_edit_menu_copies_view_settings_from_one_window_and_pastes_them_in_another(
+        app, tmp_path):
+    from PySide6.QtGui import QAction
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.gui.identity import uninstall_identity
+    source = arranged(tmp_path / "a.h5")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    windows = []
+    try:
+        for session in (source, other):
+            render = RenderWindow(session)
+            windows += [ControlWindow(session, render), render]
+
+        def trigger(control, text):
+            next(a for a in control.findChildren(QAction) if a.text() == text).trigger()
+
+        trigger(windows[0], "Copy view settings")
+        trigger(windows[2], "Paste view settings")
+        assert [s for s in summary(other) if s[0] == "locs"] == \
+            [s for s in summary(source) if s[0] == "locs"]
+    finally:
+        for w in windows:
+            w.close()
+        uninstall_identity(app)
+
+
+def test_view_settings_kept_in_a_text_file_paste_as_they_were_copied(tmp_path):
+    source = arranged(tmp_path / "a.h5")
+    kept = tmp_path / "our view.txt"
+    kept.write_text("\n" + handoff.view_settings_text(source) + "\n\n")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    handoff.apply_view_settings(other, handoff.parse_view_settings(kept.read_text()))
+    assert [s for s in summary(other) if s[0] == "locs"] == \
+        [s for s in summary(source) if s[0] == "locs"]
