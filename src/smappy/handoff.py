@@ -285,6 +285,78 @@ def apply_session_block(session, block: Optional[Dict[str, Any]]) -> None:
     apply_view_state(session, block.get("view3d"))
 
 
+# --------------------------------------------- copy and paste of settings
+#: the key that marks clipboard text as view settings, and their version
+SETTINGS_KEY = "smappy view settings"
+
+
+def view_settings(session) -> Dict[str, Any]:
+    """How the localization layers are drawn and filtered, and the merge
+    settings, to put onto another dataset (*Edit > Copy view settings*).
+
+    Comparing many positions of one sample means many instances, each a
+    file, each to be set up the same way; the clipboard is shared between
+    them, so a copy here and a paste there is all it takes.  Only what
+    describes the looking, not the data: no view range (the positions
+    differ), no image layers (their images are this file's), no ROIs.  The
+    layers' file restrictions go along, but `apply_view_settings` keeps them
+    only where the other session has as many files.
+    """
+    return {SETTINGS_KEY: VERSION,
+            "n_files": len(session.files),
+            "layers": [c for c in layer_states(session) if c.get("kind", "locs") != "image"],
+            "group_settings": _plain(session.group_settings)}
+
+
+def view_settings_text(session) -> str:
+    """`view_settings` as the text the clipboard holds."""
+    return json.dumps(view_settings(session), indent=1, default=_json_default)
+
+
+def parse_view_settings(text: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The settings ``text`` holds, or None if it is not view settings --
+    whatever else the user copied last."""
+    try:
+        settings = json.loads(text or "")
+    except ValueError:
+        return None
+    if not isinstance(settings, dict) or SETTINGS_KEY not in settings \
+            or not isinstance(settings.get("layers"), list):
+        return None
+    return settings
+
+
+def apply_view_settings(session, settings: Dict[str, Any]) -> None:
+    """Make ``session``'s localization layers those ``settings`` describe,
+    as many as there were; its image layers stay where they are.  A bound on
+    a column this table lacks is dropped (`Session.set_layer_configs`)."""
+    from .group import GroupSettings
+    if settings.get("group_settings"):
+        group = _from_plain(GroupSettings, settings["group_settings"])
+        if group != session.group_settings:
+            session.set_group_settings(group)
+    pasted = [dict(c) for c in settings.get("layers") or []]
+    if not pasted:
+        return
+    # file numbers mean the same thing only between sessions with as many
+    # files -- otherwise a layer of "file 2" would show nothing
+    if settings.get("n_files") != len(session.files):
+        for config in pasted:
+            config["files"] = None
+    # the pasted layers in the slots this session's localization layers
+    # have, the image layers between them kept; extra ones go at the end
+    configs, queue = [], iter(pasted)
+    for config in layer_states(session):
+        if config.get("kind", "locs") == "image":
+            configs.append(config)
+        else:
+            nxt = next(queue, None)
+            if nxt is not None:
+                configs.append(nxt)
+    configs.extend(queue)
+    apply_layers(session, configs)
+
+
 def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
     """Everything the new instance opens with, but the table's columns."""
     return {

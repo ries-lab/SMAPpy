@@ -213,6 +213,17 @@ def actions_of(window) -> Dict[str, Action]:
         if not done:
             raise ToolError("nothing to copy")
 
+    def paste_view_settings():
+        # not the menu's handler: that says why in a box, which would wait
+        # for a click nobody makes
+        from PySide6.QtWidgets import QApplication
+        from .. import handoff
+        settings = handoff.parse_view_settings(QApplication.clipboard().text())
+        if settings is None:
+            raise ToolError("the clipboard holds no view settings: "
+                            "Edit/Copy view settings in an instance first")
+        handoff.apply_view_settings(window.session, settings)
+
     a = [
         # ---- File
         Action("File/Open", "File > Open with these files: localization tables "
@@ -266,6 +277,13 @@ def actions_of(window) -> Dict[str, Action]:
         Action("Edit/Copy window as image", "The window last in front, as a "
                "picture, to the clipboard.",
                lambda: copied(window.copy_window_image()), shows=True),
+        Action("Edit/Copy view settings", "The layers' filters, render and "
+               "display settings and the merge settings, as text on the "
+               "clipboard, for another instance to paste.",
+               lambda: window.copy_view_settings() and None),
+        Action("Edit/Paste view settings", "The localization layers made as the "
+               "copied ones; this session's data, image layers and view stay.",
+               paste_view_settings),
         # ---- View
         Action("View/2D view", "The render window, in front.", window.show_2d,
                shows=True),
