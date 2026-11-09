@@ -16,6 +16,14 @@ The point is one framework for single-channel, multi-channel and 4Pi DECODE
 inside SMAPpy, not a port of the DECODE package.  Where the existing code did
 something that should change, the plan says what replaces it and why.
 
+**The existing code is a baseline, not a reference.**  DECODE and DECODE-Plex
+work well, but they still show pixelation artifacts, and nobody knows whether
+their architecture, loss and training are optimal.  The 4Pi branch never
+worked; it was an attempt.  So the new code need not reproduce any of them.
+It is benchmarked against them and against the CRLB, and then tuned.  That
+decides what is taken and what is written new (§5): modules with clean
+interfaces, each of which can be swapped and benchmarked on its own.
+
 ## 1. The method in one paragraph
 
 **What the network does.**  DECODE localizes molecules at high density, where
@@ -88,6 +96,20 @@ splitter (`case 2`), and the offset maps' single reference channel.  `cli/infer.
 raises `NotImplementedError`, and training's entry names a config that is not
 in the tree.
 
+### What DECODE and DECODE-Plex leave open
+
+Both work, and both are the baselines to beat.  Two things are not settled:
+- **Pixelation.**  The localizations' sub-pixel positions are not uniform:
+  they gather at places within the pixel, which shows as a grid in the
+  rendered image.  The de-biasing after the fit (above) treats the symptom.
+  Where it comes from is not known.  Candidates to test, none of them a
+  finding: the per-pixel offsets near a pixel's edge, where two pixels can
+  claim one molecule; the offset head's activation and range; how targets are
+  assigned to pixels in training; the extraction's non-maximum suppression.
+- **Whether they are optimal.**  The architecture, the loss's weights, the
+  ranges sampled in training and the training schedule were set once and
+  never searched systematically.
+
 ### The colour codes (`DECODE_Internal`, `future/dev_prob_colour`)
 
 **What it is.**  `codes` is one probability map per colour, with the photons
@@ -99,9 +121,11 @@ and positions shared.
 
 ### 4Pi (`DECODE_Internal`, branch `4pi-simulation`, Hao Sha, 2024-10 to 2025-08)
 
-**Status.**  65 commits ahead of `future/dev`.  Its README describes a
-DECODE-4Pi that beats GlobLoc on simulated density sweeps and recovers the two
-rings of Nup96 at low density.
+**Status.**  An attempt that never worked (Jonas, 2026-11).  It is 65 commits
+ahead of `future/dev`.  Its README describes a DECODE-4Pi that beats GlobLoc
+on simulated density sweeps and recovers the two rings of Nup96 at low
+density; those are its author's claims and were not borne out.  The branch is
+a source of parts and of ideas, not a result to reproduce.
 
 What it adds:
 - **PSF:** `CubicSplinePSF4Pi` (`simulation/psf_kernel.py:1494`), the IAB
@@ -117,7 +141,7 @@ What it adds:
 - **Backbone:** an optional transformer, `LunarNet` (`models/LunarNet.py`, from
   the LUNAR / FD-DeepLoc line of work), not the default.
 
-What should not be carried over:
+What should not be carried over, and may be part of why it did not work:
 1. **The phase is its own mixture.**  The loss is
    `3·(GMM(N, x, y, z), bg, 10·VMM(φ))`: two mixtures over the pixels, one for
    the position and photons and one for the phase.  A true molecule's phase
@@ -128,8 +152,10 @@ What should not be carried over:
    [0, π/2, π, 3π/2] per channel (`psf_kernel.py:1812`, `2183`) on top of the
    per-channel A and B.  SMAPpy's reader of the same files
    (`fourpi.load_uipsf_v1`) takes the per-channel A and B as already holding
-   each channel's phase, and adds nothing.  One of the two is wrong for real
-   data.  One bead stack fitted both ways settles it (§9, step 1).
+   each channel's phase, and adds nothing, and so does the C++ fitter
+   (`CSpline4Pi` in `csrc/models.hpp`: the channels share one phase with no
+   offset).  One of the two is wrong for real data, most likely the branch.
+   One bead stack fitted both ways settles it (§9, step 1).
 3. **One background map for four channels** (`n_bg = n_phot = 1`,
    `tar_bg[:, 0]`).  The channels' backgrounds differ.
 4. **The 4Pi forward model runs on the CPU in numpy** (three spline calls,
@@ -285,12 +311,15 @@ measured.
 
 ### 3.6 After the network
 
-**Extraction.**  DECODE's extraction (`to_emitter`, the lookahead) is kept.
+**Extraction.**  DECODE's extraction (`to_emitter`, the lookahead) is the
+first one, behind an interface, so another can replace it if the benchmarks
+show it causes some of the pixelation.
 
 **De-biasing.**  Its de-biasing becomes a plugin of its own after the fit:
 histogram equalisation of the sub-pixel positions per z bin and uncertainty
 group.  Then it can be judged on the table and applied to any fitter's
-output.
+output.  It is a fallback: the aim is a network whose sub-pixel positions are
+uniform without it, and the benchmark measures that (§9).
 
 **Colour and z.**  Colour is *Assign colours*, and z from the phase is
 *4Pi z*.
@@ -321,15 +350,25 @@ The fitter refuses a model whose calibration or layout differs from the
 data's.  It warns when the data's photons or background lie outside the
 ranges it was trained on.
 
-## 5. What is taken from DECODE
+## 5. Taking code, or writing it new
 
-The licence is Jonas's to decide (he is the author), so code can be taken
-directly where it helps:
-- the network blocks;
-- the loss's count term;
-- the extraction;
-- the samplers;
-- the 4Pi CRLB derivatives, as a check.
+The licence is Jonas's to decide (he is the author), so any of DECODE's code
+can be taken.  Taking it is quicker; writing it new makes it easier to change
+and tune.  Since the existing code is a baseline and not a reference (top of
+the page), the balance is set piece by piece:
+
+| piece | | why |
+| --- | --- | --- |
+| U-Net blocks | taken, as the first backbone | standard, not suspected; the backbone is an interface, so others can be tried |
+| count loss | taken | small and understood |
+| emitter samplers, the ROI's place on the chip | taken | small; the priors come from the parameter spec |
+| extraction (`to_emitter`) | taken, as the first extractor | a suspect for pixelation, so behind an interface |
+| de-biasing | taken, as a plugin after the fit | a fallback, judged on the table |
+| 4Pi CRLB derivatives | read, as a check | SMAPpy's fitters already have the CRLB |
+| heads and the mixture loss | new | driven by the parameter spec; the joint Normal × von Mises mixture does not exist |
+| target assignment to pixels | new, with DECODE's as one option | a suspect for pixelation, to be benchmarked |
+| renderer and simulation | new | torch, on SMAPpy's cameras, kinetics and calibrations (§3.5) |
+| training loop, config, model file | new | headless, resumable, no Hydra or Lightning (§7) |
 
 The DECODE package itself is not taken.  It is about 21 000 lines on Hydra,
 Lightning 1.8, pydantic < 2 and the `spline` package, and much of it
@@ -341,7 +380,10 @@ duplicates SMAPpy:
 - colour assignment;
 - phase to z.
 
-What is taken goes into the new package, written to SMAPpy's house style.
+**Modular, so it can be tuned.**  The backbone, the heads, the loss, the
+target assignment, the extraction and the training schedule are each a part
+with a setting, so one can be changed while the rest is held.  What is taken
+goes into the new package, written to SMAPpy's house style.
 
 ## 6. Where the trained models come from
 
@@ -388,23 +430,37 @@ acquisition.  The job stops at a checkpoint when asked and resumes later.
 
 ## 9. Plan
 
-Each step is accepted on numbers, as the tests do elsewhere.
+Each step is accepted on numbers, as the tests do elsewhere.  Equivalence
+with the existing code is not one of them: the new code has to match or beat
+the baselines on the benchmark, not reproduce their outputs.
 
 1. **Renderer.**  Torch splines and IAB, against the C++ models to float
-   precision on CUDA, MPS and the CPU.  The 4Pi phase convention is settled
-   on one bead stack (§2, item 2).
-2. **C = 1.**  Network, joint loss, extraction.  It must reach DECODE's
-   numbers on the SMLM Challenge's 3D set and the CRLB at low density
-   (against Spline 3D's).
-3. **C = 2.**  Biplane and colour.  It must reach DECODE-Plex's published
-   numbers (Figure 1C, Supplementary Figures 4 and 5) and its localizations of
-   our data in `~/datalocal/decode_plex`.  The Zenodo release
-   (10.5281/zenodo.20088009) holds weights, PSFs and data.
-4. **C = 4 with phase.**  Against Hao's branch and against Spline 4Pi and its
-   CRLB on the same simulations, then on Nup96.
-5. **GUI.**  The fitter on the channel layer, the *Train* window, the
+   precision on CUDA, MPS and the CPU (this one is an equivalence: the
+   simulation must be the PSF the fitters use).  The 4Pi phase convention is
+   settled on one bead stack (§2, item 2).
+2. **Benchmark.**  Before any network: fixed simulated sets over density, z,
+   photons and background for each modality, drawn once and kept, plus the
+   SMLM Challenge's 3D set and real data.  Each run reports detection
+   (Jaccard, recall, precision), RMSE against the CRLB (Spline 3D's, Spline
+   3D 2C's, Spline 4Pi's), the bias in z, **the sub-pixel histogram's
+   uniformity, as the measure of pixelation**, and speed.  DECODE and
+   DECODE-Plex are run on it as they are, with their published weights where
+   these fit (DECODE-Plex's Zenodo release, 10.5281/zenodo.20088009), and
+   their localizations of our data in `~/datalocal/decode_plex`.
+3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
+   the benchmark.
+4. **Tuning.**  One part at a time on C = 1, where it is cheapest: target
+   assignment, the offset head, the extraction (pixelation first), then the
+   loss's weights, the training ranges and schedule, the backbone.  This
+   needs the cluster or many nights on a 4090 (§8).
+5. **C = 2.**  Biplane and colour.  At least DECODE-Plex's numbers on the
+   benchmark.
+6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
+   CRLB on the same simulations, then on Nup96.  Hao's branch is read for
+   parts and ideas only.
+7. **GUI.**  The fitter on the channel layer, the *Train* window, the
    de-biasing plugin, plugin pages.
-6. **Extra input maps.**  Chip coordinates (field-dependent PSFs) and sCMOS
+8. **Extra input maps.**  Chip coordinates (field-dependent PSFs) and sCMOS
    variance.
 
 ## 10. Open questions
@@ -413,8 +469,10 @@ Each step is accepted on numbers, as the tests do elsewhere.
   authors say which the published models used.
 - **Is DECODE Cloud alive,** and could its worker run this trainer?
 - **Which machine trains** (§8).
-- **Is LunarNet worth keeping** as a backbone?  It should be judged on step
-  3's numbers.
+- **Is LunarNet worth keeping** as a backbone?  It should be judged on the
+  benchmark during tuning (§9, step 4).
+- **Where does the pixelation come from?**  §2 lists the suspects; the
+  benchmark tells them apart.
 
 ## References
 
