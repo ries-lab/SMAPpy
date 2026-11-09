@@ -73,7 +73,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | `MLE_global_spline` | multi-channel global fit | ✅ 2C (Gaussian and spline) | – |
 | `MLE_4Pi`, `Loader4PiMat`, `Channeldrift4Pi`, `RegisterLocs4Pi`, `Phase2z4Pi` | 4Pi | ✗ | skip unless 4Pi data comes back into use (L). |
 | `iterativeMDfitter` | multi-emitter-aware single fitter | ✗ | **P3**, M – for medium density; DECODE is the better answer. |
-| `DECODE_fitting`, `Loader_decode`, `DECODE_training_estimates` | deep-learning localization | ✗ | **P2**, M – run DECODE in its own Python (external worker + import of its output). Don't port the training glue as is. |
+| `DECODE_fitting`, `Loader_decode`, `DECODE_training_estimates` | deep-learning localization | ✗ | **P2**, L – one torch framework for DECODE, DECODE-Plex and 4Pi inside smappy, the plan in `docs/decode.md`. Don't port the training glue as is. |
 | `deepSMLM`, `TrainDeepSMLM`, `FalconHD2D` | other high-density localizers | ✗ | skip |
 | `RadialSymmetry2D/3D` | fast non-MLE localizer | ✗ | **P3**, S – nice for beads/tracking; not for SMLM precision. |
 | `usePeakfinder`, `pushLocs` | pass positions through | n/a | skip |

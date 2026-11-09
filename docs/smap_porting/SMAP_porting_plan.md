@@ -185,7 +185,7 @@ processing for image layers (#81, `Process/Process image`).
 
 GPU fitter (#10) · background before fitting (#6) · astigmatic z (#11,
 **done**: `After fit/Astigmatic z`) · 4Pi (#13, **done**: Spline 4Pi, 4Pi z) ·
-DECODE / DECODE-plex (#15) · sCMOS maps (#22) · uiPSF robustness
+DECODE / DECODE-plex (#15, planned: `docs/decode.md`) · sCMOS maps (#22) · uiPSF robustness
 (#24) · depth-dependent aberrations (#26) · GainOffsetFFT (#27) · DHPSF (#29) ·
 Register3Dstacks (#44) · combine files (#65, **done**: `Process/Combine files`) · alternating excitation (#71) ·
 TIFF intensity at sites (#124).
