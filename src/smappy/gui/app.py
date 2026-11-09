@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -328,6 +329,14 @@ class ControlWindow(QMainWindow):
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
         edit = _add_menu(self.menuBar(), "Edit", self)
+        self.edit_menu = edit
+        self._front_now: Optional[QWidget] = None       # `_note_front`
+        self._front_before: Optional[QWidget] = None
+        self._front_since = 0.0
+        self._menu_front: Optional[QWidget] = None
+        self._menu_hidden_at = 0.0
+        edit.aboutToShow.connect(self._edit_menu_shown)
+        edit.aboutToHide.connect(self._edit_menu_hidden)
         self.undo_action = self._action(edit, "Undo", QKeySequence.Undo,
                                         lambda: self.session.undo())
         self.undo_menu = _add_menu(edit, "Undo steps", edit)
@@ -1008,12 +1017,13 @@ class ControlWindow(QMainWindow):
     # fitter's settings must not also change the other window's picture.
     # The system clipboard is shared between instances, which is the point:
     # many datasets, each in a window of its own, set up once.
-    def _settings_in_front(self):
+    def _settings_in_front(self, front: Optional[QWidget] = None):
         """What *Copy settings* takes: ``("layers",)`` for the Render tab or
         the picture, ``("plugin", path, panel, instance, where)`` for an open
-        section or a plugin's window, else None."""
+        section or a plugin's window, else None.  ``front`` is the window
+        meant, when it is known better than by which one is active."""
         from .plugin_panel import PluginPanel
-        active = QApplication.activeWindow()
+        active = front if front is not None else QApplication.activeWindow()
         tabs = list(zip(self.workspace.tabs, self._tab_widgets()))
         if active is not None and active is not self:
             if active is self.render_window or active is self.view3d_window:
@@ -1052,13 +1062,13 @@ class ControlWindow(QMainWindow):
         ref = plugins.refs().get(path)
         return ref.name if ref is not None else path.rsplit("/", 1)[-1]
 
-    def copy_settings(self) -> str:
+    def copy_settings(self, front: Optional[QWidget] = None) -> str:
         """*Edit > Copy settings*: the settings of what is in front, as text
         on the clipboard -- the layers with the Render tab in front, else
         the open section's plugin or the plugin window's.  What was copied,
         said in the status line and returned; ValueError when nothing is."""
         from .. import handoff
-        source = self._settings_in_front()
+        source = self._settings_in_front(front)
         if source is None:
             raise ValueError("nothing to copy: bring the Render tab, a plugin's "
                              "open section or a plugin's window to the front")
@@ -1145,9 +1155,47 @@ class ControlWindow(QMainWindow):
             places.append("its window")
         return places
 
-    def _copy_settings_asked(self) -> None:
+    # On Windows and Linux only this window has the menu bar, and a click on
+    # it makes this window the active one: chosen from the menu, Copy settings
+    # would always mean this window's tab.  The same press activates the
+    # window and opens the menu, milliseconds apart, so the window that was
+    # in front until just before the menu opened is the one meant; from the
+    # keyboard this window was active already and nothing is read into it.
+    MENU_CLICK_S = 0.5           # activated this long before the menu opened
+
+    def _note_front(self, widget: QWidget) -> None:
+        """A real window came to the front (`_on_focus_window`)."""
+        if widget is not self._front_now:
+            self._front_before, self._front_now = self._front_now, widget
+            self._front_since = time.monotonic()
+
+    def _edit_menu_shown(self) -> None:
+        self._menu_front = None
+        before = self._front_before
+        if self._front_now is self and before is not None \
+                and time.monotonic() - self._front_since < self.MENU_CLICK_S:
+            try:
+                if before.isVisible():
+                    self._menu_front = before
+            except RuntimeError:                  # closed and deleted since
+                pass
+
+    def _edit_menu_hidden(self) -> None:
+        self._menu_hidden_at = time.monotonic()
+
+    def _front_from_menu(self) -> Optional[QWidget]:
+        """The window the Edit menu was opened over, if Copy settings comes
+        from that menu -- an action is triggered just after its menu hides;
+        a shortcut pressed later must not find it."""
+        front, self._menu_front = self._menu_front, None
+        if front is None or self.edit_menu.isVisible() \
+                or time.monotonic() - self._menu_hidden_at > 1.0:
+            return None
+        return front
+
+    def _copy_settings_asked(self, front: Optional[QWidget] = None) -> None:
         try:
-            self.copy_settings()
+            self.copy_settings(front if front is not None else self._front_from_menu())
         except ValueError as e:
             self.statusBar().showMessage(str(e), 10000)
 
@@ -1540,6 +1588,8 @@ class ControlWindow(QMainWindow):
                 QMessageBox.warning(self, "plugin", f"{path} could not be opened:\n{e}")
                 return None
             window_shortcuts(window)
+            window.settings_menu(lambda w=window: self._copy_settings_asked(w),
+                                 lambda: self._paste_settings_asked())
             self._plugin_windows[path] = window
         window.show()
         window.raise_()
@@ -1564,6 +1614,9 @@ class ControlWindow(QMainWindow):
             self._picture_window = widget
         if widget is not None and widget is not self and widget.windowType() == Qt.Window:
             self._last_window = widget
+        if widget is not None and widget.windowType() in (Qt.Window, Qt.Dialog) \
+                and not isinstance(widget, QMenu):
+            self._note_front(widget)
 
     def _copy_window(self) -> QWidget:
         """The window Copy is about: the one in front if it has a picture,
