@@ -30,6 +30,14 @@ code is, so it is read without a question each time.  The folder gets an
 plugins are, and a ``CLAUDE.md`` for the user's own notes that imports it
 (`prepare_folder`).
 
+**It is closed when SMAPpy quits**, unless the user unticked that in the
+settings (`close_terminal`): left open, its MCP server -- this Python,
+forwarding -- kept the environment's files busy, so an update or a restart
+of SMAPpy stalled behind a window nobody was looking at.  The start script
+writes its process number and terminal into ``terminal-<GUI pid>.pid``
+before ``exec`` makes it the client (on Windows SMAPpy writes the console's), so
+the SMAPpy that started it, and only that one, finds it at quit.
+
 A script is written and the terminal runs it, rather than a command typed
 into AppleScript or ``cmd``: three layers of quoting (Python, the terminal's
 own language, the shell) around a JSON path were where this went wrong.  The
@@ -42,8 +50,10 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -210,9 +220,19 @@ def welcome(client: Client) -> List[str]:
             "The first time it asks you to sign in and whether to trust this folder."]
 
 
-def script(command, folder: Path, client: Client) -> str:
+def pid_file(settings_folder: Path, gui_pid: Optional[int] = None) -> Path:
+    """Where the terminal started by the SMAPpy of process ``gui_pid`` is
+    written down: one per SMAPpy, so that quitting one window never closes
+    the assistant another started."""
+    return Path(settings_folder) / f"terminal-{gui_pid or os.getpid()}.pid"
+
+
+def script(command, folder: Path, client: Client,
+           record: Optional[Path] = None) -> str:
     """A shell script that starts ``command`` in ``folder`` -- after offering
-    to install the program it needs, so nobody copies a command anywhere."""
+    to install the program it needs, so nobody copies a command anywhere.
+    ``record``: the file its process number and terminal go into, for
+    `close_terminal` -- the number is the client's, which ``exec`` keeps."""
     lines = ["#!/bin/sh", f"cd {shlex.quote(str(folder))} || exit 1",
              # where Claude Code's installer puts it, which it leaves the user
              # to add to the PATH themselves: found without that step too
@@ -236,6 +256,8 @@ def script(command, folder: Path, client: Client) -> str:
                   "  fi",
                   "fi"]
     lines += ["echo"] + [f"echo {shlex.quote(line)}" for line in welcome(client)] + ["echo"]
+    if record is not None:
+        lines.append(f'echo "$$ $(tty)" > {shlex.quote(str(record))}')
     lines.append(command if isinstance(command, str)
                  else "exec " + " ".join(shlex.quote(p) for p in command))
     return "\n".join(lines) + "\n"
@@ -257,6 +279,8 @@ def windows_script(command, folder: Path, client: Client) -> str:
     ``%VAR%`` and all.
     """
     lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{_percent(str(folder))}"',
+             # `start` gave the window its title; started directly, the script does
+             "title SMAPpy assistant",
              r'set "PATH=%PATH%;%USERPROFILE%\.local\bin"']
     if client.program:
         lines += [f"where {client.program} >nul 2>nul && goto start",
@@ -286,13 +310,18 @@ def _applescript_string(text: str) -> str:
 
 def open_terminal(script_file: Path, title: str = "SMAPpy assistant",
                   bounds: Optional[Tuple[int, int, int, int]] = None,
-                  run=subprocess.Popen) -> List[str]:
+                  run=subprocess.Popen, record: Optional[Path] = None) -> List[str]:
     """Run ``script_file`` in a new terminal window, at ``bounds`` (left,
     top, right, bottom in screen points) where that can be set: on a Mac
     Terminal's bounds, on Linux the place (not the size, which xterm and
     gnome-terminal take in characters) where the terminal takes
     ``--geometry``.  On Windows ``start`` opens the console where Windows
-    puts it.  Returns the command used, for the log and the tests."""
+    puts it.  Returns the command used, for the log and the tests.
+
+    On Windows the console is started directly, in a console of its own,
+    rather than through ``start``, which hands back no process: the
+    console's ``cmd`` is the one `close_terminal` ends, with all it started,
+    and its number goes into ``record``."""
     if sys.platform == "darwin":
         lines = ['tell application "Terminal"', "activate",
                  f"set t to do script {_applescript_string(shlex.quote(str(script_file)))}"]
@@ -301,11 +330,109 @@ def open_terminal(script_file: Path, title: str = "SMAPpy assistant",
         lines += [f"set custom title of t to {_applescript_string(title)}", "end tell"]
         command = ["osascript", "-e", "\n".join(lines)]
     elif sys.platform.startswith("win"):
-        command = ["cmd", "/c", "start", title, "cmd", "/k", str(script_file)]
+        command = ["cmd", "/k", str(script_file)]
+        process = run(command, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10))
+        pid = getattr(process, "pid", None)
+        if record is not None and pid is not None:
+            record.write_text(f"{pid}\n", encoding="utf-8")
+        return command
     else:
         command = _linux_terminal(script_file, title, bounds)
     run(command)
     return command
+
+
+#: what the command line of a process SMAPpy started in its terminal shows:
+#: Claude Code's config file, Codex's server, a command of the user's own
+#: run by its script -- a number reused by another program shows none
+_OURS_IN_COMMAND = ("mcp-gui.json", "smappy.assistant.server", "start-command")
+
+
+def _ours(pid: int, run=subprocess.run) -> bool:
+    """Whether process ``pid`` is still the terminal's client, not a
+    program that got its number after the client ended."""
+    try:
+        if sys.platform.startswith("win"):
+            done = run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                       capture_output=True, text=True, timeout=5)
+            return '"cmd.exe"' in str(done.stdout).lower()
+        done = run(["ps", "-o", "command=", "-p", str(pid)],
+                   capture_output=True, text=True, timeout=5)
+    except Exception:
+        return False
+    return any(mark in str(done.stdout) for mark in _OURS_IN_COMMAND)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True             # there, but not ours to signal
+    return True
+
+
+def close_terminal(settings_folder: Path, gui_pid: Optional[int] = None,
+                   run=subprocess.run, wait: float = 2.0) -> bool:
+    """The terminal this SMAPpy started (`pid_file`), closed: at quit, with
+    *close the assistant's terminal when SMAPpy quits* on.
+
+    The client is sent SIGHUP, as a closed terminal sends it, with its
+    process group -- the MCP server it started, and the script of a command
+    of the user's own -- and SIGKILL if it is still there after ``wait``
+    seconds.  On Linux the terminal closes with the program it ran; on a Mac
+    Terminal keeps the window, with its shell, so the window on that tty is
+    closed too; on Windows ``taskkill /T`` ends the console's ``cmd`` and
+    everything under it.  False when there was nothing to close."""
+    record = pid_file(settings_folder, gui_pid)
+    try:
+        fields = record.read_text(encoding="utf-8").split()
+        pid = int(fields[0])
+    except (OSError, ValueError, IndexError):
+        return False
+    tty = fields[1] if len(fields) > 1 and fields[1].startswith("/dev/") else ""
+    try:
+        record.unlink()
+    except OSError:
+        pass
+    if not _ours(pid, run):
+        return False
+    if sys.platform.startswith("win"):
+        try:
+            run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
+        except Exception:
+            return False
+        return True
+    try:
+        group = os.getpgid(pid)
+        own = group == pid and group != os.getpgid(0)
+    except OSError:
+        own = False
+    send = (lambda sig: os.killpg(pid, sig)) if own else (lambda sig: os.kill(pid, sig))
+    try:
+        send(signal.SIGHUP)
+        end = time.monotonic() + wait
+        while _alive(pid) and time.monotonic() < end:
+            time.sleep(0.05)
+        if _alive(pid):
+            send(signal.SIGKILL)
+    except OSError:
+        pass
+    if sys.platform == "darwin" and tty:
+        # left alone it says "[Process completed]" and stays: closed, which
+        # asks nothing with only the shell left in it
+        script = ('if application "Terminal" is running then\n'
+                  'tell application "Terminal"\n'
+                  'repeat with w in windows\n'
+                  'repeat with t in tabs of w\n'
+                  f'if tty of t is {_applescript_string(tty)} then close w\n'
+                  'end repeat\nend repeat\nend tell\nend if')
+        try:
+            run(["osascript", "-e", script], capture_output=True, timeout=5)
+        except Exception:
+            pass
+    return True
 
 
 def raise_terminal(run=subprocess.run) -> bool:
@@ -435,6 +562,11 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
                 f"the '{NAME}' server it finds ({written.name}).")
     config = write_config(settings_folder, pid)
     command = client_command(key, config, own, pre_allow, also)
+    record = pid_file(settings_folder, pid)
+    try:
+        record.unlink()                 # an earlier one's, which has ended
+    except OSError:
+        pass
     if sys.platform.startswith("win"):
         file = settings_folder / f"start-{key}.cmd"
         # newline="": the lines end in \r\n already, which text mode on
@@ -443,7 +575,7 @@ def start(key: str, folder: Path, settings_folder: Path, pid: int, own: str = ""
                         newline="")
     else:
         file = settings_folder / f"start-{key}.sh"
-        file.write_text(script(command, folder, client), encoding="utf-8")
+        file.write_text(script(command, folder, client, record), encoding="utf-8")
         file.chmod(0o700)
-    open_terminal(file, f"SMAPpy assistant: {client.label}", bounds, run)
+    open_terminal(file, f"SMAPpy assistant: {client.label}", bounds, run, record)
     return f"{client.label} started in {folder}."
