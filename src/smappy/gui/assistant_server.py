@@ -35,6 +35,7 @@ proposals, whoever asked.
 from __future__ import annotations
 
 import json
+import os
 import time
 import traceback
 from collections import deque
@@ -49,7 +50,11 @@ from ..assistant.tools import Later
 # what the client is told on connecting, after the tools' own instructions
 GUI_NOTE = """
 You are connected to the running SMAPpy GUI: the user sees this session in
-its windows as you work.  open_plugin opens a plugin's window filled in, for
+its windows as you work.  Several SMAPpy windows may be open, each its own
+session; you work in one at a time, which session_state names ('window').
+When the user starts the assistant in another window you are moved there,
+and the next tool answer begins with a note saying so: from then on the
+files, layers and results are that window's.  open_plugin opens a plugin's window filled in, for
 the user to run; open_window one of SMAPpy's other windows (the ROI manager,
 the 3D view, ...); filters, grouping and show() change what is shown; all are
 made at once, in either mode.  In suggest mode a change to the data appears
@@ -107,7 +112,10 @@ class AssistantServer(QObject):
         from ..assistant.tools import Assistant
         self.session = session
         self.registry = registry            # where `attach.announce` writes; None: the config's
+        self.key: Optional[str] = None      # the socket's own part; None: the process's
         self.assistant = Assistant(session, mode="suggest", viewer=viewer)
+        # which window this is, for session_state: an assistant moves between them
+        self.assistant.window = self.window
         # the output folder follows the first open file until the user sets one
         self.output_pinned = False
         self._follow_output()
@@ -137,7 +145,7 @@ class AssistantServer(QObject):
         from ..assistant import attach
         if self.listening:
             return True
-        name = attach.server_name()
+        name = attach.server_name(self.key)
         QLocalServer.removeServer(name)      # a socket file left by a crash
         server = QLocalServer(self)
         server.setSocketOptions(QLocalServer.UserAccessOption)
@@ -155,7 +163,7 @@ class AssistantServer(QObject):
 
     def stop(self) -> None:
         from ..assistant import attach
-        attach.withdraw(self.registry)
+        attach.withdraw(self.registry, self.key)
         for client in list(self.clients.values()):
             client.socket.abort()
         self.clients.clear()
@@ -170,9 +178,27 @@ class AssistantServer(QObject):
     def _announce(self) -> None:
         from ..assistant import attach
         if self.listening:
-            attach.announce(self.server.fullServerName(),
-                            getattr(self.session, "display_name", "") or "",
-                            self.registry)
+            attach.announce(self.server.fullServerName(), self.name, self.registry,
+                            self.key)
+
+    @property
+    def name(self) -> str:
+        """The session's name as the windows show it."""
+        return getattr(self.session, "display_name", "") or ""
+
+    def window(self) -> Dict:
+        """This window and the others an assistant could be moved to."""
+        from ..assistant import attach
+        return {"session": self.name or "unnamed session", "process": os.getpid(),
+                "other_windows": [e.get("session") or "unnamed session"
+                                  for e in attach.others(self.address, self.registry)]}
+
+    def call_assistant_here(self) -> None:
+        """Ask the assistant running for another window to move to this one
+        (`attach.request_handover`); one waiting for a window comes too."""
+        from ..assistant import attach
+        if self.listening:
+            attach.request_handover(self.address, self.name, self.registry)
 
     @property
     def address(self) -> str:

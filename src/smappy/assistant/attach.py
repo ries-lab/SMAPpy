@@ -16,6 +16,24 @@ session's name, so that ``--attach NAME`` picks one of several windows.
 A file left by a GUI that crashed names a socket nobody listens on; the
 forwarder skips it and removes it.
 
+**One assistant for all the windows.**  *Start assistant* in a second window
+while the assistant runs does not open a second one: the window writes a
+hand-over request beside the files (`request_handover`), which the forwarder
+looks for every `RETRY_MS`, and it moves -- disconnecting from the window it
+was in, which stays open, and attaching to the new one as it does after a
+restart.  A call still being answered is finished first, so nothing asked is
+lost.  A file, not a message through the first window's socket, because
+the forwarder is the one that has to move, and it already looks at this
+folder; the request names the window by its socket, so an old request is
+told from a new one by its time.
+
+**The assistant is told where it is.**  Each window is another session:
+other files, layers and results.  After a move -- asked for, or because its
+window was closed and it attached to another -- the next tool answer starts
+with a line saying which window it is in now and which it left
+(`_Forwarder.note`), and `session_state` names the window
+(`Assistant.window`).
+
 **A local socket, not a TCP port**: Qt's `QLocalServer` is a Unix socket on
 macOS and Linux and a named pipe on Windows, readable only by the user who
 started the GUI.  A port on 127.0.0.1 would be open to every program on the
@@ -44,15 +62,17 @@ def folder() -> Path:
     return config.config_dir() / "assistant" / "gui"
 
 
-def server_name() -> str:
+def server_name(key: Optional[str] = None) -> str:
     """This process's socket name; Qt makes it a path in the temporary
-    folder (Unix) or a pipe (Windows), and the full name is what is kept."""
-    return f"smappy-assistant-{os.getpid()}"
+    folder (Unix) or a pipe (Windows), and the full name is what is kept.
+    ``key`` tells apart two servers of one process (the tests' windows)."""
+    return f"smappy-assistant-{key or os.getpid()}"
 
 
-def announce(full_name: str, session_name: str = "", where: Optional[Path] = None) -> Path:
+def announce(full_name: str, session_name: str = "", where: Optional[Path] = None,
+             key: Optional[str] = None) -> Path:
     """Say that this process listens at ``full_name``."""
-    target = (where or folder()) / f"{os.getpid()}.json"
+    target = (where or folder()) / f"{key or os.getpid()}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     entry = {"pid": os.getpid(), "server": full_name, "session": session_name,
              "since": time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -60,8 +80,8 @@ def announce(full_name: str, session_name: str = "", where: Optional[Path] = Non
     return target
 
 
-def withdraw(where: Optional[Path] = None) -> None:
-    (where or folder()).joinpath(f"{os.getpid()}.json").unlink(missing_ok=True)
+def withdraw(where: Optional[Path] = None, key: Optional[str] = None) -> None:
+    (where or folder()).joinpath(f"{key or os.getpid()}.json").unlink(missing_ok=True)
 
 
 def listening(where: Optional[Path] = None) -> List[Dict[str, Any]]:
@@ -78,6 +98,60 @@ def listening(where: Optional[Path] = None) -> List[Dict[str, Any]]:
         if isinstance(entry, dict) and entry.get("server"):
             out.append(entry)
     return sorted(out, key=lambda e: e["mtime"], reverse=True)
+
+
+def alive(pid: int) -> bool:
+    """Whether process ``pid`` runs.  Never ``os.kill(pid, 0)`` on Windows,
+    where it ends the process instead of asking about it."""
+    if sys.platform.startswith("win"):
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, int(pid))   # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(ok) and code.value == 259                   # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OverflowError, ValueError):
+        return True
+    return True
+
+
+def others(own: str = "", where: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """The windows other than the one at socket ``own`` that allow
+    connections and whose process runs: where the assistant goes when this
+    window quits, so its terminal is closed only when there are none."""
+    return [e for e in listening(where)
+            if e.get("server") != own and alive(e.get("pid", 0))]
+
+
+#: beside the windows' files, not one of them (those are ``*.json``)
+HANDOVER = "handover.request"
+
+
+def request_handover(full_name: str, session_name: str = "",
+                     where: Optional[Path] = None) -> Path:
+    """Ask the running assistant to move to the window at ``full_name``."""
+    target = (where or folder()) / HANDOVER
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({"server": full_name, "session": session_name,
+                                  "pid": os.getpid(), "time": time.time()}),
+                      encoding="utf-8")
+    return target
+
+
+def handover(where: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """The last hand-over request, or None."""
+    try:
+        entry = json.loads(((where or folder()) / HANDOVER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return entry if isinstance(entry, dict) and entry.get("server") else None
 
 
 def _describe(entry: Dict[str, Any]) -> str:
@@ -173,6 +247,11 @@ class _Forwarder:
 
         self.app, self.stdin, self.stdout, self.where = app, stdin, stdout, where
         self.session = entry.get("session") or ""
+        self.entry = entry                  # the window it is attached to, or was
+        self.lost = False                   # that window went (else: asked to move)
+        self.note: Optional[str] = None     # said with the next tool answer
+        # requests made before this started are not for it
+        self.since = time.time()
         self.socket = None
         self.buffer = b""
         self.hello: Optional[Dict[str, Any]] = None    # the client's initialize
@@ -205,8 +284,12 @@ class _Forwarder:
         self.retry = QTimer()
         self.retry.setInterval(RETRY_MS)
         self.retry.timeout.connect(self._look_again)
+        self.watch = QTimer()
+        self.watch.setInterval(RETRY_MS)
+        self.watch.timeout.connect(self._check_handover)
 
     def run(self) -> int:
+        self.watch.start()
         def read() -> None:
             for line in self.stdin:
                 self.pipe.line.emit(bytes(line))
@@ -273,11 +356,23 @@ class _Forwarder:
                 if message["id"] in self.swallow:
                     self.swallow.discard(message["id"])
                     continue                  # a replayed initialize's answer
-                self.waiting.pop(message["id"], None)
+                method = self.waiting.pop(message["id"], None)
+                if method == "tools/call" and self.note is not None:
+                    line = self._with_note(message)
             self.stdout.write(line + b"\n")
         self.stdout.flush()
 
+    def _with_note(self, message: Dict[str, Any]) -> bytes:
+        """A tool's answer with the line about the move before it: in the
+        answer, which the model reads, not on stderr, which it does not."""
+        result = message.get("result")
+        if isinstance(result, dict) and isinstance(result.get("content"), list):
+            result["content"].insert(0, {"type": "text", "text": self.note})
+            self.note = None
+        return json.dumps(message).encode("utf-8")
+
     def _gone(self) -> None:
+        self.lost = True
         self._from_gui()
         socket, self.socket = self.socket, None
         if socket is not None:
@@ -293,13 +388,65 @@ class _Forwarder:
         entries = listening(self.where)
         if not entries:
             return
-        # the same session first, if it is there again
-        entries.sort(key=lambda e: (e.get("session") or "") != self.session)
+        # the window that asked for it first, then the same session, if it
+        # is there again
+        asked = self._fresh_request()
+        entries.sort(key=lambda e: (asked is None or e.get("server") != asked["server"],
+                                    (e.get("session") or "") != self.session))
         socket, entry = connect(entries, log=lambda text: None)
         if socket is None:
             return
         self.retry.stop()
+        if asked is not None:
+            self.since = asked.get("time", time.time())
+        self._attach_to(socket, entry)
+
+    def _fresh_request(self) -> Optional[Dict[str, Any]]:
+        asked = handover(self.where)
+        if asked is None or float(asked.get("time", 0)) <= self.since:
+            return None
+        return asked
+
+    def _check_handover(self) -> None:
+        """A window asked for the assistant: move there, once nothing asked
+        is still being answered.  Never raises (a timer's slot)."""
+        try:
+            asked = self._fresh_request()
+            if asked is None or self.socket is None or self.waiting:
+                return              # none; looking already (`_look_again`); later
+            self.since = float(asked.get("time", time.time()))
+            if asked["server"] == self.entry.get("server"):
+                return              # here already
+            from PySide6.QtNetwork import QLocalSocket
+            socket = QLocalSocket()
+            socket.connectToServer(asked["server"])
+            if not socket.waitForConnected(CONNECT_MS):
+                return              # it went meanwhile: stay
+            old, self.socket = self.socket, None
+            old.readyRead.disconnect()
+            old.disconnected.disconnect()
+            old.disconnectFromServer()
+            old.deleteLater()
+            self.lost = False
+            self._attach_to(socket, asked)
+        except Exception as error:
+            print(f"smappy-mcp: moving to another window: {error}", file=sys.stderr)
+
+    def _attach_to(self, socket, entry: Dict[str, Any]) -> None:
+        """Attached to ``entry``'s window, the client's hello replayed, and
+        the model told if that is another window than before."""
+        before = self.entry
+        self.entry = entry
         self.session = entry.get("session") or ""
+        if entry.get("server") != before.get("server"):
+            why = ("which was closed" if self.lost else
+                   "-- the user started the assistant in this window")
+            self.note = (f"Note from SMAPpy: you are now connected to the SMAPpy window "
+                         f"{_describe(entry)}, no longer to {_describe(before)}, {why}.  "
+                         "It is another session -- other files, layers, results and "
+                         "proposals -- so call session_state before going on, and tell "
+                         "the user in a few words which window you now work in.")
+        self.lost = False
         self.attach(socket)
         if self.hello is not None:
             self.replays += 1

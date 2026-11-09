@@ -137,15 +137,19 @@ def _no_terminal():
     tutorial's configuration's."""
     from ... import config
     from ...assistant import launch
-    kept = launch.open_terminal, launch.raise_terminal, launch.default_folder
+    kept = (launch.open_terminal, launch.raise_terminal, launch.default_folder,
+            launch.terminal_running)
     try:
         # the script is written as for anyone; only the terminal is not opened
+        # -- nor an assistant running on this machine moved to the tutorial
         launch.open_terminal = lambda *a, **k: None
         launch.raise_terminal = lambda *a, **k: False
         launch.default_folder = lambda: config.config_dir() / "SMAPpy assistant"
+        launch.terminal_running = lambda *a, **k: False
         yield
     finally:
-        launch.open_terminal, launch.raise_terminal, launch.default_folder = kept
+        (launch.open_terminal, launch.raise_terminal, launch.default_folder,
+         launch.terminal_running) = kept
 
 
 def _menu_action(d, title: str, text: str):
