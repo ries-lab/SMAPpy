@@ -493,6 +493,13 @@ def test_the_settings_window_keeps_the_client_and_shows_its_own_command(controls
     window.client.setCurrentIndex(window.client.findData("manual"))
     assert window.other.isVisibleTo(window) and not window.pre_allow.isVisibleTo(window)
     assert not window.folder.isVisibleTo(window)
+    # no terminal of SMAPpy's to close for one started by hand; for Codex,
+    # closed at quit unless unticked
+    assert not window.close_terminal.isVisibleTo(window)
+    window.client.setCurrentIndex(window.client.findData("codex"))
+    assert window.close_terminal.isVisibleTo(window) and window.close_terminal.isChecked()
+    window.close_terminal.setChecked(False)
+    assert kept["close_terminal"] is False
     # the mode it starts in: both choices in sight
     window.start_act.setChecked(True)
     assert kept["mode"] == "act"
@@ -586,13 +593,49 @@ def test_the_terminal_offers_to_install_a_missing_client_and_welcomes_the_user(t
     assert "Ask here what you need:" in out.stdout and "CLAUDE --mcp-config" in out.stdout
 
 
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a shell script; Windows runs a .cmd")
+def test_quitting_smappy_ends_the_assistant_it_started_and_no_other_program(tmp_path):
+    from smappy.assistant import launch
+    settings = tmp_path / "settings"
+    launch.start("claude", tmp_path / "work", settings, 4242, run=lambda *a, **k: None)
+    record = launch.pid_file(settings, 4242)
+    assert not record.exists()          # written by the script, as it starts the client
+    fake = tmp_path / "bin" / "claude"  # a client that runs until it is ended
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\nwhile :; do sleep 0.05; done\n")
+    fake.chmod(0o755)
+    # a session of its own, as a terminal gives it
+    client = subprocess.Popen(["/bin/sh", str(settings / "start-claude.sh")],
+                              env={"PATH": f"{fake.parent}:/bin:/usr/bin",
+                                   "HOME": str(tmp_path)},
+                              stdout=subprocess.DEVNULL, start_new_session=True)
+    try:
+        end = time.monotonic() + 10
+        while not record.exists() and time.monotonic() < end:
+            time.sleep(0.05)
+        assert int(record.read_text().split()[0]) == client.pid    # exec kept it
+        time.sleep(0.2)                 # the exec done: its command line the client's
+        # another SMAPpy's quit closes nothing of this one's
+        assert not launch.close_terminal(settings, 4343)
+        assert client.poll() is None
+        assert launch.close_terminal(settings, 4242)
+        assert client.wait(timeout=10) != 0 and not record.exists()
+    finally:
+        if client.poll() is None:
+            client.kill()
+    # a number taken by another program since: left alone
+    record.write_text(f"{os.getpid()} /dev/none\n")
+    assert not launch.close_terminal(settings, 4242)
+
+
 def test_the_windows_script_is_read_in_utf8_keeps_its_percent_signs_and_returns_from_npm(
         tmp_path, monkeypatch):
     from smappy.assistant import launch
     monkeypatch.setattr(sys, "platform", "win32")
     folder = tmp_path / "Jürgen 100%"
     ran = []
-    launch.start("codex", folder, tmp_path / "settings", 4242, run=ran.append)
+    launch.start("codex", folder, tmp_path / "settings", 4242,
+                 run=lambda command, **k: ran.append(command))
     written = (tmp_path / "settings" / "start-codex.cmd").read_bytes()
     # cmd reads a batch file in the OEM code page until told otherwise
     lines = written.decode("utf-8").split("\r\n")
@@ -602,7 +645,9 @@ def test_the_windows_script_is_read_in_utf8_keeps_its_percent_signs_and_returns_
     # npm is npm.cmd: without call the script ends inside it
     assert "call npm install -g @openai/codex" in lines
     assert lines[-2].startswith("codex -c ")
-    assert ran[0][:2] == ["cmd", "/c"]
+    # started directly, in a console of its own, so that its process is known
+    # and quitting SMAPpy can close it (`launch.close_terminal`)
+    assert ran[0][:2] == ["cmd", "/k"] and "title SMAPpy assistant" in lines
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="cmd.exe runs it")

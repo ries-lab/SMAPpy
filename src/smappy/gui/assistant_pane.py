@@ -72,7 +72,7 @@ NEW_STYLE = "font-weight: bold; color: #c06000;"
 
 DEFAULTS = {"client": "", "command": "", "folder": "", "output": "",
             "mode": "suggest", "allow_at_start": False, "pre_allow": True,
-            "show_runs": True}
+            "show_runs": True, "close_terminal": True}
 
 
 def preferences() -> Dict:
@@ -983,7 +983,13 @@ class AssistantSettings(QWidget):
                                   "section or window, fills it in and presses Run, so you "
                                   "see it, its progress and its figures, and can stop it")
         self.show_runs.toggled.connect(self._show_runs)
-        for box in (self.at_start, self.pre_allow, self.show_runs):
+        self.close_terminal = QCheckBox("close its terminal when SMAPpy quits")
+        self.close_terminal.setChecked(prefs["close_terminal"])
+        self.close_terminal.setToolTip("left open, it keeps SMAPpy's files in use, which "
+                                       "holds up an update or a restart")
+        self.close_terminal.toggled.connect(
+            lambda on: save_preferences({"close_terminal": on}))
+        for box in (self.at_start, self.pre_allow, self.show_runs, self.close_terminal):
             column.addWidget(box)
 
         # for "one I start myself": what to give that client
@@ -1053,6 +1059,8 @@ class AssistantSettings(QWidget):
         for widget in (self.folder_label, self.folder, self.folder_button, self.default):
             widget.setVisible(key != "manual")      # it starts wherever its user does
         self.pre_allow.setVisible(key == "claude")
+        from ..assistant.launch import CLIENTS
+        self.close_terminal.setVisible(key in CLIENTS and CLIENTS[key].terminal)
         self.refresh()
 
     def _show_runs(self, on: bool) -> None:

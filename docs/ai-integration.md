@@ -58,7 +58,11 @@ once); `--attach NAME` picks a window by its session's name.  The forwarder
 outlives the window: while SMAPpy is gone it answers the client's calls with
 why they cannot be made, and when a SMAPpy listens again it attaches to it and
 replays the client's `initialize`, so the conversation -- which knows what
-was analysed -- goes on across a restart.
+was analysed -- goes on across a restart.  That is when the user keeps the
+terminal: by default SMAPpy closes the terminal it started when it quits
+(`launch.close_terminal`, the assistant's setting *close its terminal when
+SMAPpy quits*), because the forwarder, running from SMAPpy's Python, held
+an update or a restart of SMAPpy up.
 
 The tools are the same `Assistant`, over the GUI's session.  Every line from
 the socket is queued and handled on the GUI thread, one per tick of a timer
