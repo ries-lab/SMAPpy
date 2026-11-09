@@ -231,6 +231,7 @@ columns.
 | colour by PSF or codes | 1 or C | N | -- | 1 per colour |
 | 4Pi | 4 | N, through I, A, B | φ | 1 |
 | 4Pi in colour (later) | 4 | per colour | φ | 1 per colour |
+| patterned illumination, SIMFLUX (an idea) | 1, a pattern cycle of frames | N per frame | -- (the pattern fitted after) | 1 |
 
 ### 3.1 The parameter spec
 
@@ -263,6 +264,18 @@ fit work unchanged:
 as DECODE-Plex samples the colours' photons independently.  The network then
 learns no relation between phase and z.  The cavity's drift does not matter at
 training, and *4Pi z* unwraps afterwards as it does for Spline 4Pi.
+
+**The phase from intensities instead (an idea, SIMCODE's route).**  SIMCODE
+(Cnossen 2025) keeps the illumination pattern out of the network: it outputs
+one photon count per pattern frame with its uncertainty (and whether the
+molecule was on in that frame), and a small fit afterwards finds the position
+from them, the pattern's phases and drift measured on the data.  For 4Pi the
+same route is photons per channel (a link the spec has) and a fit of
+I + A cos φ + B sin φ to the four counts.  It is not the same physics:
+SIMFLUX's modulation scales the whole PSF, so the intensities hold all of it,
+while in 4Pi A and B change each channel's shape with φ and z, which counts
+throw away.  The direct phase head should therefore win; if it does not, the
+network is not using the shape.  Not planned as a test.
 
 ### 3.2 Inputs
 
