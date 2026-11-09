@@ -1061,6 +1061,91 @@ class ControlWindow(QMainWindow):
                             f"the {tab.name} tab")
         return None
 
+    def _source_of_panel(self, panel):
+        """Where ``panel`` is, as `_settings_in_front` says it, or None."""
+        for path, window in self._plugin_windows.items():
+            if window.panel is panel:
+                return ("plugin", path, panel, None, "its window")
+        for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
+            if isinstance(widget, PluginTab):
+                for instance in widget.tab.instances:
+                    slot = widget.slots.get(instance.id)
+                    if slot is not None and slot.panel is panel:
+                        return ("plugin", instance.plugin, panel, instance,
+                                f"the {tab.name} tab")
+        return None
+
+    def copy_panel_settings(self, panel) -> Optional[str]:
+        """A plugin's own right-click menu: its settings on the clipboard,
+        whatever is in front."""
+        source = self._source_of_panel(panel)
+        return None if source is None else self._copy_source(source)
+
+    def copy_layer_settings(self) -> str:
+        """The Render tab's right-click menu: the layers on the clipboard."""
+        return self._copy_source(("layers",))
+
+    def _clipboard_layers(self) -> Optional[Dict]:
+        from .. import handoff
+        settings = handoff.parse_view_settings(QApplication.clipboard().text())
+        if settings is None or not isinstance(settings.get("layers"), list):
+            return None
+        return settings
+
+    def cannot_paste_layers(self) -> Optional[str]:
+        """Why the Render tab's *Paste settings* is greyed, or None."""
+        if self._clipboard_layers() is None:
+            return ("the clipboard holds no layers: Copy settings with the "
+                    "Render tab in front first")
+        return None
+
+    def paste_layers(self) -> Optional[str]:
+        """The Render tab's *Paste settings*: the clipboard's layers alone."""
+        from .. import handoff
+        settings = self._clipboard_layers()
+        if settings is None:
+            return None
+        handoff.apply_view_settings(self.session, settings)
+        n = len(settings["layers"])
+        said = f"pasted: {n} layer{'s' if n != 1 else ''} and the merging of blinks"
+        self.statusBar().showMessage(said, 10000)
+        return said
+
+    def _clipboard_values(self, path: str) -> Optional[Dict]:
+        from .. import handoff
+        settings = handoff.parse_view_settings(QApplication.clipboard().text())
+        for entry in (settings or {}).get("plugins") or []:
+            if entry.get("plugin") == path:
+                return entry.get("values") or {}
+        return None
+
+    def cannot_paste_into(self, panel) -> Optional[str]:
+        """Why a plugin's own *Paste settings* is greyed, or None."""
+        source = self._source_of_panel(panel)
+        if source is None:
+            return "this panel is not one of this window's"
+        if self._clipboard_values(source[1]) is None:
+            return (f"the clipboard holds no settings of {self._plugin_title(source[1])}: "
+                    "Copy settings in its menu or with it in front first")
+        return None
+
+    def paste_into_panel(self, panel) -> Optional[str]:
+        """A plugin's own *Paste settings*: the clipboard's settings of that
+        plugin into this panel only -- two instances of one plugin are set
+        apart this way, where the Edit menu's paste reaches every place."""
+        source = self._source_of_panel(panel)
+        values = None if source is None else self._clipboard_values(source[1])
+        if values is None:
+            return None
+        _, path, panel, instance, where = source
+        panel.form.restore(values)
+        panel.refresh_derived()
+        if instance is not None:
+            instance.values = panel.form.values()
+        said = f"pasted: {self._plugin_title(path)} into {where}"
+        self.statusBar().showMessage(said, 10000)
+        return said
+
     def _plugin_title(self, path: str) -> str:
         ref = plugins.refs().get(path)
         return ref.name if ref is not None else path.rsplit("/", 1)[-1]
@@ -1075,6 +1160,10 @@ class ControlWindow(QMainWindow):
         if source is None:
             raise ValueError("nothing to copy: bring the Render tab, a plugin's "
                              "open section or a plugin's window to the front")
+        return self._copy_source(source)
+
+    def _copy_source(self, source) -> str:
+        from .. import handoff
         if source[0] == "layers":
             settings = handoff.view_settings(self.session)
             n = len(settings["layers"])
@@ -1591,8 +1680,6 @@ class ControlWindow(QMainWindow):
                 QMessageBox.warning(self, "plugin", f"{path} could not be opened:\n{e}")
                 return None
             window_shortcuts(window)
-            window.settings_menu(lambda w=window: self._copy_settings_asked(w),
-                                 lambda: self._paste_settings_asked())
             self._plugin_windows[path] = window
         window.show()
         window.raise_()

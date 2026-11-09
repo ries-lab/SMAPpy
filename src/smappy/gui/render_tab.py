@@ -1219,6 +1219,11 @@ class RenderTab(QWidget):
         self._tracks_coloured: set = set()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        # Copy settings / Paste settings of the layers on a right-click where
+        # no control takes it -- the labels, the space between
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda point: self._pop_settings_menu(self.mapToGlobal(point)))
         inner = QWidget()
         layout = QVBoxLayout(inner)              # the tab's content; scrolls when short
         outer.addWidget(ColumnScroll(inner))
@@ -1508,6 +1513,37 @@ class RenderTab(QWidget):
         self._bind_layer(0)
         self.axes.bind()
 
+
+    def _pop_settings_menu(self, at) -> None:
+        menu = self.settings_menu()
+        menu.setAttribute(Qt.WA_DeleteOnClose)       # one per click: not kept
+        menu.popup(at)
+
+    def settings_menu(self, menu=None):
+        """``menu`` (a new one if None) with *Copy settings* and *Paste
+        settings* for the layers: the Edit menu's with this tab in front,
+        reached where one is working.  Paste is greyed, with the reason as
+        its tooltip, when the clipboard holds no layers."""
+        if menu is None:
+            menu = QMenu(self)
+        elif menu.actions():
+            menu.addSeparator()
+        menu.setToolTipsVisible(True)
+        copy = menu.addAction("Copy settings")
+        paste = menu.addAction("Paste settings")
+        owner = self.parentWidget()
+        while owner is not None and not hasattr(owner, "copy_layer_settings"):
+            owner = owner.parentWidget()
+        if owner is None:                   # a tab outside the control window
+            copy.setEnabled(False)
+            paste.setEnabled(False)
+            return menu
+        copy.triggered.connect(lambda: owner.copy_layer_settings())
+        why = owner.cannot_paste_layers()
+        paste.setEnabled(why is None)
+        paste.setToolTip(why or "")
+        paste.triggered.connect(lambda: owner.paste_layers())
+        return menu
     def show_view_path(self, path) -> None:
         """The player open on ``path``: the 3D window's *Make a movie of
         this...* (`ScanPlayer.take_path`)."""

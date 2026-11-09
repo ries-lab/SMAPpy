@@ -59,9 +59,15 @@ changes the other window's picture:
   layer's filter, how it is drawn (*render*, *colour by*, the LUT, the
   contrast), whether blinks are merged, and the settings that merge them;
 * with another tab in front, the plugin whose section is open there;
-* with a plugin's own window in front, that plugin -- also through the
-  window's right-click menu, and through the Edit menu when it is clicked
-  straight from that window.
+* with a plugin's own window in front, that plugin, also through the Edit
+  menu when it is clicked straight from that window.
+
+The same two items are on a right-click: on this tab (anywhere a control
+does not take the click), on a plugin -- its title in a tab, or anywhere in
+its panel, in a tab, a detached section or a window of its own.  From
+there they copy that one, and paste into that one alone: this tab's
+*Paste settings* takes only layers, a plugin's only its own settings, and
+each is greyed, saying why, while the clipboard holds nothing for it.
 
 The status line says what was copied.  A paste puts it where it belongs,
 whatever the other window has in front: layers onto its layers, a plugin's

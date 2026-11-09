@@ -292,6 +292,10 @@ class PluginTab(QWidget):
                                              else known.name if known else ""))
         self.changed.emit()
 
+    def _exec_menu(self, menu: QMenu, at):
+        """The chosen action, or None: apart so a test can answer it."""
+        return menu.exec(at)
+
     def _menu(self, instance: Instance, section: CollapsibleSection, point) -> None:
         menu = QMenu(self)
         up = menu.addAction("Move up")
@@ -305,10 +309,16 @@ class PluginTab(QWidget):
         menu.addSeparator()
         detach = menu.addAction("Open in its own window")
         remove = menu.addAction("Remove from this tab")
+        # Copy settings / Paste settings: the panel's own, which knows
+        # where it is (built here if the section was never opened)
+        slot = self.slots.get(instance.id)
+        panel = slot.ensure() if slot is not None and not instance.chain else None
+        if isinstance(panel, PluginPanel):
+            panel.settings_menu(menu)
         index = self.tab.index_of(instance.id)
         up.setEnabled(index > 0)
         down.setEnabled(index < len(self.tab.instances) - 1)
-        chosen = menu.exec(section.button.mapToGlobal(point))
+        chosen = self._exec_menu(menu, section.button.mapToGlobal(point))
         if chosen is None:
             return
         if chosen in (up, down):
