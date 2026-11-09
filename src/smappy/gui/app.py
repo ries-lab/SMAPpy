@@ -366,14 +366,17 @@ class ControlWindow(QMainWindow):
                                "drawn sharp, else the window as it is shown")
         copy_window.setShortcutContext(Qt.ApplicationShortcut)
         edit.addSeparator()
-        self._action(edit, "Copy view settings", None,
-                     lambda: self.copy_view_settings()).setToolTip(
-            "how the layers are filtered and drawn, and the merge settings, as "
-            "text on the clipboard: Paste view settings in another window takes them")
-        paste = self._action(edit, "Paste view settings", None,
-                             lambda: self.paste_view_settings())
-        paste.setToolTip("the localization layers made as the copied ones: "
-                         "filters, render and display; this file's data and view stay")
+        copy_settings = self._action(edit, "Copy settings", QKeySequence("Ctrl+Alt+C"),
+                                     lambda: self._copy_settings_asked())
+        copy_settings.setToolTip(
+            "the settings of what is in front, as text on the clipboard: the layers "
+            "with the Render tab, else the open plugin section or the plugin's window")
+        copy_settings.setShortcutContext(Qt.ApplicationShortcut)
+        paste = self._action(edit, "Paste settings", QKeySequence("Ctrl+Alt+V"),
+                             lambda: self._paste_settings_asked())
+        paste.setToolTip("copied settings, in this window or another: layers onto the "
+                         "layers, a plugin's into that plugin, wherever it is")
+        paste.setShortcutContext(Qt.ApplicationShortcut)
         self._load_locked.append(paste)
         edit.setToolTipsVisible(True)
         # the window Copy means when it is chosen from this menu, which makes
@@ -990,42 +993,163 @@ class ControlWindow(QMainWindow):
         self.statusBar().setStyleSheet(
             f"QStatusBar {{ border-top: 4px solid {colour}; }}" if colour else "")
 
-    # ------------------------------------------- view settings, copied
-    def copy_view_settings(self) -> str:
-        """*Edit > Copy view settings*: the layers' filters and drawing as
-        text on the system clipboard, which every instance shares
-        (`handoff.view_settings`).  Returns the text."""
-        from .. import handoff
-        text = handoff.view_settings_text(self.session)
-        QApplication.clipboard().setText(text)
-        n = sum(1 for l in self.session.layers if not l.is_image)
-        self.statusBar().showMessage(
-            f"copied the settings of {n} layer{'s' if n != 1 else ''}: "
-            "Edit > Paste view settings in another window takes them", 8000)
-        return text
+    # ------------------------------------------------ settings, copied
+    # What is in front is what is copied, and nothing else: copying a
+    # fitter's settings must not also change the other window's picture.
+    # The system clipboard is shared between instances, which is the point:
+    # many datasets, each in a window of its own, set up once.
+    def _settings_in_front(self):
+        """What *Copy settings* takes: ``("layers",)`` for the Render tab or
+        the picture, ``("plugin", path, panel, instance, where)`` for an open
+        section or a plugin's window, else None."""
+        from .plugin_panel import PluginPanel
+        active = QApplication.activeWindow()
+        tabs = list(zip(self.workspace.tabs, self._tab_widgets()))
+        if active is not None and active is not self:
+            if active is self.render_window or active is self.view3d_window:
+                return ("layers",)
+            for path, window in self._plugin_windows.items():
+                if window is active and isinstance(window.panel, PluginPanel):
+                    return ("plugin", path, window.panel, None, "its window")
+            # a section detached into a window of its own
+            for tab, widget in tabs:
+                if not isinstance(widget, PluginTab):
+                    continue
+                for instance in widget.tab.instances:
+                    slot = widget.slots.get(instance.id)
+                    if slot is not None and isinstance(slot.panel, PluginPanel) \
+                            and slot.window() is active:
+                        return ("plugin", instance.plugin, slot.panel, instance,
+                                f"the {tab.name} tab")
+            return None
+        index = self.tabs.currentIndex()
+        if not 0 <= index < len(tabs):
+            return None
+        tab, widget = tabs[index]
+        if isinstance(widget, RenderTab):
+            return ("layers",)
+        if isinstance(widget, PluginTab):
+            opened = widget.open_instance()
+            for instance in widget.tab.instances:
+                slot = widget.slots.get(instance.id)
+                if instance.id == opened and slot is not None \
+                        and isinstance(slot.panel, PluginPanel):
+                    return ("plugin", instance.plugin, slot.panel, instance,
+                            f"the {tab.name} tab")
+        return None
 
-    def paste_view_settings(self, text: Optional[str] = None) -> bool:
-        """*Edit > Paste view settings*: the localization layers made as the
-        copied ones (`handoff.apply_view_settings`).  ``text`` None reads
-        the clipboard.  False, and a word why, if it holds no settings."""
+    def _plugin_title(self, path: str) -> str:
+        ref = plugins.refs().get(path)
+        return ref.name if ref is not None else path.rsplit("/", 1)[-1]
+
+    def copy_settings(self) -> str:
+        """*Edit > Copy settings*: the settings of what is in front, as text
+        on the clipboard -- the layers with the Render tab in front, else
+        the open section's plugin or the plugin window's.  What was copied,
+        said in the status line and returned; ValueError when nothing is."""
+        from .. import handoff
+        source = self._settings_in_front()
+        if source is None:
+            raise ValueError("nothing to copy: bring the Render tab, a plugin's "
+                             "open section or a plugin's window to the front")
+        if source[0] == "layers":
+            settings = handoff.view_settings(self.session)
+            n = len(settings["layers"])
+            said = f"copied: {n} layer{'s' if n != 1 else ''} and the merging of blinks"
+        else:
+            _, path, panel, instance, where = source
+            values = panel.form.values()
+            settings = handoff.plugin_settings(
+                [(path, values, instance.id if instance is not None else "")])
+            said = f"copied: {self._plugin_title(path)}, from {where}"
+        QApplication.clipboard().setText(handoff.settings_text(settings))
+        self.statusBar().showMessage(said, 10000)
+        return said
+
+    def paste_settings(self, text: Optional[str] = None) -> str:
+        """*Edit > Paste settings*: what the clipboard (or ``text``) holds,
+        put where it belongs whatever is in front -- the layers onto the
+        session, a plugin's settings into its pinned section and its open
+        window.  What was pasted, said and returned; ValueError when the
+        text holds no settings or nothing here takes them."""
         from .. import handoff
         if text is None:
             text = QApplication.clipboard().text()
         settings = handoff.parse_view_settings(text)
         if settings is None:
-            QMessageBox.information(self, "Paste view settings",
-                                    "the clipboard holds no view settings: "
-                                    "Edit > Copy view settings in a window first")
-            return False
-        try:
+            raise ValueError("the clipboard holds no settings: Edit > Copy "
+                             "settings in a window first")
+        said, missing = [], []
+        if isinstance(settings.get("layers"), list):
             handoff.apply_view_settings(self.session, settings)
+            n = len(settings["layers"])
+            said.append(f"{n} layer{'s' if n != 1 else ''} and the merging of blinks")
+        for entry in settings.get("plugins") or []:
+            path, values = entry.get("plugin", ""), entry.get("values") or {}
+            places = self._paste_plugin(path, entry.get("id", ""), values)
+            name = self._plugin_title(path)
+            if places:
+                said.append(f"{name} into {' and '.join(places)}")
+            else:
+                missing.append(name)
+        if not said:
+            names = ", ".join(missing)
+            raise ValueError(f"pasted nothing: {names} is pinned to no tab here and "
+                             f"has no window open -- pin it with a tab's + or open it "
+                             f"from the Plugins menu, then paste again")
+        line = "pasted: " + "; ".join(said)
+        if missing:
+            line += f" -- not {', '.join(missing)}: pinned to no tab and no window open"
+        self.statusBar().showMessage(line, 10000)
+        return line
+
+    def _paste_plugin(self, path: str, ident: str, values: Dict) -> List[str]:
+        """``values`` into the pinned instance of ``path`` -- the same one
+        (``ident``), else the open section, else the first -- and into its
+        window if one is open.  Where they went."""
+        from .plugin_panel import PluginPanel
+        places = []
+        candidates = []                    # (tab, widget, instance)
+        for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
+            if isinstance(widget, PluginTab):
+                candidates += [(tab, widget, i) for i in widget.tab.instances
+                               if i.plugin == path and not i.chain]
+        chosen = next((c for c in candidates if ident and c[2].id == ident), None) \
+            or next((c for c in candidates if c[1].open_instance() == c[2].id), None) \
+            or (candidates[0] if candidates else None)
+        if chosen is not None:
+            tab, widget, instance = chosen
+            slot = widget.slots.get(instance.id)
+            if slot is not None and isinstance(slot.panel, PluginPanel):
+                slot.panel.form.restore(values)
+                slot.panel.refresh_derived()
+                instance.values = slot.values()
+            else:                          # never opened: used when it is
+                instance.values = {**instance.values, **values}
+            places.append(f"the {tab.name} tab")
+        window = self._plugin_windows.get(path)
+        if window is not None and window.isVisible() \
+                and isinstance(window.panel, PluginPanel):
+            window.panel.form.restore(values)
+            window.panel.refresh_derived()
+            places.append("its window")
+        return places
+
+    def _copy_settings_asked(self) -> None:
+        try:
+            self.copy_settings()
+        except ValueError as e:
+            self.statusBar().showMessage(str(e), 10000)
+
+    def _paste_settings_asked(self) -> None:
+        try:
+            self.paste_settings()
+        except ValueError as e:
+            QMessageBox.information(self, "Paste settings", str(e))
         except Exception as e:
             traceback.print_exc()
-            QMessageBox.warning(self, "Paste view settings",
+            QMessageBox.warning(self, "Paste settings",
                                 f"the settings could not be applied:\n{e}")
-            return False
-        self.statusBar().showMessage("pasted the view settings", 8000)
-        return True
 
     # ------------------------------------------------- a new instance
     def open_in_new_window(self, start: bool = True, run=None) -> Optional[object]:

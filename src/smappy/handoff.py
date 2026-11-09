@@ -286,13 +286,14 @@ def apply_session_block(session, block: Optional[Dict[str, Any]]) -> None:
 
 
 # --------------------------------------------- copy and paste of settings
-#: the key that marks clipboard text as view settings, and their version
-SETTINGS_KEY = "smappy view settings"
+#: the key that marks clipboard text as copied settings, and their version
+SETTINGS_KEY = "smappy settings"
 
 
 def view_settings(session) -> Dict[str, Any]:
     """How the localization layers are drawn and filtered, and the merge
-    settings, to put onto another dataset (*Edit > Copy view settings*).
+    settings, to put onto another dataset (*Edit > Copy settings* with
+    the Render tab in front).
 
     Comparing many positions of one sample means many instances, each a
     file, each to be set up the same way; the clipboard is shared between
@@ -308,20 +309,39 @@ def view_settings(session) -> Dict[str, Any]:
             "group_settings": _plain(session.group_settings)}
 
 
+def plugin_settings(entries) -> Dict[str, Any]:
+    """A plugin's settings to put into another instance (*Edit > Copy
+    settings* with its section or window in front): ``entries`` are
+    ``(path, values, instance_id)``, the values by dotted name as a form
+    saves them.  The id finds the same pinned instance in a window started
+    from the same GUI file; elsewhere the path finds the plugin."""
+    return {SETTINGS_KEY: VERSION,
+            "plugins": [{"plugin": path, "id": ident or "", "values": _plain(values)}
+                        for path, values, ident in entries]}
+
+
+def settings_text(settings: Dict[str, Any]) -> str:
+    """Settings as the text the clipboard holds: JSON, so it can be kept in
+    a text file and pasted from there."""
+    return json.dumps(settings, indent=1, default=_json_default)
+
+
 def view_settings_text(session) -> str:
     """`view_settings` as the text the clipboard holds."""
-    return json.dumps(view_settings(session), indent=1, default=_json_default)
+    return settings_text(view_settings(session))
 
 
 def parse_view_settings(text: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The settings ``text`` holds, or None if it is not view settings --
+    """The settings ``text`` holds, or None if it is not copied settings --
     whatever else the user copied last."""
     try:
         settings = json.loads(text or "")
     except ValueError:
         return None
-    if not isinstance(settings, dict) or SETTINGS_KEY not in settings \
-            or not isinstance(settings.get("layers"), list):
+    if not isinstance(settings, dict) or SETTINGS_KEY not in settings:
+        return None
+    if not isinstance(settings.get("layers"), list) \
+            and not isinstance(settings.get("plugins"), list):
         return None
     return settings
 
@@ -331,6 +351,8 @@ def apply_view_settings(session, settings: Dict[str, Any]) -> None:
     as many as there were; its image layers stay where they are.  A bound on
     a column this table lacks is dropped (`Session.set_layer_configs`)."""
     from .group import GroupSettings
+    if not isinstance(settings.get("layers"), list):
+        return                          # a plugin's settings: the GUI's to put
     if settings.get("group_settings"):
         group = _from_plain(GroupSettings, settings["group_settings"])
         if group != session.group_settings:

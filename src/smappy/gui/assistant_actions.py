@@ -213,16 +213,17 @@ def actions_of(window) -> Dict[str, Action]:
         if not done:
             raise ToolError("nothing to copy")
 
-    def paste_view_settings():
-        # not the menu's handler: that says why in a box, which would wait
-        # for a click nobody makes
-        from PySide6.QtWidgets import QApplication
-        from .. import handoff
-        settings = handoff.parse_view_settings(QApplication.clipboard().text())
-        if settings is None:
-            raise ToolError("the clipboard holds no view settings: "
-                            "Edit/Copy view settings in an instance first")
-        handoff.apply_view_settings(window.session, settings)
+    def copy_settings():
+        try:
+            return window.copy_settings()
+        except ValueError as e:
+            raise ToolError(str(e))
+
+    def paste_settings():
+        try:
+            return window.paste_settings()
+        except ValueError as e:
+            raise ToolError(str(e))
 
     a = [
         # ---- File
@@ -277,13 +278,14 @@ def actions_of(window) -> Dict[str, Action]:
         Action("Edit/Copy window as image", "The window last in front, as a "
                "picture, to the clipboard.",
                lambda: copied(window.copy_window_image()), shows=True),
-        Action("Edit/Copy view settings", "The layers' filters, render and "
-               "display settings and the merge settings, as text on the "
-               "clipboard, for another instance to paste.",
-               lambda: window.copy_view_settings() and None),
-        Action("Edit/Paste view settings", "The localization layers made as the "
-               "copied ones; this session's data, image layers and view stay.",
-               paste_view_settings),
+        Action("Edit/Copy settings", "The settings of what is in front, as text on "
+               "the clipboard: the layers and blink merging with the Render tab in "
+               "front, else the open section's plugin or the plugin window's.  For "
+               "another instance to paste.", copy_settings),
+        Action("Edit/Paste settings", "What Copy settings put on the clipboard: "
+               "layers onto this session's layers (its data, image layers and view "
+               "stay), a plugin's settings into that plugin's section and window.",
+               paste_settings),
         # ---- View
         Action("View/2D view", "The render window, in front.", window.show_2d,
                shows=True),
