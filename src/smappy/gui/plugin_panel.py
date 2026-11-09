@@ -225,6 +225,17 @@ class PluginPanel(QWidget):
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
         self.output.setFixedHeight(90)
         layout.addWidget(self.output)
+        # Copy settings / Paste settings on a right-click, wherever the panel
+        # sits -- a tab, a detached section, a window of its own: on the
+        # panel (its labels and empty space pass the click on to it) and in
+        # the output box's own menu, under its Copy and Select All
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda point: self.settings_menu().popup(self.mapToGlobal(point)))
+        self.output.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.output.customContextMenuRequested.connect(
+            lambda point: self.settings_menu(self.output.createStandardContextMenu())
+            .popup(self.output.mapToGlobal(point)))
         # F1 anywhere in the panel opens the plugin's page, wherever the panel
         # sits -- a tab, a detached section or a window of its own
         shortcut = QShortcut(QKeySequence.HelpContents, self, self.show_help)
@@ -374,6 +385,41 @@ class PluginPanel(QWidget):
         if updates:
             self.form.set_values(updates)
         self._describe()
+
+    def _settings_owner(self):
+        """The control window this panel belongs to, which knows where the
+        panel is and keeps the clipboard's format (`ControlWindow.copy_panel_settings`)."""
+        widget = self.parentWidget()
+        while widget is not None:
+            if hasattr(widget, "copy_panel_settings"):
+                return widget
+            widget = widget.parentWidget()
+        return None
+
+    def settings_menu(self, menu=None):
+        """``menu`` (a new one if None) with *Copy settings* and *Paste
+        settings* for this panel at its end.  Paste fills this panel only,
+        and is greyed, with the reason as its tooltip, when the clipboard
+        holds no settings of this plugin."""
+        from PySide6.QtWidgets import QMenu
+        if menu is None:
+            menu = QMenu(self)
+        elif menu.actions():
+            menu.addSeparator()
+        menu.setToolTipsVisible(True)
+        copy = menu.addAction("Copy settings")
+        paste = menu.addAction("Paste settings")
+        owner = self._settings_owner()
+        if owner is None:                      # a panel outside the GUI's windows
+            copy.setEnabled(False)
+            paste.setEnabled(False)
+            return menu
+        copy.triggered.connect(lambda: owner.copy_panel_settings(self))
+        why = owner.cannot_paste_into(self)
+        paste.setEnabled(why is None)
+        paste.setToolTip(why or "")
+        paste.triggered.connect(lambda: owner.paste_into_panel(self))
+        return menu
 
     def refresh_derived(self) -> None:
         """Read again what the plugin works out from outside the form -- the
@@ -1175,21 +1221,3 @@ class PluginWindow(QMainWindow):
         column.addWidget(area)
         self.setCentralWidget(central)
         self.resize(max(self.panel.sizeHint().width() + 40, 380), 520)
-
-    def settings_menu(self, copy, paste) -> None:
-        """*Copy settings* and *Paste settings* on a right-click anywhere a
-        field does not take it: the Edit menu is the control window's, and
-        on Windows and Linux this window has no menu bar to reach it from.
-        ``copy`` and ``paste`` are the control window's (`ControlWindow.copy_settings`)."""
-        # a menu of its own, not the window's actions: those are its
-        # shortcuts too (Close window, Quit), which do not belong here
-        from PySide6.QtWidgets import QMenu
-        self.settings_actions = []
-        menu = QMenu(self)
-        for text, slot in (("Copy settings", copy), ("Paste settings", paste)):
-            action = menu.addAction(text)
-            action.triggered.connect(lambda checked=False, f=slot: f())
-            self.settings_actions.append(action)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(
-            lambda point: menu.popup(self.mapToGlobal(point)))

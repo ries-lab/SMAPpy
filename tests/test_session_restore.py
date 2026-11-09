@@ -415,18 +415,87 @@ def test_the_edit_menu_opened_after_working_in_the_control_window_copies_its_tab
         _close(app, windows)
 
 
-def test_a_plugin_windows_right_click_menu_copies_it_and_pastes_into_another(
-        app, tmp_path):
+def _items(menu):
+    return {a.text(): a for a in menu.actions() if a.text()}
+
+
+def test_a_plugins_own_menu_copies_it_and_pastes_into_that_panel_alone(app, tmp_path):
+    """The right-click menu of a plugin, in a window of its own, a tab or a
+    detached section: paste fills that panel only, and is greyed while the
+    clipboard holds nothing of that plugin."""
     windows, window = _plugin_window_and_tab(app, tmp_path)
     try:
-        target = windows[2]
+        control, target = windows[0], windows[2]
         other_window = target.open_plugin_window(RCC)
-        copy, paste = window.settings_actions
-        copy.trigger()
-        assert windows[0].statusBar().currentMessage() == \
+        items = _items(window.panel.settings_menu())
+        items["Copy settings"].trigger()
+        assert control.statusBar().currentMessage() == \
             "copied: RCC drift correction, from its window"
-        other_window.settings_actions[1].trigger()
+        paste = _items(other_window.panel.settings_menu())["Paste settings"]
+        assert paste.isEnabled()
+        paste.trigger()
         assert other_window.panel.form.values()["n_timepoints"] == 33
-        assert target.workspace.tabs[1].instances[1].values["n_timepoints"] == 33
+        # this panel alone: the pinned RCC in the Drift tab keeps its own
+        assert target.workspace.tabs[1].instances[1].values.get("n_timepoints") != 33
+        # a plugin the clipboard has nothing of: greyed, and says why
+        comet = target.tabs.widget(1).slots["comet"].ensure()
+        paste = _items(comet.settings_menu())["Paste settings"]
+        assert not paste.isEnabled() and "no settings of COMET" in paste.toolTip()
+        # the output box's menu keeps its own items and adds these
+        output = _items(window.panel.settings_menu(
+            window.panel.output.createStandardContextMenu()))
+        assert "Copy settings" in output and "Paste settings" in output
+        assert any("Select" in t for t in output)
+    finally:
+        _close(app, windows)
+
+
+def test_a_sections_title_menu_in_a_tab_has_copy_and_paste_settings(app, tmp_path):
+    from PySide6.QtCore import QPoint
+    windows, _ = _plugin_window_and_tab(app, tmp_path)
+    shown = []
+    try:
+        tab = windows[0].tabs.widget(1)
+        tab._exec_menu = lambda menu, at: shown.append(_items(menu)) or None
+        rcc = tab.tab.instances[1]                  # never opened: built for the menu
+        tab._menu(rcc, tab.sections[1], QPoint(0, 0))
+        items = shown[-1]
+        assert "Rename..." in items and "Copy settings" in items
+        items["Copy settings"].trigger()
+        assert windows[0].statusBar().currentMessage() == \
+            "copied: RCC drift correction, from the Drift tab"
+    finally:
+        _close(app, windows)
+
+
+def test_the_render_tabs_menu_copies_the_layers_and_pastes_only_layers(app, tmp_path):
+    source = arranged(tmp_path / "a.h5")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    windows = _windows(app, source, other)
+    try:
+        target_tab = windows[2].tabs.widget(0)
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText("not settings")
+        paste = _items(target_tab.settings_menu())["Paste settings"]
+        assert not paste.isEnabled() and "no layers" in paste.toolTip()
+        _items(windows[0].tabs.widget(0).settings_menu())["Copy settings"].trigger()
+        _items(target_tab.settings_menu())["Paste settings"].trigger()
+        assert [s for s in summary(other) if s[0] == "locs"] == \
+            [s for s in summary(source) if s[0] == "locs"]
+    finally:
+        _close(app, windows)
+
+
+def test_a_detached_sections_panel_has_the_menu_and_copies_from_its_tab(app, tmp_path):
+    windows, _ = _plugin_window_and_tab(app, tmp_path)
+    try:
+        tab = windows[0].tabs.widget(1)
+        tab._detach(tab.sections[0], tab.tab.instances[0])
+        panel = tab.slots["comet"].panel
+        assert panel.window() is not windows[0]                 # in a window of its own
+        _items(panel.settings_menu())["Copy settings"].trigger()
+        assert windows[0].statusBar().currentMessage() == \
+            "copied: COMET drift correction, from the Drift tab"
     finally:
         _close(app, windows)
