@@ -254,9 +254,21 @@ def _trigger(control, text):
 
 
 def _close(app, windows):
+    """Close and delete: closed windows that stay alive are re-styled by every
+    later theme switch in the worker, which took test_theme past its limit."""
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QWidget
     from smappy.gui.identity import uninstall_identity
     for w in windows:
+        for child in w.findChildren(QWidget):     # its own windows: plugin, detached
+            if child.isWindow():
+                child.close()
+                child.deleteLater()
         w.close()
+        w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
     uninstall_identity(app)
 
 

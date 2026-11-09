@@ -1223,7 +1223,7 @@ class RenderTab(QWidget):
         # no control takes it -- the labels, the space between
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(
-            lambda point: self.settings_menu().popup(self.mapToGlobal(point)))
+            lambda point: self._pop_settings_menu(self.mapToGlobal(point)))
         inner = QWidget()
         layout = QVBoxLayout(inner)              # the tab's content; scrolls when short
         outer.addWidget(ColumnScroll(inner))
@@ -1513,6 +1513,11 @@ class RenderTab(QWidget):
         self._bind_layer(0)
         self.axes.bind()
 
+
+    def _pop_settings_menu(self, at) -> None:
+        menu = self.settings_menu()
+        menu.setAttribute(Qt.WA_DeleteOnClose)       # one per click: not kept
+        menu.popup(at)
 
     def settings_menu(self, menu=None):
         """``menu`` (a new one if None) with *Copy settings* and *Paste

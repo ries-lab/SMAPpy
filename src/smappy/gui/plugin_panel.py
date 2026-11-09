@@ -73,6 +73,13 @@ class _Worker(QObject):
             self.failed.emit(message_of(error), traceback.format_exc())
 
 
+
+def _pop(menu, at) -> None:
+    """A right-click menu shown, and deleted once closed: one is made per
+    click, and kept they piled up as the panel's children."""
+    menu.setAttribute(Qt.WA_DeleteOnClose)
+    menu.popup(at)
+
 class PluginPanel(QWidget):
     # The context is built before the worker exists, so progress cannot go
     # through a worker signal any more.  These belong to the panel, which lives
@@ -231,11 +238,11 @@ class PluginPanel(QWidget):
         # the output box's own menu, under its Copy and Select All
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(
-            lambda point: self.settings_menu().popup(self.mapToGlobal(point)))
+            lambda point: _pop(self.settings_menu(), self.mapToGlobal(point)))
         self.output.setContextMenuPolicy(Qt.CustomContextMenu)
         self.output.customContextMenuRequested.connect(
-            lambda point: self.settings_menu(self.output.createStandardContextMenu())
-            .popup(self.output.mapToGlobal(point)))
+            lambda point: _pop(self.settings_menu(self.output.createStandardContextMenu()),
+                               self.output.mapToGlobal(point)))
         # F1 anywhere in the panel opens the plugin's page, wherever the panel
         # sits -- a tab, a detached section or a window of its own
         shortcut = QShortcut(QKeySequence.HelpContents, self, self.show_help)
