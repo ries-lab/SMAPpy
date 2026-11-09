@@ -256,9 +256,25 @@ the polynomial in the sub-voxel offsets.  It runs on CUDA, MPS and the CPU,
 and has no conda dependency.  It is checked pixel by pixel against SMAPpy's
 C++ `CSpline` and `CSpline4Pi` (§9, step 1).
 
-**Speed.**  The C++/CUDA kernel draws 10⁵ frames in under 0.5 s on a 4090.
-A torch version may be several times slower and still not limit training,
-whose cost is the network.
+**Speed.**  Measured on an M1 Max (2026-11) for one batch: 256 frames of
+64 × 64, 25 spots each, 13 × 13 spline spots, background, Poisson and read
+noise to uint16.  The C++ is `CSpline::value` from `csrc/models.hpp` (value
+only), with the same accumulation and noise, `-O3`; DECODE's `spline` package
+has only an Intel macOS build and was not timed.
+
+| | 1 channel | 4Pi: 4 channels, I + A cos φ + B sin φ |
+| --- | --- | --- |
+| numpy, `smappy.simulate` now | 0.33 s | – |
+| C++, 1 thread | 0.115 s | 0.85 s |
+| C++, 10 threads | 0.018 s | 0.12 s |
+| torch, CPU | 0.094 s | 0.68 s |
+| torch, MPS | 0.013 s | 0.13 s |
+
+Torch on the GPU is as fast as the C++ on every core, and matches
+`io.calibration.evaluate_spline` to float precision.  A DECODE batch is
+smaller than this one, so drawing it costs milliseconds; training's cost is
+the network.  CUDA (a 4090, torch against DECODE's kernel) is not yet
+measured.
 
 **Everything else from SMAPpy:**
 - kinetics (`simulate.kinetics`);
