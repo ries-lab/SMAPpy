@@ -192,9 +192,9 @@ lab's code and SHOT's are GPL-3.0 and AGPL-3.0: ideas only, no code.
 **On pixelation.**  LUNAR's extraction (a commit of 2025-02) forms a mixture
 of the pixel and the neighbour its offset points to and takes its peak; the
 commit reports far fewer grid artifacts, without retraining.  Its authors
-say since (to Jonas, 2026-11) that it helps a little and is not the solution.
-No paper measures sub-pixel bias in a controlled way, and none has a fix that
-is known to work.
+say since (to Jonas, 2026-11) that it helps somewhat but does not remove
+the pixelation: worth trying, not the whole answer.  No paper measures
+sub-pixel bias in a controlled way.
 
 **Image or volume outputs** (Deep-STORM, DeepSTORM3D, diffusion and flow
 reconstructions) are limited by their grid and are not candidates.
@@ -310,7 +310,7 @@ medical segmentation a tuned CNN U-Net beat most of them (Isensee 2024).
 
 **Representation and decoding** come first, as in keypoint estimation, where
 the sub-pixel bias was traced to decoding from a grid (DARK, Zhang 2020):
-LUNAR's mixture peak (a little help, its authors say), overlapping offsets
+LUNAR's mixture peak (helps somewhat, its authors say), overlapping offsets
 with an optimal-transport loss
 (SHOT, keeping a σ per localization), coordinates as sub-pixel bins (SimCC,
 Li 2022).
@@ -514,9 +514,9 @@ the baselines on the benchmark, not reproduce their outputs.
 3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
    the benchmark.
 4. **Tuning.**  One part at a time on C = 1, where it is cheapest.
-   Pixelation first, with no fix assumed: anti-aliasing, the offsets' range
-   and the loss (SHOT's), target assignment, the extraction (LUNAR's mixture
-   peak as one, expected to help a little).  Then time
+   Pixelation first: LUNAR's mixture peak in the extraction (cheap, no
+   retraining; helps somewhat), then anti-aliasing, the offsets' range and
+   the loss (SHOT's), target assignment.  Then time
    (per-pixel attention against a ConvGRU), the backbones of §3.3, the loss's
    weights, the training ranges and schedule.  This needs the cluster or many
    nights on a 4090 (§8).
