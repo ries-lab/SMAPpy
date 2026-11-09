@@ -1,7 +1,7 @@
 # DECODE, DECODE-Plex and 4Pi in SMAPpy: what exists, and a plan
 
-Status, 2026-11-09: investigation only, nothing written.  This page is the
-design to start from.  It is written from five sources:
+Status, 2026-11-09: investigation only, nothing written; the published DECODE
+first (§9).  This page is the design to start from.  It is written from five sources:
 - the DECODE-Plex preprint (Sha et al. 2026) and its code,
   `ries-lab/DECODE-Plex`;
 - DECODE's development tree, the private `ries-lab/DECODE_Internal`, read on
@@ -23,6 +23,14 @@ worked; it was an attempt.  So the new code need not reproduce any of them.
 It is benchmarked against them and against the CRLB, and then tuned.  That
 decides what is taken and what is written new (§5): modules with clean
 interfaces, each of which can be swapped and benchmarked on its own.
+
+**First the published DECODE, as a proof of concept (§9).**  Before the new
+framework, the single-channel DECODE is ported into SMAPpy with its
+algorithm unchanged: preparation, training, progress and inference, all
+from SMAPpy.  That puts a working deep-learning fitter in users' hands
+early, builds the parts the new fitter reuses (the job, the *Train* window,
+the fitter, the benchmark), and gives the baseline it has to beat.  §3 to
+§8 and §10 are the new fitter, a project of its own after that.
 
 ## 1. The method in one paragraph
 
@@ -64,7 +72,7 @@ earlier network (DECODE-Plex, Supplementary Figures 6 and 7).
 - A first U-Net reads each channel's frames.  In the v1 model this is one
   U-Net with shared weights (`unet_shared`) applied to each channel.  The paper
   says one U-Net per channel, and the v2 model has a `separate_ch` switch.
-  Which one the published models used is to be checked (§10).
+  Which one the published models used is to be checked (§11).
 - A union U-Net reads their concatenated features.
 - Heads write the outputs: probability, means, sigmas and background.
 
@@ -157,7 +165,7 @@ What should not be carried over, and may be part of why it did not work:
    each channel's phase, and adds nothing, and so does the C++ fitter
    (`CSpline4Pi` in `csrc/models.hpp`: the channels share one phase with no
    offset).  One of the two is wrong for real data, most likely the branch.
-   One bead stack fitted both ways settles it (§9, step 1).
+   One bead stack fitted both ways settles it (§10, step 1).
 3. **One background map for four channels** (`n_bg = n_phot = 1`,
    `tar_bg[:, 0]`).  The channels' backgrounds differ.
 4. **The 4Pi forward model runs on the CPU in numpy** (three spline calls,
@@ -349,7 +357,7 @@ its own photons.  That is what `codes` cannot do now.
 the 64 coefficients of each voxel the molecule touches, then the product with
 the polynomial in the sub-voxel offsets.  It runs on CUDA, MPS and the CPU,
 and has no conda dependency.  It is checked pixel by pixel against SMAPpy's
-C++ `CSpline` and `CSpline4Pi` (§9, step 1).
+C++ `CSpline` and `CSpline4Pi` (§10, step 1).
 
 **Speed.**  Measured on an M1 Max (2026-11) for one batch: 256 frames of
 64 × 64, 25 spots each, 13 × 13 spline spots, background, Poisson and read
@@ -388,7 +396,7 @@ show it causes some of the pixelation.
 histogram equalisation of the sub-pixel positions per z bin and uncertainty
 group.  Then it can be judged on the table and applied to any fitter's
 output.  It is a fallback: the aim is a network whose sub-pixel positions are
-uniform without it, and the benchmark measures that (§9).
+uniform without it, and the benchmark measures that (§10).
 
 **Colour and z.**  Colour is *Assign colours*, and z from the phase is
 *4Pi z*.
@@ -497,7 +505,146 @@ acquisition.  The job stops at a checkpoint when asked and resumes later.
 | the Mac (M1 Max, MPS) | tests and development, small warm starts within the memory cap |
 | DECODE Cloud, if alive | users without a GPU |
 
-## 9. Plan
+## 9. First: the published DECODE in SMAPpy (proof of concept)
+
+Status, 2026-11-09: agreed as the first step, not started.
+
+**What it is.**  `TuragaLab/DECODE` v0.10.2 (2023, Speiser et al. 2021), one
+channel, brought into SMAPpy as uiPSF was: a package of its own beside
+`smappy`, changed wherever install, inputs or outputs need it, ported to
+current Python and torch.  The method stays as published: the network
+(`SigmaMUNet`), the loss, the simulation's statistics and the
+post-processing (`SpatialIntegration`, `raw_th` 0.5).  Nothing of §3 goes
+in; pixelation and the rest wait for the new fitter.  DECODE-Plex and 4Pi
+are not part of it.
+
+**Why first.**  The four things a user needs -- preparing a training,
+starting it, watching it, fitting with the model -- are the same for any
+network.  Built once on a method that works, they carry over to the new
+fitter, which then only changes the network, the loss and the extraction.
+
+### 9.1 The port
+
+- **Where.**  `src/decode_smlm/`, a working name: `decode` is taken on PyPI
+  and would shadow the original wherever both are installed.  torch is
+  imported inside the functions that need it, as for uipsf; an extra
+  `decode` installs it.
+- **What it starts from.**  About 400 kB of Python in 77 modules, half of it
+  `neuralfitter`.  What the proof of concept does not use is left behind:
+  the notebooks, the example downloads, `plot`, `renderer`.
+- **What changes.**
+  - The `spline` package (compiled, from the `turagalab` conda channel)
+    gives way to the torch renderer of §3.5.  The package is then pure
+    pip and runs on CUDA, MPS and the CPU.
+  - The calibration is read through `io.calibration.load_spline_calibration`:
+    SMAPpy's HDF5 and SMAP's `_3dcal.mat` directly, and a uiPSF pupil model
+    drawn at the sample's depth (`calibrate/depth.depth_spline`) -- what
+    DECODE-Plex's users do by hand in uiPSF's demo, with a flip and a
+    transpose.
+  - The camera comes from SMAPpy's camera database, not typed.
+  - torch 1.7's APIs move to current ones where they broke.
+  - The job, the progress file and the model file of §9.3 to §9.5.
+- **Licence.**  DECODE is GPL-3.  Shipping it in the BSD wheel needs its
+  authors (Müller, Speiser, the Turaga and Ries labs) to relicense it, or
+  the package to keep its GPL and its own `LICENSE` as uipsf keeps its
+  own.  To be settled before
+  it is merged.
+- **Accepted when** -- training is stochastic, so not bitwise:
+  - the torch renderer draws the PSF `spline` draws, to float precision;
+  - a model trained by the original v0.10.2 loads in the port and gives the
+    same localizations on the same frames (inference is deterministic);
+  - a model trained by the port scores as one trained by the original, same
+    settings and calibration, within the spread between two runs of the
+    original.
+  The original runs in its own conda environment for this.  Its torch 1.7
+  may not run on an RTX 40xx at all; then on an older GPU or the CPU.
+
+### 9.2 Preparation
+
+- **The PSF.**  Any calibration SMAPpy fits with (§9.1).  Checked once at
+  the start of a job: the PSF as the training draws it against
+  `evaluate_spline`, at a sub-pixel offset, which catches a flip or a half
+  pixel.
+- **The prefit,** a port of SMAP's *DECODE_training_estimates*.  Spline 3D
+  fits a few hundred frames of the user's data (*focus* on *auto* for a
+  pupil model), filtered on `logl_rel`, and the training's parameters are
+  read off the table as SMAP does:
+
+  | parameter | from |
+  | --- | --- |
+  | `lifetime_avg` | the mean blink length (`n_in_group`) less 1, at least 1 |
+  | `intensity_mu_sig` | [1, 0.2] × mean photons / lifetime |
+  | `bg_uniform` | the background's 1st to 98th percentiles, widened by 30 % |
+  | `emitter_av` | the density, per 40 × 40 pixels |
+  | `emitter_extent` z | the z range of the fits, within the calibration's |
+  | `Camera` | the camera database: offset, gain, EM gain, pixel size, read noise |
+
+  Every value stays editable.  Two figures check them: simulated frames
+  against real ones in photons (DECODE's notebook does this by eye), and
+  the prefit's photons, background and z with the distributions the
+  training will draw overlaid.
+- **The job folder.**  The output of preparation: DECODE's `param.yaml`,
+  the calibration, and `job.json` (SMAPpy's version, the data it was
+  prepared on, the ranges).  Everything training needs, so the folder can be
+  copied to another machine.
+- The functions are Qt-free in the package; the GUI is the first part of the
+  *Train* window, on the open file.
+
+### 9.3 Starting the training
+
+- **One command, any machine:** `smappy-decode train FOLDER`.  Headless,
+  nothing of Qt imported.  Installed by `pip install smappy-smlm[decode]` (or
+  `uv tool install`): no conda, no compiled package beyond SMAPpy's wheels.
+  CUDA on Linux and Windows, MPS on a Mac.
+- **Here** the *Train* window starts it as a subprocess.
+- **On a workstation** over the system's `ssh`, with a key (the host saved in
+  Preferences): the job folder copied there, the job started under `nohup`,
+  the model copied back.  No server and no daemon.  The workstation's
+  SMAPpy version must be the job's; the job refuses otherwise.
+- **Detached.**  Closing SMAPpy leaves the job running; the window lists the
+  jobs it started and attaches to them again.
+- **Stop, resume, warm start.**  A stop file is read after each epoch; the
+  job resumes from `ckpt.pt` (DECODE's `InOut.checkpoint_init`) and starts
+  warm from an earlier model (`InOut.model_init`).  That also lets a
+  microscope PC yield its GPU to an acquisition (§7).
+
+### 9.4 Progress
+
+- The job appends a line per epoch to `progress.jsonl`: the training and
+  test losses, DECODE's validation numbers on its fixed test set (Jaccard,
+  lateral and axial RMSE, efficiency), the learning rate, the time per
+  epoch.  Every few epochs a test frame with its truth and the predictions.
+- The *Train* window follows the file -- here directly, on a workstation
+  over `ssh` -- and draws the curves, the RMSE against the CRLB of the
+  calibration at the training's photons, and the time left.  It has *Stop*.
+- **Try on my data:** the latest model on a few real frames, its
+  localizations over the prefit's Spline 3D fits.  On real data this says
+  more than any loss.
+- TensorBoard stays, for those who want it.
+
+### 9.5 Inference in SMAPpy
+
+- **A fitter,** *DECODE*, a `_FitPlugin` like the others on the channel
+  layer: ROIs on the chip, every loader, live fits and *After the fit* come
+  with it.  It runs in SMAPpy's process, on CUDA, MPS or the CPU.
+- **The model file,** written by the job next to `ckpt.pt`: the weights and
+  the parameters as JSON, no pickle -- the calibration's hash, the camera,
+  the ranges (§4).  The fitter refuses a model whose calibration or camera
+  differs from the data's, and warns where the data's photons or background
+  lie outside the ranges.
+- **What it does:** frames to photons through SMAPpy's camera, three frames
+  at a time, the network, DECODE's post-processing.  The columns are
+  SMAPpy's, as `io/decode.py` already names DECODE's: `x_nm`, `y_nm`,
+  `z_nm`, `photons`, `background`, their errors, and the probability `prob`
+  to filter on.  DECODE's `.h5` keeps loading through
+  `io/decode.py`.
+- **Checked on the benchmark (§10, step 2):** the same simulated frames
+  fitted by Spline 3D and by DECODE, both against the truth.  This also
+  catches x and y swapped or the pixel centre shifted, the likeliest
+  mistakes of a port.
+- A page for the fitter and one for the *Train* window, as for every plugin.
+
+## 10. The new fitter: plan
 
 Each step is accepted on numbers, as the tests do elsewhere.  Equivalence
 with the existing code is not one of them: the new code has to match or beat
@@ -543,14 +690,14 @@ the baselines on the benchmark, not reproduce their outputs.
 8. **Extra input maps.**  Chip coordinates (field-dependent PSFs) and sCMOS
    variance.
 
-## 10. Open questions
+## 11. Open questions
 
 - **Shared or separate first-stage weights?**  It stays a setting until the
   authors say which the published models used.
 - **Is DECODE Cloud alive,** and could its worker run this trainer?
 - **Which machine trains** (§8).
 - **Is LunarNet worth keeping** as a backbone?  It should be judged on the
-  benchmark during tuning (§9, step 4).
+  benchmark during tuning (§10, step 4).
 - **Where does the pixelation come from?**  §2 lists the suspects; the
   benchmark tells them apart.
 
