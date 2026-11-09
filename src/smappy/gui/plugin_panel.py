@@ -1221,21 +1221,3 @@ class PluginWindow(QMainWindow):
         column.addWidget(area)
         self.setCentralWidget(central)
         self.resize(max(self.panel.sizeHint().width() + 40, 380), 520)
-
-    def settings_menu(self, copy, paste) -> None:
-        """*Copy settings* and *Paste settings* on a right-click anywhere a
-        field does not take it: the Edit menu is the control window's, and
-        on Windows and Linux this window has no menu bar to reach it from.
-        ``copy`` and ``paste`` are the control window's (`ControlWindow.copy_settings`)."""
-        # a menu of its own, not the window's actions: those are its
-        # shortcuts too (Close window, Quit), which do not belong here
-        from PySide6.QtWidgets import QMenu
-        self.settings_actions = []
-        menu = QMenu(self)
-        for text, slot in (("Copy settings", copy), ("Paste settings", paste)):
-            action = menu.addAction(text)
-            action.triggered.connect(lambda checked=False, f=slot: f())
-            self.settings_actions.append(action)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(
-            lambda point: menu.popup(self.mapToGlobal(point)))
