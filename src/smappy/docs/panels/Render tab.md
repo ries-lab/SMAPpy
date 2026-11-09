@@ -59,7 +59,9 @@ changes the other window's picture:
   layer's filter, how it is drawn (*render*, *colour by*, the LUT, the
   contrast), whether blinks are merged, and the settings that merge them;
 * with another tab in front, the plugin whose section is open there;
-* with a plugin's own window in front, that plugin.
+* with a plugin's own window in front, that plugin -- also through the
+  window's right-click menu, and through the Edit menu when it is clicked
+  straight from that window.
 
 The status line says what was copied.  A paste puts it where it belongs,
 whatever the other window has in front: layers onto its layers, a plugin's

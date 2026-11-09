@@ -353,3 +353,80 @@ def test_settings_kept_in_a_text_file_paste_as_they_were_copied(tmp_path):
     handoff.apply_view_settings(other, handoff.parse_view_settings(kept.read_text()))
     assert [s for s in summary(other) if s[0] == "locs"] == \
         [s for s in summary(source) if s[0] == "locs"]
+
+
+def _plugin_window_and_tab(app, tmp_path):
+    """Two windows; the first with a Drift tab whose COMET section is open
+    and set, and an RCC window of its own, also set."""
+    from smappy.workspace import Instance, Tab
+    source = arranged(tmp_path / "a.h5")
+    other = Session()
+    other.add_file(table(seed=7), _info(tmp_path / "b.h5"))
+    drift = Tab(name="Drift", instances=[Instance(plugin=COMET, id="comet"),
+                                         Instance(plugin=RCC, id="rcc")])
+    windows = _windows(app, source, other, tabs=[drift])
+    control = windows[0]
+    control.tabs.setCurrentIndex(1)
+    control.tabs.currentWidget().open_section("comet")
+    window = control.open_plugin_window(RCC)
+    window.panel.form.set_values({"n_timepoints": 33})
+    return windows, window
+
+
+RCC = "Analysis/Drift/RCC"
+
+
+def test_the_edit_menu_opened_by_a_click_from_a_plugin_window_copies_that_plugin(
+        app, tmp_path):
+    windows, window = _plugin_window_and_tab(app, tmp_path)
+    control = windows[0]
+    try:
+        # the click on the menu bar: the control window comes to the front,
+        # the menu opens at once, the item is chosen
+        control._note_front(window)
+        control._note_front(control)
+        control._edit_menu_shown()
+        control._edit_menu_hidden()
+        _trigger(control, "Copy settings")
+        assert control.statusBar().currentMessage() == \
+            "copied: RCC drift correction, from its window"
+        # a shortcut pressed later, in the control window: its tab
+        _trigger(control, "Copy settings")
+        assert control.statusBar().currentMessage() == \
+            "copied: COMET drift correction, from the Drift tab"
+    finally:
+        _close(app, windows)
+
+
+def test_the_edit_menu_opened_after_working_in_the_control_window_copies_its_tab(
+        app, tmp_path):
+    windows, window = _plugin_window_and_tab(app, tmp_path)
+    control = windows[0]
+    try:
+        control._note_front(window)
+        control._note_front(control)
+        control._front_since -= 5            # five seconds in the tab since
+        control._edit_menu_shown()
+        control._edit_menu_hidden()
+        _trigger(control, "Copy settings")
+        assert control.statusBar().currentMessage() == \
+            "copied: COMET drift correction, from the Drift tab"
+    finally:
+        _close(app, windows)
+
+
+def test_a_plugin_windows_right_click_menu_copies_it_and_pastes_into_another(
+        app, tmp_path):
+    windows, window = _plugin_window_and_tab(app, tmp_path)
+    try:
+        target = windows[2]
+        other_window = target.open_plugin_window(RCC)
+        copy, paste = window.settings_actions
+        copy.trigger()
+        assert windows[0].statusBar().currentMessage() == \
+            "copied: RCC drift correction, from its window"
+        other_window.settings_actions[1].trigger()
+        assert other_window.panel.form.values()["n_timepoints"] == 33
+        assert target.workspace.tabs[1].instances[1].values["n_timepoints"] == 33
+    finally:
+        _close(app, windows)
