@@ -443,10 +443,18 @@ the baselines on the benchmark, not reproduce their outputs.
    SMLM Challenge's 3D set and real data.  Each run reports detection
    (Jaccard, recall, precision), RMSE against the CRLB (Spline 3D's, Spline
    3D 2C's, Spline 4Pi's), the bias in z, **the sub-pixel histogram's
-   uniformity, as the measure of pixelation**, and speed.  DECODE and
-   DECODE-Plex are run on it as they are, with their published weights where
-   these fit (DECODE-Plex's Zenodo release, 10.5281/zenodo.20088009), and
-   their localizations of our data in `~/datalocal/decode_plex`.
+   uniformity, as the measure of pixelation**, and speed.  The baselines are
+   run on it as they are, each in its own environment:
+   - **DECODE-Plex** (`ries-lab/DECODE-Plex`, 2026-10), the main baseline and
+     the main source of ideas, for C = 1 (its `conf.yaml`, `channels: 1`; not
+     yet tried) and C = 2.  Its published weights where they fit (the Zenodo
+     release, 10.5281/zenodo.20088009), and its localizations of our data in
+     `~/datalocal/decode_plex`.
+   - **The published DECODE** (`TuragaLab/DECODE`, v0.10.2, 2023), a second
+     baseline for C = 1: the paper's method and its released models.
+   - `DECODE_Internal` is not a baseline: its `future/dev` (2024-06) is older
+     than DECODE-Plex.  It is read only for what DECODE-Plex lacks: the 4Pi
+     attempt, the colour codes, LunarNet, the uiPSF loaders.
 3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
    the benchmark.
 4. **Tuning.**  One part at a time on C = 1, where it is cheapest: target
