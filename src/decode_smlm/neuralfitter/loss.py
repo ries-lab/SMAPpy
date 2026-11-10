@@ -218,8 +218,10 @@ class GaussianMMLoss(Loss):
         pxyz_mu = pxyz_mu[p_inds[0], :, p_inds[1], p_inds[2]]
 
         """Convert px shifts to absolute coordinates"""
-        pxyz_mu[:, 1] += self._offset2coord.bin_ctr_x[p_inds[1]].to(pxyz_mu.device)
-        pxyz_mu[:, 2] += self._offset2coord.bin_ctr_y[p_inds[2]].to(pxyz_mu.device)
+        # the pixel centres to the device before they are indexed: torch 1.12 took GPU indices into
+        # a CPU tensor, current torch refuses them (on CUDA as on MPS)
+        pxyz_mu[:, 1] += self._offset2coord.bin_ctr_x.to(pxyz_mu.device)[p_inds[1]]
+        pxyz_mu[:, 2] += self._offset2coord.bin_ctr_y.to(pxyz_mu.device)[p_inds[2]]
 
         """Flatten img dimension --> N x (HxW) x 4"""
         pxyz_mu = pxyz_mu.reshape(batch_size, -1, 4)
