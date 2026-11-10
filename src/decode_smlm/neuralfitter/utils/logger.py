@@ -1,10 +1,17 @@
 import time
 
 import matplotlib.pyplot as plt
-import torch.utils.tensorboard
+
+# TensorBoard is optional: the training keeps its own log (DictLogger), and the package is not
+# a dependency of decode_smlm.  Without it SummaryWriter refuses to be made, and NoLog and
+# DictLogger, which only borrow its interface, work as before.
+try:
+    from torch.utils.tensorboard import SummaryWriter as _TensorBoardWriter
+except ImportError:  # torch.utils.tensorboard imports the tensorboard package
+    _TensorBoardWriter = None
 
 
-class SummaryWriter(torch.utils.tensorboard.SummaryWriter):
+class SummaryWriter(_TensorBoardWriter or object):
 
     def __init__(self, filter_keys=(), *args, **kwargs):
         """
@@ -14,6 +21,8 @@ class SummaryWriter(torch.utils.tensorboard.SummaryWriter):
             *args:
             **kwargs:
         """
+        if _TensorBoardWriter is None:
+            raise ImportError("TensorBoard logging needs the tensorboard package: pip install tensorboard")
         super().__init__(*args, **kwargs)
 
         self.filter_keys = filter_keys

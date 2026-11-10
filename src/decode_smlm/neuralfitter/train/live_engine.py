@@ -155,6 +155,9 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
     if no_log:
         logger = decode_smlm.neuralfitter.utils.logger.NoLog()
 
+    elif decode_smlm.neuralfitter.utils.logger._TensorBoardWriter is None:
+        logger = decode_smlm.neuralfitter.utils.logger.DictLogger()  # no TensorBoard: the checkpoint's log alone
+
     else:
         log_folder = log_folder + '/' + experiment_id
 
@@ -259,7 +262,8 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
                           step=i)
             else:
                 ckpt.dump(model.state_dict(), optimizer.state_dict(), lr_scheduler.state_dict(),
-                          log=logger.logger[1].log_dict, step=i)
+                          log=(logger.log_dict if isinstance(logger, decode_smlm.neuralfitter.utils.logger.DictLogger)
+                               else logger.logger[1].log_dict), step=i)
 
             """Draw new samples Samples"""
             if param.Simulation.mode in 'acquisition':
