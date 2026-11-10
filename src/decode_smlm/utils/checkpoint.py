@@ -1,11 +1,10 @@
 from pathlib import Path
-from typing import Union, Optional
 
 import torch
 
 
 class CheckPoint:
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: str | Path):
         """
         Checkpointing intended to resume to an already started training.
         Warning:
@@ -45,8 +44,8 @@ class CheckPoint:
         torch.save(self.dict, self.path)
 
     @classmethod
-    def load(cls, path: Union[str, Path], path_out: Optional[Union[str, Path]] = None,
-             map_location: Union[str, torch.device] = 'cpu'):
+    def load(cls, path: str | Path, path_out: str | Path | None = None,
+             map_location: str | torch.device = 'cpu'):
         # map_location: a checkpoint written on CUDA does not open on a machine without it.
         # weights_only stays torch's default (True since 2.6): a v0.10.2 checkpoint, its log of
         # floats included, loads under it (tried on a 4090 run's, 2026-11-10).

@@ -2,5 +2,4 @@ import decode_smlm.evaluation.evaluation
 import decode_smlm.evaluation.match_emittersets
 import decode_smlm.evaluation.metric
 import decode_smlm.evaluation.utils
-
 from decode_smlm.evaluation.evaluation import DistanceEvaluation, SegmentationEvaluation, SMLMEvaluation

@@ -11,15 +11,15 @@ __gateway__ = 'https://raw.githubusercontent.com/TuragaLab/DECODE/master/gateway
 
 import warnings
 
+# check device capability
+import torch
+
 import decode_smlm.evaluation
 import decode_smlm.generic
 import decode_smlm.neuralfitter
 import decode_smlm.simulation
-from decode_smlm.generic.emitter import EmitterSet, RandomEmitterSet, CoordinateOnlyEmitter
-
-# check device capability
-import torch
 import decode_smlm.utils.hardware
+from decode_smlm.generic.emitter import CoordinateOnlyEmitter, EmitterSet, RandomEmitterSet
 
 if torch.cuda.is_available():
     device_capa = decode_smlm.utils.hardware.get_device_capability()

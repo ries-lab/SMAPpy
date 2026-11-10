@@ -1,13 +1,12 @@
 import math
 import warnings
 from abc import ABC, abstractmethod
-from typing import Tuple, Union
 
 import numpy as np
 import torch
 
-from decode_smlm.generic import slicing as gutil
 import decode_smlm.generic.utils
+from decode_smlm.generic import slicing as gutil
 
 
 class PSF(ABC):
@@ -36,10 +35,7 @@ class PSF(ABC):
         self.img_shape = img_shape
 
     def __str__(self):
-        return 'PSF: \n xextent: {}\n yextent: {}\n zextent: {}\n img_shape: {}'.format(self.xextent,
-                                                                                        self.yextent,
-                                                                                        self.zextent,
-                                                                                        self.img_shape)
+        return f'PSF: \n xextent: {self.xextent}\n yextent: {self.yextent}\n zextent: {self.zextent}\n img_shape: {self.img_shape}'
 
     def crlb(self, *args, **kwargs):
         raise NotImplementedError
@@ -211,7 +207,7 @@ class GaussianPSF(PSF):
 
     """
 
-    def __init__(self, xextent: Tuple[float, float], yextent, zextent, img_shape, sigma_0, peak_weight=False):
+    def __init__(self, xextent: tuple[float, float], yextent, zextent, img_shape, sigma_0, peak_weight=False):
         """
         Init of Gaussian Expect. If no z extent is provided we assume 2D PSF.
 
@@ -429,7 +425,7 @@ class CubicSplinePSF(PSF):
     @property
     def _ref_diff(self):
         if self.ref_re is None:
-            return torch.zeros((3))
+            return torch.zeros(3)
         else:
             return self.ref_re - self.ref0
 

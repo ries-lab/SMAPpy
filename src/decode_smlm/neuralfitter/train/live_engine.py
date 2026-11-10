@@ -183,7 +183,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
         lr_scheduler.load_state_dict(ckpt.lr_sched_state)
         first_epoch = ckpt.step + 1
         model = model.train()
-        print(f'Resuming training from checkpoint ' + experiment_id)
+        print('Resuming training from checkpoint ' + experiment_id)
     else:
         first_epoch = 0
 

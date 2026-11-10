@@ -2,7 +2,8 @@ import pytest
 import torch
 
 import decode_smlm.simulation.psf_kernel as psf_kernel
-from decode_smlm.generic import EmitterSet, CoordinateOnlyEmitter, RandomEmitterSet, EmptyEmitterSet, test_utils as tutil
+from decode_smlm.generic import CoordinateOnlyEmitter, EmitterSet, EmptyEmitterSet, RandomEmitterSet
+from decode_smlm.generic import test_utils as tutil
 from decode_smlm.neuralfitter import target_generator
 
 

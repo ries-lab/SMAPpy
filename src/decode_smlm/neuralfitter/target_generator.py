@@ -1,11 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Union
 
 import torch
 
 from decode_smlm.evaluation import predict_dist
-from decode_smlm.generic import EmitterSet
-from decode_smlm.generic import process
+from decode_smlm.generic import EmitterSet, process
 from decode_smlm.generic.process import RemoveOutOfFOV
 from decode_smlm.simulation.psf_kernel import DeltaPSF
 
@@ -33,7 +31,7 @@ class TargetGenerator(ABC):
     def sanity_check(self):
 
         if self.squeeze_batch_dim and self.ix_low != self.ix_high:
-            raise ValueError(f"Automatic batch squeeze can only be used when upper and lower ix fall together.")
+            raise ValueError("Automatic batch squeeze can only be used when upper and lower ix fall together.")
 
     def _filter_forward(self, em: EmitterSet, ix_low: (int, None), ix_high: (int, None)):
         """
@@ -148,8 +146,8 @@ class UnifiedEmbeddingTarget(TargetGenerator):
         n_roi = xx.size(0)
 
         """
-        Repeat the indices and add an ID for bookkeeping. 
-        The idea here is that for the ix we do 'repeat_interleave' and for the offsets we do repeat, such that they 
+        Repeat the indices and add an ID for bookkeeping.
+        The idea here is that for the ix we do 'repeat_interleave' and for the offsets we do repeat, such that they
         overlap correctly. E.g.
         5  5  5  9  9  9 (indices)
         +1 0  -1 +1 0  -1 (offset)
@@ -305,7 +303,7 @@ class ParameterListTarget(TargetGenerator):
 
 class DisableAttributes:
 
-    def __init__(self, attr_ix: Union[None, int, tuple, list]):
+    def __init__(self, attr_ix: None | int | tuple | list):
         """
         Allows to disable attribute prediction of parameter list target; e.g. when you don't want to predict z.
 

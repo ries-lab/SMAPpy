@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod  # abstract class
-from typing import Union
 
 import torch
 
@@ -9,11 +8,11 @@ from . import noise_distributions
 class Camera(ABC):
 
     @abstractmethod
-    def forward(self, x: torch.Tensor, device: Union[str, torch.device] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, device: str | torch.device = None) -> torch.Tensor:
         raise NotImplementedError
 
     @abstractmethod
-    def backward(self, x: torch.Tensor, device: Union[str, torch.device] = None) -> torch.Tensor:
+    def backward(self, x: torch.Tensor, device: str | torch.device = None) -> torch.Tensor:
         raise NotImplementedError
 
 
@@ -24,8 +23,8 @@ class Photon2Camera(Camera):
 
     """
 
-    def __init__(self, *, qe: float, spur_noise: float, em_gain: Union[float, None], e_per_adu: float, baseline: float,
-                 read_sigma: float, photon_units: bool, device: Union[str, torch.device] = None):
+    def __init__(self, *, qe: float, spur_noise: float, em_gain: float | None, e_per_adu: float, baseline: float,
+                 read_sigma: float, photon_units: bool, device: str | torch.device = None):
         """
 
         Args:
@@ -62,12 +61,12 @@ class Photon2Camera(Camera):
                    device=param.Hardware.device_simulation)
 
     def __str__(self):
-        return f"Photon to Camera Converter.\n" + \
+        return "Photon to Camera Converter.\n" + \
                f"Camera: QE {self.qe} | Spur noise {self.spur} | EM Gain {self._em_gain} | " + \
                f"e_per_adu {self.e_per_adu} | Baseline {self.baseline} | Readnoise {self._read_sigma}\n" + \
                f"Output in Photon units: {self.photon_units}"
 
-    def forward(self, x: torch.Tensor, device: Union[str, torch.device] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, device: str | torch.device = None) -> torch.Tensor:
         """
         Forwards frame through camera
 
@@ -109,7 +108,7 @@ class Photon2Camera(Camera):
 
         return camera
 
-    def backward(self, x: torch.Tensor, device: Union[str, torch.device] = None) -> torch.Tensor:
+    def backward(self, x: torch.Tensor, device: str | torch.device = None) -> torch.Tensor:
         """
         Calculates the expected number of photons from a noisy image.
 
@@ -136,7 +135,7 @@ class Photon2Camera(Camera):
 
 
 class PerfectCamera(Photon2Camera):
-    def __init__(self, device: Union[str, torch.device] = None):
+    def __init__(self, device: str | torch.device = None):
         """
         Convenience wrapper for perfect camera, i.e. only shot noise. By design in 'photon units'.
 

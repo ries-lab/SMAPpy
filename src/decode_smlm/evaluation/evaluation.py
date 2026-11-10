@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import scipy.stats
 import torch
 
-from decode_smlm.evaluation.metric import precision_recall_jaccard, rmse_mad_dist, efficiency
+from decode_smlm.evaluation.metric import efficiency, precision_recall_jaccard, rmse_mad_dist
+
 from ..generic import emitter as emitter
 from ..generic.emitter import EmitterSet
 from .utils import density_hist
@@ -334,19 +335,19 @@ class SMLMEvaluation:
 
     def __str__(self):
         str = "------------------------ Evaluation Set ------------------------\n"
-        str += "Precision {}\n".format(self.prec.__str__())
-        str += "Recall {}\n".format(self.rec.__str__())
-        str += "Jaccard {}\n".format(self.jac.__str__())
-        str += "F1Score {}\n".format(self.f1.__str__())
-        str += "RMSE lat. {}\n".format(self.rmse_lat.__str__())
-        str += "RMSE ax. {}\n".format(self.rmse_axial.__str__())
-        str += "RMSE vol. {}\n".format(self.rmse_vol.__str__())
-        str += "MAD lat. {}\n".format(self.mad_lat.__str__())
-        str += "MAD ax. {}\n".format(self.mad_axial.__str__())
-        str += "MAD vol. {}\n".format(self.mad_vol.__str__())
-        str += "Efficiency lat. {}\n".format(self.effcy_lat.__str__())
-        str += "Efficiency ax. {}\n".format(self.effcy_ax.__str__())
-        str += "Efficiency vol. {}\n".format(self.effcy_vol.__str__())
+        str += f"Precision {self.prec.__str__()}\n"
+        str += f"Recall {self.rec.__str__()}\n"
+        str += f"Jaccard {self.jac.__str__()}\n"
+        str += f"F1Score {self.f1.__str__()}\n"
+        str += f"RMSE lat. {self.rmse_lat.__str__()}\n"
+        str += f"RMSE ax. {self.rmse_axial.__str__()}\n"
+        str += f"RMSE vol. {self.rmse_vol.__str__()}\n"
+        str += f"MAD lat. {self.mad_lat.__str__()}\n"
+        str += f"MAD ax. {self.mad_axial.__str__()}\n"
+        str += f"MAD vol. {self.mad_vol.__str__()}\n"
+        str += f"Efficiency lat. {self.effcy_lat.__str__()}\n"
+        str += f"Efficiency ax. {self.effcy_ax.__str__()}\n"
+        str += f"Efficiency vol. {self.effcy_vol.__str__()}\n"
         str += "-----------------------------------------------------------------"
         return str
 

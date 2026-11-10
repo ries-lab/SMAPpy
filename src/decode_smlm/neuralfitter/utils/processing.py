@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from operator import itemgetter
-from typing import Callable
 
 
 class TransformSequence:

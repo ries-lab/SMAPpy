@@ -2,7 +2,6 @@ import hashlib
 import math
 import pathlib
 import time
-from typing import Union
 
 import torch
 
@@ -53,7 +52,7 @@ class LoadSaveModel:
             raise FileNotFoundError("I will only create the last folder for model saving. But the path you specified "
                                     "lacks more folders or is completely wrong.")
 
-    def load_init(self, device: Union[str, torch.device, None] = None):
+    def load_init(self, device: str | torch.device | None = None):
         """
         Init and warmstart model (if possible) and ship to specified device
 
@@ -82,7 +81,7 @@ class LoadSaveModel:
 
             model.load_state_dict(state_dict)
 
-            print('Loaded pretrained model: {}'.format(self.warmstart_file))
+            print(f'Loaded pretrained model: {self.warmstart_file}')
 
         model.eval()
         return model
@@ -118,6 +117,6 @@ class LoadSaveModel:
         """Determine file name and save."""
         fname = pathlib.Path(str(self.output_file.with_suffix('')) + '_' + str(self.output_file_suffix) + '.pt')
         torch.save(model.state_dict(), fname)
-        print('Saved model to file: {}'.format(fname))
+        print(f'Saved model to file: {fname}')
 
         self._last_saved = time.time()

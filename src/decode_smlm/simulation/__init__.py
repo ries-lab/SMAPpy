@@ -1,10 +1,9 @@
 import decode_smlm.simulation.background
-import decode_smlm.simulation.noise_distributions
 import decode_smlm.simulation.camera
 import decode_smlm.simulation.emitter_generator
+import decode_smlm.simulation.noise_distributions
 import decode_smlm.simulation.psf_kernel
 import decode_smlm.simulation.simulator
 import decode_smlm.simulation.structure_prior
-
 from decode_smlm.simulation.simulator import Simulation
 from decode_smlm.simulation.structure_prior import RandomStructure

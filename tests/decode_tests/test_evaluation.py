@@ -1,10 +1,12 @@
+import math
+
 import matplotlib.pyplot as plt
 import pytest
-import math
 import torch
 
 from decode_smlm.evaluation import evaluation
-from decode_smlm.generic import emitter as em, test_utils
+from decode_smlm.generic import emitter as em
+from decode_smlm.generic import test_utils
 
 
 class TestEval:

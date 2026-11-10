@@ -1,7 +1,6 @@
-import pytest
-
-import torch
 import numpy as np
+import pytest
+import torch
 
 from decode_smlm.simulation import structure_prior
 

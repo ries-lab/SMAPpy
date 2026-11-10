@@ -1,5 +1,6 @@
-import pytest
 import math
+
+import pytest
 import torch
 
 import decode_smlm.evaluation.metric as test_cand

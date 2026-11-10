@@ -1,8 +1,8 @@
 import torch
 from torch import nn as nn
 
-from . import unet_param
 from ..utils import last_layer_dynamics as lyd
+from . import unet_param
 
 
 class SimpleSMLMNet(unet_param.UNet2d):

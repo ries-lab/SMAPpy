@@ -5,6 +5,7 @@ import torch
 from torch.distributions.exponential import Exponential
 
 import decode_smlm.generic.emitter
+
 from . import structure_prior
 
 

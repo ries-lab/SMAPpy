@@ -1,4 +1,5 @@
 from unittest import mock
+
 import pytest
 
 from decode_smlm.neuralfitter.utils import progress

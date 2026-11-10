@@ -1,9 +1,8 @@
-from typing import Tuple
 
 import torch
 
 
-def weight_by_gradient(layer: torch.nn.ModuleList, loss: torch.Tensor, optimizer: torch.optim.Optimizer) -> Tuple[
+def weight_by_gradient(layer: torch.nn.ModuleList, loss: torch.Tensor, optimizer: torch.optim.Optimizer) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor]:
     """
 

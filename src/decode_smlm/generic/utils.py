@@ -1,4 +1,3 @@
-from typing import Tuple
 
 import numpy as np
 import torch
@@ -31,7 +30,7 @@ def cum_count_per_group(arr: torch.Tensor):
     return grp_range(cnt)[np.argsort(np.argsort(arr, kind='mergesort'), kind='mergesort')]
 
 
-def frame_grid(img_size, xextent=None, yextent=None, *, origin=None, px_size=None) -> Tuple[torch.Tensor, torch.Tensor]:
+def frame_grid(img_size, xextent=None, yextent=None, *, origin=None, px_size=None) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Get pixel center coordinates based on extent and img shape. Either specify extents XOR origin and px size.
 

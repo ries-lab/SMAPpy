@@ -1,11 +1,10 @@
 import math
+
 import torch
-
 from torch import nn as nn
-from typing import Tuple
 
 
-def rmse_mad_dist(xyz_0: torch.Tensor, xyz_1: torch.Tensor) -> Tuple[float, float, float, float, float, float]:
+def rmse_mad_dist(xyz_0: torch.Tensor, xyz_1: torch.Tensor) -> tuple[float, float, float, float, float, float]:
     """
     Calculate RMSE and mean absolute distance.
 
@@ -51,7 +50,7 @@ def rmse_mad_dist(xyz_0: torch.Tensor, xyz_1: torch.Tensor) -> Tuple[float, floa
     return rmse_lat.item(), rmse_axial.item(), rmse_vol.item(), mad_lat.item(), mad_axial.item(), mad_vol.item()
 
 
-def precision_recall_jaccard(tp: int, fp: int, fn: int) -> Tuple[float, float, float, float]:
+def precision_recall_jaccard(tp: int, fp: int, fn: int) -> tuple[float, float, float, float]:
     """
     Calculates precision, recall, jaccard index and f1 score
 

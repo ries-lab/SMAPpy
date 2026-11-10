@@ -1,6 +1,7 @@
+import warnings
+
 import matplotlib.pyplot as plt
 import torch
-import warnings
 
 from . import utils
 
@@ -25,7 +26,7 @@ def deviation_dist(x: torch.Tensor, x_gt: torch.Tensor, residuals=False, kde=Tru
 
     else:
         if not nan_okay:
-            raise ValueError(f"Some of the values are NaN.")
+            raise ValueError("Some of the values are NaN.")
 
     if residuals:
         ax.plot([x_gt.min(), x_gt.max()], [0, 0], 'green')

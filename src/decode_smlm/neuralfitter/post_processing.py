@@ -1,6 +1,5 @@
-import warnings
 from abc import ABC, abstractmethod  # abstract class
-from typing import Union, Callable
+from collections.abc import Callable
 
 import torch
 
@@ -112,8 +111,8 @@ class LookUpPostProcessing(PostProcessing):
     """
 
     def __init__(self, raw_th: float, xy_unit: str, px_size=None,
-                 pphotxyzbg_mapping: Union[list, tuple] = (0, 1, 2, 3, 4, -1),
-                 photxyz_sigma_mapping: Union[list, tuple, None] = (5, 6, 7, 8)):
+                 pphotxyzbg_mapping: list | tuple = (0, 1, 2, 3, 4, -1),
+                 photxyz_sigma_mapping: list | tuple | None = (5, 6, 7, 8)):
         """
 
         Args:
@@ -218,9 +217,9 @@ class SpatialIntegration(LookUpPostProcessing):
     _split_th = 0.6
 
     def __init__(self, raw_th: float, xy_unit: str, px_size=None,
-                 pphotxyzbg_mapping: Union[list, tuple] = (0, 1, 2, 3, 4, -1),
-                 photxyz_sigma_mapping: Union[list, tuple, None] = (5, 6, 7, 8),
-                 p_aggregation: Union[str, Callable] = 'norm_sum'):
+                 pphotxyzbg_mapping: list | tuple = (0, 1, 2, 3, 4, -1),
+                 photxyz_sigma_mapping: list | tuple | None = (5, 6, 7, 8),
+                 p_aggregation: str | Callable = 'norm_sum'):
         """
 
         Args:
@@ -285,7 +284,7 @@ class SpatialIntegration(LookUpPostProcessing):
             return p_ps.squeeze(1)
 
     @classmethod
-    def set_p_aggregation(cls, p_aggr: Union[str, Callable]) -> Callable:
+    def set_p_aggregation(cls, p_aggr: str | Callable) -> Callable:
         """
         Sets the p_aggregation by string or callable. Return s Callable
 

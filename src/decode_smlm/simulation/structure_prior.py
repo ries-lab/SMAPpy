@@ -1,7 +1,6 @@
-import torch
-
 from abc import ABC, abstractmethod
-from typing import Tuple
+
+import torch
 
 
 class StructurePrior(ABC):
@@ -40,7 +39,7 @@ class RandomStructure(StructurePrior):
 
     """
 
-    def __init__(self, xextent: Tuple[float, float], yextent: Tuple[float, float], zextent: Tuple[float, float]):
+    def __init__(self, xextent: tuple[float, float], yextent: tuple[float, float], zextent: tuple[float, float]):
         """
 
         Args:

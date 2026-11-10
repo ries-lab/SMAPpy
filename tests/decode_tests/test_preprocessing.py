@@ -1,8 +1,7 @@
 import torch
 
-import decode_smlm.generic.test_utils as tutil
 import decode_smlm.generic.process as prep
-
+import decode_smlm.generic.test_utils as tutil
 from decode_smlm.generic.emitter import RandomEmitterSet
 
 

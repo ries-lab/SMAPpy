@@ -4,6 +4,7 @@ import pytest
 
 import decode_smlm.utils.param_io as wlp
 from decode_smlm.utils import types
+
 from . import asset_handler
 
 """Root folder"""

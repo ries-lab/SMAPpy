@@ -1,5 +1,5 @@
-import torch
 import pytest
+import torch
 
 import decode_smlm.generic.slicing as gutils  # candidate
 

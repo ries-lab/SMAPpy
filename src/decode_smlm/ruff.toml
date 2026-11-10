@@ -1,0 +1,29 @@
+# decode_smlm's lint rules: uipsf's (src/uipsf/ruff.toml), for src/decode_smlm and tests/decode_tests:
+#     ruff check --config src/decode_smlm/ruff.toml src/decode_smlm tests/decode_tests
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E741",   # l, I and O are the physics' own names
+    # DECODE's code as it came (NOTICE.md): what these find is fixed in a file when the file is
+    # changed for a reason of its own, not in a lint-only rewrite.  Some would change what it does:
+    "E501",   # long lines
+    "B905",   # zip() without strict=: strict would raise where DECODE truncated
+    "B008",   # calls in default arguments (torch.device(...), tuples of tensors)
+    "B018",   # bare expressions, mostly in its tests
+    "B028",   # warnings without stacklevel
+    "B904",   # raise without from inside except
+    "B007",   # unused loop variables
+    "B024",   # an ABC without abstract methods
+    "E721",   # type() comparisons in a test
+    "E722",   # one bare except, around TensorBoard's add_graph
+    "F841",   # assigned and unused, in the training loop's unpacking and in tests
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]   # importing a subpackage there is what makes it available
+
+[lint.isort]
+known-first-party = ["decode_smlm", "decode_tests"]

@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 import decode_smlm.utils.param_io
 

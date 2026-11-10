@@ -1,17 +1,11 @@
-import threading
-import time
-from unittest import mock
 
 import pytest
-import tifffile
 import torch
 
 from decode_smlm.generic import emitter
-from decode_smlm.generic import test_utils
 from decode_smlm.generic.process import Identity
 from decode_smlm.neuralfitter import post_processing
 from decode_smlm.neuralfitter.inference import inference
-
 from decode_smlm.utils.hardware import default_device
 
 GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only

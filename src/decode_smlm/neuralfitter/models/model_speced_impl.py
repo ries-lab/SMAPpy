@@ -1,4 +1,3 @@
-from typing import Union
 
 import torch
 from torch import nn
@@ -21,7 +20,7 @@ class SigmaMUNet(model_param.DoubleMUnet):
 
     def __init__(self, ch_in: int, *, depth_shared: int, depth_union: int, initial_features: int, inter_features: int,
                  norm=None, norm_groups=None, norm_head=None, norm_head_groups=None, pool_mode='StrideConv',
-                 upsample_mode='bilinear', skip_gn_level: Union[None, bool] = None,
+                 upsample_mode='bilinear', skip_gn_level: None | bool = None,
                  activation=nn.ReLU(), kaiming_normal=True):
 
         super().__init__(ch_in=ch_in, ch_out=self.ch_out, depth_shared=depth_shared, depth_union=depth_union,

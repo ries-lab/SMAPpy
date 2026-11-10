@@ -1,6 +1,5 @@
 import hashlib
 import pathlib
-from typing import Union
 
 import torch
 
@@ -35,7 +34,7 @@ def tens_almeq(a: torch.Tensor, b: torch.Tensor, prec: float = 1e-8, nan: bool =
     return torch.all(torch.lt(torch.abs(torch.add(a, -b)), prec)).item()
 
 
-def open_n_hash(file: Union[str, pathlib.Path]) -> str:
+def open_n_hash(file: str | pathlib.Path) -> str:
     """
     Check SHA 256 hash of file
 
@@ -54,7 +53,7 @@ def open_n_hash(file: Union[str, pathlib.Path]) -> str:
     return hash_str
 
 
-def file_loadable(path: Union[str, pathlib.Path], reader=None, mode=None, exceptions=None) -> bool:
+def file_loadable(path: str | pathlib.Path, reader=None, mode=None, exceptions=None) -> bool:
     """
     Check whether file is present and loadable. This function could be used in a while lood and sleep
 

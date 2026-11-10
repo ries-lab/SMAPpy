@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod  # abstract class
-from typing import Union, Tuple
 
 import torch
 from torch import distributions
@@ -76,7 +75,7 @@ class PPXYZBLoss(Loss):
         5: background
     """
 
-    def __init__(self, device: Union[str, torch.device], chweight_stat: Union[None, tuple, list, torch.Tensor] = None,
+    def __init__(self, device: str | torch.device, chweight_stat: None | tuple | list | torch.Tensor = None,
                  p_fg_weight: float = 1., forward_safety: bool = True):
         """
 
@@ -135,8 +134,8 @@ class GaussianMMLoss(Loss):
     Model output is a mean and sigma value which forms a gaussian mixture model.
     """
 
-    def __init__(self, *, xextent: tuple, yextent: tuple, img_shape: tuple, device: Union[str, torch.device],
-                 chweight_stat: Union[None, tuple, list, torch.Tensor] = None,
+    def __init__(self, *, xextent: tuple, yextent: tuple, img_shape: tuple, device: str | torch.device,
+                 chweight_stat: None | tuple | list | torch.Tensor = None,
                  forward_safety: bool = True):
         """
 
@@ -248,18 +247,18 @@ class GaussianMMLoss(Loss):
     def _forward_checks(self, output: torch.Tensor, target: tuple, weight: None):
 
         if weight is not None:
-            raise NotImplementedError(f"Weight must be None for this loss implementation.")
+            raise NotImplementedError("Weight must be None for this loss implementation.")
 
         if output.dim() != 4:
-            raise ValueError(f"Output must have 4 dimensions (N,C,H,W).")
+            raise ValueError("Output must have 4 dimensions (N,C,H,W).")
 
         if output.size(1) != 10:
-            raise ValueError(f"Wrong number of channels.")
+            raise ValueError("Wrong number of channels.")
 
         if len(target) != 3:
-            raise ValueError(f"Wrong length of target.")
+            raise ValueError("Wrong length of target.")
 
-    def forward(self, output: torch.Tensor, target: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    def forward(self, output: torch.Tensor, target: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
                 weight: None) -> torch.Tensor:
 
         if self.forward_safety:
@@ -271,7 +270,7 @@ class GaussianMMLoss(Loss):
         bg_loss = self._bg_loss(bg, tar_bg).sum(-1).sum(-1)
         gmm_loss = self._compute_gmm_loss(p, pxyz_mu, pxyz_sig, tar_param, tar_mask)
 
-        """Stack in 2 channels. 
+        """Stack in 2 channels.
         Factor 2 because original impl. adds the two terms, but this way it's better for logging."""
         loss = 2 * torch.stack((gmm_loss, bg_loss), 1) * self._ch_weight
 

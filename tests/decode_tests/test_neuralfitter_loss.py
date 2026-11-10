@@ -3,7 +3,6 @@ import torch
 
 from decode_smlm.generic import test_utils
 from decode_smlm.neuralfitter import loss
-
 from decode_smlm.utils.hardware import default_device
 
 GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only

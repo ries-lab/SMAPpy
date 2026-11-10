@@ -1,4 +1,3 @@
-from pathlib import Path
 import pytest
 
 from decode_smlm.utils import checkpoint

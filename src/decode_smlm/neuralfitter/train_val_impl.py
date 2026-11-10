@@ -1,12 +1,11 @@
-import torch
 import time
-from typing import Union
-
-from tqdm import tqdm
 from collections import namedtuple
 
-from .utils import log_train_val_progress
+import torch
+from tqdm import tqdm
+
 from ..evaluation.utils import MetricMeter
+from .utils import log_train_val_progress
 
 
 def train(model, optimizer, loss, dataloader, grad_rescale, grad_mod, epoch, device, logger) -> float:
@@ -25,7 +24,7 @@ def train(model, optimizer, loss, dataloader, grad_rescale, grad_mod, epoch, dev
 
         """Ship the data to the correct device"""
         x, y_tar, weight = ship_device([x, y_tar, weight], device)
-        
+
         """Forward the data"""
         y_out = model(x)
 
@@ -107,7 +106,7 @@ def test(model, loss, dataloader, epoch, device):
     return loss_cmp_ep.mean(), _val_return(loss=loss_cmp_ep, x=x_ep, y_out=y_out_ep, y_tar=None, weight=None, em_tar=None)
 
 
-def ship_device(x, device: Union[str, torch.device]):
+def ship_device(x, device: str | torch.device):
     """
     Ships the input to a pytorch compatible device (e.g. CUDA)
 
@@ -130,4 +129,4 @@ def ship_device(x, device: Union[str, torch.device]):
         return x
 
     elif device != 'cpu':
-        raise NotImplementedError(f"Unsupported data type for shipping from host to CUDA device.")
+        raise NotImplementedError("Unsupported data type for shipping from host to CUDA device.")

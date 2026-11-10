@@ -5,7 +5,6 @@ import torch
 
 import decode_smlm.simulation.background as background
 from decode_smlm.generic import emitter, test_utils
-
 from decode_smlm.utils.hardware import default_device
 
 GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only

@@ -1,9 +1,9 @@
 import json
+
 # import copy
 import pathlib
-from pathlib import Path
-from typing import Union
 from importlib import resources
+from pathlib import Path
 
 import yaml
 
@@ -61,7 +61,7 @@ class ParamHandling:
 
         return params
 
-    def write_params(self, filename: Union[str, pathlib.Path], param: Union[dict, RecursiveNamespace]):
+    def write_params(self, filename: str | pathlib.Path, param: dict | RecursiveNamespace):
         """
         Write parameter file to path
 
@@ -209,7 +209,7 @@ def add_root_relative(path: (str, Path), root: (str, Path)):
         return root / path
 
 
-def copy_reference_param(path: Union[str, Path]):
+def copy_reference_param(path: str | Path):
     """
     Copies our param references to the desired path
 

@@ -1,6 +1,6 @@
-from copy import deepcopy
-from decode_smlm import utils
 import pytest
+
+from decode_smlm import utils
 
 
 class TestRecursiveNamespace:

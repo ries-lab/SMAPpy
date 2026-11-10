@@ -1,6 +1,5 @@
 import os
 import warnings
-from typing import Tuple, Union
 
 import torch
 
@@ -39,7 +38,7 @@ def available_device(device: str) -> str:
     return fallback
 
 
-def _specific_device_by_str(device) -> Tuple[str, str]:
+def _specific_device_by_str(device) -> tuple[str, str]:
     """Converts torch compatible device string to device name and device index"""
     if device != 'cpu' and device[:4] != 'cuda' and device[:3] != 'mps':
         raise ValueError(f"Unknown device {device!r}: cpu, cuda, cuda:<i> or mps.")
@@ -58,7 +57,7 @@ def get_device_capability() -> str:
     return f'{capability[0]}.{capability[1]}'
 
 
-def get_max_batch_size(callable, x_size: Tuple, device: Union[str, torch.device], size_low: int, size_high: int):
+def get_max_batch_size(callable, x_size: tuple, device: str | torch.device, size_low: int, size_high: int):
     if size_low > size_high:
         raise ValueError("Lower bound must be lower than upper bound.")
 

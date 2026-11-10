@@ -35,7 +35,7 @@ def split_sliceable(x, x_ix: torch.Tensor, ix_low: int, ix_high: int):
     x = x[re]
 
     """
-    arange( + 2) because + 1 for pythonic and another + 1 because the loop before return below goes from 0 to on 
+    arange( + 2) because + 1 for pythonic and another + 1 because the loop before return below goes from 0 to on
     range('len' - 1)
     """
     picker = np.arange(ix_low, ix_high + 2)

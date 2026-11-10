@@ -1,13 +1,9 @@
 import warnings
 
 import matplotlib.pyplot as plt
-import torch
 
-import decode_smlm.generic.emitter
+from decode_smlm.evaluation import evaluation, predict_dist
 from decode_smlm.evaluation.evaluation import WeightedErrors
-from decode_smlm.evaluation import predict_dist
-
-from decode_smlm.evaluation import evaluation
 
 
 def log_kpi(loss_scalar: float, loss_cmp: dict, eval_set: dict, logger, step):

@@ -7,7 +7,6 @@ import decode_smlm
 import decode_smlm.generic.emitter
 import decode_smlm.neuralfitter.dataset as can  # candidate
 import decode_smlm.neuralfitter.target_generator
-from decode_smlm.neuralfitter import em_filter
 from decode_smlm.simulation.simulator import Simulation
 
 decode_root = pathlib.Path(decode_smlm.__file__).parent.parent  # 'repo' directory

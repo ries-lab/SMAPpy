@@ -1,21 +1,20 @@
-import time
 import warnings
+from collections.abc import Callable
 from functools import partial
-from typing import Union, Callable
 
 import torch
 from tqdm import tqdm
 
-from .. import dataset
 from ...generic import emitter
 from ...utils import hardware
+from .. import dataset
 
 
 class Infer:
 
-    def __init__(self, model, ch_in: int, frame_proc, post_proc, device: Union[str, torch.device],
-                 batch_size: Union[int, str] = 'auto', num_workers: int = 0, pin_memory: bool = False,
-                 forward_cat: Union[str, Callable] = 'emitter'):
+    def __init__(self, model, ch_in: int, frame_proc, post_proc, device: str | torch.device,
+                 batch_size: int | str = 'auto', num_workers: int = 0, pin_memory: bool = False,
+                 forward_cat: str | Callable = 'emitter'):
         """
         Convenience class for inference.
 
@@ -87,7 +86,7 @@ class Infer:
                 # compute output
                 y_out = model(x_in)
 
-                """In post processing we need to make sure that we get a single Emitterset for each batch, 
+                """In post processing we need to make sure that we get a single Emitterset for each batch,
                 so that we can easily concatenate."""
                 if self.post_proc is not None:
                     out.append(self.post_proc.forward(y_out))
@@ -116,17 +115,17 @@ class Infer:
             return forward_cat
 
         else:
-            raise TypeError(f"Specified forward cat method was wrong.")
+            raise TypeError("Specified forward cat method was wrong.")
 
-        raise ValueError(f"Unsupported forward_cat value.")
+        raise ValueError("Unsupported forward_cat value.")
 
     @staticmethod
-    def get_max_batch_size(model: torch.nn.Module, frame_size: Union[tuple, torch.Size],
+    def get_max_batch_size(model: torch.nn.Module, frame_size: tuple | torch.Size,
                            limit_low: int, limit_high: int):
         """
         Get maximum batch size for inference.
 
-        Args: 
+        Args:
             model: model on correct device
             frame_size: size of frames (without batch dimension)
             limit_low: lower batch size limit

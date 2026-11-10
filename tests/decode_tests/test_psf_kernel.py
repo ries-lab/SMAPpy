@@ -1,20 +1,15 @@
-import pathlib
-import pickle
-import random
 from abc import ABC, abstractmethod
 
-import matplotlib.pyplot as plt
 import pytest
 import torch
 
-import decode_smlm.generic.test_utils as tutil
 import decode_smlm.simulation.psf_kernel as psf_kernel
 
 # DECODE's TestCubicSplinePSF tested its `spline` package on a downloaded bead calibration;
 # the torch renderer's tests, against the v0.10.2 oracle, come with milestone (c).
 
 
-psf_cuda_available = pytest.mark.skipif(not psf_kernel.CubicSplinePSF.cuda_is_available(), 
+psf_cuda_available = pytest.mark.skipif(not psf_kernel.CubicSplinePSF.cuda_is_available(),
                                         reason="Skipped because cuda not available for Spline PSF.")
 
 

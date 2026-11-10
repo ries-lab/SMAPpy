@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-import torch
 
-from typing import Tuple, List
+import torch
 
 
 class FrameProcessing(ABC):
@@ -20,7 +19,7 @@ class FrameProcessing(ABC):
 
 class Mirror2D(FrameProcessing):
 
-    def __init__(self, dims: Tuple):
+    def __init__(self, dims: tuple):
         """
         Mirror the specified dimensions. Providing dim index in negative format is recommended.
         Given format N x C x H x W and you want to mirror H and W set dims=(-2, -1).

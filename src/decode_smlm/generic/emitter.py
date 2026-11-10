@@ -1,13 +1,15 @@
 import copy
 import warnings
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Union, Optional, Iterable
 
 import numpy as np
 import torch
 
 import decode_smlm.generic.utils
-from . import slicing as gutil, test_utils as tutil
+
+from . import slicing as gutil
+from . import test_utils as tutil
 
 
 class EmitterSet:
@@ -37,7 +39,7 @@ class EmitterSet:
                  id: torch.LongTensor = None, prob: torch.Tensor = None, bg: torch.Tensor = None,
                  xyz_cr: torch.Tensor = None, phot_cr: torch.Tensor = None, bg_cr: torch.Tensor = None,
                  xyz_sig: torch.Tensor = None, phot_sig: torch.Tensor = None, bg_sig: torch.Tensor = None,
-                 sanity_check: bool = True, xy_unit: str = None, px_size: Union[tuple, torch.Tensor] = None):
+                 sanity_check: bool = True, xy_unit: str = None, px_size: tuple | torch.Tensor = None):
         """
         Initialises EmitterSet of :math:`N` emitters.
 
@@ -233,7 +235,7 @@ class EmitterSet:
 
         return em_dict
 
-    def save(self, file: Union[str, Path]):
+    def save(self, file: str | Path):
         """
         Pickle save's the dictionary of this instance. No legacy guarantees given.
         Should only be used for short-term storage.
@@ -252,7 +254,7 @@ class EmitterSet:
             raise ValueError(f"Only .pt is written here, not {file.suffix}.")
 
     @staticmethod
-    def load(file: Union[str, Path]):
+    def load(file: str | Path):
         """
         Loads the set of emitters which was saved by the 'save' method.
 
@@ -529,7 +531,7 @@ class EmitterSet:
         return torch.sqrt(tot_var)
 
     @staticmethod
-    def cat(emittersets: Iterable, remap_frame_ix: Union[None, torch.Tensor] = None, step_frame_ix: int = None):
+    def cat(emittersets: Iterable, remap_frame_ix: None | torch.Tensor = None, step_frame_ix: int = None):
         """
         Concatenate multiple emittersets into one emitterset which is returned. Optionally modify the frame indices by
         the arguments.
@@ -684,7 +686,7 @@ class EmitterSet:
         # https://stackoverflow.com/questions/2130016/splitting-a-list-into-n-parts-of-approximately-equal-length/37414115#37414115
         return [l[i * (n // k) + min(i, n % k):(i + 1) * (n // k) + min(i + 1, n % k)] for i in range(k)]
 
-    def filter_by_sigma(self, fraction: float, dim: Optional[int] = None, return_low=True):
+    def filter_by_sigma(self, fraction: float, dim: int | None = None, return_low=True):
         """
         Filter by sigma values. Returns EmitterSet.
 
