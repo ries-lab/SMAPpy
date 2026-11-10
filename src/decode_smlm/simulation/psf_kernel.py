@@ -385,9 +385,12 @@ class CubicSplinePSF(PSF):
         Init the spline implementation. Done seperately because otherwise it's harder to pickle
 
         """
-        # DECODE's compiled `spline` package is not used; the torch renderer of milestone (c)
-        # (docs/decode/poc-plan.md) takes its place.
-        raise NotImplementedError("CubicSplinePSF waits for the torch renderer (milestone (c)).")
+        # DECODE's compiled `spline` package is replaced by the same kernel in torch (spline_torch.py),
+        # on any device torch has: the CPU, CUDA and Apple's GPU
+        from decode_smlm.simulation.spline_torch import SplineTorch
+
+        device = self._device if self._device_ix is None else f'{self._device}:{self._device_ix}'
+        self._spline_impl = SplineTorch(self._coeff, tuple(self.roi_size_px), device)
 
     def sanity_check(self):
         """
@@ -411,7 +414,7 @@ class CubicSplinePSF(PSF):
         Technically (1) could come without (2).
 
         """
-        return False
+        return torch.cuda.is_available()  # the torch renderer needs no compiled CUDA
 
     @staticmethod
     def cuda_is_available() -> bool:
@@ -420,7 +423,7 @@ class CubicSplinePSF(PSF):
         whether Python has 'static properties'?
 
         """
-        return False
+        return torch.cuda.is_available()
 
     @property
     def _ref_diff(self):
@@ -550,9 +553,7 @@ class CubicSplinePSF(PSF):
 
         n_rois = xyz.size(0)  # number of rois / emitters / fluorophores
 
-        out = self._spline_impl.forward_rois(xyz[:, 0], xyz[:, 1], xyz[:, 2], phot)
-
-        out = torch.from_numpy(out)
+        out = self._spline_impl.forward_rois(xyz[:, 0], xyz[:, 1], xyz[:, 2], phot)  # a tensor already
         out = out.reshape(n_rois, *self.roi_size_px)
         return out
 
@@ -622,8 +623,8 @@ class CubicSplinePSF(PSF):
         n_rois = xyz.size(0)
 
         drv_rois, rois = self._spline_impl.forward_drv_rois(xyz_[:, 0], xyz_[:, 1], xyz_[:, 2], phot, bg, add_bg)
-        drv_rois = torch.from_numpy(drv_rois).reshape(n_rois, self.n_par, *self.roi_size_px)
-        rois = torch.from_numpy(rois).reshape(n_rois, *self.roi_size_px)
+        drv_rois = drv_rois.reshape(n_rois, self.n_par, *self.roi_size_px)
+        rois = rois.reshape(n_rois, *self.roi_size_px)
 
         """Convert Implementation order to natural order, i.e. x/y/z/phot/bg instead of x/y/phot/bg/z."""
         drv_rois = drv_rois[:, [0, 1, 4, 2, 3]]
@@ -759,5 +760,5 @@ class CubicSplinePSF(PSF):
                                                   ix[:, 1],
                                                   weight)
 
-        frames = torch.from_numpy(frames).reshape(n_frames, *self.img_shape)
+        frames = frames.reshape(n_frames, *self.img_shape)
         return frames
