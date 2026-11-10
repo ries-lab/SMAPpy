@@ -12,8 +12,11 @@ def setup_random_simulation(param):
         3. Setup simulation and datasets
         """
 
-    psf = decode_smlm.utils.calibration_io.SMAPSplineCoefficient(
-        calib_file=param.InOut.calibration_file).init_spline(
+    # SMAPpy's loader in place of SMAPSplineCoefficient: a _3dcal.mat or SMAPpy's .h5, un-mirrored
+    # (decode_smlm/utils/calibration_io.py)
+    from decode_smlm.utils.calibration_io import spline_psf
+    psf = spline_psf(
+        param.InOut.calibration_file,
         xextent=param.Simulation.psf_extent[0],
         yextent=param.Simulation.psf_extent[1],
         img_shape=param.Simulation.img_size,

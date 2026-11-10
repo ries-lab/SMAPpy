@@ -660,9 +660,12 @@ Decided (Jonas, 2026-11-10):
 - **The licence:** the copied files go into the package, and into releases,
   for now.
 
+- **The training's density is chosen,** LD / HD / UHD as in SMAP (§6, item 7),
+  and the measured one is shown beside it, not used: the density can change
+  during an acquisition, and a model trained at a low one learns less from each
+  frame.
+
 Still open:
-- The prefit's density: measured, or LD / HD / UHD as in SMAP (§6, item 7)?
-  Suggested: measured, with the nearest of the three preselected.
 - Which single-channel 3D data set with its bead calibration is the real data
   for (i)?
 
@@ -871,3 +874,64 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
   (rows, columns) order, so DECODE's nm put 127 nm on SMAPpy's y; whether SMAP's camera meant 127
   along x is not in the files.  `to_columns` takes the pixel size from the caller in SMAPpy's
   (x, y) order.
+
+### (e) as done, 2026-11-10
+
+- **The estimates** are `decode_smlm/prefit.py`, numpy only: `import decode_smlm` no longer loads
+  torch, its subpackages imported when first used (`decode_smlm/__init__.py`, a commit of its
+  own; DECODE's warning for GPUs below compute capability 3.7 dropped).  SMAP's rules with its
+  constants (`usecurrent_callback`, `setz`, `finalizejson`) for the on-time, background, z and
+  camera, SMAP's read noise where the camera gives none, and `method_params`, a job's
+  `method.yaml`: DECODE's minimal file (`param_friendly.yaml`'s sections) that its loader fills
+  from `reference.yaml`.
+- **Three departures from SMAP, all measured:**
+  - *The brightness is that of the fully-on frames* (Jonas, 2026-11-10): DECODE draws a
+    molecule's photons a frame while it is on, and the frames it switches in get less, so the
+    middle frames of blinks of 3 frames or more measure it directly -- their mean and standard
+    deviation, of the fits whose `logl_rel` is at most 1 MAD below the median (overlapping
+    molecules fit worse and look brighter; losing most fits is fine) and neither at the
+    iteration limit nor within 10 % of the calibration's z limit (`fully_on`).  On simulations of
+    1.5 and 3 frames' on-time it gives the molecules' 2667 and 1333 photons to 3 %; SMAP's rule
+    (the blinks' mean photons over the lifetime, sd 0.2 of it) stays for fewer than 200 such
+    frames.  SMAP's rule had given 30 465 photons on the example package, twice its own value:
+    Spline 3D's poor fits, far from focus, reach 150 000 photons and pulled the mean.
+  - *The on-time is the histogram's mean over SMAP's range, not its three-exponential fit's.*  A
+    sum of decaying exponentials is log-convex and blink lengths are not (few in 1 frame, most in
+    1 or 2): the fit gave 1.95 frames for blinks of 1.64 on a SMAPpy simulation, 3.3 for 2.5 on
+    exponential ones.  SMAP's cut at max(95th percentile, 13) frames is kept; it shortens long
+    on-times (2.70 for 3).
+  - *The prefit is a fit of its own* (`smappy/training/prefit.py`), not the layer's: 10 blocks of 50
+    consecutive frames spread from the acquisition's first frame to its last (it is densest at
+    its start), each fitted and grouped on its own, with a 150 nm box, not 50 -- the dim first and
+    last frames of a blink scatter further, and 50 nm cut blinks of 2.48 and 3.95 frames to 2.22
+    and 3.19 (150 nm: 2.44 and 3.81).
+- **On a simulation** of known on-time, brightness, background and z (`tests/decode_tests/test_prefit.py`):
+  the lifetime within 10 % at 1.5 and 3 frames, the brightness within 5 %, its spread between the
+  molecules' own and 1.3 times it (shot noise on top), background and z as the rules say.
+- **The job folder** is `smappy/training/job.py`, torch-free: `job.json` (schema 1), `method.yaml`,
+  `calibration.h5`; written, read and written again it is byte-identical, moved it is complete
+  (`check`), and an absolute path in `method.yaml` is refused (`tests/test_training_job.py`).
+  That a moved folder still *trains* is for (f), which runs it; `random_simulation` now loads the
+  calibration through SMAPpy (`spline_psf`), as the training needs.
+- **The two check figures** are `decode_smlm/figures.py`: `draw_frames` (a data frame beside one
+  simulated by DECODE's own simulation, `simulate_frames`, in photons, on one scale) and
+  `draw_ranges` (the prefit's fully-on photons, background and z under the training's draws).
+  With SMAP's brightness the simulated frames were three times brighter than the data; with the
+  fully-on frames' the spots match (99.9th percentile of the pixels 1 219 against 1 317 photons
+  at LD), and what is left is the background's uniform draw over SMAP's widened range.
+- **On the example package** (10 blocks of 20 of its first 500 frames, flipped as its beads were
+  taken without EM gain, camera from `frames_meta.yaml`), beside its `param_run.yaml` -- whose
+  photons are in its EM gain of 100, half the frames' 50:
+
+  | | estimates | `param_run.yaml` | its value at gain 50 |
+  |---|---|---|---|
+  | lifetime | 1.0 (on-time 1.70 frames) | 1.0 | 1.0 |
+  | intensity | 12 672 +- 9 559 (3 286 fully-on frames) | 7 000 +- 3 000 | 14 000 +- 6 000 |
+  | background | 33 -- 340 | 20 -- 200 | 40 -- 400 |
+  | z | +-995 (the calibration's limit) | +-800 | +-800 |
+  | density | measured 3.5 a 40 x 40 frame | UHD, 50 | |
+  | read noise | 74.4 e- | 58.8 e- | |
+
+  DECODE draws the brightness from a normal distribution; the fully-on frames' is closer to a
+  log-normal (sd 0.75 in log), so the normal of the same mean and spread puts about 10 % of the
+  molecules at almost no photons -- invisible to the training, so they only lower its density.

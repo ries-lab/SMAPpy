@@ -25,7 +25,10 @@ against the original's outputs in `tests/decode_tests/fixtures/`).  It is
 verbatim copies, and every change is a commit of its own; the extra
 `smappy-smlm[decode]`, lint with `ruff check --config
 src/decode_smlm/ruff.toml src/decode_smlm tests/decode_tests`.  It is imported
-only where a DECODE model is used, as uipsf is (a test checks).
+only where a DECODE model is used, as uipsf is (a test checks); `import
+decode_smlm` itself loads no torch, so its torch-free parts (`prefit`, the
+estimates of what to train on) serve the GUI.  What a training needs that is
+no method's -- the prefit, the job folder -- is `src/smappy/training/`.
 
 `src/smappy/assistant/` is the AI assistant's side: SMAPpy's tools served over
 MCP (`smappy-mcp`), plain functions over a `Session` in `assistant/tools.py`,
