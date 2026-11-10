@@ -27,7 +27,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 DISTRIBUTION = "smappy-smlm"
 WAIT_S = 120            # for SMAPpy to close: then the install is tried anyway
@@ -35,14 +35,26 @@ RETRY_PAUSE_S = 5
 PLAN_PREFIX = "smappy-update-"
 
 
-def commands(kind: str, python: str, uv: Optional[str] = None) -> Optional[List[List[str]]]:
+def commands(kind: str, python: str, uv: Optional[str] = None, pixi: Optional[str] = None,
+             workspace: Optional[Tuple[Path, str]] = None,
+             pip: bool = True) -> Optional[List[List[str]]]:
     """The install, as argument lists, for a kind of installation
     (`smappy.updates.how_installed`); None where the GUI only gives the
     command -- a checkout, whose ``git pull`` may meet local changes, and
-    ``uvx``, which fetches the newest on its own when asked for ``@latest``."""
+    ``uvx``, which fetches the newest on its own when asked for ``@latest``
+    -- or none would work: no pip, no uv, no pixi.  ``workspace`` is a pixi
+    environment's manifest and name (`smappy.updates.pixi_environment`);
+    the commands are `smappy.updates.update_command`'s, which says why."""
     uv = uv if uv is not None else shutil.which("uv")
+    if kind == "pixi":
+        pixi = pixi if pixi is not None else find_pixi()
+        if not (pixi and workspace):
+            return None
+        manifest, environment = workspace
+        return [[pixi, "upgrade", "--manifest-path", str(manifest), DISTRIBUTION],
+                [pixi, "install", "--manifest-path", str(manifest), "-e", environment]]
     if kind == "pip":
-        return [[python, "-m", "pip", "install", "--upgrade", DISTRIBUTION]]
+        return [[python, "-m", "pip", "install", "--upgrade", DISTRIBUTION]] if pip else None
     # uv keeps PyPI's list of releases for the ten minutes PyPI allows, so
     # an update just after a release found nothing new (0.5.7, October
     # 2026); pip asks again for every list on its own
@@ -52,6 +64,19 @@ def commands(kind: str, python: str, uv: Optional[str] = None) -> Optional[List[
         return [[uv, "pip", "install", "--upgrade", "--refresh-package", DISTRIBUTION,
                  "--python", python, DISTRIBUTION]]
     return None
+
+
+def find_pixi() -> Optional[str]:
+    """pixi: the one that started SMAPpy (``pixi run`` says which in
+    ``PIXI_EXE``), else the PATH's, else where pixi's installer puts it --
+    SMAPpy started from the Dock or a shortcut has a PATH without
+    ``~/.pixi/bin``."""
+    found = os.environ.get("PIXI_EXE") or shutil.which("pixi")
+    if found and Path(found).exists():
+        return found
+    home = Path(os.environ.get("PIXI_HOME") or Path.home() / ".pixi")
+    installed = home / "bin" / ("pixi.exe" if sys.platform.startswith("win") else "pixi")
+    return str(installed) if installed.exists() else None
 
 
 @functools.lru_cache(maxsize=None)
