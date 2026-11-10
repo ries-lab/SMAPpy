@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from smappy import plugins
@@ -14,6 +15,7 @@ from smappy.assistant.tools import INSTRUCTIONS, Assistant, Image, ToolError
 # a small simulation: a second or so for everything a test does with it
 SIMULATION = {"n_frames": 5000}
 STATISTICS = "Analysis/Measure/Localization Statistics"
+CLUSTERS = "Analysis/Regions/Find clusters"
 
 
 def simulated(tmp_path, mode="act"):
@@ -435,3 +437,76 @@ def test_in_suggest_mode_loading_an_image_and_colouring_a_layer_are_proposals(tm
         a.carry_out(proposal.id)
     assert any(im.name == "wf.tif" for im in a.session.images)
     assert a.session.layers[0].get_display().lut == "green"
+
+
+# ---------------------------------------------------------- the drawn ROI
+
+def test_the_drawn_roi_is_reported_apart_from_the_roi_managers_and_set_by_a_tool(tmp_path):
+    a = simulated(tmp_path)
+    state = a.call("session_state")
+    assert state["roi"] is None and state["roi_manager_rois"] == 0
+    (x0, x1), (y0, y1) = state["extent_nm"]["x"], state["extent_nm"]["y"]
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    drawn = a.call("set_roi", {"kind": "rect",
+                               "points": [[x0, y0], [cx, cy]]})["roi"]
+    assert drawn["kind"] == "rect" and drawn["corners"][1] == [round(cx, 1), round(cy, 1)]
+    whole = state["layers"][0]["shown"]
+    assert 0 < drawn["shown_in_roi"][0] < whole
+    assert a.call("session_state")["roi"]["shown_in_roi"][0] == drawn["shown_in_roi"][0]
+    circle = a.call("set_roi", {"kind": "circle", "points": [[cx, cy]],
+                                "radius": (x1 - x0) / 10})["roi"]
+    assert circle["radius"] == round((x1 - x0) / 10, 1)
+    with pytest.raises(ToolError, match="radius"):
+        a.call("set_roi", {"kind": "circle", "points": [[cx, cy]]})
+    assert a.call("set_roi", {"clear": True})["roi"] is None
+    assert a.session.roi is None
+
+
+def test_set_roi_is_a_proposal_in_suggest_mode_headless(tmp_path):
+    a = simulated(tmp_path, mode="suggest")
+    answer = a.call("set_roi", {"kind": "rect", "points": [[0, 0], [1000, 1000]]})
+    assert "proposed" in answer and a.session.roi is None
+
+
+def test_read_values_reads_the_rows_inside_the_drawn_roi(tmp_path):
+    a = simulated(tmp_path)
+    a.call("set_grouped", {"on": False})
+    state = a.call("session_state")
+    (x0, x1), (y0, y1) = state["extent_nm"]["x"], state["extent_nm"]["y"]
+    xm = (x0 + x1) / 2
+    a.call("set_roi", {"kind": "rect", "points": [[x0, y0], [xm, y1]]})
+    read = a.call("read_values", {"columns": ["frame", "x_nm"]})
+    locs = a.session.locs
+    inside = ((locs["x_nm"] >= x0) & (locs["x_nm"] <= xm)
+              & (locs["y_nm"] >= y0) & (locs["y_nm"] <= y1)
+              & a.session.layers[0].filter.mask)
+    assert read["rows"] == int(inside.sum()) and "drawn" in read["from"]
+    frames = read["columns"]["frame"]
+    assert frames["n"] == read["rows"]
+    assert sum(frames["histogram"]["counts"]) == read["rows"]
+    assert read["columns"]["x_nm"]["max"] <= xm
+    everything = a.call("read_values", {"columns": ["frame"], "where": "all"})
+    assert everything["rows"] == len(locs)
+    with pytest.raises(ToolError, match="no attribute"):
+        a.call("read_values", {"columns": ["nonsense"]})
+    picture = a.call("read_values", {"columns": ["frame"], "plot": True})
+    assert isinstance(picture, Image) and picture.png.startswith(b"\x89PNG")
+    assert json.loads(picture.caption)["rows"] == read["rows"]
+
+
+def test_read_values_counts_the_clusters_in_the_drawn_roi(tmp_path):
+    a = simulated(tmp_path)
+    a.call("run_plugin", {"path": CLUSTERS, "apply": True})
+    state = a.call("session_state")
+    (x0, x1), (y0, y1) = state["extent_nm"]["x"], state["extent_nm"]["y"]
+    xm = (x0 + x1) / 2
+    a.call("set_roi", {"kind": "rect", "points": [[x0, y0], [xm, y1]]})
+    a.call("set_grouped", {"on": False})
+    a.call("set_filter", {"column": "cluster_id", "lo": 1})
+    read = a.call("read_values", {"columns": ["cluster_id"]})
+    locs = a.session.locs
+    x, y, ids = (np.asarray(locs[c]) for c in ("x_nm", "y_nm", "cluster_id"))
+    inside = (x >= x0) & (x <= xm) & (y >= y0) & (y <= y1) & (ids >= 1)
+    expected = np.unique(ids[inside]).size
+    assert expected > 1
+    assert read["columns"]["cluster_id"]["n_unique"] == expected

@@ -36,12 +36,15 @@ import dataclasses
 import inspect
 import io
 import itertools
+import json
 import tempfile
 import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+import numpy as np
 
 from ..images import load_images
 from ..lut import get as lut_table, groups as lut_groups
@@ -53,6 +56,7 @@ MODES = ("suggest", "act")
 # tens of kilobytes rather than the hundreds a print-quality PNG takes
 FIGURE_DPI = 90
 MAX_SOURCE = 60_000          # characters of source in one answer
+MAX_VALUES = 5000           # values read_values hands back at most
 MAX_RESULTS = 50             # results kept for `figure`; the oldest go
 
 
@@ -604,10 +608,66 @@ class Assistant:
             out["render"] = _plain(dataclasses.asdict(layer.state.settings))
         return out
 
+    def _drawn_roi(self) -> Optional[Dict[str, Any]]:
+        """The ROI drawn in the 2D view, as set_roi takes it, and how much of
+        each layer it holds; None when none is drawn."""
+        region = self.session.roi
+        if region is None:
+            return None
+        out: Dict[str, Any] = {"kind": region.kind}
+        if region.kind == "circle":
+            out["center"] = [round(float(v), 1) for v in region.points[0]]
+            out["radius"] = round(float(region.radius), 1)
+        elif region.kind == "rect":
+            x0, y0, x1, y1 = region.bounds
+            out["corners"] = [[round(float(x0), 1), round(float(y0), 1)],
+                              [round(float(x1), 1), round(float(y1), 1)]]
+        elif region.kind == "line":
+            out["ends"] = [[round(float(v), 1) for v in end] for end in region.ends()]
+            out["width"] = round(float(region.width), 1)
+        else:
+            out["vertices"] = [[round(float(v), 1) for v in p] for p in region.points]
+        out["bounds_nm"] = [round(float(v), 1) for v in region.bounds]
+        out["center_nm"] = [round(float(v), 1) for v in region.center]
+        layers = [i for i, lay in enumerate(self.session.layers) if not lay.is_image]
+        if layers and not self.session.axes(layers[0]).is_default:
+            # drawn on a picture of other attributes (photons against frame):
+            # its coordinates are that picture's, not nm
+            out["coordinates"] = "the view's own axes, not x_nm / y_nm"
+        out["shown_in_roi"] = {i: self._shown(i).get("shown") for i in layers}
+        return out
+
+    def _values_table(self, layer: int, where: str, roi: Optional[int]):
+        """The rows read_values reads, ``(locs, mask, what)``: the layer's table
+        as it shows it (blinks when grouped) and which rows count."""
+        self._layer(layer)
+        if roi is not None:
+            project = self.session.rois
+            found = next((r for r in project.rois.values() if r.number == roi), None)
+            if found is None:
+                numbers = sorted(r.number for r in project.rois.values())
+                raise ToolError(f"no ROI {roi} in the ROI manager; there are "
+                                f"{', '.join(map(str, numbers)) or 'none'}")
+            # the ROI's rows of its file, each layer's filter over them; the
+            # drawn ROI does not narrow a manager ROI (docs/regions.md)
+            locs, selection = project.region_context(found).table(layer)
+            mask = (np.asarray(selection.mask, dtype=bool) if where != "all"
+                    else np.ones(len(locs), dtype=bool))
+            return locs, mask, f"ROI {roi} of the ROI manager ({project.describe(found)})"
+        locs, selection = self.session.context(layer).table(layer)
+        if where == "all":
+            return locs, np.ones(len(locs), dtype=bool), "the whole table, no filter"
+        what = "the layer's filter"
+        if self.session.roi is not None:
+            what += f" inside the drawn {self.session.roi}"
+        return locs, np.asarray(selection.mask, dtype=bool), what
+
     # ------------------------------------------------------------------ reading
     @tool("What is open: the files, the table's attributes (`columns`), where the data lie "
           "(extent_nm) and, in the GUI, what the 2D view shows, each layer's "
-          "filter and grouping and how many localizations it shows, the ROIs, "
+          "filter and grouping and how many localizations it shows, the ROI "
+          "drawn in the 2D view ('roi': its shape and how many each layer shows "
+          "inside it) and how many ROIs the ROI manager holds, "
           "what can be undone, the results kept, the mode and the output "
           "folder, and which SMAPpy window you are connected to ('window').  Call it "
           "first, after anything that changes the session, and after a note that "
@@ -648,7 +708,11 @@ class Assistant:
             **({"view": view} if view is not None else {}),
             "layers": layers,
             "images": [self._image_entry(im) for im in s.images if not im.is_empty],
-            "rois": len(rois.rois) if rois is not None and hasattr(rois, "rois") else 0,
+            # the one ROI drawn in the 2D view, which every plugin's selection
+            # is cut to; not the ROI manager's ROIs, which are counted apart
+            "roi": self._drawn_roi(),
+            "roi_manager_rois": (len(rois.rois) if rois is not None
+                                 and hasattr(rois, "rois") else 0),
             "undo": s.undo_labels()[-5:],
             "results": [{"result": k.id, "plugin": k.path, "applied": k.applied}
                         for k in self.results[-10:]],
@@ -802,6 +866,126 @@ class Assistant:
             if not written:
                 raise ToolError("the picture was not written")
             return Image(written[0].read_bytes(), "the view")
+
+    @tool("The localizations' values of some attributes, as numbers: for each "
+          "column how many, how many distinct (n_unique: the clusters or tracks "
+          "an id column such as cluster_id names), min, max, mean, median, std "
+          "and a histogram.  Which rows: by default those the layer shows -- its "
+          "filter, cut to the ROI drawn in the 2D view (session_state's 'roi') "
+          "and the 3D box, exactly what a plugin run on the layer reads; "
+          "where='all' the layer's whole table; roi=<number> an ROI of the ROI "
+          "manager instead, with the layer's filter.  Rows are blinks on a "
+          "grouped layer.  plot=true answers with a picture of the histograms, "
+          "the numbers in its caption.",
+          columns={"type": "array", "items": {"type": "string"},
+                   "description": "attributes, e.g. ['frame'] or ['cluster_id']"},
+          layer={"type": "integer", "description": "default 0"},
+          where={"type": "string", "enum": ["selection", "all"],
+                 "description": "default 'selection'"},
+          roi={"type": "integer", "description": "an ROI of the ROI manager, by number"},
+          bins={"type": "integer", "description": "histogram bins, default 50; "
+                "an integer column with fewer distinct values gets one per value"},
+          range={"type": "array", "items": {"type": "number"},
+                 "description": "[lo, hi] of the histogram"},
+          values={"type": "boolean",
+                  "description": "also the values themselves (up to 5000 rows)"},
+          plot={"type": "boolean", "description": "a picture of the histograms"})
+    def read_values(self, columns: List[str], layer: int = 0, where: str = "selection",
+                    roi: Optional[int] = None, bins: int = 50,
+                    range: Optional[List[float]] = None, values: bool = False,
+                    plot: bool = False):
+        if isinstance(columns, str):
+            columns = [columns]
+        if not columns:
+            raise ToolError("name at least one column")
+        where = _pick("where", where, [("selection", "selection"), ("all", "all")])
+        if not len(self.session.locs):
+            raise ToolError("no localizations: load a file or simulate first")
+        locs, mask, what = self._values_table(layer, where, roi)
+        missing = [c for c in columns if c not in locs]
+        if missing:
+            raise ToolError(f"no attribute {', '.join(map(repr, missing))}; the table "
+                            f"has {', '.join(locs.columns)}")
+        if bins < 1:
+            raise ToolError("bins must be at least 1")
+        n = int(mask.sum())
+        if values and n > MAX_VALUES:
+            raise ToolError(f"{n} rows: values come for up to {MAX_VALUES}; "
+                            "narrow the filter or the ROI, or read the statistics")
+        out: Dict[str, Any] = {"rows": n, "of": len(locs), "from": what,
+                               "rows_are": "blinks" if self.session.layers[layer].grouped
+                               else "localizations",
+                               "columns": {}}
+        drawn = []
+        for column in columns:
+            v = np.asarray(locs[column])[mask]
+            entry, hist = _column_values(v, bins, range)
+            if values:
+                entry["values"] = _plain(v.tolist())
+            out["columns"][column] = entry
+            drawn.append((column, hist))
+        if not plot:
+            return out
+        return Image(_histograms_png(drawn, what), json.dumps(out, default=str))
+
+    @tool("Draw the ROI in the 2D view -- the one ROI every plugin's selection "
+          "is cut to, and read_values' default rows -- or clear it.  Not an ROI "
+          "of the ROI manager: those are many, kept with the file and measured "
+          "one by one.  kind 'rect' takes two corners, 'circle' a center and "
+          "radius, 'polygon' vertices, 'line' two ends and a width.  Positions "
+          "in nm, as session_state's extent_nm.  Changes no data.",
+          kind={"type": "string", "enum": ["rect", "circle", "polygon", "line"]},
+          points={"type": "array", "items": {"type": "array", "items": {"type": "number"}},
+                  "description": "[[x, y], ...] in nm: two corners, the center, the "
+                                 "vertices or the two ends"},
+          radius={"type": "number", "description": "a circle's, nm"},
+          width={"type": "number", "description": "a line's, nm"},
+          clear={"type": "boolean", "description": "remove the drawn ROI"},
+          reason={"type": "string", "description": "why, for the user (a proposal)"})
+    def set_roi(self, kind: str = "", points: Optional[List[List[float]]] = None,
+                radius: Optional[float] = None, width: Optional[float] = None,
+                clear: bool = False, reason: str = "") -> Dict[str, Any]:
+        from ..regions import Region
+        if clear:
+            region = None
+        else:
+            kind = _pick("kind", kind, [(k, k) for k in ("rect", "circle", "polygon", "line")])
+            try:
+                pts = np.asarray(points if points is not None else [], dtype=float)
+            except (TypeError, ValueError):
+                raise ToolError("points are [[x, y], ...] in nm") from None
+            if pts.ndim != 2 or pts.shape[1:] != (2,):
+                raise ToolError("points are [[x, y], ...] in nm")
+            need = {"rect": 2, "circle": 1, "line": 2}.get(kind)
+            if need is not None and len(pts) != need:
+                raise ToolError(f"a {kind} takes {need} point(s), not {len(pts)}")
+            if kind == "polygon" and len(pts) < 3:
+                raise ToolError("a polygon takes at least 3 vertices")
+            if kind == "circle":
+                if not radius or radius <= 0:
+                    raise ToolError("a circle needs a positive radius")
+                region = Region.circle(pts[0], float(radius))
+            elif kind == "line":
+                if not width or width <= 0:
+                    raise ToolError("a line needs a positive width")
+                region = Region.line(pts[0], pts[1], float(width))
+            elif kind == "rect":
+                (x0, y0), (x1, y1) = pts
+                if x0 == x1 or y0 == y1:
+                    raise ToolError("a rect's corners must differ in x and in y")
+                region = Region.rect(x0, y0, x1, y1)
+            else:
+                region = Region.polygon(pts)
+        if not self._viewing():
+            arguments: Dict[str, Any] = {"clear": True} if clear else {
+                "kind": kind, "points": pts.tolist()}
+            if radius is not None and not clear:
+                arguments["radius"] = radius
+            if width is not None and not clear:
+                arguments["width"] = width
+            return self._propose("set_roi", arguments, reason)
+        self.session.set_roi(region)
+        return {"roi": self._drawn_roi()}
 
     # ------------------------------------------------------------------- trying
     @tool("Run a plugin.  apply=false (the default) tries it on a copy of the "
@@ -1384,6 +1568,62 @@ class Assistant:
         return [p.as_dict() for p in self.proposals]
 
 
+def _column_values(v: np.ndarray, bins: int, span=None):
+    """One column's statistics and histogram, for read_values: ``(entry,
+    (counts, edges))``.  An integer column with few distinct values -- frames
+    of a short movie, a channel -- gets a bin per value, so a count is a
+    count of that value and not of a bin straddling two."""
+    entry: Dict[str, Any] = {"n": int(v.size)}
+    numeric = np.issubdtype(v.dtype, np.number) or v.dtype == bool
+    if not numeric:
+        distinct, counts = np.unique(v.astype(str), return_counts=True)
+        entry["n_unique"] = int(distinct.size)
+        entry["counts"] = {str(d): int(c) for d, c in zip(distinct[:50], counts[:50])}
+        return entry, None
+    v = v.astype(float)
+    finite = v[np.isfinite(v)]
+    if finite.size < v.size:
+        entry["n_not_finite"] = int(v.size - finite.size)
+    if not finite.size:
+        return entry, None
+    distinct = np.unique(finite)
+    entry["n_unique"] = int(distinct.size)
+    entry.update({k: round(float(f(finite)), 6) for k, f in (
+        ("min", np.min), ("max", np.max), ("mean", np.mean),
+        ("median", np.median), ("std", np.std))})
+    lo, hi = (float(span[0]), float(span[1])) if span else (entry["min"], entry["max"])
+    integer = bool(np.all(distinct == np.round(distinct)))
+    if integer and hi - lo + 1 <= max(bins, 1) * 4 and hi - lo + 1 <= 2000:
+        edges = np.arange(np.floor(lo), np.floor(hi) + 2) - 0.5
+    else:
+        edges = np.linspace(lo, hi if hi > lo else lo + 1, bins + 1)
+    counts, edges = np.histogram(finite, bins=edges)
+    entry["histogram"] = {"counts": counts.tolist(),
+                          "edges": [round(float(e), 6) for e in edges]}
+    return entry, (counts, edges)
+
+
+def _histograms_png(drawn, what: str) -> bytes:
+    """The histograms of read_values, one panel each, as a PNG."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    shown = [(c, h) for c, h in drawn if h is not None]
+    if not shown:
+        raise ToolError("nothing to draw: no finite numbers in these columns")
+    figure = Figure(figsize=(4.5 * len(shown), 3.2))
+    FigureCanvasAgg(figure)
+    for i, (column, (counts, edges)) in enumerate(shown):
+        ax = figure.add_subplot(1, len(shown), i + 1)
+        ax.stairs(counts, edges, fill=True)
+        ax.set_xlabel(column)
+        ax.set_ylabel("count")
+    figure.suptitle(what, fontsize=9)
+    figure.tight_layout()
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format="png", dpi=FIGURE_DPI)
+    return buffer.getvalue()
+
+
 # What a client is told when it connects (MCP's `instructions`): how to work
 # with these tools.  Agent-neutral, short; the pages hold the rest.
 INSTRUCTIONS = """\
@@ -1411,6 +1651,14 @@ How to work:
   again in the GUI and over many files with smappy-batch.
 * recall before deciding what the user may have decided already; remember
   and save_chain only when the user has agreed to keep it.
+* Two kinds of ROI.  The ROI drawn in the 2D view (session_state's 'roi',
+  set_roi) is one shape that every plugin run on a layer is confined to,
+  with the filter: "in the ROI" means it, unless the user names an ROI of
+  the ROI manager (many, numbered, kept with the file, measured one by one
+  by the per-region steps).  Questions about what is in it -- how many
+  clusters, a histogram of the frames -- are read_values (n_unique of
+  cluster_id; plot=true for a picture), after the plugin that makes the
+  column if the table lacks it (run_plugin finds clusters in the selection).
 * load opens a table, or an image as sources; set_layer shows an image in
   a layer and sets any layer's colours, contrast and render settings.
 * In the GUI, what a user clicks -- a menu item, the Load plugin's Add, the

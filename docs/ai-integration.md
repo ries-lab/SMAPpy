@@ -206,6 +206,21 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   button is in `WINDOW_BUTTONS`: the GUI tests walk the real menus and the
   shipped plugins, so a new item that is neither fails there.  Before them
   "add this image and show it in a layer" had no way in but the screen.
+* **the drawn ROI and what is in it** -- `session_state` reports the ROI
+  drawn in the 2D view (`Session.roi`, the one shape every plugin's
+  selection is cut to) as `roi`, its shape as `set_roi` takes it and how
+  many each layer shows inside it, and counts the ROI manager's apart
+  (`roi_manager_rois`); the two were one number before, and the model could
+  not tell "in the ROI" from "in the ROI manager".  `set_roi` draws or
+  clears it, a change to what is shown and so made in suggest mode with the
+  GUI attached.  `read_values` reads columns of the rows a plugin would read
+  -- the layer's table as it shows it, its filter, the drawn ROI and the 3D
+  box (`Context.table`); `where="all"` the whole table; `roi=` an ROI of the
+  ROI manager through `ROIProject.region_context` -- as statistics, a
+  histogram (a bin per value for an integer column with few) and the number
+  of distinct values, which answers "how many clusters in the ROI" from
+  `cluster_id`; `plot=true` draws the histograms.  Before it, "a histogram
+  of the frames in the ROI" had no answer but a plugin that did not ask.
 * `show` -- the GUI only (a tool `needs="viewer"`, not listed headless):
   moves the user's 2D view onto a point, an ROI or everything.
 * `open_plugin` -- the GUI only (`needs="panels"`): opens a plugin's window
