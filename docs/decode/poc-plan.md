@@ -969,3 +969,33 @@ engine on the example package, each phase timed with the device synchronised.
   the original's reference runs ran unclipped to epoch 359 without the check failing, its
   summation order on the 4090 being another.  Whether to train clipped is for (f) and (i):
   better at 3 epochs, but not the original's training.
+
+### (f) as done, 2026-11-10 -- the comparison with the original running
+
+- **The runner** is `decode_smlm/training.py`, `train(folder)`: the live engine's loop around a
+  job folder, `setup_random_simulation` and `setup_trainer` as they are.  Added: the job's seed,
+  the test set drawn once and kept (`test_set.pt`), every random state in the checkpoint (taken
+  before the next epoch's frames are drawn), the checkpoint written atomically, the `STOP` file
+  and SIGTERM as a stop at the checkpoint, `model.safetensors` and a `progress.jsonl` line every
+  epoch, DECODE's restarts as `restart` lines (each reseeded from the job's seed), `lock.json`,
+  and a refusal of a job another SMAPpy version prepared (`--allow-other-version`).  Left out:
+  TensorBoard and the four matplotlib figures DECODE drew every epoch only to close them.
+- **The files** are SMAPpy's, torch-free: `smappy/training/model_file.py` (safetensors written and
+  read with numpy, the metadata a JSON document in the header, read without the tensors) and
+  `smappy/training/progress.py` (appended and fsynced; NaN written as null; a line a crash cut
+  short skipped, and the next line kept off it).  `smappy.__version__` no longer imports the
+  fit pipeline (a training machine may have SMAPpy's sources without its compiled fitter).
+- **The command** is `smappy-decode train | stop | status FOLDER` (`decode_smlm/cli.py`).
+- **The tests** (`tests/decode_tests/test_training.py`, a tiny job of 16 x 16 frames, 8 batches,
+  3 epochs, about a second each on the CPU, so not the slow tier): every progress line valid;
+  stopped after epoch 1 and resumed, epoch 2's losses bitwise the uninterrupted run's; a STOP
+  file; a warm start from a model file; the lock; the version refusal; `status`.  The model and
+  progress files: `tests/test_training_files.py`.
+- **A moved folder trains:** the reference job written on the Mac (`scripts/decode/reference_job.py`),
+  copied to gpuvm and trained there.  macOS's spawned data-loader workers found a function local
+  to `SMLMLiveDataset.sample` that the lazy split held and could not pickle: now module-level, with
+  a test.
+- **One epoch of the reference job**: 196 s on the M1 Max (MPS, 4 workers), 12.2 s on the H100.
+- **The comparison**, §1 (f)'s last criterion, is running on gpuvm: the reference job with seeds 0
+  and 1, 1000 epochs each, one after the other (`port_run0`, `port_run1`), unclipped, TF32 on,
+  to be set against the original's two runs when all four have finished.
