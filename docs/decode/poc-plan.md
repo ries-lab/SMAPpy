@@ -949,12 +949,23 @@ engine on the example package, each phase timed with the device synchronised.
   frame (`LazySplit`; 1.6 s of the simulation's 2.4).  1000 epochs: 3.6 h, from 5.4 (the
   original on the 4090: 7.2).
 - **Measured, not adopted:** 2 data-loader workers instead of 4, 12.2 s (this machine's 4 cores);
-  fused AdamW, no gain; torch.distributions' argument checks off, 0.6 s, but they are what
-  catches the NaN below; the network channels-last, training 8.4 s with TF32 and twice as slow
+  fused AdamW, no gain; all of torch.distributions' argument checks off, 0.6 s (the one that
+  failed runs is now off on its own, below); the network channels-last, training 8.4 s with TF32 and twice as slow
   without.
-- **TF32.**  Current torch convolves in TF32 on the H100 by default, 11.3 s against 18 s without.
-  The original's cuDNN 8.3 evidently did not on the 4090 ((d): its GPU output within 8e-5 of its
-  CPU's).  4 of about 15 runs with TF32 diverged to NaN in their first epochs, none of 7
-  without; the reference runs had none by epoch 359.  To settle in (f), with more runs.  The NaN
-  raises in the loss's Categorical check before DECODE's restart for a pathological loss can see
-  it, so a run dies instead of restarting: (f) catches it and restarts.
+- **TF32** (cuDNN's, torch's default on the H100) is 1.6x of the training's speed: 11.3 s against
+  18 s an epoch.  It is not what failed runs: in a study of 10 seeds x 3 epochs each
+  (`--watch`), TF32 on failed 1 of 10, TF32 off 2 of 10, TF32 on with DECODE's gradient
+  clipping (`grad_mod`, `clip_grad_norm_` at 0.03) none, and the test loss after 3 epochs had a
+  median of 520, 526 and 376 (366 -- 393).  The original's cuDNN 8.3 evidently did not use TF32
+  on the 4090 ((d): its GPU output within 8e-5 of its CPU's).
+- **The failures were torch's argument check, not a NaN.**  A run caught failing (seed 17, its
+  batch saved) had a finite network output: 40 -- 60 pixels a frame saturated at the clamp,
+  p = sigmoid(8), and the rest at its floor.  Normalised, the mixture's 1600 weights summed to 1
+  within 9.5e-7 in the batch before; in the next float32 rounding went past the 1e-6 that
+  `torch.distributions.constraints.simplex` allows, and `Categorical` refused it -- a ValueError
+  before DECODE's restart could see anything.  The mixture's `Categorical` is now built
+  unvalidated (`loss.py`), which changes no number.  Without clipping the gradient's norm
+  reaches 10^7 -- 10^8 in the first epochs (with it, 0.03), likely what saturates the network;
+  the original's reference runs ran unclipped to epoch 359 without the check failing, its
+  summation order on the 4090 being another.  Whether to train clipped is for (f) and (i):
+  better at 3 epochs, but not the original's training.
