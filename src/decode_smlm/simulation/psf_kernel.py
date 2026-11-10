@@ -326,7 +326,7 @@ class CubicSplinePSF(PSF):
 
     def __init__(self, xextent, yextent, img_shape, ref0, coeff, vx_size,
                  *, roi_size: (None, tuple) = None, ref_re: (None, torch.Tensor, tuple) = None,
-                 roi_auto_center: bool = False, device: str = 'cuda:0', max_roi_chunk: int = 500000):
+                 roi_auto_center: bool = False, device: str = None, max_roi_chunk: int = 500000):
         """
         Initialise Spline PSF
 
@@ -357,6 +357,7 @@ class CubicSplinePSF(PSF):
 
         self.ref_re = self._shift_ref(ref_re, roi_auto_center)
 
+        device = decode_smlm.utils.hardware.default_device() if device is None else device  # was 'cuda:0'
         self._device, self._device_ix = decode_smlm.utils.hardware._specific_device_by_str(device)
         self.max_roi_chunk = max_roi_chunk
 
