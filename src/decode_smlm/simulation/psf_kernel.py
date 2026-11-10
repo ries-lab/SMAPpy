@@ -282,7 +282,7 @@ class GaussianPSF(PSF):
 
         x = torch.linspace(self.xextent[0], self.xextent[1], img_shape[0] + 1).float()
         y = torch.linspace(self.yextent[0], self.yextent[1], img_shape[1] + 1).float()
-        xx, yy = torch.meshgrid(x, y)
+        xx, yy = torch.meshgrid(x, y, indexing='ij')
 
         xx = xx.unsqueeze(2).repeat(1, 1, num_emitters)
         yy = yy.unsqueeze(2).repeat(1, 1, num_emitters)

@@ -122,7 +122,7 @@ class TestBgPerEmitterFromBgFrame:
         x_in = []
         x_in.append(torch.randn((1, 1, 64, 64)))
         x_in.append(torch.zeros((1, 1, 64, 64)))
-        x_in.append(torch.meshgrid(torch.arange(64), torch.arange(64))[0].unsqueeze(0).unsqueeze(0).float())
+        x_in.append(torch.meshgrid(torch.arange(64), torch.arange(64), indexing="ij")[0].unsqueeze(0).unsqueeze(0).float())
 
         # excpt outcome
         expect = []
@@ -142,7 +142,7 @@ class TestBgPerEmitterFromBgFrame:
 
     test_data = [
         (torch.zeros((1, 1, 64, 64)), emitter.RandomEmitterSet(100), torch.zeros((100,))),
-        (torch.meshgrid(torch.arange(64), torch.arange(64))[0].unsqueeze(0).unsqueeze(0).float(),
+        (torch.meshgrid(torch.arange(64), torch.arange(64), indexing="ij")[0].unsqueeze(0).unsqueeze(0).float(),
          emitter.CoordinateOnlyEmitter(torch.tensor([[8., 0., 0.]])),
          torch.tensor([8.])),
         (torch.rand((1, 1, 64, 64)), emitter.CoordinateOnlyEmitter(torch.tensor([[70., 32., 0.]])),

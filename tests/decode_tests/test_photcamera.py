@@ -66,7 +66,7 @@ class TestSCMOS(TestPhoton2Camera):
 
     @pytest.fixture()
     def cam_fix(self):
-        read_sigma = torch.meshgrid(torch.arange(256), torch.arange(256))[0]
+        read_sigma = torch.meshgrid(torch.arange(256), torch.arange(256), indexing="ij")[0]
 
         return camera.SCMOS(sample_mode='batch', qe=1.0, spur_noise=0.002, em_gain=300., e_per_adu=45.,
                             baseline=100, read_sigma=read_sigma, photon_units=False)

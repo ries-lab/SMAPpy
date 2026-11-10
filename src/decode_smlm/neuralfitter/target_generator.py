@@ -106,7 +106,7 @@ class UnifiedEmbeddingTarget(TargetGenerator):
         self.img_shape = img_shape
 
         self.mesh_x, self.mesh_y = torch.meshgrid(
-            (torch.arange(-(self._roi_size - 1) // 2, (self._roi_size - 1) // 2 + 1),) * 2)
+            (torch.arange(-(self._roi_size - 1) // 2, (self._roi_size - 1) // 2 + 1),) * 2, indexing='ij')
 
         self._delta_psf = DeltaPSF(xextent=xextent, yextent=yextent, img_shape=img_shape)
         self._em_filter = process.RemoveOutOfFOV(xextent=xextent, yextent=yextent, zextent=None, xy_unit='px')

@@ -21,7 +21,7 @@ class Offset2Coordinate:
                                          yextent=yextent,
                                          img_shape=img_shape, roi_size=1)
 
-        xv, yv = torch.meshgrid([off_psf._bin_ctr_x, off_psf._bin_ctr_y])
+        xv, yv = torch.meshgrid([off_psf._bin_ctr_x, off_psf._bin_ctr_y], indexing='ij')
         self._x_mesh = xv.unsqueeze(0)
         self._y_mesh = yv.unsqueeze(0)
 
