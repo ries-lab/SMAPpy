@@ -3,10 +3,7 @@ import json
 import pathlib
 from pathlib import Path
 from typing import Union
-try:
-    import importlib.resources as pkg_resources
-except ImportError:  # Try backported to PY<37 `importlib_resources`.
-    import importlib_resources as pkg_resources
+from importlib import resources
 
 import yaml
 
@@ -121,8 +118,8 @@ def load_reference() -> dict:
     """
 
     from . import reference_files
-    param_ref = pkg_resources.open_text(reference_files, 'reference.yaml')
-    param_ref = yaml.load(param_ref, Loader=yaml.SafeLoader)
+    # files(): open_text and read_text are deprecated since Python 3.11; and the file is closed
+    param_ref = yaml.load((resources.files(reference_files) / 'reference.yaml').read_text(), Loader=yaml.SafeLoader)
 
     return param_ref
 
@@ -225,8 +222,8 @@ def copy_reference_param(path: Union[str, Path]):
     assert path.is_dir()
 
     from . import reference_files
-    pr = pkg_resources.read_text(reference_files, "reference.yaml")
-    pf = pkg_resources.read_text(reference_files, "param_friendly.yaml")
+    pr = (resources.files(reference_files) / "reference.yaml").read_text()
+    pf = (resources.files(reference_files) / "param_friendly.yaml").read_text()
 
     (path / "reference.yaml").write_text(pr)
     (path / "param_friendly.yaml").write_text(pf)
