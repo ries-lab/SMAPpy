@@ -6,6 +6,8 @@ from typing import Union
 
 import torch
 
+from . import hardware
+
 
 def hash_model(modelfile):
     """
@@ -62,7 +64,7 @@ class LoadSaveModel:
 
         """
         if device is None:
-            device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            device = hardware.default_device()
 
         model = self.model
         print('Model instantiated.')

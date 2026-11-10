@@ -9,6 +9,8 @@ from decode_smlm.utils import hardware
 @pytest.mark.parametrize("device_str,device,ix", [('cpu', 'cpu', None),
                                                   ('cuda', 'cuda', None),
                                                   ('cuda:1', 'cuda', 1),
+                                                  ('mps', 'mps', None),
+                                                  ('mps:0', 'mps', 0),
                                                   ('cud:1', 'err', None)])
 def test__specific_device_by_str(device_str, device, ix):
 
@@ -50,3 +52,12 @@ def test_get_max_batch_size(size_low, size_high, expct):
         with pytest.raises(RuntimeError) as err:
             hardware.get_max_batch_size(dummy, x_size, 'cuda:0', size_low, size_high)
         assert "Lowest possible batch size is outside of provided bounds." == str(err.value)
+
+
+def test_a_device_this_machine_lacks_falls_back_to_one_it_has():
+    import warnings
+    with patch('torch.cuda.is_available', return_value=False):
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            assert hardware.available_device('cuda:0') in ('mps', 'cpu')
+    assert hardware.available_device('cpu') == 'cpu'

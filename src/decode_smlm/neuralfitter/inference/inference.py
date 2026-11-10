@@ -142,8 +142,8 @@ class Infer:
 
             return o
 
-        assert next(model.parameters()).is_cuda, \
-            "Auto determining the max batch size makes only sense when running on CUDA device."
+        assert next(model.parameters()).device.type in ('cuda', 'mps'), \
+            "Auto determining the max batch size makes only sense on a GPU (CUDA or MPS)."
 
         return hardware.get_max_batch_size(model_forward_no_grad, frame_size, next(model.parameters()).device,
                                            limit_low, limit_high)

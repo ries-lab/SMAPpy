@@ -9,6 +9,10 @@ from decode_smlm.neuralfitter import post_processing
 from decode_smlm.neuralfitter import train_val_impl
 from decode_smlm.neuralfitter.utils import logger as logger_utils
 
+from decode_smlm.utils.hardware import default_device
+
+GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only
+
 
 class TestTrain:
 
@@ -49,7 +53,7 @@ class TestTrain:
 
     @pytest.fixture()
     def train_val_environment(self, loss, model_mock):
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        device = torch.device(GPU)
         # ship the things to the apropriate device
         loss.__init__(device=device)
         model = model_mock.to(device)

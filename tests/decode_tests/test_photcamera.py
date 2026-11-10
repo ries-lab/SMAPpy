@@ -4,6 +4,10 @@ import torch
 import decode_smlm.simulation.camera as camera
 from decode_smlm.generic import test_utils
 
+from decode_smlm.utils.hardware import default_device
+
+GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only
+
 
 class TestPhoton2Camera:
 
@@ -29,9 +33,9 @@ class TestPhoton2Camera:
         tol = 0.01
         assert abs((x.mean() - out.mean()) / x.mean()) <= tol
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Shipping to CUDA makes only sense if CUDA is available.")
-    @pytest.mark.parametrize("input_device", ["cpu", "cuda"])
-    @pytest.mark.parametrize("forward_device", ["cpu", "cuda"])
+    @pytest.mark.skipif(GPU == "cpu", reason="Shipping to a GPU makes only sense if there is one.")
+    @pytest.mark.parametrize("input_device", ["cpu", GPU])
+    @pytest.mark.parametrize("forward_device", ["cpu", GPU])
     def test_forward_backward_device(self, cam_fix, input_device, forward_device):
         exp_device = torch.rand(1).to(forward_device).device
 

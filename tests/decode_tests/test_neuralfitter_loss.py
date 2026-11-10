@@ -4,6 +4,10 @@ import torch
 from decode_smlm.generic import test_utils
 from decode_smlm.neuralfitter import loss
 
+from decode_smlm.utils.hardware import default_device
+
+GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only
+
 
 class TestLossAbstract:
 
@@ -50,7 +54,7 @@ class TestLossAbstract:
             random_input: fixture as above
         """
 
-        return random_loss_input[0].cuda(), random_loss_input[1].cuda(), random_loss_input[2].cuda()
+        return random_loss_input[0].to(GPU), random_loss_input[1].to(GPU), random_loss_input[2].to(GPU)
 
     def test_call(self, loss_impl, random_loss_input):
         assert (loss_impl(*random_loss_input) == loss_impl.forward(*random_loss_input)).all(), "Call does not yield " \
@@ -73,7 +77,7 @@ class TestLossAbstract:
 
         _ = loss_impl(*random_loss_input)
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available on test machine.")
+    @pytest.mark.skipif(GPU == "cpu", reason="No GPU on test machine.")
     def test_forward_cuda(self, loss_impl, random_cuda):
         """Tests the CUDA capability"""
 
@@ -104,9 +108,9 @@ class TestPPXYZBLoss(TestLossAbstract):
                 torch.rand((request.param, 6, 64, 64)),
                 torch.rand((request.param, 6, 64, 64)))
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available on test machine.")
+    @pytest.mark.skipif(GPU == "cpu", reason="No GPU on test machine.")
     def test_forward_cuda(self, loss_impl, random_cuda):
-        loss_impl.__init__(device=torch.device('cuda'))  # re-init with cuda
+        loss_impl.__init__(device=torch.device(GPU))  # re-init on the GPU
         super().test_forward_cuda(loss_impl, random_cuda)
 
     def test_forward_quant(self, loss_impl):

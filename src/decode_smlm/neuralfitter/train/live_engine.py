@@ -132,13 +132,13 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
     else:
         device = param.Hardware.device
 
-    if torch.cuda.is_available():
-        _, device_ix = decode_smlm.utils.hardware._specific_device_by_str(device)
-        if device_ix is not None:
-            # do this instead of set env variable, because torch is inevitably already imported
-            torch.cuda.set_device(device)
-    elif not torch.cuda.is_available():
-        device = 'cpu'
+    device = decode_smlm.utils.hardware.available_device(device)  # CUDA, else MPS, else the CPU
+    param.Hardware.device_simulation = decode_smlm.utils.hardware.available_device(
+        param.Hardware.device_simulation)
+    name, device_ix = decode_smlm.utils.hardware._specific_device_by_str(device)
+    if name == 'cuda' and device_ix is not None:
+        # do this instead of set env variable, because torch is inevitably already imported
+        torch.cuda.set_device(device)
 
     if param.Hardware.torch_multiprocessing_sharing_strategy is not None:
         torch.multiprocessing.set_sharing_strategy(

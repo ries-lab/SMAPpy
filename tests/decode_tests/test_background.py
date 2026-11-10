@@ -6,6 +6,10 @@ import torch
 import decode_smlm.simulation.background as background
 from decode_smlm.generic import emitter, test_utils
 
+from decode_smlm.utils.hardware import default_device
+
+GPU = default_device()  # CUDA, else Apple's GPU, else 'cpu': DECODE tested CUDA only
+
 
 class BackgroundAbstractTest(ABC):
 
@@ -45,9 +49,9 @@ class BackgroundAbstractTest(ABC):
         assert x.size() == out.size()
         assert x.device == out.device
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Makes only sense if we have another device to test on.")
+    @pytest.mark.skipif(GPU == "cpu", reason="Makes only sense if we have another device to test on.")
     def test_sample_like_cuda(self, bgf):
-        x = torch.rand((2, 32, 32)).cuda()
+        x = torch.rand((2, 32, 32)).to(GPU)
 
         out = bgf.sample_like(x)
 
