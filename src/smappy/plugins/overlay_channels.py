@@ -117,14 +117,16 @@ def with_fitter(settings: OverlaySettings, fitter_settings) -> OverlaySettings:
 
 
 def registration_for(locs, settings: OverlaySettings, report=None, stop=None):
-    """``(transform, how, measured)``: the registration ``settings`` name, a line saying where
-    it came from, and the `RegistrationResult` when it was measured now (else None)."""
+    """``(transform, how, measured, path)``: the registration ``settings`` name, a line saying
+    where it came from, the `RegistrationResult` when it was measured now (else None), and the
+    file it is kept in (None when it is kept nowhere)."""
     from ..calibrate.transform import load_transform
     from .. import channel_overlay as co
     if settings.source == "file":
         if not settings.path:
             raise ValueError("choose a transformation file (_2ct.h5)")
-        return load_transform(settings.path), f"from {Path(settings.path).name}", None
+        return (load_transform(settings.path), f"from {Path(settings.path).name}", None,
+                Path(settings.path))
     if settings.source == "table":
         if not settings.beads_table:
             raise ValueError("choose the fitted beads: a localization file fitted as two "
@@ -147,7 +149,7 @@ def registration_for(locs, settings: OverlaySettings, report=None, stop=None):
     if settings.save:
         cached = co.cached_transform(where, key)
         if cached is not None:
-            return cached, f"from {where.name}, measured on these beads before", None
+            return cached, f"from {where.name}, measured on these beads before", None, where
     if settings.source == "table":
         from ..io.formats import load
         beads, _ = load(files[0])
@@ -163,7 +165,7 @@ def registration_for(locs, settings: OverlaySettings, report=None, stop=None):
     if settings.save:
         measured.save(where, overwrite=True)
         how += f", kept as {where.name}"
-    return measured.transform, how, measured
+    return measured.transform, how, measured, where if settings.save else None
 
 
 @register("Analysis/After fit/Overlay channels")
@@ -192,7 +194,7 @@ class OverlayChannels(Plugin):
         co.secondary_rows(locs)                      # refused here, before beads are fitted
         if co.is_overlaid(locs):
             raise ValueError("the secondary channel has already been put onto the main one")
-        transform, how, measured = registration_for(locs, settings, ctx.report, ctx.stop)
+        transform, how, measured, path = registration_for(locs, settings, ctx.report, ctx.stop)
         problem = co.check_layout(locs, transform)
         if problem:
             ctx.warn(problem)
@@ -203,7 +205,7 @@ class OverlayChannels(Plugin):
             lines.append(f"{p['n_inliers']:,} bead pairs, residual dx "
                          f"{p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
             plots["beads"] = registration_plot(measured)
-        out = co.overlay_table(locs, transform)
+        out = co.overlay_table(locs, transform, path=path)
         n = int(co.secondary_rows(locs).sum())
         lines.insert(0, f"{n:,} of {len(locs):,} localizations moved onto the main channel")
         return Result(locs=out, text="\n".join(lines), plots=plots, settings=settings,

@@ -44,7 +44,10 @@ structures that lie together, the shift that is left can be measured on
 the overlaid table with
 [Register layers](plugin:Analysis/Register/Register layers), one layer per
 `channel`, and taken out with
-[Transform](plugin:Analysis/Process/Transform).
+[Transform](plugin:Analysis/Process/Transform).  Whatever the structures,
+[Raw channel offset](plugin:Localize/Raw channel offset) measures how far the
+map is off from the dyes' crosstalk in the raw frames, per region of the
+field.
 
 Every fitter offers this plugin as a step of its
 [*after the fit*](plugin:Analysis/After fit/After the fit), *overlay
@@ -230,7 +233,8 @@ registration afresh on every run.
 
 The table with the second half moved onto the first, and `channel` written:
 0 for the main half's dye, 1 for the other's.  The move is recorded in the
-table's metadata with the map that was used, and is one step of the undo.
+table's metadata with the map that was used, and the `_2ct.h5` it is kept
+in when it is in one, and is one step of the undo.
 
 The output says how many localizations were moved, where the registration
 came from (a file, measured now, or measured before on the same beads), the

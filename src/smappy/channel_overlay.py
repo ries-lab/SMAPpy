@@ -67,10 +67,13 @@ def is_overlaid(locs: Localizations) -> bool:
                for record in locs.metadata.get("transformations") or [])
 
 
-def overlay_table(locs: Localizations, transform, what: str = "") -> Localizations:
+def overlay_table(locs: Localizations, transform, what: str = "",
+                  path: Optional[Path] = None) -> Localizations:
     """``locs`` with its secondary half moved onto the main half, and ``channel`` written.
 
-    ``transform`` is a `ChannelTransform` (secondary to main, chip pixels).
+    ``transform`` is a `ChannelTransform` (secondary to main, chip pixels); ``path`` the
+    `_2ct.h5` it is kept in, when it is, recorded with the move so that *Raw channel offset*
+    can find the map again and write a corrected copy of it.
     Refused for a table already moved: twice is never what is meant.
     """
     from .locs import table_pixel_sizes
@@ -80,7 +83,8 @@ def overlay_table(locs: Localizations, transform, what: str = "") -> Localizatio
                          "undo that first to overlay it again")
     rows = secondary_rows(locs)
     sizes = table_pixel_sizes(locs)
-    moved = transform_table(locs, from_channel_transform(transform, sizes), rows,
+    origin = {"file": str(path)} if path else None
+    moved = transform_table(locs, from_channel_transform(transform, sizes, origin), rows,
                             name=RECORD_NAME, what=what or "camera_channel 1")
     columns = dict(moved.columns)
     # the dye: in this workflow, the half it was seen in
