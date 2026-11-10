@@ -188,5 +188,7 @@ class TestSpatialIntegration(TestLookUpPostProcessing):
         p_out = post._nms(p, post.p_aggregation, 0.2, 0.6)
 
         """Assertions"""
-        assert test_utils.tens_almeq(p_out[0, 4:6, 4], torch.tensor(expct[0]))
-        assert test_utils.tens_almeq(p_out[1, 6:8, 4], torch.tensor(expct[1]))
+        # 1e-6, not DECODE's 1e-8: 0.25 + 0.251 is a float32 step off 0.501 on current torch
+        # (0.50099993 against 0.50099999 on torch 1.12), and 1e-8 is below float32's step at 0.5
+        assert test_utils.tens_almeq(p_out[0, 4:6, 4], torch.tensor(expct[0]), prec=1e-6)
+        assert test_utils.tens_almeq(p_out[1, 6:8, 4], torch.tensor(expct[1]), prec=1e-6)

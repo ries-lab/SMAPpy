@@ -1,14 +1,14 @@
 from pathlib import Path
 import pytest
 
-from ..utils import checkpoint
+from decode_smlm.utils import checkpoint
 
 
 class TestCheckpoint:
 
     @pytest.fixture()
-    def ckpt(self):
-        path = Path('dummy_ckpt.pt')
+    def ckpt(self, tmp_path):
+        path = tmp_path / 'dummy_ckpt.pt'
         yield checkpoint.CheckPoint(path)
         path.unlink()
 

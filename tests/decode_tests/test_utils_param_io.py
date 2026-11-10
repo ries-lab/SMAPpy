@@ -112,9 +112,9 @@ def test_set_autoscale_param():
     assert param.Scaling.z_max == 960.
 
 
-def test_copy_reference_param():
+def test_copy_reference_param(tmp_path):
 
-    path = test_dir / Path(f'assets/refs')
+    path = tmp_path / 'refs'   # DECODE wrote into its test folder's assets/
     path.mkdir(exist_ok=True)
 
     with asset_handler.RMAfterTest(path, recursive=True):
