@@ -232,6 +232,14 @@ Moves the selected step one place earlier.
 ### down
 Moves the selected step one place later.
 
+### interface...
+Chooses the settings the chain asks: tick a step's setting and type the label
+it goes by in the chain.  The chain's form then shows those at the top and
+folds its steps away behind *show the steps*, a tick that only such a chain
+has: every step's settings are still saved and run, and the tick shows them.
+The batch window shows the chain the same way.  Saved with the chain (`interface:` in its file); see
+`docs/batch.md`, "A chain's interface".
+
 ### rename...
 Gives the selected step a label.  The label, made into an identifier, is the
 step's key: what overrides and the summary's columns are named by

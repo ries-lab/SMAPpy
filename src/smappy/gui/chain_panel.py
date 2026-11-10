@@ -15,7 +15,8 @@ so a restart loses nothing.
 
 The steps are a tree: a block (`docs/regions.md`) holds steps of its own,
 indented under it.  A step is added after the selected one, or into the
-selected block; up and down move a step within its own list.  **check**, on
+selected block; up and down move a step within its own list.  **interface...** chooses
+the settings the chain asks (`chain_interface.py`).  **check**, on
 a block, times it in a few of its regions and says what the whole will take
 and which columns its steps change without writing them back
 (`blocks.BlockPlugin.estimate`).
@@ -140,6 +141,11 @@ class ChainPanel(QWidget):
         self.checked.setWordWrap(True)
         self.checked.setStyleSheet(note_style())
         checking.addWidget(self.check_button)
+        self.interface_button = QPushButton("interface...")
+        self.interface_button.setToolTip("choose the settings this chain asks: shown at the top "
+                                         "of its form, the steps folded away")
+        self.interface_button.clicked.connect(self.edit_interface)
+        checking.addWidget(self.interface_button)
         checking.addWidget(self.checked, 1)
         column.addLayout(checking)
         self.editor.setVisible(False)
@@ -351,7 +357,10 @@ class ChainPanel(QWidget):
         step = _step_at(spec, path)
         name, ok = QInputDialog.getText(self, "Rename step", "Name:", text=step.title())
         if ok and name.strip():
+            before = spec.keys()
             step.label = name.strip()
+            # the interface names settings by their step's key, which the label makes
+            spec.interface = chains.renamed_interface(spec.interface, before, spec.keys())
             self._apply(spec)
 
     def remove_step(self) -> None:
@@ -392,6 +401,18 @@ class ChainPanel(QWidget):
             return
         self.checked.setText("no regions to time" if estimate is None
                              else estimate.text())
+
+    def edit_interface(self, dialog=None) -> bool:
+        """Choose the settings the chain asks (`chain_interface.InterfaceDialog`); ``dialog``,
+        already answered, is for a test."""
+        from .chain_interface import InterfaceDialog
+        spec = self.current_spec()
+        if dialog is None:
+            dialog = InterfaceDialog(self.cls, dict(spec.interface), self)
+            if dialog.exec() != dialog.Accepted:
+                return False
+        spec.interface = dialog.chosen()
+        return self._apply(spec)
 
     # -------------------------------------------------------------- saving
     def save_chain(self, ask: bool = False) -> Optional[Path]:
