@@ -507,7 +507,9 @@ acquisition.  The job stops at a checkpoint when asked and resumes later.
 
 ## 9. First: the published DECODE in SMAPpy (proof of concept)
 
-Status, 2026-11-09: agreed as the first step, not started.
+Status, 2026-11-09: agreed as the first step, not started.  The plan, its
+milestones and what reading v0.10.2 found against this section:
+[`decode/poc-plan.md`](decode/poc-plan.md).
 
 **What it is.**  `TuragaLab/DECODE` v0.10.2 (2023, Speiser et al. 2021), one
 channel, brought into SMAPpy as uiPSF was: a package of its own beside

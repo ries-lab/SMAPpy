@@ -1,0 +1,16 @@
+# DECODE v0.10.2 as the reference for the port (docs/decode/poc-plan.md, (a) and §8).
+# The exact build is v0102_linux64.explicit.txt; this file says what it is made of.
+# spline 0.10.0 from turagalab is replaced by SplinePSF 1f85d10, built by setup_v0102.sh:
+# 0.10.0's GPU renderer is 25x slower than its own CPU above ~2000 emitters a call
+# and fails DECODE's test_psf_kernel.py on an RTX 4090.
+name: decode_fast
+channels:
+  - turagalab
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.8
+  - numpy=1.19
+  - pytorch=1.12.0=py3.8_cuda11.3_cudnn8.3.2_0
+  - cudatoolkit=11.3
+  - decode=0.10.2
