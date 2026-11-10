@@ -793,3 +793,45 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
   network for `torch.hub`'s UNet; files to `tmp_path`; `test_nms` at 1e-6 (a float32 step:
   0.50099993 against 0.50099999); DECODE's `test_load_init` passed a path as the device.
 
+
+### (c) as done, 2026-11-10
+
+- **The renderer** is `src/decode_smlm/simulation/spline_torch.py`: SplinePSF's kernel
+  (`spline_psf.c`, read for it) in torch, behind DECODE's own `CubicSplinePSF`, of which only
+  `_spline_impl` changed.  The emitters are grouped by voxel offset -- `frame2roi_coord` leaves
+  one lateral kind and one of Z in z (163 kinds in an epoch of the example package) -- so each
+  kind's coefficient slab is gathered once and drawn with one batched product; the ROIs are added
+  into a canvas padded by a ROI on every side (32-bit indices, no mask) on the device, and the
+  frames handed over once.  DECODE's chunking of the frames on the CPU is not used.
+- **Against the renderer oracle:** ROIs 1.3e-7, frames 0.8-1.6e-7, derivatives 1.9e-7 of the
+  largest value, on the CPU, MPS and CUDA (the 4090, torch 2.15) -- the original's own GPU is
+  1.3-1.6e-7 from its CPU.  One departure: SplinePSF's CPU kernel looped a non-square ROI's
+  second axis to `npx`.
+- **The calibration** comes through `load_spline_calibration` (`utils/calibration_io.py`, in
+  place of `SMAPSplineCoefficient`), transposed to DECODE's `(ny, nx, nz, 64)` with the two
+  lateral monomial digits exchanged.  §6, item 4 holds: DECODE's x is the rows, SMAPpy's y.
+  Without a mirror the coefficients are DECODE's reading bitwise, and the example package's
+  frames come out bitwise.
+- **The mirror (§6, item 5)** needed more than the plan said.  At the reference SMAPpy's `x0`
+  implies, the un-mirrored spline drew the PSF two pixels off; at the right one (`n - r`), DECODE's
+  ROI window, which is not mirror-symmetric (voxels 0 to n - 2 of an axis), still cut another edge
+  column: 16 % of the peak at 800 nm defocus.  The un-mirrored coefficients are moved one voxel
+  along the columns: then the PSF is the file's mirrored to 1.5e-7 at every z, except for an
+  emitter exactly on a pixel centre, where DECODE's own window jumps (pinned by a test).
+- **`evaluate_spline` (§6, item 6)** agrees inside the ROI to 6.7e-7 (z of +-900 nm); on the
+  first row and column it extrapolates where the kernel gives 1e-10, up to 25 % of the peak.
+- **Speed, one epoch of the example package** (`benchmarks/decode/bench_renderer.py`: 32 768
+  frames of 40 x 40, 1.64 M emitters, its 26 x 26 x 197 calibration; the plan's 10 000 frames
+  were the reference parameters', not the package's):
+
+  | | original (`spline`, 1f85d10) | port (torch) |
+  |---|---:|---:|
+  | RTX 4090, under the reference runs' load, alternated | 0.46 s | 0.43 s |
+  | M1 Max, MPS | -- | 0.96 s |
+  | CPU, 8 threads (workstation / M1 Max) | 49.6 s / -- | 8.3 s / 3.8 s |
+
+  On the way there: masked 64-bit indices for the frames had made MPS take 16 s, and
+  DECODE's chunking on the CPU had made the 4090 take 0.84 s.  The 4090's numbers are to be
+  measured again on an idle GPU when the reference runs end; until then they say "no slower",
+  not by how much.
+- **Defaults:** `CubicSplinePSF`'s device is the machine's, not `cuda:0`.
