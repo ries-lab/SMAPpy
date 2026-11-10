@@ -193,17 +193,31 @@ class SplineTorch:
         return drv.reshape(n, 5, *self.roi_size).cpu(), model.reshape(n, *self.roi_size).cpu()
 
     def frames_on_device(self, fx, fy, frame_ix, n_frames, xr, yr, z, x_ix, y_ix, phot) -> torch.Tensor:
-        """``(n_frames, fx, fy)`` on the device: the ROIs added into the frames, as roi_accumulator."""
-        rois = self.rois_on_device(xr, yr, z, phot).reshape(-1, self.roi_size[0] * self.roi_size[1])
-        frame_ix = frame_ix.to(self.device, torch.long)
-        ii = x_ix.to(self.device, torch.long)[:, None] + self._di[None, :]
-        jj = y_ix.to(self.device, torch.long)[:, None] + self._dj[None, :]
-        keep = ((ii >= 0) & (ii < fx) & (jj >= 0) & (jj < fy)
-                & (frame_ix[:, None] >= 0) & (frame_ix[:, None] < n_frames))
-        flat = (frame_ix[:, None] * fx + ii) * fy + jj
-        frames = torch.zeros(n_frames * fx * fy, device=self.device, dtype=torch.float32)
-        frames.index_add_(0, flat[keep], rois[keep])
-        return frames.reshape(n_frames, fx, fy)
+        """``(n_frames, fx, fy)`` on the device: the ROIs added into the frames, as roi_accumulator.
+
+        Into a canvas padded by a ROI on every side, so that every pixel of every ROI has a place:
+        no mask of what falls outside, no compaction, 32-bit indices; the frames are then cut out
+        of it, which drops what fell outside, as roi_accumulator does.  Building the masked 64-bit
+        indices of 500 000 ROIs of 26 x 26 had taken four times as long as drawing them (2.7 s
+        against 0.6 s on an M1 Max).  A ROI further off the frame than its own size is clamped
+        onto the canvas's margin, which is cut away.
+        """
+        rx, ry = self.roi_size
+        px, py = fx + 2 * rx, fy + 2 * ry
+        rois = self.rois_on_device(xr, yr, z, phot).reshape(-1, rx * ry)
+        keep = (frame_ix >= 0) & (frame_ix < n_frames)                  # the base class has done this already
+        if not bool(keep.all()):
+            sel = keep.to(self.device)
+            rois, frame_ix, x_ix, y_ix = rois[sel], frame_ix[keep], x_ix[keep], y_ix[keep]
+        if n_frames * px * py >= 2 ** 31:
+            raise ValueError(f"{n_frames} frames of {fx} x {fy} are too many for one call; chunk the frames")
+        ii = (x_ix.to(self.device, torch.int32) + rx).clamp(0, px - rx)
+        jj = (y_ix.to(self.device, torch.int32) + ry).clamp(0, py - ry)
+        base = (frame_ix.to(self.device, torch.int32) * px + ii) * py + jj                # (N,)
+        offset = (self._di.to(torch.int32) * py + self._dj.to(torch.int32))               # (P,)
+        canvas = torch.zeros(n_frames * px * py, device=self.device, dtype=torch.float32)
+        canvas.index_add_(0, (base[:, None] + offset[None, :]).reshape(-1), rois.reshape(-1))
+        return canvas.reshape(n_frames, px, py)[:, rx:rx + fx, ry:ry + fy].contiguous()
 
     def forward_frames(self, fx, fy, frame_ix, n_frames, xr, yr, z, x_ix, y_ix, phot) -> torch.Tensor:
         return self.frames_on_device(fx, fy, frame_ix, n_frames, xr, yr, z, x_ix, y_ix, phot).cpu()
