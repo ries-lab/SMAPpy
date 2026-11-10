@@ -712,7 +712,7 @@ class EmitterSet:
         tot_var = xyz_sig[:, 0] ** 2 + (torch.sqrt(x_sig_var / y_sig_var) * xyz_sig[:, 1]) ** 2
 
         if is_3d:
-            tot_var += (np.sqrt(x_sig_var / z_sig_var) * xyz_sig[:, 2]) ** 2
+            tot_var += (torch.sqrt(x_sig_var / z_sig_var) * xyz_sig[:, 2]) ** 2  # torch's: numpy 2 deprecates np.sqrt(tensor)
 
         max_s = np.percentile(tot_var.cpu().numpy(), fraction * 100.)
         if return_low:

@@ -141,7 +141,7 @@ class GreedyHungarianMatching(EmitterMatcher):
 
         match_list = []
         while not (dists_ == float('inf')).all():
-            ix = np.unravel_index(dists_.argmin(), dists_.shape)
+            ix = np.unravel_index(int(dists_.argmin()), dists_.shape)  # an int: numpy 2 deprecates a tensor here
             dists_[ix[0]] = float('inf')
             dists_[:, ix[1]] = float('inf')
 
