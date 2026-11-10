@@ -742,8 +742,9 @@ class CubicSplinePSF(PSF):
         if xyz.size(0) == 0:
             return torch.zeros((ix_high - ix_low + 1, *self.img_shape))
 
-        if self.max_roi_chunk is not None and len(xyz) > self.max_roi_chunk:
-            return self._forward_chunks(xyz, weight, frame_ix, ix_low, ix_high, self.max_roi_chunk)
+        # DECODE cut the emitters into chunks of max_roi_chunk here and added the chunks' frames up on
+        # the CPU, each chunk's frames all of them (210 MB an epoch's).  The torch kernel batches on
+        # its device and hands the frames over once (spline_torch.SplineTorch.frames_on_device).
 
         """Convert Coordinates into ROI based coordinates and transform into implementation coordinates"""
         xyz_r, ix = self.frame2roi_coord(xyz)

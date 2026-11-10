@@ -204,19 +204,23 @@ class SplineTorch:
         """
         rx, ry = self.roi_size
         px, py = fx + 2 * rx, fy + 2 * ry
-        rois = self.rois_on_device(xr, yr, z, phot).reshape(-1, rx * ry)
-        keep = (frame_ix >= 0) & (frame_ix < n_frames)                  # the base class has done this already
-        if not bool(keep.all()):
-            sel = keep.to(self.device)
-            rois, frame_ix, x_ix, y_ix = rois[sel], frame_ix[keep], x_ix[keep], y_ix[keep]
         if n_frames * px * py >= 2 ** 31:
             raise ValueError(f"{n_frames} frames of {fx} x {fy} are too many for one call; chunk the frames")
+        keep = (frame_ix >= 0) & (frame_ix < n_frames)                  # the base class has done this already
+        if not bool(keep.all()):
+            xr, yr, z, phot, frame_ix, x_ix, y_ix = (t[keep] for t in (xr, yr, z, phot, frame_ix, x_ix, y_ix))
         ii = (x_ix.to(self.device, torch.int32) + rx).clamp(0, px - rx)
         jj = (y_ix.to(self.device, torch.int32) + ry).clamp(0, py - ry)
         base = (frame_ix.to(self.device, torch.int32) * px + ii) * py + jj                # (N,)
         offset = (self._di.to(torch.int32) * py + self._dj.to(torch.int32))               # (P,)
         canvas = torch.zeros(n_frames * px * py, device=self.device, dtype=torch.float32)
-        canvas.index_add_(0, (base[:, None] + offset[None, :]).reshape(-1), rois.reshape(-1))
+        # in batches whose grouped product fits at once, each added into the canvas as it comes:
+        # no ROIs of the whole call held, nothing concatenated
+        step = max(1, _MAX_ELEMENTS // (rx * ry))
+        for s in range(0, xr.shape[0], step):
+            sl = slice(s, s + step)
+            rois = self.rois_on_device(xr[sl], yr[sl], z[sl], phot[sl]).reshape(-1)
+            canvas.index_add_(0, (base[sl, None] + offset[None, :]).reshape(-1), rois)
         return canvas.reshape(n_frames, px, py)[:, rx:rx + fx, ry:ry + fy].contiguous()
 
     def forward_frames(self, fx, fy, frame_ix, n_frames, xr, yr, z, x_ix, y_ix, phot) -> torch.Tensor:
