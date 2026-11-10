@@ -10,8 +10,19 @@ TuragaLab/DECODE master branch, ``EmitterSet.save`` to ``.h5``), and what
   and ``xyz_cr``, ``phot_cr``, ``bg_cr`` (Cramer-Rao bounds, as variances).
   A quantity DECODE did not have is an empty dataset.
 * ``/meta`` attributes -- ``xy_unit`` (``px`` for a fit, or ``nm``) and
-  ``px_size`` (x and y, nm).  ``z`` is in nm whatever ``xy_unit`` says:
-  DECODE's own conversion scales x and y only.
+  ``px_size`` (DECODE's x and y, nm).  ``z`` is in nm whatever ``xy_unit``
+  says: DECODE's own conversion scales x and y only.
+
+**DECODE's x is the frame's first axis, the rows: SMAPpy's y.**  DECODE
+indexes a frame (rows, columns) and calls the first index x, so its
+``xyz[:, 0]`` and ``px_size[0]`` are SMAPpy's ``y_nm`` and its ``xyz[:, 1]``
+``x_nm``.  Read the other way, a fit came in transposed; the example
+package's fit, matched to Spline 3D on the same frames, settled it
+(docs/decode/poc-plan.md §6, item 4).  What the file cannot say is how the
+frames were prepared: DECODE's Fit notebook cropped them to a multiple of 8
+(``AutoCenterCrop``, up to 3 pixels off each edge) and, for a model trained
+on a SMAP calibration of mirrored EM beads, flipped them, and the positions
+are on those frames.
 * ``/decode`` attributes -- the version that wrote it.
 
 The precision is ``xyz_sig``: the uncertainty DECODE predicts per
@@ -30,7 +41,8 @@ import numpy as np
 
 from ..locs import Localizations
 
-AXES = ("x", "y", "z")
+# DECODE's axes 0, 1, 2 by SMAPpy's names: its x is the rows
+AXES = ("y", "x", "z")
 
 
 def is_decode(path: Path) -> bool:
@@ -103,7 +115,7 @@ def load(path: Path):
     if px is not None and suffix == "nm":
         metadata["pixelsize_nm"] = px
         if size[0] != size[1]:
-            metadata["pixelsize_nm_xy"] = [float(v) for v in size]
+            metadata["pixelsize_nm_xy"] = [float(size[1]), float(size[0])]
     locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "DECODE", pixelsize_nm=px,
                           metadata=metadata["decode"])

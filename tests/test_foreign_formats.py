@@ -179,12 +179,13 @@ def decode_file(path, xy_unit="px"):
 
 
 def test_a_decode_file_reads_x_and_y_from_pixels_and_z_as_it_is(tmp_path):
+    """DECODE's x is the rows, SMAPpy's y: its first coordinate and pixel size are y's."""
     path = decode_file(tmp_path / "fit.h5")
     assert formats.reader_for(path).name == "DECODE"
     locs, info = formats.load(path)
-    assert np.allclose(locs["x_nm"], [100, 300]) and np.allclose(locs["y_nm"], [240, 480])
+    assert np.allclose(locs["y_nm"], [100, 300]) and np.allclose(locs["x_nm"], [240, 480])
     assert np.allclose(locs["z_nm"], [-50, 60])
-    assert np.allclose(locs["x_err_nm"], [10, 20]) and np.allclose(locs["y_err_nm"], [12, 24])
+    assert np.allclose(locs["y_err_nm"], [10, 20]) and np.allclose(locs["x_err_nm"], [12, 24])
     assert np.allclose(locs["z_err_nm"], [20, 30])
     assert list(locs["frame"]) == [0, 3] and np.allclose(locs["prob"], [0.9, 0.5])
     assert np.allclose(locs["photons_err"], [30, 40])
@@ -198,8 +199,9 @@ def test_decode_crlbs_are_kept_as_standard_deviations(tmp_path):
         del f["data/xyz_cr"]
         f["data/xyz_cr"] = np.array([[4.0, 9.0, 100.0], [16.0, 25.0, 400.0]], np.float32)
     locs, _ = formats.load(path)
-    assert np.allclose(locs["x_nm"], [1, 3])            # already in nm
-    assert np.allclose(locs["x_crlb_nm"], [2, 4]) and np.allclose(locs["z_crlb_nm"], [10, 20])
+    assert np.allclose(locs["y_nm"], [1, 3])            # already in nm
+    assert np.allclose(locs["y_crlb_nm"], [2, 4]) and np.allclose(locs["x_crlb_nm"], [3, 5])
+    assert np.allclose(locs["z_crlb_nm"], [10, 20])
 
 
 # ----------------------------------------------------------------- export
