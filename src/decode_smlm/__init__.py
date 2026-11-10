@@ -9,22 +9,25 @@ __author__ = 'Lucas-Raphael Mueller, Artur Speiser'
 __repo__ = 'https://github.com/TuragaLab/DECODE/master/gateway.yaml'  # main repo
 __gateway__ = 'https://raw.githubusercontent.com/TuragaLab/DECODE/master/gateway.yaml'  # gateway
 
-import warnings
+# The subpackages are imported when first used, not here: DECODE imported them all, and torch with
+# them, so the port's torch-free parts (`decode_smlm.prefit`) could not be imported without it
+# (docs/decode/poc-plan.md (e)).  `decode_smlm.simulation`, `decode_smlm.EmitterSet` and the rest
+# still work as attributes.  DECODE's warning for a GPU of compute capability below 3.7 is gone:
+# current torch builds refuse such a GPU themselves.
+import importlib
 
-# check device capability
-import torch
+_SUBPACKAGES = ("evaluation", "generic", "neuralfitter", "simulation", "utils")
+_NAMES = {"CoordinateOnlyEmitter": "generic.emitter", "EmitterSet": "generic.emitter",
+          "RandomEmitterSet": "generic.emitter"}
 
-import decode_smlm.evaluation
-import decode_smlm.generic
-import decode_smlm.neuralfitter
-import decode_smlm.simulation
-import decode_smlm.utils.hardware
-from decode_smlm.generic.emitter import CoordinateOnlyEmitter, EmitterSet, RandomEmitterSet
 
-if torch.cuda.is_available():
-    device_capa = decode_smlm.utils.hardware.get_device_capability()
-    if float(device_capa) < 3.7:
-        warnings.warn(
-            f"Your GPU {torch.cuda.get_device_name()} has cuda capability {device_capa} and is no longer supported (minimum is 3.7)."
-            f"\nIf you have multiple devices make sure to select the index of the most modern one."
-            f"\nOtherwise you can use your CPU to run DECODE or switch to Google Colab.", category=UserWarning)
+def __getattr__(name):
+    if name in _SUBPACKAGES:
+        return importlib.import_module(f".{name}", __name__)
+    if name in _NAMES:
+        return getattr(importlib.import_module(f".{_NAMES[name]}", __name__), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted([*globals(), *_SUBPACKAGES, *_NAMES])
