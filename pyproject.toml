@@ -148,6 +148,8 @@ smappy-batch = "smappy.cli.batch:main"
 smappy-batch-gui = "smappy.gui.batch_window:main"
 smappy-plugins = "smappy.user_plugins:main"
 smappy-mcp = "smappy.assistant.server:main"
+# DECODE's training (the extra `decode`): train, stop and follow a job folder, docs/decode/poc-plan.md (f)
+smappy-decode = "decode_smlm.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
