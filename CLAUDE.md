@@ -204,7 +204,10 @@ shape, so read the one closest to what you are writing:
 | is run by MicroClaw during an acquisition | `gui/live_session.py` (the GUI on a fit another program controls through `Context.stop` and `writer_finished`; the package and its protocol runner are `ries-lab/smappy-microclaw`) |
 
 A chain of plugins that runs as one, and running one over many files
-(`smappy-batch`, the batch window): `docs/batch.md`.
+(`smappy-batch`, the batch window): `docs/batch.md`.  A chain may name the few
+settings it asks (`interface:` in its file, `ChainSpec.interface`, chosen with
+the step editor's *interface...*): its form then shows those as key parameters
+and folds its steps behind *show the steps*.
 
 ### Shipped plugins and the user's own
 

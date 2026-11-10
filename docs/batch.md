@@ -200,6 +200,29 @@ not been saved lives in the workspace with its steps inline, like any pinned
 plugin's values, so nothing is lost on restart.  There is no separate chain
 tab: building and using are the same widget.
 
+### A chain's interface
+
+Most of a chain's settings are how it is made, not what its user decides.  A
+chain's file may name the few that are (`ChainSpec.interface`, a dotted name
+in the chain's settings and a label each):
+
+```yaml
+interface:
+  rcc.n_timepoints: drift windows
+  localization_statistics.bins: ""      # "": the field's own label
+```
+
+Its form then shows those at the top (`FormState.keys`, the same key
+parameters *Simulate*'s presets use), and its steps fold away behind one
+tick, *show the steps* (`chain.STEPS_FIELD`, a field only such a chain has).
+Nothing else changes: every step's settings are still there, saved and run,
+and the batch window shows the chain the same way.  **interface...** in the
+step editor ticks the settings and types their labels
+(`gui/chain_interface.py`, the choices from `chain.interface_choices`).  A name
+is its step's key, so renaming a step renames it (`renamed_interface`); one
+whose step is gone, or that names a part rather than a field, is left out when
+the chain is built (`ChainPlugin.interface`).
+
 ### Where chains live
 
 Discovery reads `*.chain.yaml` beside `*.py` in every plugin root, and also in

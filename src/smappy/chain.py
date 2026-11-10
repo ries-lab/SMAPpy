@@ -36,6 +36,13 @@ the ones that shape this module:
   far) -- are the chain's result, which says ``stopped``.  A step that
   raises `Stopped` keeps nothing and the chain ends before it.
 
+* **An interface, when it has one.**  A chain's file may name the few settings
+  a user is meant to set (``interface:``, a dotted name in the chain's
+  settings and a label each).  Its form then shows those at the top
+  (`FormState.keys`) and hides the steps behind one tick, *show the steps*:
+  the steps are how the chain is made, and what it asks is these.  Nothing
+  is lost -- every step's settings are still there, saved and run.
+
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
   a chain does what a person clicking through the tabs would do, in order.
@@ -75,6 +82,8 @@ GROUPING_FIELD = "use_grouping"
 BLOCK_ROIS = "rois"
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
+# the field a chain with an interface gains: whether its steps are shown
+STEPS_FIELD = "show_steps"
 
 
 class ChainError(ValueError):
@@ -218,6 +227,8 @@ class ChainSpec:
     description: str = ""
     grouping: str = "layer"           # layer | grouped | ungrouped
     origin: Optional[Path] = None     # the file it was read from; not written
+    # the settings the chain asks, {dotted name in its settings: label}; empty: every step's
+    interface: Dict[str, str] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -238,6 +249,8 @@ class ChainSpec:
         if self.description:
             out["description"] = self.description
         out["grouping"] = self.grouping
+        if self.interface:
+            out["interface"] = dict(self.interface)
         out["steps"] = [s.to_dict() for s in self.steps]
         return out
 
@@ -256,10 +269,16 @@ class ChainSpec:
         steps = raw.get("steps") or []
         if not isinstance(steps, list):
             raise ChainError("`steps` must be a list")
+        interface = raw.get("interface") or {}
+        if isinstance(interface, list):            # names alone: the fields' own labels
+            interface = {str(name): "" for name in interface}
+        if not isinstance(interface, dict):
+            raise ChainError("`interface` must map a setting's dotted name to its label")
         return cls(steps=[step_from_dict(s) for s in steps],
                    path=str(raw.get("path") or ""),
                    description=str(raw.get("description") or ""),
-                   grouping=grouping, origin=origin)
+                   grouping=grouping, origin=origin,
+                   interface={str(k): str(v or "") for k, v in interface.items()})
 
 
 def identifier(text: str) -> str:
@@ -267,7 +286,7 @@ def identifier(text: str) -> str:
     name = re.sub(r"[^0-9a-zA-Z]+", "_", text).strip("_").lower() or "step"
     if name[0].isdigit():
         name = "s_" + name
-    if keyword.iskeyword(name) or name == "grouping":
+    if keyword.iskeyword(name) or name in ("grouping", STEPS_FIELD):
         name += "_"
     return name
 
@@ -708,7 +727,27 @@ class ChainPlugin(Plugin):
                 pass                       # best effort, like the panel's
             if cls.grouping and hasattr(sub, GROUPING_FIELD):
                 state.active[f"{key}.{GROUPING_FIELD}"] = False
+        interface = self.interface()
+        if interface:
+            state.keys = interface
+            show = bool(getattr(settings, STEPS_FIELD, True))
+            state.shown.update({key: show for key, _, _ in self.steps})
         return state
+
+    @classmethod
+    def interface(cls) -> Dict[str, str]:
+        """The settings the chain asks, ``{dotted name: label}``: the file's, those that name a
+        setting of the chain as it is (a step renamed or removed takes its own with it), each
+        labelled as the file says or else as the field is."""
+        from .plugins import param_specs
+        out: Dict[str, str] = {}
+        # a block (`blocks.BlockPlugin`) is a chain whose spec is a `Block`, with no interface
+        for path, label in (getattr(cls.spec, "interface", None) or {}).items():
+            spec = _spec_at(param_specs(cls.Settings), path)
+            if spec is None or spec.children is not None or spec.items is not None:
+                continue
+            out[path] = label or spec.info.label or path.rsplit(".", 1)[-1]
+        return out
 
     @classmethod
     def current_spec(cls, settings=None) -> ChainSpec:
@@ -736,7 +775,8 @@ class ChainPlugin(Plugin):
         grouping = settings.grouping if settings is not None else cls.spec.grouping
         return ChainSpec(steps=steps, path=cls.spec.path,
                          description=cls.spec.description, grouping=grouping,
-                         origin=cls.spec.origin)
+                         origin=cls.spec.origin,
+                         interface=dict(getattr(cls.spec, "interface", None) or {}))
 
 
 def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
@@ -773,6 +813,11 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
             help=cls.description or step.plugin)))
         extras.update(_flat_infos(cls.specs(), f"{key}."))
         steps.append((key, step, cls))
+    if spec.interface:
+        # last, below the settings the chain asks (shown at the top) and the steps it folds
+        columns.append((STEPS_FIELD, bool, param(
+            False, label="show the steps",
+            help="every step's settings, not only the ones this chain asks")))
     settings_cls = make_dataclass("ChainSettings", columns,
                                   namespace={"__module__": __name__})
     name = spec.name
@@ -790,6 +835,53 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     except Exception:
         chain.changes_locs = any(cls.changes_locs for _, _, cls in steps)
     return chain
+
+
+def interface_choices(chain_cls) -> List[Tuple[str, str, List[Tuple[str, str]]]]:
+    """What a chain's interface can name: ``(step key, step title, [(dotted name, label)])`` per
+    step, every field of its settings down through its parts -- what the chain panel's
+    *interface...* lists."""
+    from .plugins import param_specs
+    specs = param_specs(chain_cls.Settings)
+    out = []
+    for key, step, _ in chain_cls.steps:
+        rows: List[Tuple[str, str]] = []
+
+        def walk(children, prefix, part=""):
+            for name, spec in children.items():
+                if spec.info.hidden or name == GROUPING_FIELD or spec.items is not None:
+                    continue
+                label = spec.info.label or name
+                if spec.children is not None:
+                    walk(spec.children, f"{prefix}{name}.", f"{part}{label}: ")
+                else:
+                    rows.append((f"{prefix}{name}", f"{part}{label}"))
+        walk(specs[key].children or {}, f"{key}.")
+        out.append((key, step.title(), rows))
+    return out
+
+
+def renamed_interface(interface: Dict[str, str], before: List[str],
+                      after: List[str]) -> Dict[str, str]:
+    """``interface`` with its names following the steps' keys from ``before`` to ``after`` (a
+    step renamed): a setting is named by its step's key, which its label makes."""
+    moved = dict(zip(before, after))
+    out = {}
+    for path, label in interface.items():
+        key, _, rest = path.partition(".")
+        out[f"{moved.get(key, key)}.{rest}" if rest else moved.get(key, key)] = label
+    return out
+
+
+def _spec_at(specs, path: str):
+    """The `ParamSpec` at a dotted ``path`` of nested specs, or None."""
+    spec = None
+    for part in path.split("."):
+        if specs is None or part not in specs:
+            return None
+        spec = specs[part]
+        specs = spec.children
+    return spec
 
 
 # the chain files being built, innermost last: a chain that contains itself,
