@@ -44,6 +44,17 @@ BSD 3-Clause licensed as smappy is, Copyright (c) 2026 uiPSF contributors.
 `src/uipsf/LICENSE` carries its notice and ships with it.  It needs PyTorch,
 the extra `smappy-smlm[uipsf]`.
 
+## Included: decode_smlm (DECODE, GPL-3.0)
+
+`src/decode_smlm/` and `tests/decode_tests/` are a port of
+[DECODE](https://github.com/TuragaLab/DECODE) v0.10.2 (Speiser, Müller et al., *Nat. Methods*
+2021, [doi:10.1038/s41592-021-01236-x](https://doi.org/10.1038/s41592-021-01236-x)) to current
+PyTorch, begun as verbatim copies of its modules and tests.  DECODE is licensed under the **GNU
+General Public License, version 3**: `src/decode_smlm/LICENSE.txt` is its licence and
+`src/decode_smlm/NOTICE.md` says which version, commit and authors.  Unlike the rest of
+smappy, these files are GPL-3.0 until relicensed.  It needs PyTorch, the extra
+`smappy-smlm[decode]`.
+
 ## Dependencies
 
 Dependencies are separate works and remain subject to their own licenses. They
