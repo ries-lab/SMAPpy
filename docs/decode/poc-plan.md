@@ -935,3 +935,26 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
   DECODE draws the brightness from a normal distribution; the fully-on frames' is closer to a
   log-normal (sd 0.75 in log), so the normal of the same mean and spread puts about 10 % of the
   molecules at almost no photons -- invisible to the training, so they only lower its density.
+
+### Training speed, 2026-11-10 (for (f))
+
+Measured on gpuvm's H100 (4 vCPUs) with `benchmarks/decode/bench_training.py`: the port's live
+engine on the example package, each phase timed with the device synchronised.
+
+- **An epoch, 19.4 s before:** training 15.8 s (512 batches), the next epoch's simulation 2.4 s,
+  the test set with its post-processing 0.9 s, the rest 0.4 s.
+- **Two exact changes, 12.9 s after:** the loss's mixture log-probability cut to the target slots
+  a batch uses (padded to 250 for about 50 a frame; half the GPU's time; `loss.py`, the method
+  oracle unchanged); an epoch's emitters split into frames lazily, in the worker that reads a
+  frame (`LazySplit`; 1.6 s of the simulation's 2.4).  1000 epochs: 3.6 h, from 5.4 (the
+  original on the 4090: 7.2).
+- **Measured, not adopted:** 2 data-loader workers instead of 4, 12.2 s (this machine's 4 cores);
+  fused AdamW, no gain; torch.distributions' argument checks off, 0.6 s, but they are what
+  catches the NaN below; the network channels-last, training 8.4 s with TF32 and twice as slow
+  without.
+- **TF32.**  Current torch convolves in TF32 on the H100 by default, 11.3 s against 18 s without.
+  The original's cuDNN 8.3 evidently did not on the 4090 ((d): its GPU output within 8e-5 of its
+  CPU's).  4 of about 15 runs with TF32 diverged to NaN in their first epochs, none of 7
+  without; the reference runs had none by epoch 359.  To settle in (f), with more runs.  The NaN
+  raises in the loss's Categorical check before DECODE's restart for a pathological loss can see
+  it, so a run dies instead of restarting: (f) catches it and restarts.
