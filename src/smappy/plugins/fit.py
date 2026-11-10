@@ -829,11 +829,16 @@ class _FitPlugin(Plugin):
             # two channels, z after an elliptical Gaussian
             from .after_fit import shown
             model = getattr(settings, "model", None)
+            channels = getattr(settings, "channels", None)
             can = {"two_channel": self.two_channel,
                    "widths": bool(getattr(model, "elliptical", False)),
-                   "phase": self.phase}
+                   "phase": self.phase,
+                   # the halves of a 1C fit on two channels, for the overlay
+                   "split": not self.two_channel and bool(getattr(channels, "two", False))}
             state.shown.update({f"finish.{name}": on
                                 for name, on in shown(finish, **can).items()})
+            # the overlay's beads are fitted in this fitter's own arrangement (`finish`)
+            state.shown["finish.overlay_channels.channels"] = False
             state.titles["finish"] = finish.summary(**can)
             from ..drift import merge_values
             dx, dt = merge_values(ctx.session if ctx is not None else None)
@@ -1101,6 +1106,9 @@ class _FitPlugin(Plugin):
         if wanted is None:
             return Finished(locs)
         from .after_fit import with_session_merge
+        from .overlay_channels import with_fitter
+        # the overlay's beads are read with this fit's camera, in its arrangement
+        wanted = replace(wanted, overlay_channels=with_fitter(wanted.overlay_channels, settings))
         return finish_localizations(locs, with_session_merge(wanted, ctx.session), ctx.report)
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:

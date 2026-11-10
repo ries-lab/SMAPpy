@@ -320,8 +320,11 @@ detected and fitted on its own -- a dim channel then has a threshold of its
 own instead of the bright one's.  Nothing pairs the two, and nothing maps one
 onto the other: each localization is on the chip where its channel saw it,
 with `camera_channel` saying which.  That table is what *Calibrate
-transform* registers the channels from.  No file records whether the
-splitting dichroic was in, so the choice is yours.
+transform* registers the channels from.  For two dyes each seen in one half
+only, *after the fit*'s *overlay channels* then moves the second half onto
+the first by beads
+([Overlay channels](plugin:Analysis/After fit/Overlay channels)).  No file
+records whether the splitting dichroic was in, so the choice is yours.
 
 ### channels.layout
 On *microscope*, the entry of the microscope the file was taken on gives it

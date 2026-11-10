@@ -237,6 +237,8 @@ papers and in other software.
   chip -- the two halves of a split frame.
 * **ratiometric**: telling dyes apart by how their photons divide between
   the two halves, rather than by exciting them one at a time.
+* **crosstalk** (also called bleed-through or spectral leakage): the part of
+  one dye's light that reaches the channel meant for the other.
 * **registration** (also called channel alignment, mapping or chromatic
   correction): the transformation -- shift, rotation, scale and distortion --
   that takes a position in one half to the same place in the other.

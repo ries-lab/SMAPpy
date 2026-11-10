@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.after_fit.AfterFit, smappy.plugins.after_fit.AfterFitSettings, smappy.plugins.after_fit.finish_localizations, smappy.plugins.after_fit.applicable, smappy.plugins.after_fit.table_can, smappy.plugins.after_fit.shown, smappy.plugins.after_fit.chain_plugin, smappy.plugins.fit._FitPlugin.finish]
+covers: [smappy.plugins.after_fit.AfterFit, smappy.plugins.after_fit.AfterFitSettings, smappy.plugins.after_fit.finish_localizations, smappy.plugins.after_fit.applicable, smappy.plugins.after_fit.table_can, smappy.plugins.after_fit.shown, smappy.plugins.after_fit.chain_plugin, smappy.plugins.fit._FitPlugin.finish, smappy.plugins.overlay_channels.with_fitter]
 ---
 
 ## What it does
@@ -37,12 +37,18 @@ hand give the same numbers:
 2. ***4Pi z*** -- z from the interference phase of a 4Pi fit, unwrapped by
    its envelope z ([4Pi z](plugin:Analysis/After fit/4Pi z)).  Also before
    the drift correction, for the same reason.
-3. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
+3. ***overlay channels*** -- for two dyes each seen in one half of a split
+   camera: the second half's localizations moved onto the first by a
+   registration from beads
+   ([Overlay channels](plugin:Analysis/After fit/Overlay channels)).
+   Before the drift correction, because the drift is the same in both
+   halves and is best measured on the overlaid table.
+4. ***drift correction*** -- none, [RCC](plugin:Analysis/Drift/RCC) or
    [COMET](plugin:Analysis/Drift/COMET).
-4. ***assign colours*** -- a colour per localization from how its photons
+5. ***assign colours*** -- a colour per localization from how its photons
    split between the two channels
    ([Assign colours](plugin:Analysis/After fit/Assign colours)).
-5. ***then chain*** -- a saved chain: plugins in order, with their
+6. ***then chain*** -- a saved chain: plugins in order, with their
    settings, that run as one.  It is for whatever else your lab does to
    every fit.  A chain is made with the + of the Analysis tab and its *Save
    chain*, and is what the [batch window](plugin:Panels/Batch window) runs
@@ -54,7 +60,8 @@ fitters ([Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C),
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C)).  *Astigmatic z* appears only
 in [Gaussian 2D](plugin:Localize/Gaussian 2D), and only while its
 *elliptical* is ticked.  *4Pi z* appears only in
-[Spline 4Pi](plugin:Localize/Spline 4Pi).  A step's settings appear below it only while the
+[Spline 4Pi](plugin:Localize/Spline 4Pi).  *Overlay channels* appears only
+in a one-colour fitter whose *channels* reads *two channels*.  A step's settings appear below it only while the
 step is on: tick *assign colours* and *colour assignment* appears; choose
 COMET and only *COMET drift* is shown.
 
@@ -62,7 +69,8 @@ COMET and only *COMET drift* is shown.
 the open localizations, it looks at the table rather than at a fitter.
 Colours need two channels' photons (`photons_ch0` and `photons_ch1`, or
 MINFLUX's `dcr`).  Astigmatic z needs `sigma_x_nm` and `sigma_y_nm`.  4Pi z
-needs `phase_rad` and `phase_err_rad`.  A step
+needs `phase_rad` and `phase_err_rad`.  The overlay needs `camera_channel`,
+which a fit on *two channels* writes.  A step
 whose attributes are missing is skipped without a word, so the default
 *assign colours* does nothing to a one-colour table.
 
@@ -105,6 +113,13 @@ gives z its precision.  Its settings, under *4Pi phase*, are those of
 [4Pi z](plugin:Analysis/After fit/4Pi z); the fit keeps the phase's slope
 with the table, so *as fitted* needs no file.
 
+### overlay
+Off by default.  Inside a fitter, the beads are fitted with that fitter's
+camera settings and in its channel arrangement, so the overlay's own
+*channels* part is not shown there.  With *keep the registration* on, the
+beads are fitted and registered once and the result is used again by every
+fit that names the same beads, until a bead file changes.
+
 ### drift
 Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 [COMET](plugin:Analysis/Drift/COMET), say which to choose.  The settings
@@ -124,7 +139,8 @@ and saved to its file.
 ## Output
 
 The table with what the steps wrote: `z_nm` and `z_err_nm` from Astigmatic z
-or 4Pi z (with `fringe_probability`),
+or 4Pi z (with `fringe_probability`), the second half moved and `channel`
+written by the overlay,
 positions moved by the drift correction, `channel` from Assign colours, and
 whatever the chain added.  The output lists one line per step: what it found,
 that it failed and why, or nothing for a step that was not run.  Each step's
