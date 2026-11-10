@@ -73,10 +73,20 @@ _EXPORTS = {
 }
 
 
+def _installed_version() -> str:
+    """The installed version, ``smappy-smlm``'s.  Here, not in `pipeline` as it was, so that asking
+    for it loads nothing: a training machine with SMAPpy's sources and no fitter asks too
+    (`decode_smlm.training`)."""
+    try:
+        from importlib.metadata import version
+        return version("smappy-smlm")
+    except Exception:
+        return "0.1.0.dev0+unknown"
+
+
 def __getattr__(name: str):
     if name == "__version__":
-        from .pipeline import _version
-        return _version()
+        return _installed_version()
     module = _EXPORTS.get(name)
     if module is None:
         raise AttributeError(f"module 'smappy' has no attribute '{name}'")

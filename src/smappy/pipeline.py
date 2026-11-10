@@ -381,8 +381,5 @@ def _version() -> str:
     nothing (or, worse, an unrelated package of that name) and would quietly
     stamp every file with the fallback.
     """
-    try:
-        from importlib.metadata import version
-        return version("smappy-smlm")
-    except Exception:
-        return "0.1.0.dev0+unknown"
+    from . import _installed_version
+    return _installed_version()
