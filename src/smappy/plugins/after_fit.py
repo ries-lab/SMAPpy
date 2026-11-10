@@ -14,6 +14,10 @@ settings only while it is chosen:
   correct z too.
 * *4Pi z* -- z from a 4Pi fit's interference phase (`fourpi_z.py`), first
   for the same reason.
+* *overlay channels* -- a split camera's second half moved onto the first by
+  a registration from beads, for two dyes each seen in one half
+  (`overlay_channels.py`).  Before the drift: the drift is the sample's, the
+  same in both halves, and is best measured on the overlaid table.
 * *drift correction* -- none, RCC or COMET (`drift_rcc.py`, `drift_comet.py`).
 * *assign colours* -- a channel per localization from its photon ratio, for
   a two-colour fit (`assign_colors.py`).  Last of the three: the correction
@@ -47,6 +51,7 @@ from . import Context, FormState, Plugin, Result, param, register
 from .assign_colors import AssignColorSettings
 from .astigmatic_z import WIDTHS, AstigmaticZSettings
 from .fourpi_z import NEEDS as PHASE, FourPiZSettings
+from .overlay_channels import OverlaySettings
 
 CHAIN_FILTER = "Chains (*.chain.yaml);;All files (*)"
 
@@ -65,6 +70,11 @@ class AfterFitSettings:
                                 "envelope z (Analysis/After fit/4Pi z)")
     fourpi: FourPiZSettings = param(default_factory=FourPiZSettings, label="4Pi phase",
                                     collapsed=True)
+    overlay: bool = param(False, label="overlay channels",
+                          help="move the second half of a two-channel fit onto the first, by "
+                               "beads; channel is the half (Analysis/After fit/Overlay channels)")
+    overlay_channels: OverlaySettings = param(default_factory=OverlaySettings,
+                                              label="channel overlay", collapsed=True)
     drift: str = param("none", label="drift correction",
                        choices=(("none", "none"), ("rcc", "RCC"), ("comet", "COMET")),
                        help="estimate the drift from the finished table and subtract it from "
@@ -96,6 +106,9 @@ class AfterFitSettings:
         if self.fourpi_z:
             from .fourpi_z import FourPiZ
             out.append((FourPiZ(), self.fourpi))
+        if self.overlay:
+            from .overlay_channels import OverlayChannels
+            out.append((OverlayChannels(), self.overlay_channels))
         if self.drift == "rcc":
             from .drift_rcc import RCCDrift
             out.append((RCCDrift(), self.rcc))
@@ -111,12 +124,13 @@ class AfterFitSettings:
         return out
 
     def summary(self, two_channel: bool = True, widths: bool = True,
-                phase: bool = False) -> str:
+                phase: bool = False, split: bool = False) -> str:
         """What the folded part's title says: the steps that are on, of those
         the table can take (`applicable`)."""
-        on = applicable(self, two_channel, widths, phase)
+        on = applicable(self, two_channel, widths, phase, split)
         names = (["astigmatic z"] if on.astigmatic_z else []) + \
             (["4Pi z"] if on.fourpi_z else []) + \
+            (["overlay"] if on.overlay else []) + \
             ([{"rcc": "RCC", "comet": "COMET"}[on.drift]] if on.drift != "none" else []) + \
             (["colours"] if on.assign_colors else []) + \
             ([_chain_name(on.chain)] if on.chain else [])
@@ -143,18 +157,20 @@ def _chain_name(path: str) -> str:
 
 
 def applicable(settings: AfterFitSettings, two_channel: bool,
-               widths: bool, phase: bool = False) -> AfterFitSettings:
+               widths: bool, phase: bool = False, split: bool = False) -> AfterFitSettings:
     """``settings`` with the steps the table cannot take turned off: colours
     without two channels' photons, astigmatic z without the widths, 4Pi z
-    without a phase."""
+    without a phase, the overlay without a two-channel fit's halves."""
     return replace(settings, assign_colors=settings.assign_colors and two_channel,
                    astigmatic_z=settings.astigmatic_z and widths,
-                   fourpi_z=settings.fourpi_z and phase)
+                   fourpi_z=settings.fourpi_z and phase,
+                   overlay=settings.overlay and split)
 
 
 def table_can(locs: Localizations, colors: AssignColorSettings) -> Dict[str, bool]:
     """What the table has for the steps that need something: two channels'
-    photons (as Assign colours finds them), and the elliptical widths."""
+    photons (as Assign colours finds them), the elliptical widths, a phase,
+    and the halves of a two-channel fit (``camera_channel``)."""
     from .assign_colors import channel_columns
     try:
         channel_columns(locs, colors.channel1, colors.channel2)
@@ -162,17 +178,18 @@ def table_can(locs: Localizations, colors: AssignColorSettings) -> Dict[str, boo
     except ValueError:
         two = False
     return {"two_channel": two, "widths": all(c in locs for c in WIDTHS),
-            "phase": all(c in locs for c in PHASE)}
+            "phase": all(c in locs for c in PHASE), "split": "camera_channel" in locs}
 
 
 def shown(settings: AfterFitSettings, two_channel: bool, widths: bool,
-          phase: bool = False) -> Dict[str, bool]:
+          phase: bool = False, split: bool = False) -> Dict[str, bool]:
     """Which fields the form shows: a step only where it applies, its
     settings only while it is on, and inside them what their own plugin
     shows (the file or the typed curves of Astigmatic z)."""
     out = {"astigmatic_z": widths,
            "astigmatic": widths and settings.astigmatic_z,
            "fourpi_z": phase, "fourpi": phase and settings.fourpi_z,
+           "overlay": split, "overlay_channels": split and settings.overlay,
            "rcc": settings.drift == "rcc", "comet": settings.drift == "comet",
            "assign_colors": two_channel,
            "colors": two_channel and settings.assign_colors}
@@ -188,6 +205,9 @@ def shown(settings: AfterFitSettings, two_channel: bool, widths: bool,
     except Exception:
         inner = {}
     out.update({f"fourpi.{name}": on for name, on in inner.items()})
+    from .overlay_channels import shown as overlay_shown
+    out.update({f"overlay_channels.{name}": on
+                for name, on in overlay_shown(settings.overlay_channels).items()})
     return out
 
 
@@ -268,7 +288,7 @@ class AfterFit(Plugin):
         """The steps the open table can take, and what *auto* merges by."""
         locs = getattr(ctx, "locs", None) if ctx is not None else None
         can = (table_can(locs, settings.colors) if locs is not None and len(locs)
-               else {"two_channel": True, "widths": True, "phase": True})
+               else {"two_channel": True, "widths": True, "phase": True, "split": True})
         state = FormState(shown=shown(settings, **can))
         from ..drift import merge_values
         dx, dt = merge_values(ctx.session if ctx is not None else None)

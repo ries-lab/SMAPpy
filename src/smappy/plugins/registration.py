@@ -96,6 +96,41 @@ def table_channels(locs, settings, shape, roi):
     return chip_channels(settings, roi if roi is not None else (0, 0, width, height), microscope)
 
 
+def register_table(locs, channels: ArrangementSettings, registration: RegisterSettings,
+                   report=None):
+    """The registration of a two-channel fit's table (`calibrate.transform.register_channels`):
+    the plugin's work as a function, which *Overlay channels* calls on fitted beads too.
+
+    ``channels`` says where the channels lie only where the table does not record it."""
+    if not len(locs):
+        raise ValueError("no localizations selected")
+    x, y = chip_pixels(locs, report)
+    shape, roi = source_geometry(locs)
+    if shape is None:
+        # nothing recorded the frame; the localizations bound it well
+        # enough for a geometry that is only ever compared against itself
+        shape = (int(np.ceil(y.max())) + 1, int(np.ceil(x.max())) + 1)
+    if "frame" not in locs:
+        raise ValueError("registration pairs within a frame, and the table "
+                         "has no frame attribute")
+    # the fit's own error bars, so a dim pair counts for what it knows --
+    # in pixels, as the positions are
+    precision = None
+    if "xy_err_nm" in locs or "xy_err_pix" in locs:
+        precision = in_pixels(locs, "xy_err_pix")
+    if "camera_channel" not in locs:
+        raise ValueError("the table was not fitted as two channels: fit the movie with "
+                         "channels > read: two channels, so that each localization keeps "
+                         "the channel it was found in (camera_channel)")
+    # the channels the fit read, on the chip; the arrangement's words for the record
+    told, layout = table_channels(locs, channels, shape, roi)
+    # a pair is two channels of one frame of one file: files opened
+    # together share frame numbers, and beads from several files pool
+    return register_channels(x, y, frames_apart(locs), np.asarray(locs["camera_channel"]),
+                             layout, shape, roi, settings=registration,
+                             progress=report, precision=precision, arrangement=told)
+
+
 def default_transform_path(locs, fallback: Path) -> Path:
     source = (locs.metadata.get("source")
               or (locs.metadata.get("provenance") or {}).get("source"))
@@ -131,34 +166,7 @@ class CalibrateChannelTransform(Plugin):
     # ------------------------------------------------------------ the work
     def _register(self, ctx: Context, settings):
         locs = ctx.locs[ctx.selection.mask] if ctx.selection is not None else ctx.locs
-        if not len(locs):
-            raise ValueError("no localizations selected")
-        x, y = chip_pixels(locs, ctx.report)
-        shape, roi = source_geometry(locs)
-        if shape is None:
-            # nothing recorded the frame; the localizations bound it well
-            # enough for a geometry that is only ever compared against itself
-            shape = (int(np.ceil(y.max())) + 1, int(np.ceil(x.max())) + 1)
-        if "frame" not in locs:
-            raise ValueError("registration pairs within a frame, and the table "
-                             "has no frame attribute")
-        # the fit's own error bars, so a dim pair counts for what it knows --
-        # in pixels, as the positions are
-        precision = None
-        if "xy_err_nm" in locs or "xy_err_pix" in locs:
-            precision = in_pixels(locs, "xy_err_pix")
-        if "camera_channel" not in locs:
-            raise ValueError("the table was not fitted as two channels: fit the movie with "
-                             "channels > read: two channels, so that each localization keeps "
-                             "the channel it was found in (camera_channel)")
-        # the channels the fit read, on the chip; the arrangement's words for the record
-        told, layout = table_channels(locs, settings.channels, shape, roi)
-        # a pair is two channels of one frame of one file: files opened
-        # together share frame numbers, and beads from several files pool
-        return register_channels(x, y, frames_apart(locs), np.asarray(locs["camera_channel"]),
-                                 layout, shape, roi, settings=settings.registration,
-                                 progress=ctx.report, precision=precision,
-                                 arrangement=told), locs
+        return register_table(locs, settings.channels, settings.registration, ctx.report), locs
 
     def run(self, ctx: Context, settings) -> Result:
         result, locs = self._register(ctx, settings)
