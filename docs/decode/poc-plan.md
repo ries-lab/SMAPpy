@@ -379,12 +379,11 @@ renderer, the job runner, the model file, the prefit), about 3 300 dropped.
 Most breaks of the torch 1.7 era were already fixed in v0.10.2: it uses
 `rounding_mode` and `nonzero(as_tuple=False)`.  What is left:
 
-1. **`torch.load` with `weights_only=True`**, the default since torch 2.6.
-   - `utils/checkpoint.py:49` loads a dict holding the logger's dict, so it
-     fails.
-   - It also has no `map_location`, so a CUDA checkpoint cannot be loaded on a
-     Mac.
-   - `model_io.py` loads a plain `state_dict` and works.
+1. **`torch.load`**, at `utils/checkpoint.py:49`, has no `map_location`, so
+   a CUDA checkpoint cannot be loaded on a Mac.  (Read first as a
+   `weights_only=True` failure too, the default since torch 2.6; tried on a
+   4090 run's checkpoint, it is not: the logger's dict is lists of floats.)
+   `model_io.py` loads a plain `state_dict` and works.
 2. **Legacy type classes as type checks.**  `isinstance(frame_ix,
    torch.LongTensor)` (`target_generator.py:219`) and `torch.IntTensor` or
    `LongTensor` (`generic/slicing.py:26`) are false for a CUDA or MPS tensor.
@@ -415,6 +414,16 @@ Most breaks of the torch 1.7 era were already fixed in v0.10.2: it uses
    already inside a `try`, and TensorBoard is optional (§9.4).
 
 Not found: `np.float`-style aliases, `torch._six`, removed linalg functions.
+
+Found only by running it, in (b):
+
+10. **A CPU tensor indexed with GPU indices.**  `GaussianMMLoss` indexes its
+    pixel centres (a CPU tensor) with the detections' indices, which are on
+    the model's device.  torch 1.12 accepts a CUDA index into a CPU tensor;
+    torch 2.14 refuses it.  DECODE's own tests miss it: the mixture-model
+    loss's test class has no GPU test.  The method oracle on MPS found it.
+11. **numpy functions on torch tensors** (`np.sqrt`, `np.unravel_index`) are
+    deprecated in numpy 2: a warning per call, two thousand in the tests.
 
 ## 4. Test data and the tiers
 
@@ -753,3 +762,34 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
   02:00 on 2026-11-11.  Their per-epoch metrics are in each checkpoint's `log` (`eval/jac`,
   `eval/rmse_lat`, ..., the loss channels); they go to
   `benchmarks/decode/results/original_run{1,2}.jsonl` when they end.
+
+### (b) as done, 2026-11-10
+
+- **The port is `src/decode_smlm/`, 8 800 lines, and `tests/decode_tests/` (35 files).**  The first
+  commit (e7376e7f) is the 58 files and 34 test files of v0.10.2 unchanged; every change since
+  is a commit of its own: the rename and the dropped modules, then §3's items 1, 2, 3, 5, 6, 7,
+  8 and 9, the two of §3 that only running found (10, 11), and ruff.  DECODE's licence is
+  `src/decode_smlm/LICENSE.txt`, with `NOTICE.md` (version, commit, authors) and an entry in
+  `THIRD_PARTY_NOTICES.md`.
+- **Dropped beyond §2's table:** the consistency post-processing (scikit-learn), `log_frames`
+  (DECODE's plot package; its figures went only to TensorBoard), `SCMOS` (unfinished upstream),
+  `EmitterSet`'s `.h5` and `.csv` (`.pt` stays), the `deprecated` package, `LiveInfer` and the
+  inference CLI.  `CubicSplinePSF` raises until (c).
+- **The frame:** the extra `decode = ["torch>=2.4", "tqdm>=4.60"]`; TensorBoard optional (the
+  live engine then logs to the `DictLogger` alone); devices CUDA, then MPS, then the CPU
+  (`utils.hardware.default_device`, `DECODE_DEVICE` overrides), and a parameter file's `cuda`
+  falls back to what the machine has; `src/decode_smlm/ruff.toml`, uipsf's rules, with DECODE's
+  remaining findings listed as ignores.
+- **Item 4, sampling on MPS:** torch 2.14 draws Poisson and Gamma there; the moments, and
+  `Photon2Camera`'s output, agree with the CPU's.
+- **The tests:** 460 pass, 34 skipped (DECODE's own skips, CUDA-only tests, one asset
+  download), on torch 2.14.1, numpy 2.5, Python 3.12, on the CPU and on the M1 Max's GPU.
+  DECODE's GPU tests run on whichever GPU there is.  Not yet run on CUDA with current torch.
+- **Against the method oracle** (`tests/decode_tests/test_port.py`): the targets are bitwise
+  the original's; the loss, its gradient and the post-processing at raw_th 0.1 and 0.5 within
+  1e-6 of the original's largest value, on the CPU and on MPS.
+- **`import smappy` and plugin discovery load neither torch nor `decode_smlm`** (a test).
+- **Test changes, for an offline suite:** downloads skipped (`asset_handler`, `web`); a local
+  network for `torch.hub`'s UNet; files to `tmp_path`; `test_nms` at 1e-6 (a float32 step:
+  0.50099993 against 0.50099999); DECODE's `test_load_init` passed a path as the device.
+

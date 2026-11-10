@@ -17,6 +17,16 @@ working there), its docs in `docs/uipsf/` and its tests in
 `tests/uipsf_tests/`.  Where smappy uses it, it imports it inside the
 functions that need a model, so that nothing else loads torch.
 
+`src/decode_smlm/` is a third: DECODE v0.10.2 ported to current PyTorch
+(`docs/decode.md` §9, the plan and its record in `docs/decode/poc-plan.md`),
+with its tests in `tests/decode_tests/` (DECODE's own, ported, and the port's
+against the original's outputs in `tests/decode_tests/fixtures/`).  It is
+**GPL-3.0, DECODE's licence**, not BSD (`src/decode_smlm/NOTICE.md`), began as
+verbatim copies, and every change is a commit of its own; the extra
+`smappy-smlm[decode]`, lint with `ruff check --config
+src/decode_smlm/ruff.toml src/decode_smlm tests/decode_tests`.  It is imported
+only where a DECODE model is used, as uipsf is (a test checks).
+
 `src/smappy/assistant/` is the AI assistant's side: SMAPpy's tools served over
 MCP (`smappy-mcp`), plain functions over a `Session` in `assistant/tools.py`,
 which nothing else imports but the GUI's socket server and pane
