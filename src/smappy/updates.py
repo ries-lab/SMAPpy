@@ -6,14 +6,24 @@ cannot replace itself everywhere -- on Windows its compiled extensions and
 ``smappy-gui.exe`` are locked while it runs.  The command depends on how this
 copy was installed, which the package's own metadata records:
 
-* a checkout installed with ``pip install -e`` (PEP 610's ``direct_url.json``
-  says ``editable``): ``git pull`` and install again, which rebuilds the C++;
+* a checkout installed editable (PEP 610's ``direct_url.json`` says
+  ``editable``): ``git pull`` and install again, which rebuilds the C++ --
+  by the tool that installed it, since neither a pixi environment nor a uv
+  one has pip;
+* a pixi environment (``conda-meta/pixi``): ``pixi upgrade`` in its
+  workspace, which moves the manifest's range past a new minor version
+  rather than leave the user on the old one, then ``pixi install`` of the
+  environment, which ``upgrade`` installs only when it is the default;
 * a ``uv tool install`` (``uv-receipt.toml`` beside the tool's Python):
   ``uv tool upgrade``;
 * an ephemeral ``uvx`` environment (in uv's cache): ``uvx`` with ``@latest``;
 * anything else installed by uv (``INSTALLER`` says ``uv``): ``uv pip``;
 * otherwise pip, through this very Python, so it lands in this environment
-  whatever ``pip`` on the PATH would be.
+  whatever ``pip`` on the PATH would be -- conda's and mamba's environments
+  among them, which have pip beside their Python.
+
+Where none of these fits and this Python has no pip either, there is no
+command to give: the dialog says so rather than offer one that fails.
 
 Qt-free, so the tests reach every decision without a window; the request
 itself is the GUI's (`gui/updates.py`), made with QtNetwork, which uses the
@@ -97,8 +107,33 @@ def _distribution():
         return None
 
 
+def pixi_environment(prefix: Optional[str] = None) -> Optional[Tuple[Path, str]]:
+    """The pixi workspace's manifest and the environment's name, where this
+    is a pixi environment; None elsewhere.
+
+    pixi records both in the environment's ``conda-meta/pixi``, which is
+    there however SMAPpy was started -- a launcher has none of ``pixi run``'s
+    variables -- and wherever the environment is, which need not be under
+    the workspace (pixi's *detached environments*).  Without that file the
+    environment's place says it: ``<workspace>/.pixi/envs/<name>``.
+    """
+    prefix = Path(prefix or sys.prefix)
+    try:
+        data = json.loads((prefix / "conda-meta" / "pixi").read_text(encoding="utf-8"))
+        return Path(data["manifest_path"]), str(data.get("environment_name") or "default")
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if prefix.parent.name == "envs" and prefix.parent.parent.name == ".pixi":
+        workspace = prefix.parent.parent.parent
+        for name in ("pixi.toml", "pyproject.toml"):
+            if (workspace / name).exists():
+                return workspace / name, prefix.name
+    return None
+
+
 def how_installed(prefix: Optional[str] = None, dist=None) -> str:
-    """``checkout``, ``uv tool``, ``uvx``, ``uv`` or ``pip``; see the module."""
+    """``checkout``, ``pixi``, ``uv tool``, ``uvx``, ``uv`` or ``pip``; see
+    the module."""
     prefix = Path(prefix or sys.prefix)
     dist = _distribution() if dist is None else dist
     direct = (dist.read_text("direct_url.json") if dist is not None else None) or ""
@@ -107,6 +142,8 @@ def how_installed(prefix: Optional[str] = None, dist=None) -> str:
             return "checkout"
     except ValueError:
         pass
+    if pixi_environment(prefix) is not None:
+        return "pixi"
     if (prefix / "uv-receipt.toml").exists():
         return "uv tool"
     installer = ((dist.read_text("INSTALLER") if dist is not None else None) or "").strip()
@@ -143,27 +180,56 @@ def _quote(path, windows: bool) -> str:
     return f'"{text}"' if " " in text else text
 
 
+def _installer(dist) -> str:
+    return ((dist.read_text("INSTALLER") if dist is not None else None) or "").strip()
+
+
+def has_pip() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("pip") is not None
+
+
 def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
-                   python: Optional[str] = None, dist=None) -> str:
-    """The command to run in a terminal, with SMAPpy closed, to update it.
+                   python: Optional[str] = None, dist=None, prefix: Optional[str] = None,
+                   pip: Optional[bool] = None) -> str:
+    """The command to run in a terminal, with SMAPpy closed, to update it;
+    empty where there is none to give (the module's last paragraph).
 
     One line for PowerShell on Windows -- Windows PowerShell 5.1 has no
     ``&&``, so steps are joined with ``;`` there -- and for a POSIX shell
     elsewhere.  pip is run through this Python, so the update goes where
-    SMAPpy is, whichever ``pip`` the PATH would find.
+    SMAPpy is, whichever ``pip`` the PATH would find.  ``prefix`` is the
+    environment (this one by default) and ``pip`` whether it has pip (asked
+    of this Python by default).
     """
     windows = sys.platform.startswith("win") if windows is None else windows
     dist = _distribution() if dist is None else dist
-    kind = kind or how_installed(dist=dist)
+    kind = kind or how_installed(prefix, dist=dist)
     python = python or sys.executable
+    pip = has_pip() if pip is None else pip
     run = _quote(python, windows)
     if windows and run.startswith('"'):
         run = "& " + run
+    then = "; " if windows else " && "
+    pixi = pixi_environment(prefix)
     if kind == "checkout":
         source = _checkout_dir(dist) if dist is not None else None
-        steps = ([f"cd {_quote(source, windows)}"] if source else []) + [
-            "git pull", f"{run} -m pip install -e ."]
-        return ("; " if windows else " && ").join(steps)
+        if pixi is not None:
+            # a pixi environment has no pip, and pixi keeps its lock in step
+            install = (f"pixi reinstall --manifest-path {_quote(pixi[0], windows)} "
+                       f"-e {pixi[1]} {DISTRIBUTION}")
+        elif _installer(dist) == "uv":
+            install = f"uv pip install --python {_quote(python, windows)} -e ."
+        elif pip:
+            install = f"{run} -m pip install -e ."
+        else:
+            return ""
+        steps = ([f"cd {_quote(source, windows)}"] if source else []) + ["git pull", install]
+        return then.join(steps)
+    if kind == "pixi" and pixi is not None:
+        manifest = f"--manifest-path {_quote(pixi[0], windows)}"
+        return then.join([f"pixi upgrade {manifest} {DISTRIBUTION}",
+                          f"pixi install {manifest} -e {pixi[1]}"])
     if kind == "uv tool":
         # uv's copy of PyPI's list may predate the release, and how to ask
         # afresh depends on the uv (`smappy.updater.refresh_args`)
@@ -177,7 +243,7 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
     if kind == "uv":
         return (f"uv pip install --upgrade --refresh-package {DISTRIBUTION} "
                 f"--python {_quote(python, windows)} {DISTRIBUTION}")
-    return f"{run} -m pip install --upgrade {DISTRIBUTION}"
+    return f"{run} -m pip install --upgrade {DISTRIBUTION}" if pip else ""
 
 
 # ------------------------------------------------------------- the schedule

@@ -1,6 +1,7 @@
 """Checking for a newer SMAPpy: the comparison, the command for each kind of
 installation, the once-a-day schedule, and the GUI's request and button."""
 import json
+import shlex
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -56,29 +57,124 @@ def test_how_it_was_installed_is_read_from_the_package_metadata(tmp_path):
     assert updates.how_installed(tmp_path / "venv", Dist(INSTALLER="uv")) == "uv"
     assert updates.how_installed(tmp_path / "venv", Dist(INSTALLER="pip")) == "pip"
     assert updates.how_installed(tmp_path / "venv", Dist()) == "pip"
+    pixi = _pixi_env(tmp_path / "ws" / ".pixi" / "envs" / "default", tmp_path / "ws" / "pixi.toml")
+    assert updates.how_installed(pixi, Dist(INSTALLER="uv-pixi")) == "pixi"
+    assert updates.how_installed(pixi, editable) == "checkout"      # pixi installs it again, below
+
+
+def _pixi_env(prefix, manifest, name="default"):
+    """An environment as pixi leaves it: its workspace and name in conda-meta/pixi."""
+    (prefix / "conda-meta").mkdir(parents=True)
+    (prefix / "conda-meta" / "pixi").write_text(json.dumps(
+        {"manifest_path": str(manifest), "environment_name": name, "pixi_version": "0.81.0"}))
+    return prefix
+
+
+def test_a_pixi_environment_names_its_workspace_wherever_it_is(tmp_path):
+    # detached: in pixi's cache, nowhere near the workspace it belongs to
+    detached = _pixi_env(tmp_path / "cache" / "analysis-1a2b" / "envs" / "smlm",
+                         tmp_path / "analysis" / "pixi.toml", "smlm")
+    assert updates.pixi_environment(detached) == (tmp_path / "analysis" / "pixi.toml", "smlm")
+    # an older pixi's, without the file: the environment's place says it
+    workspace = tmp_path / "project"
+    (workspace / ".pixi" / "envs" / "gpu").mkdir(parents=True)
+    (workspace / "pyproject.toml").write_text("[tool.pixi.workspace]\n")
+    assert updates.pixi_environment(workspace / ".pixi" / "envs" / "gpu") == (
+        workspace / "pyproject.toml", "gpu")
+    assert updates.pixi_environment(tmp_path / "venv") is None
 
 
 def test_the_command_runs_pip_through_this_python_in_each_shell():
-    posix = updates.update_command("pip", windows=False, python="/opt/my env/bin/python", dist=Dist())
+    posix = updates.update_command("pip", windows=False, python="/opt/my env/bin/python",
+                                   dist=Dist(), pip=True)
     assert posix == "'/opt/my env/bin/python' -m pip install --upgrade smappy-smlm"
     # PowerShell runs a quoted program only after `&`
-    spaced = updates.update_command("pip", windows=True, python=r"C:\Users\J R\python.exe", dist=Dist())
+    spaced = updates.update_command("pip", windows=True, python=r"C:\Users\J R\python.exe",
+                                    dist=Dist(), pip=True)
     assert spaced == r'& "C:\Users\J R\python.exe" -m pip install --upgrade smappy-smlm'
-    plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe", dist=Dist())
+    plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe",
+                                   dist=Dist(), pip=True)
     assert plain == r"C:\py\python.exe -m pip install --upgrade smappy-smlm"
     assert updates.update_command("uv tool", dist=Dist()) == (
         "uv tool upgrade --refresh-package smappy-smlm smappy-smlm")
 
 
-def test_a_checkout_is_pulled_where_it_is_and_installed_again():
-    dist = Dist(**{"direct_url.json": json.dumps(
-        {"url": "file:///home/me/SMAPpy", "dir_info": {"editable": True}})})
-    command = updates.update_command(windows=False, python="/v/bin/python", dist=dist)
+def _editable(url="file:///home/me/SMAPpy", installer=None):
+    files = {"direct_url.json": json.dumps({"url": url, "dir_info": {"editable": True}})}
+    if installer:
+        files["INSTALLER"] = installer + "\n"
+    return Dist(**files)
+
+
+def test_a_checkout_is_pulled_where_it_is_and_installed_again(tmp_path):
+    dist = _editable()
+    command = updates.update_command(windows=False, python="/v/bin/python", dist=dist,
+                                     prefix=tmp_path, pip=True)
     if sys.platform != "win32":             # there the file URL is a Windows path, \home\me
         assert command == "cd /home/me/SMAPpy && git pull && /v/bin/python -m pip install -e ."
     assert command.endswith(" && git pull && /v/bin/python -m pip install -e .")
     # Windows PowerShell 5.1 has no &&
-    assert "; git pull; " in updates.update_command(windows=True, python="py.exe", dist=dist)
+    assert "; git pull; " in updates.update_command(windows=True, python="py.exe", dist=dist,
+                                                    prefix=tmp_path, pip=True)
+
+
+def test_a_checkout_is_installed_again_by_the_tool_that_installed_it(tmp_path):
+    # neither a pixi environment nor a uv one has pip, which the command named
+    # whatever had installed the checkout
+    manifest = tmp_path / "my analysis" / "pixi.toml"
+    pixi = _pixi_env(tmp_path / "env", manifest, "smlm")
+    command = updates.update_command(windows=False, python="/v/bin/python",
+                                     dist=_editable(installer="uv-pixi"), prefix=pixi, pip=False)
+    assert command.endswith(f" && git pull && pixi reinstall --manifest-path "
+                            f"{shlex.quote(str(manifest))} -e smlm smappy-smlm")
+    command = updates.update_command(windows=False, python="/v/bin/python",
+                                     dist=_editable(installer="uv"), prefix=tmp_path, pip=False)
+    assert command.endswith(" && git pull && uv pip install --python /v/bin/python -e .")
+    # installed by something else, and no pip to fall back on: no command at all
+    assert updates.update_command(windows=False, dist=_editable(installer="hatch"),
+                                  prefix=tmp_path, pip=False) == ""
+
+
+def test_a_pixi_environment_upgrades_in_its_workspace_and_installs_the_environment(tmp_path):
+    from smappy import updater
+    manifest = tmp_path / "analysis" / "pixi.toml"
+    pixi = _pixi_env(tmp_path / "env", manifest, "smlm")
+    # upgrade, not update: it moves the manifest's range (">=0.6.2, <0.7" as
+    # `pixi add` writes it) past a new minor version; and it installs only the
+    # default environment
+    assert updates.update_command(windows=False, dist=Dist(INSTALLER="uv-pixi"), prefix=pixi,
+                                  pip=False) == (
+        f"pixi upgrade --manifest-path {shlex.quote(str(manifest))} smappy-smlm"
+        f" && pixi install --manifest-path {shlex.quote(str(manifest))} -e smlm")
+    workspace = updates.pixi_environment(pixi)
+    assert updater.commands("pixi", "/env/bin/python", pixi="/bin/pixi", workspace=workspace) == [
+        ["/bin/pixi", "upgrade", "--manifest-path", str(manifest), "smappy-smlm"],
+        ["/bin/pixi", "install", "--manifest-path", str(manifest), "-e", "smlm"]]
+    assert updater.commands("pixi", "/env/bin/python", pixi="", workspace=workspace) is None
+
+
+def test_pixi_is_found_where_smappy_was_started_from_or_where_its_installer_put_it(
+        tmp_path, monkeypatch):
+    from smappy import updater
+    monkeypatch.setenv("PATH", "")                  # a launcher's: no ~/.pixi/bin
+    monkeypatch.delenv("PIXI_EXE", raising=False)
+    monkeypatch.setenv("PIXI_HOME", str(tmp_path / "nowhere"))
+    assert updater.find_pixi() is None
+    installed = tmp_path / "home" / "bin" / ("pixi.exe" if sys.platform == "win32" else "pixi")
+    installed.parent.mkdir(parents=True)
+    installed.write_text("")
+    monkeypatch.setenv("PIXI_HOME", str(tmp_path / "home"))
+    assert updater.find_pixi() == str(installed)
+    started = tmp_path / "pixi-that-ran-us"
+    started.write_text("")
+    monkeypatch.setenv("PIXI_EXE", str(started))
+    assert updater.find_pixi() == str(started)
+
+
+def test_without_pip_or_a_known_installer_there_is_no_command_to_give(tmp_path):
+    from smappy import updater
+    assert updates.update_command(dist=Dist(), prefix=tmp_path, pip=False) == ""
+    assert updater.commands("pip", "/env/bin/python", pip=False) is None
 
 
 def test_a_check_is_due_once_a_day_and_not_at_all_when_switched_off(own_config):
@@ -173,18 +269,22 @@ def test_a_failed_check_answers_none_and_why(own_config):
     assert "Could not ask PyPI" in message(None, got[0][1])
 
 
-def test_a_newer_release_puts_a_button_in_the_status_bar(own_config):
+def test_a_newer_release_puts_a_button_in_the_status_bar(own_config, monkeypatch):
     _app()
     from PySide6.QtWidgets import QMainWindow
-    from smappy.gui.updates import Updates, message
+    from smappy.gui.updates import NO_COMMAND, Updates, message
     window = QMainWindow()
     found = Updates(window)
     found._answered("0.0.1", "")
     assert found.button is None                  # older: nothing to say
     found._answered("99.2", "")
     assert found.button.text() == "SMAPpy 99.2 is available"
+    # the command is this installation's: pin one
+    monkeypatch.setattr(updates, "update_command", lambda: "pip install --upgrade smappy-smlm")
     assert "99.2 is available" in message("99.2") and "pip install" in message("99.2")
     assert "is the newest version" in message("0.0.1")
+    monkeypatch.setattr(updates, "update_command", lambda: "")
+    assert NO_COMMAND in message("99.2") and "<pre>" not in message("99.2")
     window.deleteLater()
 
 
