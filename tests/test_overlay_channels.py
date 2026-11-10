@@ -1,7 +1,6 @@
 """Overlay channels: a split camera's second half put on the first, one dye in each.
 
-Tables in chip pixels with a known registration and a known move of the halves since the beads,
-and the numbers asserted back; then the plugin end to end, on bead movies it fits itself.
+Tables in chip pixels with a known registration, and the numbers asserted back; then the plugin end to end, on bead movies it fits itself.
 """
 from dataclasses import replace
 
@@ -9,8 +8,8 @@ import numpy as np
 import pytest
 
 from smappy.calibrate.dual import ArrangementSettings, ChannelTransform, split_geometry
-from smappy.channel_overlay import (bead_key, cached_transform, crosstalk_pairs, fit_correction,
-                                    overlay_table, refine, secondary_rows, transform_path)
+from smappy.channel_overlay import (bead_key, cached_transform, overlay_table, secondary_rows,
+                                    transform_path)
 from smappy.locs import Localizations
 from smappy.plugins import Context
 
@@ -103,89 +102,6 @@ def test_a_table_not_fitted_as_two_channels_is_refused_with_how_to_fit_it():
                           "y_nm": np.zeros(3)}, {"pixelsize_nm": PIXEL})
     with pytest.raises(ValueError, match="two channels"):
         secondary_rows(locs)
-
-
-# ----------------------------------------------------------------------------------- crosstalk
-def test_crosstalk_measures_how_far_the_halves_moved_since_the_beads():
-    t = registration()
-    locs = two_dyes(t, moved=(0.3, -0.2))
-    x, y = chip(locs)
-    r = refine(x, y, locs["frame"], locs["camera_channel"], t, "shift",
-               photons=locs["photons"])
-    # moved +0.3 in the secondary half: the correction takes it back
-    np.testing.assert_allclose(r.matrix[:2, 2], [-0.3, 0.2], atol=4 * r.error_px)
-    assert r.significant and r.n_pairs > 300
-    corrected = overlay_table(locs, t, r.applied)
-    assert np.max(np.abs(np.median(error_px(corrected), axis=0))) < 0.01
-    assert np.max(np.abs(np.median(error_px(overlay_table(locs, t)), axis=0))) > 0.15
-
-
-def test_the_correction_is_not_cut_short_by_the_pairing_distance():
-    """Paired once around the bead map's prediction, an offset of half the pairing distance
-    comes out short; paired again through the corrected map, it does not."""
-    t = registration()
-    locs = two_dyes(t, moved=(0.5, 0.0), sigma=0.15, seed=4)
-    x, y = chip(locs)
-    r = refine(x, y, locs["frame"], locs["camera_channel"], t, "shift", tolerance_px=1.0,
-               photons=locs["photons"])
-    assert abs(r.matrix[0, 2] + 0.5) < 3 * r.error_px + 0.005
-
-
-def test_an_affine_correction_follows_a_small_turn_of_the_splitter():
-    t = registration()
-    turned = registration(angle_deg=0.4)               # the halves as they are today
-    locs = two_dyes(turned, n_frames=600)
-    x, y = chip(locs)
-    r = refine(x, y, locs["frame"], locs["camera_channel"], t, "affine",
-               photons=locs["photons"])
-    assert r.significant
-    corrected = overlay_table(locs, t, r.applied)
-    assert np.percentile(np.abs(error_px(corrected)), 90) < 0.06
-    assert np.percentile(np.abs(error_px(overlay_table(locs, t))), 90) > 0.1
-
-
-def test_a_correction_within_its_error_is_not_applied():
-    t = registration()
-    locs = two_dyes(t, n_frames=60, moved=(0.0, 0.0), sigma=0.2, seed=7)
-    x, y = chip(locs)
-    r = refine(x, y, locs["frame"], locs["camera_channel"], t, "shift", min_pairs=5,
-               photons=locs["photons"])
-    assert r.n_pairs >= 5 and not r.significant
-    np.testing.assert_array_equal(r.applied, np.eye(3))
-
-
-def test_too_few_pairs_leave_the_bead_map_and_say_why():
-    t = registration()
-    locs = two_dyes(t, n_frames=10, moved=(0.3, 0.0))
-    x, y = chip(locs)
-    r = refine(x, y, locs["frame"], locs["camera_channel"], t, "shift", min_pairs=500,
-               photons=locs["photons"])
-    assert "wanted" in r.reason and not r.significant
-
-
-def test_two_molecules_meeting_are_not_taken_for_crosstalk():
-    """An even pair is two molecules; only a pair with a dim partner is crosstalk."""
-    t = registration()
-    forward = np.linalg.inv(t.transformation)
-    p = np.array([[20.0, 20.0], [40.0, 30.0]])
-    q = (np.c_[p, np.ones(2)] @ forward.T)[:, :2]
-    x, y = np.r_[p[:, 0], q[:, 0]], np.r_[p[:, 1], q[:, 1]]
-    photons = np.array([5000.0, 5000.0, 150.0, 4800.0])  # the first a leak, the second a meeting
-    ref, sec = crosstalk_pairs(x, y, np.zeros(4), np.array([0, 0, 1, 1]), t.to_reference, 1.0,
-                               photons, max_ratio=0.3)
-    assert list(zip(ref, sec)) == [(0, 2)]
-
-
-def test_a_shift_and_an_affine_map_are_fitted_exactly_from_exact_pairs():
-    rng = np.random.default_rng(0)
-    mapped = rng.uniform(0, 50, (40, 2))
-    a = np.array([[1.002, -0.004], [0.004, 1.002]])
-    reference = mapped @ a.T + [0.3, -0.1]
-    c = fit_correction(reference, mapped, "affine")
-    np.testing.assert_allclose(c[:2, :2], a, atol=1e-9)
-    np.testing.assert_allclose(c[:2, 2], [0.3, -0.1], atol=1e-9)
-    s = fit_correction(mapped + [0.2, 0.1], mapped, "shift")
-    np.testing.assert_allclose(s[:2, 2], [0.2, 0.1], atol=1e-9)
 
 
 # ---------------------------------------------------------------------------- keeping the beads

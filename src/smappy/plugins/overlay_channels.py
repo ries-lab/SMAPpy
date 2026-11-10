@@ -25,9 +25,9 @@ with the files and settings it came from, and use it again while those have
 not changed (`channel_overlay.cached_transform`): a batch, or the *after the
 fit* step of every fit of a day, fits and registers the beads once.
 
-*refine with crosstalk* corrects the bead map with the sample's own crosstalk
-pairs, by a shift or an affine map, where that correction is larger than its
-error (`channel_overlay.refine`).
+There is no correction of the bead map from the sample: one from crosstalk pairs
+was tried and taken out (`channel_overlay`'s docstring says why).  A shift left
+between the dyes is measured by *Register layers* on the two overlaid channels.
 
 The step of every fitter's *after the fit* (`after_fit.py`) is this plugin,
 run before drift correction: the drift is the sample's, the same in both
@@ -39,10 +39,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-
 from ..calibrate.dual import ArrangementSettings, RegisterSettings
-from . import Context, FormState, Notice, Plot, Plugin, Result, param, register
+from . import Context, FormState, Notice, Plugin, Result, param, register
 
 SOURCES = (("file", "transformation file"), ("table", "fitted beads"),
            ("movies", "bead movies"))
@@ -60,23 +58,6 @@ class BeadFitSettings:
                                "frame's noise (the fitters' dynamic cutoff)")
     max_frames: Optional[int] = param(None, label="at most", unit="frames", min=1,
                                       help="frames fitted per bead movie; auto: all")
-
-
-@dataclass
-class CrosstalkSettings:
-    """A correction of the bead map from pairs of a molecule and its crosstalk in the sample."""
-    model: str = param("off", label="refine with crosstalk",
-                       choices=(("off", "off"), ("shift", "shift"), ("affine", "affine")),
-                       help="correct the bead map with the sample's own crosstalk pairs; "
-                            "applied only where larger than its error")
-    tolerance_px: float = param(1.0, label="pairing distance", unit="px", min=0.05,
-                                help="how far from where the bead map puts it a partner "
-                                     "may be")
-    max_ratio: float = param(0.3, label="crosstalk at most", min=0.0, max=1.0,
-                             help="the dimmer partner's photons over the brighter one's; "
-                                  "a more even pair is two molecules")
-    min_pairs: int = param(50, label="at least", unit="pairs", min=3,
-                           help="fewer pairs and the bead map is used as it is")
 
 
 @dataclass
@@ -104,8 +85,6 @@ class OverlaySettings:
     save: bool = param(True, label="keep the registration",
                        help="write it beside the beads as <name>_2ct.h5 and use it again "
                             "while the beads and these settings are unchanged")
-    crosstalk: CrosstalkSettings = param(default_factory=CrosstalkSettings,
-                                         label="crosstalk", collapsed=True)
     # the camera the sample was read with, which the bead movies are read with too: the
     # fitter's, filled when this is its step (`fit._FitPlugin.finish`); empty: the table's record
     camera: dict = param(default_factory=dict, hidden=True,
@@ -113,14 +92,11 @@ class OverlaySettings:
 
 
 def shown(settings: OverlaySettings) -> dict:
-    """The fields of the chosen source only, and the crosstalk part's while it is on."""
+    """The fields of the chosen source only."""
     beads = settings.source in ("table", "movies")
-    on = settings.crosstalk.model != "off"
     return {"path": settings.source == "file", "beads_table": settings.source == "table",
             "beads": settings.source == "movies", "bead_fit": settings.source == "movies",
-            "channels": beads, "registration": beads, "save": beads,
-            "crosstalk.tolerance_px": on, "crosstalk.max_ratio": on,
-            "crosstalk.min_pairs": on}
+            "channels": beads, "registration": beads, "save": beads}
 
 
 def with_fitter(settings: OverlaySettings, fitter_settings) -> OverlaySettings:
@@ -195,10 +171,9 @@ class OverlayChannels(Plugin):
     """Put a split camera's secondary half onto its main half, from beads."""
 
     description = ("Move the localizations of a split camera's second half onto the first, by "
-                   "a registration from a file, fitted beads or bead movies, optionally "
-                   "corrected by the sample's crosstalk; channel is the half.")
+                   "a registration from a file, fitted beads or bead movies; channel is the half.")
     Settings = OverlaySettings
-    version = "1"
+    version = "2"
     changes_locs = True
     # every localization moves, whatever the layer shows, and pairs are within a frame
     grouping = "ungrouped"
@@ -212,8 +187,7 @@ class OverlayChannels(Plugin):
 
     def run(self, ctx: Context, settings: OverlaySettings) -> Result:
         from .. import channel_overlay as co
-        from ..locs import frames_apart, in_pixels
-        from .registration import chip_pixels, registration_plot
+        from .registration import registration_plot
         locs, _ = ctx.ungrouped()
         co.secondary_rows(locs)                      # refused here, before beads are fitted
         if co.is_overlaid(locs):
@@ -229,62 +203,9 @@ class OverlayChannels(Plugin):
             lines.append(f"{p['n_inliers']:,} bead pairs, residual dx "
                          f"{p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
             plots["beads"] = registration_plot(measured)
-        refinement = None
-        if settings.crosstalk.model != "off":
-            c = settings.crosstalk
-            ctx.report("pairing crosstalk")
-            x, y = chip_pixels(locs)
-            refinement = co.refine(
-                x, y, frames_apart(locs), np.asarray(locs["camera_channel"]), transform,
-                c.model, c.tolerance_px,
-                np.asarray(locs["photons"]) if "photons" in locs else None,
-                c.max_ratio if "photons" in locs else None, c.min_pairs,
-                in_pixels(locs, "xy_err_pix") if "xy_err_nm" in locs else None)
-            lines.append(refinement_line(refinement, locs))
-            if refinement.n_pairs and not refinement.reason:
-                plots["crosstalk"] = crosstalk_plot(refinement)
-        out = co.overlay_table(locs, transform,
-                               refinement.applied if refinement is not None else None)
+        out = co.overlay_table(locs, transform)
         n = int(co.secondary_rows(locs).sum())
         lines.insert(0, f"{n:,} of {len(locs):,} localizations moved onto the main channel")
         return Result(locs=out, text="\n".join(lines), plots=plots, settings=settings,
-                      data={"transform": transform, "refinement": refinement,
-                            "measured": measured})
+                      data={"transform": transform, "measured": measured})
 
-
-def refinement_line(r, locs=None) -> str:
-    """What the crosstalk said, in nm where the table's pixel is known."""
-    if r.reason:
-        return f"crosstalk: {r.reason}; the bead map as it is"
-    scale, unit = 1.0, "px"
-    if locs is not None:
-        try:
-            from ..locs import table_pixel_sizes
-            scale, unit = float(np.mean(table_pixel_sizes(locs))), "nm"
-        except ValueError:
-            pass
-    size, error = r.size_px * scale, r.error_px * scale
-    verdict = "applied" if r.significant else "not applied: within its error"
-    return (f"crosstalk: {r.n_pairs:,} pairs, a {r.model} of up to {size:.3g} +- "
-            f"{error:.2g} {unit}, {verdict}")
-
-
-def crosstalk_plot(r) -> Plot:
-    """The crosstalk pairs' residuals through the bead map, and after the correction."""
-    before, after = r.before, r.after
-
-    def draw(figure) -> None:
-        axes = figure.subplots(1, 2, sharex=True, sharey=True)
-        span = max(float(np.percentile(np.abs(before), 99)) * 1.3, 0.05)
-        for ax, d, title in ((axes[0], before, "through the bead map"),
-                             (axes[1], after, "corrected" if r.significant
-                              else "corrected (not applied)")):
-            ax.plot(d[:, 0], d[:, 1], ".", ms=3, alpha=.5)
-            m = np.median(d, axis=0)
-            ax.plot(m[0], m[1], "+", color="crimson", ms=14, mew=2)
-            ax.axhline(0, lw=.6, color="grey")
-            ax.axvline(0, lw=.6, color="grey")
-            ax.set(xlim=(-span, span), ylim=(-span, span), title=title,
-                   xlabel="dx main - secondary (px)", ylabel="dy (px)")
-            ax.set_aspect("equal", adjustable="box")
-    return Plot(draw, panels=2, size=(9, 4.4))
