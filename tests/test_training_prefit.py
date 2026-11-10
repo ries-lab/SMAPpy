@@ -30,5 +30,5 @@ def test_each_block_is_fitted_and_grouped_on_its_own_frames():
     for g in np.unique(gid):                                              # no blink across two blocks
         assert len(np.unique(start[gid == g])) == 1
     assert p.n_frames == 120 and p.area_px == 64 * 64
-    blinks, locs = p.columns()
+    _, locs = p.columns()
     assert {"group_id", "n_in_group", "photons", "background"} <= set(locs)
