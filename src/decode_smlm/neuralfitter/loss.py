@@ -232,7 +232,14 @@ class GaussianMMLoss(Loss):
         gmm = distributions.mixture_same_family.MixtureSameFamily(mix, comp)
 
         """Calc log probs if there is anything there"""
-        if mask.sum():
+        # The targets are padded to max_number_targets (250 in the example package) and a frame holds
+        # about 50; the mixture's log-probability, (slots x frames x pixels x 4), was computed for
+        # every slot and the empty ones multiplied by 0.  ParameterListTarget fills the slots from
+        # the first, so cutting them to the most any frame of the batch uses is the same sum: about
+        # half of a training step's GPU time on an H100 went to the padding.
+        n_used = int(mask.sum(-1).max()) if mask.numel() else 0
+        pxyz_tar, mask = pxyz_tar[:, :n_used], mask[:, :n_used]
+        if n_used:
             gmm_log = gmm.log_prob(pxyz_tar.transpose(0, 1)).transpose(0, 1)
             gmm_log = (gmm_log * mask).sum(-1)
             # print(f"LogProb: {log_prob.mean()}, GMM_log: {gmm_log.mean()}")
