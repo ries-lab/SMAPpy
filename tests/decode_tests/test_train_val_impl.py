@@ -3,11 +3,11 @@ import copy
 import pytest
 import torch
 
-from decode.generic import test_utils
-from decode.neuralfitter import loss
-from decode.neuralfitter import post_processing
-from decode.neuralfitter import train_val_impl
-from decode.neuralfitter.utils import logger as logger_utils
+from decode_smlm.generic import test_utils
+from decode_smlm.neuralfitter import loss
+from decode_smlm.neuralfitter import post_processing
+from decode_smlm.neuralfitter import train_val_impl
+from decode_smlm.neuralfitter.utils import logger as logger_utils
 
 
 class TestTrain:

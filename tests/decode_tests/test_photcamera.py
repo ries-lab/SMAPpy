@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-import decode.simulation.camera as camera
-from decode.generic import test_utils
+import decode_smlm.simulation.camera as camera
+from decode_smlm.generic import test_utils
 
 
 class TestPhoton2Camera:

@@ -1,16 +1,14 @@
-import decode.neuralfitter.dataset
-import decode.neuralfitter.de_bias
-import decode.neuralfitter.em_filter
-import decode.neuralfitter.frame_processing
-import decode.neuralfitter.loss
-import decode.neuralfitter.models
-import decode.neuralfitter.coord_transform
-import decode.neuralfitter.post_processing
-import decode.neuralfitter.utils.processing
-import decode.neuralfitter.scale_transform
-import decode.neuralfitter.weight_generator
-import decode.neuralfitter.train_val_impl
-import decode.neuralfitter.train
-import decode.neuralfitter.inference
+import decode_smlm.neuralfitter.dataset
+import decode_smlm.neuralfitter.em_filter
+import decode_smlm.neuralfitter.frame_processing
+import decode_smlm.neuralfitter.loss
+import decode_smlm.neuralfitter.models
+import decode_smlm.neuralfitter.coord_transform
+import decode_smlm.neuralfitter.post_processing
+import decode_smlm.neuralfitter.utils.processing
+import decode_smlm.neuralfitter.scale_transform
+import decode_smlm.neuralfitter.train_val_impl
+import decode_smlm.neuralfitter.train
+import decode_smlm.neuralfitter.inference
 
-from decode.neuralfitter.inference.inference import Infer, LiveInfer
+from decode_smlm.neuralfitter.inference.inference import Infer

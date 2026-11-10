@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from decode.generic import test_utils
-from decode.neuralfitter import loss
+from decode_smlm.generic import test_utils
+from decode_smlm.neuralfitter import loss
 
 
 class TestLossAbstract:

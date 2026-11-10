@@ -4,11 +4,10 @@ from abc import ABC, abstractmethod
 from typing import Tuple, Union
 
 import numpy as np
-import spline  # cubic spline implementation
 import torch
 
-from decode.generic import slicing as gutil
-import decode.generic.utils
+from decode_smlm.generic import slicing as gutil
+import decode_smlm.generic.utils
 
 
 class PSF(ABC):
@@ -130,12 +129,12 @@ class DeltaPSF(PSF):
     def __init__(self, xextent, yextent, img_shape):
         super().__init__(xextent=xextent, yextent=yextent, img_shape=img_shape)
 
-        from decode.generic.process import RemoveOutOfFOV
+        from decode_smlm.generic.process import RemoveOutOfFOV
 
         self._fov_filter = RemoveOutOfFOV(xextent=self.xextent, yextent=self.yextent, zextent=None)
 
         self._bin_x, self._bin_y, self._bin_ctr_x, self._bin_ctr_y = \
-            decode.generic.utils.frame_grid(img_shape, xextent, yextent)
+            decode_smlm.generic.utils.frame_grid(img_shape, xextent, yextent)
 
     @property
     def bin_ctr_x(self):
@@ -362,7 +361,7 @@ class CubicSplinePSF(PSF):
 
         self.ref_re = self._shift_ref(ref_re, roi_auto_center)
 
-        self._device, self._device_ix = decode.utils.hardware._specific_device_by_str(device)
+        self._device, self._device_ix = decode_smlm.utils.hardware._specific_device_by_str(device)
         self.max_roi_chunk = max_roi_chunk
 
         self._init_spline_impl()
@@ -390,23 +389,9 @@ class CubicSplinePSF(PSF):
         Init the spline implementation. Done seperately because otherwise it's harder to pickle
 
         """
-        if 'cuda' in self._device:
-            if self._device_ix is None:
-                device_ix = 0
-            else:
-                device_ix = self._device_ix
-
-            self._spline_impl = spline.PSFWrapperCUDA(self._coeff.shape[0], self._coeff.shape[1],
-                                                      self._coeff.shape[2],
-                                                      self.roi_size_px[0], self.roi_size_px[1],
-                                                      self._coeff.numpy(), device_ix)
-        elif 'cpu' == self._device:
-            self._spline_impl = spline.PSFWrapperCPU(self._coeff.shape[0], self._coeff.shape[1],
-                                                     self._coeff.shape[2],
-                                                     self.roi_size_px[0], self.roi_size_px[1],
-                                                     self._coeff.numpy())
-        else:
-            raise ValueError(f"Unsupported device ({self._device} has been set.")
+        # DECODE's compiled `spline` package is not used; the torch renderer of milestone (c)
+        # (docs/decode/poc-plan.md) takes its place.
+        raise NotImplementedError("CubicSplinePSF waits for the torch renderer (milestone (c)).")
 
     def sanity_check(self):
         """
@@ -430,7 +415,7 @@ class CubicSplinePSF(PSF):
         Technically (1) could come without (2).
 
         """
-        return spline.cuda_compiled
+        return False
 
     @staticmethod
     def cuda_is_available() -> bool:
@@ -439,7 +424,7 @@ class CubicSplinePSF(PSF):
         whether Python has 'static properties'?
 
         """
-        return spline.cuda_is_available()
+        return False
 
     @property
     def _ref_diff(self):

@@ -7,7 +7,7 @@ import scipy.stats
 import seaborn as sns
 import torch
 
-from decode.evaluation.metric import precision_recall_jaccard, rmse_mad_dist, efficiency
+from decode_smlm.evaluation.metric import precision_recall_jaccard, rmse_mad_dist, efficiency
 from ..generic import emitter as emitter
 from ..generic.emitter import EmitterSet
 

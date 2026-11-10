@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pytest
 import torch
 
-from decode.evaluation import predict_dist
+from decode_smlm.evaluation import predict_dist
 
 
 class TestPredictDist:

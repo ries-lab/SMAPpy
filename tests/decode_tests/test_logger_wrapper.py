@@ -2,7 +2,7 @@ import warnings
 import pytest
 import torch
 
-from decode.neuralfitter.utils import logger
+from decode_smlm.neuralfitter.utils import logger
 
 
 def test_noop_logger():

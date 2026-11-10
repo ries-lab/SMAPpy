@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-import decode.evaluation
-from decode.generic import test_utils as tutil
+import decode_smlm.evaluation
+from decode_smlm.generic import test_utils as tutil
 
 
 class TestMetricMeter:
@@ -10,7 +10,7 @@ class TestMetricMeter:
     @pytest.fixture(scope='class')
     def mm0(self):
         x = torch.ones(32)
-        m = decode.evaluation.utils.MetricMeter()
+        m = decode_smlm.evaluation.utils.MetricMeter()
         m.vals = x
 
         return m
@@ -18,7 +18,7 @@ class TestMetricMeter:
     @pytest.fixture(scope='class')
     def mm1(self):
         x = torch.ones(32) * 2
-        m = decode.evaluation.utils.MetricMeter()
+        m = decode_smlm.evaluation.utils.MetricMeter()
         m.vals = x
         return m
 

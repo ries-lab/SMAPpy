@@ -3,8 +3,8 @@ import pytest
 import math
 import torch
 
-from decode.evaluation import evaluation
-from decode.generic import emitter as em, test_utils
+from decode_smlm.evaluation import evaluation
+from decode_smlm.generic import emitter as em, test_utils
 
 
 class TestEval:

@@ -1,9 +1,9 @@
 import pytest
 import torch
 
-import decode.simulation.psf_kernel as psf_kernel
-from decode.generic import EmitterSet, CoordinateOnlyEmitter, RandomEmitterSet, EmptyEmitterSet, test_utils as tutil
-from decode.neuralfitter import target_generator
+import decode_smlm.simulation.psf_kernel as psf_kernel
+from decode_smlm.generic import EmitterSet, CoordinateOnlyEmitter, RandomEmitterSet, EmptyEmitterSet, test_utils as tutil
+from decode_smlm.neuralfitter import target_generator
 
 
 class TestTargetGenerator:

@@ -4,7 +4,7 @@ import time
 import pytest
 import torch
 
-import decode.utils.model_io as io_model
+import decode_smlm.utils.model_io as io_model
 
 decode_root = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)),

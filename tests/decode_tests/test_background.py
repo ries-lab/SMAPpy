@@ -3,8 +3,8 @@ from abc import ABC
 import pytest
 import torch
 
-import decode.simulation.background as background
-from decode.generic import emitter, test_utils
+import decode_smlm.simulation.background as background
+from decode_smlm.generic import emitter, test_utils
 
 
 class BackgroundAbstractTest(ABC):

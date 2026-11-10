@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 import torch
 
-import decode.generic.emitter as emitter
-from decode.generic import test_utils
-from decode.generic.emitter import EmitterSet, CoordinateOnlyEmitter, RandomEmitterSet, EmptyEmitterSet
+import decode_smlm.generic.emitter as emitter
+from decode_smlm.generic import test_utils
+from decode_smlm.generic.emitter import EmitterSet, CoordinateOnlyEmitter, RandomEmitterSet, EmptyEmitterSet
 
 
 @pytest.fixture()
@@ -333,8 +333,7 @@ class TestEmitterSet:
 
         assert em_start == em
 
-    @pytest.mark.parametrize("format", ['.pt', '.h5', '.csv'])
-    @pytest.mark.filterwarnings("ignore:.*For .csv files, implicit usage of .load()")
+    @pytest.mark.parametrize("format", ['.pt'])  # .h5 and .csv were DECODE's emitter_io, not ported
     def test_save_load(self, format, tmpdir):
 
         em = RandomEmitterSet(1000, xy_unit='nm', px_size=(100., 100.))

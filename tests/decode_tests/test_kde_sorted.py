@@ -1,6 +1,6 @@
 import torch
 
-from decode.evaluation import utils
+from decode_smlm.evaluation import utils
 
 
 class TestKDESorted:

@@ -2,7 +2,7 @@ import pytest
 import torch
 import unittest.mock
 
-from decode.neuralfitter.utils import processing
+from decode_smlm.neuralfitter.utils import processing
 
 
 class TestTransformSequence:
@@ -82,7 +82,7 @@ class TestWrapCallable:
     def test_pickleability():
         """Test whether camera.backward is pickleable"""
         import pickle
-        from decode.simulation.camera import Photon2Camera
+        from decode_smlm.simulation.camera import Photon2Camera
 
         camera = Photon2Camera(qe=1.0, spur_noise=0., em_gain=100., e_per_adu=10., baseline=100., read_sigma=25, photon_units=True, device='cpu')
         wrapped = processing.wrap_callable(camera.backward)

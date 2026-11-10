@@ -3,14 +3,14 @@ import pathlib
 import pytest
 import torch
 
-import decode
-import decode.generic.emitter
-import decode.neuralfitter.dataset as can  # candidate
-import decode.neuralfitter.target_generator
-from decode.neuralfitter import em_filter
-from decode.simulation.simulator import Simulation
+import decode_smlm
+import decode_smlm.generic.emitter
+import decode_smlm.neuralfitter.dataset as can  # candidate
+import decode_smlm.neuralfitter.target_generator
+from decode_smlm.neuralfitter import em_filter
+from decode_smlm.simulation.simulator import Simulation
 
-decode_root = pathlib.Path(decode.__file__).parent.parent  # 'repo' directory
+decode_root = pathlib.Path(decode_smlm.__file__).parent.parent  # 'repo' directory
 
 
 class TestDataset:
@@ -22,7 +22,7 @@ class TestDataset:
                 return x.clamp(0., 0.5)
 
         class DummyEmProc:
-            def forward(em: decode.generic.emitter.EmitterSet):
+            def forward(em: decode_smlm.generic.emitter.EmitterSet):
                 return em[em.xyz[:, 0] <= 16]
 
         class DummyWeight:
@@ -31,12 +31,12 @@ class TestDataset:
 
         n = 100
 
-        em = decode.generic.emitter.RandomEmitterSet(n * 100)
+        em = decode_smlm.generic.emitter.RandomEmitterSet(n * 100)
         em.frame_ix = torch.randint_like(em.frame_ix, n + 1)
 
         dataset = can.SMLMStaticDataset(frames=torch.rand((n, 32, 32)), emitter=em.split_in_frames(0, n - 1),
                                         frame_proc=DummyFrameProc, bg_frame_proc=None, em_proc=DummyEmProc,
-                                        tar_gen=decode.neuralfitter.target_generator.UnifiedEmbeddingTarget(
+                                        tar_gen=decode_smlm.neuralfitter.target_generator.UnifiedEmbeddingTarget(
                                             (-0.5, 31.5), (-0.5, 31.5), (32, 32), roi_size=1, ix_low=0, ix_high=0),
                                         weight_gen=DummyWeight(),
                                         frame_window=request.param,
@@ -106,7 +106,7 @@ class TestSMLMLiveDataset:
                 pass
 
             def sample(self):
-                em = decode.RandomEmitterSet(1024)
+                em = decode_smlm.RandomEmitterSet(1024)
                 em.frame_ix = torch.randint_like(em.frame_ix, 0, 256)
                 frames, bg_frames = self.forward(em)
 
@@ -178,7 +178,7 @@ class TestSMLMAPrioriDataset:
                 return
 
             def sample(self):
-                em = decode.RandomEmitterSet(1000)
+                em = decode_smlm.RandomEmitterSet(1000)
                 em.phot = torch.rand_like(em.phot) * 10000
                 em.frame_ix = torch.randint_like(em.frame_ix, -10, 5000)
                 frames, bg_frames = self.forward(em)
@@ -212,7 +212,7 @@ class TestSMLMAPrioriDataset:
         ds.sample()
 
         """Assertions"""
-        assert isinstance(ds._emitter, decode.generic.emitter.EmitterSet)
+        assert isinstance(ds._emitter, decode_smlm.generic.emitter.EmitterSet)
         assert isinstance(ds._em_split, list)
 
     def test_len(self, ds):
@@ -229,7 +229,7 @@ class TestLiveSampleDataset:
                 pass
 
             def sample(self):
-                em = decode.RandomEmitterSet(150)
+                em = decode_smlm.RandomEmitterSet(150)
                 em.frame_ix = torch.randint_like(em.frame_ix, -1, 2)
                 frames, bg_frames = self.forward(em)
 

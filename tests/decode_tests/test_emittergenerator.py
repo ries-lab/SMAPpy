@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 import torch
 
-import decode.generic.emitter as em
-import decode.simulation.emitter_generator as emgen
-from decode.generic import test_utils
-from decode.simulation.structure_prior import RandomStructure
+import decode_smlm.generic.emitter as em
+import decode_smlm.simulation.emitter_generator as emgen
+from decode_smlm.generic import test_utils
+from decode_smlm.simulation.structure_prior import RandomStructure
 
 
 class TestEmitterSamplerABC:

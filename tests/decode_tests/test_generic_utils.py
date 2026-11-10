@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from decode.generic import utils
+from decode_smlm.generic import utils
 
 
 @pytest.mark.parametrize("arr,expct", [((5108, 3239, 3892, 570, 4994, 3428, 800, 2025, 1206, 655, 1707, 3239),

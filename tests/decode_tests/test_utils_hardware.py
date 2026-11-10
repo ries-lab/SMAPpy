@@ -3,7 +3,7 @@ import pytest
 
 from unittest.mock import patch, Mock
 
-from decode.utils import hardware
+from decode_smlm.utils import hardware
 
 
 @pytest.mark.parametrize("device_str,device,ix", [('cpu', 'cpu', None),

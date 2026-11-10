@@ -4,90 +4,11 @@ import matplotlib.pyplot as plt
 import torch
 import seaborn as sns
 
-import decode.generic.emitter
-from decode.evaluation.evaluation import WeightedErrors
-from decode.evaluation import predict_dist
-from decode.plot import frame_coord
+import decode_smlm.generic.emitter
+from decode_smlm.evaluation.evaluation import WeightedErrors
+from decode_smlm.evaluation import predict_dist
 
-from decode.evaluation import evaluation
-
-
-def log_frames(x, y_out, y_tar, weight, em_out, em_tar, tp, tp_match, logger, step, colorbar=True):
-
-    r_ix = torch.randint(0, len(x), (1, )).long().item()
-    assert x.dim() == 4
-
-    # rm batch dimension, i.e. select one sample
-    x = x[r_ix]
-    y_out = y_out[r_ix]
-    y_tar = y_tar[r_ix] if y_tar is not None else None
-    weight = weight[r_ix] if weight is not None else None
-
-    assert isinstance(em_tar, decode.generic.emitter.EmitterSet)
-    em_tar = em_tar.get_subset_frame(r_ix, r_ix)
-    em_out = em_out.get_subset_frame(r_ix, r_ix)
-    em_tp = tp.get_subset_frame(r_ix, r_ix)
-    em_tp_match = tp_match.get_subset_frame(r_ix, r_ix)
-
-    # loop over all input channels
-    for i, xc in enumerate(x):
-        f_input = plt.figure()
-        frame_coord.PlotFrameCoord(xc, pos_tar=em_tar.xyz_px, plot_colorbar_frame=colorbar).plot()
-        logger.add_figure('input/raw_input_ch_' + str(i), f_input, step)
-
-    # loop over all output channels
-    for i, yc in enumerate(y_out):
-        f_out = plt.figure()
-        frame_coord.PlotFrameCoord(yc, plot_colorbar_frame=colorbar).plot()
-        logger.add_figure('output/raw_output_ch_' + str(i), f_out, step)
-
-    # record tar / output emitters
-    tar_ch = (x.size(0) - 1) // 2
-
-    f_em_out = plt.figure(figsize=(10, 8))
-    frame_coord.PlotFrameCoord(x[tar_ch], pos_tar=em_tar.xyz_px, pos_out=em_out.xyz_px).plot()
-    logger.add_figure('em_out/em_out_tar', f_em_out, step)
-
-    f_em_out3d = plt.figure(figsize=(10, 8))
-    frame_coord.PlotCoordinates3D(pos_tar=em_tar.xyz_px, pos_out=em_out.xyz_px).plot()
-    logger.add_figure('em_out/em_out_tar_3d', f_em_out3d, step)
-
-    f_match = plt.figure(figsize=(10, 8))
-    frame_coord.PlotFrameCoord(x[tar_ch], pos_tar=em_tp_match.xyz_px, pos_out=em_tp.xyz_px, match_lines=True,
-                               labels=('TP match', 'TP')).plot()
-    logger.add_figure('em_out/em_match', f_match, step)
-
-    f_match_3d = plt.figure(figsize=(10, 8))
-    frame_coord.PlotCoordinates3D(pos_tar=em_tp_match.xyz_px, pos_out=em_tp.xyz_px, match_lines=True,
-                                  labels=('TP match', 'TP')).plot()
-    logger.add_figure('em_out/em_match_3d', f_match_3d, step)
-
-    # loop over all target channels
-    if y_tar is not None:
-        for i, yct in enumerate(y_tar):
-            f_tar = plt.figure()
-            frame_coord.PlotFrameCoord(yct, plot_colorbar_frame=colorbar).plot()
-            logger.add_figure('target/target_ch_' + str(i), f_tar, step)
-
-    # loop over all weight channels
-    if weight is not None:
-        for i, w in enumerate(weight):
-            f_w = plt.figure()
-            frame_coord.PlotFrameCoord(w, plot_colorbar_frame=colorbar).plot()
-            logger.add_figure('weight/weight_ch_' + str(i), f_w, step)
-
-    # plot dist of probability channel
-    # ToDo: Histplots seem to cause trouble with memory. Deactivated for now. If reactivate: change back to distplot
-    # f_prob_dist, ax_prob_dist = plt.subplots()
-    # sns.histplot(y_out[0].reshape(-1).numpy(), kde=False, ax=ax_prob_dist)
-    # plt.xlabel('prob')
-    # logger.add_figure('output_dist/prob', f_prob_dist)
-    #
-    # f_prob_dist_log, ax_prob_dist_log = plt.subplots()
-    # sns.histplot(y_out[0].reshape(-1).numpy(), kde=False, ax=ax_prob_dist_log)
-    # plt.yscale('log')
-    # plt.xlabel('prob')
-    # logger.add_figure('output_dist/prob_log', f_prob_dist_log)
+from decode_smlm.evaluation import evaluation
 
 
 def log_kpi(loss_scalar: float, loss_cmp: dict, eval_set: dict, logger, step):
@@ -150,9 +71,8 @@ def post_process_log_test(*, loss_cmp, loss_scalar, x, y_out, y_tar, weight, em_
         result = evaluation.SMLMEvaluation(weighted_eval=WeightedErrors(mode='crlb', reduction='gaussian')).forward(tp, fp, fn, tp_match)
 
     """Log"""
-    # raw frames
-    log_frames(x=x, y_out=y_out, y_tar=y_tar, weight=weight, em_out=em_out, em_tar=em_tar, tp=tp, tp_match=tp_match,
-               logger=logger, step=step)
+    # DECODE logged figures of raw frames here (log_frames, with its plot package, which is not
+    # ported): they went to TensorBoard only.  What a training shows is milestone (f)'s.
 
     # KPIs
     log_kpi(loss_scalar=loss_scalar, loss_cmp=loss_cmp, eval_set=result._asdict(), logger=logger, step=step)

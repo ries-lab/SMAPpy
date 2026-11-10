@@ -9,15 +9,15 @@ from pathlib import Path
 
 import torch
 
-import decode.evaluation
-import decode.neuralfitter
-import decode.neuralfitter.coord_transform
-import decode.neuralfitter.utils
-import decode.simulation
-import decode.utils
-from decode.neuralfitter.train.random_simulation import setup_random_simulation
-from decode.neuralfitter.utils import log_train_val_progress
-from decode.utils.checkpoint import CheckPoint
+import decode_smlm.evaluation
+import decode_smlm.neuralfitter
+import decode_smlm.neuralfitter.coord_transform
+import decode_smlm.neuralfitter.utils
+import decode_smlm.simulation
+import decode_smlm.utils
+from decode_smlm.neuralfitter.train.random_simulation import setup_random_simulation
+from decode_smlm.neuralfitter.utils import log_train_val_progress
+from decode_smlm.utils.checkpoint import CheckPoint
 
 
 def parse_args():
@@ -71,13 +71,13 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
 
     """Load Parameters and back them up to the network output directory"""
     param_file = Path(param_file)
-    param = decode.utils.param_io.ParamHandling().load_params(param_file)
+    param = decode_smlm.utils.param_io.ParamHandling().load_params(param_file)
 
     # auto-set some parameters (will be stored in the backup copy)
-    param = decode.utils.param_io.autoset_scaling(param)
+    param = decode_smlm.utils.param_io.autoset_scaling(param)
 
     # add meta information
-    param.Meta.version = decode.utils.bookkeeping.decode_state()
+    param.Meta.version = decode_smlm.__version__
 
     """Experiment ID"""
     if not debug:
@@ -117,10 +117,10 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
     shutil.copy(param_file, param_backup_in)
 
     param_backup = experiment_path / Path('param_run').with_suffix(param_file.suffix)
-    decode.utils.param_io.ParamHandling().write_params(param_backup, param)
+    decode_smlm.utils.param_io.ParamHandling().write_params(param_backup, param)
 
     if debug:
-        decode.utils.param_io.ParamHandling.convert_param_debug(param)
+        decode_smlm.utils.param_io.ParamHandling.convert_param_debug(param)
 
     if num_worker_override is not None:
         param.Hardware.num_worker_train = num_worker_override
@@ -133,7 +133,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
         device = param.Hardware.device
 
     if torch.cuda.is_available():
-        _, device_ix = decode.utils.hardware._specific_device_by_str(device)
+        _, device_ix = decode_smlm.utils.hardware._specific_device_by_str(device)
         if device_ix is not None:
             # do this instead of set env variable, because torch is inevitably already imported
             torch.cuda.set_device(device)
@@ -153,20 +153,20 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
 
     """Setup Log System"""
     if no_log:
-        logger = decode.neuralfitter.utils.logger.NoLog()
+        logger = decode_smlm.neuralfitter.utils.logger.NoLog()
 
     else:
         log_folder = log_folder + '/' + experiment_id
 
-        logger = decode.neuralfitter.utils.logger.MultiLogger(
-            [decode.neuralfitter.utils.logger.SummaryWriter(log_dir=log_folder,
+        logger = decode_smlm.neuralfitter.utils.logger.MultiLogger(
+            [decode_smlm.neuralfitter.utils.logger.SummaryWriter(log_dir=log_folder,
                                                             filter_keys=["dx_red_mu", "dx_red_sig",
                                                                          "dy_red_mu",
                                                                          "dy_red_sig", "dz_red_mu",
                                                                          "dz_red_sig",
                                                                          "dphot_red_mu",
                                                                          "dphot_red_sig"]),
-             decode.neuralfitter.utils.logger.DictLogger()])
+             decode_smlm.neuralfitter.utils.logger.DictLogger()])
 
     sim_train, sim_test = setup_random_simulation(param)
     ds_train, ds_test, model, model_ls, optimizer, criterion, lr_scheduler, grad_mod, post_processor, matcher, ckpt = \
@@ -174,7 +174,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
     dl_train, dl_test = setup_dataloader(param, ds_train, ds_test)
 
     if from_ckpt:
-        ckpt = decode.utils.checkpoint.CheckPoint.load(param.InOut.checkpoint_init)
+        ckpt = decode_smlm.utils.checkpoint.CheckPoint.load(param.InOut.checkpoint_init)
         model.load_state_dict(ckpt.model_state)
         optimizer.load_state_dict(ckpt.optimizer_state)
         lr_scheduler.load_state_dict(ckpt.lr_sched_state)
@@ -191,7 +191,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
     while not converges and n < n_max:
         n += 1
 
-        conv_check = decode.neuralfitter.utils.progress.GMMHeuristicCheck(
+        conv_check = decode_smlm.neuralfitter.utils.progress.GMMHeuristicCheck(
             ref_epoch=1,
             emitter_avg=sim_train.em_sampler.em_avg,
             threshold=param.HyperParameter.auto_restart_param.restart_treshold,
@@ -201,7 +201,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
             logger.add_scalar('learning/learning_rate', optimizer.param_groups[0]['lr'], i)
 
             if i >= 1:
-                _ = decode.neuralfitter.train_val_impl.train(
+                _ = decode_smlm.neuralfitter.train_val_impl.train(
                     model=model,
                     optimizer=optimizer,
                     loss=criterion,
@@ -213,7 +213,7 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
                     logger=logger
                 )
 
-            val_loss, test_out = decode.neuralfitter.train_val_impl.test(
+            val_loss, test_out = decode_smlm.neuralfitter.train_val_impl.test(
                 model=model,
                 loss=criterion,
                 dataloader=dl_test,
@@ -280,15 +280,15 @@ def live_engine_setup(param_file: str, device_overwrite: str = None, debug: bool
 def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path, device, param):
     """Set model, optimiser, loss and schedulers"""
     models_available = {
-        'SigmaMUNet': decode.neuralfitter.models.SigmaMUNet,
-        'DoubleMUnet': decode.neuralfitter.models.model_param.DoubleMUnet,
-        'SimpleSMLMNet': decode.neuralfitter.models.model_param.SimpleSMLMNet,
+        'SigmaMUNet': decode_smlm.neuralfitter.models.SigmaMUNet,
+        'DoubleMUnet': decode_smlm.neuralfitter.models.model_param.DoubleMUnet,
+        'SimpleSMLMNet': decode_smlm.neuralfitter.models.model_param.SimpleSMLMNet,
     }
 
     model = models_available[param.HyperParameter.architecture]
     model = model.parse(param)
 
-    model_ls = decode.utils.model_io.LoadSaveModel(model,
+    model_ls = decode_smlm.utils.model_io.LoadSaveModel(model,
                                                    output_file=model_out)
 
     model = model_ls.load_init()
@@ -304,7 +304,7 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
     optimizer = optimizer(model.parameters(), **param.HyperParameter.opt_param)
 
     """Loss function."""
-    criterion = decode.neuralfitter.loss.GaussianMMLoss(
+    criterion = decode_smlm.neuralfitter.loss.GaussianMMLoss(
         xextent=param.Simulation.psf_extent[0],
         yextent=param.Simulation.psf_extent[1],
         img_shape=param.Simulation.img_size,
@@ -337,22 +337,22 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
         # raise RuntimeError("Your dummy input is wrong. Please update it.")
 
     """Transform input data, compute weight mask and target data"""
-    frame_proc = decode.neuralfitter.scale_transform.AmplitudeRescale.parse(param)
+    frame_proc = decode_smlm.neuralfitter.scale_transform.AmplitudeRescale.parse(param)
     bg_frame_proc = None
 
     if param.HyperParameter.emitter_label_photon_min is not None:
-        em_filter = decode.neuralfitter.em_filter.PhotonFilter(
+        em_filter = decode_smlm.neuralfitter.em_filter.PhotonFilter(
             param.HyperParameter.emitter_label_photon_min)
     else:
-        em_filter = decode.neuralfitter.em_filter.NoEmitterFilter()
+        em_filter = decode_smlm.neuralfitter.em_filter.NoEmitterFilter()
 
     tar_frame_ix_train = (0, 0)
     tar_frame_ix_test = (0, param.TestSet.test_size)
 
     """Setup Target generator consisting possibly multiple steps in a transformation sequence."""
-    tar_gen = decode.neuralfitter.utils.processing.TransformSequence(
+    tar_gen = decode_smlm.neuralfitter.utils.processing.TransformSequence(
         [
-            decode.neuralfitter.target_generator.ParameterListTarget(
+            decode_smlm.neuralfitter.target_generator.ParameterListTarget(
                 n_max=param.HyperParameter.max_number_targets,
                 xextent=param.Simulation.psf_extent[0],
                 yextent=param.Simulation.psf_extent[1],
@@ -360,9 +360,9 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
                 ix_high=tar_frame_ix_train[1],
                 squeeze_batch_dim=True),
 
-            decode.neuralfitter.target_generator.DisableAttributes.parse(param),
+            decode_smlm.neuralfitter.target_generator.DisableAttributes.parse(param),
 
-            decode.neuralfitter.scale_transform.ParameterListRescale(
+            decode_smlm.neuralfitter.scale_transform.ParameterListRescale(
                 phot_max=param.Scaling.phot_max,
                 z_max=param.Scaling.z_max,
                 bg_max=param.Scaling.bg_max)
@@ -376,7 +376,7 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
     tar_gen_test.com[0].sanity_check()
 
     if param.Simulation.mode == 'acquisition':
-        train_ds = decode.neuralfitter.dataset.SMLMLiveDataset(
+        train_ds = decode_smlm.neuralfitter.dataset.SMLMLiveDataset(
             simulator=simulator_train,
             em_proc=em_filter,
             frame_proc=frame_proc,
@@ -388,7 +388,7 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
         train_ds.sample(True)
 
     elif param.Simulation.mode == 'samples':
-        train_ds = decode.neuralfitter.dataset.SMLMLiveSampleDataset(
+        train_ds = decode_smlm.neuralfitter.dataset.SMLMLiveSampleDataset(
             simulator=simulator_train,
             em_proc=em_filter,
             frame_proc=frame_proc,
@@ -399,7 +399,7 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
             return_em=False,
             ds_len=param.HyperParameter.pseudo_ds_size)
 
-    test_ds = decode.neuralfitter.dataset.SMLMAPrioriDataset(
+    test_ds = decode_smlm.neuralfitter.dataset.SMLMAPrioriDataset(
         simulator=simulator_test,
         em_proc=em_filter,
         frame_proc=frame_proc,
@@ -412,20 +412,20 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
 
     """Set up post processor"""
     if param.PostProcessing is None:
-        post_processor = decode.neuralfitter.post_processing.NoPostProcessing(xy_unit='px',
+        post_processor = decode_smlm.neuralfitter.post_processing.NoPostProcessing(xy_unit='px',
                                                                               px_size=param.Camera.px_size)
 
     elif param.PostProcessing == 'LookUp':
-        post_processor = decode.neuralfitter.utils.processing.TransformSequence([
+        post_processor = decode_smlm.neuralfitter.utils.processing.TransformSequence([
 
-            decode.neuralfitter.scale_transform.InverseParamListRescale(
+            decode_smlm.neuralfitter.scale_transform.InverseParamListRescale(
                 phot_max=param.Scaling.phot_max,
                 z_max=param.Scaling.z_max,
                 bg_max=param.Scaling.bg_max),
 
-            decode.neuralfitter.coord_transform.Offset2Coordinate.parse(param),
+            decode_smlm.neuralfitter.coord_transform.Offset2Coordinate.parse(param),
 
-            decode.neuralfitter.post_processing.LookUpPostProcessing(
+            decode_smlm.neuralfitter.post_processing.LookUpPostProcessing(
                 raw_th=param.PostProcessingParam.raw_th,
                 pphotxyzbg_mapping=[0, 1, 2, 3, 4, -1],
                 xy_unit='px',
@@ -433,16 +433,16 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
         ])
 
     elif param.PostProcessing in ('SpatialIntegration', 'NMS'):  # NMS as legacy support
-        post_processor = decode.neuralfitter.utils.processing.TransformSequence([
+        post_processor = decode_smlm.neuralfitter.utils.processing.TransformSequence([
 
-            decode.neuralfitter.scale_transform.InverseParamListRescale(
+            decode_smlm.neuralfitter.scale_transform.InverseParamListRescale(
                 phot_max=param.Scaling.phot_max,
                 z_max=param.Scaling.z_max,
                 bg_max=param.Scaling.bg_max),
 
-            decode.neuralfitter.coord_transform.Offset2Coordinate.parse(param),
+            decode_smlm.neuralfitter.coord_transform.Offset2Coordinate.parse(param),
 
-            decode.neuralfitter.post_processing.SpatialIntegration(
+            decode_smlm.neuralfitter.post_processing.SpatialIntegration(
                 raw_th=param.PostProcessingParam.raw_th,
                 xy_unit='px',
                 px_size=param.Camera.px_size)
@@ -452,7 +452,7 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
         raise NotImplementedError
 
     """Evaluation Specification"""
-    matcher = decode.evaluation.match_emittersets.GreedyHungarianMatching.parse(param)
+    matcher = decode_smlm.evaluation.match_emittersets.GreedyHungarianMatching.parse(param)
 
     return train_ds, test_ds, model, model_ls, optimizer, criterion, lr_scheduler, grad_mod, post_processor, matcher, checkpoint
 
@@ -467,7 +467,7 @@ def setup_dataloader(param, train_ds, test_ds=None):
         shuffle=True,
         num_workers=param.Hardware.num_worker_train,
         pin_memory=True,
-        collate_fn=decode.neuralfitter.utils.dataloader_customs.smlm_collate)
+        collate_fn=decode_smlm.neuralfitter.utils.dataloader_customs.smlm_collate)
 
     if test_ds is not None:
 
@@ -478,7 +478,7 @@ def setup_dataloader(param, train_ds, test_ds=None):
             shuffle=False,
             num_workers=param.Hardware.num_worker_train,
             pin_memory=False,
-            collate_fn=decode.neuralfitter.utils.dataloader_customs.smlm_collate)
+            collate_fn=decode_smlm.neuralfitter.utils.dataloader_customs.smlm_collate)
     else:
 
         test_dl = None

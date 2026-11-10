@@ -1,7 +1,7 @@
 from unittest import mock
 import pytest
 
-from decode.neuralfitter.utils import progress
+from decode_smlm.neuralfitter.utils import progress
 
 
 class TestProgressCheck:

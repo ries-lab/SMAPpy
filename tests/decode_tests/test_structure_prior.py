@@ -3,7 +3,7 @@ import pytest
 import torch
 import numpy as np
 
-from decode.simulation import structure_prior
+from decode_smlm.simulation import structure_prior
 
 
 class TestAbstractStructure:

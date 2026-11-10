@@ -3,11 +3,11 @@ from typing import Union
 
 import torch
 
-from decode.evaluation import predict_dist
-from decode.generic import EmitterSet
-from decode.generic import process
-from decode.generic.process import RemoveOutOfFOV
-from decode.simulation.psf_kernel import DeltaPSF
+from decode_smlm.evaluation import predict_dist
+from decode_smlm.generic import EmitterSet
+from decode_smlm.generic import process
+from decode_smlm.generic.process import RemoveOutOfFOV
+from decode_smlm.simulation.psf_kernel import DeltaPSF
 
 
 class TargetGenerator(ABC):

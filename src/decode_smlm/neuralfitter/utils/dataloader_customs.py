@@ -1,7 +1,7 @@
 import torch
 import torch.utils.data
 
-import decode.generic
+import decode_smlm.generic
 
 
 def smlm_collate(batch):
@@ -35,7 +35,7 @@ def smlm_collate(batch):
     # END INSERT
     elif elem is None:
         return None
-    elif isinstance(elem, decode.generic.emitter.EmitterSet):
+    elif isinstance(elem, decode_smlm.generic.emitter.EmitterSet):
         return [em for em in batch]
     else:
         return torch.utils.data.dataloader.default_collate(batch)

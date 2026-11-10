@@ -1,8 +1,8 @@
 import torch
 import pytest
 
-from decode.neuralfitter import frame_processing
-from decode.generic import test_utils
+from decode_smlm.neuralfitter import frame_processing
+from decode_smlm.generic import test_utils
 
 
 class TestMirror:

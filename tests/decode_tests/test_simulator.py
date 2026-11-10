@@ -1,10 +1,10 @@
 import pytest
 import torch
 
-import decode.generic.emitter as emitter
-import decode.simulation.background as background
-import decode.simulation.psf_kernel as psf_kernel
-import decode.simulation.simulator as can  # test candidate
+import decode_smlm.generic.emitter as emitter
+import decode_smlm.simulation.background as background
+import decode_smlm.simulation.psf_kernel as psf_kernel
+import decode_smlm.simulation.simulator as can  # test candidate
 
 
 class TestSimulator:

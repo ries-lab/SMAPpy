@@ -4,7 +4,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 
-from decode.simulation import psf_kernel as psf_kernel
+from decode_smlm.simulation import psf_kernel as psf_kernel
 
 
 class Background(ABC):
@@ -169,7 +169,7 @@ class BgPerEmitterFromBgFrame:
         """
         super().__init__()
 
-        from decode.neuralfitter.utils import padding_calc as padcalc
+        from decode_smlm.neuralfitter.utils import padding_calc as padcalc
         """Sanity checks"""
         if filter_size % 2 == 0:
             raise ValueError("ROI size must be odd.")

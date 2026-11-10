@@ -39,10 +39,11 @@ if os.environ.get("PYTEST_XDIST_WORKER"):
         os.environ.setdefault(_name, "1")
 
 
-# uipsf's tests need torch, which is an extra (`pip install -e .[uipsf]`); without it they
-# are not collected, so a plain checkout runs the rest of the suite as before.
+# uipsf's and decode_smlm's tests need torch, which is an extra (`pip install -e .[uipsf]`,
+# `.[decode]`); without it they are not collected, so a plain checkout runs the rest of the
+# suite as before.
 if importlib.util.find_spec("torch") is None:
-    collect_ignore = ["uipsf_tests"]
+    collect_ignore = ["uipsf_tests", "decode_tests"]
 
 
 #: a long test's limit: the region study takes four minutes and more alone

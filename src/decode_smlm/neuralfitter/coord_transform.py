@@ -1,6 +1,6 @@
 import torch
 
-from decode.neuralfitter.target_generator import UnifiedEmbeddingTarget
+from decode_smlm.neuralfitter.target_generator import UnifiedEmbeddingTarget
 
 
 class Offset2Coordinate:

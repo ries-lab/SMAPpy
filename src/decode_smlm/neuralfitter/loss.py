@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod  # abstract class
 from typing import Union, Tuple
 
 import torch
-from deprecated import deprecated
 from torch import distributions
 
 # from . import MixtureSameFamily as mixture

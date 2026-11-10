@@ -11,20 +11,18 @@ __gateway__ = 'https://raw.githubusercontent.com/TuragaLab/DECODE/master/gateway
 
 import warnings
 
-import decode.evaluation
-import decode.generic
-import decode.neuralfitter
-import decode.plot
-import decode.renderer
-import decode.simulation
-from decode.generic.emitter import EmitterSet, RandomEmitterSet, CoordinateOnlyEmitter
+import decode_smlm.evaluation
+import decode_smlm.generic
+import decode_smlm.neuralfitter
+import decode_smlm.simulation
+from decode_smlm.generic.emitter import EmitterSet, RandomEmitterSet, CoordinateOnlyEmitter
 
 # check device capability
 import torch
-import decode.utils.hardware
+import decode_smlm.utils.hardware
 
 if torch.cuda.is_available():
-    device_capa = decode.utils.hardware.get_device_capability()
+    device_capa = decode_smlm.utils.hardware.get_device_capability()
     if float(device_capa) < 3.7:
         warnings.warn(
             f"Your GPU {torch.cuda.get_device_name()} has cuda capability {device_capa} and is no longer supported (minimum is 3.7)."

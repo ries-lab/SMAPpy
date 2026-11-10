@@ -1,2 +1,2 @@
-import decode.neuralfitter.train.random_simulation
+import decode_smlm.neuralfitter.train.random_simulation
 

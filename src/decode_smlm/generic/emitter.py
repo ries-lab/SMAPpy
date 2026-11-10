@@ -6,7 +6,7 @@ from typing import Union, Optional, Iterable
 import numpy as np
 import torch
 
-import decode.generic.utils
+import decode_smlm.generic.utils
 from . import slicing as gutil, test_utils as tutil
 
 
@@ -242,19 +242,14 @@ class EmitterSet:
             file: path where to save
 
         """
-        from decode.utils import emitter_io
-
         if not isinstance(file, Path):
             file = Path(file)
 
+        # DECODE's emitter_io also wrote .h5 and .csv; in SMAPpy a table is written by its savers
         if file.suffix == '.pt':
-            emitter_io.save_torch(file, self.data, self.meta)
-        elif file.suffix in ('.h5', '.hdf5'):
-            emitter_io.save_h5(file, self.data, self.meta)
-        elif file.suffix == '.csv':
-            emitter_io.save_csv(file, self.data, self.meta)
+            torch.save({'data': self.data, 'meta': self.meta, 'decode': {'version': decode_smlm.__version__}}, file)
         else:
-            raise ValueError
+            raise ValueError(f"Only .pt is written here, not {file.suffix}.")
 
     @staticmethod
     def load(file: Union[str, Path]):
@@ -268,20 +263,13 @@ class EmitterSet:
             EmitterSet
 
         """
-        from decode.utils import emitter_io
-
         file = Path(file) if not isinstance(file, Path) else file
 
         if file.suffix == '.pt':
-            em_dict, meta, _ = emitter_io.load_torch(file)
-        elif file.suffix in ('.h5', '.hdf5'):
-            em_dict, meta, _ = emitter_io.load_h5(file)
-        elif file.suffix == '.csv':
-            warnings.warn("For .csv files, implicit usage of .load() is discouraged. "
-                          "Please use 'decode.utils.emitter_io.load_csv' explicitly.")
-            em_dict, meta, _ = emitter_io.load_csv(file)
+            out = torch.load(file)
+            em_dict, meta = out['data'], out['meta']
         else:
-            raise ValueError
+            raise ValueError(f"Only .pt is read here, not {file.suffix}.")
 
         em_dict.update(meta)
 
@@ -980,7 +968,7 @@ class LooseEmitterSet:
         id_ = id_.repeat_interleave(frame_dur_full_clean + 1, dim=0)
         # because 0 is first occurence
         frame_ix_ = frame_start_full.repeat_interleave(frame_dur_full_clean + 1, dim=0) \
-                    + decode.generic.utils.cum_count_per_group(id_) + 1
+                    + decode_smlm.generic.utils.cum_count_per_group(id_) + 1
 
         """First frame"""
         # first

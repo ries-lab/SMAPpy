@@ -3,10 +3,10 @@ import warnings
 import pytest
 import torch
 
-import decode.evaluation
-import decode.evaluation.match_emittersets as match_em
-import decode.generic
-from decode import CoordinateOnlyEmitter
+import decode_smlm.evaluation
+import decode_smlm.evaluation.match_emittersets as match_em
+import decode_smlm.generic
+from decode_smlm import CoordinateOnlyEmitter
 
 
 class TestMatcherABC:
@@ -17,7 +17,7 @@ class TestMatcherABC:
 
     @pytest.fixture()
     def matcher(self):
-        class MockMatch(decode.evaluation.match_emittersets.EmitterMatcher):
+        class MockMatch(decode_smlm.evaluation.match_emittersets.EmitterMatcher):
             def forward(self, output, target):
                 """Randomly assign tp and tp_match"""
                 ix_tp = torch.randint(2, size=(len(output),)).bool()  # assign output randomly as tp / fp
@@ -38,14 +38,14 @@ class TestMatcherABC:
 
     @pytest.fixture()
     def can_em_out(self):  # candidate emitter output
-        em = decode.generic.emitter.RandomEmitterSet(1000, xy_unit='nm')
+        em = decode_smlm.generic.emitter.RandomEmitterSet(1000, xy_unit='nm')
         em.frame_ix = torch.randint_like(em.frame_ix, 100)
 
         return em
 
     @pytest.fixture()
     def can_em_tar(self, can_em_out):  # candidate emitter target
-        em = decode.generic.emitter.RandomEmitterSet(len(can_em_out), xy_unit='nm')
+        em = decode_smlm.generic.emitter.RandomEmitterSet(len(can_em_out), xy_unit='nm')
         em.frame_ix = torch.randint_like(em.frame_ix, 50)
 
         return em

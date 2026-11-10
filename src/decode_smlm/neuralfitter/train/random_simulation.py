@@ -1,5 +1,5 @@
-import decode.simulation
-import decode.utils
+import decode_smlm.simulation
+import decode_smlm.utils
 
 
 def setup_random_simulation(param):
@@ -12,7 +12,7 @@ def setup_random_simulation(param):
         3. Setup simulation and datasets
         """
 
-    psf = decode.utils.calibration_io.SMAPSplineCoefficient(
+    psf = decode_smlm.utils.calibration_io.SMAPSplineCoefficient(
         calib_file=param.InOut.calibration_file).init_spline(
         xextent=param.Simulation.psf_extent[0],
         yextent=param.Simulation.psf_extent[1],
@@ -23,7 +23,7 @@ def setup_random_simulation(param):
     )
 
     """Structure Prior"""
-    prior_struct = decode.simulation.structure_prior.RandomStructure.parse(param)
+    prior_struct = decode_smlm.simulation.structure_prior.RandomStructure.parse(param)
 
     if param.Simulation.mode in ('acquisition', 'apriori'):
         frame_range_train = (0, param.HyperParameter.pseudo_ds_size)
@@ -34,28 +34,28 @@ def setup_random_simulation(param):
     else:
         raise ValueError
 
-    prior_train = decode.simulation.emitter_generator.EmitterSamplerBlinking.parse(
+    prior_train = decode_smlm.simulation.emitter_generator.EmitterSamplerBlinking.parse(
         param, structure=prior_struct, frames=frame_range_train)
 
     """Define our background and noise model."""
-    bg = decode.simulation.background.UniformBackground.parse(param)
+    bg = decode_smlm.simulation.background.UniformBackground.parse(param)
 
     if param.CameraPreset == 'Perfect':
-        noise = decode.simulation.camera.PerfectCamera.parse(param)
+        noise = decode_smlm.simulation.camera.PerfectCamera.parse(param)
     elif param.CameraPreset is not None:
         raise NotImplementedError
     else:
-        noise = decode.simulation.camera.Photon2Camera.parse(param)
+        noise = decode_smlm.simulation.camera.Photon2Camera.parse(param)
 
-    simulation_train = decode.simulation.simulator.Simulation(psf=psf, em_sampler=prior_train, background=bg,
+    simulation_train = decode_smlm.simulation.simulator.Simulation(psf=psf, em_sampler=prior_train, background=bg,
                                                               noise=noise, frame_range=frame_range_train)
 
     frame_range_test = (0, param.TestSet.test_size)
 
-    prior_test = decode.simulation.emitter_generator.EmitterSamplerBlinking.parse(
+    prior_test = decode_smlm.simulation.emitter_generator.EmitterSamplerBlinking.parse(
         param, structure=prior_struct, frames=frame_range_test)
 
-    simulation_test = decode.simulation.simulator.Simulation(psf=psf, em_sampler=prior_test, background=bg, noise=noise,
+    simulation_test = decode_smlm.simulation.simulator.Simulation(psf=psf, em_sampler=prior_test, background=bg, noise=noise,
                                                              frame_range=frame_range_test)
 
     return simulation_train, simulation_test

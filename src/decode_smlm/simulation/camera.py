@@ -2,10 +2,8 @@ from abc import ABC, abstractmethod  # abstract class
 from typing import Union
 
 import torch
-from deprecated import deprecated
 
 from . import noise_distributions
-from ..neuralfitter import sampling
 
 
 class Camera(ABC):
@@ -152,90 +150,3 @@ class PerfectCamera(Photon2Camera):
     @classmethod
     def parse(cls, param):
         return cls(device=param.Hardware.device_simulation)
-
-
-@deprecated(reason="Not yet ready implementation. Needs thorough testing and validation.")
-class SCMOS(Photon2Camera):
-    """
-    Models a sCMOS camera. You need provide a pixel-wise sigma map of the readout noise of the camera.
-
-    """
-
-    def __init__(self, qe: float, spur_noise: float, em_gain: float, e_per_adu: float, baseline: float,
-                 read_sigma: torch.Tensor, photon_units: bool, sample_mode: str, device: (str, torch.device) = None):
-
-        super().__init__(qe=qe, spur_noise=spur_noise, em_gain=em_gain, e_per_adu=e_per_adu,
-                         baseline=baseline, read_sigma=read_sigma, photon_units=photon_units, device=device)
-
-        self.sample_mode = sample_mode
-
-    def check_sanity(self):
-
-        if self._read_sigma.dim() != 2:
-            raise ValueError(f"Expected readout noise map to be 2D")
-
-        if self.sample_mode not in ('batch', 'const'):
-            raise ValueError(f"Sample mode: {self.sample_mode} not supported.")
-
-    def sample_sensor_window(self, size_nxy: tuple) -> torch.Tensor:
-        """
-        Samples a random window from the sensor and returns the corresponding readout noise values
-
-        Args:
-            size_nxy: number of samples and window size, i.e. tuple of len 3, where (N, H, W)
-
-        Returns:
-            read-out noise window samples
-
-        """
-
-        return sampling.sample_crop(self._read_sigma, size_nxy)
-
-    def forward_on_sampled_sensor_window(self, x: torch.Tensor, device: Union[str, torch.device] = None) \
-            -> (torch.Tensor, torch.Tensor):
-        """
-        Forwards model input image 'x' through camera where x is possibly smaller than the camera sensor.
-        A random window on the sensor is sampled and returned as second return argument.
-
-        Args:
-            x: model image
-            device:
-
-        Returns:
-            Sampled noisy image
-            Sampled camera window(s)
-        """
-        if x.size() != self._read_sigma.size():
-
-            if self.sample_mode == 'const':
-                sigma = self.sample_sensor_window((1, x.size(-2), x.size(-1)))
-            elif self.sample_mode == 'batch':
-                sigma = self.sample_sensor_window((x.size(0), x.size(-2), x.size(-1)))
-
-            if x.dim() == 4:
-                sigma.unsqueeze_(1)
-
-            self.read = noise_distributions.Gaussian(sigma.to(device))
-
-        return super().forward(x, device=device), sigma
-
-    def forward(self, x: torch.Tensor, device: Union[str, torch.device] = None) -> torch.Tensor:
-        """
-        Forwards model input image 'x' through camera.
-
-        Args:
-            x: model image
-            device:
-
-        Returns:
-            Sampled noisy image
-        """
-
-        if x.size()[-2:] != self._read_sigma.size()[-2:]:
-            raise ValueError(f"Size of input does not match size of camera sensor. "
-                             f"Refer to method 'forward_on_sampled_sensor_window'")
-
-        else:
-            self.read = noise_distributions.Gaussian(self._read_sigma.to(device))
-
-        return super().forward(x, device=device)

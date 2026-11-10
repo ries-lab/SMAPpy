@@ -1,5 +1,5 @@
 from copy import deepcopy
-from decode import utils
+from decode_smlm import utils
 import pytest
 
 

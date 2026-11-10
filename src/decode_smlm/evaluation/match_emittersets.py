@@ -5,7 +5,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 
-from decode.generic import emitter as emitter
+from decode_smlm.generic import emitter as emitter
 
 
 class EmitterMatcher(ABC):

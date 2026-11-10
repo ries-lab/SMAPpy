@@ -2,8 +2,8 @@ import pytest
 import torch
 import copy
 
-from decode.neuralfitter.models import model_speced_impl as model_impl
-from decode.generic import test_utils
+from decode_smlm.neuralfitter.models import model_speced_impl as model_impl
+from decode_smlm.generic import test_utils
 
 
 class TestSigmaMUNet:

@@ -3,8 +3,8 @@ import functools
 import pytest
 import torch
 
-import decode.generic.test_utils as t_util
-import decode.neuralfitter.scale_transform as scf
+import decode_smlm.generic.test_utils as t_util
+import decode_smlm.neuralfitter.scale_transform as scf
 
 
 class TestSpatialinterpolation:

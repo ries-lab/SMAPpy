@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-import decode.generic.slicing as gutils  # candidate
+import decode_smlm.generic.slicing as gutils  # candidate
 
 
 class TestSplitSliceable:
