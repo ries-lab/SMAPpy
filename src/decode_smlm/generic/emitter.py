@@ -266,7 +266,7 @@ class EmitterSet:
         file = Path(file) if not isinstance(file, Path) else file
 
         if file.suffix == '.pt':
-            out = torch.load(file)
+            out = torch.load(file, map_location='cpu')  # written on any device, read on this one
             em_dict, meta = out['data'], out['meta']
         else:
             raise ValueError(f"Only .pt is read here, not {file.suffix}.")

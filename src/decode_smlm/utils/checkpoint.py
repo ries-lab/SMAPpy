@@ -45,8 +45,12 @@ class CheckPoint:
         torch.save(self.dict, self.path)
 
     @classmethod
-    def load(cls, path: Union[str, Path], path_out: Optional[Union[str, Path]] = None):
-        ckpt_dict = torch.load(path)
+    def load(cls, path: Union[str, Path], path_out: Optional[Union[str, Path]] = None,
+             map_location: Union[str, torch.device] = 'cpu'):
+        # map_location: a checkpoint written on CUDA does not open on a machine without it.
+        # weights_only stays torch's default (True since 2.6): a v0.10.2 checkpoint, its log of
+        # floats included, loads under it (tried on a 4090 run's, 2026-11-10).
+        ckpt_dict = torch.load(path, map_location=map_location)
 
         if path_out is None:
             path_out = path
