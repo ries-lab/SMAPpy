@@ -249,6 +249,9 @@ def run_model(package: pathlib.Path, out: pathlib.Path, device: str):
     out.mkdir(parents=True, exist_ok=True)
     param, model, frame_proc = fit_pipeline(package, device)
     frames = frames_io.load_tif(package / "frames.tif")[:MODEL_FRAMES]
+    # the frames themselves, 32 MB, so the port's tests need not read the 1.3 GB stack
+    import tifffile
+    tifffile.imwrite(out / "frames_500.tif", frames.numpy().astype(np.uint16))
     size = frame_processing.get_frame_extent(frames.unsqueeze(1).size(), frame_proc.forward)
     extent = ((-0.5, size[-2] - 0.5), (-0.5, size[-1] - 0.5))
     post_proc = TransformSequence([

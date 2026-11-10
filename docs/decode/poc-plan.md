@@ -561,8 +561,8 @@ To decide; none of it has been changed in `decode.md`.
    - So DECODE's x is SMAPpy's y.
    - `io/decode.py` reads `xyz[:, 0]` as `x_nm`, unswapped.
      `test_foreign_formats.py` builds its file by hand and cannot catch this.
-   - (d) settles it on the example package.  If it is confirmed,
-     `io/decode.py` gets a small fix of its own.
+   - (d) settled it on the example package: confirmed (§8, "(d) as done"), and
+     `io/decode.py` fixed in a commit of its own.
 5. **The mirror.**
    - SMAP builds the spline of an EMCCD from x-mirrored beads.
    - DECODE takes that spline as it is, and the Fit notebook flips the frames
@@ -835,3 +835,39 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
   measured again on an idle GPU when the reference runs end; until then they say "no slower",
   not by how much.
 - **Defaults:** `CubicSplinePSF`'s device is the machine's, not `cuda:0`.
+
+### (d) as done, 2026-11-10
+
+- **`decode_smlm.io`:** `load_original(param_run.yaml, model.pt, frames_mirrored=...)` and
+  `OriginalModel.raw` / `.localize`, the Fit notebook's pipeline as §1 (d) lists it, with the
+  camera always the caller's (`training_camera(param)` is what the notebook in effect used);
+  `to_columns` puts the positions back on the frames as given, in SMAPpy's names.  `model.pt` is
+  a plain state dict and loads with `weights_only=True`.  `frames_mirrored` is not in either file
+  and is an argument.  Tests: `tests/decode_tests/test_original_model.py` (slow; skipped without
+  the package and the oracle, which `reference_v0102.py model` now also writes the 500 frames for,
+  `frames_500.tif`, 32 MB).
+- **Against the model oracle:** the network output within 6e-5 of each channel's range on the CPU
+  and MPS, 1.4e-4 against the original's CUDA output.  The localizations: all 137 351, in the
+  original's order, on the CPU, MPS and CUDA; x and y within 1.5e-5 px, z within 0.03 nm, photons,
+  background and probability within 2e-5 of their largest value (the sigmas within the test's 1e-4).  §1 (d)'s 1e-3 nm cannot be met by any
+  float32 run: one step of a float32 at 176 px is 1.5e-5 px, 0.002 nm, and the original's own CPU
+  and GPU differ by that.  The test asks for 2 steps.  CPU 0.29 s a frame (8 threads), MPS 0.012 s.
+- **TF32.**  Current torch lets cuDNN convolve in TF32 on Ampere and later; on the 4090 that moved
+  the network output by 1.5 % of a channel's range against the original's (which, on torch 1.12,
+  was within 8e-5 of its CPU).  Inference switches it off for its call.  Whether training may use
+  it is for (f): it is faster, but the reference runs did not use it in effect.
+- **The axes (§6, item 4) are settled:** DECODE's x is the rows.  Matched to SMAPpy's Spline 3D on
+  the same frames (probability above 0.7, nearest within a pixel), the medians differ by 0.9 nm in
+  x, 1.0 nm in y and 0.8 nm in z (41 000 pairs); with the frames not flipped back, 5.4 nm in x.
+  `smappy/io/decode.py` read `xyz[:, 0]` as x: it now reads DECODE's x as `y_nm`, its own commit.
+  It cannot undo the crop or the flip, which the file does not record (its docstring says so).
+- **The package's calibration is of beads without EM gain** (`EMon` 0), its frames with: the Fit
+  notebook's flip matched them, and SMAPpy, which un-mirrors only a spline of EM beads, keeps it as
+  it is and only warns ("EM gain mismatch") -- for Spline 3D the frames were flipped by hand.  A
+  model the port trains on such a calibration will need the same flip for EM frames; the model
+  file's `frames_mirrored` (§5) carries it, and (g) must set it from the calibration's and the
+  data's EM settings, not from the user.
+- **The pixel size's order is not recorded.**  The package's `px_size` is (127, 117) in DECODE's
+  (rows, columns) order, so DECODE's nm put 127 nm on SMAPpy's y; whether SMAP's camera meant 127
+  along x is not in the files.  `to_columns` takes the pixel size from the caller in SMAPpy's
+  (x, y) order.
