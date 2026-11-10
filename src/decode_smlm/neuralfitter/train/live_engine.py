@@ -464,13 +464,16 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
 def setup_dataloader(param, train_ds, test_ds=None):
     """Set's up dataloader"""
 
+    # pinned memory speeds the copy to a CUDA device; on MPS and the CPU torch only warns about it
+    pin = str(param.Hardware.device).startswith('cuda') and torch.cuda.is_available()
+
     train_dl = torch.utils.data.DataLoader(
         dataset=train_ds,
         batch_size=param.HyperParameter.batch_size,
         drop_last=True,
         shuffle=True,
         num_workers=param.Hardware.num_worker_train,
-        pin_memory=True,
+        pin_memory=pin,
         collate_fn=decode_smlm.neuralfitter.utils.dataloader_customs.smlm_collate)
 
     if test_ds is not None:
