@@ -23,9 +23,10 @@ def tens_almeq(a: torch.Tensor, b: torch.Tensor, prec: float = 1e-8, nan: bool =
     if a.type() != b.type():
         raise TypeError("Both tensors must be of equal type.")
 
-    if a.type != torch.FloatTensor:
-        a = a.float()
-        b = b.float()
+    # DECODE wrote `if a.type != torch.FloatTensor`, a method against a class, which is always
+    # true: both are compared as float32, whatever they were.  Kept so.
+    a = a.float()
+    b = b.float()
 
     if nan:
         if torch.isnan(a).all() and torch.isnan(b).all():

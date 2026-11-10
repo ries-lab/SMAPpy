@@ -216,7 +216,7 @@ class UnifiedEmbeddingTarget(TargetGenerator):
         """Get index of central bin for each emitter."""
         x_ix, y_ix = self._delta_psf.search_bin_index(xyz[:, :2])
 
-        assert isinstance(frame_ix, torch.LongTensor)
+        assert frame_ix.dtype == torch.long  # not isinstance LongTensor: false on CUDA and MPS
 
         """Get the indices of the ROIs around the ctrl pixel"""
         batch_ix_roi, x_ix_roi, y_ix_roi, offset_x, offset_y, id = self._get_roi_px(frame_ix, x_ix, y_ix)

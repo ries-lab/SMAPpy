@@ -619,7 +619,8 @@ class EmitterSet:
             ix = [ix]
 
         # PyTorch single element support
-        if not isinstance(ix, torch.BoolTensor) and isinstance(ix, torch.Tensor) and ix.numel() == 1:
+        # a one-element bool mask is a mask on any device (isinstance BoolTensor is false on CUDA and MPS)
+        if isinstance(ix, torch.Tensor) and ix.dtype != torch.bool and ix.numel() == 1:
             ix = [int(ix)]
 
         # Todo: Check for numpy boolean array

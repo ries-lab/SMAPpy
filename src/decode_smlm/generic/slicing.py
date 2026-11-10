@@ -23,7 +23,8 @@ def split_sliceable(x, x_ix: torch.Tensor, ix_low: int, ix_high: int):
     """
 
     """Safety checks"""
-    if x_ix.numel() >= 1 and not isinstance(x_ix, (torch.IntTensor, torch.ShortTensor, torch.LongTensor)):
+    # the dtype, not isinstance(x_ix, torch.LongTensor & co.), which is false on CUDA and MPS
+    if x_ix.numel() >= 1 and x_ix.dtype not in (torch.int16, torch.int32, torch.int64):
         raise TypeError("Index must be subtype of integer.")
 
     if len(x_ix) != len(x):
