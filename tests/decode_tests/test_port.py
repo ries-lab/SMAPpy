@@ -94,3 +94,20 @@ def test_importing_smappy_and_discovering_its_plugins_leaves_torch_unloaded():
             "print('torch' in sys.modules, 'decode_smlm' in sys.modules)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.split()[-2:] == ["False", "False"], out.stdout + out.stderr
+
+
+def test_the_lazy_split_gives_split_sliceables_elements_in_its_order():
+    """The training's dataset cuts each frame's emitters out when it is read (``LazySplit``)."""
+    import torch
+
+    from decode_smlm.generic.emitter import RandomEmitterSet
+    from decode_smlm.generic.slicing import LazySplit, split_sliceable
+    torch.manual_seed(0)
+    em = RandomEmitterSet(500)
+    em.frame_ix = torch.randint(-1, 12, (500,))
+    eager = split_sliceable(em, em.frame_ix, 0, 10)
+    lazy = LazySplit(em, em.frame_ix, 0, 10)
+    assert len(lazy) == len(eager) == 11
+    for a, b in zip(lazy, eager):
+        assert torch.equal(a.xyz, b.xyz) and torch.equal(a.frame_ix, b.frame_ix) and torch.equal(a.phot, b.phot)
+    assert torch.equal(lazy[-1].xyz, eager[-1].xyz) and len(lazy[2:5]) == 3

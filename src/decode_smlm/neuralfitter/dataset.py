@@ -227,7 +227,8 @@ class SMLMLiveDataset(SMLMStaticDataset):
     def sanity_check(self):
 
         super().sanity_check()
-        if self._emitter is not None and not isinstance(self._emitter, (list, tuple)):
+        from ..generic.slicing import LazySplit
+        if self._emitter is not None and not isinstance(self._emitter, (list, tuple, LazySplit)):
             raise TypeError("EmitterSet shall be stored in list format, where each list item is one target emitter.")
 
     def sample(self, verbose: bool = False):
@@ -250,8 +251,9 @@ class SMLMLiveDataset(SMLMStaticDataset):
             print(f"Sampled dataset in {time.time() - t0:.2f}s. {len(emitter)} emitters on {frames.size(0)} frames.")
 
         """Split Emitters into list of emitters (per frame) and set frame_ix to 0."""
-        emitter = emitter.split_in_frames(0, frames.size(0) - 1)
-        emitter = [set_frame_ix(em) for em in emitter]
+        # each frame's emitters cut out when a worker reads it, not all in a loop here (LazySplit)
+        from ..generic.slicing import LazySplit
+        emitter = LazySplit(emitter, emitter.frame_ix, 0, frames.size(0) - 1, each=set_frame_ix)
 
         self._emitter = emitter
         self._frames = frames.cpu()

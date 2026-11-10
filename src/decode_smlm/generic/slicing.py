@@ -44,6 +44,44 @@ def split_sliceable(x, x_ix: torch.Tensor, ix_low: int, ix_high: int):
     return [x[ix_sort[i]:ix_sort[i + 1]] for i in range(ix_sort.shape[0] - 1)]
 
 
+class LazySplit:
+    """`split_sliceable`'s list, each element cut out only when it is asked for.
+
+    The training's dataset splits an epoch's 1.6 million emitters into its 32 769 frames, and
+    building every frame's EmitterSet in a loop took 1.6 s an epoch on the H100's VM (49 us a frame)
+    -- longer than drawing the frames.  Each is needed once, when a data-loader worker builds that
+    frame's target, so here the sort is done once and an element is sliced in the worker that
+    reads it.  The elements are those of `split_sliceable`, in its order; ``each`` is applied to
+    an element as it is cut.
+    """
+
+    def __init__(self, x, x_ix: torch.Tensor, ix_low: int, ix_high: int, each=None):
+        if x_ix.numel() >= 1 and x_ix.dtype not in (torch.int16, torch.int32, torch.int64):
+            raise TypeError("Index must be subtype of integer.")
+        if len(x_ix) != len(x):
+            raise ValueError("Index and sliceable are not of same length (along first index).")
+        x_ix, re = torch.sort(x_ix)
+        self._x = x[re]
+        self._bounds = np.searchsorted(x_ix, np.arange(ix_low, ix_high + 2))
+        self._each = each
+
+    def __len__(self):
+        return len(self._bounds) - 1
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return [self[j] for j in range(*i.indices(len(self)))]
+        if i < 0:
+            i += len(self)
+        if not 0 <= i < len(self):
+            raise IndexError(i)
+        out = self._x[self._bounds[i]:self._bounds[i + 1]]
+        return self._each(out) if self._each is not None else out
+
+    def __iter__(self):
+        return (self[i] for i in range(len(self)))
+
+
 def ix_split(ix: torch.Tensor, ix_min: int, ix_max: int):
     """
     Splits an index rather than a sliceable (as above). Might be slower than splitting the sliceable because here we can
