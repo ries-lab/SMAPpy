@@ -1,7 +1,6 @@
 import math
 
 import numpy as np
-import seaborn as sns
 import torch
 
 from matplotlib import pyplot as plt
@@ -9,6 +8,24 @@ from matplotlib.ticker import AutoMinorLocator
 from scipy import stats
 from scipy.stats import gaussian_kde
 import warnings
+
+
+def density_hist(values, ax, bins=50, fit=None):
+    """A histogram normalised to a density, with the fitted pdf of `fit` over it.
+
+    What DECODE drew with seaborn's ``distplot(..., norm_hist=True, kde=False, fit=...)``:
+    distplot has been deprecated since seaborn 0.11, DECODE pinned seaborn 0.10 for it, and
+    matplotlib draws the same thing without a dependency.  The kernel density estimate that
+    distplot added by default is not drawn.
+    """
+    values = np.asarray(values, dtype=float).ravel()
+    values = values[np.isfinite(values)]
+    ax.hist(values, bins=bins, density=True, alpha=0.6)
+    if fit is not None and values.size > 1:
+        params = fit.fit(values)
+        x = np.linspace(*ax.get_xlim(), 200)
+        ax.plot(x, fit.pdf(x, *params), color="k", lw=1)
+    return ax
 
 
 def kde_sorted(x: torch.Tensor, y: torch.Tensor, plot=False, ax=None, band_with=None, sub_sample: (None, int) = None,
@@ -131,8 +148,8 @@ class MetricMeter:
         f, (ax_box, ax_hist) = plt.subplots(2, sharex=True, gridspec_kw={"height_ratios": (.1, .9)})
 
         """Plot boxplot and histplot."""
-        sns.boxplot(vals, ax=ax_box)
-        sns.distplot(vals, ax=ax_hist, kde=False, fit=fit, bins=bins_, norm_hist=True)
+        ax_box.boxplot(vals, vert=False, widths=0.6)
+        density_hist(vals, ax_hist, bins=bins_, fit=fit)
 
         """Get the fit values."""
         if fit is not None:
@@ -143,8 +160,9 @@ class MetricMeter:
         ax_box.set(yticks=[])
         ax_box.xaxis.set_minor_locator(AutoMinorLocator())
         ax_hist.xaxis.set_minor_locator(AutoMinorLocator())
-        sns.despine(ax=ax_hist)
-        sns.despine(ax=ax_box, left=True)
+        for ax, sides in ((ax_hist, ("top", "right")), (ax_box, ("top", "right", "left"))):
+            for side in sides:
+                ax.spines[side].set_visible(False)
         return f
 
     def reset(self):

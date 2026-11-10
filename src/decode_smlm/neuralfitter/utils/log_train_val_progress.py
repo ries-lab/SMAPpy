@@ -2,7 +2,6 @@ import warnings
 
 import matplotlib.pyplot as plt
 import torch
-import seaborn as sns
 
 import decode_smlm.generic.emitter
 from decode_smlm.evaluation.evaluation import WeightedErrors
@@ -42,7 +41,7 @@ def log_dists(tp, tp_match, pred, px_border, px_size, logger, step):
     f_prob, ax_prob = plt.subplots()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        sns.distplot(pred.prob, bins=50, norm_hist=True, ax=ax_prob, kde=False)
+        predict_dist.utils.density_hist(pred.prob, ax_prob, bins=50)
     logger.add_figure('dist/prob', f_prob, step)
 
 

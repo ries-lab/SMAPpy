@@ -4,12 +4,12 @@ from collections import namedtuple
 
 import matplotlib.pyplot as plt
 import scipy.stats
-import seaborn as sns
 import torch
 
 from decode_smlm.evaluation.metric import precision_recall_jaccard, rmse_mad_dist, efficiency
 from ..generic import emitter as emitter
 from ..generic.emitter import EmitterSet
+from .utils import density_hist
 
 
 class SegmentationEvaluation:
@@ -216,12 +216,12 @@ class WeightedErrors:
         if len(dxyz[:, 0]) != len(dphot) or len(dphot) != len(dbg):
             raise ValueError("Inconsistent number of elements.")
 
-        sns.distplot(dxyz[:, 0].numpy(), norm_hist=True, kde=False, fit=scipy.stats.norm, ax=axes[0])
-        sns.distplot(dxyz[:, 1].numpy(), norm_hist=True, kde=False, fit=scipy.stats.norm, ax=axes[1])
-        sns.distplot(dxyz[:, 2].numpy(), norm_hist=True, kde=False, fit=scipy.stats.norm, ax=axes[2])
+        density_hist(dxyz[:, 0].numpy(), axes[0], fit=scipy.stats.norm)
+        density_hist(dxyz[:, 1].numpy(), axes[1], fit=scipy.stats.norm)
+        density_hist(dxyz[:, 2].numpy(), axes[2], fit=scipy.stats.norm)
 
-        sns.distplot(dphot.numpy(), norm_hist=True, kde=False, fit=scipy.stats.norm, ax=axes[3])
-        sns.distplot(dbg.numpy(), norm_hist=True, kde=False, fit=scipy.stats.norm, ax=axes[4])
+        density_hist(dphot.numpy(), axes[3], fit=scipy.stats.norm)
+        density_hist(dbg.numpy(), axes[4], fit=scipy.stats.norm)
 
         return axes
 

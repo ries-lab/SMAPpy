@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import seaborn as sns
 import torch
 import warnings
 
@@ -62,8 +61,8 @@ def emitter_deviations(tp, tp_match, px_border: float, px_size: float, axes, res
     """XY within px"""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        sns.distplot(px_pointer_dist(tp.xyz_px[:, 0], px_border=px_border, px_size=px_size), norm_hist=True, ax=axes[0], bins=50)
-        sns.distplot(px_pointer_dist(tp.xyz_px[:, 1], px_border=px_border, px_size=px_size), norm_hist=True, ax=axes[1], bins=50)
+        utils.density_hist(px_pointer_dist(tp.xyz_px[:, 0], px_border=px_border, px_size=px_size), axes[0], bins=50)
+        utils.density_hist(px_pointer_dist(tp.xyz_px[:, 1], px_border=px_border, px_size=px_size), axes[1], bins=50)
 
 
     """Z and Photons"""
