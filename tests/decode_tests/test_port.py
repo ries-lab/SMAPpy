@@ -111,3 +111,18 @@ def test_the_lazy_split_gives_split_sliceables_elements_in_its_order():
     for a, b in zip(lazy, eager):
         assert torch.equal(a.xyz, b.xyz) and torch.equal(a.frame_ix, b.frame_ix) and torch.equal(a.phot, b.phot)
     assert torch.equal(lazy[-1].xyz, eager[-1].xyz) and len(lazy[2:5]) == 3
+
+
+def test_the_lazy_split_of_a_training_dataset_pickles_for_spawned_workers():
+    """macOS starts data-loader workers by spawning, which pickles the dataset and its split."""
+    import pickle
+
+    import torch
+
+    from decode_smlm.generic.emitter import RandomEmitterSet
+    from decode_smlm.generic.slicing import LazySplit
+    from decode_smlm.neuralfitter.dataset import _frame_ix_to_zero
+    em = RandomEmitterSet(50)
+    em.frame_ix = torch.randint(0, 5, (50,))
+    split = pickle.loads(pickle.dumps(LazySplit(em, em.frame_ix, 0, 4, each=_frame_ix_to_zero)))
+    assert len(split) == 5 and all((e.frame_ix == 0).all() for e in split)

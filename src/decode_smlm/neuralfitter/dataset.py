@@ -206,6 +206,14 @@ class InferenceDataset(SMLMStaticDataset):
         return frame
 
 
+def _frame_ix_to_zero(em):
+    """A frame's emitters with frame index 0.  At module level, not inside `sample` as DECODE had it:
+    the split holds it, and a data-loader worker started by spawning (macOS) gets the dataset
+    pickled."""
+    em.frame_ix = torch.zeros_like(em.frame_ix)
+    return em
+
+
 class SMLMLiveDataset(SMLMStaticDataset):
     """
     A SMLM dataset where new datasets is sampleable via the sample() method of the simulation instance.
@@ -240,10 +248,6 @@ class SMLMLiveDataset(SMLMStaticDataset):
 
         """
 
-        def set_frame_ix(em):  # helper function
-            em.frame_ix = torch.zeros_like(em.frame_ix)
-            return em
-
         """Sample new dataset."""
         t0 = time.time()
         emitter, frames, bg_frames = self.simulator.sample()
@@ -253,7 +257,7 @@ class SMLMLiveDataset(SMLMStaticDataset):
         """Split Emitters into list of emitters (per frame) and set frame_ix to 0."""
         # each frame's emitters cut out when a worker reads it, not all in a loop here (LazySplit)
         from ..generic.slicing import LazySplit
-        emitter = LazySplit(emitter, emitter.frame_ix, 0, frames.size(0) - 1, each=set_frame_ix)
+        emitter = LazySplit(emitter, emitter.frame_ix, 0, frames.size(0) - 1, each=_frame_ix_to_zero)
 
         self._emitter = emitter
         self._frames = frames.cpu()
