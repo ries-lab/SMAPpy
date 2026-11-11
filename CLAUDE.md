@@ -110,6 +110,11 @@ Running the tests -- three tiers:
   includes `--slow`; its tests have a 1200 s limit (`LONG_TIMEOUT` in
   `conftest.py`) where every other has 300 s.  A `slow` test that grows past
   20 s is shortened or moved to `long`, not left to stretch `--slow`.
+* **A test never waits for a person.**  `conftest.py` closes a modal dialog
+  left open 10 s and fails its test, naming it (`modal_guard`); `plt.show()`
+  returns at once (on QtAgg, which `gui/figures.py` sets, it waited for its
+  window); and the 300 s limit runs on a thread, which fires inside Qt's event
+  loop where a signal's never did.  A hung `--slow` run is a bug to fix there.
 * `-n auto` needs pytest-xdist (the `test` extra).  `conftest.py` gives each
   worker one BLAS thread (without it four workers are barely faster than one),
   makes work stealing the default (xdist's own piles the tutorials onto one

@@ -136,6 +136,11 @@ test = ["pytest>=8.4", "pytest-timeout>=2.1", "pytest-xdist>=3.2"]
 # faulthandler stays: at 240 s it prints every thread's stack, which shows
 # where a hang inside Qt is, and lets the test go on.
 timeout = 300
+# on a thread, not a signal: a test waiting inside Qt's event loop never returns to Python, so
+# the signal's handler never ran and the run hung for hours (2026-11).  The thread prints every
+# stack and ends the worker; xdist names the test and starts another.  A modal dialog left open
+# fails sooner, after 10 s, in conftest.py (`modal_guard`).
+timeout_method = "thread"
 testpaths = ["tests"]
 faulthandler_timeout = 240
 

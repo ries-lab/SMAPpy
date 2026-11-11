@@ -5,8 +5,11 @@ builds a `ControlWindow`, which opens the GUI file named there on the way up
 and writes the window position on the way down.  Without this the suite would
 take its plugin roots and tabs from whatever the developer has configured.
 """
+import contextlib
 import importlib.util
 import os
+import sys
+import time
 
 import pytest
 
@@ -222,6 +225,97 @@ def _collect_after_each_test(collect_on_the_main_thread):
                 keep_screens(app)
         gc.collect()
         _tests_since_collect = 0
+
+
+# A modal dialog open this long in a test is one nobody will answer: it is closed and the test
+# fails, naming it.  Without this a test that reached an unpatched question waited in Qt's
+# event loop for good, where pytest-timeout's signal never runs, and the run hung (2026-11).
+MODAL_SECONDS = 10.0
+
+
+def _dialog_words(widget) -> str:
+    """What a dialog says: its class, title and text, for the failure."""
+    bits = [type(widget).__name__, repr(widget.windowTitle())]
+    text = getattr(widget, "text", None)
+    if callable(text):
+        try:
+            bits.append(repr(str(text())[:200]))
+        except Exception:
+            pass
+    return " ".join(bits)
+
+
+@contextlib.contextmanager
+def modal_guard(seconds: float = MODAL_SECONDS):
+    """While inside, a modal dialog left open ``seconds`` is rejected and said in the list this
+    yields.  A timer on the GUI thread, which runs inside the dialog's own event loop: the static
+    `QMessageBox.question` and `QFileDialog.getOpenFileName` included, which a patch of
+    `QDialog.exec` would not see.  Nothing without a QApplication."""
+    left: list = []
+    app = None
+    if "PySide6.QtWidgets" in sys.modules:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+    if app is None:
+        yield left
+        return
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+    seen: dict = {}
+
+    def check() -> None:
+        # never raises: a timer's exception left pending in Qt segfaults the next call (CLAUDE.md)
+        try:
+            widget = QApplication.activeModalWidget()
+            if widget is None:
+                return
+            now = time.monotonic()
+            if now - seen.setdefault(id(widget), now) < seconds:
+                return
+            seen.pop(id(widget), None)
+            left.append(_dialog_words(widget))
+            if hasattr(widget, "reject"):
+                widget.reject()
+            else:
+                widget.close()
+        except Exception as error:                     # noqa: BLE001
+            print(f"modal_guard: {type(error).__name__}: {error}", file=sys.stderr)
+
+    timer = QTimer()
+    timer.setInterval(250)
+    timer.timeout.connect(check)
+    timer.start()
+    try:
+        yield left
+    finally:
+        timer.stop()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _pyplot_show_returns():
+    """`pyplot.show` returns at once in the tests.  `smappy.gui.figures` makes QtAgg pyplot's
+    backend as it is imported, and on it `show` runs Qt's event loop until its window is closed:
+    a test after any GUI test on the same worker that ends in ``plt.show()`` -- DECODE's ported
+    ones do -- waited for good (2026-11)."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        yield
+        return
+    shown = plt.show
+    plt.show = lambda *args, **kwargs: None
+    yield
+    plt.show = shown
+
+
+@pytest.fixture(autouse=True)
+def _no_dialog_left_open():
+    """Fail a test that left a modal dialog waiting (`modal_guard`) instead of hanging the run."""
+    with modal_guard() as left:
+        yield
+    if left:
+        pytest.fail(f"a modal dialog waited {MODAL_SECONDS:g} s for an answer and was closed: "
+                    + "; ".join(left) + " -- patch the question the test reaches", pytrace=False)
 
 
 @pytest.fixture(autouse=True, scope="session")
