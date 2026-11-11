@@ -714,6 +714,15 @@ Decided (Jonas, 2026-11-10):
   no: batch 256 needs three to five times the epochs; the batch stays 64, and the H100's spare
   capacity goes to two or three trainings at once through MPS (§8, "(f) and (f2)").
 
+- **SMAPpy's notation for the integration** (2026-11-11): the new fitter (`docs/decode.md` §10)
+  works in SMAPpy's conventions throughout -- x along the columns, 0-based pixel coordinates with
+  centres at whole numbers, ``x0`` from 0, calibrations as SMAPpy holds them (``(64, nz, ny, nx)``,
+  its monomial order, the camera's orientation), SMAPpy's column names and units -- with no
+  conversion layer.  The port (`decode_smlm`) keeps DECODE's, to stay comparable to the original,
+  and its boundary to SMAPpy stays in `utils/calibration_io.py`, `predict.py` and `io.py`.  Why:
+  every conversion between the two is a place to be wrong, as the ``x0`` of (the pixelation study,
+  §8) was, a whole pixel unnoticed until a fit was compared with Spline 3D spot by spot.
+
 Still open:
 - Which single-channel 3D data set with its bead calibration is the real data
   for (i)?

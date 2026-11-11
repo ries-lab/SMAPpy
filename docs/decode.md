@@ -661,6 +661,11 @@ fitter, which then only changes the network, the loss and the extraction.
 
 ## 10. The new fitter: plan
 
+**In SMAPpy's notation.**  The new fitter's code uses SMAPpy's conventions throughout -- x along
+the columns, 0-based pixels with centres at whole numbers, calibrations as SMAPpy holds them,
+SMAPpy's column names -- not DECODE's (x the rows, ``x0`` from 1, its own coefficient order).  The
+port keeps DECODE's, behind one boundary (`docs/decode/poc-plan.md` §7).
+
 Each step is accepted on numbers, as the tests do elsewhere.  Equivalence
 with the existing code is not one of them: the new code has to match or beat
 the baselines on the benchmark, not reproduce their outputs.
