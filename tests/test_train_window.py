@@ -138,3 +138,40 @@ def test_a_sparse_movie_is_prefitted_further_until_molecules_were_fully_on_often
     prepared = run_prefit(settings, report=messages.append)
     assert any("too few" in m["message"] for m in messages)
     assert prepared.estimates.n_fully_on >= FULLY_ON_ENOUGH or prepared.estimates.n_localizations > 600
+
+
+def test_the_crlb_reference_is_the_gaussian_bound_of_a_bright_spot_and_doubles_in_variance_with_em_gain(tmp_path):
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.training.reference import crlb_reference
+    cal = load_spline_calibration(_calibration(tmp_path / "beads.h5"))
+    params = {"Simulation": {"intensity_mu_sig": [4000.0, 0.0], "bg_uniform": [0.01, 0.02],
+                             "emitter_extent": [None, None, [0.0, 0.0]]},
+              "Camera": {"px_size": [100.0, 100.0], "em_gain": None}}
+    # a Gaussian of sigma 1.3 px at focus, without background: sigma_a / sqrt(N) an axis, sigma_a^2
+    # = sigma^2 + a^2 / 12 for pixels of size a (Thompson et al. 2002; Mortensen et al. 2010 add a
+    # factor near 1 for an MLE without background)
+    from smappy.simulate.camera import _draw_spline
+    spot = np.zeros((1, 13, 13))
+    _draw_spline(spot, np.zeros(1, int), np.full((1, 2), 6.0), np.zeros(1), np.full(1, 4000.0), cal)
+    n = spot.sum()                 # this calibration is normalised on its widest slice: 38 % at focus
+    expected = np.sqrt(2) * np.sqrt(1.3 ** 2 + 1 / 12) * 100.0 / np.sqrt(n)
+    found = crlb_reference(params, cal, spots=200)
+    assert found["lateral_nm"] == pytest.approx(expected, rel=0.1)
+    params["Camera"]["em_gain"] = 300.0
+    assert crlb_reference(params, cal, spots=200)["lateral_nm"] == pytest.approx(np.sqrt(2) * found["lateral_nm"], rel=1e-3)
+
+
+def test_the_follow_curves_draw_the_crlb_reference_on_the_rmse(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.gui.train_window import draw_progress
+    from smappy.training import progress
+    progress.append(tmp_path, "start", 0, epochs=10)
+    progress.append(tmp_path, "epoch", 0, loss_train=1.0, loss_test=1.0, seconds=1.0,
+                    metrics={"jaccard": 0.5, "rmse_lat_nm": 40.0, "rmse_ax_nm": 60.0})
+    figure = Figure()
+    draw_progress(figure, progress.read(tmp_path), {"lateral_nm": 12.0, "axial_nm": 30.0})
+    rmse = next(a for a in figure.axes if a.get_title().startswith("RMSE"))
+    levels = sorted(line.get_ydata()[0] for line in rmse.get_lines() if line.get_linestyle() == "--")
+    assert levels == [12.0, 30.0]

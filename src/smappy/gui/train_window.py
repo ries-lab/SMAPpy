@@ -225,9 +225,10 @@ def stop(folder) -> Path:
     return path
 
 
-def draw_progress(figure, lines: list) -> str:
+def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     """The curves of a job's ``progress.jsonl``: the losses, Jaccard, the RMSEs, the seconds an epoch;
-    returns a line saying where it is and how long it has left."""
+    returns a line saying where it is and how long it has left.  ``reference``, the median spot's
+    CRLB (`training.reference`), is drawn on the RMSE as dashed lines."""
     epochs = [line for line in lines if line["kind"] == "epoch"]
     figure.clear()
     axes = figure.subplots(2, 2)
@@ -247,8 +248,11 @@ def draw_progress(figure, lines: list) -> str:
     axes[0, 0].legend(fontsize=7)
     axes[0, 1].plot(e, series("jaccard", True))
     axes[0, 1].set(title="Jaccard (test set)", xlabel="epoch")
-    axes[1, 0].plot(e, series("rmse_lat_nm", True), label="lateral")
-    axes[1, 0].plot(e, series("rmse_ax_nm", True), label="axial")
+    lateral = axes[1, 0].plot(e, series("rmse_lat_nm", True), label="lateral")[0]
+    axial = axes[1, 0].plot(e, series("rmse_ax_nm", True), label="axial")[0]
+    if reference:
+        axes[1, 0].axhline(reference["lateral_nm"], ls="--", lw=0.8, color=lateral.get_color(), label="CRLB, median spot")
+        axes[1, 0].axhline(reference["axial_nm"], ls="--", lw=0.8, color=axial.get_color())
     axes[1, 0].set(title="RMSE (nm, test set)", xlabel="epoch")
     axes[1, 0].legend(fontsize=7)
     seconds = series("seconds")
@@ -298,6 +302,7 @@ class TrainWindow(QWidget):
         self.busy, self.prepared = False, None
         self._thread = self._worker = None
         self.follower = HostFollower()
+        self.references = {}              # a job's CRLB reference, by folder
 
         # the jobs
         self.job_list = QListWidget()
@@ -318,6 +323,12 @@ class TrainWindow(QWidget):
         self.prepare_form = SettingsForm(PrepareSettings)
         self.estimate_form = SettingsForm(EstimateSettings)
         self.estimate_form.setEnabled(False)
+        self.simulated = None             # frames the training would draw, in photons; with torch only
+        self._simulate_later = QTimer(self)
+        self._simulate_later.setSingleShot(True)
+        self._simulate_later.setInterval(800)
+        self._simulate_later.timeout.connect(self.simulate)
+        self.estimate_form.changed.connect(self._estimates_changed)
         self.yaml_edit = QPlainTextEdit()
         self.yaml_edit.setPlaceholderText("method.yaml, after the prefit: DECODE's parameters, used as written")
         self.yaml_edit.setVisible(False)
@@ -482,7 +493,10 @@ class TrainWindow(QWidget):
                 return
             from ..training import jobs, progress
             status = jobs.status(entry)
-            text = draw_progress(self.follow_figure, progress.read(entry.folder))
+            if entry.folder not in self.references:        # once a job: a second, from its own files
+                from ..training.reference import for_job
+                self.references[entry.folder] = for_job(entry.folder)
+            text = draw_progress(self.follow_figure, progress.read(entry.folder), self.references[entry.folder])
             self.follow_canvas.draw_idle()
             self.follow_label.setText(f"{entry.name}: {status.state}; {text}"
                                       + (f" -- {status.message}" if status.message else ""))
@@ -515,6 +529,10 @@ class TrainWindow(QWidget):
             self.show_try(*value)
         elif kind == "use":
             self._use(value)
+        elif kind == "simulated":
+            self.simulated = value
+            if self.prepared is not None:
+                self.draw_prepared()
         elif kind == "started":
             self.train_note.setText(value)
             self.tabs.setCurrentIndex(2)
@@ -535,18 +553,43 @@ class TrainWindow(QWidget):
         self.estimate_form.setEnabled(True)
         self.yaml_edit.setPlainText(yaml.safe_dump(method_params(prepared, est), sort_keys=False))
         self.write_button.setEnabled(True)
+        self.simulated = None
         self.draw_prepared()
+        self.simulate()
         self.status_bar.showMessage(f"prefit: {est.n_blinks} blinks, {est.n_localizations} localizations; "
                                     f"photons from {est.intensity_from} ({est.n_fully_on} fully-on frames)")
 
     def draw_prepared(self) -> None:
-        from decode_smlm.figures import draw_ranges
+        from decode_smlm.figures import draw_frames, draw_ranges, photons
         self.prepare_figure.clear()
         est = with_settings(self.prepared.estimates, self.estimate_form.value())
         params = method_params(self.prepared, est)
-        axes = self.prepare_figure.subplots(1, 3)
-        draw_ranges(axes, self.prepared.localizations, params)
+        frames = self.simulated is not None and self.prepared.sample is not None
+        axes = self.prepare_figure.subplots(2 if frames else 1, 3, squeeze=False)
+        draw_ranges(axes[0], self.prepared.localizations, params)
+        if frames:
+            draw_frames(axes[1], photons(self.prepared.sample[:1], params["Camera"]), self.simulated[:1])
         self.prepare_canvas.draw_idle()
+
+    def _estimates_changed(self) -> None:
+        if self.prepared is not None:
+            self.draw_prepared()
+            self._simulate_later.start()
+
+    def simulate(self) -> None:
+        """Frames as the training would draw them with the estimates as they stand, beside the data:
+        with torch here only (DECODE's own simulation); on a timer, so never raising."""
+        try:
+            if self.prepared is None or not torch_here():
+                return
+            if self.busy:
+                self._simulate_later.start()
+                return
+            est = with_settings(self.prepared.estimates, self.estimate_form.value())
+            params, calibration = method_params(self.prepared, est), self.prepared.settings.calibration
+            self._work("simulated", lambda report: simulated_frames(params, calibration))
+        except Exception as error:
+            print(f"DECODE training: {error}")
 
     def write(self) -> None:
         import yaml
@@ -649,6 +692,12 @@ class TrainWindow(QWidget):
             return
         self.model_chosen.emit(str(model))
         self.status_bar.showMessage(f"the DECODE fitter now uses {model}")
+
+
+def simulated_frames(params: dict, calibration, n_frames: int = 2) -> np.ndarray:
+    """Frames as the training simulates them with these settings, in photons (needs torch)."""
+    from decode_smlm.figures import simulate_frames
+    return simulate_frames(params, calibration, n_frames=n_frames)
 
 
 def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> str:

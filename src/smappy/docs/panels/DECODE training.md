@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
 ---
 
 ## What it does
@@ -27,7 +27,11 @@ blinks.  From them come the training's ranges: the photons of a molecule in
 a frame it is fully on in, the background, the z range and how many frames a
 blink lasts.  They appear under *Estimates*, to change if you know better;
 the figure shows the prefit's values with the ranges the training will draw
-from over them.  *Write job* writes the job folder beside the movie, in
+from over them.  With torch installed here, a frame as the training would
+simulate it is drawn beside a frame of the movie, on one scale, with both
+their pixel values: the spots should look as bright and as wide, the
+background as grey and as grainy.  It is drawn again a moment after an
+estimate is changed.  *Write job* writes the job folder beside the movie, in
 `<movie>_decode/`, and lists it on the left.
 
 **Train.**  Choose a job on the left, where it trains, and *Start*.  The
@@ -52,7 +56,15 @@ prepared* is on.
 
 **Follow.**  The losses, the test set's Jaccard and RMSE, and the seconds
 an epoch, read from the job's progress file every few seconds, with the time
-left.
+left.  The dashed lines on the RMSE are the
+[CRLB](plugin:Panels/Glossary) of the median spot the training draws: its
+photons, background and z drawn as the training draws them, alone and
+without noise, from the job's calibration, the bound SMAPpy's spline fitter
+gives there -- doubled in variance with EM gain, whose excess noise the
+bound leaves out.  It is a guide, not a bound on the curve: the test set's
+spots overlap, and its RMSE is over the spots found, of which the dim ones
+are fewer.  A curve that levels out well above it has room left; one near it
+has little.
 
 **Try.**  *Try on my data* runs the newest model on the first frames of the
 movie and draws what it found.  *Use this model* puts it into the DECODE
