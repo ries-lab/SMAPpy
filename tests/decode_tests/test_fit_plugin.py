@@ -245,3 +245,19 @@ def test_the_fitters_table_of_the_packages_frames_is_the_originals(tmp_path):
     assert np.abs(np.asarray(locs["y_nm"]) - y).max() < 0.01
     assert np.abs(np.asarray(locs["z_nm"]) - ref["xyz"][:, 2]).max() < 0.05
     assert np.abs(np.asarray(locs["photons"]) - ref["phot"]).max() <= 1e-4 * ref["phot"].max()
+
+
+def test_a_fit_outside_the_trained_range_says_so_in_its_text_and_its_file(tiny, tmp_path, monkeypatch):
+    from smappy.io.hdf5 import load_localizations
+    from smappy.plugins import fit_decode
+    real = fit_decode.read_model
+
+    def narrow(path):                       # a model that drew backgrounds no fit here has
+        meta = real(path)
+        return {**meta, "trained_on": {**(meta.get("trained_on") or {}), "background": [1e5, 2e5]}}
+    monkeypatch.setattr(fit_decode, "read_model", narrow)
+    out = tmp_path / "fit.hdf5"
+    result = plugins.get(PLUGIN)().run(Context(), settings(tiny["tif"], tiny["model"], **{"output.path": str(out)}))
+    said = [line for line in result.text.splitlines() if "background outside the training's" in line]
+    assert len(said) == 1 and said[0].startswith("warning:")             # once, not again by the plugin
+    assert any("background outside" in w for w in load_localizations(out).metadata["warnings"])

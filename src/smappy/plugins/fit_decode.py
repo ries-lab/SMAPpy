@@ -197,18 +197,13 @@ class DecodeFit(_FitPlugin):
                            "model_metadata": meta},
                 "smappy_version": _version()}
 
-    def run(self, ctx: Context, settings) -> Result:
-        result = super().run(ctx, settings)
+    def checks(self, ctx: Context, settings, locs) -> list:
+        """What the fit found outside what the network was trained on (`range_warnings`): in the
+        run's text and in its file."""
         try:
-            meta = read_model(settings.model.path)
+            return range_warnings(locs, read_model(settings.model.path))
         except ValueError:
-            return result
-        said = range_warnings(result.locs, meta) if result.locs is not None else []
-        for line in said:
-            ctx.warn(line)
-        if said:
-            result.text = "\n".join([result.text] + [f"warning: {w}" for w in said])
-        return result
+            return []
 
     # ---------------------------------------------------------- the form
     def describe(self, ctx: Optional[Context], settings) -> FormState:

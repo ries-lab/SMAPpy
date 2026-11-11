@@ -808,6 +808,12 @@ class _FitPlugin(Plugin):
         without a peak finder or a PSF fit (DECODE) records its own."""
         return provenance(camera, finder, model, settings.fit, source=source)
 
+    def checks(self, ctx: Context, settings, locs: Localizations) -> List[str]:
+        """Warnings about the fit as a whole, made when its last block is in and before its file
+        is closed, so they are written into it with the others (``warnings``); none by default.
+        DECODE's: localizations outside what its network was trained on."""
+        return []
+
     def finder(self, settings, camera: Optional[CameraMetadata] = None):
         """What finds the candidates, in each channel on its own for a
         multi-channel fitter."""
@@ -1553,6 +1559,8 @@ class _FitPlugin(Plugin):
             # this table is measured between (`calibrate.transform`)
             chip = getattr(engine, "chip", None)
             record["channels"] = chip.to_dict() if chip is not None else None
+            for line in self.checks(ctx, settings, collected):
+                ctx.warn(line)
             # kept with the localizations, so a file that was fitted against
             # a mismatched calibration says so whoever opens it
             record["warnings"] = list(ctx.warnings)

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -155,7 +155,8 @@ the network.
 **The check after a run.**  The fit's photons and background are compared
 with what the training drew.  More than 5 % of the localizations brighter
 than the training's mean plus three spreads, or with a background outside
-its range, is a warning in the run's text, and so in the session's history:
+its range, is a warning in the run's text, and so in the session's history,
+and in the fitted file's `warnings`:
 the network has seen no molecule like those, and their numbers are
 extrapolated.
 
