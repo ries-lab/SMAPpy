@@ -207,6 +207,46 @@ as it is.  What is added:
   runs (§9.1's third criterion).
 - One epoch on the M1 Max is timed and written here.
 
+### (f2) The batch size fitted to the GPU -- the first optimisation
+
+**Why first.**  Every later study trains (the benchmark (i), the training's ranges, clipping,
+DECODE's later versions), so anything that makes a training faster is worth having before them.
+The package's batch of 64 frames of 40 x 40 leaves a large GPU partly idle.  On gpuvm's H100 the
+network's step (forward, backward, AdamW; TF32; 2026-11-11) costs per frame:
+
+| batch | a step | a frame |
+|---:|---:|---:|
+| 64 (the package's) | 16.2 ms | 253 us |
+| 128 | 22.9 ms | 179 us |
+| 256 | 42.7 ms | 167 us |
+| 512 | 81.4 ms | 159 us |
+
+So at 64 the H100 runs at about 60 % of its rate per frame, and at most 1.6 times the frames a
+second are there to gain on the GPU's part of an epoch (11.3 s of 12.9).  Two trainings at once
+are not the way to it: without NVIDIA's MPS two processes take turns on the GPU, and gpuvm's 4
+cores, 62 % busy with one training, are what a second one would run short of.
+
+**What it is.**
+- **The batch measured, not guessed:** before the first epoch, a few seconds of the network's step
+  at 64, 128, 256, ... frames on the training's device, the batch taken as the smallest within
+  10 % of the best time a frame, and below the memory the device has.  The CPU and a small GPU
+  keep 64.  `batch_size: auto` in `method.yaml`; a number is used as it is, and 64 is the
+  original's training, kept for comparisons with it.
+- **The learning rate follows the batch:** a larger batch takes fewer, larger steps through the
+  same 32 768 frames an epoch, and DECODE's rate (and StepLR's schedule, in epochs) were tuned for
+  64.  The rule -- linear scaling with a warm-up, or the square root -- is what the study below
+  decides.
+- **Recorded:** the batch and the rate chosen, and the measurement, in `progress.jsonl`'s `start`
+  line and the model file's metadata.
+
+**Done when:**
+- the reference job at the chosen batch on the H100 reaches the batch-64 runs' final test metrics
+  ((f)'s table, within (f)'s tolerance), and the time to get there is measured against theirs
+  (3.4 h);
+- the choice is measured and written here for the 4090, the H100 and MPS;
+- the choosing is tested on the CPU with a given timing (no GPU needed), and a job with a number
+  keeps it.
+
 ### (g) The fitter plugin
 
 **What it is.**  `DecodeFit(_FitPlugin)` at `Localize/DECODE`.
@@ -664,6 +704,8 @@ Decided (Jonas, 2026-11-10):
   and the measured one is shown beside it, not used: the density can change
   during an acquisition, and a model trained at a low one learns less from each
   frame.
+- **The batch size is fitted to the GPU, early** (2026-11-11), before the studies that
+  train, so that they run as fast as the GPU allows: (f2).
 
 Still open:
 - Which single-channel 3D data set with its bead calibration is the real data
@@ -763,8 +805,9 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
 - **The reference runs** started at 11:52 (`scripts/decode/train_reference_v0102.sh
   original_run1`, `original_run2`, in `~/decode_poc/runs_reference/`), together, to end about
   02:00 on 2026-11-11.  Their per-epoch metrics are in each checkpoint's `log` (`eval/jac`,
-  `eval/rmse_lat`, ..., the loss channels); they go to
-  `benchmarks/decode/results/original_run{1,2}.jsonl` when they end.
+  `eval/rmse_lat`, ..., the loss channels), exported by `scripts/decode/export_log_v0102.py` to
+  `benchmarks/decode/results/original_run{1,2}.jsonl`: both ran their 1000 epochs, in 14.7 h
+  together.
 
 ### (b) as done, 2026-11-10
 
@@ -829,14 +872,15 @@ uncommitted changes in `psf_kernel.py`, `model.py`, `loss.py`,
 
   | | original (`spline`, 1f85d10) | port (torch) |
   |---|---:|---:|
+  | RTX 4090, idle, alternated three times (2026-11-11) | 0.30 s | 0.22 s |
   | RTX 4090, under the reference runs' load, alternated | 0.46 s | 0.43 s |
   | M1 Max, MPS | -- | 0.96 s |
   | CPU, 8 threads (workstation / M1 Max) | 49.6 s / -- | 8.3 s / 3.8 s |
 
   On the way there: masked 64-bit indices for the frames had made MPS take 16 s, and
-  DECODE's chunking on the CPU had made the 4090 take 0.84 s.  The 4090's numbers are to be
-  measured again on an idle GPU when the reference runs end; until then they say "no slower",
-  not by how much.
+  DECODE's chunking on the CPU had made the 4090 take 0.84 s.  On the idle 4090 the port is
+  1.4 times as fast as the original's CUDA `spline` (0.217-0.224 s against 0.300-0.306 s; the
+  same image sum to 1e-11 of it).
 - **Defaults:** `CubicSplinePSF`'s device is the machine's, not `cuda:0`.
 
 ### (d) as done, 2026-11-10
@@ -970,7 +1014,7 @@ engine on the example package, each phase timed with the device synchronised.
   summation order on the 4090 being another.  Whether to train clipped is for (f) and (i):
   better at 3 epochs, but not the original's training.
 
-### (f) as done, 2026-11-10 -- the comparison with the original running
+### (f) as done, 2026-11-10 -- the comparison with the original 2026-11-11
 
 - **The runner** is `decode_smlm/training.py`, `train(folder)`: the live engine's loop around a
   job folder, `setup_random_simulation` and `setup_trainer` as they are.  Added: the job's seed,
@@ -996,9 +1040,28 @@ engine on the example package, each phase timed with the device synchronised.
   to `SMLMLiveDataset.sample` that the lazy split held and could not pickle: now module-level, with
   a test.
 - **One epoch of the reference job**: 196 s on the M1 Max (MPS, 4 workers), 12.2 s on the H100.
-- **The comparison**, §1 (f)'s last criterion, is running on gpuvm: the reference job with seeds 0
-  and 1, 1000 epochs each, one after the other (`port_run0`, `port_run1`), unclipped, TF32 on,
-  to be set against the original's two runs when all four have finished.
+- **The comparison**, §1 (f)'s last criterion, **holds.**  The reference job with seeds 0 and 1,
+  1000 epochs each on gpuvm's H100 (`port_run0`, `port_run1`, unclipped, TF32 on, no restart, 3.4 h
+  each), against the original's two runs on the 4090.  The means of the last 20 epochs (the test
+  sets differ: the original drew its own per run):
+
+  | | original 1 | original 2 | port 0 | port 1 | \|Δ of the means\| | allowed |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Jaccard | 0.365 | 0.382 | 0.370 | 0.370 | 0.003 | 0.017 |
+  | precision | 0.987 | 0.990 | 0.987 | 0.987 | 0.002 | 0.020 |
+  | recall | 0.367 | 0.383 | 0.372 | 0.372 | 0.003 | 0.016 |
+  | RMSE lateral, nm | 47.0 | 47.9 | 47.9 | 46.9 | 0.08 | 0.95 |
+  | RMSE axial, nm | 74.0 | 70.6 | 72.2 | 72.1 | 0.17 | 3.4 |
+  | RMSE volume, nm | 87.7 | 85.3 | 86.6 | 86.0 | 0.20 | 2.4 |
+  | efficiency lateral | 0.210 | 0.218 | 0.209 | 0.215 | 0.002 | 0.008 |
+  | efficiency axial | 0.265 | 0.288 | 0.274 | 0.275 | 0.002 | 0.023 |
+  | test loss | 283.9 | 278.1 | 286.6 | 279.2 | 1.9 | 5.8 |
+
+  Allowed is max(\|original 1 - original 2\|, 2 %).  The curves agree from epoch 50 on (Jaccard
+  at 100: 0.325 and 0.342 both ways); before it the port's runs were ahead (0.005 and 0.055
+  against 0.000 and 0.008 at epoch 10).  The recall is low for both because the test frames hold
+  50 emitters on 40 x 40 pixels, as the package's training does.  The logs:
+  `benchmarks/decode/results/` (`original_run{1,2}.jsonl`, `port_run{0,1}_progress.jsonl`).
 
 ### (g) as done, 2026-11-10
 
