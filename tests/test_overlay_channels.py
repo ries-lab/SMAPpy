@@ -243,3 +243,27 @@ def test_a_fitter_without_a_split_cameras_channels_leaves_the_arrangement_alone(
     s = with_fitter(OverlaySettings(), FourPiFitSettings())
     assert s.channels == ArrangementSettings()
 
+
+
+def test_a_fitted_table_names_its_microscope_so_its_beads_register_on_its_layout(tmp_path):
+    """*layout: microscope* is spelt out from the table's camera record, which a table fitted here
+    lacked until it was saved: *after the fit*'s overlay on bead movies failed with 'no
+    microscope recognised' on M2, the microscope recognised and the fit split right (2026-11)."""
+    from smappy.plugins.fit import (CameraSettings, ChannelsSettings, GaussianFit,
+                                    GaussianFitSettings, OutputSettings, SourceSettings)
+    from smappy.plugins.registration import table_channels
+    rng = np.random.default_rng(7)
+    bead_movie(tmp_path / "beads.tif", rng, registration(), n_frames=5)
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(tmp_path / "beads.tif")),
+        camera=CameraSettings(microscope="M2", conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        channels=ChannelsSettings(split="two channels", layout="microscope",
+                                  main_channel="microscope"),
+        output=OutputSettings(save=False))
+    settings.finish.assign_colors = False
+    locs = GaussianFit().run(Context(), settings).locs
+    assert locs.metadata["camera"]["microscope"]["name"] == "M2"
+    told, _ = table_channels(locs, ArrangementSettings(layout="microscope",
+                                                       main_channel="microscope"),
+                             (64, 64), None)
+    assert "right-left" in told.layout

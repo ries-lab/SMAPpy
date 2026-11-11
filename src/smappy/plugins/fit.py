@@ -1559,7 +1559,11 @@ class _FitPlugin(Plugin):
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
-        for key in ("frame_tags", "acquisition", "warnings", "channels"):
+        # the camera with it, the microscope it was recognised as included: a table fitted here
+        # is read as the file it is saved to would be -- a registration of fitted beads spells
+        # out *layout: microscope* from it, and without it *after the fit*'s overlay failed
+        # (2026-11)
+        for key in ("camera", "frame_tags", "acquisition", "warnings", "channels"):
             if record.get(key):
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
