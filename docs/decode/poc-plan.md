@@ -1221,3 +1221,37 @@ DECODE?  Scripts in `benchmarks/decode/pixelation/` (`common.py` says how the da
 - **Running:** C, and DECODE's trainings on B (the H100, through MPS) and then C, 1000 epochs each;
   then DECODE with B and C on the movie as taken, the fitter flipping it, the positions mirrored
   back for the analysis (`fit_decode.py`).
+- **C, the in situ model, is a mismatch** (`compare_fits.py`: the same spots fitted with two models,
+  matched within half a pixel).  Spline 3D with C gave a sharp z peak at -100 nm and a narrow one at
+  -670 nm, the shape unchanged by the log-likelihood cut -- but C fits 81 % of 1.82 M spots worse
+  than A (logl_rel lower by a median 0.21 a pixel; worse in 90 % between -200 and 0 nm) and maps A's
+  -200 to +200 nm onto -147 to -15 nm: it compresses z near the focus, which is the peak.  Its
+  DECODE training was stopped.  Why in situ learning went wrong on these data (it started from B
+  and held its gamma and the phase above order 6) is SMAPpy's in situ learning's question.
+- **A DECODE model trained on a calibration SMAPpy made was a pixel off: fixed.**  DECODE with B
+  localized 0.962 and 0.988 px off Spline 3D with B in x and y (DECODE with A: 0.012 and 0.009).
+  `calibration_io` took ``x0`` as SMAP's, 1-based, less one; SMAPpy writes its own 0-based
+  (``(roi_size - 1) / 2``), and its fitter never reads it.  Now SMAP's convention is used where the
+  calibration carries SMAP's parameters (``emmirror``, ``ROIxy``), SMAPpy's elsewhere, and a centre
+  that is not the grid's middle is refused (a test).  The whole-pixel shift leaves the pixelation
+  below as it is (0.04 px of it in the sub-pixel histograms); B's model is to be trained again before
+  anything else uses it.
+- **DECODE with B against DECODE with A** (prob >= 0.7, 3.3 M each), KS from uniform, the larger of x
+  and y:
+
+  | | DECODE A | DECODE B |
+  |---|---:|---:|
+  | all, x / y | 0.007 / 0.008 | 0.005 / 0.003 |
+  | \|z\| 0 -- 150 nm | 0.018 | 0.013 |
+  | \|z\| 150 -- 300 nm | 0.013 | 0.026 |
+  | \|z\| 300 -- 450 nm | 0.044 | 0.051 |
+  | \|z\| 450 -- 600 nm | 0.081 | 0.068 |
+  | 1000 -- 2000 photons | 0.038 | 0.025 |
+
+  The bead pupil model helps near the focus and for dim spots, a little; the growth with |z| stays.
+  So the pixelation far from focus is the network's, not the PSF model's: for the redesign
+  (`docs/decode.md` §3.6).
+- **DECODE pulls z inward below the focus.**  Matched with Spline 3D with A, the spots it puts at
+  -400 to -300 nm come back at a median -271, at -500 to -400 at -173 (above the focus: +400 to +500
+  at +420).  Its z histograms have no humps and little beyond +-500 nm; part of Spline 3D's humps are
+  misfits, but DECODE's z far below the focus is compressed.
