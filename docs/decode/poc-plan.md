@@ -1411,8 +1411,22 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
   the smallest claims bounds that.  For SMAPpy's fitters, worth its own look: the CRLB is what
   the precision filters and NeNA comparisons read.  (The ratio pooled over all claims is not
   meaningful: a mixture's robust spread against the root mean square of its claims.)
-- **Not yet:** the SMLM Challenge 2016 3D-AS set (trainings running); the density test by
-  summing frames.
+- **The example's real frames: density by adding frames** (`benchmarks/decode/pixelation/
+  summed_frames.py`).  Frame t with frame t + 10 000 added, its background taken off (a per-pixel
+  median over its 11 neighbours, so the mean background stays the data's and inside the training's
+  20 -- 200), for t < 2000; each fitter's own localizations in the two frames alone are what it
+  should find in the sum (kept as the study keeps them, matched within 100 nm and 250 nm in z):
+
+  | | alone, a 40 x 40 px | summed | recall | precision | Jaccard |
+  |---|---:|---:|---:|---:|---:|
+  | Spline 3D, B | 4.7 | 9.5 | 0.25 | 0.68 | 0.22 |
+  | DECODE, B | 11.4 | 19.3 | 0.77 | 0.87 | 0.69 |
+
+  DECODE finds twice as many molecules in a frame alone, and in a frame of twice the molecules
+  finds three quarters of them again; Spline 3D a quarter of its fewer.  As the simulated sets
+  said, on real data.  The sum's background noise is up to half again the data's in variance,
+  which costs both; not separated here (a control adding only the second frame's noise would).
+- **Not yet:** the SMLM Challenge 2016 3D-AS set (trainings running).
 
 ### (h), first step: the window here (2026-11-11)
 
