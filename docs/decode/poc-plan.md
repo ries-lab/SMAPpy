@@ -1387,8 +1387,32 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
   Jaccard 0.89 against 0.63 at density 1, 0.77 against 0.04 at 25, 0.64 at 50; offsets at most 2.0 nm
   in x and y, 3.7 in z (at 50).  A model trained on a calibration SMAPpy made works as one trained on
   SMAP's.
-- **Not yet:** the SMLM Challenge 2016 3D-AS set; the example's real frames (precision from
-  consecutive frames against DECODE's own uncertainties; the density test by summing frames).
+- **The example's real frames: the precision each fitter claims against the one the data show**
+  (`benchmarks/decode/pixelation/consecutive_frames.py`, 2026-11-11).  A molecule on in two
+  consecutive frames is localized twice, independently, so the spread of the difference (1.4826 MAD,
+  pairs mutually nearest within 100 nm) against ``sqrt(s_1^2 + s_2^2)`` of the claimed precisions
+  says whether a fitter's errors are what it says.  In bins of the claim, 0.6 -- 1.7 M pairs:
+
+  | claimed (nm, an axis) | Spline 3D A, x | DECODE A, x | Spline 3D B, x | DECODE B, x | Spline 3D B, z | DECODE B, z |
+  |---|---:|---:|---:|---:|---:|---:|
+  | 0 -- 5 (z: 0 -- 10) | 2.48 | 1.20 | 2.56 | 1.29 | 2.99 | 1.25 |
+  | 5 -- 10 (10 -- 20) | 1.54 | 1.13 | 1.53 | 1.16 | 1.78 | 1.12 |
+  | 10 -- 15 (20 -- 30) | 1.29 | 1.11 | 1.26 | 1.11 | 1.31 | 1.14 |
+  | 15 -- 20 (30 -- 45) | 1.19 | 1.06 | 1.15 | 1.06 | 1.09 | 1.15 |
+  | 20 -- 30 (45 -- 70) | 1.21 | 1.00 | 1.13 | 1.01 | 0.88 | 1.09 |
+  | 30 -- 50 (70 -- 120) | 0.93 | 0.90 | 0.97 | 0.91 | 0.71 | 0.95 |
+
+  DECODE's predicted uncertainties are what the data show within 10 -- 30 %, at every claim; Spline
+  3D's CRLB is too optimistic for the bright spots -- 2.5 times below 5 nm, 3 times in z below 10
+  nm -- and right only for the dim ones.  An error the CRLB leaves out grows the ratio where the
+  claim is small: a model error of the PSF, the EM register's excess noise (a factor 1.41 the
+  fitter's Poisson CRLB may lack), or the sample moving a few nm between frames, which DECODE's
+  sigma, learnt on simulated frames without motion, would not know either -- its 1.2 -- 1.3 at
+  the smallest claims bounds that.  For SMAPpy's fitters, worth its own look: the CRLB is what
+  the precision filters and NeNA comparisons read.  (The ratio pooled over all claims is not
+  meaningful: a mixture's robust spread against the root mean square of its claims.)
+- **Not yet:** the SMLM Challenge 2016 3D-AS set (trainings running); the density test by
+  summing frames.
 
 ### (h), first step: the window here (2026-11-11)
 
