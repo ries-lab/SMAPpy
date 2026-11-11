@@ -88,6 +88,8 @@ def test_the_status_says_how_far_how_fast_and_how_long():
         "37% (370 of 1000 regions), 100 a second, about 6 s left"
     assert progress_text(1000, 1000, 10.0).endswith("100 a second")
     assert "min left" in progress_text(10, 10_000, 1.0)
+    # the last second of a run: 999 regions in 10 s leave 0.01 s
+    assert progress_text(999, 1000, 10.0).endswith(", under a second left")
     said, ticks = [], []
     status = Progress(3, said.append, lambda d, t: ticks.append(d))
     for done in (1, 2, 3):
