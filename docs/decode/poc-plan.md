@@ -999,3 +999,49 @@ engine on the example package, each phase timed with the device synchronised.
 - **The comparison**, §1 (f)'s last criterion, is running on gpuvm: the reference job with seeds 0
   and 1, 1000 epochs each, one after the other (`port_run0`, `port_run1`), unclipped, TF32 on,
   to be set against the original's two runs when all four have finished.
+
+### (g) as done, 2026-11-10
+
+- **The plugin** is `Localize/DECODE` (`smappy/plugins/fit_decode.py`), a `_FitPlugin` whose
+  settings have the shared parts under their names (source, microscope, output, *after the fit*)
+  and none of detection, the fit region, the channels or the fit: the plan's "hidden" detection
+  part is simply absent.  Two hooks were added to `_FitPlugin.run`, nothing else changed in it:
+  `provenance` (the file's record, the model's here) and `region_finder` returning None.
+- **The engine** is `smappy/window_engine.py`, `WindowEngine`: the last `2 window` frames of a
+  block are kept in front of the next, frames whose later neighbours have not been read wait,
+  the first and last frame of the movie are repeated (DECODE's `InferenceDataset`), and a jump
+  in the frame numbers ends one run and starts another.  `flush`, which a live fit calls after
+  every block, holds nothing it could localize; the end is a new `end()`, which `pipeline.drive`
+  calls at the source's end when an engine has one.
+- **The predictor** is `decode_smlm/predict.py`: `load_predictor(path, device, frames_mirrored=)`
+  builds the network from the model file (the architecture from an allowed list, the activation
+  a class of `torch.nn` -- nothing in the file is evaluated, where DECODE's own parse `eval`s
+  strings), takes photons with `window` frames of context, and gives pixel columns on the frames
+  as given.  `export_original` makes a model file of a model the original trained, with the
+  sha256 and EM state of its calibration.  `io.to_columns` now shares `pixel_columns` with it.
+- **The model file's metadata changed:** `frames_mirrored` (a constant false) is replaced by
+  `calibration_em_on`, the EM state of the calibration's beads, which the training reads from the
+  folder's calibration.  The fitter flips the frames when the data's EM state differs from it --
+  set from the calibration and the data, never by the user, as (d) asked.  Added: `trained_on`,
+  the training's photons, background and z ranges, against which the fit is checked afterwards
+  (more than 5 % outside is a warning in the run's text).
+- **Done when**, each a test:
+  - the package's model, exported, through the plugin on the oracle's 500 frames (MPS; 30 on the
+    CPU): all 137 351 localizations, in order, within 1e-4 px (`test_fit_plugin.py`, slow);
+  - blocks of 1, 7 and 37 frames give the table of one block, exactly; so does a fit from frame
+    10 (with frame 9 as context) -- with the network one frame per batch: the CPU's convolutions
+    take another path for batches under 32 and round differently, by 5e-4 of a channel's range
+    in the untrained test network, which would hide a wrong context frame;
+  - a live fit of an NDTiff written in blocks of 3 to 13 frames gives the finished file's table;
+  - a camera ROI moves the positions by its corner (non-square pixels);
+  - `describe()` with a refusal leaves `torch` out of `sys.modules` (`tests/test_fit_decode.py`);
+  - a model trained on calibration A is refused, at Run and in the form, on data checked against
+    B; its own passes.  With no calibration to compare (none chosen, none listed for the file's
+    microscope), the form says the model is unchecked.
+- **The test network** is the tiny job's, three frames in, randomly initialised: it localizes 40
+  frames of 32 x 32 in milliseconds, and the plumbing tests need no trained model and no data.
+- **Not in the shipped GUI yet:** the plugin is in the tree (*Localize > DECODE*) but not pinned
+  in `default.gui.yaml`, until the benchmark (i) says it should be.
+- **Left for later:** item 17's padding in place of the crop (edge pixels are still lost, as the
+  page says); the range check writes to the run's text, not to the file, since it is made after
+  the file is written.
