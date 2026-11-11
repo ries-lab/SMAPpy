@@ -3,10 +3,12 @@
     smappy-decode train FOLDER [--device cuda] [--epochs N] [--workers N]
     smappy-decode stop FOLDER
     smappy-decode status FOLDER
+    smappy-decode serve
 
 ``train`` runs in the foreground and can be stopped with ``stop`` from another shell (or over
 ssh), Ctrl-C or SIGTERM; run again, it resumes from the last epoch.  ``status`` reads only the
-folder's files, so it needs neither torch nor the training's machine.
+folder's files, so it needs neither torch nor the training's machine.  ``serve`` localizes for a
+SMAPpy on another computer, over stdin and stdout (`serve`): its DECODE fitter starts it over ssh.
 """
 from __future__ import annotations
 
@@ -55,7 +57,11 @@ def main(argv=None) -> int:
     for name, text in (("stop", "stop the training of FOLDER at its next checkpoint"),
                        ("status", "where the job in FOLDER stands")):
         sub.add_parser(name, help=text).add_argument("folder", type=Path)
+    sub.add_parser("serve", help="localize frames sent on stdin with a model sent first (SMAPpy's DECODE fitter)")
     a = ap.parse_args(argv)
+    if a.command == "serve":
+        from .serve import serve
+        return serve()
     if a.command == "status":
         return _status(a.folder)
     if a.command == "stop":
