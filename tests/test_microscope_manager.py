@@ -167,7 +167,7 @@ def test_psf_calibration_names_the_stacks_microscope_and_takes_one_chosen(app, t
     from smappy.calibrate.psf_window import PSFCalibrationWindow
     window = PSFCalibrationWindow()
     window.method_box.setCurrentText("bead average")      # reads no optics: unrecognised, nothing missing
-    tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Luxx638-Serial Number"}
     window.add_paths([a_tiff(tmp_path / "beads_MMStack.ome.tif", tags)])
     form = window.optics_form
     assert form.title == "no microscope recognised" and form.status == "unrecognised"

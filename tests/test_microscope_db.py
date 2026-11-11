@@ -20,7 +20,7 @@ from smappy.microscope_db import (FROM_NAME, Channel, Device, Follows, Microscop
 # M2 with the iXon, 2026-08-29: the bead stacks, and the TIRF movie of the same
 # afternoon, which differs from them in one device -- the cylindrical lens
 M2_BEADS = {
-    "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644",
+    "Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13644", "Luxx638-Serial Number": "1311-08",
     "Core-Camera": "Andor", "Andor-Camera": "| iXon Ultra | DU897_BV | 8172 |",
     "Andor-Output_Amplifier": "Electron Multiplying", "Andor-Pre-Amp-Gain": "Gain 1",
     "Andor-ReadoutMode": "10.000 MHz", "Andor-Gain": "25",
@@ -397,7 +397,7 @@ def test_the_users_pixel_still_wins_over_the_microscope():
 
 def test_a_file_no_microscope_recognises_keeps_the_files_pixel():
     from smappy.io.tiff import resolve_camera
-    tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Luxx638-Serial Number"}
     found = resolve_camera(a_file(tags))
     assert found.microscope is None
     assert found.values["pixelsize_um"] == 0.127
@@ -472,7 +472,7 @@ def test_dual_colour_puts_the_arm_on_the_main_half_first():
 
 def test_without_a_microscope_the_na_and_emission_must_be_typed():
     from smappy.calibrate.pupil import OpticsSettings
-    tags = {k: v for k, v in M2_BEADS.items() if k != "Focus-lock-Serial ID"}
+    tags = {k: v for k, v in M2_BEADS.items() if k != "Luxx638-Serial Number"}
     camera = camera_of(tags)
     assert OpticsSettings().missing(camera) == ["NA", "emission"]
     assert OpticsSettings(NA=1.43, wavelength_nm=670.0).missing(camera) == []
@@ -666,3 +666,14 @@ def test_m6_is_chosen_by_hand_and_reads_its_own_devices():
                                                                     ("reflected", 700.0)]
     camera = camera_db.database(reload=True).get("Fusion BT 2")
     assert camera is not None and camera.parameters["pixelsize_um"].fixed == [0.102, 0.108]
+
+
+def test_the_shipped_m2_is_recognised_before_and_after_its_focus_lock_laser_was_exchanged():
+    """M2 is recognised by its Luxx 638's serial, which every file of 2026 records; the focus-lock
+    laser it was recognised by was exchanged in November 2026 and the files stopped matching."""
+    from smappy.microscope_db import database
+    before = dict(M2_BEADS)
+    after = dict(M2_BEADS, **{"Focus-lock-Serial ID": "iBEAM-SMART-785-S-A3-13738",
+                              "StartTime": "2026-11-06 17:28:02.385 +0100"})
+    for tags in (before, after, M2_EVOLVE):
+        assert database().identify(tags).name == "M2"
