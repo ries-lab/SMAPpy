@@ -144,6 +144,8 @@ class DecodeFit(_FitPlugin):
     Settings = DecodeFitSettings
     version = "1"
     channel_part = "none"
+    # a model is trained for these data in the Train window (`plugins/train_decode.py`)
+    window_buttons = (("Train a model...", "decode training"),)
     preview_help = ("localize one frame with the network and draw what it found over the frame. "
                     "Nothing is saved and the session is not touched.")
 

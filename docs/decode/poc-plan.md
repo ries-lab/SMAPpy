@@ -1383,3 +1383,37 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
   calibration (models to train on it, with the x0 fix); the example's real frames (the pixelation
   study; precision from consecutive frames against DECODE's own uncertainties; the density test by
   summing frames).
+
+### (h), first step: the window here (2026-11-11)
+
+- **The window** is `gui/train_window.py`, opened by `Localize/Train DECODE` (`plugins/train_decode.py`)
+  and the DECODE fitter's *Train a model...* (`window_buttons`); `ControlWindow.open_decode_training`,
+  `use_decode_model` (*Use this model* into the fitter), the assistant's `open_window` and
+  `WINDOW_BUTTONS`; its page `docs/panels/DECODE training.md`, the plugin's `Localize/Train DECODE.md`.
+- **Its work** is module-level: `run_prefit`, `write_job` (beside the movie, `default_folder`),
+  `start_here` (``python -m decode_smlm.cli train`` detached, `handoff.own_session`), `stop` (the STOP
+  file), `draw_progress`, `try_on_data`.  The list of jobs and the training hosts are
+  `smappy/training/jobs.py` (``training_jobs.json``; a job's state from its progress and lock, a
+  dead training *interrupted*).
+- **Tests:** `tests/test_training_jobs.py`, `tests/test_train_window.py` (a job prepared from a
+  simulated movie through Spline 3D, edited estimates written, the curves, the window's list and its
+  refusal without torch, the command it starts), `tests/decode_tests/test_train_window_run.py` (slow: a
+  tiny job started the window's way, followed, stopped through the STOP file, resumed).
+- **Not yet:** training on a host over ssh, its Preferences page, following it there; the simulated
+  frames beside real ones in the preparation figure (needs torch here); the CRLB line on the curves.
+
+### Inference speed (2026-11-11)
+
+`benchmarks/decode/benchmark/bench_inference.py`: the port's model, (i)'s density-15 frames tiled to
+camera sizes, the predictor with its post-processing, TF32 off.
+
+| device | 256 x 256 | 512 x 512 | 20 000 frames of 512 x 512 |
+|---|---:|---:|---:|
+| RTX 4090 | 264 frames/s | 67 | 5 min |
+| H100 PCIe | 234 | 53 | 6 min |
+| M1 Max, Apple GPU | 64 | 15 | 23 min |
+| M1 Max, CPU (8 threads) | 2.7 | 0.7 | 8 h |
+
+Any GPU fits a movie in minutes; a CPU alone does not, which is what the fitter on a workstation is
+for.  The 4090 is slightly faster than the H100 here: the network is small, and the PCIe H100 is no
+faster on it than a gaming card.

@@ -397,6 +397,7 @@ class ControlWindow(QMainWindow):
         self.view3d_window = None
         self.calibration_window = None
         self.psf_calibration_window = None
+        self.decode_training_window = None
         # the render window, brought to the front; Ctrl+2 beside the 3D
         # view's Ctrl+3.  Reset view is its button, Ctrl+0 its key from either
         # window (`RenderToolBar`); a menu item as well said it twice
@@ -434,6 +435,10 @@ class ControlWindow(QMainWindow):
         # *PSF calibration*: uipsf's pupil model, a window of its own (`calibrate.psf_window`)
         session.window_openers["psf calibration"] = \
             lambda settings=None: self.open_psf_calibration()
+        # *Train DECODE* and the DECODE fitter's *Train a model...* (`gui/train_window.py`): handed the
+        # fitter's settings, its movie, camera and calibration the start of a job
+        session.window_openers["decode training"] = \
+            lambda settings=None: self.open_decode_training(settings)
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
         # *Load*'s two buttons (`plugins.file.Open`): each says what it does,
         # so neither asks, as File > Open does
@@ -621,6 +626,7 @@ class ControlWindow(QMainWindow):
                 "batch window": lambda roi_id=None: self.open_batch(),
                 "bead calibration": lambda roi_id=None: self.open_calibration(),
                 "PSF calibration": lambda roi_id=None: self.open_psf_calibration(),
+                "DECODE training": lambda roi_id=None: self.open_decode_training(),
                 "microscope manager": lambda roi_id=None: self.open_microscope_manager(),
                 "camera editor": lambda roi_id=None: self.open_camera_editor(),
                 "help": lambda roi_id=None: self.show_plugin_docs()}
@@ -1866,6 +1872,39 @@ class ControlWindow(QMainWindow):
             self.psf_calibration_window.open_manager = self.open_microscope_manager
         self.psf_calibration_window.show()
         self.psf_calibration_window.raise_()
+
+    def open_decode_training(self, settings=None) -> None:
+        """The DECODE training window, made once and opened as it was left; a model it is asked to use
+        goes to the DECODE fitter (`use_decode_model`)."""
+        from .train_window import TrainWindow
+        if self.decode_training_window is None:
+            self.decode_training_window = TrainWindow(settings, parent=self)
+            self.decode_training_window.model_chosen.connect(self.use_decode_model)
+        elif settings is not None:
+            self.decode_training_window.take_fitter(settings)
+        self.decode_training_window.show()
+        self.decode_training_window.raise_()
+
+    def use_decode_model(self, path: str) -> None:
+        """Put a trained model into the DECODE fitter, as `use_calibration` puts a calibration into Spline 3D."""
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            slots = getattr(tab, "slots", None)
+            if not slots:
+                continue
+            for instance in tab.tab.instances:
+                if instance.plugin != "Localize/DECODE":
+                    continue
+                panel = slots[instance.id].ensure()
+                if panel is None:
+                    break
+                self.tabs.setCurrentIndex(index)
+                tab.open_section(instance.id)
+                panel.form.set_values({"model.path": str(path)})
+                self.statusBar().showMessage(f"the DECODE fitter now uses {Path(path).name}", 8000)
+                return
+        self.statusBar().showMessage(f"{Path(path).name} is trained, but no DECODE fitter is pinned to a tab - "
+                                     "add one with + and set its model", 12000)
 
     def use_calibration(self, path: str, dual: bool = False) -> None:
         """Put a fresh calibration into the fitter it belongs to.

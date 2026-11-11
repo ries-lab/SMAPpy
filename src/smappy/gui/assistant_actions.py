@@ -60,6 +60,7 @@ WINDOW_BUTTONS = {
     "add files": "File/Add",
     "bead calibration": "open_window",
     "psf calibration": "open_window",
+    "decode training": "open_window",
 }
 
 
