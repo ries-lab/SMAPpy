@@ -398,6 +398,22 @@ group.  Then it can be judged on the table and applied to any fitter's
 output.  It is a fallback: the aim is a network whose sub-pixel positions are
 uniform without it, and the benchmark measures that (§10).
 
+**Where it pixelates, measured (2026-11-11).**  On DECODE's example data, the
+port's model trained on SMAP's spline pulls positions towards the pixel's
+centre where the image says little.  The KS distance of the sub-pixel
+positions from uniform is 0.018 within 150 nm of focus and 0.134 at 600 to
+700 nm, and 0.038 below 2000 photons.  Density matters little (0.008 to
+0.018), the training having been dense already.  Spline 3D on the same frames
+and calibration stays at counting noise (0.001 to 0.006).  It is what has
+been seen before: pixelation where the SNR is low, the density high or |z|
+large.  So the redesign measures it this way on experimental data -- the
+sub-pixel histograms in bins of |z|, photons, local density and predicted
+error (`benchmarks/decode/pixelation/analyse.py`, `--by-condition`,
+`--by-error`), against Spline 3D -- and tries output representations and
+architectures that reduce it, before reaching for the de-biasing.  Whether a
+better PSF model reduces it (the bead pupil model, the in situ one) is the
+pixelation study of the proof of concept (`docs/decode/poc-plan.md` §8).
+
 **Colour and z.**  Colour is *Assign colours*, and z from the phase is
 *4Pi z*.
 

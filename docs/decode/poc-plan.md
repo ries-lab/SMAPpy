@@ -209,6 +209,11 @@ as it is.  What is added:
 
 ### (f2) The batch size fitted to the GPU -- the first optimisation
 
+**Outcome (2026-11-11): measured and rejected.**  The choice works (`decode_smlm/batch.py`), but
+batch 256 needs three to five times the epochs of 64 to reach the same test loss, and is at most
+1.4 times as fast an epoch; several trainings at once through MPS give 1.4 times the throughput
+without changing one (§8, "(f) and (f2)").  What follows is the plan as it was written.
+
 **Why first.**  Every later study trains (the benchmark (i), the training's ranges, clipping,
 DECODE's later versions), so anything that makes a training faster is worth having before them.
 The package's batch of 64 frames of 40 x 40 leaves a large GPU partly idle.  On gpuvm's H100 the
@@ -705,7 +710,9 @@ Decided (Jonas, 2026-11-10):
   during an acquisition, and a model trained at a low one learns less from each
   frame.
 - **The batch size is fitted to the GPU, early** (2026-11-11), before the studies that
-  train, so that they run as fast as the GPU allows: (f2).
+  train, so that they run as fast as the GPU allows: (f2).  Done the same day, with the answer
+  no: batch 256 needs three to five times the epochs; the batch stays 64, and the H100's spare
+  capacity goes to two or three trainings at once through MPS (§8, "(f) and (f2)").
 
 Still open:
 - Which single-channel 3D data set with its bead calibration is the real data
@@ -1108,3 +1115,109 @@ engine on the example package, each phase timed with the device synchronised.
 - **Left for later:** item 17's padding in place of the crop (edge pixels are still lost, as the
   page says); the range check writes to the run's text, not to the file, since it is made after
   the file is written.
+
+### (f) and (f2), 2026-11-11
+
+- **Convergence per epoch is the original's** (`benchmarks/decode/results/convergence.png`):
+  the test loss came within 10 % / 5 % / 2 % of its final value at epochs 46 / 73 / 149 and
+  30 / 60 / 145 in the original's runs, 43 / 78 / 146 and 31 / 54 / 141 in the port's.  By time
+  the port was 4.3 times as fast (0.5 h to 2 % on the H100 against 2.1 h on the 4090 shared by two
+  runs), which is the hardware.  Since 2 % is reached at about 145 epochs, (f2)'s studies compare
+  runs of 200.
+- **The batch on `auto`** is `decode_smlm/batch.py`: `measure` (the network's step on random
+  frames, a copy of the model, a generator of its own -- no random state of the training touched),
+  `choose` (the smallest batch within 10 % of the best time a frame), `scaled_lr` (`sqrt`,
+  `linear`, `none`) and `resolve`, called once before the first epoch; the checkpoint keeps the
+  batch and rate, so a resume or a restart never measures again.  The `start` line has
+  `batch` (size, rate, how chosen, the times), the model file `batch_size` and `learning_rate`.
+  `benchmarks/decode/bench_batch.py` prints a machine's choice:
+
+  | GPU | 64 | best | chosen | gain a frame |
+  |---|---:|---:|---:|---:|
+  | H100, TF32 (the training's default) | 253 us | 154 us (1024) | 256 | 1.51x |
+  | H100, TF32 off | 463 us | 362 us (1024) | 256 | 1.22x |
+  | RTX 4090 | 265 us | 249 us (128) | 64 | -- |
+  | M1 Max, MPS | 4042 us | 3637 us (256) | 128 | 1.05x |
+
+  Only the H100 gains: the 4090 is full at the package's 64.
+- **A larger rate needs a warm-up.**  Batch 256 at the square root's rate (0.0012, no warm-up,
+  the 4090, seed 0) restarted five times for a pathological loss after epoch 1 -- the most
+  DECODE allows -- and its training loss jumped from 506 to 1828 at epoch 7; batch 64 at 0.0006
+  never restarted.  `lr_warmup_epochs` (with `lr_warmup_from`, by default the rate the linear rule
+  gives `batch_base`) ramps the rate linearly over the first epochs, outside the scheduler, so
+  the checkpoint and a resume are untouched (a test: stopped inside the ramp and resumed, bitwise
+  the run through).
+- **The study: batch 256 learns too little an epoch to be worth it.**  On the 4090 (the H100
+  kept free; whether batch 256 learns as much an epoch does not depend on the card), 200 epochs of
+  the reference job, seed 0, against the port's batch-64 runs (`benchmarks/decode/batch_study.py`,
+  `batch_study.png`):
+
+  | 200 epochs | restarts | test loss, 180-200 | Jaccard | batch 64 there at epoch |
+  |---|---:|---:|---:|---:|
+  | batch 64, seed 0 / seed 1 | 0 / 0 | 291 / 283 | 0.353 / 0.360 | -- |
+  | 256, sqrt rate (0.0012), no warm-up | 5 | 302 | 0.278 | 70 / 36 |
+  | 256, linear rate (0.0024), 5 epochs' warm-up | 1 | 302 | 0.328 | 61 / 35 |
+  | 256, sqrt rate, 5 epochs' warm-up | 1 | 304 | 0.313 | 60 / 34 |
+
+  Batch 64 gets as far in 35 -- 70 epochs as 256 in 200; an epoch at 256 would be at most 1.4
+  times as fast on the H100.  An epoch's 32 768 frames are 512 steps at 64 and 128 at 256, and
+  the larger rate does not make up for the steps.  So no seed-1 run.
+- **Nor does a smaller batch.**  Batch 32 costs 1.24 times as much a frame on the H100 (317 against
+  255 us; 1.17 times on the 4090), 16 costs 1.85 times.  Two runs of 32, seed 0, 200 epochs:
+
+  | 200 epochs | test loss, 180-200 | Jaccard | lateral RMSE | at batch 64's seed-0 loss (291) |
+  |---|---:|---:|---:|---:|
+  | batch 64, seed 0 / seed 1 | 291 / 283 | 0.353 / 0.360 | 46.3 nm | epoch 200 |
+  | 32, rate 0.0006 (the 4090) | 291 | 0.382 | 49.3 nm | epoch 151 |
+  | 32, rate 0.00042 (the H100) | 290 | 0.378 | 48.7 nm | epoch 137 |
+
+  It ends where 64 ends; 30 % fewer epochs at 1.25 times the time an epoch is at most 15 % in time,
+  less than the gap between 64's two seeds.  It finds a few more molecules, harder ones, so its RMSE
+  is larger.  Batch 16 is not tried.  The batch stays 64.
+  `batch_size: auto` and the warm-up stay as options, off unless a job asks for them.
+- **The cores did not matter.**  gpuvm went from 4 cores to 32 (and 125 GB) on 2026-11-11; an
+  epoch at 64 took 12.4, 12.7 and 13.0 s with 4, 8 and 16 data workers (it was 12.9 with 4 on 4
+  cores).  The training is the GPU's.
+- **Several trainings at once, through MPS, use the idle part of the H100** without changing a
+  training.  Without MPS the processes take turns (two at once: 26.4 s an epoch each, nothing
+  gained).  Through MPS, run as the user with its pipes in a directory of its own (only the
+  processes given `CUDA_MPS_PIPE_DIRECTORY` use it; `echo quit | nvidia-cuda-mps-control` stops it):
+
+  | at once | an epoch, each | epochs a minute, together |
+  |---:|---:|---:|
+  | 1 | 12.7 s | 4.7 |
+  | 2 | 18.4 s | 6.5 (1.38x) |
+  | 3 | 26.5 s | 6.8 (1.43x) |
+
+  So a study of several runs (seeds, variants, (i)'s models) runs two or three at once through
+  MPS; one run alone gains nothing.
+
+### The pixelation study, so far (2026-11-11)
+
+On DECODE's example data, before (i): does a better PSF model reduce pixelation, in Spline 3D and in
+DECODE?  Scripts in `benchmarks/decode/pixelation/` (`common.py` says how the data are read).
+
+- **The data:** the example package's movie (U2OS, alpha+beta tubulin, an Evolve 512 at EM gain 50,
+  20 000 frames of 180 x 179) and the 11 bead stacks it was calibrated from (200 slices 10 nm apart,
+  without EM gain), DECODE_Internal's copy on decodebox.  Pixels 117 x 127 nm, 5 e-/ADU, offset 398.6
+  (SMAP's fit of the movie, `frames_sml.mat`); NA 1.43, indices 1.516 / 1.335, 600 nm (the 2024 uiPSF
+  v1 model of the beads; it used 50 nm slices, the files and SMAP's calibration say 10).
+- **The mirror:** beads without EM gain, movie with it, and a pupil model cannot be mirrored in
+  SMAPpy, so the movie is flipped once into the beads' orientation and everything works there.
+- **The models:** A, SMAP's spline (DECODE's); B, SMAPpy's pupil model of the beads (converged, most
+  beads used, Noll 6 at -0.59 rad); C, B refined in situ on the movie (running).
+- **Spline 3D** (fit box 13, *focus as calibrated*): 2.34 M localizations each with A and B, 1.8 M
+  kept (photons >= 1000, |z| <= 700 nm, log-likelihood within 3 MADs, not at the iteration limit).
+  Flat within a pixel at every photon count, |z| and density (KS 0.001 -- 0.006, counting noise).
+  Its z histogram has humps at -550 and +450 nm (A; B puts them at -450 and +420) that shrink to half
+  or less at the median log-likelihood cut: misfits, mostly.  B piles fits up at its spline's ends,
+  +-794 nm.
+- **DECODE with A** (the port's reference model, prob >= 0.7): 3.3 M kept.  Pixelated where the image
+  says little -- KS 0.018 within 150 nm of focus, 0.134 at 600 -- 700 nm, 0.038 below 2000 photons;
+  density matters little -- with positions pulled to the pixel's centre (a one-bin spike in y) and
+  sloped histograms in between.  Its z histogram has no humps and little beyond +-500 nm.  As seen
+  before: pixelation where the SNR is low, the density high or |z| large; for the redesign
+  (`docs/decode.md` §3.6).
+- **Running:** C, and DECODE's trainings on B (the H100, through MPS) and then C, 1000 epochs each;
+  then DECODE with B and C on the movie as taken, the fitter flipping it, the positions mirrored
+  back for the analysis (`fit_decode.py`).
