@@ -553,7 +553,7 @@ class PSFCalibrationWindow(QMainWindow):
         return self.molecule_form if getattr(self.method, "sections", {}).get("molecules") else self.detection_form
 
     def _main_half(self):
-        """The dual calibration's main half as chosen by hand, or None on the microscope's (`OpticsSettings`
+        """The dual calibration's main half as chosen, or None on the microscope's (`OpticsSettings`
         then reads the entry's)."""
         if not self.is_dual:
             return None
@@ -561,12 +561,12 @@ class PSFCalibrationWindow(QMainWindow):
             channels = self._sample_form().value().channels
         except (ValueError, AttributeError):
             return None
-        return None if channels.layout == "microscope" else channels.main_channel
+        return None if channels.main_channel == "microscope" else channels.main_channel
 
     def _show_channels(self) -> None:
         """A dual sample's *channels* part as the fitters' is: one line on the microscope's
         (`dual.arrangement_line`), the main channel and the split only for a layout chosen by hand."""
-        from .dual import arrangement_line, arrangement_shown
+        from .dual import arrangement_line, arrangement_shown, main_channel_choices
         if not self.is_dual:
             return
         for form in (self.detection_form, self.molecule_form):
@@ -575,8 +575,10 @@ class PSFCalibrationWindow(QMainWindow):
             except (ValueError, AttributeError):
                 continue
             form.set_shown({f"channels.{k}": v for k, v in arrangement_shown(channels).items()})
+            scope = getattr(self.optics_camera, "microscope", None)
             try:
-                line = arrangement_line(channels, getattr(self.optics_camera, "microscope", None))
+                form.set_choices({"channels.main_channel": main_channel_choices(channels, scope)})
+                line = arrangement_line(channels, scope)
             except Exception:
                 line = None
             form.set_titles({"channels": f"channels: {line or channels.layout}"})

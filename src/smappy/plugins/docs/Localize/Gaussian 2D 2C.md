@@ -458,8 +458,8 @@ simulation, or one started after a bleaching phase.
 on -- the layout, the main channel and where the channels lie, its arms'
 regions or the frame's halves -- and the part says it in one line; a file no
 entry recognises stops with a message asking for it.  All the Ries lab's
-microscopes are *right-left mirrored*.  Choose a layout by hand and *main
-channel* and *split position* appear.  *channels* says where the two channels
+microscopes are *right-left mirrored*.  Choose a layout by hand and *split
+position* appears.  *channels* says where the two channels
 are on the chip; the map between them is the model's *registration*, whose
 *measuring* settings are only how it is measured.
 With a transformation file, the channels lie where the file says, the split
@@ -468,7 +468,10 @@ and a line under the form and a warning at the run say so.
 
 ### channels.main_channel
 For two far-red dyes split by a long-pass dichroic, the transmitted arm is
-the brighter and the usual main channel; on *microscope* the entry names it.
+the brighter and the usual main channel; on *the microscope's* the entry
+names it, and its choices say which half that is.  Choose the other half to
+swap the dyes, also with the microscope's layout, whose regions and mirror
+stay.  A transformation file's own main channel wins, and the form says so.
 
 ### model.registration.measure.model
 *polynomial* is refused, with a message, when the pairs are too few for its

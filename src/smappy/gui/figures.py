@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QFontDatabase, QTextCursor
-from PySide6.QtWidgets import (QMainWindow, QPlainTextEdit, QTabWidget,
+from PySide6.QtWidgets import (QApplication, QMainWindow, QPlainTextEdit, QTabWidget,
                                QVBoxLayout, QWidget)
 
 from ..figures import summary_plot as _summary_page
@@ -339,6 +339,10 @@ class FigureTabs(QWidget):
             window.close()
 
 
+#: a result window opens at most this share of the screen's width and height (`_take_size`)
+MAX_SCREEN_SHARE = (0.5, 0.6)
+
+
 class ResultWindow(QMainWindow):
     """One result's figures in a window of their own.
 
@@ -394,7 +398,15 @@ class ResultWindow(QMainWindow):
             return
         self._sized = True
         dpi = self.figures.dpi()
-        self.resize(int(hint[0] * dpi), int(hint[1] * dpi))
+        width, height = int(hint[0] * dpi), int(hint[1] * dpi)
+        # a wide figure (three panels in a row) asked for the whole width of a large screen,
+        # where it is read from too far: a share of the screen at most, and the figure reflows
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            room = screen.availableGeometry()
+            width = min(width, int(MAX_SCREEN_SHARE[0] * room.width()))
+            height = min(height, int(MAX_SCREEN_SHARE[1] * room.height()))
+        self.resize(width, height)
 
     def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
         self.figures.close_detached()

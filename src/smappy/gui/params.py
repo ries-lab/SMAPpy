@@ -297,7 +297,9 @@ class _Field(QWidget):
         # empty: what the plugin suggests (`set_hint`), the localization
         # file's folder and name for a file to write
         current = self.widget.text() or self.widget.placeholderText()
-        if not current or Path(current).parent == Path("."):
+        if not current:
+            current = folders.data_start()      # beside the data being fitted
+        elif Path(current).parent == Path("."):
             current = folders.start(current)    # nothing better to go on
         if kind == "open_file":
             path, _ = QFileDialog.getOpenFileName(self, self.spec.name, current, name_filter)

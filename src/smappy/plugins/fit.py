@@ -931,12 +931,16 @@ class _FitPlugin(Plugin):
                 said = self._arrangement_line(settings) if two else None
                 state.titles["channels"] = ("two channels" if two else "whole chip") + (
                     f", {said or channels.layout}" if two else "")
-                # on *microscope* the entry says it all, in the title and the layout's hint
-                from ..calibrate.dual import arrangement_shown
+                # on *microscope* the entry says where the halves are, in the title and the
+                # layout's hint; the main channel is a choice either way
+                from ..calibrate.dual import arrangement_shown, main_channel_choices
                 for name, flag in arrangement_shown(channels).items():
                     state.shown[f"channels.{name}"] = flag
                 if two and said and channels.layout == "microscope":
                     state.hints["channels.layout"] = said
+                if two:
+                    state.choices["channels.main_channel"] = main_channel_choices(
+                        channels, self._microscope_summary(settings))
                 if self.channel_part == "two":
                     registration = settings.model.registration
                     measured = registration.calibrate
@@ -1105,17 +1109,23 @@ class _FitPlugin(Plugin):
         return {"line": title, "status": status, "values": ", ".join(bits),
                 "sources": sources}, shown
 
+    def _microscope_summary(self, settings) -> Optional[dict]:
+        """This file's microscope, as a summary, or None."""
+        try:
+            resolved = self.resolution(settings)
+            found = resolved.microscope if resolved is not None else None
+            return found.summary() if found is not None else None
+        except Exception:
+            return None
+
     def _arrangement_line(self, settings) -> Optional[str]:
         """How the chip is split, in one line (`calibrate.dual.arrangement_line`), for this file's
         microscope."""
         from ..calibrate.dual import arrangement_line
         scope = None
         if settings.channels.layout == "microscope":
-            try:
-                resolved = self.resolution(settings)
-                found = resolved.microscope if resolved is not None else None
-                scope = found.summary() if found is not None else None
-            except Exception:
+            scope = self._microscope_summary(settings)
+            if scope is None:
                 return None
         return arrangement_line(settings.channels, scope)
 
@@ -2256,19 +2266,23 @@ class _TwoChannelFit(_FitPlugin):
         is the one its registration was measured on, and fitting with another would pair the
         wrong spots."""
         asked = settings.channels
-        if asked.layout == "microscope":
+        by_hand = {k: v for k, v in (("layout", asked.layout), ("main", asked.main_channel))
+                   if v != "microscope"}
+        if not by_hand:
             return None
         try:
             geometry = self.fitted_geometry(settings) or {}
         except Exception:
             return None                      # no file yet, or unreadable: said elsewhere
         layout, main = geometry.get("layout"), geometry.get("main_channel")
-        if (layout is None or layout == asked.layout) and (main is None
-                                                           or main == asked.main_channel):
+        if ("layout" not in by_hand or layout is None or layout == asked.layout) and (
+                "main" not in by_hand or main is None or main == asked.main_channel):
             return None
         said = ", ".join(bit for bit in (layout, main and f"main {main}") if bit)
+        chosen = ", ".join(bit for bit in (by_hand.get("layout"),
+                                           "main" in by_hand and f"main {by_hand['main']}") if bit)
         return (f"the {self.geometry_source} splits the chip {said}, and the fit reads it so; "
-                f"the channels part's {asked.layout}, main {asked.main_channel}, is not used")
+                f"the channels part's {chosen} is not used")
 
     #: what `fitted_geometry` comes from, in the conflict's words
     geometry_source = "registration file"
@@ -2709,7 +2723,10 @@ class DualSplineFit(_TwoChannelFit):
         if not main:
             # the calibration's layout with the main channel of its own axis the dual calibration
             # has always taken (`resolve_arrangement`), not the hand-chosen one of another axis
-            main = given.main_channel if layout == given.layout else "microscope"
+            halves = ("left", "right") if "right-left" in layout else ("upper", "lower")
+            fits = layout == given.layout or (given.layout == "microscope"
+                                              and given.main_channel in halves)
+            main = given.main_channel if fits else "microscope"
         return replace(settings, channels=replace(given, layout=layout, main_channel=main))
 
     def with_measured(self, settings, transform):

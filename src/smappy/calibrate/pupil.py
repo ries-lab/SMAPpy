@@ -737,8 +737,9 @@ class OpticsSettings:
         nothing gives one) and ``pixel`` (x, y), each typed or from the microscope and the camera.
 
         Dual colour: the main channel is the arm on ``main``'s half of the chip (``left``, ``right``,
-        ``upper``, ``lower``, the dual calibration's ``main_channel``); on *auto* the left or the upper,
-        as the dual calibration chooses it.  Single colour: the microscope's first arm, the transmitted
+        ``upper``, ``lower``, the dual calibration's ``main_channel``); on *auto* (None) the
+        microscope's first arm, the transmitted one, which is its main channel
+        (`dual.resolve_arrangement`), and the left or the upper where no arm has a side.  Single colour: the microscope's first arm, the transmitted
         one, over the whole chip -- nothing records whether the splitting dichroic was in."""
         scope = getattr(camera, "microscope", None) or {}
         values = scope.get("values") or {}
@@ -746,7 +747,10 @@ class OpticsSettings:
         if channels > 1 and arms:
             sides = [arm.get("side") for arm in arms]
             if main is None:
-                main = next((s for s in ("left", "upper") if any(
+                # the entry's main channel: its first arm's side.  It took the left or the upper
+                # half, which on M2 (transmitted right) gave the main channel the reflected arm's
+                # wavelength (2026-11)
+                main = sides[0] or next((s for s in ("left", "upper") if any(
                     x in (s, {"left": "right", "upper": "lower"}[s]) for x in sides)), None)
             if main in sides:
                 arms.sort(key=lambda arm: arm.get("side") != main)

@@ -39,3 +39,45 @@ def test_a_dialog_starts_in_the_last_folder_with_the_suggested_name(tmp_path):
     config.remember_folder(tmp_path)
     assert folders.start() == str(tmp_path.resolve())
     assert folders.start("image.png") == str(tmp_path.resolve() / "image.png")
+
+
+def test_the_data_folder_is_beside_a_movie_one_up_for_a_movie_in_its_own_folder(tmp_path):
+    from smappy.gui import folders
+    acquisition = tmp_path / "Pos1_cells"
+    acquisition.mkdir()
+    movie = acquisition / "Pos1_cells_MMStack_Pos0.ome.tif"
+    movie.write_bytes(b"")
+    assert folders.data_folder_of(movie) == tmp_path
+    loose = tmp_path / "cells.tif"
+    loose.write_bytes(b"")
+    assert folders.data_folder_of(loose) == tmp_path
+    assert folders.data_folder_of("") is None
+
+
+def test_choosing_a_fitters_movie_makes_its_folder_where_empty_path_fields_open(tmp_path,
+                                                                               monkeypatch):
+    """Bead movies, a transformation, a calibration: looked for beside the data, whatever
+    dialog was used last (2026-11)."""
+    import pytest
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    QApplication.instance() or QApplication([])
+    from smappy.gui import folders
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+    monkeypatch.setattr(folders, "_data", None)
+    elsewhere = tmp_path / "calibrations"
+    elsewhere.mkdir()
+    config.remember_folder(elsewhere)                       # the last dialog's folder
+    movie = tmp_path / "cells.tif"
+    movie.write_bytes(b"")
+    panel = PluginPanel(GaussianFit, Session())
+    source = panel.form.fields["source"].fields["path"]
+    source.widget.setText(str(movie))
+    source.changed.emit()
+    opened = []
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda parent, title, start: opened.append(start) or ""))
+    panel.form.fields["finish"].fields["overlay_channels"].fields["beads"]._browse()
+    assert opened == [str(tmp_path)]

@@ -9,11 +9,47 @@ than in whatever directory the program was launched from.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Union
+from typing import Iterable, Optional, Union
 
 from .. import config
 
 STACK_SUFFIXES = (".tif", ".tiff")
+
+
+# The folder of the data being fitted, set when a fitter's movie is chosen (`use_data`): where a
+# plugin's empty path field opens its dialog (`gui.params`), since what goes with a movie -- its
+# bead movies, a transformation, a calibration measured that day -- usually lies beside it.  Kept
+# apart from the last folder, which every dialog moves: picking a calibration from a library, or
+# saving elsewhere, would otherwise lose it.  For this run of the program only.
+_data: Optional[Path] = None
+
+
+def data_folder_of(path) -> Optional[Path]:
+    """The folder a movie's neighbours are in: its own, or one up for a movie in a folder of its
+    own -- Micro-Manager writes ``Pos1_x/Pos1_x_MMStack_Pos0.ome.tif``, the file named after its
+    folder, beside the other acquisitions of the day."""
+    if not path:
+        return None
+    path = Path(str(path)).expanduser()
+    folder = path if path.is_dir() else path.parent
+    if not path.is_dir() and folder.name and path.name.startswith(folder.name):
+        folder = folder.parent
+    return folder if folder.is_dir() else None
+
+
+def use_data(path) -> None:
+    """``path`` is the data now being fitted: its folder is the data folder."""
+    global _data
+    folder = data_folder_of(path)
+    if folder is not None:
+        _data = folder
+
+
+def data_start() -> str:
+    """Where a plugin's empty path field opens: the data folder, else the last folder."""
+    if _data is not None and _data.is_dir():
+        return str(_data)
+    return start()
 
 
 def start(name: str = "") -> str:

@@ -684,6 +684,9 @@ def test_a_split_chosen_by_hand_that_the_calibration_overrules_is_said(tmp_path)
     agreed = _by_hand(tmp_path, dual_calibration(), "up-down", "upper")
     assert plugin.arrangement_conflict(agreed[1]) is None
     settings.channels.layout = "microscope"
+    said = plugin.arrangement_conflict(settings)               # the main channel still chosen
+    assert "main upper" in said and "main right is not used" in said
+    settings.channels.main_channel = "microscope"
     assert plugin.arrangement_conflict(settings) is None
 
 

@@ -185,6 +185,9 @@ class OverlayChannels(Plugin):
         locs = getattr(ctx, "locs", None) if ctx is not None else None
         if locs is not None and len(locs) and "camera_channel" not in locs:
             state.notice = Notice(NEEDS)
+        from ..calibrate.dual import main_channel_choices
+        scope = (locs.metadata.get("camera") or {}).get("microscope") if locs is not None else None
+        state.choices["channels.main_channel"] = main_channel_choices(settings.channels, scope)
         return state
 
     def run(self, ctx: Context, settings: OverlaySettings) -> Result:

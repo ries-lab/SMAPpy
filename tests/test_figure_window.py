@@ -104,13 +104,22 @@ def test_a_rerun_redraws_what_is_open_and_greys_the_rest(app):
 def test_the_size_hint_sets_the_window_once(app):
     drawn = []
     made = window(app)
-    made.show_plots([counted(drawn, "", size=(12, 4))])
+    made.show_plots([counted(drawn, "", size=(4, 3))])
     dpi = made.panes[""].figure.get_dpi()
-    assert made.width() == int(12 * dpi)
+    assert made.width() == int(4 * dpi)
 
     made.resize(400, 300)                         # the user's size wins now
-    made.show_plots([counted(drawn, "", size=(12, 4))])
+    made.show_plots([counted(drawn, "", size=(4, 3))])
     assert made.width() == 400
+
+
+def test_a_wide_figure_opens_at_most_half_the_screen_wide(app):
+    """Three panels in a row asked for the whole width of a large screen (2026-11)."""
+    from smappy.gui.figures import MAX_SCREEN_SHARE
+    made = window(app)
+    made.show_plots([counted([], "", size=(60, 4))])
+    room = (made.screen() or app.primaryScreen()).availableGeometry()
+    assert made.width() <= int(MAX_SCREEN_SHARE[0] * room.width())
 
 
 def test_a_figure_that_is_gone_takes_its_tab_with_it(app):

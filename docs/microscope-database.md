@@ -614,8 +614,10 @@ Decided with Jonas: one description per fact.  The entry had four overlapping on
 Decided with Jonas, no compatibility with older saved settings.  Every fitter's *channels* part
 says where the channels are on the chip, and only that: on *microscope* it is one line (the
 title and the layout's hint, `_FitPlugin._arrangement_line`: the entry's layout, main channel and
-regions or halves), and the main channel and the split appear only for a layout chosen by hand
-(`resolve_arrangement` reads no main channel beside the microscope's layout).  Spline 4Pi's
+regions or halves), and the split appears only for a layout chosen by hand.  The main channel is
+a field on the microscope's layout too since 2026-11-11: which dye the other is registered onto is
+a choice per experiment, and `resolve_arrangement` takes it beside the entry's layout, regions
+and mirrors (`main_channel_choices` offers the layout's two halves).  Spline 4Pi's
 geometry is its *channels* part (`fit_4pi.FourPiChannelsSettings`) in the same place, no longer
 inside its model.  The map between the channels is calibration, beside the PSF it belongs with:
 the model's *registration* -- `model.registration` in the two-colour fitters

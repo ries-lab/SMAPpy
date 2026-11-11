@@ -215,7 +215,9 @@ The microscope's entry says how its chip is split.  Choose it here only for
 a microscope without one; in a fitter's step the fitter's own is used.
 
 ### channels.main_channel
-Which half the other is moved onto, for a layout chosen by hand.
+Which half the other is moved onto: the microscope's (its transmitted arm),
+or the other half to swap them -- with the microscope's layout too.  In a
+fitter's step the fitter's own is used.
 
 ### channels.split_position
 Only for a split away from the middle of the chip.

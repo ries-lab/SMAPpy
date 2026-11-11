@@ -285,7 +285,8 @@ peak, and the run says so.
 ### channels.main_channel
 The half the other is mapped onto.  For two far-red dyes imaged
 ratiometrically it is the transmitted arm, the brighter one; the
-microscope's entry names it.
+microscope's entry names it, and its choices say which half that is.  Choose
+the other half to swap them, with the microscope's layout too.
 
 ### channels.split_position
 Read only for a table that does not record its channels: set it as the fit

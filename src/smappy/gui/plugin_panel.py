@@ -385,6 +385,10 @@ class PluginPanel(QWidget):
 
     def _react(self, path: str) -> None:
         """Let the plugin answer an edit, e.g. fill the camera from the file."""
+        if path == "source.path":
+            # a fitter's movie: what goes with it is looked for beside it (`folders.use_data`)
+            from . import folders
+            folders.use_data(getattr(getattr(self.form.value(), "source", None), "path", ""))
         try:
             updates = self.plugin.react(path, self.form.value())
         except (ValueError, TypeError):

@@ -34,7 +34,7 @@ import numpy as np
 
 from ..calibrate.transform import ArrangementSettings, RegisterSettings, register_channels
 from ..locs import frames_apart, in_pixels
-from . import Context, ParamInfo, Plot, Plugin, Result, param, register
+from . import Context, FormState, ParamInfo, Plot, Plugin, Result, param, register
 
 TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
 
@@ -163,6 +163,14 @@ class CalibrateChannelTransform(Plugin):
                     "residual scatter and where the pairs are -- without "
                     "writing a file")
 
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """The main channel's choices: the microscope's, saying which half, and the layout's two."""
+        from ..calibrate.dual import main_channel_choices
+        locs = getattr(ctx, "locs", None) if ctx is not None else None
+        scope = (locs.metadata.get("camera") or {}).get("microscope") if locs is not None else None
+        return FormState(choices={"channels.main_channel":
+                                  main_channel_choices(settings.channels, scope)})
+
     # ------------------------------------------------------------ the work
     def _register(self, ctx: Context, settings):
         locs = ctx.locs[ctx.selection.mask] if ctx.selection is not None else ctx.locs
@@ -218,7 +226,7 @@ def registration_plot(result):
             panel.tick_params(labelsize=8)
             panel.xaxis.label.set_fontsize(8)
             panel.yaxis.label.set_fontsize(8)
-    return Plot(draw, panels=3, size=(15, 4.6))
+    return Plot(draw, panels=3, size=(12, 4))
 
 
 def _draw_vote(ax, result) -> None:

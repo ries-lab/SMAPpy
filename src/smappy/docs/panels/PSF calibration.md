@@ -972,10 +972,11 @@ whose part is Spline 4Pi's own.  On *the microscope's* it is one line, the
 microscope's entry as the
 [Microscope manager](plugin:Panels/Microscope manager) keeps it: the arms'
 sides or regions for dual colour, each channel's `region` and `mirror` for
-4Pi (the shipped *4Pi-SMS example* is one).  Choose the layout by hand for a
-microscope without an entry; only then are the *main channel* and the
-*split position* shown, and a different main channel for one calibration is
-chosen there too.  On *auto*, 4Pi takes the layout quadrant files give
+4Pi (the shipped *4Pi-SMS example* is one).  *main channel* is shown in dual
+colour on the microscope's layout too: the entry's (its transmitted arm), or
+the other half for a calibration with the dyes the other way round.  Choose
+the layout by hand for a microscope without an entry; only then is the
+*split position* shown.  On *auto*, 4Pi takes the layout quadrant files give
 themselves, else the microscope's.
 
 ### x corners

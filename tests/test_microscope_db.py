@@ -464,10 +464,12 @@ def test_dual_colour_puts_the_arm_on_the_main_half_first():
     from smappy.calibrate.pupil import OpticsSettings
     tags = dict(M2_BEADS, **{"Servos-Position0": "20000", "Thorlabs ELL9-Label": "Position 3"})
     camera = camera_of(tags)                     # transmitted 676/37 on the right, reflected 600/60 left
-    auto = OpticsSettings().resolved(camera, 2)  # auto: the left half is the main channel
-    assert auto["wavelengths"] == [600.0, 676.0]
-    assert OpticsSettings().resolved(camera, 2, main="right")["wavelengths"] == [676.0, 600.0]
-    assert OpticsSettings().hints(camera, 2)["wavelength2_nm"] == 676.0
+    # auto: the microscope's main channel, its first arm, the transmitted one -- as the dual
+    # calibration takes it (`dual.resolve_arrangement`); it was the left half's, the reflected
+    auto = OpticsSettings().resolved(camera, 2)
+    assert auto["wavelengths"] == [676.0, 600.0]
+    assert OpticsSettings().resolved(camera, 2, main="left")["wavelengths"] == [600.0, 676.0]
+    assert OpticsSettings().hints(camera, 2)["wavelength2_nm"] == 600.0
 
 
 def test_without_a_microscope_the_na_and_emission_must_be_typed():
@@ -519,9 +521,12 @@ def test_an_arm_without_a_wavelength_is_missing_not_the_others():
     # dichroic's, which nothing records
     tags = dict(M2_BEADS, **{"Servos-Position3": "57000", "Thorlabs ELL9-Label": "Position 1"})
     camera = camera_of(tags)
-    assert OpticsSettings().resolved(camera, 2)["wavelengths"] == [676.0, None]
-    assert OpticsSettings().missing(camera, 2) == ["emission, 2nd"]
-    assert OpticsSettings(wavelength2_nm=700.0).missing(camera, 2) == []
+    # the main channel the transmitted arm, whose slider is the empty one
+    assert OpticsSettings().resolved(camera, 2)["wavelengths"] == [None, 676.0]
+    assert OpticsSettings().missing(camera, 2) == ["emission"]
+    assert OpticsSettings(wavelength_nm=700.0).missing(camera, 2) == []
+    # with the reflected arm chosen as the main channel, the 2nd is the missing one
+    assert OpticsSettings().missing(camera, 2, main="left") == ["emission, 2nd"]
     # a microscope with no second arm: the same light on both halves
     one_arm = camera_of(M5_BEADS)
     one_arm.microscope["channels"] = one_arm.microscope["channels"][:1]
@@ -622,6 +627,22 @@ def test_the_fitters_cut_the_channels_at_the_arms_regions_and_read_a_typed_split
                               split_position=300)
     _, chip = chip_channels(chosen, (0, 0, 512, 512), m2)
     assert chip.regions == [(0, 0, 300, 512), (300, 0, 212, 512)]
+
+
+def test_the_main_channel_is_swapped_on_the_microscopes_layout_keeping_its_regions():
+    """The dye registered onto is chosen per experiment: the other half as main, at the entry's
+    regions and mirror, without choosing the layout by hand (2026-11)."""
+    from smappy.calibrate.dual import ArrangementSettings, chip_channels, resolve_arrangement
+    m2 = microscope_db.database(reload=True).get("M2")
+    m2.channels[0].region, m2.channels[1].region = [240, 0, 272, 512], [0, 0, 236, 512]
+    told, chip = chip_channels(ArrangementSettings(main_channel="left"), (0, 0, 512, 512), m2)
+    assert told.layout == "right-left mirrored" and told.main_channel == "left"
+    assert chip.regions == [(0, 0, 236, 512), (240, 0, 272, 512)]
+    assert chip.flips == [(False, False), (True, False)]       # still mirrored against each other
+    # the microscope's is its transmitted arm; a half off the layout's axis is refused by name
+    assert resolve_arrangement(ArrangementSettings(), m2).main_channel == "right"
+    with pytest.raises(ValueError, match="microscope's entry splits the chip right-left"):
+        resolve_arrangement(ArrangementSettings(main_channel="upper"), m2)
 
 
 def test_an_entry_from_before_the_arms_said_the_split_reads_its_mirror_and_warns_of_its_split():

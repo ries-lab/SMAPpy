@@ -43,7 +43,8 @@ def layout_param():
 
 def main_channel_param():
     return param('microscope', label="main channel", choices=HALF_CHOICES,
-                 help="the channel the other is registered onto, for a layout chosen by hand")
+                 help="the channel the other is registered onto: the microscope's (its "
+                      "transmitted arm), or either half, to swap them")
 
 
 def split_position_param():
@@ -210,8 +211,12 @@ def resolve_arrangement(settings, microscope=None, camera: str = ""):
     `MicroscopeResolution` or an entry's name), what is chosen by hand kept as it is.
 
     A layout on *microscope* with no entry that gives one is refused, saying what to choose: the
-    arrangement is never guessed.  A main channel on *microscope* without one is the left or upper
-    side of the chip, as the dual calibration has always taken it."""
+    arrangement is never guessed.  The main channel is chosen apart from the layout: the entry's
+    (its first arm, the transmitted one) on *microscope*, else the half chosen -- also with the
+    entry's layout, whose regions and mirrors stay the entry's, so that the two dyes can be
+    swapped without giving those up (2026-11; before, the entry's layout took its main channel
+    with it).  On *microscope* without an entry that says, the left or upper half, as the dual
+    calibration has always taken it."""
     from .. import microscope_db
     found = microscope_db.arrangement_of(microscope, camera)
     layout = settings.layout
@@ -225,8 +230,7 @@ def resolve_arrangement(settings, microscope=None, camera: str = ""):
                   "channels settings, or add the arms' sides to the microscope's entry")
         layout = found['layout']
     halves = ('left', 'right') if 'right-left' in layout else ('upper', 'lower')
-    # the entry's arrangement is all the entry's: a main channel is chosen with a layout by hand
-    main = 'microscope' if settings.layout == 'microscope' else settings.main_channel
+    main = settings.main_channel
     if main == 'microscope':
         main = (found['main_channel'] if found is not None and found['main_channel'] in halves
                 else halves[0])
@@ -253,15 +257,38 @@ def arrangement_line(settings, microscope=None, camera: str = ""):
     found = microscope_db.arrangement_of(microscope, camera)
     if found is None:
         return f"{name}'s entry does not say: choose it"
-    return (f"{name}'s: {found['layout']}, main {found['main_channel']}, "
+    chosen = settings.main_channel
+    main = (f"main {chosen}, swapped" if chosen not in ('microscope', found['main_channel'])
+            else f"main {found['main_channel']}")
+    return (f"{name}'s: {found['layout']}, {main}, "
             + ("at its arms' regions" if found.get('regions') else "the frame halved"))
 
 
 def arrangement_shown(settings) -> dict:
-    """Which of a *channels* part's fields a form shows: on *microscope* the entry says it all, in
-    the title; the main channel and the split are fields only for an arrangement chosen by hand."""
-    by_hand = settings.layout != 'microscope'
-    return {'main_channel': by_hand, 'split_position': by_hand}
+    """Which of a *channels* part's fields a form shows: the main channel always -- which dye the
+    other is registered onto is a choice per experiment, not the instrument's -- and the split
+    only for a layout chosen by hand (on *microscope* the entry says where it is)."""
+    return {'main_channel': True, 'split_position': settings.layout != 'microscope'}
+
+
+def main_channel_choices(settings, microscope=None, camera: str = "") -> list:
+    """What a *main channel* field offers: the microscope's, saying which half that is, and the two
+    halves of the layout in force (all four while it is not known yet)."""
+    from .. import microscope_db
+    layout = settings.layout
+    entry = None
+    if microscope is not None:
+        try:
+            entry = microscope_db.arrangement_of(microscope, camera)
+        except Exception:
+            entry = None
+    if layout == 'microscope':
+        layout = entry['layout'] if entry else None
+    halves = (['left', 'right', 'upper', 'lower'] if layout is None
+              else ['left', 'right'] if 'right-left' in layout else ['upper', 'lower'])
+    own = entry['main_channel'] if entry and entry['main_channel'] in halves else None
+    label = f"the microscope's ({own})" if own else "the microscope's"
+    return [('microscope', label)] + halves
 
 
 def entry_regions(settings, microscope=None, camera: str = ""):

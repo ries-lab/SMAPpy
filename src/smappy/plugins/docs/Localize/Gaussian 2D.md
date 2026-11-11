@@ -331,8 +331,11 @@ On *microscope*, the entry of the microscope the file was taken on gives it
 ([Microscope manager](plugin:Panels/Microscope manager)) -- the layout, the
 main channel and where the channels lie, its arms' regions or the frame's
 halves -- and the part says it in one line; a file no entry recognises asks
-for it to be chosen.  Choose a layout by hand and *main channel* and *split
-position* appear.  Read only on *two channels*.
+for it to be chosen.  *main channel* is shown either way: on *the
+microscope's* it is the entry's, its transmitted arm, and choosing the other
+half swaps the two dyes while the entry's regions and mirror stay.  Choose a
+layout by hand and *split position* appears too.  Read only on *two
+channels*.
 ### detection.sigma
 1 to 1.5 for a well-sampled microscope.
 

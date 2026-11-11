@@ -516,7 +516,14 @@ def test_the_fitters_channels_part_is_one_line_on_the_microscope_and_its_fields_
     said = "M2's: right-left mirrored, main right, the frame halved"
     assert state.titles["channels"] == "two channels, " + said
     assert state.hints["channels.layout"] == said
-    assert not state.shown["channels.main_channel"] and not state.shown["channels.split_position"]
+    # the main channel a choice on the microscope's too, its two halves offered: the split is not
+    assert state.shown["channels.main_channel"] and not state.shown["channels.split_position"]
+    assert state.choices["channels.main_channel"] == [("microscope", "the microscope's (right)"),
+                                                      "left", "right"]
+    settings.channels.main_channel = "left"                    # the dyes swapped
+    state = plugin.describe(None, settings)
+    assert state.titles["channels"] == ("two channels, M2's: right-left mirrored, main left, "
+                                        "swapped, the frame halved")
     settings.channels.layout, settings.channels.main_channel = "up-down", "lower"
     state = plugin.describe(None, settings)
     assert state.titles["channels"] == "two channels, up-down, main lower"
