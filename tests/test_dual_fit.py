@@ -658,3 +658,65 @@ def test_a_fit_region_drawn_on_channel_1_picks_among_the_pairs():
     locs = engine.flush()
     assert engine.stats["matched"] == 8 and len(locs) == 4
     np.testing.assert_allclose(np.asarray(locs["x_nm"]) / 100, 44.0, atol=0.2)
+
+
+# ------------------------------------------------------- a split chosen by hand against the file's
+def _by_hand(tmp_path, cal, layout="right-left", main="right"):
+    from smappy.plugins.fit import DualSplineFit
+    plugin = DualSplineFit()
+    settings = plugin.Settings()
+    path = tmp_path / "dual_2Ccal.h5"
+    settings.model.calibration = str(path if path.exists() else _dual_calibration_file(path, cal))
+    settings.channels.layout, settings.channels.main_channel = layout, main
+    return plugin, settings
+
+
+def test_a_split_chosen_by_hand_that_the_calibration_overrules_is_said(tmp_path):
+    """A two-colour fit cuts the chip where its calibration says; a layout chosen by hand that
+    disagrees is not used, and the form and the run say so rather than switching silently."""
+    plugin, settings = _by_hand(tmp_path, dual_calibration())          # up-down, main upper
+    said = plugin.arrangement_conflict(settings)
+    assert "up-down" in said and "right-left" in said and "not used" in said
+    assert plugin.describe(None, settings).notice.text == said
+    # the same split by hand, or the microscope's: nothing to say
+    agreed = _by_hand(tmp_path, dual_calibration(), "up-down", "upper")
+    assert plugin.arrangement_conflict(agreed[1]) is None
+    settings.channels.layout = "microscope"
+    assert plugin.arrangement_conflict(settings) is None
+
+
+def test_measuring_takes_the_calibrations_layout_and_main_channel_together(tmp_path):
+    """A calibration that records its layout but no main channel is measured on its own axis, never
+    with the calibration's up-down beside a main channel chosen by hand for right-left -- the
+    combination a customer's run failed on (2026-11)."""
+    from smappy.calibrate.dual import resolve_arrangement
+    cal = dual_calibration()
+    cal.geometry = {k: v for k, v in cal.geometry.items() if k != "main_channel"}
+    plugin, settings = _by_hand(tmp_path, cal)
+    measuring = plugin.measuring_settings(settings).channels
+    told = resolve_arrangement(measuring)
+    assert (told.layout, told.main_channel) == ("up-down", "upper")
+
+
+def test_a_main_channel_off_the_layouts_axis_is_refused_naming_where_the_layout_came_from():
+    from smappy.calibrate.dual import ArrangementSettings, resolve_arrangement
+    with pytest.raises(ValueError, match="the layout chosen splits the chip up-down"):
+        resolve_arrangement(ArrangementSettings(layout="up-down", main_channel="right"))
+
+
+def test_gaussian_2c_says_when_its_registration_file_overrules_the_split_but_not_when_it_measures(
+        tmp_path):
+    from smappy.calibrate.dual import ChannelTransform
+    from smappy.calibrate.transform import save_channel_transform
+    from smappy.plugins.fit import DualGaussianFit
+    cal = dual_calibration()
+    path = tmp_path / "beads_2ct.h5"
+    save_channel_transform(path, ChannelTransform(cal.transformation, dict(cal.geometry), {}))
+    plugin = DualGaussianFit()
+    settings = plugin.Settings()
+    settings.model.registration.path, settings.model.registration.calibrate = str(path), False
+    settings.channels.layout, settings.channels.main_channel = "right-left", "right"
+    assert "registration file splits the chip up-down" in plugin.arrangement_conflict(settings)
+    # measured from the movie, it is measured with the channels part: nothing overrules it
+    settings.model.registration.calibrate = True
+    assert plugin.arrangement_conflict(settings) is None

@@ -231,8 +231,11 @@ def resolve_arrangement(settings, microscope=None, camera: str = ""):
         main = (found['main_channel'] if found is not None and found['main_channel'] in halves
                 else halves[0])
     if main not in halves:
-        raise ValueError(f"the chip is split {halves[0]}/{halves[1]}, so the main "
-                         f"channel cannot be {main!r}; use {halves[0]!r} or {halves[1]!r}")
+        # where the split came from, so that one handed in by a file (a calibration's layout
+        # beside the form's main channel) is told apart from one chosen in the form
+        said = "the layout chosen" if settings.layout != 'microscope' else "the microscope's entry"
+        raise ValueError(f"{said} splits the chip {layout} ({halves[0]}/{halves[1]}), so the "
+                         f"main channel cannot be {main!r}; use {halves[0]!r} or {halves[1]!r}")
     return replace(settings, layout=layout, main_channel=main)
 
 

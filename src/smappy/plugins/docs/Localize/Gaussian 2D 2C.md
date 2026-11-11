@@ -462,6 +462,9 @@ microscopes are *right-left mirrored*.  Choose a layout by hand and *main
 channel* and *split position* appear.  *channels* says where the two channels
 are on the chip; the map between them is the model's *registration*, whose
 *measuring* settings are only how it is measured.
+With a transformation file, the channels lie where the file says, the split
+it was measured on; a layout chosen by hand that says otherwise is not used,
+and a line under the form and a warning at the run say so.
 
 ### channels.main_channel
 For two far-red dyes split by a long-pass dichroic, the transmitted arm is

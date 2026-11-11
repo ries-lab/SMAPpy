@@ -419,7 +419,9 @@ Ignored when *registration* > *from this movie* is ticked.
 For a splitter that moved since the beads -- the residuals of *link xy*
 off-centre say so.  As in Gaussian 2D 2C, the first frames are fitted with a
 plain Gaussian as two channels, cut with the calibration's layout and main
-channel so that each PSF stays on its half, each channel detected on its own,
+channel so that each PSF stays on its half (a layout chosen by hand under
+*channels* that says otherwise is not used, and a line under the form and a
+warning at the run say so), each channel detected on its own,
 and the pairs of the two channels registered; then the real
 fit runs with the calibration's PSFs and this registration.  *Preview*
 measures it too and shows it in a tab, *channel registration*; the

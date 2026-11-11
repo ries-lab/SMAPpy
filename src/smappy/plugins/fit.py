@@ -2084,13 +2084,71 @@ class _TwoChannelFit(_FitPlugin):
         finally:
             self._loaded = None
 
+    def fitted_geometry(self, settings) -> Optional[dict]:
+        """The split the fit reads when it is not the *channels* part's: the registration file's
+        geometry, or None when the registration is measured from this movie with the part."""
+        if settings.model.registration.calibrate:
+            return None
+        return self._read_geometry(settings) or _geometry_of(settings.model.registration.path,
+                                                             settings.model.registration.load)
+
+    def _read_geometry(self, settings) -> Optional[dict]:
+        """The geometry of the registration this run has read already (`_reading_once`), else None:
+        a run reads its file once."""
+        loaded = self._loaded
+        if loaded is not None and loaded[0] == self.registration_path(settings):
+            return dict(loaded[1].geometry)
+        return None
+
+    def arrangement_conflict(self, settings) -> Optional[str]:
+        """A line when the *channels* part, chosen by hand, says another split than the file the fit
+        reads its channels from, else None.
+
+        A two-colour fit cuts the chip where its registration says (`channel_layout`), so a layout
+        chosen by hand that disagrees is not used -- and was not said to be: a customer chose
+        right-left and saw the fit read up-down (2026-11).  Said, not refused: the file's split
+        is the one its registration was measured on, and fitting with another would pair the
+        wrong spots."""
+        asked = settings.channels
+        if asked.layout == "microscope":
+            return None
+        try:
+            geometry = self.fitted_geometry(settings) or {}
+        except Exception:
+            return None                      # no file yet, or unreadable: said elsewhere
+        layout, main = geometry.get("layout"), geometry.get("main_channel")
+        if (layout is None or layout == asked.layout) and (main is None
+                                                           or main == asked.main_channel):
+            return None
+        said = ", ".join(bit for bit in (layout, main and f"main {main}") if bit)
+        return (f"the {self.geometry_source} splits the chip {said}, and the fit reads it so; "
+                f"the channels part's {asked.layout}, main {asked.main_channel}, is not used")
+
+    #: what `fitted_geometry` comes from, in the conflict's words
+    geometry_source = "registration file"
+
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        state = super().describe(ctx, settings)
+        if state.notice is None:
+            try:
+                conflict = self.arrangement_conflict(settings)
+            except Exception:
+                conflict = None
+            if conflict:
+                state.notice = Notice(conflict)
+        return state
+
     def run(self, ctx: Context, settings) -> Result:
         settings = self.with_calibration(settings, ctx)
         found = self.measured(ctx, settings, save=True)
         measured = None if found is None else self.with_measured(settings, found.transform)
-        result = self._reading_once(
-            settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
-            measured)
+
+        def fit():
+            conflict = self.arrangement_conflict(settings)
+            if conflict:
+                ctx.warn(conflict)
+            return super(_TwoChannelFit, self).run(ctx, settings)
+        result = self._reading_once(settings, fit, measured)
         if found is not None:
             # a tab of the result, never a window of its own: a run without a GUI shows nothing
             from .registration import registration_plot
@@ -2460,14 +2518,32 @@ class DualSplineFit(_TwoChannelFit):
             return with_registration(calibration, settings.model.registration.load())
         return calibration
 
+    geometry_source = "calibration"
+
+    def fitted_geometry(self, settings) -> Optional[dict]:
+        """The calibration's split, measured from the movie or not: its PSFs belong to its halves.
+        A registration file beside it must agree with it (`dual.with_registration`)."""
+        return self._read_geometry(settings) or _geometry_of(settings.model.calibration,
+                                                             settings.model.load)
+
     def measuring_settings(self, settings):
         """Measured with the calibration's layout and main channel, so that each PSF stays on the
-        half it was made from (`dual.with_registration` refuses one that does not)."""
+        half it was made from (`dual.with_registration` refuses one that does not).
+
+        The two together or neither: the calibration's layout beside a main channel chosen by
+        hand for another layout (``up-down``, main ``right``) is refused when it is resolved,
+        which is how a calibration that does not record its main channel failed a run."""
         g = settings.model.load().geometry
         given = settings.channels
-        return replace(settings, channels=replace(
-            given, layout=g.get("layout", given.layout),
-            main_channel=g.get("main_channel", given.main_channel)))
+        layout = g.get("layout")
+        if not layout:
+            return settings
+        main = g.get("main_channel")
+        if not main:
+            # the calibration's layout with the main channel of its own axis the dual calibration
+            # has always taken (`resolve_arrangement`), not the hand-chosen one of another axis
+            main = given.main_channel if layout == given.layout else "microscope"
+        return replace(settings, channels=replace(given, layout=layout, main_channel=main))
 
     def with_measured(self, settings, transform):
         """The calibration's PSFs with the registration measured from this movie: the splitter
@@ -2477,6 +2553,24 @@ class DualSplineFit(_TwoChannelFit):
 
     def model(self, settings, camera):
         return settings.model.model(self.registration(settings), camera)
+
+
+# The split each registration or calibration file records, by path and modification time: the form
+# asks with every change (`arrangement_conflict`), and a calibration is megabytes of splines.
+_GEOMETRIES: Dict[Any, dict] = {}
+
+
+def _geometry_of(path: str, load) -> dict:
+    """``load().geometry`` for the file at ``path``, read once per version of it."""
+    try:
+        key = (str(Path(path).resolve()), Path(path).stat().st_mtime_ns)
+    except (OSError, TypeError, ValueError):
+        return dict(load().geometry)
+    if key not in _GEOMETRIES:
+        if len(_GEOMETRIES) > 16:
+            _GEOMETRIES.clear()
+        _GEOMETRIES[key] = dict(load().geometry)
+    return _GEOMETRIES[key]
 
 
 # The last registration measured from a movie, under what it was measured with (`_measuring_key`).
