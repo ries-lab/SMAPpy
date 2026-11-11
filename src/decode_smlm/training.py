@@ -154,8 +154,32 @@ def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=Non
             "calibration_sha256": job.calibration.get("sha256"), "ranges": job.ranges,
             "trained_on": trained_on(param),
             "base_model": job.base_model, "epoch": epoch, "epochs": param.HyperParameter.epochs,
+            "batch_size": int(param.HyperParameter.batch_size), "learning_rate": float(param.HyperParameter.opt_param.lr),
             "seed": job.seed, "smappy_version": __version__, "decode_version": "0.10.2"}
     model_file.write(path, tensors, meta)
+
+
+def _warm_up(optimizer, param, epoch: int) -> list:
+    """The rates of the epoch's training ramped up from ``lr_warmup_from`` over the first
+    ``lr_warmup_epochs`` (plan (f2)); the scheduler's rates, to be put back after the epoch, so
+    that the scheduler, the checkpoint and a resume never see the ramp.  A larger batch's larger
+    rate made the first epochs' loss blow up without it (5 restarts at batch 256, 2x the rate).
+    The ramp starts by default at the rate the linear rule gives ``batch_base``."""
+    hp = param.HyperParameter
+    target = [group["lr"] for group in optimizer.param_groups]
+    n = int(getattr(hp, "lr_warmup_epochs", None) or 0)
+    if n <= 0 or epoch > n:
+        return target
+    start = getattr(hp, "lr_warmup_from", None)
+    for group, lr in zip(optimizer.param_groups, target):
+        lr0 = float(start) if start is not None else lr * int(getattr(hp, "batch_base", None) or 64) / int(hp.batch_size)
+        group["lr"] = lr0 + (lr - lr0) * (epoch - 1) / n          # epoch 1 at the start, epoch n + 1 at the target
+    return target
+
+
+def _ckpt_batch(batch: dict) -> dict:
+    """The batch's record as the checkpoint keeps it: plain numbers and strings (weights-only safe)."""
+    return {"batch_size": int(batch["batch_size"]), "lr": float(batch["lr"]), "chosen": str(batch["chosen"])}
 
 
 def load_weights(model, path: Path):
@@ -306,6 +330,16 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
     ckpt_path = folder / CKPT
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True) if ckpt_path.exists() else None
     restarts = ckpt["restarts"] if ckpt else 0
+    # the batch (and its rate) once, before the first epoch: a resume keeps the checkpoint's, so
+    # that a run is the same however often it was stopped (`batch.resolve`, plan (f2))
+    if ckpt is not None and "batch" in ckpt:
+        batch = dict(ckpt["batch"])
+        param.HyperParameter.batch_size = int(batch["batch_size"])
+        param.HyperParameter.opt_param.lr = float(batch["lr"])
+    else:
+        from . import batch as batches
+        from .neuralfitter import models
+        batch = batches.resolve(param, lambda: getattr(models, param.HyperParameter.architecture).parse(param))
     def quietly():
         # DECODE prints and draws tqdm bars (stderr); quiet keeps both out, the progress file is the log
         if not quiet:
@@ -347,7 +381,7 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
     from smappy.io.calibration import load_spline_calibration
     cal_em_on = load_spline_calibration(param.InOut.calibration_file).em_on
     progress.append(folder, "start", first, device=str(device), torch=torch.__version__, decode="0.10.2",
-                    resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts)
+                    resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts, batch=batch)
     if first >= n_epochs:
         progress.append(folder, "finished", first - 1)
         return "finished"
@@ -361,10 +395,14 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
         loss_train = None
         with quietly():
             if i >= 1:
+                target = _warm_up(optimizer, param, i)
                 loss_train = train_val_impl.train(model=model, optimizer=optimizer, loss=criterion, dataloader=dl_train,
                                                   grad_rescale=param.HyperParameter.moeller_gradient_rescale,
                                                   grad_mod=grad_mod, epoch=i, device=torch.device(device),
                                                   logger=loggers.NoLog())
+                lr_trained = optimizer.param_groups[0]["lr"]
+                for group, lr in zip(optimizer.param_groups, target):
+                    group["lr"] = lr          # the scheduler's own rate back before it steps
             val_loss, test_out = train_val_impl.test(model=model, loss=criterion, dataloader=dl_test, epoch=i,
                                                      device=torch.device(device))
         if not conv_check(test_out.loss[:, 0].mean(), i):
@@ -381,7 +419,7 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
             i = 0
             continue
         metrics = evaluate_test(test_out, ds_test, post_processor, matcher, float(val_loss))
-        lr = optimizer.param_groups[0]["lr"]
+        lr = lr_trained if i >= 1 else optimizer.param_groups[0]["lr"]
         if i >= 1:
             if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 lr_scheduler.step(val_loss)
@@ -389,7 +427,8 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
                 lr_scheduler.step()
         write_model(folder / MODEL, model, param, job, i, cal_em_on)
         _save_atomic({"epoch": i, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
-                      "lr_scheduler": lr_scheduler.state_dict(), "rng": rng_state(), "restarts": restarts}, ckpt_path)
+                      "lr_scheduler": lr_scheduler.state_dict(), "rng": rng_state(), "restarts": restarts,
+                      "batch": _ckpt_batch(batch)}, ckpt_path)
         progress.append(folder, "epoch", i, loss_train=loss_train, loss_test=float(val_loss), lr=lr,
                         seconds=round(time.perf_counter() - t0, 3), metrics=metrics)
         if (folder / STOP).exists() or stop["why"]:

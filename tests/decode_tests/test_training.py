@@ -18,7 +18,7 @@ from smappy.training import job as jobs
 from smappy.training import model_file, progress
 
 
-def tiny_job(folder, epochs=3, seed=0, base_model=None):
+def tiny_job(folder, epochs=3, seed=0, base_model=None, batch_size=4, **hyper):
     g = np.exp(-0.5 * ((np.arange(13) - 6.0) / 1.5) ** 2)
     coeff = np.zeros((64, 11, 13, 13), np.float32)
     coeff[0] = (np.outer(g, g) / np.outer(g, g).sum())[None]
@@ -30,8 +30,9 @@ def tiny_job(folder, epochs=3, seed=0, base_model=None):
     ext = [[-0.5, 15.5], [-0.5, 15.5], None]
     params["Simulation"].update(img_size=[16, 16], psf_extent=ext, emitter_av=3)
     params["TestSet"] = {"test_size": 16, "img_size": [16, 16], "frame_extent": ext}
-    params["HyperParameter"] = {"epochs": epochs, "batch_size": 4, "pseudo_ds_size": 32, "max_number_targets": 16,
-                                "arch_param": {"initial_features": 8, "inter_features": 8}}
+    params["HyperParameter"] = {"epochs": epochs, "batch_size": batch_size, "batch_base": 4, "pseudo_ds_size": 32,
+                                "max_number_targets": 16,
+                                "arch_param": {"initial_features": 8, "inter_features": 8}, **hyper}
     params["Hardware"] = {"num_worker_train": 0, "torch_threads": 1}
     job = jobs.Job.new(method="decode-v0.10.2", ranges={"density": "LD"}, camera={}, calibration={}, seed=seed,
                        device="cpu", base_model=base_model)
@@ -129,3 +130,89 @@ def test_status_reads_the_folder_alone(tmp_path, capsys):
     assert main(["status", str(folder)]) == 0
     out = capsys.readouterr().out
     assert "finished" in out and "epoch 1:" in out and "jaccard" in out
+
+
+# ----------------------------------------------------------------------------- the batch size, (f2)
+def test_the_batch_chosen_is_the_smallest_within_ten_percent_of_the_best_time_a_frame():
+    from decode_smlm.batch import choose, scaled_lr
+    h100 = {64: 253e-6, 128: 179e-6, 256: 167e-6, 512: 159e-6}       # gpuvm's H100, 2026-11-11
+    assert choose(h100) == 256
+    assert choose({64: 1.0, 128: 0.98}) == 64                        # nothing to gain: the base
+    assert scaled_lr(2e-4, 256) == pytest.approx(4e-4)               # the square root of 4
+    assert scaled_lr(2e-4, 256, rule="linear") == pytest.approx(8e-4)
+    assert scaled_lr(2e-4, 256, rule="none") == 2e-4
+    with pytest.raises(ValueError):
+        choose({})
+
+
+def test_auto_on_a_gpu_measures_and_scales_the_rate_and_a_number_or_the_cpu_keeps_its_own(monkeypatch):
+    from decode_smlm import batch as batches
+    from decode_smlm.utils.types import RecursiveNamespace
+
+    def param(size, device):
+        return RecursiveNamespace(HyperParameter={"batch_size": size, "batch_base": 64, "lr_scaling": "sqrt",
+                                                  "channels_in": 3, "opt_param": {"lr": 2e-4}},
+                                  Hardware={"device": device}, Simulation={"img_size": [40, 40]})
+    asked = []
+    monkeypatch.setattr(batches, "measure", lambda model, ch, frame, device, base: asked.append((ch, frame, base))
+                        or {64: 253e-6, 128: 179e-6, 256: 167e-6, 512: 159e-6})
+    p = param("auto", "cuda:0")
+    done = batches.resolve(p, lambda: None)
+    assert asked == [(3, (40, 40), 64)]
+    assert p.HyperParameter.batch_size == 256 and p.HyperParameter.opt_param.lr == pytest.approx(4e-4)
+    assert done["chosen"] == "measured" and done["us_per_frame"]["256"] == 167.0
+    p = param(128, "cuda:0")
+    assert batches.resolve(p, lambda: None)["chosen"] == "given" and p.HyperParameter.opt_param.lr == 2e-4
+    p = param("auto", "cpu")
+    assert batches.resolve(p, lambda: None)["chosen"] == "cpu" and p.HyperParameter.batch_size == 64
+    assert len(asked) == 1
+
+
+def test_the_measurement_touches_no_random_state_and_runs_on_the_cpu():
+    import torch
+
+    from decode_smlm.batch import measure
+    net = torch.nn.Conv2d(3, 4, 3, padding=1)
+    weights = net.weight.detach().clone()
+    torch.manual_seed(5)
+    before = torch.rand(1)
+    torch.manual_seed(5)
+    times = measure(net, 3, (16, 16), "cpu", base=4, doublings=2, steps=2, warmup=1)
+    assert torch.rand(1) == before and torch.equal(net.weight, weights)
+    assert sorted(times) == [4, 8, 16] and all(t > 0 for t in times.values())
+
+
+def test_an_auto_batch_is_chosen_once_and_a_resume_keeps_it(tmp_path, monkeypatch):
+    from decode_smlm import batch as batches
+    folder = tiny_job(tmp_path / "job", batch_size="auto")
+
+    def chosen(param, factory):              # as a GPU would have measured: 8 frames, the rate times sqrt 2
+        param.HyperParameter.batch_size = 8
+        param.HyperParameter.opt_param.lr *= 2 ** 0.5
+        return {"batch_size": 8, "chosen": "measured", "lr": param.HyperParameter.opt_param.lr}
+    monkeypatch.setattr(batches, "resolve", chosen)
+    train(folder, epochs=2, quiet=True)
+    lr = progress.read(folder)[0]["batch"]["lr"]
+
+    def never(param, factory):
+        raise AssertionError("measured again on resume")
+    monkeypatch.setattr(batches, "resolve", never)
+    train(folder, epochs=3, quiet=True)
+    starts = [line for line in progress.read(folder) if line["kind"] == "start"]
+    assert [s["batch"]["batch_size"] for s in starts] == [8, 8] and starts[1]["batch"]["lr"] == lr
+    meta = model_file.read_metadata(folder / MODEL)
+    assert meta["batch_size"] == 8 and meta["learning_rate"] == pytest.approx(lr)
+
+
+def test_the_warm_up_ramps_the_rate_and_a_resume_inside_it_is_bitwise_the_run_through(tmp_path):
+    hyper = {"lr_warmup_epochs": 2, "lr_warmup_from": 1e-5, "opt_param": {"lr": 4e-4}}
+    through = tiny_job(tmp_path / "through", epochs=4, **hyper)
+    train(through, quiet=True)
+    lrs = [e["lr"] for _, e in sorted(_epochs(through).items())]
+    assert lrs[1] == pytest.approx(1e-5) and lrs[2] == pytest.approx(2.05e-4) and lrs[3] == pytest.approx(4e-4)
+    parts = tiny_job(tmp_path / "parts", epochs=4, **hyper)
+    train(parts, epochs=2, quiet=True)                       # stopped inside the ramp
+    train(parts, epochs=4, quiet=True)
+    a, b = _epochs(through), _epochs(parts)
+    assert [b[i]["loss_train"] for i in (2, 3)] == [a[i]["loss_train"] for i in (2, 3)]
+    assert [b[i]["lr"] for i in (1, 2, 3)] == [a[i]["lr"] for i in (1, 2, 3)]
