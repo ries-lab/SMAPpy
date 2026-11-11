@@ -22,8 +22,6 @@ tabs:
   - plugin: Localize/Spline 3D 2C
   - plugin: Analysis/After fit/Assign colours
     line_above: true
-  - plugin: Analysis/After fit/Overlay channels
-  - plugin: Localize/Raw channel offset
   - plugin: Analysis/Drift/RCC
   - plugin: Analysis/Drift/COMET
 - name: Render

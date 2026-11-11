@@ -220,6 +220,31 @@ def test_the_overview_detached_fills_its_window(app):
     window.close()
 
 
+def test_a_click_anywhere_in_the_overview_brings_the_view_to_the_front(app, monkeypatch):
+    """On the field it also moves the view; on the grey around it, only this."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtTest import QTest
+    from smappy.gui.render_tab import Overview
+    from smappy.gui.render_view import RenderView
+    session = Session(table())
+    view = RenderView(session)
+    view.show()
+    raised = []
+    monkeypatch.setattr(view, "raise_", lambda: raised.append("raised"))
+    overview = Overview(session, view)
+    overview.resize(380, 300)
+    overview.show()
+    app.processEvents()
+    QTest.mouseClick(overview, Qt.LeftButton, pos=overview.rect().bottomRight() - QPointF(1, 1)
+                     .toPoint())
+    assert raised == ["raised"]
+    view.hide()                                       # closed by accident
+    overview.graphics.scene().sigMouseClicked.emit(None)
+    assert view.isVisible() and raised == ["raised"] * 2
+    overview.close()
+    view.close()
+
+
 def test_about_says_the_version_the_licence_github_and_what_to_cite():
     from smappy.gui import about
     text = about.about_html()

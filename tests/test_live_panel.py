@@ -228,9 +228,10 @@ class DrawsAsItGoes(Plugin):
 
 @pytest.mark.parametrize("asked", [True, False])
 def test_a_fits_image_tags_are_drawn_while_it_runs_and_end_as_its_figure(app, asked):
-    """Opened from the stream, kept in the live table's metadata, and the
-    final figure drawn in the same window -- also for a run nobody asked for
-    (MicroClaw's, `start_run(ask=False)`), which opens no window otherwise."""
+    """Kept in the live table's metadata, the figure opened when the fit ends
+    -- also for a run nobody asked for (MicroClaw's, `start_run(ask=False)`),
+    which opens no window otherwise -- and redrawn live in a window that is
+    open, never opened (and so put in front) while the fit runs."""
     from PySide6.QtCore import QEventLoop, QTimer
     from smappy.gui.plugin_panel import PluginPanel
     session = Session()
@@ -251,6 +252,15 @@ def test_a_fits_image_tags_are_drawn_while_it_runs_and_end_as_its_figure(app, as
     window = panel._window
     assert window is not None and window.isVisible()
     assert list(window.panes) == ["PIZ"]
-    assert DrawsAsItGoes.drawn[-1] == "final" and len(DrawsAsItGoes.drawn) >= 2
+    assert DrawsAsItGoes.drawn == ["final"]                    # no window while it ran
     assert any(v is not None and len(v) >= 3 for v in seen)    # tags while live
+    # again, the window still open: redrawn as it goes
+    DrawsAsItGoes.drawn = []
+    loop = QEventLoop()
+    panel.ended.connect(lambda *_: loop.quit())
+    assert panel.start_run(ask=False)
+    QTimer.singleShot(10000, loop.quit)
+    loop.exec()
+    app.processEvents()
+    assert DrawsAsItGoes.drawn[-1] == "final" and len(DrawsAsItGoes.drawn) >= 2
     window.close()

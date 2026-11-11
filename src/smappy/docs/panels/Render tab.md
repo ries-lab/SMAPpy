@@ -702,7 +702,9 @@ zero (plain binning), and put back on the way back to x and y.
 
 ### overview
 The whole field, with a yellow frame where the main view is; click in it
-to move the main view there, at the same zoom.  It shows the extent of
+to move the main view there, at the same zoom.  Any click in it, on the
+field or the grey around it, also brings the main view's window to the
+front.  It shows the extent of
 the visible layers' localizations, or of an image layer, and 1 % around it,
 as large as the panel allows -- docked, its height follows the data's shape,
 up to 200 pixels so that the tab's rows below it fit the window;

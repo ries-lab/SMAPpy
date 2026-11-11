@@ -22,9 +22,10 @@ that drifted, jumped or ran into the end of its range shows up there at
 once, while in the localizations it shows only as a slow loss of quality.
 So the fit draws the piezo position on its own (see *show image tags* in the
 fit's output settings), with the same drawing as here.  The figure opens
-while the fit is still running and is redrawn every few seconds, so a focus
-lock that slips during a long acquisition is seen while there is still time
-to act.  When the fit is done, the same window shows the final figure.
+when the fit is done.  If its window is still open from an earlier fit, it
+is redrawn there every few seconds while the fit runs, without coming to the
+front, so a focus lock that slips during a long acquisition is seen while
+there is still time to act.
 
 It needs a table fitted from a Micro-Manager acquisition (an OME-TIFF
 series, an NDTiff dataset or a folder of single images) by this program.  A

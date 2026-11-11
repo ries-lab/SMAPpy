@@ -199,7 +199,9 @@ for ax, (title, az, el, mode) in zip(fig.subplots(1, 3), views):
 resolution, and from a sample of the localizations sized so that the picture
 keeps up with the mouse on the machine it runs on.  When the mouse stops,
 the full image is drawn from every localization in the slab.  An image that
-is saved is always the full one.
+is saved is always the full one.  When the full image itself is drawn in
+less than 1/27 s -- a few localizations, a small slab -- there is no preview:
+a drag or a turn draws the full image every time.
 
 **8. Rocking it.**  A still projection hides depth: two structures one
 above the other look like one.  Turned a little, the near one moves against
@@ -343,7 +345,10 @@ loop.
 about 13 localizations per pixel are drawn, fewer if the last frames took
 longer than 1/27 s.  The sample is evenly spaced through the table, which is
 in acquisition order, so it is a shorter acquisition rather than a
-rearranged one.
+rearranged one.  Each full frame is timed, and while the last one of
+the engine in use took no longer than 1/27 s, a drag draws full frames
+instead; one slower full frame sends the drags back
+to the preview.
 
 **Which engine draws it.**  The plain sum (*sum*) is drawn on the GPU when
 the visible layers hold at least 100 000 localizations around the slab, and

@@ -778,7 +778,12 @@ class LayerStrip(QWidget):
 
 class Overview(QWidget):
     """The whole field, small, with a frame where the main view is; a click
-    centres the main view there, at its zoom.  It never zooms."""
+    centres the main view there, at its zoom.  It never zooms.
+
+    Any click in it, on the field or the grey around it, also brings the
+    view's window to the front: the overview is how one finds the picture
+    again once it is behind other windows.
+    """
 
     def __init__(self, session: Session, view, parent=None):
         super().__init__(parent)
@@ -807,6 +812,9 @@ class Overview(QWidget):
         self.image = pg.ImageItem(axisOrder="row-major")
         self.box.addItem(self.image)
         self.image.mouseClickEvent = self._on_click
+        # every click on the scene, the field's and the grey's, before the
+        # image takes its own
+        self.graphics.scene().sigMouseClicked.connect(lambda _: self.view_to_front())
         self.frame = pg.QtWidgets.QGraphicsRectItem()
         self.frame.setPen(pg.mkPen((255, 255, 0), width=1))
         self.frame.setBrush(pg.mkBrush(None))
@@ -910,9 +918,25 @@ class Overview(QWidget):
         if self.view is None:
             return
         pos = self.image.mapToView(event.pos())
-        self.view.window().show()          # closed by accident: bring it back
+        self.view_to_front()               # closed by accident: back, too
         self.view.center_on(pos.x(), pos.y())
         event.accept()
+
+    def view_to_front(self) -> None:
+        """The main view's window shown and raised, unless it is this one's
+        (docked, the overview is in it already)."""
+        if self.view is None:
+            return
+        window = self.view.window()
+        window.show()
+        if window is not self.window():
+            window.raise_()
+            window.activateWindow()
+
+    def mousePressEvent(self, event) -> None:
+        # the margin around the picture, detached, is the overview's own
+        self.view_to_front()
+        super().mousePressEvent(event)
 
     def _track(self) -> None:
         if self.view is not None:

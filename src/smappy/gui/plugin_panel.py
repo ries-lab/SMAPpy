@@ -554,21 +554,20 @@ class PluginPanel(QWidget):
         """Figures a run draws while it goes (``("plots", {name: draw})``,
         the fit's image tags), in the window its result will be shown in.
 
-        Opened without the focus, and redrawn in place: the fit hands them
-        on every few seconds, and the final result's figures of the same
-        names replace them there (`_on_done`).
+        Redrawn in place, and only in a window already open: the fit hands
+        them on every few seconds, and a window opened (or reopened after
+        being closed) on each of those came to the front over whatever one
+        was looking at, the picture of the fit included (2026-11).  So they
+        are drawn when the fit ends (`_on_done`), and live only where the
+        window from an earlier run is still open, left where it is.
         """
         from ..plugins import _as_plot
-        from .figures import ResultWindow
         figures = [_as_plot(draw, name) for name, draw in plots.items()]
         if not figures:
             return
-        if self._window is None:
-            self._window = ResultWindow(self.plugin.name, self)
-        if not self._window.isVisible():
-            self._window.show()
-        self._window.show_plots(figures, "running")
-        self._live_figures = True
+        self._live_figures = True          # the final ones shown, unasked too
+        if self._window is not None and self._window.isVisible():
+            self._window.show_plots(figures, "running")
 
     def preview(self) -> None:
         """The work, shown and thrown away."""

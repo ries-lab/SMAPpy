@@ -364,3 +364,25 @@ def test_the_view_keeps_rendering_while_a_live_fit_appends(app):
     assert not view.last_error and view.fov is not None
     assert float(np.max(view.image.image)) > 0
     view.close()
+
+
+def test_a_3d_drag_frame_is_drawn_whole_while_a_whole_frame_is_quick(monkeypatch):
+    """Few localizations are turned at full resolution, unthinned; a whole
+    frame slower than a drag frame may be sends the drags back to the preview."""
+    from types import SimpleNamespace
+    from smappy.gui import view3d
+    session = two_layer_session()
+    drawn = []
+    real = view3d.render_3d
+    monkeypatch.setattr(view3d, "render_3d", lambda *a, **k: (drawn.append(a[4]), real(*a, **k))[1])
+    worker = SimpleNamespace(budgets={}, gpu=lambda: None)
+    job = view3d.Job3D(snapshot_3d(session.layers), Projection(pivot=[500, 500, 0], zoom=2.0,
+                                                               engine="cpu"),
+                       None, 60, 40, preview=True)
+    job.run(worker)                                  # nothing timed yet: a preview
+    dataclasses.replace(job, preview=False).run(worker)
+    assert worker.full_seconds["cpu"] < view3d.FULL_QUALITY_SECONDS
+    job.run(worker)                                  # timed, and quick: whole
+    worker.full_seconds["cpu"] = 1.0                 # a whole frame that took a second
+    job.run(worker)
+    assert drawn == [True, False, False, True]

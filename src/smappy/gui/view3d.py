@@ -38,8 +38,8 @@ from . import folders
 from .render_view import (RenderWorker, bar_label, canvas_pixels, fill_canvas,
                           frame_canvas, nice_step, toolbar_border, toolbar_sheet)
 from .widgets import CollapsibleSection, Popup
-from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, engine_for,
-                      render_3d, snapshot_3d, upscale)
+from ..view3d import (PRESETS, PREVIEW_SCALE, TARGET_FPS, PreviewBudget, Projection, Slab,
+                      engine_for, render_3d, snapshot_3d, upscale)
 
 BOX_PEN = pg.mkPen((255, 255, 0, 160), width=1)
 DEGREES_PER_PIXEL = 0.4
@@ -64,8 +64,24 @@ class Job3D:
     preview: bool
 
     def run(self, worker):
-        """``(rgb, fov)``."""
+        """``(rgb, fov)``.
+
+        A drag frame is drawn whole, as the final one, while the last whole
+        frame of this engine took less than a drag frame may
+        (`full_quality_affordable`): a few thousand localizations turned at
+        half resolution and thinned looked worse than they had to, for no
+        speed anyone could see.  Each whole frame is timed, so a view that
+        grows too large for it goes back to the preview by itself.
+        """
+        import time
         projection, preview = self.projection, self.preview
+        full = getattr(worker, "full_seconds", None)
+        if full is None:
+            full = worker.full_seconds = {}
+        if preview and full_quality_affordable(full.get(projection.engine)):
+            preview = False
+        whole = not preview
+        started = time.perf_counter()
         scale = PREVIEW_SCALE if preview else 1
         fov = projection.fov(self.nx, self.ny, scale)
         # "auto" is settled here, before the GPU is asked for: a small slab
@@ -82,7 +98,20 @@ class Job3D:
         budget = worker.budgets.setdefault(projection.engine, PreviewBudget())
         rgb = render_3d(self.layers, projection, self.slab, fov, preview, engine,
                         budget=budget)
+        if whole:
+            # under the engine asked for, which is what the next job looks up
+            full[self.projection.engine] = time.perf_counter() - started
         return upscale(rgb, scale, self.ny, self.nx), fov
+
+
+# a drag frame is drawn whole when the last whole frame took no longer than
+# this: the budget's own frame time (`TARGET_FPS`), so a turn stays as fluid
+FULL_QUALITY_SECONDS = 1.0 / TARGET_FPS
+
+
+def full_quality_affordable(seconds: Optional[float]) -> bool:
+    """Whether a whole frame that took ``seconds`` may stand in for a preview."""
+    return seconds is not None and seconds <= FULL_QUALITY_SECONDS
 
 
 RELAX_SECONDS = 0.5         # a stopped rock eases back to where it began over this
