@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve]
 ---
 
 ## What it does
@@ -66,6 +66,17 @@ photons and uncertainties are read from the network's output at that pixel.
 **Positions go on the chip.**  The positions are put back on the frames as
 they were read -- the crop and any flip undone -- and the camera ROI's corner
 is added, as for every fitter.
+
+**The network can run on a workstation.**  Without a GPU the network is slow:
+a laptop's CPU localizes about one frame of 512 × 512 pixels a second, a GPU
+50 to 250.  With *run on* set to a training host (*File > Preferences*,
+*Training hosts*, the hosts the [training window](plugin:Panels/DECODE training)
+trains on), everything but the network still happens here -- the movie is
+read, cut to the camera ROI, turned into photons and cut into blocks -- and
+each block is sent there over ssh, through the network, and its
+localizations sent back.  The model file goes there at the start; it need
+not be there before.  The table is the same as here, but for the last digits
+where two GPUs round differently.  A live fit always runs here.
 
 ## In detail
 
@@ -133,6 +144,15 @@ be undone.
 
 32 suits a GPU with a few GB; lower it if the GPU runs out of memory, raise
 it on a large one for speed.  On the CPU it changes the last digits only.
+
+### model.where
+
+Worth it when this computer has no GPU: the frames go there as photons, four
+bytes a pixel, so a movie of 512 × 512 pixels needs about 50 MB a second at a
+GPU's pace -- a wired network carries that, a slow one makes the network the
+limit.  The example movie's 20 000 frames of 180 × 179 took 153 s on a
+workstation's H100 from a laptop, 166 s on the laptop's own GPU.  *device*
+then names the device there.
 
 ## Output
 

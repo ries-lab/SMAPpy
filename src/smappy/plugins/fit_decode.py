@@ -63,6 +63,9 @@ class DecodeModelSettings:
                         help="where the network runs; auto: a GPU if there is one")
     batch: int = param(32, label="frames per batch", min=1, advanced=True,
                        help="frames through the network at once; only memory and speed depend on it")
+    where: str = param("here", label="run on", choices=lambda: _where_choices(),
+                       help="this computer, or a training host of Preferences > Training hosts: the frames "
+                            "are read and converted here and sent there, the network runs there")
 
 
 @dataclass
@@ -172,8 +175,10 @@ class DecodeFit(_FitPlugin):
         problems = model_problems(meta, self.checked_calibration(settings))
         if problems:
             raise ValueError(problems[0])
-        from decode_smlm.predict import load_predictor
         device = settings.model.device
+        if settings.model.where != "here":
+            return remote_predictor(settings, meta, camera)
+        from decode_smlm.predict import load_predictor
         return load_predictor(settings.model.path, None if device == "auto" else device,
                               frames_mirrored=_mirrored(meta, camera), raw_th=settings.model.threshold,
                               batch_size=settings.model.batch)
@@ -271,6 +276,28 @@ class DecodeFit(_FitPlugin):
 
         return Result(text=f"frame {index}: {len(x)} localizations", settings=settings,
                       plot=Plot(draw=plot, size=(7, 6)), data={"frame": index, "localizations": int(len(x))})
+
+
+def _where_choices():
+    from ..training import jobs
+    return [("here", "this computer")] + [(h.name, h.name) for h in jobs.hosts()]
+
+
+def remote_predictor(settings, meta: dict, camera: CameraMetadata):
+    """The network on the training host *run on* names (`smappy.decode_remote`): the frames are
+    read, cut and converted here and only the network runs there.  A live fit runs here: its
+    frames arrive as they are taken, and a network across the network adds nothing then."""
+    from ..decode_remote import RemotePredictor
+    from ..training import jobs
+    m = settings.model
+    host = jobs.host(m.where)
+    if host is None:
+        raise ValueError(f"no training host {m.where!r}: add it in Preferences > Training hosts, "
+                         f"or run the network on this computer")
+    if getattr(settings.source, "live", False):
+        raise ValueError("a live fit runs its network on this computer: set run on to this computer")
+    return RemotePredictor(host, m.path, None if m.device == "auto" else m.device,
+                           frames_mirrored=_mirrored(meta, camera), raw_th=m.threshold, batch_size=m.batch)
 
 
 def _mirrored(meta: dict, camera: CameraMetadata) -> bool:
