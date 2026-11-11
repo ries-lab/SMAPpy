@@ -138,17 +138,21 @@ def load_test_set(ds, path: Path):
     ds._target, ds._weight = tuple(d["target"]), d["weight"]
 
 
-def write_model(path: Path, model, param, job, epoch: int):
+def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=None):
     from smappy import __version__
     from smappy.training import model_file
+
+    from .predict import trained_on
     tensors = {k: v.detach().cpu().numpy() for k, v in model.state_dict().items()}
     meta = {"method": METHOD, "architecture": param.HyperParameter.architecture,
             "arch_param": _plain(param.HyperParameter.arch_param),
             "channels_in": param.HyperParameter.channels_in, "channels_out": 10,
-            "frames_mirrored": bool(job.data.get("frames_mirrored", False)),
+            # the EM state of the calibration's beads: the fitter flips data taken the other way
+            "calibration_em_on": None if calibration_em_on is None else bool(calibration_em_on),
             "scaling": _plain(param.Scaling), "camera": _plain(param.Camera),
             "post_processing": {"kind": param.PostProcessing, "raw_th": param.PostProcessingParam.raw_th},
             "calibration_sha256": job.calibration.get("sha256"), "ranges": job.ranges,
+            "trained_on": trained_on(param),
             "base_model": job.base_model, "epoch": epoch, "epochs": param.HyperParameter.epochs,
             "seed": job.seed, "smappy_version": __version__, "decode_version": "0.10.2"}
     model_file.write(path, tensors, meta)
@@ -340,6 +344,8 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
             load_weights(model, folder / job.base_model)
         first = 0
     n_epochs = param.HyperParameter.epochs
+    from smappy.io.calibration import load_spline_calibration
+    cal_em_on = load_spline_calibration(param.InOut.calibration_file).em_on
     progress.append(folder, "start", first, device=str(device), torch=torch.__version__, decode="0.10.2",
                     resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts)
     if first >= n_epochs:
@@ -381,7 +387,7 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
                 lr_scheduler.step(val_loss)
             else:
                 lr_scheduler.step()
-        write_model(folder / MODEL, model, param, job, i)
+        write_model(folder / MODEL, model, param, job, i, cal_em_on)
         _save_atomic({"epoch": i, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
                       "lr_scheduler": lr_scheduler.state_dict(), "rng": rng_state(), "restarts": restarts}, ckpt_path)
         progress.append(folder, "epoch", i, loss_train=loss_train, loss_test=float(val_loss), lr=lr,
