@@ -2,7 +2,7 @@
 
     python benchmarks/decode/benchmark/fit_sets.py [--calibration A] [--only NAME ...]
 
-The fitters on A: Spline 3D (fit box 13, *focus as calibrated*); the package's published model; the
+The fitters on A (on B, Spline 3D and the port's model trained on B, `models`): Spline 3D (fit box 13, *focus as calibrated*); the package's published model; the
 original's two reference runs (``original_run{1,2}``, their final weights, exported to model files
 by `decode_smlm.predict.export_original`); the port's two (``port_run{0,1}``).  DECODE's models are
 run through the predictor and `smappy.window_engine.WindowEngine`, the plugin's own path, with the
@@ -18,14 +18,20 @@ import time
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "pixelation"))
-from common import DATA, PACKAGE, SMAP_SPLINE  # noqa: E402
+from common import DATA, OUT, PACKAGE, SMAP_SPLINE  # noqa: E402
 
 ROOT = DATA / "benchmark"
 MODELS = ROOT / "models"
 
 
-def models():
-    """The DECODE models, as model files: the package's and the original runs' exported once."""
+def models(calibration="A"):
+    """The DECODE models, as model files: the package's and the original runs' exported once.
+
+    On B, the port's model trained on SMAPpy's bead calibration (the pixelation study's ``decode_B``,
+    trained after the ``x0`` fix) is the only DECODE model: the others were trained on A's spline.
+    """
+    if calibration == "B":
+        return {"port_B": OUT / "decode_B.safetensors"}
     from decode_smlm.predict import export_original
     from smappy.io.calibration import load_spline_calibration
     cal = load_spline_calibration(SMAP_SPLINE)
@@ -85,7 +91,7 @@ def main():
     a = ap.parse_args()
     root = ROOT / a.calibration
     meta = json.loads((root / "sets.json").read_text())
-    fitters = {"spline3d": None, **models()}
+    fitters = {"spline3d": None, **models(a.calibration)}
     for d in meta["sets"]:
         folder = root / f"density_{d}"
         for name, path in fitters.items():

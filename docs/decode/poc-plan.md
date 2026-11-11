@@ -1325,8 +1325,9 @@ DECODE?  Scripts in `benchmarks/decode/pixelation/` (`common.py` says how the da
   (``(roi_size - 1) / 2``), and its fitter never reads it.  Now SMAP's convention is used where the
   calibration carries SMAP's parameters (``emmirror``, ``ROIxy``), SMAPpy's elsewhere, and a centre
   that is not the grid's middle is refused (a test).  The whole-pixel shift leaves the pixelation
-  below as it is (0.04 px of it in the sub-pixel histograms); B's model is to be trained again before
-  anything else uses it.
+  below as it is (0.04 px of it in the sub-pixel histograms); B's model, trained again with the fix,
+  matches Spline 3D with B on 1.47 M spots (32 k before) at median offsets of 1.5, -0.7 and -1.5 nm in
+  x, y and z, z within 27 nm (robust spread, |z| < 300 nm) of Spline 3D's.
 - **DECODE with B against DECODE with A** (prob >= 0.7, 3.3 M each), KS from uniform, the larger of x
   and y:
 
@@ -1379,10 +1380,15 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
 - **DECODE pulls z towards the focus at the range's ends:** +8 to +13 nm at -650 nm, -11 to -15 at
   +650, the same in all five models; Spline 3D -7 to +6.  The experimental data showed the same
   (the pixelation study, above): a property of the trained network.
-- **Not yet:** the frames per second; the SMLM Challenge 2016 3D-AS set; one astigmatic SMAPpy
-  calibration (models to train on it, with the x0 fix); the example's real frames (the pixelation
-  study; precision from consecutive frames against DECODE's own uncertainties; the density test by
-  summing frames).
+- **B, SMAPpy's own bead calibration** (the pixelation study's pupil model of the same beads,
+  `--calibration B`; 2026-11-11): the same sets drawn with B, fitted by Spline 3D with B and the
+  port's model trained on B after the x0 fix (``port_B``, 1000 epochs on the H100).  The same
+  picture as on A: at density 1 and >= 2000 photons DECODE 1.11 times the CRLB, Spline 3D 1.23;
+  Jaccard 0.89 against 0.63 at density 1, 0.77 against 0.04 at 25, 0.64 at 50; offsets at most 2.0 nm
+  in x and y, 3.7 in z (at 50).  A model trained on a calibration SMAPpy made works as one trained on
+  SMAP's.
+- **Not yet:** the SMLM Challenge 2016 3D-AS set; the example's real frames (precision from
+  consecutive frames against DECODE's own uncertainties; the density test by summing frames).
 
 ### (h), first step: the window here (2026-11-11)
 

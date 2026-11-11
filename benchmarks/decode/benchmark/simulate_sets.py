@@ -14,7 +14,8 @@ a frame is Poisson, as DECODE draws it.
 
 Writes ``<out>/density_<d>/frames.tif`` (uint16) and ``truth.npz`` (frame, x_px, y_px, z_nm, photons;
 background per frame), and ``sets.json`` with the settings and seeds.  A is SMAP's spline of the
-example package, in the beads' orientation as SMAPpy loads it; the models trained on it see frames
+example package, B SMAPpy's own bead calibration of the same beads, both in the beads' orientation
+as SMAPpy loads them; the models trained on it see frames
 in that orientation, so nothing is flipped anywhere.
 """
 import argparse
@@ -25,7 +26,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "pixelation"))
-from common import DATA, SMAP_SPLINE  # noqa: E402
+from common import DATA, OUT, SMAP_SPLINE  # noqa: E402
 
 DENSITIES = (1, 5, 15, 25, 50)          # emitters per 40 x 40 pixels
 SIZE = 64
@@ -35,7 +36,9 @@ PHOTONS = (7000.0, 3000.0, 1000.0)      # mean, spread, the least
 BACKGROUND = (20.0, 200.0)
 CAMERA = dict(conversion=5.0, offset=398.6, em_gain=100.0, read_noise_adu=58.8 / 5.0)
 PIXEL_NM = (117.0, 127.0)
-CALIBRATIONS = {"A": SMAP_SPLINE}
+# A: SMAP's spline of the example package; B: SMAPpy's own bead calibration of its beads (the
+# pixelation study's ``beads_pupil.h5``), in the beads' orientation too
+CALIBRATIONS = {"A": SMAP_SPLINE, "B": OUT / "beads_pupil.h5"}
 
 
 def simulate(cal, density: int, seed: int):

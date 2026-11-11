@@ -16,7 +16,8 @@ from common import DATA  # noqa: E402
 
 STYLE = {"spline3d": ("k", "-", "Spline 3D"), "package": ("C2", "-", "DECODE, the package's model"),
          "original_run1": ("C0", "-", "original, run 1"), "original_run2": ("C0", "--", "original, run 2"),
-         "port_run0": ("C3", "-", "port, run 0"), "port_run1": ("C3", "--", "port, run 1")}
+         "port_run0": ("C3", "-", "port, run 0"), "port_run1": ("C3", "--", "port, run 1"),
+         "port_B": ("C3", "-", "port, trained on B")}
 
 
 def main():
