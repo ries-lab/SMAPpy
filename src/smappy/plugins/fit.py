@@ -707,6 +707,11 @@ class _FitPlugin(Plugin):
         engine.chip = channels.chip_layout(camera, source.shape)
         return engine
 
+    def provenance(self, camera: CameraMetadata, finder, model, settings, source) -> dict:
+        """The fitted file's record of how it was fitted (`pipeline.provenance`); a fitter
+        without a peak finder or a PSF fit (DECODE) records its own."""
+        return provenance(camera, finder, model, settings.fit, source=source)
+
     def finder(self, settings, camera: Optional[CameraMetadata] = None):
         """What finds the candidates, in each channel on its own for a
         multi-channel fitter."""
@@ -1258,7 +1263,6 @@ class _FitPlugin(Plugin):
             raise ValueError("choose a source file")
         source = self.open_source(settings, watch=src.live, stop_event=ctx.stop)
         camera = settings.camera.resolve(source)
-        fit = settings.fit
         finder = self.region_finder(settings, camera)
         settings = self.with_focus(ctx, settings, source, camera, finder)
         model = self._model_telling(ctx, settings, camera)
@@ -1301,7 +1305,7 @@ class _FitPlugin(Plugin):
                      f"records, so they divide back into camera pixels exactly")
         ctx.emit("start", {"extent": camera_extent(self.view_camera(camera), source.shape),
                            "path": out})
-        record = provenance(camera, finder, model, fit, source=src.path)
+        record = self.provenance(camera, finder, model, settings, src.path)
         if self.calibration_kind is not None and "calibration" not in record:
             # a two-channel model is two splines and records neither: the file it came from
             record["calibration"] = {"file": str(settings.model.calibration)}

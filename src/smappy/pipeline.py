@@ -340,6 +340,11 @@ def drive(engine, frames: Iterable[Tuple[int, np.ndarray]],
         if progress is not None:
             progress(engine)
     emit(engine.flush())
+    # an engine that holds frames back for context it has not seen yet -- DECODE's, which
+    # localizes a frame with its neighbours -- localizes them at the end of the source
+    end = getattr(engine, "end", None)
+    if end is not None:
+        emit(end())
     return collected
 
 
