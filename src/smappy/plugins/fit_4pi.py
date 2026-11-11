@@ -184,7 +184,8 @@ class FourPiFit(_FitPlugin):
 
     Settings = FourPiFitSettings
     # 2: positions on the camera chip, where channel 0 saw them, not in its own pixels
-    version = "2"
+    # 3: a fit region's part on any channel copied onto channel 0 (`fit.region_copies`)
+    version = "3"
     phase = True
     # its *channels* part is its own (`FourPiChannelsSettings`): four regions, not a two-way split
     channel_part = "own"
@@ -242,9 +243,12 @@ class FourPiFit(_FitPlugin):
         # DCIMG followed by its frames' footers, `io.dcimg.DcimgSource.watch`)
         return source.watch(**options)
 
+    def layer_layout(self, settings):
+        return self.open_source(settings).layout
+
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
         """The molecules found on the channels' sum, in the main channel's own pixels, judged by a
-        region drawn on the frame (`fit.ChannelRegionFinder`)."""
+        region drawn on the frame and copied onto every channel (`fit.ChannelRegionFinder`)."""
         from .fit import ChannelRegionFinder
         finder = self.finder(settings, camera)
         region = getattr(settings, "region", None)
@@ -361,7 +365,7 @@ class FourPiFit(_FitPlugin):
             panels[0].plot(found_on_frame[:, 0], found_on_frame[:, 1], "o", mfc="none",
                            color="C1", ms=8)
             panels[0].set_title("sum")
-            draw_region(panels[0], shapes)
+            draw_region(panels[0], shapes, layout)
             for c in range(layout.n_channels):
                 ax = panels[c + 1]
                 ax.imshow(channels[0, c], cmap="gray")

@@ -97,3 +97,118 @@ def test_a_shape_drawn_on_the_preview_goes_into_the_form(stack):
     tools.undo()
     assert panel.form.value().region.shapes == []
     plt.close("all")
+
+
+# ------------------------------------------------------------ a split chip: copied through the channels
+def halves(mirrored=False):
+    from smappy.channels import ChannelLayout
+    return ChannelLayout([(30, 0, 30, 48), (0, 0, 30, 48)],
+                         flips=[(False, False), (mirrored, False)])
+
+
+def test_a_shape_on_one_channel_is_copied_where_that_sample_lies_in_the_other():
+    from smappy.plugins.fit import region_copies
+    shape = rect("include", 8, 5, 16, 15)                       # on the left channel, channel 2
+    copy, = region_copies([shape], halves())
+    np.testing.assert_allclose(np.sort(np.asarray(copy["points"])[:, 0]), [38, 38, 46, 46])
+    assert copy["kind"] == "include" and copy["copied_from"] == 1
+    # mirrored: the left channel's x runs the other way, and so does the copy
+    copy, = region_copies([shape], halves(mirrored=True))
+    np.testing.assert_allclose(np.sort(np.asarray(copy["points"])[:, 0]), [43, 43, 51, 51])
+
+
+def test_a_strip_along_the_seam_crops_both_channels_inner_edges():
+    """The usual *leave out*: the DoG's artefacts and scattered light along the boundary.  Each
+    side's part is copied onto the other: mirrored, inner edge onto inner edge."""
+    from smappy.plugins.fit import channel_region
+    strip = rect("exclude", 27, 0, 33, 48)
+    judged = channel_region([strip], halves(mirrored=True))
+    x = np.array([24.0, 28.0, 31.0, 36.0])
+    assert in_region(x, np.full(4, 10.0), judged).tolist() == [True, False, False, True]
+    # not mirrored, the inner edge of the left is the outer edge of the right
+    judged = channel_region([strip], halves())
+    assert not in_region(np.array([2.0]), np.array([10.0]), judged)[0]
+
+
+def test_a_two_channel_fit_fits_both_channels_in_a_region_drawn_on_one(stack):
+    """A *fit in* rectangle on one half of a split chip fitted that half alone (2026-11)."""
+    settings = settings_for(GaussianFit, stack)
+    settings.channels.split = "two channels"
+    settings.channels.layout, settings.channels.main_channel = "right-left", "right"
+    settings.region.shapes = [rect("include", 4, 2, 24, 20)]   # the left half's top: (12, 10)
+    settings.output.save = False
+    locs = GaussianFit().run(Context(), settings).locs
+    xy = np.column_stack([np.asarray(locs["x_nm"]) / 100, np.asarray(locs["y_nm"]) / 100])
+    assert near(xy, EMITTERS[0]) and near(xy, EMITTERS[1])     # and its copy on the right: (40, 10)
+    assert not near(xy, EMITTERS[2]) and not near(xy, EMITTERS[3])
+    assert set(np.unique(locs["camera_channel"])) == {0, 1}
+
+
+def test_a_region_that_leaves_a_channel_nothing_is_said():
+    from smappy.plugins.fit import region_problem
+    assert region_problem([rect("include", 4, 2, 24, 20)], halves()) is None
+    assert region_problem([rect("exclude", 0, 0, 30, 48)], halves()) \
+        .startswith("the fit region leaves nothing of channels 1 and 2")
+    off = rect("include", 70, 0, 80, 10)                       # beside the frame: no channel
+    assert "channels 1 and 2" in region_problem([off], halves())
+    assert region_problem([off], None) is None                 # a whole-chip fit: not asked
+
+
+def test_the_form_says_when_the_region_leaves_a_channel_nothing(stack):
+    settings = settings_for(GaussianFit, stack)
+    settings.channels.split = "two channels"
+    settings.channels.layout, settings.channels.main_channel = "right-left", "right"
+    settings.region.shapes = [rect("exclude", 0, 0, 60, 48)]
+    notice = GaussianFit().describe(None, settings).notice
+    assert notice is not None and "leaves nothing" in notice.text
+
+
+def _edited_pane(stack, shapes):
+    """A Preview's figure with the drawing tools, its shapes written into a list as the form would."""
+    pytest.importorskip("PySide6")
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.figures import FigurePane
+    settings = settings_for(GaussianFit, stack)
+    settings.region.shapes = shapes
+    result = GaussianFit().preview(Context(), settings, frame=0)
+    kept = []
+    result.plot.edit.on_change = kept.append
+    pane = FigurePane()
+    pane.offer(result.plot)
+    pane.draw()
+    tools = pane.shape_tools
+    tools.edit_button.setChecked(True)
+    tools._choose(len(tools.buttons))
+    click = (lambda x, y: tools._pressed(SimpleNamespace(inaxes=tools.ax, xdata=x, ydata=y)))
+    return tools, kept, click
+
+
+def test_a_drawn_rectangle_is_taken_up_and_resized(stack):
+    from matplotlib.widgets import RectangleSelector
+    tools, kept, click = _edited_pane(stack, [rect("include", 0, 0, 30, 22)])
+    click(50, 40)                                              # on no shape: nothing taken up
+    assert tools._editing is None and tools._selector is None
+    click(15, 10)
+    assert tools._editing == 0 and isinstance(tools._selector, RectangleSelector)
+    tools._selector.extents = (0, 40, 0, 22)                   # its right edge dragged out
+    tools._selector.onselect(None, None)
+    assert kept[-1] == [rect("include", 0, 0, 40, 22)]
+    # drawn again, the shape stays in the selector, at its new size
+    assert tools._editing == 0 and tools._selector.extents == pytest.approx((0, 40, 0, 22))
+    click(55, 45)                                              # let go
+    assert tools._selector is None
+    plt.close("all")
+
+
+def test_a_drawn_polygon_is_taken_up_by_its_vertices(stack):
+    from matplotlib.widgets import PolygonSelector
+    triangle = {"kind": "exclude", "points": [[5.0, 5.0], [25.0, 5.0], [15.0, 20.0]]}
+    tools, kept, click = _edited_pane(stack, [triangle])
+    click(15, 9)
+    assert isinstance(tools._selector, PolygonSelector)
+    tools._selector.verts = [(5, 5), (25, 5), (15, 30)]
+    tools._selector.onselect(tools._selector.verts)
+    assert kept[-1] == [{"kind": "exclude", "points": [[5, 5], [25, 5], [15, 30]]}]
+    plt.close("all")

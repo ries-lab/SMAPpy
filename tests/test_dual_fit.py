@@ -442,7 +442,9 @@ def test_a_2c_preview_shows_each_channels_peaks_and_the_fits_where_the_channels_
     figure = plt.figure()
     result.plot.draw_into(figure)
     panels = {a.get_title(): a for a in figure.axes if a.get_title()}
-    first, second = panels["channel 1"], panels["channel 2"]
+    # the whole frame, both channels where they lie, so that a region can be drawn on either
+    first, second = panels["frame"], panels["channel 2"]
+    assert first.get_xlim()[1] - first.get_xlim()[0] == pytest.approx(64)
 
     def marked(panel, marker):
         line = next(l for l in panel.lines if l.get_marker() == marker)

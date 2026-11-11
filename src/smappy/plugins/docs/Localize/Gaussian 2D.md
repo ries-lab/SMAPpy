@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper]
+version: "5"
+covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
 ## What it does
@@ -373,9 +373,10 @@ chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
 `PIZStage` draws the piezo position, which shows at once whether the focus
-lock held.  The figure opens while the fit runs and is redrawn every 5
-seconds, so a focus lock that slips is seen during the acquisition; when the
-fit is done the same window shows the final figure.  On a microscope whose
+lock held.  The figure opens when the fit is done; a window of it still
+open from an earlier fit is redrawn every 5 seconds while the fit runs, in
+place and without coming to the front, so a focus lock that slips is seen
+during the acquisition.  On a microscope whose
 piezo has another name, put that name (or part of it) here.  Every tag that changed is kept in the file whatever this
 says; Analysis/Process/Image Tags draws any of them later.
 
@@ -384,11 +385,22 @@ To fit only part of the camera frame -- one cell of several, or everything
 but a bright bead or a dirty corner -- press *Preview* and draw on the
 frame it shows: the buttons above the figure draw a rectangle or a polygon
 to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
-shapes away.  With shapes to fit in, only the candidates inside one of them
+shapes away, and *edit* takes a drawn shape back: click it, then drag its handles or its middle (a polygon by its corners; shift-drag moves it whole).  With shapes to fit in, only the candidates inside one of them
 are fitted; a candidate inside a shape left out never is.  The frame is
 still filtered whole, so a dynamic cutoff is set as without a region.  The
 shapes are in the frame's pixels and kept with the settings -- in the
 workspace, a chain or a batch they apply to every file.
+
+Read as *two channels*, a shape marks a part of the sample, not of the
+camera: its part on either channel is copied onto the other, where the
+channels' layout puts the same part of the sample (dotted on the Preview).
+A cell outlined on one half is fitted in both, and a strip left out along
+the boundary between the channels -- where the filter's edge and scattered
+light give dim, false localizations -- crops both channels' inner edges.
+Before version 5 a shape acted only on the half it was drawn on, so a *fit
+in* rectangle on one half left the other unfitted.  A region that leaves a
+channel nothing to fit is said under the form, in the Preview and at the
+run.
 
 ## Output
 

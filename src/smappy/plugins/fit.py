@@ -204,6 +204,92 @@ def in_region(x, y, shapes) -> np.ndarray:
     return keep
 
 
+def _clip_to_rectangle(points, left, top, right, bottom) -> np.ndarray:
+    """The part of polygon ``points`` (n, 2) inside the rectangle, a polygon again (Sutherland and
+    Hodgman's clipping, one edge of the rectangle at a time); fewer than three points when none."""
+    poly = [tuple(p) for p in np.asarray(points, float).reshape(-1, 2)]
+    for axis, bound, keep_above in ((0, left, True), (0, right, False),
+                                    (1, top, True), (1, bottom, False)):
+        def inside(p):
+            return p[axis] >= bound if keep_above else p[axis] <= bound
+
+        def crossing(p, q):
+            t = (bound - p[axis]) / (q[axis] - p[axis])
+            return (p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]))
+        out = []
+        for i, q in enumerate(poly):
+            p = poly[i - 1]
+            if inside(q):
+                if not inside(p):
+                    out.append(crossing(p, q))
+                out.append(q)
+            elif inside(p):
+                out.append(crossing(p, q))
+        poly = out
+        if len(poly) < 3:
+            return np.zeros((0, 2))
+    return np.asarray(poly, float)
+
+
+def region_copies(shapes, layout) -> list:
+    """The fit region's shapes copied onto the other channels of a channel layer: each shape's part
+    on a channel, through the layout's map (`ChannelLayout.to_reference`, `to_channel`), onto every
+    other channel where that part of the sample lies.
+
+    A region means a part of the sample, not of the camera: the cell to fit, the scattered light
+    and the DoG's artefacts along the seam to leave out.  Drawn on one channel -- whichever shows
+    the structure best -- it applies to all.  Before (2026-11), a shape on one half of a split chip
+    left the other half unfitted, or not judged at all, and a *fit in* rectangle on one half fitted
+    one channel only.  Clipped to each channel before it is mapped, so that a strip drawn along the
+    seam crops both channels' edges and a polynomial registration is never read beyond its half.
+    Copies are on the frame, as the shapes are; marked ``copied_from``, the channel they came from.
+    """
+    out = []
+    n = layout.n_channels
+    for shape in shapes or ():
+        points = np.asarray(shape.get("points") or [], float).reshape(-1, 2)
+        if len(points) < 3:
+            continue
+        for k in range(n):
+            x, y, w, h = layout.regions[k]
+            part = _clip_to_rectangle(points, x - 0.5, y - 0.5, x + w - 0.5, y + h - 0.5)
+            if len(part) < 3:
+                continue
+            reference = layout.to_reference(k, layout.from_frame(k, part))
+            for c in range(n):
+                if c != k:
+                    there = layout.on_frame(c, layout.to_channel(c, reference))
+                    out.append({"kind": shape.get("kind"), "points": there.tolist(),
+                                "copied_from": k})
+    return out
+
+
+def channel_region(shapes, layout) -> list:
+    """The shapes as drawn and their copies on the other channels (`region_copies`): what a
+    candidate of any channel is judged by, at its place on the frame."""
+    return list(shapes or ()) + region_copies(shapes, layout)
+
+
+def region_problem(shapes, layout) -> Optional[str]:
+    """A line when the region leaves a channel nothing to fit, else None: a grid over each channel
+    judged as its candidates are.  With the shapes copied through the channels it takes a *fit in*
+    shape off every channel, or a *leave out* over a whole one -- seldom what was meant, and the
+    fit's only sign of it otherwise is a channel with no localizations."""
+    if not shapes or layout is None or layout.n_channels < 2:
+        return None
+    judged = channel_region(shapes, layout)
+    empty = []
+    for c, (x, y, w, h) in enumerate(layout.regions):
+        gx, gy = np.meshgrid(np.linspace(x, x + w - 1, 24), np.linspace(y, y + h - 1, 24))
+        if not in_region(gx.ravel(), gy.ravel(), judged).any():
+            empty.append(str(c + 1))
+    if not empty:
+        return None
+    which = " and ".join(empty)
+    return (f"the fit region leaves nothing of channel{'s' * (len(empty) > 1)} {which} to fit: "
+            f"draw a *fit in* shape over the sample, or clear the region")
+
+
 class _Points:
     """Positions as a Preview draws candidates: ``x``, ``y`` and a length."""
 
@@ -242,17 +328,19 @@ class RegionFinder:
 
 class ChannelRegionFinder(RegionFinder):
     """`RegionFinder` for candidates in a channel layer's channel (the main one unless told): the
-    region is drawn on the frame, as for a whole-chip fit, so each candidate is put back there
-    (`ChannelLayout.on_frame`) before it is judged."""
+    region is drawn on the frame, as for a whole-chip fit, and copied onto the other channels
+    (`channel_region`), so each candidate is put back on the frame (`ChannelLayout.on_frame`) and
+    judged there by the shapes and their copies."""
 
     def __init__(self, finder, shapes, layout, channel: int = 0):
         super().__init__(finder, shapes)
         self.layout, self.channel = layout, channel
+        self.judged = channel_region(self.shapes, layout)
 
     def __call__(self, photons, first_frame: int = 0, **kwargs):
         candidates, filtered = self._finder(photons, first_frame=first_frame, **kwargs)
         on = self.layout.on_frame(self.channel, np.c_[candidates.x, candidates.y])
-        return candidates[in_region(on[:, 0], on[:, 1], self.shapes)], filtered
+        return candidates[in_region(on[:, 0], on[:, 1], self.judged)], filtered
 
 
 #: how a shape of the region is drawn: what is fitted in, what is left out
@@ -260,16 +348,24 @@ REGION_STYLE = {"include": dict(color="#2ca02c", ls="-"),
                 "exclude": dict(color="#d62728", ls="--")}
 
 
-def draw_region(ax, shapes) -> None:
+def draw_region(ax, shapes, layout=None) -> None:
     """The region's shapes as outlines on a frame: green the parts fitted
-    in, dashed red the parts left out."""
-    for shape in shapes or ():
+    in, dashed red the parts left out; on a channel layer (``layout``) their
+    copies on the other channels too (`region_copies`), thin and dotted.  The
+    axis keeps its limits: a copy may lie beyond what the panel shows."""
+    limits = ax.get_xlim(), ax.get_ylim()
+    copies = region_copies(shapes, layout) if layout is not None else []
+    for shape in list(shapes or ()) + copies:
         points = np.asarray(shape.get("points") or [], float)
         if len(points) < 3:
             continue
         closed = np.vstack([points, points[:1]])
-        style = REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"])
-        ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
+        style = dict(REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"]))
+        if "copied_from" in shape:
+            style.update(ls=":", alpha=0.8)
+        ax.plot(closed[:, 0], closed[:, 1], lw=1.0 if "copied_from" in shape else 1.5, **style)
+    ax.set_xlim(limits[0])
+    ax.set_ylim(limits[1])
 
 
 @dataclass
@@ -717,6 +813,35 @@ class _FitPlugin(Plugin):
         multi-channel fitter."""
         return settings.detection.finder(settings.fit.n_threads)
 
+    def region_problem(self, settings, layout) -> Optional[str]:
+        """`region_problem` for this fit's region on ``layout``, the channel layer it fits on (None
+        on a whole chip): a line to warn with, or None."""
+        region = getattr(settings, "region", None)
+        if region is None or not region.active() or layout is None:
+            return None
+        return region_problem(list(region.shapes), layout)
+
+    def region_layout(self, settings):
+        """The channel layer this fit's region is judged on, for the form: the *two channels*'
+        split on this file's frames, None on the whole chip; kept per file and settings, as the
+        form asks with every change.  The fitters with a layer of their own override it."""
+        if not settings.source.path:
+            return None
+        # everything but the region, which is what changes while it is drawn
+        key = repr(replace(settings, region=FitRegionSettings()))
+        if getattr(self, "_region_layout_key", None) != key:
+            self._region_layout_value = self.layer_layout(settings)
+            self._region_layout_key = key
+        return self._region_layout_value
+
+    def layer_layout(self, settings):
+        """The channel layer this fit runs on, None on the whole chip (`region_layout`)."""
+        channels = getattr(settings, "channels", None)
+        if not getattr(channels, "two", False):
+            return None
+        source = _open(replace(settings.source, live=False), watch=False)
+        return channels.layout_for(self._camera(settings), source.shape)
+
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
         """`finder`, keeping only the candidates in the drawn region
         (`FitRegionSettings`) when there is one."""
@@ -828,6 +953,13 @@ class _FitPlugin(Plugin):
         if region is not None:
             state.titles["region"] = region.summary()
             state.active["region.use"] = bool(region.shapes)
+            if state.notice is None and region.active():
+                try:
+                    problem = self.region_problem(settings, self.region_layout(settings))
+                except Exception:
+                    problem = None
+                if problem:
+                    state.notice = Notice(problem)
         finish = getattr(settings, "finish", None)
         if finish is not None:
             # a step only where this fitter's table can take it: colours after
@@ -1154,9 +1286,11 @@ class _FitPlugin(Plugin):
         else:
             photons = to_photons(raw, camera)/camera.excess_noise
         channels = getattr(settings, "channels", None)
+        layer = None
         if self.channel_part == "choice" and channels.two:
             # each channel on its own, drawn back on the frame
             split = self.engine(settings, camera, finder, None, source)
+            layer = split.layout
             xy, filtered, cutoffs = split.detect(photons[None], first_frame=index)
             candidates = _Points(xy)
             cutoff = max(cutoffs)
@@ -1192,6 +1326,9 @@ class _FitPlugin(Plugin):
             lines.append(f"{len(locs)} fitted")
         if trouble:
             lines.append("not fitted -- " + trouble)
+        problem = self.region_problem(settings, layer)
+        if problem:
+            lines.append(problem)
         text = "; ".join(lines)
 
         fitted = None
@@ -1216,7 +1353,7 @@ class _FitPlugin(Plugin):
                        ms=9, mew=1, label=f"{len(candidates)} peaks")
             peaks.set(title=f"frame {index}: peaks found")
             peaks.legend(fontsize=7, loc="upper right")
-            draw_region(peaks, shapes)
+            draw_region(peaks, shapes, layer)
 
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
@@ -1396,6 +1533,9 @@ class _FitPlugin(Plugin):
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
+            problem = self.region_problem(settings, getattr(engine, "layout", None))
+            if problem:
+                ctx.warn(problem)
             drive(engine, blocks, sink=sink, progress=progress, read_ahead=2,
                   flush_seconds=0.0 if src.live else None)
             record["frame_tags"] = tags.table()
@@ -1735,7 +1875,8 @@ class GaussianFit(_FitPlugin):
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
     # 3: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
     # 4: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
-    version = "4"
+    # 5: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
+    version = "5"
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1754,7 +1895,8 @@ class SplineFit(_FitPlugin):
     # 6: *focus* on auto by default: a pupil (Zernike) calibration is drawn for the focus in the
     #    sample, z the height above the coverslip (`calibrate.depth`)
     # 7: *focus in situ* holds a minimal bead model's γ, where it held a flat magnitude (`insitu_run.held_pupil`)
-    version = "7"
+    # 8: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
+    version = "8"
     calibration_kind = "single"
 
     def model(self, settings, camera):
@@ -2319,9 +2461,12 @@ class _TwoChannelFit(_FitPlugin):
     def watch_blocks(self, source, path, **options):
         return source.watch(**options)
 
+    def layer_layout(self, settings):
+        return self.open_source(settings).layout
+
     def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
-        # each channel is searched alone; the region, drawn on channel 0, picks among the pairs
-        # (`engine`), so a molecule only the other channel saw is judged where it lies
+        # each channel is searched alone; the region, drawn on either channel and copied onto the
+        # other, picks among the pairs at the main channel's place (`engine`)
         return self.finder(settings, camera)
 
     def photon_factors(self, settings) -> tuple:
@@ -2351,8 +2496,9 @@ class _TwoChannelFit(_FitPlugin):
         region = getattr(settings, "region", None)
         select = None
         if region is not None and region.active():
-            # drawn on the frame, as for a whole-chip fit; the pairs are in channel 0's own pixels
-            shapes, layout = list(region.shapes), source.layout
+            # drawn on the frame, as for a whole-chip fit, on either channel and copied onto the
+            # other (`channel_region`); the pairs are in channel 0's own pixels
+            shapes, layout = channel_region(region.shapes, source.layout), source.layout
 
             def select(x, y):
                 on = layout.on_frame(0, np.c_[x, y])
@@ -2390,9 +2536,9 @@ class _TwoChannelFit(_FitPlugin):
         return result
 
     def _layer_preview(self, ctx: Context, settings, frame: int) -> Result:
-        """One frame: each channel with the molecules found in it, with its own cutoff; on channel 1
-        -- drawn where it lies on the frame, where a fit region is drawn as for a whole-chip fit --
-        the second channel's peaks put there by the registration, the cheapest check of it there
+        """One frame: each channel with the molecules found in it, with its own cutoff; on the frame
+        -- both channels where they lie on the chip, where a fit region is drawn on either, as for
+        a whole-chip fit -- the second channel's peaks put on the first by the registration, the cheapest check of it there
         is; and the fitted positions in both.  Without a registration, the frame as the camera
         wrote it."""
         from . import ShapeEdit
@@ -2423,6 +2569,8 @@ class _TwoChannelFit(_FitPlugin):
         own = layout.to_reference(1, np.c_[found[1].x, found[1].y].astype(float))
         projected = layout.on_frame(0, own)
         found_on_frame = layout.on_frame(0, np.c_[found[0].x, found[0].y].astype(float))
+        found_1_on_frame = layout.on_frame(1, np.c_[found[1].x, found[1].y].astype(float))
+        frame_h, frame_w = source.base.shape[-2:]
         text = (f"frame {index}: " + ", ".join(f"{len(f)} in channel {c + 1} (cutoff {k:.3g})"
                                                 for c, (f, k) in enumerate(zip(found, cutoffs))))
         fitted, trouble = None, ""
@@ -2435,6 +2583,9 @@ class _TwoChannelFit(_FitPlugin):
         except Exception as error:
             trouble = str(error)
             text += f"; not fitted -- {error}"
+        problem = self.region_problem(settings, layout)
+        if problem:
+            text += f"; {problem}"
         (px, py), _ = camera.pixelsize_nm_or_default
         roi = np.array(camera.roi_offset, float)
         shapes = list(settings.region.shapes)
@@ -2449,13 +2600,24 @@ class _TwoChannelFit(_FitPlugin):
             for c, ax in enumerate(panels):
                 w, h = layout.sizes[c]
                 if c == 0:
-                    ax.imshow(channels[0, c, :h, :w], cmap="gray", extent=layout.frame_extent(0))
+                    # the whole frame, each channel where it lies on the chip, so that a region
+                    # can be drawn on either: it is copied onto the other (`region_copies`)
+                    top = max(float(np.percentile(channels[0, k, :hk, :wk], 99.8))
+                              for k, (wk, hk) in enumerate(layout.sizes)) or None
+                    for k, (wk, hk) in enumerate(layout.sizes):
+                        ax.imshow(channels[0, k, :hk, :wk], cmap="gray", vmax=top,
+                                  extent=layout.frame_extent(k))
+                    ax.set_xlim(-0.5, frame_w - 0.5)
+                    ax.set_ylim(frame_h - 0.5, -0.5)
                     ax.plot(found_on_frame[:, 0], found_on_frame[:, 1], "o", mfc="none",
                             color="C1", ms=8)
+                    ax.plot(found_1_on_frame[:, 0], found_1_on_frame[:, 1], "o", mfc="none",
+                            color="C1", ms=8)
+                    ax.set_title("frame")
                 else:
                     ax.imshow(channels[0, c, :h, :w], cmap="gray")
                     ax.plot(found[c].x, found[c].y, "o", mfc="none", color="C1", ms=8)
-                ax.set_title(f"channel {c + 1}")
+                    ax.set_title(f"channel {c + 1}")
                 if on_frame is not None:
                     there = (on_frame if c == 0
                              else layout.to_channel(c, layout.from_frame(0, on_frame)))
@@ -2463,7 +2625,7 @@ class _TwoChannelFit(_FitPlugin):
                 ax.set_xticks([])
                 ax.set_yticks([])
             panels[0].plot(projected[:, 0], projected[:, 1], "x", color="C0", ms=6)
-            draw_region(panels[0], shapes)
+            draw_region(panels[0], shapes, layout)
         return Result(text=text, settings=settings,
                       plot=Plot(draw, panels=2, size=(7, 3.6),
                                 edit=ShapeEdit("region.shapes", panel=0, shapes=shapes)),
@@ -2503,7 +2665,8 @@ class DualSplineFit(_TwoChannelFit):
     # 11: positions on the camera chip, where the main channel saw them (the ROI's corner added),
     #     as every fitter reports them; not counted from the main channel's corner
     # 12: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
-    version = "12"
+    # 13: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
+    version = "13"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2728,7 +2891,8 @@ class DualGaussianFit(_TwoChannelFit):
     #    detected; the vote across the seam only
     # 9: positions on the camera chip, as Spline 3D 2C's 11
     # 10: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
-    version = "10"
+    # 11: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
+    version = "11"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

@@ -1,6 +1,6 @@
 ---
-version: "10"
-covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement]
+version: "11"
+covers: [smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.geometry_layout, smappy.channels.ChannelLayout.on_camera, smappy.channels.ChannelLayout.cut, smappy.multichannel.paired_candidates, smappy.multichannel.channel_candidates, smappy.multichannel.build_link, smappy.multichannel.cut_channel_rois, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.multichannel.SplitEngine, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels, smappy.calibrate.dual.resolve_arrangement, smappy.microscope_db.Microscope.arrangement, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
 ---
 
 ## What it does
@@ -505,9 +505,10 @@ chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
 `PIZStage` draws the piezo position, which shows at once whether the focus
-lock held.  The figure opens while the fit runs and is redrawn every 5
-seconds, so a focus lock that slips is seen during the acquisition; when the
-fit is done the same window shows the final figure.  On a microscope whose
+lock held.  The figure opens when the fit is done; a window of it still
+open from an earlier fit is redrawn every 5 seconds while the fit runs, in
+place and without coming to the front, so a focus lock that slips is seen
+during the acquisition.  On a microscope whose
 piezo has another name, put that name (or part of it) here.  Every tag that changed is kept in the file whatever this
 says; Analysis/Process/Image Tags draws any of them later.
 
@@ -516,16 +517,21 @@ To fit only part of the camera frame -- one cell of several, or everything
 but a bright bead or a dirty corner -- press *Preview* and draw on the
 frame it shows: the buttons above the figure draw a rectangle or a polygon
 to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
-shapes away.  With shapes to fit in, only the candidates inside one of them
+shapes away, and *edit* takes a drawn shape back: click it, then drag its handles or its middle (a polygon by its corners; shift-drag moves it whole).  With shapes to fit in, only the candidates inside one of them
 are fitted; a candidate inside a shape left out never is.  The channels
 are still filtered whole, so a dynamic cutoff is set as without a region.
-The shapes are drawn on channel 1, the main channel, shown where it lies on
-the frame -- as for a whole-chip fit -- and kept with the settings: in the
-workspace, a chain or a batch they apply to every file.  They act on the
-pairs: each channel's peaks are found and paired first, and a molecule is
-kept or left out by where it lies in channel 1 -- so a bead left out is not
-fitted from its partner in the other channel, and a molecule only the dim
-channel saw is judged where it lies.  Draw after the registration is chosen:
+The Preview's *frame* panel shows both channels where they lie on the chip,
+and a shape may be drawn on either: it marks a part of the sample, so its
+part on each channel is copied onto the other through the registration
+(dotted) -- a structure that shows best in channel 2 is outlined there, and
+a strip left out along the boundary between the channels crops both inner
+edges.  The shapes are kept with the settings: in the workspace, a chain or
+a batch they apply to every file.  They act on the pairs: each channel's
+peaks are found and paired first, and a molecule is kept or left out by
+where it lies in channel 1, by the shapes and their copies -- so a bead left
+out is not fitted from its partner in the other channel, and a molecule only
+the dim channel saw is judged where it lies.  A region that leaves a channel
+nothing to fit is said under the form, in the Preview and at the run.  Draw after the registration is chosen:
 without one the Preview shows the frame as the camera wrote it.
 
 ## Output
@@ -554,7 +560,8 @@ drift curve -- open with the fit's result.
 
 What to check:
 
-* **The preview.**  It shows the two channels side by side, with the peaks
+* **The preview.**  It shows the whole frame, both channels where they lie on
+  the chip, beside channel 2 in its own pixels, with the peaks
   found in each (circles), the second channel's peaks mapped onto the first
   with the transformation (crosses), and the fitted positions in both.  A
   cross that sits on its partner's circle is a good registration; a cross
