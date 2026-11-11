@@ -428,6 +428,57 @@ def column_table(locs: Localizations, column: str, label: str, ids, values,
     return RegionTable.from_columns(label, ids, values, step, signature, data, groups)
 
 
+def _parts(locs: Localizations, channel: bool) -> np.ndarray:
+    """Each row's file and channel, (n, 2); 0 for a column the table lacks."""
+    n = len(locs)
+    f = (np.asarray(locs["filenumber"], float) if "filenumber" in locs
+         else np.zeros(n))
+    c = np.asarray(locs["channel"], float) if channel else np.zeros(n)
+    return np.column_stack([f, c])
+
+
+def replaced_rows(whole: Localizations, table: Localizations, use) -> np.ndarray:
+    """The rows of ``whole`` a run on ``table``'s rows ``use`` writes an id
+    column afresh on: every row of each file and channel it read -- the rest
+    keep theirs.
+
+    The unit is what a layer picks out of the data, a file and a channel:
+    with two files, or two colours of one, on two layers, a run on the
+    second must not erase the first's ids (a bug until 2026-11).  Not the
+    rows ``use`` names alone: a filter or ROI only says which rows take
+    part, and rows it leaves out inside a file it read are 0, as before --
+    keeping their old ids would mix two runs' ids in one field of view, and
+    an ROI cutting a cluster would leave a fragment of it with its old id.
+    ``table`` is ``whole`` or its grouped table, ``use`` a mask over it."""
+    channel = "channel" in whole and "channel" in table
+    read = _parts(table, channel)[np.asarray(use, dtype=bool)]
+    if len(read) == 0:
+        return np.zeros(len(whole), dtype=bool)
+    read = np.unique(read, axis=0)
+    rows = _parts(whole, channel)
+    _, inverse = np.unique(np.concatenate([read, rows]), axis=0, return_inverse=True)
+    inverse = inverse.ravel()
+    return np.isin(inverse[len(read):], inverse[:len(read)])
+
+
+def merge_ids(old, new: np.ndarray, replaced: np.ndarray) -> Tuple[np.ndarray, int]:
+    """``new`` ids on the ``replaced`` rows and ``old`` (None: none yet) on
+    the rest; and how many ids were kept.
+
+    The new ids are shifted above the largest kept one, so none is shared
+    with a kept region.  The kept ids are never renumbered: results stored
+    per region (`Session.id_regions`) and ROIs made from the column name
+    them."""
+    new = np.asarray(new, dtype=np.int64)
+    kept = (np.zeros(len(new), dtype=np.int64) if old is None
+            else np.where(replaced, 0, np.asarray(old)).astype(np.int64))
+    kept[kept < 0] = 0
+    offset = int(kept.max(initial=0))
+    shifted = np.where(new > 0, new + offset, 0)
+    n_kept = len(np.unique(kept[kept > 0]))
+    return np.where(replaced, shifted, kept), n_kept
+
+
 def layer_mask(ctx) -> np.ndarray:
     """The layer's own filter over ``ctx.locs`` -- not the drawn ROI nor the
     slab, and not what is written from regions (`unmeasured`): what a

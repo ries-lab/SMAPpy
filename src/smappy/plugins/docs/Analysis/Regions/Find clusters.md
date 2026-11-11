@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.voronoi_clusters, smappy.plugins.clusters.hdbscan_clusters, smappy.plugins.clusters.by_size, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.FindClusters.run, smappy.plugins.clusters.FindClusters.preflight]
 ---
 
@@ -92,6 +92,16 @@ joins the cluster of the nearest core point.  The rest are **noise**:
 **4. Names.**  The clusters are numbered by size, the largest 1.
 `n_in_cluster` is written beside `cluster_id`; both are kept when blinks
 are merged, a blink taking its cluster.
+
+**Several files or colours.**  A run writes `cluster_id` afresh only in the
+files and channels its layer shows.  The others keep their clusters, and
+the new ones are numbered after the largest kept number.  So two files, or
+two colours of one file, on two layers are clustered one after the other:
+run it on the first layer, then on the second, and both keep their
+clusters.  Inside a file and channel the layer shows, a localization its
+filter or ROI leaves out gets 0, never an old number: a field of view never
+holds clusters of two runs.  A kept cluster keeps its number, so results
+measured per cluster and ROIs made from the clusters still point to it.
 
 ```figure 141 simulated nuclear pores (left; a colour per pore) and the clusters DBSCAN finds with a 50 nm radius and 10 neighbours (right; a colour per cluster, noise grey): every cluster holds one pore, and one pore came out as two clusters.
 fig.set_size_inches(8, 4)

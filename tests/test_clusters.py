@@ -102,6 +102,64 @@ def test_only_the_selected_localizations_are_clustered_and_each_file_alone():
     assert set(ids[(files == 1) & (ids > 0)]).isdisjoint(set(ids[(files == 0) & (ids > 0)]))
 
 
+def two_parts(column):
+    """The blobs twice, the copy 50 um away and in part 1 of ``column``."""
+    xy, truth = blobs()
+    xy = np.vstack([xy, xy + 50000])
+    part = np.repeat([0, 1], len(truth))
+    return table(xy, **{column: part}), np.concatenate([truth, truth]), part
+
+
+def test_a_second_file_on_another_layer_keeps_the_first_files_clusters():
+    locs, truth, files = two_parts("filenumber")
+    session = Session(locs)
+    session.show_grouped(0, False)
+    session.layers[0].set_files([0])
+    second = session.add_layer(like=0)
+    second.set_files([1])
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5), layer=0)
+    first = np.asarray(session.locs["cluster_id"])[files == 0].copy()
+    result = session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5), layer=1)
+    ids = np.asarray(session.locs["cluster_id"])
+    assert np.array_equal(ids[files == 0], first)          # kept, numbers and all
+    assert np.array_equal(first, truth[files == 0])
+    assert set(ids[(files == 1) & (ids > 0)]) == {4, 5, 6}  # numbered above them
+    assert np.asarray(session.locs["n_in_cluster"])[(files == 1) & (truth == 1)][0] == 60
+    assert "3 clusters of other files or channels kept" in result.text
+    # again on the second file: its own clusters replaced, the first's kept
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5), layer=1)
+    again = np.asarray(session.locs["cluster_id"])
+    assert np.array_equal(again[files == 0], first)
+    assert len(np.unique(again[again > 0])) == 6
+
+
+def test_a_second_channel_of_one_file_keeps_the_first_channels_clusters():
+    locs, truth, channel = two_parts("channel")
+    session = Session(locs)
+    session.show_grouped(0, False)
+    session.layers[0].set_bound("channel", None, 0.5)
+    second = session.add_layer(like=0)
+    second.set_bound("channel", 0.5, None)
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5), layer=0)
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5), layer=1)
+    ids = np.asarray(session.locs["cluster_id"])
+    assert np.array_equal(ids[channel == 0], truth[channel == 0])
+    assert set(ids[(channel == 1) & (ids > 0)]) == {4, 5, 6}
+
+
+def test_a_filtered_run_again_leaves_no_old_ids_in_the_file_it_reads():
+    xy, _ = blobs()
+    session = Session(table(xy))
+    session.show_grouped(0, False)
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=3))
+    session.layers[0].set_bound("photons", 1500.0, None)
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=3))
+    ids = np.asarray(session.locs["cluster_id"])
+    dim = np.asarray(session.locs["photons"]) < 1500
+    assert (ids[dim] == 0).all()                        # not the first run's
+    assert ids.max() <= 3
+
+
 def test_on_a_grouped_layer_the_blinks_are_clustered():
     xy, truth = blobs()
     xy = np.repeat(xy, 2, axis=0)                       # each spot on two frames

@@ -20,7 +20,7 @@ SMAP's:
 * a border point joins the cluster of its **nearest** core point, not of
   whichever core point's neighbourhood was expanded first, so the answer
   does not depend on the order of the table;
-* clusters are numbered **by size**, the largest 1;
+* clusters are numbered **by size**, the largest 1, within a run;
 * the radius defaults to **50 nm** rather than SMAP's automatic one, which
   is the radius of a ball holding *k* points at the mean density of the
   whole field: in a cell, mostly empty, that is hundreds of nanometres and
@@ -30,6 +30,10 @@ SMAP's:
   union-find during it -- the same clusters, 2 M localizations in 2 s;
 * each **file** of the session is clustered on its own, so two files'
   positions are never mixed;
+* a run writes afresh only the files and channels its layer shows; the
+  others keep their clusters, and the new ones are numbered above them
+  (`region_runs.replaced_rows`, `merge_ids`), so two files or two colours
+  on two layers are clustered one after the other;
 * on a **grouped** layer the blinks are clustered, and every localization
   takes its blink's cluster.
 
@@ -70,6 +74,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 
 from ..locs import Localizations
+from ..region_runs import merge_ids, replaced_rows
 from . import (Context, FormState, Notice, Plot, Plugin, Result, Stopped, param,
                register)
 
@@ -328,7 +333,7 @@ class FindClusters(Plugin):
 
     Settings = FindClustersSettings
     changes_locs = True
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: FindClustersSettings
                  ) -> FormState:
@@ -429,17 +434,26 @@ class FindClusters(Plugin):
         if grouped:
             labels = _per_localization(whole, table, labels)
         n_clusters = int(labels.max(initial=0))
+        # the files and channels the layer shows are clustered afresh; the
+        # others keep their clusters, numbered above them (`replaced_rows`)
+        replaced = replaced_rows(whole, table, use)
         clustered = int((labels > 0).sum())
+        labels, n_kept = merge_ids(whole["cluster_id"] if "cluster_id" in whole
+                                   else None, labels, replaced)
         text = (f"{n_clusters} clusters of {clustered} localizations, "
-                f"{int(len(labels) - clustered)} in none; " + _how(settings, used)
-                + (" (blinks)" if grouped else ""))
+                f"{int(replaced.sum()) - clustered} in none; " + _how(settings, used)
+                + (" (blinks)" if grouped else "")
+                + (f"; {n_kept} clusters of other files or channels kept"
+                   if n_kept else ""))
         locs = with_clusters(whole, labels)
-        data: Dict[str, Any] = {"clusters": n_clusters, "algorithm": algorithm}
+        data: Dict[str, Any] = {"clusters": n_clusters, "algorithm": algorithm,
+                                "kept": n_kept}
         if algorithm == "dbscan":
             data["radius_nm"] = used
         elif algorithm == "voronoi":
             data["mean_density_um2"] = used
-        sizes = np.bincount(labels)[1:] if n_clusters else np.zeros(0, int)
+        sizes = np.bincount(labels)[1:]
+        sizes = sizes[sizes > 0]
         xy = np.column_stack([np.asarray(whole["x_nm"], float),
                               np.asarray(whole["y_nm"], float)])
         return Result(locs=locs, text=text, settings=settings, data=data,

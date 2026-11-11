@@ -21,8 +21,11 @@ a memory of dark frames, a minimum length, 2D or 3D.  Where it departs:
   numbering and their localizations keeping an old id; ids are 1, 2, ... in
   the order the tracks start;
 * the localizations linked are those the layer's filter and the ROI keep;
-  the rest get 0.  Always the localizations, never merged blinks: merging
-  would join a slow particle's whole track into one blink.
+  the rest of the files and channels the layer shows get 0, and the other
+  files and channels keep their tracks, the new ones numbered above them
+  (`region_runs.replaced_rows`, `merge_ids`) -- so two files on two layers
+  are linked one after the other.  Always the localizations, never merged
+  blinks: merging would join a slow particle's whole track into one blink.
 
 The ids go to ``track_id`` unless *output column* names another -- to link
 twice and compare, or to keep a MINFLUX ``tid`` beside a relinking.  It
@@ -46,6 +49,7 @@ import numpy as np
 from . import Context, FormState, Plot, Plugin, Result, Stopped, param, register
 from ..group import TRACK_COLUMNS_KEY, length_column
 from ..locs import Localizations
+from ..region_runs import merge_ids, replaced_rows
 
 # tracks drawn in the figure at most: more is a tangle and seconds to draw
 FIGURE_TRACKS = 3000
@@ -105,7 +109,7 @@ class LinkTracks(Plugin):
     changes_locs = True
     # tracks are of localizations: a merged blink is a piece of a track
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: LinkTracksSettings
                  ) -> FormState:
@@ -147,26 +151,35 @@ class LinkTracks(Plugin):
             locs["z_nm"] if in_3d else None, max_jump_nm=settings.max_jump_nm,
             memory=settings.memory, min_length=settings.min_length,
             algorithm=settings.algorithm, groups=groups, progress=progress)
+        n_tracks = int(track.max(initial=0))
+        tracked = int((track > 0).sum())
+        lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, np.int64)
+        mean = float(lengths.mean()) if n_tracks else 0.0
+        # the files and channels the layer shows are linked afresh; the
+        # others keep their tracks (`replaced_rows`)
+        replaced = replaced_rows(locs, locs, use)
+        track, n_kept = merge_ids(locs[column] if column in locs else None, track,
+                                  replaced)
+        length = np.bincount(track)[track]
+        length[track == 0] = 0
         metadata = dict(locs.metadata)
         metadata[WRITTEN] = sorted(set(metadata.get(WRITTEN, [])) | {column})
         out = Localizations({**locs.columns, column: track, lengths_to: length}, metadata)
         remember(out, column, "", grouped="max")
         remember(out, lengths_to, "", grouped="max")
 
-        n_tracks = int(track.max(initial=0))
-        tracked = int((track > 0).sum())
-        lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, np.int64)
-        mean = float(lengths.mean()) if n_tracks else 0.0
         text = (f"{column}: {n_tracks} tracks of {tracked} localizations (mean length "
                 f"{mean:.1f}), {int(use.sum()) - tracked} in none; "
                 f"{settings.algorithm}, maximum jump {settings.max_jump_nm:g} nm, "
-                f"memory {settings.memory}" + (", 3D" if in_3d else ""))
+                f"memory {settings.memory}" + (", 3D" if in_3d else "")
+                + (f"; {n_kept} tracks of other files or channels kept"
+                   if n_kept else ""))
         x = np.asarray(locs["x_nm"], float)
         y = np.asarray(locs["y_nm"], float)
         frame = np.asarray(locs["frame"], np.int64)
         return Result(locs=out, text=text, settings=settings,
                       data={"tracks": n_tracks, "tracked": tracked,
-                            "mean_length": mean},
+                            "mean_length": mean, "kept": n_kept},
                       plot=Plot(lambda figure: draw_tracks(figure, x, y, frame, track),
                                 panels=2, size=(8, 3.6)))
 
@@ -176,8 +189,8 @@ def draw_tracks(figure, x, y, frame, track) -> None:
     from matplotlib.collections import LineCollection
     left, right = figure.subplots(1, 2, gridspec_kw={"width_ratios": [1.3, 1]})
     track = np.asarray(track, np.int64)
-    n_tracks = int(track.max(initial=0))
-    shown = np.arange(1, n_tracks + 1)
+    shown = np.unique(track[track > 0])     # kept ids need not be 1, 2, ...
+    n_tracks = len(shown)
     if n_tracks > FIGURE_TRACKS:
         shown = np.sort(np.random.default_rng(0).choice(shown, FIGURE_TRACKS,
                                                         replace=False))
@@ -200,6 +213,7 @@ def draw_tracks(figure, x, y, frame, track) -> None:
                                            if n_tracks > FIGURE_TRACKS else ""),
                    fontsize=9)
     lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, int)
+    lengths = lengths[lengths > 0]
     if len(lengths):
         right.hist(lengths, bins=np.arange(1, lengths.max() + 2) - 0.5
                    if lengths.max() <= 60 else 50, color="0.6")

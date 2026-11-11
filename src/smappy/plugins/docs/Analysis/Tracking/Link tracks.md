@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.tracking.link.candidates, smappy.tracking.link.link_simple, smappy.tracking.link.link_global, smappy.tracking.link.track_ids, smappy.tracking.link.link_tracks, smappy.tracking.link.score, smappy.plugins.link_tracks.LinkTracks.run, smappy.simulate.tracks.simulate_tracks]
 ---
 
@@ -46,7 +46,10 @@ filter on `track_length` keeps the long tracks, and
 attribute*, makes an ROI of each track to review.
 
 It links the localizations the layer's [filter](plugin:Panels/Glossary) and
-ROI keep; the rest get `track_id` 0.  It always links the single
+ROI keep; the rest of the files and channels the layer shows get `track_id`
+0.  Other files and channels keep their tracks, and the new ones are
+numbered after them, so two files on two layers are linked one after the
+other.  It always links the single
 localizations, never [merged blinks](plugin:Panels/Glossary): merging joins
 the localizations in consecutive frames that lie close together, which for
 a slow particle is its whole track.

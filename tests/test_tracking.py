@@ -139,6 +139,30 @@ def test_the_plugin_writes_track_id_and_track_length_for_the_selection():
     assert "tracks" in result.text
 
 
+def test_linking_a_second_file_keeps_the_first_files_tracks():
+    one = simulate_tracks(n_frames=100, density_um2=0.05, d_um2_s=(0.2,), seed=2)
+    n = len(one)
+    locs = Localizations({k: np.concatenate([np.asarray(v), np.asarray(v)])
+                          for k, v in one.columns.items()}, dict(one.metadata))
+    files = np.repeat([0, 1], n)
+    locs.columns["filenumber"] = files
+    settings = LinkTracks.Settings(max_jump_nm=250.0)
+    first = LinkTracks().run(Context(locs=locs, selection=Selection(files == 0)),
+                             settings)
+    kept = np.asarray(first.locs["track_id"])[files == 0].copy()
+    second = LinkTracks().run(Context(locs=first.locs, selection=Selection(files == 1)),
+                              settings)
+    track = np.asarray(second.locs["track_id"])
+    length = np.asarray(second.locs["track_length"])
+    assert np.array_equal(track[files == 0], kept)
+    assert track[files == 1][track[files == 1] > 0].min() == kept.max() + 1
+    # the same tracks in both: the second file's are the first's, shifted
+    shifted = np.where(track[files == 1] > 0, track[files == 1] - kept.max(), 0)
+    assert np.array_equal(shifted, kept)
+    assert (np.bincount(track)[track[track > 0]] == length[track > 0]).all()
+    assert "of other files or channels kept" in second.text
+
+
 def test_the_plugin_refuses_a_table_without_frames():
     locs = Localizations({"x_nm": np.zeros(3), "y_nm": np.zeros(3)}, {})
     with pytest.raises(ValueError, match="frame"):
