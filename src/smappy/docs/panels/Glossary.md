@@ -78,6 +78,19 @@ papers and in other software.
 * **SAF** (supercritical-angle fluorescence): light that only a molecule
   within about a wavelength of the coverslip sends into the objective, at
   angles beyond the critical one; it makes those molecules brighter.
+* **neural network** (also called a deep-learning model): a function with
+  millions of adjustable numbers, adjusted -- **trained** -- on examples
+  whose answer is known, here frames simulated with the microscope's PSF,
+  until it gives that answer; then applied to data, it localizes without a
+  fit.
+* **U-Net**: a network for images that shrinks a frame step by step to see
+  large structures and grows it back to full size to say something about
+  every pixel, the full-size steps joined to the small ones so fine detail
+  survives.  DECODE's localizes this way: an answer for every pixel.
+* **mixture model** (also called a Gaussian mixture): a probability
+  distribution that is a sum of several bell curves, each with its weight;
+  DECODE describes where the molecules of a frame are as such a sum, one
+  bell curve a pixel, weighted by the pixel's detection probability.
 
 ## Camera
 

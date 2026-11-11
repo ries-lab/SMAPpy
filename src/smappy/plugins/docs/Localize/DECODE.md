@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -50,10 +50,32 @@ gives.  At the first and last frame of the movie that frame is repeated in
 place of the neighbour it does not have, as DECODE did.
 
 **The network.**  The frames are cut to a multiple of 8 pixels in each
-direction, as the network's two halvings need, and scaled as in training.
-Out comes, for every pixel, a probability of a molecule, its offset within
-the pixel in x and y, its z, its photons, the background, and an uncertainty
-for each of x, y, z and the photons.
+direction, as the network's halvings need, and scaled as in training: the
+middle of the training's background taken off, divided by a fiftieth of its
+mean photons.  The network (`SigmaMUNet`) is two
+[U-Nets](plugin:Panels/Glossary) in a row.  The first sees each of the three
+frames alone, the same network for each; the second sees what the first made
+of all three together, and so learns what a molecule on in two frames looks
+like.  Four small heads read its output, and give, for every pixel:
+
+* the probability that a molecule is there;
+* its offset from the pixel's centre in x and y (at most a pixel either way),
+  its z and its photons;
+* an uncertainty for each of those four;
+* the background.
+
+**How it learnt.**  A training shows it simulated frames whose molecules it
+knows, and adjusts it to make those molecules probable.  Its answer for a
+frame is read as a [mixture model](plugin:Panels/Glossary): one bell curve a
+pixel, centred on the position, z and photons the pixel predicts and as wide
+as its uncertainties, weighted by its probability.  The loss -- the number a
+training makes small -- is how improbable the true molecules are under that
+mixture, plus how far the summed probabilities are from the number of
+molecules in the frame, plus the background's squared error.  So a pixel's
+uncertainty is learnt as the spread of its own errors, and its probability
+as how often a molecule is there.  Molecules of fewer than 100 photons are
+drawn in the training frames but not counted in the loss: the network is not
+asked to find what is too dim to be found.
 
 **Probabilities become localizations.**  A pixel whose probability is the
 largest in its 3 × 3 neighbourhood and above *threshold* starts a
@@ -62,6 +84,35 @@ shares an edge with, capped at 1.  A neighbouring pixel with a probability
 above 0.6 starts a second one, so two molecules in adjacent pixels are both
 kept.  Where the summed probability is above *threshold*, the position,
 photons and uncertainties are read from the network's output at that pixel.
+
+```figure-setup
+import torch
+from decode_smlm.neuralfitter.post_processing import SpatialIntegration
+
+def blob(shape, centre, peak, width=0.7):
+    yy, xx = np.mgrid[:shape[0], :shape[1]]
+    return peak * np.exp(-((xx - centre[0]) ** 2 + (yy - centre[1]) ** 2) / (2 * width ** 2))
+
+# a probability map as the network gives it: one molecule alone, spread over its pixel's
+# neighbours; two in adjacent pixels; and a faint smear that is no molecule
+shape = (12, 16)
+p = blob(shape, (3.3, 4.6), 0.75) + blob(shape, (9.0, 6.0), 0.8, 0.45) + blob(shape, (10.0, 6.0), 0.7, 0.45) \
+    + blob(shape, (13.0, 3.0), 0.09, 1.2)
+p = np.clip(p, 0, 0.95).astype(np.float32)
+summed = SpatialIntegration._nms(torch.from_numpy(p)[None], torch.add, 0.1, 0.6)[0].numpy()
+```
+
+```figure The probabilities a network gives (left) and what they become (right): a molecule's probability spread over its pixel and the next is summed into one localization (circled) where the summed value passes the threshold; two molecules in adjacent pixels, each above 0.6, stay two; the faint smear passes 0.1 but sums to too little to count at 0.5.
+axes = fig.subplots(1, 2)
+for ax, image, title in ((axes[0], p, "network's probability"), (axes[1], summed, "summed at the maxima")):
+    shown = ax.imshow(image, cmap="magma", vmin=0, vmax=1)
+    ax.set_title(title, fontsize=9)
+    ax.set_xticks([])
+    ax.set_yticks([])
+yy, xx = np.nonzero(summed >= 0.5)
+axes[1].scatter(xx, yy, s=120, facecolors="none", edgecolors="cyan", linewidths=1.5)
+fig.colorbar(shown, ax=axes, shrink=0.8, label="probability")
+```
 
 **Positions go on the chip.**  The positions are put back on the frames as
 they were read -- the crop and any flip undone -- and the camera ROI's corner
@@ -114,10 +165,48 @@ network runs without TF32 on NVIDIA GPUs, which moved its output by 1.5 % of
 a channel's range.  Different batch sizes round differently on the CPU, by
 float32's last digits.
 
+**The network's numbers.**  Two U-Nets of depth 2, 48 features each
+(DECODE's defaults), three frames in.  The probability is a logistic
+function of the network's value, clamped to plus or minus 8 before it (so
+between 0.0003 and 0.9997); the offsets and z a hyperbolic tangent, so the
+offset stays within a pixel and z within plus or minus `z_max`; the photons
+and the background a logistic function times `phot_max` and `bg_max`; an
+uncertainty a logistic function times 3, plus 0.001.  The scales come from
+the training's ranges where its file does not set them (`autoset_scaling`):
+the input offset the middle of the background range, the input scale a
+fiftieth of the mean photons, `phot_max` the mean photons plus 8 spreads,
+`z_max` 1.2 times the top of the z range, `bg_max` 1.2 times the top of the
+background range.  A model file keeps the values it was trained with.
+
+**The second molecule's 0.6.**  Of the summed probability's maxima, only
+those of a pixel that is the largest of its 3 × 3 neighbourhood start a
+localization; a pixel next to one, above 0.6 on its own, starts another.
+DECODE's constant (`split_th`), unchanged: lower, a molecule spread over two
+pixels would become two.
+
 **The window.**  The localizations of each frame come from that frame and
 its neighbours, the frames before and after only as context.  A jump in the
 frame numbers, as in a live acquisition that skipped frames, is treated as
 the end of one movie and the start of another.
+
+## Differences from the original DECODE
+
+The network, its training and its post-processing are DECODE v0.10.2's,
+ported to current PyTorch: a model the original trained gives the original's
+localizations on the same frames, and one the port trained scores as the
+original's do (within the spread of two of its runs).  What can change the
+numbers:
+
+* **The mirror is decided, not assumed.**  The original took the frames as
+  they came, and its example data -- beads without EM gain, a movie with it
+  -- needed a flipped calibration made by hand.  Here a model file records
+  its beads' EM state and the frames are flipped when the data's differs.
+* **The calibration's centre.**  SMAPpy reads SMAP's calibrations with
+  SMAP's 1-based centre and its own with its 0-based one; read the other way,
+  a model trained on a SMAPpy calibration localized a pixel off.
+* **No TF32.**  The original ran with PyTorch's default, which on recent
+  NVIDIA GPUs computes the convolutions in TF32 and moved the output by
+  1.5 % of a channel's range; the port turns it off for inference.
 
 ## Parameters
 
@@ -162,7 +251,10 @@ The table has the columns of every fitter -- `frame`, `x_nm`, `y_nm`, `z_nm`,
 network's probability that the localization is a molecule.  The
 uncertainties are the network's own estimate of its error, not a CRLB from a
 likelihood: they are right on average for data like the training's, and less
-so for data unlike it.
+so for data unlike it.  On DECODE's example movie, a molecule localized in two
+consecutive frames moved between them by what the two uncertainties say,
+within 10 to 30 % at every size of uncertainty -- where Spline 3D's CRLB was
+up to 2.5 times too small for the bright spots.
 
 No `logl` or `iterations` is written: nothing is fitted.  The file records
 the model, the device, the threshold, whether the frames were flipped and the

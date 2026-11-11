@@ -1446,6 +1446,23 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
 - **Not yet:** training on a host over ssh, its Preferences page, following it there; the simulated
   frames beside real ones in the preparation figure (needs torch here); the CRLB line on the curves.
 
+### (j) as done, 2026-11-12
+
+- **The fitter's page** (`plugins/docs/Localize/DECODE.md`): the network in the code's steps (two
+  U-Nets, the shared one on each frame; the four heads), how it learnt (the mixture loss, the count
+  term, labels under 100 photons not counted), `SpatialIntegration` with a figure on a synthetic
+  probability map (torch, no network), the constants (`autoset_scaling`'s rules, the activations'
+  ranges, `split_th` 0.6), *Differences from the original DECODE* (the mirror decided, the
+  calibration's centre, no TF32), the network on a workstation, and the uncertainties' check on
+  real frames in *Output*.
+- **The Train window's page** (`docs/panels/DECODE training.md`), with training on a host, the
+  simulated frames and the CRLB line.
+- **`docs/decode/`:** `architecture.md`, `data.md`, `conventions.md`.
+- **Glossary:** neural network, U-Net, mixture model.
+- **Left:** the renderer against real frames as a page figure -- the window draws it on the
+  user's data, and a page cannot without DECODE's example data; the prefit's distributions are
+  the window's figure (`decode_smlm.figures.draw_ranges`), not a page's.
+
 ### Inference speed (2026-11-11)
 
 `benchmarks/decode/benchmark/bench_inference.py`: the port's model, (i)'s density-15 frames tiled to
