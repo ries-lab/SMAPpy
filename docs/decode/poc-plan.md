@@ -307,6 +307,88 @@ cores, 62 % busy with one training, are what a second one would run short of.
   (fast tier), and has been run by hand against a real workstation;
 - the panel page passes `test_panel_docs`.
 
+### (h), the design (2026-11-11; its open points decided with Jonas the same day)
+
+Built on the patterns the GUI has (surveyed 2026-11-11); nothing in the window imports torch -- a
+training is always a process of its own.
+
+**How it opens.**  A plugin `Localize/Train DECODE` whose `window = "decode training"`, and the
+DECODE fitter's *Train a model...* button (`Plugin.window_buttons`); the opener registered in
+`gui/app.py` beside the PSF calibration's (one instance, `show()` and `raise_()`), named in
+`gui/assistant_actions.WINDOW_BUTTONS`.  It is handed the fitter's settings when there are any (the
+movie, the camera, the calibration), else the session's first file.  Its page is
+`docs/panels/DECODE training.md` (with *Controls*, in `test_panel_docs.PANELS`).
+
+**The window: a list of jobs on the left, three tabs on the right.**
+- **Jobs.**  Every job folder this computer prepared or started, with its state (`progress.state`
+  and `lock.json`: new, running, interrupted, stopped, finished, error), its epoch and where it
+  runs.  Kept as `config_dir()/training_jobs.json`, as `calibration_list` keeps calibrations
+  (`{"version": 1, "jobs": [...]}`, a missing folder dropped from view, never deleted); so after a
+  restart every job is listed again and a running one followed again.
+- **Prepare.**  The movie, the camera (the fitters' `CameraSettings` form) and the calibration,
+  filled from the fitter; the density (LD / HD / UHD, §7).  *Prefit* runs `training.prefit.prefit`
+  (Spline 3D on 10 blocks) and `decode_smlm.prefit.estimates` on a worker thread (the PSF window's
+  `_Worker`: a `QThread`, `progress` and `done` signals, a cancel event, errors as a result, never a
+  crash), then shows the estimates as a form one can edit (photons, background, z, on-time,
+  density) and the two figures of (e) (simulated frames beside real ones, the ranges over the
+  prefit's).  The five estimates are the form; the whole ``method.yaml`` is behind *advanced*.
+  *Write job* writes the folder (`training.job.write`) beside the movie,
+  ``<movie>_decode/<calibration>_<date>/`` -- the model belongs to the data it was prepared on --
+  and lists it.
+- **Train.**  Where: *this computer*, or one of the hosts saved in Preferences (a new page,
+  *Training hosts*: an ssh alias, the remote folder for jobs, the remote command, by default
+  `smappy-decode`).  *Start*:
+  - here: ``sys.executable -m decode_smlm.cli train FOLDER`` detached (`handoff.own_session()`),
+    stdout and stderr to ``train.log``; refused with a line saying how when this Python has no torch
+    (the PSF window's *install torch* offered);
+  - on a host: the system's ``ssh`` with ``BatchMode=yes`` (no password prompt: a key or an open
+    control socket, which the page explains), the folder copied with ``rsync -a`` (``scp -r`` where
+    there is none), the version checked (``smappy-decode --version``, to add), then ``nohup
+    smappy-decode train`` there.  Every ssh call is a `QProcess` (`batch_window`'s pattern), never a
+    blocking call on the GUI thread.
+  *Stop* writes ``STOP`` here or over ssh (``smappy-decode stop``); *Resume* is *Start* again.
+- **Follow.**  A repeating `QTimer` (5 s here, 30 s on a host; never `singleShot` with code that can
+  raise) reads ``progress.jsonl`` -- here with `progress.read`, on a host by ``tail -c +OFFSET`` over
+  ssh into a local copy -- and redraws: the train and test loss, Jaccard, the lateral and axial
+  RMSE against the CRLB at the training's mean photons and background (a line, from SMAPpy's spline
+  CRLB), the seconds an epoch and the time left, the restarts.  Canvases from
+  `gui/canvas.canvas_class()`.
+- **Try.**  *Try on my data*: the newest model (copied back from a host first) through the DECODE
+  fitter's preview path on a few frames of the movie, its localizations drawn over the prefit's.
+  *Use this model* puts it into the DECODE fitter's *model* (a `Signal`, as the PSF window's
+  `calibrated`).
+
+**Why a training needs no shared drive.**  It reads no frames: a job folder is ``job.json``,
+``method.yaml`` and ``calibration.h5`` (about 30 MB with the calibration), the frames are simulated,
+and what comes back is the model file (about 9 MB) and ``progress.jsonl``.  Copied over ssh in
+seconds.  The prefit, the one step that reads the movie, runs here in SMAPpy.
+
+**Units.**  The network already sees photons: the package trains with ``convert2photons: true`` --
+frames drawn in photons, through the camera model to ADU, back to photons -- and the fitter feeds it
+SMAPpy's photons (`to_photons`, then the training's QE and spurious charge), which is how (d)
+matched the original.  What a model keeps of its camera is the noise it learnt (EM gain, read
+noise): so the training's camera is the job's, from the prefit's data, and a model is checked
+against the data's camera as against its calibration.
+
+**Tests** (the plan's done-when, made concrete): a slow window test, offscreen, prepares a job on
+frames simulated with a spline (`smappy.simulate`), trains a tiny one here (the training tests'
+`tiny_job` sizes), sees two progress lines drawn, stops and resumes it; the ssh path against a fake
+``ssh`` on ``PATH`` (a script running the command here, fast tier); `test_panel_docs`,
+`test_assistant_gui`, `test_control_width`.
+
+### The fitter run on a workstation (2026-11-11, decided with Jonas)
+
+Inference stays in SMAPpy: everything before the network is the fitters' (the camera's photons, the
+camera ROI, the mirror, the blocks, live fits) and *after the fit* follows it, so frames are never
+sent to another program.  Locally it is fast on a GPU (the M1 Max's: 107 -- 120 frames/s of the
+example's 180 x 179, 20 000 frames in about 3 minutes) and too slow on a CPU alone (3.4 frames/s
+there, about 0.4 for 512 x 512: hours a movie).  So the DECODE fitter gets an option to **run on a
+workstation**: SMAPpy's own fitter, the same code, headless there (as `smappy-batch` runs a chain),
+reading the movie from the shared drive and writing the table back to it -- no frames copied --
+with the result loaded here when it is done.  A live fit always runs here.  The hosts are the Train
+window's (Preferences, *Training hosts*).  To decide how much it matters, (i) measures the frames a
+second of inference on the CPU, the Apple GPU, the 4090 and the H100 at 256 x 256 and 512 x 512.
+
 ### (i) The benchmark against Spline 3D and the CRLB
 
 **Where:** `benchmarks/decode/`, with its results as `jsonl`, as uipsf's
@@ -1264,3 +1346,40 @@ DECODE?  Scripts in `benchmarks/decode/pixelation/` (`common.py` says how the da
   -400 to -300 nm come back at a median -271, at -500 to -400 at -173 (above the focus: +400 to +500
   at +420).  Its z histograms have no humps and little beyond +-500 nm; part of Spline 3D's humps are
   misfits, but DECODE's z far below the focus is compressed.
+
+### (i), first round: simulated sets on the example's spline (2026-11-11)
+
+Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `score_sets.py`,
+`plot_scores.py`; data in `$DECODE_SMLM_DATA/benchmark/A/`.
+
+- **The sets:** A, SMAP's spline of the example package (the beads' orientation, so nothing is
+  flipped).  Five densities -- 1, 5, 15, 25 and 50 emitters per 40 x 40 pixels -- of about 20 000
+  emitters each, single frames of 64 x 64 pixels drawn as the package's training draws them: x and y
+  uniform, z uniform in +-700 nm, photons 7000 +- 3000 (at least 1000), background 20 -- 200 a frame,
+  the training's EMCCD (gain 100, 5 e-/ADU, read noise 58.8 e-).  Drawn by `smappy.simulate`'s
+  `_draw_spline`, not by the training's renderer.  Seeds kept (`sets.json`).
+- **The fitters:** Spline 3D (fit box 13, *as calibrated*); the package's published model; the
+  original's two reference runs, their final weights through the port's inference (which (d) showed
+  gives the original's localizations); the port's two runs.
+- **The scoring:** DECODE kept at prob >= 0.5, Spline 3D within 3 MADs of the median log-likelihood
+  and not at the iteration limit; matched per frame by the Hungarian algorithm within 250 nm
+  laterally and 500 nm axially; scored inside a margin of 7 pixels (Spline 3D's fit box cannot
+  leave the frame; DECODE localizes to the edge).
+- **Every criterion of §1 (i) for these sets holds:**
+  - the port within the original runs' spread at every density (Jaccard at 25: port 0.822,
+    original 0.822 and 0.835, package 0.822; lateral RMSE 46.8 against 46.9 and 47.6);
+  - at density 1 and >= 2000 photons, DECODE's lateral RMSE 1.11 -- 1.12 times the CRLB (Spline 3D's
+    own precision at the same emitters), Spline 3D's 1.19: DECODE is closer to the bound on the same
+    spots -- probably the noise, which Spline 3D approximates as Poisson after the excess factor and
+    the network learnt as it is;
+  - at 25 per 40 x 40, Jaccard 0.82 against Spline 3D's 0.03;
+  - DECODE's mean offsets at most 1.8 nm in x and y, 1.1 nm in z, at every density.
+- **DECODE finds more even sparse:** recall 0.96 against Spline 3D's 0.77 at density 1, 0.95 against
+  0.55 at 5 (defocused spots reach into each other's fit boxes).
+- **DECODE pulls z towards the focus at the range's ends:** +8 to +13 nm at -650 nm, -11 to -15 at
+  +650, the same in all five models; Spline 3D -7 to +6.  The experimental data showed the same
+  (the pixelation study, above): a property of the trained network.
+- **Not yet:** the frames per second; the SMLM Challenge 2016 3D-AS set; one astigmatic SMAPpy
+  calibration (models to train on it, with the x0 fix); the example's real frames (the pixelation
+  study; precision from consecutive frames against DECODE's own uncertainties; the density test by
+  summing frames).
