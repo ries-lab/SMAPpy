@@ -36,11 +36,14 @@ def test_a_jobs_state_tells_a_dead_training_from_a_running_one(tmp_path):
     assert jobs.status(jobs.Entry(str(tmp_path / "gone"))).state == "missing"
 
 
-def test_a_job_on_a_host_is_judged_on_its_progress_alone(tmp_path):
+def test_a_job_on_a_host_is_running_while_the_lock_copied_back_says_so(tmp_path):
     folder = tmp_path / "job"
     folder.mkdir()
     progress.append(folder, "start", 0)
-    assert jobs.status(jobs.Entry(str(folder), host="gpuvm")).state == "running"   # its lock is there, not here
+    entry = jobs.Entry(str(folder), host="gpuvm", remote="~/jobs/job")
+    assert jobs.status(entry).state == "interrupted"        # `remote.follow` found its process gone
+    (folder / jobs.LOCK).write_text(json.dumps({"host": "elsewhere", "pid": 2 ** 22 + 12345}))
+    assert jobs.status(entry).state == "running"            # a process there, not here: not asked about here
 
 
 def test_training_hosts_are_kept_in_the_configuration():
@@ -48,3 +51,13 @@ def test_training_hosts_are_kept_in_the_configuration():
     assert [h.name for h in jobs.hosts()] == ["H100", "4090"]
     assert jobs.host("H100").ssh == "gpuvm" and jobs.host("H100").command == "smappy-decode"
     assert jobs.host("nowhere") is None
+
+
+def test_a_training_that_refused_to_start_is_an_error_with_its_reason(tmp_path):
+    folder = tmp_path / "job"
+    folder.mkdir()
+    (folder / jobs.LOG).write_text("some warning\nsmappy-decode: job was prepared by SMAPpy 0.6.1, this is 0.6.5\n")
+    s = jobs.status(jobs.Entry(str(folder)))
+    assert s.state == "error" and s.message.startswith("smappy-decode: job was prepared")
+    (folder / jobs.LOG).write_text("UserWarning: something harmless\n")
+    assert jobs.status(jobs.Entry(str(folder))).state == "new"

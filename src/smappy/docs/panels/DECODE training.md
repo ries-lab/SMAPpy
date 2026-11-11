@@ -1,8 +1,8 @@
 ---
 title: DECODE training
-summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer, follows its curves and tries the model on the data.
+summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.training.jobs.status, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
 ---
 
 ## What it does
@@ -15,8 +15,8 @@ same background and z range as in the data, with the camera's noise.  This
 window sets that up from a movie, trains it, and lets you watch it learn.
 
 A training takes hours, on a GPU; a computer without one trains on a
-workstation (coming in a later version of this window).  Nothing is copied
-there but a folder of a few files: the training draws its own frames.
+workstation, over ssh.  Nothing is copied there but a folder of a few files:
+the training draws its own frames, so the movie stays here.
 
 ## How it works
 
@@ -30,10 +30,25 @@ the figure shows the prefit's values with the ranges the training will draw
 from over them.  *Write job* writes the job folder beside the movie, in
 `<movie>_decode/`, and lists it on the left.
 
-**Train.**  Choose a job on the left and *Start*.  The training runs as a
-program of its own, so it goes on when this window or SMAPpy is closed, and
-is listed again when it opens.  *Stop* stops it after the epoch it is in,
-with its checkpoint written; *Start* again goes on from there.
+**Train.**  Choose a job on the left, where it trains, and *Start*.  The
+training runs as a program of its own, so it goes on when this window or
+SMAPpy is closed, and is listed again when it opens.  *Stop* stops it after
+the epoch it is in, with its checkpoint written; *Start* again goes on from
+there.
+
+**On a workstation.**  The workstations are listed in *File > Preferences*,
+*Training hosts*: a name, what `ssh` is given (an alias of your
+`~/.ssh/config`, or `user@host`), the folder job folders go to there, and
+the command that trains there -- `smappy-decode` where SMAPpy is installed
+with its `decode` extra.  ssh must log in without a password (a key): the
+window cannot type one.  *Test* logs in and asks the command, and says which
+GPU it found.  A job started there is copied there first; its progress is
+copied back every 15 seconds, so it is followed here as one trained here,
+and its model when it finished, stopped or is asked for (*Try*, *Use this
+model*).  Its checkpoint stays there, and *Start* again resumes it there.  A
+job records the SMAPpy version that prepared it, and a training refuses a
+job of another version unless the host's *train jobs another SMAPpy version
+prepared* is on.
 
 **Follow.**  The losses, the test set's Jaccard and RMSE, and the seconds
 an epoch, read from the job's progress file every few seconds, with the time
@@ -46,10 +61,13 @@ fitter.
 ## Controls
 
 ### Jobs
-Every job this computer prepared or started, with its state: *new* (not
-trained yet), *running*, *interrupted* (its training stopped without saying
-so: the computer slept or the process was killed -- *Start* goes on from its
-last checkpoint), *stopped*, *finished* or *error*.
+Every job this computer prepared or started, with its state and where it
+trains: *new* (not trained yet), *running*, *interrupted* (its training
+stopped without saying so: the computer slept or the process was killed --
+*Start* goes on from its last checkpoint), *stopped*, *finished* or *error*
+(also a training that refused to start; *Follow* says why).  A job on a
+workstation that could not be reached says *not reached*, and its tooltip
+what ssh said.
 
 ### Add folder...
 List a job folder made elsewhere, or one taken off the list.
@@ -83,12 +101,13 @@ as written when shown.
 Writes the job folder and selects it.
 
 ### Train
-Where and how long.  The test loss is within 2 % of its final value after
+Where -- this computer, or a training host -- and how long.  The test loss is within 2 % of its final value after
 about 150 epochs; the example data's models were trained for 1000.
 
 ### Start
-Starts the chosen job on this computer, or goes on with it from its last
-checkpoint.  It needs torch here, SMAPpy's `decode` extra.
+Starts the chosen job where *where* says, or goes on with it from its last
+checkpoint.  Here it needs torch, SMAPpy's `decode` extra; on a training
+host the job folder is copied there first.
 
 ### Stop
 Stops the chosen job after the epoch it is in.
@@ -104,4 +123,5 @@ The first frames of the movie through the newest model, drawn with what it
 found at a probability of at least 0.5.
 
 ### Use this model
-Puts the newest model into the DECODE fitter's *model*.
+Puts the newest model into the DECODE fitter's *model* (from a workstation,
+copied back first).

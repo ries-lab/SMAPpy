@@ -1,6 +1,6 @@
 """Preferences: the folders scanned for plugins, the tabs, light or dark,
 whether quitting asks about unsaved changes and whether startup looks for
-updates.
+updates, and the workstations DECODE trains on.
 
 Both are things the user names on purpose.  One plugin folder is scanned
 without being named, the user's own (`config.user_plugin_dir`), and no tab
@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QFileDialog, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
+                               QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QInputDialog, QLabel, QListWidget, QListWidgetItem,
-                               QMessageBox, QPushButton, QTabWidget, QVBoxLayout,
+                               QLineEdit, QMessageBox, QPushButton, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import config, plugins, updates
@@ -228,8 +228,126 @@ class TabsPage(QWidget):
         self.refresh()
 
 
+
+class HostsPage(QWidget):
+    """The workstations the DECODE training window trains on (`training.jobs.Host`): reached with
+    ``ssh`` without a password, a job folder sent there and trained by its command."""
+
+    FIELDS = (("name", "name", "what the training window calls it"),
+              ("ssh", "ssh", "what ssh is given: an alias of ~/.ssh/config or user@host; it must log in "
+                             "without a password (a key)"),
+              ("folder", "folder there", "where job folders go on it"),
+              ("command", "command", "what trains there: smappy-decode where SMAPpy is installed with its "
+                                     "decode extra, or a python -m decode_smlm.cli"))
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from ..training import jobs
+        layout = QVBoxLayout(self)
+        about = QLabel("Workstations DECODE trains on (Localize > Train DECODE): a computer with a GPU "
+                       "that ssh reaches without a password.  Only the job folder is copied there.")
+        about.setWordWrap(True)
+        about.setStyleSheet("color: gray")
+        layout.addWidget(about)
+        self.hosts = jobs.hosts()
+        self.list = QListWidget()
+        self.list.currentRowChanged.connect(self.show_host)
+        layout.addWidget(self.list, 1)
+        form = QFormLayout()
+        self.edits = {}
+        for key, label, tip in self.FIELDS:
+            edit = QLineEdit()
+            edit.setToolTip(tip)
+            edit.editingFinished.connect(self.apply)
+            form.addRow(label, edit)
+            self.edits[key] = edit
+        self.other_version = QCheckBox("train jobs another SMAPpy version prepared")
+        self.other_version.setToolTip("a job records the SMAPpy that wrote it, and a training refuses "
+                                      "another version unless this is on: for a workstation a version "
+                                      "behind or ahead of this computer")
+        self.other_version.toggled.connect(lambda _: self.apply())
+        form.addRow("", self.other_version)
+        layout.addLayout(form)
+        layout.addLayout(_buttons(("Add", self.add), ("Remove", self.remove), ("Test", self.test)))
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.refresh()
+
+    def refresh(self, select: int = 0) -> None:
+        self.list.blockSignals(True)
+        self.list.clear()
+        self.list.addItems([f"{h.name}: {h.ssh}" for h in self.hosts])
+        self.list.blockSignals(False)
+        if self.hosts:
+            self.list.setCurrentRow(min(select, len(self.hosts) - 1))
+        self.show_host(self.list.currentRow())
+
+    def show_host(self, row: int) -> None:
+        h = self.hosts[row] if 0 <= row < len(self.hosts) else None
+        for key, edit in self.edits.items():
+            edit.setEnabled(h is not None)
+            edit.setText("" if h is None else str(getattr(h, key)))
+        self.other_version.blockSignals(True)
+        self.other_version.setEnabled(h is not None)
+        self.other_version.setChecked(bool(h and h.allow_other_version))
+        self.other_version.blockSignals(False)
+
+    def add(self) -> None:
+        from ..training import jobs
+        name = "workstation"
+        taken = {h.name for h in self.hosts}
+        k = 2
+        while name in taken:
+            name, k = f"workstation {k}", k + 1
+        self.hosts.append(jobs.Host(name, ""))
+        jobs.set_hosts(self.hosts)
+        self.refresh(len(self.hosts) - 1)
+        self.edits["ssh"].setFocus()
+
+    def remove(self) -> None:
+        from ..training import jobs
+        row = self.list.currentRow()
+        if 0 <= row < len(self.hosts):
+            del self.hosts[row]
+            jobs.set_hosts(self.hosts)
+            self.refresh(row)
+
+    def apply(self) -> None:
+        """The fields into the chosen host, saved at once."""
+        from dataclasses import replace
+
+        from ..training import jobs
+        row = self.list.currentRow()
+        if not 0 <= row < len(self.hosts):
+            return
+        values = {key: edit.text().strip() for key, edit in self.edits.items()}
+        values = {k: v for k, v in values.items() if v or k == "ssh"}
+        self.hosts[row] = replace(self.hosts[row], allow_other_version=self.other_version.isChecked(), **values)
+        jobs.set_hosts(self.hosts)
+        self.list.item(row).setText(f"{self.hosts[row].name}: {self.hosts[row].ssh}")
+
+    def test(self) -> None:
+        """ssh to the chosen host and ask its command (`training.remote.check`)."""
+        from ..training import remote
+        self.apply()
+        row = self.list.currentRow()
+        if not 0 <= row < len(self.hosts):
+            return
+        self.status.setText(f"asking {self.hosts[row].name}...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self.status.setText(remote.check(self.hosts[row]))
+            self.status.setStyleSheet("")
+        except remote.RemoteError as error:
+            self.status.setText(str(error))
+            self.status.setStyleSheet("color: #e0453a")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+
 class PreferencesDialog(QDialog):
-    """Plugin folders and tabs.  Accepting means the window rebuilds its tabs."""
+    """Plugin folders, tabs, general settings and training hosts.  Accepting means the window rebuilds its tabs."""
 
     def __init__(self, workspace: Workspace, parent=None):
         super().__init__(parent)
@@ -240,9 +358,11 @@ class PreferencesDialog(QDialog):
         self.roots = RootsPage()
         self.tabs = TabsPage(workspace)
         self.general = GeneralPage()
+        self.training_hosts = HostsPage()
         self.pages.addTab(self.roots, "Plugin folders")
         self.pages.addTab(self.tabs, "Tabs")
         self.pages.addTab(self.general, "General")
+        self.pages.addTab(self.training_hosts, "Training hosts")
         layout.addWidget(self.pages)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)

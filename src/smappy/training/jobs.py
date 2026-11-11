@@ -13,14 +13,15 @@ progress back into it, so a finished job reads the same wherever it ran.
 **A job's state** (`status`) is the last word of its ``progress.jsonl`` (`progress.state`), told
 apart from a training that died by its ``lock.json`` (written by the training, with its host and
 process): "running" with no lock, or with the lock of a process here that is gone, is
-"interrupted".  A job on a host is judged on the progress copied back; whether its process lives
-is the window's to ask over ssh.
+"interrupted".  A job on a host is judged on the progress and the lock `remote.follow` copied back,
+the lock only while its process lives there.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import json
 import os
+import re
 import socket
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ from . import progress
 LIST_NAME = "training_jobs.json"
 HOSTS_KEY = "training_hosts"
 LOCK = "lock.json"                      # decode_smlm.training.LOCK: the training's own
+LOG = "train.log"                       # where the window sends a training's output, here and there
 
 
 @dataclass
@@ -57,6 +59,9 @@ class Host:
     ssh: str                            # the alias or user@host `ssh` is given (a key or a socket: BatchMode)
     folder: str = "~/smappy_training"   # where job folders go there
     command: str = "smappy-decode"      # what trains there
+    # a job records the SMAPpy that prepared it, and a training refuses another version unless told
+    # (`decode_smlm.training`): a workstation is often a version behind or ahead
+    allow_other_version: bool = False
     extra: dict = field(default_factory=dict)
 
 
@@ -130,14 +135,30 @@ def status(entry: Entry) -> Status:
     epochs = next((line.get("epochs") for line in reversed(lines) if line["kind"] == "start"), None)
     last = next((line for line in reversed(lines) if line["kind"] == "epoch"), None)
     message = next((line.get("message", "") for line in reversed(lines) if line["kind"] == "error"), "")
-    if state == "running" and entry.host is None:
+    if state == "new" and not (folder / LOCK).exists():
+        refused = _refusal(folder / LOG)              # a training that stopped before its first line
+        if refused:
+            state, message = "error", refused
+    if state == "running":              # on a host, `remote.follow` keeps the lock only while its process lives
         try:
             lock = json.loads((folder / LOCK).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             lock = None
-        if lock is None or (lock.get("host") == socket.gethostname() and not _alive(lock.get("pid", 0))):
+        if lock is None or (entry.host is None and lock.get("host") == socket.gethostname()
+                            and not _alive(lock.get("pid", 0))):
             state = "interrupted"
     return Status(state, epoch=None if last is None else last.get("epoch"), epochs=epochs, last=last, message=message)
+
+
+def _refusal(log: Path) -> str:
+    """The last line of a training's log when it says why the training would not start: the CLI's
+    own refusal (``smappy-decode: ...``) or a Python exception's last line."""
+    try:
+        lines = [line for line in log.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    except OSError:
+        return ""
+    last = lines[-1].strip() if lines else ""
+    return last if re.match(r"(smappy-decode: |[\w.]*(Error|Exception)\b)", last) else ""
 
 
 def hosts() -> List[Host]:

@@ -36,6 +36,7 @@ CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All fil
 DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"))
 REFRESH_MS = 5000
 TRY_FRAMES = 20
+FOLLOW_S = 15                           # a host's jobs followed this often
 GROW = 4                                # blocks times this while the prefit has too few fully-on frames
 
 
@@ -296,6 +297,7 @@ class TrainWindow(QWidget):
         self.setWindowTitle("DECODE training")
         self.busy, self.prepared = False, None
         self._thread = self._worker = None
+        self.follower = HostFollower()
 
         # the jobs
         self.job_list = QListWidget()
@@ -433,7 +435,11 @@ class TrainWindow(QWidget):
             epoch = "" if status.epoch is None else f", epoch {status.epoch}"
             item = QListWidgetItem(f"{entry.name}: {status.state}{epoch}{where}")
             item.setData(Qt.UserRole, entry.folder)
-            item.setToolTip(entry.folder)
+            problem = self.follower.problems.get(entry.folder)
+            item.setToolTip(entry.folder + ("" if entry.remote is None else f"\non {entry.host}: {entry.remote}")
+                            + ("" if problem is None else f"\nnot reached: {problem}"))
+            if problem is not None:
+                item.setText(item.text() + " (not reached)")
             self.job_list.addItem(item)
             if entry.folder == chosen:
                 self.job_list.setCurrentItem(item)
@@ -468,6 +474,7 @@ class TrainWindow(QWidget):
     def refresh(self) -> None:
         """The list's states, and the chosen job's curves; on the timer, so never raising."""
         try:
+            self.follower.poke()
             self.reload_jobs()
             entry = self.selected_entry()
             if entry is None:
@@ -506,6 +513,14 @@ class TrainWindow(QWidget):
             self.show_prepared(value)
         elif kind == "try":
             self.show_try(*value)
+        elif kind == "use":
+            self._use(value)
+        elif kind == "started":
+            self.train_note.setText(value)
+            self.tabs.setCurrentIndex(2)
+            self.reload_jobs()
+        elif kind == "stopping":
+            self.train_note.setText("asked to stop: it stops after the epoch it is in, its checkpoint written there")
 
     def prefit(self) -> None:
         settings = self.prepare_form.value()
@@ -565,7 +580,7 @@ class TrainWindow(QWidget):
             return
         train = self.train_form.value()
         if train.where != "here":
-            self.train_note.setText("training on a host comes with the next step of this window")
+            self._work("started", lambda report: start_on_host(folder, train, report))
             return
         if not torch_here():
             self.train_note.setText("this Python has no torch: install SMAPpy's decode extra "
@@ -588,7 +603,8 @@ class TrainWindow(QWidget):
             return
         entry = self.selected_entry()
         if entry is not None and entry.host is not None:
-            self.train_note.setText("stopping on a host comes with the next step of this window")
+            from ..training import remote
+            self._work("stopping", lambda report: remote.stop(entry))
             return
         stop(folder)
         self.train_note.setText("asked to stop: it stops after the epoch it is in, its checkpoint written")
@@ -602,7 +618,11 @@ class TrainWindow(QWidget):
             self.status_bar.showMessage("trying a model needs torch here: pip install smappy-smlm[decode]")
             return
         folder = Path(entry.folder)
-        self._work("try", lambda report: try_on_data(folder))
+
+        def run(report):
+            fetch_if_remote(entry, report)
+            return try_on_data(folder)
+        self._work("try", run)
 
     def show_try(self, photons, locs) -> None:
         self.try_figure.clear()
@@ -617,12 +637,78 @@ class TrainWindow(QWidget):
         entry = self.selected_entry()
         if entry is None:
             return
+        if entry.host is not None:
+            self._work("use", lambda report: fetch_if_remote(entry, report))
+            return
+        self._use(entry)
+
+    def _use(self, entry) -> None:
         model = Path(entry.folder) / "model.safetensors"
         if not model.exists():
             self.status_bar.showMessage("no model yet: it is written after the first epoch")
             return
         self.model_chosen.emit(str(model))
         self.status_bar.showMessage(f"the DECODE fitter now uses {model}")
+
+
+def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> str:
+    """The job sent to the training host ``train.where`` (unless it is there already) and started there."""
+    from ..training import jobs, remote
+    h = jobs.host(train.where)
+    if h is None:
+        raise ValueError(f"no training host {train.where!r}: add it in Preferences > Training hosts")
+    entry = next((e for e in jobs.entries() if e.folder == str(Path(folder).resolve())), None)
+    if entry is None or entry.host != h.name or not entry.remote:
+        report({"message": f"sending {Path(folder).name} to {h.name}"})
+        entry = remote.send(folder, h)
+    report({"message": f"starting it on {h.name}"})
+    remote.start(entry, train.epochs, train.device)
+    return f"started on {h.name}: {entry.remote}; its output in train.log there"
+
+
+def fetch_if_remote(entry, report=lambda entry: None):
+    """The newest model of a job on a host copied back; the entry, for *Use this model*."""
+    if entry.host is not None:
+        from ..training import remote
+        report({"message": f"copying the model from {entry.host}"})
+        remote.fetch_model(entry)
+    return entry
+
+
+class HostFollower:
+    """The progress of the jobs on training hosts copied back, in a thread of its own every
+    ``FOLLOW_S``: ssh takes a second or more, the window's timer must not wait for it.  Touches no
+    Qt object (the window reads the files it writes); a finished job's model is fetched once."""
+
+    def __init__(self):
+        self.last, self.thread, self.problems = 0.0, None, {}
+
+    def poke(self, now=None) -> None:
+        import threading
+        import time
+        now = time.monotonic() if now is None else now
+        if self.thread is not None and self.thread.is_alive() or now - self.last < FOLLOW_S:
+            return
+        self.last = now
+        self.thread = threading.Thread(target=self.follow_all, daemon=True, name="DECODE hosts")
+        self.thread.start()
+
+    def follow_all(self) -> None:
+        from ..training import jobs, remote
+        for entry in jobs.entries():
+            if entry.host is None or not Path(entry.folder).is_dir():
+                continue
+            state = jobs.status(entry).state
+            model = Path(entry.folder) / remote.MODEL
+            if state in ("finished", "stopped", "error") and model.exists():
+                continue                                   # nothing more to come from there
+            try:
+                remote.follow(entry)
+                if jobs.status(entry).state in ("finished", "stopped"):
+                    remote.fetch_model(entry)
+                self.problems.pop(entry.folder, None)
+            except Exception as error:                     # an unreachable host: said in the list's tooltip
+                self.problems[entry.folder] = str(error)
 
 
 def try_on_data(folder, frames: int = TRY_FRAMES):
