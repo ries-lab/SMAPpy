@@ -126,3 +126,15 @@ def test_starting_here_runs_this_pythons_decode_cli_detached_with_its_log(tmp_pa
     assert seen["command"][:4] == [sys.executable, "-m", "decode_smlm.cli", "train"]
     assert seen["command"][-4:] == ["--epochs", "7", "--device", "mps"] and seen["cwd"] == str(tmp_path)
     assert (tmp_path / "train.log").exists()
+
+
+def test_a_sparse_movie_is_prefitted_further_until_molecules_were_fully_on_often_enough(movie):
+    from decode_smlm.prefit import FULLY_ON_ENOUGH
+    from smappy.gui.train_window import run_prefit
+    path, cal_path = movie
+    settings = _prepare_settings(path, cal_path)
+    settings.blocks, settings.block_frames = 1, 10
+    messages = []
+    prepared = run_prefit(settings, report=messages.append)
+    assert any("too few" in m["message"] for m in messages)
+    assert prepared.estimates.n_fully_on >= FULLY_ON_ENOUGH or prepared.estimates.n_localizations > 600

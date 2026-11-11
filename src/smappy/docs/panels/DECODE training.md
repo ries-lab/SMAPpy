@@ -65,7 +65,11 @@ at 50, found 96 % of the molecules at one in 40 x 40 pixels.
 
 ### Prefit
 Fits the blocks and fills *Estimates*.  It takes as long as Spline 3D takes
-on those frames, seconds to a minute.
+on those frames, seconds to a minute.  A sparse movie, where too few molecules were
+seen fully on in a frame (fewer than 200 such frames), is fitted further,
+four times the blocks at a time, up to the whole movie: the photons are
+measured on those frames, and the rule that would stand in for them,
+from whole blinks, can be several times off.
 
 ### Estimates
 The training's ranges, editable.  The photons are those of a frame a molecule

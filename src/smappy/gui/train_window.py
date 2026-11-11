@@ -36,6 +36,7 @@ CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All fil
 DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("UHD", "UHD, 50 in 40 x 40 px"))
 REFRESH_MS = 5000
 TRY_FRAMES = 20
+GROW = 4                                # blocks times this while the prefit has too few fully-on frames
 
 
 def _where_choices():
@@ -116,12 +117,23 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
 
     def read(a, b):
         return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
-    found = prefit(read, source.n_frames, camera, settings.calibration, n_blocks=settings.blocks,
-                   block_frames=settings.block_frames)
-    blinks, locs = found.columns()
     cal = load_spline_calibration(settings.calibration)
-    est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
-                                 z_limit_nm=estimates_of.z_limit(cal), max_iterations=found.max_iterations)
+    blocks = settings.blocks
+    while True:
+        found = prefit(read, source.n_frames, camera, settings.calibration, n_blocks=blocks,
+                       block_frames=settings.block_frames)
+        blinks, locs = found.columns()
+        est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
+                                     z_limit_nm=estimates_of.z_limit(cal), max_iterations=found.max_iterations)
+        # a sparse movie (the SMLM challenge's: one molecule a frame) has too few fully-on frames in
+        # the default blocks, and SMAP's rule from whole blinks, which takes over then, put the
+        # challenge's photons at 3 times the truth: fit more of it, up to the whole movie
+        more = min(blocks * GROW, source.n_frames // settings.block_frames)
+        if est.n_fully_on >= estimates_of.FULLY_ON_ENOUGH or more <= blocks:
+            break
+        report({"message": f"{est.n_fully_on} frames a molecule was fully on in, too few: "
+                           f"fitting {more} blocks of {settings.block_frames} frames"})
+        blocks = more
     return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)))
 
 
