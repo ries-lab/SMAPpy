@@ -389,6 +389,15 @@ with the result loaded here when it is done.  A live fit always runs here.  The 
 window's (Preferences, *Training hosts*).  To decide how much it matters, (i) measures the frames a
 second of inference on the CPU, the Apple GPU, the 4090 and the H100 at 256 x 256 and 512 x 512.
 
+**As built (2026-11-12), streaming first** (decided with Jonas: "both, stream first"): the
+movie is read, cut and converted here, and each block of photon frames is sent over ssh to
+``smappy-decode serve`` on the host, which runs the network and sends the columns back
+(`smappy/decode_remote.py`, `decode_smlm/serve.py`; *run on* in the fitter).  Frames do cross to
+another program after all, but only into the predictor's one step, so everything before and after
+it is the fitter's as here; the table is the local fit's (exactly, in the test).  The example
+movie from the laptop on gpuvm's H100: 131 frames/s.  Reading the movie from the shared drive
+there, with no frames sent, is the second option, not built.
+
 ### (i) The benchmark against Spline 3D and the CRLB
 
 **Where:** `benchmarks/decode/`, with its results as `jsonl`, as uipsf's
@@ -1443,8 +1452,14 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
   simulated movie through Spline 3D, edited estimates written, the curves, the window's list and its
   refusal without torch, the command it starts), `tests/decode_tests/test_train_window_run.py` (slow: a
   tiny job started the window's way, followed, stopped through the STOP file, resumed).
-- **Not yet:** training on a host over ssh, its Preferences page, following it there; the simulated
-  frames beside real ones in the preparation figure (needs torch here); the CRLB line on the curves.
+- **Done since (2026-11-12):** training on a host over ssh (`training/remote.py`: the folder sent
+  as a tar stream made here, started detached, its progress, lock and log end copied back every 15
+  s by a thread of the window's, stopped by the STOP file there, the model fetched when finished or
+  asked for; a dead training there *interrupted*, one that refused to start an *error* with its
+  reason), its Preferences page *Training hosts* (`preferences.HostsPage`, with *Test* and *train
+  jobs another SMAPpy version prepared*), tried on gpuvm; the simulated frames beside the data in
+  Prepare (with torch here); the CRLB of the median spot on the Follow curves
+  (`training/reference.py`); a sparse movie prefitted further until 200 fully-on frames.
 
 ### (j) as done, 2026-11-12
 
