@@ -13,8 +13,8 @@ the fastest digit its x -- so SMAPpy's are transposed to ``(ny, nx, nz, 64)`` an
 digits exchanged.  Without a mirror this is a permutation of the file's values: the result is
 DECODE's own reading, bitwise (tests/decode_tests/test_calibration_io.py).
 
-**The reference** is SMAP's lateral centre ``x0`` (1-based, one value for both axes) less one, and
-``z0`` -- DECODE's own.
+**The reference** is the lateral centre ``x0`` (one value for both axes) counted from 0, and ``z0``
+-- DECODE's own.  SMAP writes ``x0`` 1-based, SMAPpy's own calibrations 0-based (`_x0_base`).
 
 **A mirrored calibration.**  SMAP's spline of x-mirrored EM beads, which DECODE drew as it was
 (and the Fit notebook mirrored the frames to match), comes un-mirrored from SMAPpy: ``S'(u) =
@@ -41,6 +41,18 @@ _k = np.arange(64)
 _DIGIT_SWAP = 16 * (_k // 16) + 4 * (_k % 4) + (_k // 4) % 4
 
 
+def _x0_base(cal) -> float:
+    """1 for SMAP's ``x0`` (1-based, MATLAB's), 0 for SMAPpy's own (0-based: ``(roi_size - 1) / 2`` in
+    `calibrate.core` and `calibrate.pupil`).  Both are the same point, the middle of the bead's grid --
+    SMAPpy's fitter never reads ``x0`` and puts a spline's centre there whatever it says -- so a
+    calibration SMAPpy made, read with SMAP's rule, drew every PSF a voxel off in x and y (a DECODE
+    model trained on one localized 0.96 and 0.99 px off; the pixelation study, plan §8).  A calibration
+    from SMAP keeps SMAP's parameters through every load and save: ``emmirror``, which SMAPpy's loader
+    takes as the mark of SMAP's bead calibration (`smappy.io.calibration._smap_flipped`), or ``ROIxy``."""
+    params = cal.parameters or {}
+    return 1.0 if "emmirror" in params or "ROIxy" in params else 0.0
+
+
 def decode_coefficients(cal) -> tuple[torch.Tensor, tuple[float, float, float], float]:
     """``(coeff, ref0, dz)`` for CubicSplinePSF from a `smappy.io.calibration.SplineCalibration`.
 
@@ -63,7 +75,10 @@ def decode_coefficients(cal) -> tuple[torch.Tensor, tuple[float, float, float], 
         # S(c - p + r) mirrored is S(n - u) at r' = n - r = x0 + 1; one voxel along, x0
         ref_cols = float(cal.x0)
     else:
-        ref_rows = ref_cols = float(cal.x0) - 1.0
+        ref_rows = ref_cols = float(cal.x0) - _x0_base(cal)
+        if abs(ref_cols - nx / 2) > 1.0:
+            raise ValueError(f"the calibration's centre x0 = {cal.x0} on a grid of {nx} voxels is not its middle "
+                             f"({nx / 2:g}, 0-based): neither SMAP's nor SMAPpy's convention")
     ref0 = (ref_rows, ref_cols, float(cal.z0))
     return torch.from_numpy(coeff), ref0, float(cal.dz)
 

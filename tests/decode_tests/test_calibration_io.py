@@ -64,6 +64,22 @@ def test_without_a_mirror_the_coefficients_and_reference_are_decodes_own(tmp_pat
     assert ref0 == (6.0, 6.0, 10.0) and dz == 50.0
 
 
+def test_a_calibration_smappy_made_has_its_centre_where_smaps_has_it(tmp_path, synthetic):
+    """SMAPpy writes x0 from 0, SMAP from 1: the same spline, made by SMAPpy, draws the same PSFs."""
+    from dataclasses import replace
+    path = tmp_path / "beads_3dcal.mat"
+    _write_smap(path, synthetic, x0=7, z0=10, dz=50.0, mirrored=False)
+    smap = load_spline_calibration(path)
+    own = replace(smap, x0=smap.x0 - 1, parameters={"method": "uipsf2_pupil"})     # as calibrate.pupil saves it
+    assert decode_coefficients(own)[1] == decode_coefficients(smap)[1] == (6.0, 6.0, 10.0)
+    xyz, phot, frame = _emitters()
+    a = spline_psf(smap, **FRAME).forward(xyz, phot, frame, 0, 5)
+    b = spline_psf(own, **FRAME).forward(xyz, phot, frame, 0, 5)
+    assert torch.equal(a, b)
+    with pytest.raises(ValueError, match="not its middle"):
+        decode_coefficients(replace(own, x0=own.x0 + 3))
+
+
 def test_an_unmirrored_spline_draws_the_mirror_image_of_the_files(tmp_path, synthetic):
     """EM beads were x-mirrored: the file's PSF lives in the mirrored frame, SMAPpy's in the camera's."""
     path = tmp_path / "em_beads_3dcal.mat"
