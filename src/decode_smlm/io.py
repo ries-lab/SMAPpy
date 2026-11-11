@@ -48,11 +48,7 @@ class OriginalModel:
 
     def crop(self, shape) -> tuple[int, int, int, int]:
         """(first row, first column, rows, columns) that AutoCenterCrop keeps of frames of ``shape``."""
-        h, w = int(shape[-2]), int(shape[-1])
-        th, tw = h // CROP_FOLD * CROP_FOLD, w // CROP_FOLD * CROP_FOLD
-        if th == 0 or tw == 0:
-            raise ValueError(f"frames of {h} x {w} pixels are smaller than {CROP_FOLD}")
-        return -(-(h - th) // 2), -(-(w - tw) // 2), th, tw      # the ceiling, as AutoCenterCrop
+        return crop_of(shape)
 
     def frame_processing(self, camera: dict):
         from .neuralfitter import frame_processing, scale_transform
@@ -139,30 +135,50 @@ def training_camera(param) -> dict:
             "spur_noise": float(c.spur_noise), "qe": float(c.qe)}
 
 
-def to_columns(em, pixel_size_nm, *, crop, frames_mirrored: bool, first_frame: int = 0) -> dict:
-    """An `EmitterSet` of `OriginalModel.localize` as SMAPpy's columns, on the frames as given.
+def crop_of(shape) -> tuple[int, int, int, int]:
+    """(first row, first column, rows, columns) that AutoCenterCrop keeps of frames of ``shape``."""
+    h, w = int(shape[-2]), int(shape[-1])
+    th, tw = h // CROP_FOLD * CROP_FOLD, w // CROP_FOLD * CROP_FOLD
+    if th == 0 or tw == 0:
+        raise ValueError(f"frames of {h} x {w} pixels are smaller than {CROP_FOLD}")
+    return -(-(h - th) // 2), -(-(w - tw) // 2), th, tw      # the ceiling, as AutoCenterCrop
 
-    ``pixel_size_nm`` is (x, y) in SMAPpy's order, x along the columns; ``crop`` is
-    `OriginalModel.crop` of the frames' shape.  ``prob`` keeps its name: it is what DECODE's
-    detections are filtered by.
-    """
+
+def pixel_columns(em, *, crop, frames_mirrored: bool) -> dict:
+    """An `EmitterSet` in pixels of the cropped (and mirrored) frames as SMAPpy's pixel columns on
+    the frames as given: ``x_pix`` along the columns, ``y_pix`` along the rows, z in nm.  ``prob``
+    keeps its name: it is what DECODE's detections are filtered by."""
     row0, col0, _, w = crop
-    px, py = np.broadcast_to(np.asarray(pixel_size_nm, np.float64), 2)
     xyz = em.xyz.double().numpy()
-    sig = em.xyz_sig.double().numpy() if em.xyz_sig is not None else None
     col = (w - 1) - xyz[:, 1] if frames_mirrored else xyz[:, 1]
-    cols = {"frame": em.frame_ix.numpy().astype(np.int64) + int(first_frame),
-            "x_nm": ((col + col0) * px).astype(np.float32),
-            "y_nm": ((xyz[:, 0] + row0) * py).astype(np.float32),
+    cols = {"frame": em.frame_ix.numpy().astype(np.int64),
+            "x_pix": col + col0, "y_pix": xyz[:, 0] + row0,
             "z_nm": xyz[:, 2].astype(np.float32),
             "photons": em.phot.numpy().astype(np.float32),
             "background": em.bg.numpy().astype(np.float32),
             "prob": em.prob.numpy().astype(np.float32)}
-    if sig is not None:
-        cols.update(x_err_nm=(sig[:, 1] * px).astype(np.float32), y_err_nm=(sig[:, 0] * py).astype(np.float32),
-                    z_err_nm=sig[:, 2].astype(np.float32))
+    if em.xyz_sig is not None:
+        sig = em.xyz_sig.double().numpy()
+        cols.update(x_err_pix=sig[:, 1], y_err_pix=sig[:, 0], z_err_nm=sig[:, 2].astype(np.float32))
     if em.phot_sig is not None:
         cols["photons_err"] = em.phot_sig.numpy().astype(np.float32)
     if em.bg_sig is not None:
         cols["background_err"] = em.bg_sig.numpy().astype(np.float32)
     return cols
+
+
+def to_columns(em, pixel_size_nm, *, crop, frames_mirrored: bool, first_frame: int = 0) -> dict:
+    """An `EmitterSet` of `OriginalModel.localize` as SMAPpy's columns, on the frames as given.
+
+    ``pixel_size_nm`` is (x, y) in SMAPpy's order, x along the columns; ``crop`` is
+    `OriginalModel.crop` of the frames' shape.
+    """
+    px, py = np.broadcast_to(np.asarray(pixel_size_nm, np.float64), 2)
+    cols = pixel_columns(em, crop=crop, frames_mirrored=frames_mirrored)
+    out = {"frame": cols.pop("frame") + int(first_frame),
+           "x_nm": (cols.pop("x_pix") * px).astype(np.float32), "y_nm": (cols.pop("y_pix") * py).astype(np.float32)}
+    if "x_err_pix" in cols:
+        out["x_err_nm"] = (cols.pop("x_err_pix") * px).astype(np.float32)
+        out["y_err_nm"] = (cols.pop("y_err_pix") * py).astype(np.float32)
+    out.update(cols)
+    return out
