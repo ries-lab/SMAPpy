@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
 ---
 
 ## What it does
@@ -20,12 +20,14 @@ the training draws its own frames, so the movie stays here.
 
 ## How it works
 
-**Prepare.**  Choose the movie the model is for and its bead calibration.
+**Prepare.**  Choose the movie the model is for and its *PSF calibration* (from beads).
 *Prefit* fits a few blocks spread over the movie with
 [Spline 3D](plugin:Localize/Spline 3D) and links the localizations into
 blinks.  From them come the training's ranges: the photons of a molecule in
 a frame it is fully on in, the background, the z range and how many frames a
-blink lasts.  They appear under *Estimates*, to change if you know better;
+blink lasts.  They appear under *Estimates*, to change if you know better --
+or, without a prefit, to type in yourself: *Write job* then writes the job
+from them as they stand;
 the figure shows the prefit's values with the ranges the training will draw
 from over them.  With torch installed here, a frame as the training would
 simulate it is drawn beside a frame of the movie, on one scale, with both
@@ -34,14 +36,17 @@ background as grey and as grainy.  It is drawn again a moment after an
 estimate is changed.  *Write job* writes the job folder beside the movie, in
 `<movie>_decode/`, and lists it on the left.
 
-**Train.**  Choose a job on the left, where it trains, and *Start*.  The
+**Train.**  Choose a job on the left, where it trains (*run on*), and
+*Start*.  The
 training runs as a program of its own, so it goes on when this window or
 SMAPpy is closed, and is listed again when it opens.  *Stop* stops it after
 the epoch it is in, with its checkpoint written; *Start* again goes on from
 there.
 
 **On a workstation.**  The workstations are listed in *File > Preferences*,
-*Training hosts*: a name, what `ssh` is given (an alias of your
+*Training hosts* (*Training hosts...* at the top of this window, and at the
+foot of the DECODE fitter's *model*, which offers the same list as its
+*run on*): a name, what `ssh` is given (an alias of your
 `~/.ssh/config`, or `user@host`), the folder job folders go to there, and
 the command that trains there -- `smappy-decode` where SMAPpy is installed
 with its `decode` extra.  ssh must log in without a password (a key): the
@@ -70,7 +75,17 @@ has little.
 movie and draws what it found.  *Use this model* puts it into the DECODE
 fitter.
 
+The DECODE fitter's *Train a model...* opens this window with the fitter's
+movie, microscope, PSF calibration and *run on* filled in.
+
 ## Controls
+
+### Training hosts...
+*File > Preferences*, *Training hosts*: the workstations *run on* offers.
+*run on* reads the list again when Preferences closes.
+
+### ?
+This page.
 
 ### Jobs
 Every job this computer prepared or started, with its state and where it
@@ -88,7 +103,7 @@ List a job folder made elsewhere, or one taken off the list.
 Takes the job off the list; its folder stays where it is.
 
 ### Prepare
-The movie, its calibration and the density to train at.  *LD*, *HD* and *UHD*
+The movie, its PSF calibration and the density to train at.  *LD*, *HD* and *UHD*
 are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  A model
 trained dense also localizes sparse data well: the example package's, trained
 at 50, found 96 % of the molecules at one in 40 x 40 pixels.
@@ -102,22 +117,25 @@ measured on those frames, and the rule that would stand in for them,
 from whole blinks, can be several times off.
 
 ### Estimates
-The training's ranges, editable.  The photons are those of a frame a molecule
-is fully on in, not of a whole blink.
+The training's ranges, editable, and typed by hand where no prefit was run.
+The photons are those of a frame a molecule is fully on in, not of a whole
+blink.
 
 ### Advanced: method.yaml
 DECODE's whole parameter file, as it will be written, to edit by hand.  Used
 as written when shown.
 
 ### Write job
-Writes the job folder and selects it.
+Writes the job folder and selects it: from the prefit's estimates as edited,
+or, with no prefit, from those typed in, the camera read from the movie and
+*microscope*.
 
 ### Train
-Where -- this computer, or a training host -- and how long.  The test loss is within 2 % of its final value after
+Where it trains (*run on*: this computer, or a training host) and how long.  The test loss is within 2 % of its final value after
 about 150 epochs; the example data's models were trained for 1000.
 
 ### Start
-Starts the chosen job where *where* says, or goes on with it from its last
+Starts the chosen job where *run on* says, or goes on with it from its last
 checkpoint.  Here it needs torch, SMAPpy's `decode` extra; on a training
 host the job folder is copied there first.
 
@@ -135,5 +153,5 @@ The first frames of the movie through the newest model, drawn with what it
 found at a probability of at least 0.5.
 
 ### Use this model
-Puts the newest model into the DECODE fitter's *model* (from a workstation,
+Puts the newest model into the DECODE fitter's *trained model* (from a workstation,
 copied back first).

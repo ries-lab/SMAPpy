@@ -1016,6 +1016,12 @@ class Plugin:
     # A fitter's *after the fit*, whose steps one forgot to tick, run on the
     # table without fitting again.
     part_runs: Tuple[Tuple[str, str, str], ...] = ()
+    # Buttons at the foot of a part that open a window of the GUI's, each
+    # ``(part, label, window)``, the window by its name in
+    # `Session.window_openers` and handed the form's settings as
+    # `window_buttons` are: where the window belongs to one part, the DECODE
+    # fitter's *PSF model* and its *Train a model...*.
+    part_windows: Tuple[Tuple[str, str, str], ...] = ()
 
     def __init_subclass__(cls, **kwargs):
         # At definition, not at the first run: a dropped-in plugin that does

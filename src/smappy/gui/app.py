@@ -439,6 +439,9 @@ class ControlWindow(QMainWindow):
         # fitter's settings, its movie, camera and calibration the start of a job
         session.window_openers["decode training"] = \
             lambda settings=None: self.open_decode_training(settings)
+        # the DECODE fitter's and the training window's *Training hosts...*: Preferences on that page
+        session.window_openers["training hosts"] = \
+            lambda settings=None: self.open_preferences("Training hosts")
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
         # *Load*'s two buttons (`plugins.file.Open`): each says what it does,
         # so neither asks, as File > Open does
@@ -869,9 +872,13 @@ class ControlWindow(QMainWindow):
             "says more.")
         self.show_user_plugins()
 
-    def open_preferences(self) -> None:
+    def open_preferences(self, page: Optional[str] = None) -> None:
+        """Preferences, opened on ``page`` (a tab's title) when given."""
         before = [(t.name, t.kind) for t in self.workspace.tabs]
-        PreferencesDialog(self.workspace, self).exec()
+        dialog = PreferencesDialog(self.workspace, self)
+        if isinstance(page, str):          # the menu's action passes its checked state
+            dialog.show_page(page)
+        dialog.exec()
         if [(t.name, t.kind) for t in self.workspace.tabs] != before:
             self.build_tabs()
 
@@ -1878,7 +1885,8 @@ class ControlWindow(QMainWindow):
         goes to the DECODE fitter (`use_decode_model`)."""
         from .train_window import TrainWindow
         if self.decode_training_window is None:
-            self.decode_training_window = TrainWindow(settings, parent=self)
+            self.decode_training_window = TrainWindow(
+                settings, parent=self, open_hosts=lambda: self.open_preferences("Training hosts"))
             self.decode_training_window.model_chosen.connect(self.use_decode_model)
         elif settings is not None:
             self.decode_training_window.take_fitter(settings)

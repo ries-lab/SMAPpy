@@ -932,6 +932,7 @@ def test_every_plugins_window_button_is_an_action_or_a_window_the_assistant_open
         if getattr(cls, "window", None):
             named.add(cls.window)
         named.update(opener for _, opener in getattr(cls, "window_buttons", ()) or ())
+        named.update(opener for _, _, opener in getattr(cls, "part_windows", ()) or ())
     assert "add files" in named
     assert sorted(named - set(WINDOW_BUTTONS)) == []
 

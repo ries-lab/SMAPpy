@@ -175,3 +175,51 @@ def test_the_follow_curves_draw_the_crlb_reference_on_the_rmse(tmp_path):
     rmse = next(a for a in figure.axes if a.get_title().startswith("RMSE"))
     levels = sorted(line.get_ydata()[0] for line in rmse.get_lines() if line.get_linestyle() == "--")
     assert levels == [12.0, 30.0]
+
+
+def test_without_a_prefit_the_window_writes_the_job_from_the_estimates_typed_in(movie):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui import train_window
+    from smappy.training import job as jobfile
+    path, cal_path = movie
+    w = train_window.TrainWindow()
+    try:
+        w.prepare_form.set(_prepare_settings(path, cal_path))
+        w.estimate_form.set_values({"photons": 4321.0, "background_min": 15.0, "background_max": 90.0,
+                                    "z_min_nm": -600.0, "z_max_nm": 600.0})
+        assert w.estimate_form.isEnabled() and w.write_button.isEnabled()
+        w.write()
+        folder = w.selected_folder()
+        assert folder is not None and "job written" in w.status_bar.currentMessage()
+        job, params = jobfile.read(folder)
+        sim = params["Simulation"]
+        assert sim["intensity_mu_sig"][0] == 4321.0 and sim["bg_uniform"] == [15.0, 90.0]
+        assert sim["emitter_extent"][2] == [-600, 600] and job.camera["e_per_adu"] == 0.5
+        assert jobfile.check(folder) == []
+    finally:
+        w.close()
+        w.timer.stop()
+
+
+def test_the_window_takes_the_fitters_run_on_and_opens_the_training_hosts(tmp_path):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui import train_window
+    from smappy.plugins.fit_decode import DecodeFitSettings
+    opened = []
+    w = train_window.TrainWindow(open_hosts=lambda: opened.append(True))
+    try:
+        settings = DecodeFitSettings()
+        settings.source.path = str(tmp_path / "cells.tif")
+        settings.model.run_on = "here"
+        w.take_fitter(settings)
+        assert w.prepare_form.value().movie == settings.source.path
+        assert w.train_form.value().run_on == "here"
+        w.hosts_button.click()
+        assert opened == [True]
+    finally:
+        w.close()
+        w.timer.stop()

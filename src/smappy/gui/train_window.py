@@ -26,9 +26,10 @@ import numpy as np
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
                                QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QTabWidget,
-                               QVBoxLayout, QWidget, QFileDialog)
+                               QToolButton, QVBoxLayout, QWidget, QFileDialog)
 
 from ..plugins import param
+from .widgets import note_style
 from ..plugins.fit import TIFF_FILTER, CameraSettings
 
 METHOD = "decode-v0.10.2"
@@ -50,7 +51,7 @@ class PrepareSettings:
     """What a job is prepared from: the movie, its camera, the calibration, the density to train at."""
     movie: str = param("", label="movie", kind="open_file", file_filter=TIFF_FILTER,
                        help="the acquisition the model is for: the prefit reads blocks of it, the job lands beside it")
-    calibration: str = param("", label="calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
+    calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
                              help="the bead calibration the network learns the PSF from, the one the data were taken with")
     density: str = param("LD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
@@ -78,8 +79,8 @@ class EstimateSettings:
 @dataclass
 class TrainSettings:
     """Where and how long a job trains."""
-    where: str = param("here", label="where", choices=lambda: _where_choices(),
-                       help="this computer, or a training host of Preferences > Training hosts")
+    run_on: str = param("here", label="run on", choices=lambda: _where_choices(),
+                        help="this computer, or a training host (Training hosts... above)")
     epochs: int = param(1000, label="epochs", min=1, help="how long it trains; the test loss is within 2 % of its last by about 150")
     device: str = param("auto", label="device", choices=(("auto", "auto"), ("cuda", "CUDA"), ("mps", "Apple GPU"),
                                                          ("cpu", "CPU")), advanced=True,
@@ -136,6 +137,28 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
                            f"fitting {more} blocks of {settings.block_frames} frames"})
         blocks = more
     return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)))
+
+
+def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared:
+    """What a job is written from when no prefit was run: the estimates as typed, the camera from
+    the movie (its file and the microscope part), a few of its frames for the figure."""
+    from decode_smlm.prefit import Estimates, lifetime
+    if not settings.movie or not settings.calibration:
+        raise ValueError("choose the movie and its bead calibration")
+    source = _source(settings.movie)
+    camera = settings.camera.resolve(source)
+    est = Estimates(on_time_frames=s.on_time_frames, lifetime_frames=lifetime(s.on_time_frames),
+                    intensity_mu_sig=(s.photons, s.photons_sd), intensity_from="by hand", n_fully_on=0,
+                    background=(s.background_min, s.background_max), z_nm=(s.z_min_nm, s.z_max_nm),
+                    emitters_per_frame=float("nan"), n_blinks=0, n_localizations=0)
+    n = min(4, source.n_frames)
+    sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
+    empty = {"photons": np.zeros(0), "background": np.zeros(0)}
+    return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample)
+
+
+def by_hand(prepared: Optional[Prepared]) -> bool:
+    return prepared is None or prepared.estimates.intensity_from == "by hand"
 
 
 def estimate_settings(est) -> EstimateSettings:
@@ -292,8 +315,9 @@ class TrainWindow(QWidget):
     """Jobs on the left; *Prepare*, *Train*, *Follow* and *Try* on the right."""
     model_chosen = Signal(str)            # *Use this model*: the DECODE fitter's model
 
-    def __init__(self, settings=None, parent=None):
+    def __init__(self, settings=None, parent=None, open_hosts=None):
         super().__init__(parent)
+        self._open_hosts = open_hosts       # Preferences > Training hosts, the main window's
         from ..gui.params import SettingsForm
         from .canvas import canvas_class
         from matplotlib.figure import Figure
@@ -321,8 +345,8 @@ class TrainWindow(QWidget):
 
         # Prepare
         self.prepare_form = SettingsForm(PrepareSettings)
+        # typed by hand, or filled by *Prefit* and changed after
         self.estimate_form = SettingsForm(EstimateSettings)
-        self.estimate_form.setEnabled(False)
         self.simulated = None             # frames the training would draw, in photons; with torch only
         self._simulate_later = QTimer(self)
         self._simulate_later.setSingleShot(True)
@@ -338,7 +362,10 @@ class TrainWindow(QWidget):
         self.yaml_button.toggled.connect(self.yaml_edit.setVisible)
         self.prefit_button.clicked.connect(self.prefit)
         self.write_button.clicked.connect(self.write)
-        self.write_button.setEnabled(False)
+        self.prefit_button.setToolTip("fit blocks of the movie with Spline 3D and estimate the training's "
+                                      "ranges from them; or type the estimates by hand and write the job")
+        self.write_button.setToolTip("write the job folder beside the movie, with the estimates as they stand")
+        self.yaml_button.setToolTip("DECODE's parameters as the job will have them, to edit by hand")
         self.prepare_figure = Figure(constrained_layout=True)
         self.prepare_canvas = canvas_class()(self.prepare_figure)
         prepare = QWidget()
@@ -357,6 +384,8 @@ class TrainWindow(QWidget):
         self.start_button, self.stop_button = QPushButton("Start"), QPushButton("Stop")
         self.start_button.clicked.connect(self.start)
         self.stop_button.clicked.connect(self.stop)
+        self.start_button.setToolTip("train the job chosen on the left where run on says, or go on from its checkpoint")
+        self.stop_button.setToolTip("stop it after the epoch it is in; Start goes on from there")
         self.train_note = QLabel("")
         self.train_note.setWordWrap(True)
         train = QWidget()
@@ -382,6 +411,8 @@ class TrainWindow(QWidget):
         self.try_button, self.use_button = QPushButton("Try on my data"), QPushButton("Use this model")
         self.try_button.clicked.connect(self.try_model)
         self.use_button.clicked.connect(self.use_model)
+        self.try_button.setToolTip("localize the movie's first frame with the job's newest model")
+        self.use_button.setToolTip("put the job's newest model into the DECODE fitter")
         self.try_figure = Figure(constrained_layout=True)
         self.try_canvas = canvas_class()(self.try_figure)
         tryit = QWidget()
@@ -401,6 +432,22 @@ class TrainWindow(QWidget):
         splitter.setStretchFactor(1, 3)
         self.status_bar = QStatusBar()
         layout = QVBoxLayout(self)
+        # what the window is for, the hosts it trains on, and the "?" every plugin's title bar has
+        top = QHBoxLayout()
+        intro = QLabel("Train a DECODE network for your data: prepare a job from the movie and its bead "
+                       "calibration, train it here or on a training host, then use it in the DECODE fitter.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet(note_style())
+        top.addWidget(intro, 1)
+        self.hosts_button = QPushButton("Training hosts...")
+        self.hosts_button.setToolTip("the workstations run on offers: Preferences > Training hosts")
+        self.hosts_button.clicked.connect(self.open_hosts)
+        top.addWidget(self.hosts_button)
+        self.help_button = QToolButton(text="?", autoRaise=True)
+        self.help_button.setToolTip("how to train a model: the steps, every control, and what to look at (F1)")
+        self.help_button.clicked.connect(self.show_help)
+        top.addWidget(self.help_button)
+        layout.addLayout(top)
         layout.addWidget(splitter, 1)
         layout.addWidget(self.status_bar)
         try:
@@ -419,8 +466,18 @@ class TrainWindow(QWidget):
         self.resize(1100, 800)
 
     # ---------------------------------------------------------- jobs
+    def show_help(self) -> None:
+        from .help_window import show_help
+        show_help("Panels/DECODE training", self)
+
+    def open_hosts(self) -> None:
+        """Preferences > Training hosts, then *run on*'s list again."""
+        if self._open_hosts is not None:
+            self._open_hosts()
+        self.train_form.refresh()
+
     def take_fitter(self, settings) -> None:
-        """The DECODE fitter's movie, camera and calibration, as a start for *Prepare*."""
+        """The DECODE fitter's movie, camera, calibration and *run on*, as a start."""
         values = {}
         source = getattr(settings, "source", None)
         if source is not None and getattr(source, "path", ""):
@@ -434,6 +491,9 @@ class TrainWindow(QWidget):
             values.update({f"camera.{k}": v for k, v in asdict(camera).items() if v not in (None, "")})
         if values:
             self.prepare_form.set_values(values)
+        run_on = getattr(model, "run_on", None)
+        if run_on:
+            self.train_form.set_values({"run_on": run_on})
 
     def reload_jobs(self) -> None:
         from ..training import jobs
@@ -593,8 +653,13 @@ class TrainWindow(QWidget):
 
     def write(self) -> None:
         import yaml
-        if self.prepared is None:
-            return
+        if by_hand(self.prepared):
+            # no prefit: the estimates as typed, the camera from the movie as the form has them now
+            try:
+                self.prepared = prepared_by_hand(self.prepare_form.value(), self.estimate_form.value())
+            except Exception as error:
+                self.status_bar.showMessage(f"{type(error).__name__}: {error}")
+                return
         est = with_settings(self.prepared.estimates, self.estimate_form.value())
         params = method_params(self.prepared, est)
         if self.yaml_button.isChecked():
@@ -622,7 +687,7 @@ class TrainWindow(QWidget):
             self.train_note.setText("choose a job on the left")
             return
         train = self.train_form.value()
-        if train.where != "here":
+        if train.run_on != "here":
             self._work("started", lambda report: start_on_host(folder, train, report))
             return
         if not torch_here():
@@ -701,11 +766,11 @@ def simulated_frames(params: dict, calibration, n_frames: int = 2) -> np.ndarray
 
 
 def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> str:
-    """The job sent to the training host ``train.where`` (unless it is there already) and started there."""
+    """The job sent to the training host ``train.run_on`` (unless it is there already) and started there."""
     from ..training import jobs, remote
-    h = jobs.host(train.where)
+    h = jobs.host(train.run_on)
     if h is None:
-        raise ValueError(f"no training host {train.where!r}: add it in Preferences > Training hosts")
+        raise ValueError(f"no training host {train.run_on!r}: add it in Preferences > Training hosts")
     entry = next((e for e in jobs.entries() if e.folder == str(Path(folder).resolve())), None)
     if entry is None or entry.host != h.name or not entry.remote:
         report({"message": f"sending {Path(folder).name} to {h.name}"})

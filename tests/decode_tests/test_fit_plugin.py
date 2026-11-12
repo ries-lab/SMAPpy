@@ -261,3 +261,26 @@ def test_a_fit_outside_the_trained_range_says_so_in_its_text_and_its_file(tiny, 
     said = [line for line in result.text.splitlines() if "background outside the training's" in line]
     assert len(said) == 1 and said[0].startswith("warning:")             # once, not again by the plugin
     assert any("background outside" in w for w in load_localizations(out).metadata["warnings"])
+
+
+def test_the_model_part_opens_the_training_window_with_the_fitters_settings_and_the_hosts():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit_decode import DecodeFit
+    from smappy.session import Session
+    session = Session()
+    opened = []
+    session.window_openers["decode training"] = lambda settings=None: opened.append(("training", settings))
+    session.window_openers["training hosts"] = lambda settings=None: opened.append(("hosts", None))
+    panel = PluginPanel(DecodeFit, session)
+    assert DecodeFit.description == "Deep-learning fitter for high densities (DECODE)."
+    assert DecodeFit.window_buttons == ()
+    buttons = panel.part_window_buttons
+    assert set(buttons) == {"Train a model...", "Training hosts..."}
+    panel.form.set_values({"source.path": "/data/cells.tif"})
+    buttons["Train a model..."].click()
+    buttons["Training hosts..."].click()
+    assert [kind for kind, _ in opened] == ["training", "hosts"]
+    assert opened[0][1].source.path == "/data/cells.tif" and opened[0][1].model.run_on == "here"

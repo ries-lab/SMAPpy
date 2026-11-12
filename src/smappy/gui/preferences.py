@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 from .. import config, plugins, updates
 from ..workspace import Tab, Workspace
 from . import theme
+from .widgets import note_style
 
 BESPOKE = {"render": "the render view"}
 
@@ -247,7 +248,7 @@ class HostsPage(QWidget):
         about = QLabel("Workstations DECODE trains on (Localize > Train DECODE): a computer with a GPU "
                        "that ssh reaches without a password.  Only the job folder is copied there.")
         about.setWordWrap(True)
-        about.setStyleSheet("color: gray")
+        about.setStyleSheet(note_style())
         layout.addWidget(about)
         self.hosts = jobs.hosts()
         self.list = QListWidget()
@@ -369,3 +370,10 @@ class PreferencesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
         self.resize(460, 420)
+
+    def show_page(self, title: str) -> None:
+        """The tab called ``title`` in front (the DECODE windows' *Training hosts...*)."""
+        for index in range(self.pages.count()):
+            if self.pages.tabText(index) == title:
+                self.pages.setCurrentIndex(index)
+                return

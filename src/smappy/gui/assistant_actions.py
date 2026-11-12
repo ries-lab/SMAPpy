@@ -52,7 +52,7 @@ LEFT_OUT = {
 }
 
 
-#: The plugins' own window buttons (`Plugin.window`, `window_buttons`), by
+#: The plugins' own window buttons (`Plugin.window`, `window_buttons`, `part_windows`), by
 #: the opener they name in `Session.window_openers`: the action or the
 #: tool that does the same.
 WINDOW_BUTTONS = {
@@ -61,6 +61,7 @@ WINDOW_BUTTONS = {
     "bead calibration": "open_window",
     "psf calibration": "open_window",
     "decode training": "open_window",
+    "training hosts": "File/Preferences",
 }
 
 

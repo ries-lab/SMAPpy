@@ -31,7 +31,7 @@ def host(monkeypatch):
 
 def test_a_fit_with_its_network_on_a_host_is_the_fit_here(tiny, host):  # noqa: F811
     here = fit(tiny["tif"], tiny["model"], **{"source.chunk": 7})
-    there = fit(tiny["tif"], tiny["model"], **{"source.chunk": 7, "model.where": "box"})
+    there = fit(tiny["tif"], tiny["model"], **{"source.chunk": 7, "model.run_on": "box"})
     assert len(host) == 1
     _same(there, here)
 
@@ -54,7 +54,7 @@ def test_the_workers_error_reaches_the_fit(tiny, host, tmp_path):  # noqa: F811
 
 def test_a_live_fit_and_an_unknown_host_are_refused_before_anything_is_sent(tiny, host):  # noqa: F811
     with pytest.raises(ValueError, match="no training host 'nowhere'"):
-        fit(tiny["tif"], tiny["model"], **{"model.where": "nowhere"})
+        fit(tiny["tif"], tiny["model"], **{"model.run_on": "nowhere"})
     with pytest.raises(ValueError, match="live fit"):
-        fit(tiny["tif"], tiny["model"], **{"model.where": "box", "source.live": True})
+        fit(tiny["tif"], tiny["model"], **{"model.run_on": "box", "source.live": True})
     assert host == []

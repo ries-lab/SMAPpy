@@ -20,6 +20,7 @@ tabs:
   - plugin: Localize/Gaussian 2D 2C
   - plugin: Localize/Spline 3D
   - plugin: Localize/Spline 3D 2C
+  - plugin: Localize/DECODE
   - plugin: Analysis/After fit/Assign colours
     line_above: true
   - plugin: Analysis/Drift/RCC

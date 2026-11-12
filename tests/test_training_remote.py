@@ -128,7 +128,7 @@ def test_the_window_starts_a_job_on_a_host_and_its_follower_brings_back_the_prog
     monkeypatch.setattr(remote.subprocess, "run", runner)
     folder = _job(tmp_path)
     jobs.add(folder)                                       # prepared here, as the window lists it
-    said = train_window.start_on_host(folder, train_window.TrainSettings(where="box", epochs=5))
+    said = train_window.start_on_host(folder, train_window.TrainSettings(run_on="box", epochs=5))
     assert said.startswith("started on box")
     entry = next(e for e in jobs.entries() if e.folder == str(folder.resolve()))
     assert entry.host == "box"

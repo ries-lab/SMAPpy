@@ -50,12 +50,15 @@ OUTSIDE_WARN = 0.05
 @dataclass
 class DecodeModelSettings:
     """The trained network, and the calibration it is checked against."""
-    path: str = param("", label="model", kind="open_file", file_filter=MODEL_FILTER,
+    path: str = param("", label="trained model", kind="open_file", file_filter=MODEL_FILTER,
                       help="a trained DECODE model (.safetensors): a job folder's model.safetensors, "
                            "or an original DECODE model exported")
-    calibration: str = param("", label="calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
+    calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
                              help="the data's bead calibration, which the model must have been trained "
                                   "on; empty: the one listed for this file's microscope, else unchecked")
+    run_on: str = param("here", label="run on", choices=lambda: _where_choices(),
+                        help="this computer, or a training host (Training hosts... below): the frames "
+                             "are read and converted here and sent there, the network runs there")
     threshold: float = param(0.1, label="threshold", min=0.01, max=0.99, advanced=True,
                              help="the detection probability a pixel must reach to start a localization "
                                   "(DECODE's raw_th); every localization keeps its own in prob")
@@ -63,9 +66,6 @@ class DecodeModelSettings:
                         help="where the network runs; auto: a GPU if there is one")
     batch: int = param(32, label="frames per batch", min=1, advanced=True,
                        help="frames through the network at once; only memory and speed depend on it")
-    where: str = param("here", label="run on", choices=lambda: _where_choices(),
-                       help="this computer, or a training host of Preferences > Training hosts: the frames "
-                            "are read and converted here and sent there, the network runs there")
 
 
 @dataclass
@@ -142,13 +142,13 @@ def range_warnings(locs, meta: dict) -> list:
 
 @register("Localize/DECODE")
 class DecodeFit(_FitPlugin):
-    description = ("Localize with a trained DECODE network: no peak finding, positions, photons, "
-                   "background and their uncertainties from each frame and its neighbours.")
+    description = "Deep-learning fitter for high densities (DECODE)."
     Settings = DecodeFitSettings
     version = "1"
     channel_part = "none"
-    # a model is trained for these data in the Train window (`plugins/train_decode.py`)
-    window_buttons = (("Train a model...", "decode training"),)
+    # a model is trained for these data in the Train window (`plugins/train_decode.py`), handed
+    # the movie, microscope, PSF calibration and *run on*; the hosts are Preferences' (`HostsPage`)
+    part_windows = (("model", "Train a model...", "decode training"), ("model", "Training hosts...", "training hosts"))
     preview_help = ("localize one frame with the network and draw what it found over the frame. "
                     "Nothing is saved and the session is not touched.")
 
@@ -176,7 +176,7 @@ class DecodeFit(_FitPlugin):
         if problems:
             raise ValueError(problems[0])
         device = settings.model.device
-        if settings.model.where != "here":
+        if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
         from decode_smlm.predict import load_predictor
         return load_predictor(settings.model.path, None if device == "auto" else device,
@@ -285,9 +285,9 @@ def remote_predictor(settings, meta: dict, camera: CameraMetadata):
     from ..decode_remote import RemotePredictor
     from ..training import jobs
     m = settings.model
-    host = jobs.host(m.where)
+    host = jobs.host(m.run_on)
     if host is None:
-        raise ValueError(f"no training host {m.where!r}: add it in Preferences > Training hosts, "
+        raise ValueError(f"no training host {m.run_on!r}: add it in Preferences > Training hosts, "
                          f"or run the network on this computer")
     if getattr(settings.source, "live", False):
         raise ValueError("a live fit runs its network on this computer: set run on to this computer")

@@ -313,7 +313,7 @@ Built on the patterns the GUI has (surveyed 2026-11-11); nothing in the window i
 training is always a process of its own.
 
 **How it opens.**  A plugin `Localize/Train DECODE` whose `window = "decode training"`, and the
-DECODE fitter's *Train a model...* button (`Plugin.window_buttons`); the opener registered in
+DECODE fitter's *Train a model...* button (`Plugin.window_buttons`; since 2026-11-12 in its *model* part, `Plugin.part_windows`); the opener registered in
 `gui/app.py` beside the PSF calibration's (one instance, `show()` and `raise_()`), named in
 `gui/assistant_actions.WINDOW_BUTTONS`.  It is handed the fitter's settings when there are any (the
 movie, the camera, the calibration), else the session's first file.  Its page is
@@ -1211,7 +1211,8 @@ engine on the example package, each phase timed with the device synchronised.
 - **The test network** is the tiny job's, three frames in, randomly initialised: it localizes 40
   frames of 32 x 32 in milliseconds, and the plumbing tests need no trained model and no data.
 - **Not in the shipped GUI yet:** the plugin is in the tree (*Localize > DECODE*) but not pinned
-  in `default.gui.yaml`, until the benchmark (i) says it should be.
+  in `default.gui.yaml`, until the benchmark (i) says it should be.  Pinned 2026-11-12, after
+  (i); the training window is not (it opens from the fitter and *Plugins > Localize*).
 - **Left for later:** the range check writes to the run's text, not to the file, since it is made after
   the file is written.
 
@@ -1463,7 +1464,7 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
 ### (h), first step: the window here (2026-11-11)
 
 - **The window** is `gui/train_window.py`, opened by `Localize/Train DECODE` (`plugins/train_decode.py`)
-  and the DECODE fitter's *Train a model...* (`window_buttons`); `ControlWindow.open_decode_training`,
+  and the DECODE fitter's *Train a model...* (`window_buttons`, then `part_windows`); `ControlWindow.open_decode_training`,
   `use_decode_model` (*Use this model* into the fitter), the assistant's `open_window` and
   `WINDOW_BUTTONS`; its page `docs/panels/DECODE training.md`, the plugin's `Localize/Train DECODE.md`.
 - **Its work** is module-level: `run_prefit`, `write_job` (beside the movie, `default_folder`),

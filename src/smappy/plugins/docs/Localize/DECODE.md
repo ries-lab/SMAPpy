@@ -145,7 +145,7 @@ positions flipped back.  Where either side does not say, nothing is flipped,
 as Spline 3D does not flip.
 
 **The checks before a run.**  The model file keeps the sha256 of its
-calibration's spline coefficients.  If *calibration* is given, or the
+calibration's spline coefficients.  If *PSF calibration* is given, or the
 calibration list has one for this file's microscope and state (as Spline
 3D's *auto* finds it), it must be the same calibration, or the run is
 refused.  With no calibration to compare, the form says the model is not
@@ -235,14 +235,21 @@ be undone.
 32 suits a GPU with a few GB; lower it if the GPU runs out of memory, raise
 it on a large one for speed.  On the CPU it changes the last digits only.
 
-### model.where
+### model.run_on
 
 Worth it when this computer has no GPU: the frames go there as photons, four
 bytes a pixel, so a movie of 512 × 512 pixels needs about 50 MB a second at a
 GPU's pace -- a wired network carries that, a slow one makes the network the
 limit.  The example movie's 20 000 frames of 180 × 179 took 153 s on a
 workstation's H100 from a laptop, 166 s on the laptop's own GPU.  *device*
-then names the device there.
+then names the device there.  The workstations are added under *Training
+hosts...*, at the foot of *model*: *File > Preferences*, *Training
+hosts*, the same list the training window trains on.
+
+### model
+
+*Train a model...* opens the [training window](plugin:Panels/DECODE training)
+with this fitter's movie, microscope, PSF calibration and *run on* filled in.
 
 ## Output
 
