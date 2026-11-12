@@ -3,8 +3,8 @@
 The maps are first put into physical units (`physical`): p, photons, x and y as absolute columns
 and rows (each pixel's centre plus its offset), z in nm, their uncertainties, the background.
 
-* ``lookahead`` -- DECODE's (Speiser et al. 2021): a pixel is a detection where its p is above the
-  threshold and the largest in its 3 x 3; its probability is p summed over itself and its four
+* ``lookahead`` -- DECODE's (Speiser et al. 2021): a pixel is a detection where its p is above
+  ``RAW_P`` (0.1) and the largest in its 3 x 3; its probability is p summed over itself and its four
   adjacent pixels (a molecule near a pixel's edge splits its p); a pixel next to a detection whose
   own p exceeds ``SPLIT_P`` is a second detection, two molecules in adjacent pixels.  The summed
   probability is capped at 1 and thresholded; each detection takes its pixel's values.
@@ -18,6 +18,7 @@ import torch
 import torch.nn.functional as F
 
 SPLIT_P = 0.6
+RAW_P = 0.1                     # a pixel's own p a peak needs; the summed probability is thresholded
 MEAN_SHIFT_ITERATIONS = 10
 
 
@@ -37,9 +38,11 @@ def physical(out, scaling):
     return y
 
 
-def detections(p, threshold):
-    """(frame, row, column) of the detections and their probability."""
-    peak = (p > threshold) & (p == F.max_pool2d(p[:, None], 3, 1, padding=1)[:, 0])
+def detections(p, threshold, raw: float = RAW_P):
+    """(frame, row, column) of the detections and their probability: a peak needs its own p above
+    ``raw`` only, a detection its summed probability at ``threshold`` -- a molecule near a pixel's
+    edge splits its p, each half below the threshold (DECODE: 0.1 and 0.5)."""
+    peak = (p > raw) & (p == F.max_pool2d(p[:, None], 3, 1, padding=1)[:, 0])
     plus = torch.tensor([[0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]], device=p.device, dtype=p.dtype)
     summed = F.conv2d(p[:, None], plus[None, None], padding=1)[:, 0]
     second = (~peak) & (p > SPLIT_P)

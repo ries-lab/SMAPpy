@@ -62,7 +62,8 @@ def _found(out, scaling, threshold, how, pixel_nm):
             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
 
 
-def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int | None = None, log=print):
+def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int | None = None, log=print,
+          early_stop: bool = True):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "settings.json").write_text(json.dumps(settings.to_dict(), indent=1))
@@ -95,7 +96,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         opt.load_state_dict(state["optimizer"])
         sched.load_state_dict(state["scheduler"])
         start, seconds = state["epoch"] + 1, state["seconds"]
-        torch.set_rng_state(state["rng"])
+        torch.set_rng_state(state["rng"].cpu())       # map_location moved it with the rest
         progress.append(folder, "start", start, resumed=True, device=device)
     else:
         progress.append(folder, "start", 0, device=device, method=METHOD, parameters=network.parameters(model),
@@ -147,7 +148,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         model_file.write(folder / "model.safetensors", tensors,
                          {**meta_base, "epoch": epoch, "epochs": epochs, "train_seconds": round(seconds, 1),
                           "device": device})
-        why = progress.converged(progress.read(folder))
+        why = progress.converged(progress.read(folder)) if early_stop else None
         if why:
             progress.append(folder, "finished", epoch, reason=why)
             log(f"stopped: {why}")
@@ -169,6 +170,7 @@ def main(argv=None):
     t.add_argument("--settings")
     t.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     t.add_argument("--epochs", type=int)
+    t.add_argument("--all-epochs", action="store_true", help="no early stop")
     a = ap.parse_args(argv)
     folder = Path(a.folder)
     if a.settings:
@@ -181,4 +183,4 @@ def main(argv=None):
         settings.calibration = str(Path(a.calibration).resolve())
     if not settings.calibration:
         ap.error("a calibration is needed: --calibration")
-    train(folder, settings, a.device, a.epochs)
+    train(folder, settings, a.device, a.epochs, early_stop=not a.all_epochs)
