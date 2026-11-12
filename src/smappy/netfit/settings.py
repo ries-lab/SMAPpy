@@ -36,6 +36,7 @@ class CameraModel:
     em_gain: float = 100.0                    # 0: no EM register
     read_noise_e: float = 58.8
     qe: float = 1.0
+    pixel_nm: tuple = (117.0, 127.0)          # x (columns), y (rows): for the metrics and the output
 
     @property
     def adu_to_photons(self) -> float:
@@ -57,7 +58,12 @@ class Parts:
     output: Part = field(default_factory=lambda: Part("offsets"))
     extraction: Part = field(default_factory=lambda: Part("lookahead"))
     loss: Part = field(default_factory=lambda: Part("mixture", {"terms": ["count", "mixture", "background"]}))
-    schedule: Part = field(default_factory=lambda: Part("adamw_step"))
+    # DECODE's: AdamW, the rate times 0.9 every 10 epochs, gradients clipped (the norm 0.03 is
+    # recalled from DECODE's training, not read: a setting to revisit if training is unstable);
+    # an epoch is 10 000 samples, DECODE's pseudo_ds_size.  The rate is the port's decode_B's.
+    schedule: Part = field(default_factory=lambda: Part("adamw_step", {
+        "lr": 6e-4, "weight_decay": 0.1, "step_epochs": 10, "gamma": 0.9, "clip_norm": 0.03,
+        "batch": 64, "samples_per_epoch": 10000, "epochs": 1000, "test_samples": 512, "threshold": 0.5}))
 
 
 @dataclass

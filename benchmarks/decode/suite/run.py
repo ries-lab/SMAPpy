@@ -22,6 +22,8 @@ import platform
 import sys
 import time
 
+import numpy as np
+
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import report as R  # noqa: E402
@@ -88,7 +90,38 @@ def fit_decode_smlm(run, name, out, device=None):
     return {"device": dec.get("device"), "model": str(model), "frames_mirrored": dec.get("frames_mirrored")}
 
 
-ADAPTERS = {"spline3d": fit_spline3d, "decode_smlm": fit_decode_smlm}
+def fit_netfit(run, name, out, device=None):
+    """SMAPpy's own network fitter (`smappy.netfit`), through `WindowEngine` as the DECODE fitter runs:
+    the frames converted to photons by the set's camera, mirrored where the model's camera read the
+    chip the other way."""
+    import tifffile
+
+    from smappy.io.hdf5 import save_localizations
+    from smappy.metadata import CameraMetadata
+    from smappy.netfit.predict import Predictor
+    from smappy.window_engine import WindowEngine, _joined
+    spec, cam = S.SETS[name], S.camera(name)
+    model = model_path(run, spec["context"])
+    camera = CameraMetadata(conversion=cam["conversion"], offset=cam["offset"], em_on=cam["em_on"],
+                            emgain=cam["emgain"], read_noise_e=cam.get("read_noise_e"),
+                            pixelsize_um=(cam["pixelsize_um"], cam.get("pixelsize_y_um", cam["pixelsize_um"])))
+    p = Predictor(model, device, threshold=run["fit"].get("threshold"), extraction=run["fit"].get("extraction"))
+    p.frames_mirrored = bool(p.metadata.get("calibration_em_on")) != bool(cam["em_on"])
+    start, stop = spec.get("start", 0), spec.get("stop")
+    with tifffile.TiffFile(S.movie(name)) as t:
+        stop = stop or len(t.pages)
+        engine = WindowEngine(camera, p)
+        parts = []
+        for a in range(start, stop, 500):
+            frames = np.stack([t.pages[i].asarray() for i in range(a, min(a + 500, stop))])
+            parts.append(engine.push(frames, a - start))
+        parts.append(engine.end())
+    save_localizations(out, _joined(parts), {"netfit": {"model": str(model), "device": p.device,
+                                                        "window": p.window, "frames_mirrored": p.frames_mirrored}})
+    return {"device": p.device, "model": str(model), "frames_mirrored": p.frames_mirrored, "window": p.window}
+
+
+ADAPTERS = {"spline3d": fit_spline3d, "decode_smlm": fit_decode_smlm, "netfit": fit_netfit}
 
 
 def model_path(run, context):

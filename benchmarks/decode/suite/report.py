@@ -229,7 +229,7 @@ def independent_lag(locs) -> int:
     from shared ones -- on the Fig. 4e movie's 3-frame model their errors correlated by 0.73
     (`precision_check.py`) -- so the pair check compares frames that far apart; 1 for a fitter of
     single frames."""
-    window = (locs.metadata.get("decode") or {}).get("window") or 0
+    window = ((locs.metadata.get("decode") or locs.metadata.get("netfit") or {}).get("window")) or 0
     return 2 * int(window) + 1
 
 
