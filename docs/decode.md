@@ -691,6 +691,18 @@ the baselines on the benchmark, not reproduce their outputs.
    - `DECODE_Internal` is not a baseline: its `future/dev` (2024-06) is older
      than DECODE-Plex.  It is read only for what DECODE-Plex lacks: the 4Pi
      attempt, the colour codes, LunarNet, the uiPSF loaders.
+
+   **Built for the comparisons of step 4** (decided with Jonas, 2026-11-12): the benchmark and the
+   fitter are modular from the start, so that a part can be switched and the result compared on
+   the same sets -- the backbone (DECODE's U-Net, a ConvNeXt or residual U-Net, HRNet-style full
+   resolution, NAFNet, large kernels or dilations; §3.3), the time model (none, per-pixel
+   attention, a ConvGRU), the output representation and the extraction (DECODE's offsets, LUNAR's
+   mixture peak, SHOT's overlapping offsets with an optimal-transport loss, SimCC's sub-pixel
+   bins), the loss's terms and the training's schedule.  Each named in the run's settings and
+   recorded with its results, the heads, loss and extraction otherwise unchanged; compared at
+   matched parameters, compute and training.  The benchmark's report includes the Follow tab's
+   per-epoch measures of today's training (`decode_smlm.training`): the error over each
+   molecule's CRLB as a robust width, and the sub-pixel histogram (pixelation).
 3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
    the benchmark.
 4. **Tuning.**  One part at a time on C = 1, where it is cheapest.
