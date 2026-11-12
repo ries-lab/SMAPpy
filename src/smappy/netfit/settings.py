@@ -17,7 +17,9 @@ class SimulationSettings:
     frame_px: int = 40                        # square frames, DECODE's size
     window: int = 3                           # frames a sample holds; the middle one is localized
     margin_px: float = 0.0                    # emitters drawn this far beyond the frame (DECODE: 0)
-    emitters_per_frame: float = 50.0          # mean number on in a frame (DECODE's emitter_av; the example package's 50)
+    # molecules on in a frame, per 40 x 40 pixels: a density, so that frames of another size hold as
+    # many per area (DECODE's emitter_av is per frame, of its 40 x 40; the example package's 50)
+    density_per_40px: float = 50.0
     lifetime_frames: float = 1.0              # mean on-time, exponential (DECODE's lifetime_avg)
     photons_mean: float = 7000.0              # flux while on, a full frame's photons
     photons_sd: float = 3000.0

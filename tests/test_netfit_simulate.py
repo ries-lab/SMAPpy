@@ -36,11 +36,15 @@ def test_the_torch_spline_draws_what_smappys_simulation_draws_to_float_precision
 
 
 def test_a_frame_holds_the_molecules_per_frame_asked_for_and_none_gives_a_frame_more_than_its_flux():
-    sim = SimulationSettings(emitters_per_frame=20.0, lifetime_frames=2.0, window=5)
+    sim = SimulationSettings(density_per_40px=20.0, lifetime_frames=2.0, window=5)
     g = torch.Generator().manual_seed(0)
     *_, flux, per_frame = simulate.emitters(sim, 3000, g, "cpu")
     on_mid = (per_frame[:, 2] > 0).sum().item() / 3000
     assert on_mid == pytest.approx(20.0, rel=0.03)
+    # a density: a frame of 80 x 80 pixels holds four times as many
+    big = SimulationSettings(frame_px=80, density_per_40px=20.0, lifetime_frames=2.0, window=5)
+    *_, per_big = simulate.emitters(big, 1000, g, "cpu")
+    assert (per_big[:, 2] > 0).sum().item() / 1000 == pytest.approx(80.0, rel=0.03)
     assert torch.all(per_frame <= flux[:, None] * (1 + 1e-6))
     # on for whole frames on average: the photons a frame gets are on average flux * (on-time share)
     full = (per_frame > 0.999 * flux[:, None]).sum().item()
@@ -60,7 +64,7 @@ def test_the_camera_gives_back_the_photons_with_the_em_registers_excess_noise():
 
 def test_a_batch_is_the_frames_the_settings_ask_for_and_its_targets_are_in_the_middle_frame():
     cal = _calibration()
-    sim = SimulationSettings(frame_px=24, emitters_per_frame=5.0, photons_mean=2000.0, photons_sd=0.0)
+    sim = SimulationSettings(frame_px=24, density_per_40px=5.0, photons_mean=2000.0, photons_sd=0.0)
     g = torch.Generator().manual_seed(3)
     b = simulate.draw_batch(SplineRenderer(cal), sim, CameraModel(), 16, g)
     assert b.frames.shape == (16, 3, 24, 24)

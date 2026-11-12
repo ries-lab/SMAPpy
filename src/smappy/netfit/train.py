@@ -35,7 +35,10 @@ METHOD = "netfit-v1"
 def load_settings(path) -> TrainingSettings:
     d = json.loads(Path(path).read_text())
     parts = Parts(**{k: Part(**v) for k, v in d.get("parts", {}).items()})
-    sim = SimulationSettings(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.get("simulation", {}).items()})
+    raw = dict(d.get("simulation", {}))
+    if "emitters_per_frame" in raw:          # before the density (2026-11-12): per frame of frame_px
+        raw["density_per_40px"] = raw.pop("emitters_per_frame") * (40.0 / raw.get("frame_px", 40)) ** 2
+    sim = SimulationSettings(**{k: tuple(v) if isinstance(v, list) else v for k, v in raw.items()})
     cam = CameraModel(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.get("camera", {}).items()})
     return TrainingSettings(simulation=sim, camera=cam, parts=parts, calibration=d.get("calibration"), seed=d.get("seed", 0))
 
@@ -77,17 +80,22 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     model = network.build(parts, sim.window).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=sch["lr"], weight_decay=sch["weight_decay"])
     sched = torch.optim.lr_scheduler.StepLR(opt, step_size=sch["step_epochs"], gamma=sch["gamma"])
-    # the test set: drawn once from the seed, its bounds once
-    g_test = torch.Generator(device).manual_seed(settings.seed + 1)
-    test = draw_batch(renderer, sim, cam, sch["test_samples"], g_test)
-    m = test.mask.cpu().numpy()
-    frame = np.nonzero(m)[0]
-    xyz = test.xyz.cpu().numpy()[m].astype(np.float64)
-    ph = test.photons.cpu().numpy()[m]
-    # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed
-    bound = metrics.crlbs_torch(renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm,
-                                bool(cam.em_gain))
-    truth = {"frame": frame, "xyz": xyz, "crlb": bound}
+    if settings.test_set:
+        # the context's fixed test set: the same samples for every variant (`testset.py`)
+        from . import testset
+        test, truth, _ = testset.load(settings.test_set, device, sch["test_samples"])
+    else:
+        # drawn once from the seed, its bounds once
+        g_test = torch.Generator(device).manual_seed(settings.seed + 1)
+        test = draw_batch(renderer, sim, cam, sch["test_samples"], g_test)
+        m = test.mask.cpu().numpy()
+        frame = np.nonzero(m)[0]
+        xyz = test.xyz.cpu().numpy()[m].astype(np.float64)
+        ph = test.photons.cpu().numpy()[m]
+        # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed
+        bound = metrics.crlbs_torch(renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm,
+                                    bool(cam.em_gain))
+        truth = {"frame": frame, "xyz": xyz, "crlb": bound}
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
     if ckpt.exists():
@@ -171,7 +179,33 @@ def main(argv=None):
     t.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     t.add_argument("--epochs", type=int)
     t.add_argument("--all-epochs", action="store_true", help="no early stop")
+    ts = sub.add_parser("testset", help="draw a context's fixed test set once")
+    ts.add_argument("out")
+    ts.add_argument("--calibration", required=True)
+    ts.add_argument("--settings")
+    ts.add_argument("--samples", type=int, default=2048)
+    ev = sub.add_parser("evaluate", help="score a model on a whole test set")
+    ev.add_argument("model")
+    ev.add_argument("test_set")
+    ev.add_argument("--device")
+    ev.add_argument("--out", help="write the scores here as JSON")
     a = ap.parse_args(argv)
+    if a.cmd == "testset":
+        from . import testset
+        s = load_settings(a.settings) if a.settings else TrainingSettings()
+        print(testset.draw(a.out, Path(a.calibration).resolve(), s.simulation, s.camera, a.samples))
+        return
+    if a.cmd == "evaluate":
+        from . import testset
+        r = testset.evaluate(a.model, a.test_set, a.device)
+        if a.out:
+            Path(a.out).write_text(json.dumps(r, indent=1))
+        keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
+                "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
+        print({k: round(r[k], 4) for k in keys if r.get(k) is not None})
+        for b in r.get("by_abs_z", []):
+            print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()})
+        return
     folder = Path(a.folder)
     if a.settings:
         settings = load_settings(a.settings)

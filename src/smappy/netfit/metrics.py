@@ -116,6 +116,25 @@ def evaluate(truth: dict, found: dict, pixel_nm) -> dict:
         b = truth["crlb"][ti]
         out["crlb_width_lat"] = robust_width(np.r_[dx / b[:, 0], dy / b[:, 1]])
         out["crlb_width_ax"] = robust_width(dz / b[:, 2])
+    # the whole range in 200 nm bins of |z|: near the focus decides, but no bin may fail
+    az_all, az = np.abs(truth["xyz"][:, 2]), np.abs(t[:, 2])
+    by_z = []
+    for lo in range(0, 1000, 200):
+        sel_t = (az_all >= lo) & (az_all < lo + 200)
+        sel = (az >= lo) & (az < lo + 200)
+        if sel_t.sum() < 50 or sel.sum() < 20:
+            continue
+        row = {"lo": lo, "hi": lo + 200, "n": int(sel_t.sum()), "recall": float(sel.sum() / sel_t.sum()),
+               "rmse_lat_nm": float(np.sqrt(np.mean(dx[sel] ** 2 + dy[sel] ** 2))),
+               "rmse_ax_nm": float(np.sqrt(np.mean(dz[sel] ** 2))), "bias_z_nm": float(np.mean(dz[sel])),
+               "pixel_ks": ks_uniform(np.r_[f[sel, 0], f[sel, 1]]),
+               "claim_width_ax": robust_width((dz[sel] - np.median(dz[sel])) / err[sel, 2])}
+        if truth.get("crlb") is not None:
+            b = truth["crlb"][ti][sel]
+            row["crlb_width_lat"] = robust_width(np.r_[dx[sel] / b[:, 0], dy[sel] / b[:, 1]])
+            row["crlb_width_ax"] = robust_width(dz[sel] / b[:, 2])
+        by_z.append(row)
+    out["by_abs_z"] = by_z
     core = np.abs(t[:, 2]) < CORE_Z_NM
     if core.sum() >= 50:
         out["core_rmse_lat_nm"] = float(np.sqrt(np.mean(dx[core] ** 2 + dy[core] ** 2)))

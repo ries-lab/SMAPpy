@@ -4,7 +4,7 @@ make them, and the molecules in the middle frame as the target.
 **Emitters** blink as DECODE draws them (Speiser et al. 2021): each switches on at a time uniform
 over the window and ``3 lifetime`` before and after it, stays on for an exponential time of mean
 ``lifetime_frames``, and gives ``flux * overlap`` photons to each frame its on-time overlaps.  Their
-number is Poisson with the mean that puts ``emitters_per_frame`` on in a frame on average --
+number is Poisson with the mean that puts ``density_per_40px`` on in 40 x 40 pixels of a frame on average --
 ``rate (lifetime + 1)`` per frame, the 1 for an on-time cut by frame boundaries.  Position uniform
 over the frame and ``margin_px`` beyond it (pixel centres at whole numbers), z uniform, flux normal
 cut at ``photons_min``.
@@ -46,7 +46,8 @@ def emitters(sim: SimulationSettings, batch: int, g: torch.Generator, device):
     gets, ``(n, window)``."""
     life, T = sim.lifetime_frames, sim.window
     lo, hi = -3 * life, T + 3 * life
-    rate = sim.emitters_per_frame / (life + 1)
+    area = ((sim.frame_px + 2 * sim.margin_px) / 40.0) ** 2           # the drawn area, in 40 x 40 pixels
+    rate = sim.density_per_40px * area / (life + 1)
     counts = torch.poisson(torch.full((batch,), rate * (hi - lo), device=device), generator=g).long()
     sample = torch.repeat_interleave(torch.arange(batch, device=device), counts)
     n = len(sample)
