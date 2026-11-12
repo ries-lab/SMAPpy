@@ -16,24 +16,22 @@ CORE_Z_NM = 300.0
 CRLB_ROI = 13
 
 
-def crlbs_torch(renderer, photons, background, z_nm, pixel_nm, em: bool, roi: int = CRLB_ROI) -> np.ndarray:
-    """(n, 3): each molecule's Poisson bound in x, y, z (nm), from the Fisher information of its spot
-    alone in the central ``roi`` x ``roi`` pixels of the renderer's square -- Spline 3D's fit box --
-    for x, y, z, photons and background; derivatives by central differences; doubled in variance
-    for an EM register.  The same bound as `crlbs` (SMAPpy's C++ fitter) without needing it built:
-    the training host has only Python."""
+def position_covariance(renderer, photons, background, z_nm, offsets, roi: int = CRLB_ROI):
+    """(n, 3, 3): each spot's covariance bound of x, y (pixels) and z (nm), the photons and the
+    background eliminated, from the Fisher information of its spot alone in the central ``roi`` x
+    ``roi`` pixels of the renderer's square -- Spline 3D's fit box; derivatives by central
+    differences.  ``offsets`` (n, 2): its place within its pixel."""
     import torch
     dev = renderer.device
     n = len(z_nm)
-    out = np.full((n, 3), np.nan)
+    out = np.full((n, 3, 3), np.nan)
     half, size = roi // 2, renderer.size
     lo = size // 2 - half
     for a in range(0, n, 2048):
         s = slice(a, a + 2048)
         m = len(z_nm[s])
-        g = torch.Generator().manual_seed(a)
-        x = torch.rand(m, generator=g, dtype=torch.float64).to(dev, torch.float32) - 0.5 + 100.0
-        y = torch.rand(m, generator=g, dtype=torch.float64).to(dev, torch.float32) - 0.5 + 100.0
+        x = torch.as_tensor(np.asarray(offsets[s, 0], np.float32) + 100.0, device=dev)
+        y = torch.as_tensor(np.asarray(offsets[s, 1], np.float32) + 100.0, device=dev)
         z = torch.as_tensor(np.asarray(z_nm[s], np.float32), device=dev)
         N = torch.as_tensor(np.asarray(photons[s], np.float32), device=dev)[:, None, None]
         bg = torch.as_tensor(np.asarray(background[s], np.float32), device=dev)[:, None, None]
@@ -48,10 +46,39 @@ def crlbs_torch(renderer, photons, background, z_nm, pixel_nm, em: bool, roi: in
         mu = (N * s0 + bg).clamp_min(1e-6)
         J = torch.stack([v.reshape(m, -1) for v in d], -1).double()          # (m, pixels, 5)
         fisher = torch.einsum("mpi,mpj,mp->mij", J, J, 1 / mu.reshape(m, -1).double())
-        cov = torch.linalg.inv(fisher)
-        var = torch.diagonal(cov, dim1=1, dim2=2)[:, :3].clamp_min(0).cpu().numpy()
-        out[s] = np.sqrt(var) * np.array([pixel_nm[0], pixel_nm[1], 1.0])
-    return out * (np.sqrt(2.0) if em else 1.0)
+        out[s] = torch.linalg.inv(fisher)[:, :3, :3].cpu().numpy()
+    return out
+
+
+def _offsets(n, seed=0):
+    return np.random.default_rng(seed).uniform(-0.5, 0.5, (n, 2))
+
+
+def crlbs_torch(renderer, photons, background, z_nm, pixel_nm, em: bool, roi: int = CRLB_ROI) -> np.ndarray:
+    """(n, 3): each molecule's Poisson bound in x, y, z (nm) (`position_covariance`), doubled in
+    variance for an EM register.  The same bound as `crlbs` (SMAPpy's C++ fitter) without needing it
+    built: the training host has only Python."""
+    cov = position_covariance(renderer, photons, background, z_nm, _offsets(len(z_nm)), roi)
+    var = np.clip(np.diagonal(cov, axis1=1, axis2=2), 0, None)
+    return np.sqrt(var) * np.array([pixel_nm[0], pixel_nm[1], 1.0]) * (np.sqrt(2.0) if em else 1.0)
+
+
+def crlbs_pooled(renderer, photons_window, background_window, z_nm, pixel_nm, em: bool, roi: int = CRLB_ROI):
+    """(n, 3): the bound of a molecule that stays put over a window of frames, its photons and the
+    background each frame's own: the per-frame position informations, each with that frame's photons
+    and background eliminated, summed -- ``(sum_f C_f^-1)^-1``.  What a network reading the window
+    could reach at best; a frame with no photons adds nothing."""
+    n, T = photons_window.shape
+    offsets = _offsets(n)
+    info = np.zeros((n, 3, 3))
+    for f in range(T):
+        on = photons_window[:, f] > 0
+        if on.any():
+            cov = position_covariance(renderer, photons_window[on, f], background_window[on, f], z_nm[on],
+                                      offsets[on], roi)
+            info[on] += np.linalg.inv(cov)
+    var = np.clip(np.diagonal(np.linalg.inv(info), axis1=1, axis2=2), 0, None)
+    return np.sqrt(var) * np.array([pixel_nm[0], pixel_nm[1], 1.0]) * (np.sqrt(2.0) if em else 1.0)
 
 
 def crlbs(cal, photons, background, z_nm, pixel_nm, em: bool) -> np.ndarray:
@@ -135,6 +162,27 @@ def evaluate(truth: dict, found: dict, pixel_nm) -> dict:
             row["crlb_width_ax"] = robust_width(dz[sel] / b[:, 2])
         by_z.append(row)
     out["by_abs_z"] = by_z
+    # temporal context: the molecules by how many of the window's frames they are on, their errors over
+    # the single frame's bound and over the window's pooled bound (`crlbs_pooled`).  A model that pools
+    # the frames perfectly is at 1 of the pooled bound; one that ignores them at 1 of the single frame's
+    if truth.get("frames_on") is not None and truth.get("crlb_pooled") is not None:
+        on_all, on = truth["frames_on"], truth["frames_on"][ti]
+        bp = truth["crlb_pooled"][ti]
+        rows = []
+        for k in np.unique(on_all):
+            sel_t, sel = on_all == k, on == k
+            if sel.sum() < 50:
+                continue
+            row = {"frames_on": int(k), "n": int(sel_t.sum()), "recall": float(sel.sum() / sel_t.sum()),
+                   "rmse_lat_nm": float(np.sqrt(np.mean(dx[sel] ** 2 + dy[sel] ** 2))),
+                   "pooled_width_lat": robust_width(np.r_[dx[sel] / bp[sel, 0], dy[sel] / bp[sel, 1]]),
+                   "pooled_width_ax": robust_width(dz[sel] / bp[sel, 2])}
+            if truth.get("crlb") is not None:
+                b = truth["crlb"][ti][sel]
+                row["crlb_width_lat"] = robust_width(np.r_[dx[sel] / b[:, 0], dy[sel] / b[:, 1]])
+                row["crlb_width_ax"] = robust_width(dz[sel] / b[:, 2])
+            rows.append(row)
+        out["by_frames_on"] = rows
     core = np.abs(t[:, 2]) < CORE_Z_NM
     if core.sum() >= 50:
         out["core_rmse_lat_nm"] = float(np.sqrt(np.mean(dx[core] ** 2 + dy[core] ** 2)))

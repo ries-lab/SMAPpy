@@ -194,6 +194,7 @@ def main(argv=None):
     ev.add_argument("test_set")
     ev.add_argument("--device")
     ev.add_argument("--out", help="write the scores here as JSON")
+    ev.add_argument("--shuffled", action="store_true", help="the neighbouring frames from other samples")
     a = ap.parse_args(argv)
     if a.cmd == "testset":
         from . import testset
@@ -202,13 +203,13 @@ def main(argv=None):
         return
     if a.cmd == "evaluate":
         from . import testset
-        r = testset.evaluate(a.model, a.test_set, a.device)
+        r = testset.evaluate(a.model, a.test_set, a.device, shuffled=a.shuffled)
         if a.out:
             Path(a.out).write_text(json.dumps(r, indent=1))
         keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
                 "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
         print({k: round(r[k], 4) for k in keys if r.get(k) is not None})
-        for b in r.get("by_abs_z", []):
+        for b in r.get("by_abs_z", []) + r.get("by_frames_on", []):
             print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()})
         return
     folder = Path(a.folder)

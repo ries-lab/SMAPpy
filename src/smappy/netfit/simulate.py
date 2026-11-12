@@ -35,6 +35,8 @@ class Batch:
     photons: torch.Tensor         # (b, k): their photons in that frame
     mask: torch.Tensor            # (b, k) bool: which of the k are molecules
     background: torch.Tensor      # (b,): the middle frame's background, photons a pixel
+    photons_window: torch.Tensor | None = None     # (b, k, window): the molecules' photons in every frame
+    background_window: torch.Tensor | None = None  # (b, window): every frame's background
 
 
 def _uniform(lo, hi, n, g, device):
@@ -103,5 +105,7 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     mask = torch.zeros((batch, max(k, 1)), dtype=torch.bool, device=device)
     xyz[ks, rank] = torch.stack([kx, ky, kz], 1)
     photons[ks, rank] = kp
+    window = torch.zeros((batch, max(k, 1), T), device=device)
+    window[ks, rank] = per_frame[keep]
     mask[ks, rank] = True
-    return Batch(frames, xyz, photons, mask, bg[:, mid])
+    return Batch(frames, xyz, photons, mask, bg[:, mid], window, bg)

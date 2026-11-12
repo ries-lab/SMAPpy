@@ -33,6 +33,7 @@ def draw(path, calibration, sim, cam, samples: int = SAMPLES, seed: int = 12345,
     _, drawn = _calibration(calibration, bool(cam.em_gain))
     renderer = SplineRenderer(drawn, device)
     g = torch.Generator(device).manual_seed(seed)
+    torch.manual_seed(seed)          # the EM register's gamma draws take no generator: the global state
     parts = [draw_batch(renderer, sim, cam, min(256, samples - a), g) for a in range(0, samples, 256)]
     k = max(p.xyz.shape[1] for p in parts)
 
@@ -45,41 +46,58 @@ def draw(path, calibration, sim, cam, samples: int = SAMPLES, seed: int = 12345,
     photons = torch.cat([pad(p.photons) for p in parts]).cpu().numpy()
     mask = torch.cat([pad(p.mask, False) for p in parts]).cpu().numpy()
     background = torch.cat([p.background for p in parts]).cpu().numpy()
+    photons_window = torch.cat([pad(p.photons_window) for p in parts]).cpu().numpy()
+    background_window = torch.cat([p.background_window for p in parts]).cpu().numpy()
     frame = np.nonzero(mask)[0]
     crlb = metrics.crlbs_torch(renderer, photons[mask], background[frame], xyz[mask][:, 2], cam.pixel_nm, bool(cam.em_gain))
+    # the window's bound: a molecule on in several frames, as a model reading them all could localize it
+    crlb_pooled = metrics.crlbs_pooled(renderer, photons_window[mask], background_window[frame], xyz[mask][:, 2],
+                                       cam.pixel_nm, bool(cam.em_gain))
     meta = {"simulation": asdict(sim), "camera": asdict(cam), "calibration": str(calibration),
             "calibration_sha256": _sha256(calibration), "seed": seed, "samples": samples,
             "molecules": int(mask.sum())}
     np.savez(path, frames=frames, xyz=xyz, photons=photons, mask=mask, background=background, crlb=crlb,
+             photons_window=photons_window, background_window=background_window, crlb_pooled=crlb_pooled,
              meta=json.dumps(meta))
     return meta
 
 
-def load(path, device="cpu", samples: int | None = None, window: int | None = None):
+def load(path, device="cpu", samples: int | None = None, window: int | None = None, shuffled: bool = False):
     """(Batch, truth for `metrics.evaluate`, meta) of the first ``samples`` samples; for a model
     reading ``window`` frames, fewer than the set holds, the middle ones (the targets are the
-    middle frame's)."""
+    middle frame's).  ``shuffled``: every frame but the middle one taken from the next sample, so the
+    neighbours hold other molecules -- the same middle frames and molecules with no temporal
+    information, what a model reading several frames does without it."""
     d = np.load(path)
     n = samples or len(d["frames"])
     t = lambda a, dt=torch.float32: torch.as_tensor(np.asarray(a[:n]), dtype=dt, device=device)
     mask = np.asarray(d["mask"][:n])
     frames = t(d["frames"])
+    if shuffled:
+        mid = frames.shape[1] // 2
+        other = torch.roll(frames, 1, 0)
+        frames = torch.cat([other[:, :mid], frames[:, mid:mid + 1], other[:, mid + 1:]], 1)
     if window is not None and window < frames.shape[1]:
         mid = frames.shape[1] // 2
         frames = frames[:, mid - window // 2:mid + window // 2 + 1]
     batch = Batch(frames, t(d["xyz"]), t(d["photons"]), t(d["mask"], torch.bool), t(d["background"]))
     frame = np.nonzero(mask)[0]
+    m = int(mask.sum())
     truth = {"frame": frame, "xyz": np.asarray(d["xyz"][:n])[mask].astype(np.float64),
-             "crlb": np.asarray(d["crlb"])[:int(mask.sum())]}
+             "crlb": np.asarray(d["crlb"])[:m]}
+    if "crlb_pooled" in d:
+        truth["crlb_pooled"] = np.asarray(d["crlb_pooled"])[:m]
+        truth["frames_on"] = (np.asarray(d["photons_window"][:n])[mask] > 0).sum(1)
     return batch, truth, json.loads(str(d["meta"]))
 
 
-def evaluate(model_path, path, device=None, threshold=None, extraction=None) -> dict:
-    """A model scored on the whole test set (`metrics.evaluate`), as a training scores it per epoch."""
+def evaluate(model_path, path, device=None, threshold=None, extraction=None, shuffled: bool = False) -> dict:
+    """A model scored on the whole test set (`metrics.evaluate`), as a training scores it per epoch;
+    ``shuffled``: with the neighbouring frames of other samples (`load`)."""
     from . import extract
     from .predict import Predictor
     p = Predictor(model_path, device, threshold=threshold, extraction=extraction)
-    batch, truth, meta = load(path, p.device, window=2 * p.window + 1)
+    batch, truth, meta = load(path, p.device, window=2 * p.window + 1, shuffled=shuffled)
     pixel_nm = tuple(meta["camera"]["pixel_nm"])
     outs = []
     with torch.no_grad():
@@ -92,7 +110,7 @@ def evaluate(model_path, path, device=None, threshold=None, extraction=None) -> 
              "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
     out = metrics.evaluate(truth, found, pixel_nm)
     out.update(model=str(model_path), test_set=str(path), molecules=len(truth["frame"]), threshold=p.threshold,
-               extraction=p.extraction)
+               extraction=p.extraction, shuffled=shuffled)
     return out
 
 
