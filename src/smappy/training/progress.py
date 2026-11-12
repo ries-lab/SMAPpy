@@ -76,3 +76,38 @@ def state(lines: list[dict]) -> str:
         if line["kind"] in ("start", "epoch", "restart", "sample"):
             return "running"
     return "new"
+
+
+#: When a training stops on its own (`converged`): the best test loss of the last ``window``
+#: epochs no more than ``loss_tol`` of it better than the best before, and the best test-set
+#: Jaccard no more than ``jaccard_tol`` higher, after at least ``min_epochs``.  On the seven
+#: trainings of the proof of concept (1000 epochs each: the example's, the pixelation study's,
+#: the SMLM challenge's) this stopped at epochs 300 -- 560, the Jaccard within 0.004 of the
+#: 1000th epoch's and the loss within 1 %: half to two thirds of the time saved.  The RMSEs are
+#: not read: they rise as the network finds more of the harder molecules.  A window of 50 and 1 %
+#: stopped at 160 -- 355 and lost up to 0.019 in Jaccard.
+EARLY_STOP = {"window": 100, "loss_tol": 0.005, "jaccard_tol": 0.005, "min_epochs": 150}
+
+
+def converged(lines: list, rule: dict | None = None) -> str | None:
+    """Why the training whose progress is ``lines`` may stop now, or None.  Only the epochs since
+    the last start from scratch count: a restart's run begins again."""
+    rule = {**EARLY_STOP, **(rule or {})}
+    epochs = []
+    for line in lines:
+        if line.get("kind") == "restart":
+            epochs = []
+        elif line.get("kind") == "epoch" and line.get("loss_test") is not None:
+            epochs = [e for e in epochs if e["epoch"] < line["epoch"]] + [line]   # a resume repeats none
+    w = int(rule["window"])
+    if len(epochs) < max(int(rule["min_epochs"]), w + 1):
+        return None
+    loss = [e["loss_test"] for e in epochs]
+    jac = [(e.get("metrics") or {}).get("jaccard") or 0.0 for e in epochs]
+    before, last = min(loss[:-w]), min(loss[-w:])
+    if before - last > float(rule["loss_tol"]) * abs(before):
+        return None
+    if max(jac[-w:]) - max(jac[:-w]) > float(rule["jaccard_tol"]):
+        return None
+    return (f"no better over the last {w} epochs: test loss {last:.4g} against {before:.4g}, "
+            f"Jaccard {max(jac[-w:]):.3f} against {max(jac[:-w]):.3f}")

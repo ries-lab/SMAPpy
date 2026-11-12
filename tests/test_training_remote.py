@@ -89,8 +89,9 @@ def test_a_job_is_sent_trained_followed_stopped_and_its_model_fetched(tmp_path, 
     s = _wait(entry, runner, lambda s: s.state == "running" and (s.epoch or 0) >= 2)
     assert s.epochs == 200 and (folder / jobs.LOCK).exists()
     remote.stop(entry, runner=runner)
-    s = _wait(entry, runner, lambda s: s.state == "stopped")
-    assert not (folder / jobs.LOCK).exists()
+    # the stand-in writes "stopped" a moment before it removes its lock: a follow in between copies
+    # the lock (a race of the test's trainer, which a loaded machine widens), the next one drops it
+    s = _wait(entry, runner, lambda s: s.state == "stopped" and not (folder / jobs.LOCK).exists())
     path = remote.fetch_model(entry, runner=runner)
     assert path == folder / "model.safetensors" and path.read_bytes() == f"model {s.epoch}".encode()
 
@@ -159,3 +160,38 @@ def test_the_preferences_page_keeps_a_training_host_and_tests_it(there, monkeypa
     assert page.status.text().startswith("H100 answers")
     page.remove()
     assert jobs.host("H100") is None and jobs.host("box") is not None
+
+
+def test_jobs_on_a_host_that_this_list_lacks_are_found_and_can_be_added(there, tmp_path):
+    home, runner, _ = there
+    mine = remote.send(_job(tmp_path), jobs.host("box"), runner=runner)
+    theirs = home / "smappy_training" / "other_job"
+    theirs.mkdir(parents=True)
+    (theirs / "job.json").write_text("{}")
+    (theirs / "method.yaml").write_text("x: 2\n")
+    (theirs / "ckpt.pt").write_bytes(b"large")                  # stays there
+    lines = [{"kind": "start", "epoch": 0}, {"kind": "epoch", "epoch": 311, "loss_test": 1.0},
+             {"kind": "finished", "epoch": 311, "converged": True}]
+    (theirs / "progress.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    (home / "smappy_training" / "not_a_job").mkdir()
+    found, problems = remote.others(jobs.entries(), runner=runner)
+    assert problems == {} and [f.name for f in found] == ["other_job"]      # not mine, not a folder without job.json
+    f = found[0]
+    assert f.state == "finished" and f.epoch == 311 and f.converged and f.host == "box"
+    entry = remote.adopt(f, root=tmp_path / "adopted", runner=runner)
+    assert entry.host == "box" and entry.remote.endswith("smappy_training/other_job")
+    local = tmp_path / "adopted" / "box" / "other_job"
+    assert (local / "method.yaml").read_text() == "x: 2\n" and not (local / "ckpt.pt").exists()
+    status = jobs.status(entry)
+    assert status.group == "done" and status.converged and status.epoch == 311
+    assert remote.others(jobs.entries(), runner=runner)[0] == []          # listed now
+    assert mine in jobs.entries()
+
+
+def test_an_unreachable_host_is_said_and_not_raised(tmp_path):
+    jobs.set_hosts([jobs.Host("gone", "gone.example", folder="~/x", command="smappy-decode")])
+
+    def runner(argv, input=None, capture_output=True, timeout=None):
+        return subprocess.CompletedProcess(argv, 255, b"", b"ssh: connect to host gone.example: timed out")
+    found, problems = remote.others([], runner=runner)
+    assert found == [] and "timed out" in problems["gone"]

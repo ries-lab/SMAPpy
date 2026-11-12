@@ -244,7 +244,8 @@ limit.  The example movie's 20 000 frames of 180 × 179 took 153 s on a
 workstation's H100 from a laptop, 166 s on the laptop's own GPU.  *device*
 then names the device there.  The workstations are added under *Training
 hosts...*, at the foot of *model*: *File > Preferences*, *Training
-hosts*, the same list the training window trains on.
+hosts*, the same list the training window trains on
+([how to connect one](plugin:Panels/Training hosts)).
 
 ### model
 

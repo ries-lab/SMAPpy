@@ -101,9 +101,11 @@ def test_the_window_lists_the_jobs_and_says_why_it_cannot_train_without_torch(tm
     jobs.add(folder)
     w = train_window.TrainWindow()
     try:
-        texts = [w.job_list.item(i).text() for i in range(w.job_list.count())]
-        assert any(t.startswith("job: interrupted") for t in texts)        # running, and no lock
-        w.job_list.setCurrentRow(texts.index(next(t for t in texts if t.startswith("job:"))))
+        rows = {w.job_list.item(i, 1).text(): i for i in range(w.job_list.rowCount())}
+        row = rows["job"]
+        assert w.job_list.item(row, 0).text() == train_window.SYMBOLS["failed"]      # running, and no lock: died
+        assert w.job_list.item(row, 2).text().startswith("died")
+        w.job_list.setCurrentCell(row, 0)
         monkeypatch.setattr(train_window, "torch_here", lambda: False)
         w.start()
         assert "no torch" in w.train_note.text()
@@ -223,3 +225,43 @@ def test_the_window_takes_the_fitters_run_on_and_opens_the_training_hosts(tmp_pa
     finally:
         w.close()
         w.timer.stop()
+
+
+def test_the_table_groups_the_states_running_first_with_a_symbol_each_and_marks_jobs_from_elsewhere():
+    from smappy.gui.train_window import ORDER, found_row, job_row, state_text
+    from smappy.training import jobs
+    from smappy.training.remote import Found
+    done = jobs.Status("finished", epoch=311, epochs=1000, converged=True,
+                       last={"metrics": {"jaccard": 0.371, "rmse_lat_nm": 47.2}})
+    assert done.group == "done" and state_text(done) == "done, converged at epoch 311"
+    row = job_row(jobs.Entry("/x/job"), done)
+    assert row["result"] == "test set: Jaccard 0.371, lateral 47 nm" and row["run_on"] == "this computer"
+    assert state_text(jobs.Status("finished", epoch=999)) == "done, all 1000 epochs"
+    assert jobs.Status("stopped", epoch=40).group == "paused"
+    assert [jobs.Status(s).group for s in ("interrupted", "error", "new", "running")] == \
+        ["failed", "failed", "not started", "running"]
+    assert state_text(jobs.Status("running", epoch=12, epochs=1000)) == "running, epoch 12 of 1000"
+    other = found_row(Found("gpuvm", "~/smappy_training/theirs", "running", epoch=5))
+    assert other["foreign"] and other["name"].endswith("theirs") and other["run_on"] == "gpuvm"
+    assert ORDER[0] == "running" and ORDER[-1] == "done"
+
+
+def test_a_job_can_start_from_a_model_of_the_same_network_and_refuses_another(movie, tmp_path):
+    from smappy.gui.train_window import BASE_MODEL, default_folder, run_prefit, write_job
+    from smappy.training import job as jobfile
+    from smappy.training import model_file
+    path, cal_path = movie
+    prepared = run_prefit(_prepare_settings(path, cal_path))
+    good, other = tmp_path / "earlier.safetensors", tmp_path / "other.safetensors"
+    model_file.write(good, {"w": np.zeros(2, np.float32)},
+                     {"method": "decode-v0.10.2", "architecture": "SigmaMUNet", "channels_in": 3})
+    model_file.write(other, {"w": np.zeros(2, np.float32)},
+                     {"method": "decode-v0.10.2", "architecture": "SigmaMUNet", "channels_in": 5})
+    prepared.settings.start_from = str(good)
+    folder = write_job(prepared, prepared.estimates, default_folder(path, cal_path))
+    job, _ = jobfile.read(folder)
+    assert job.base_model == BASE_MODEL and (folder / BASE_MODEL).read_bytes() == good.read_bytes()
+    assert jobfile.check(folder) == []
+    prepared.settings.start_from = str(other)
+    with pytest.raises(ValueError, match="another network"):
+        write_job(prepared, prepared.estimates, default_folder(path, cal_path))

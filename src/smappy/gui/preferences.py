@@ -250,6 +250,16 @@ class HostsPage(QWidget):
         about.setWordWrap(True)
         about.setStyleSheet(note_style())
         layout.addWidget(about)
+        # the steps from nothing to a workstation that answers Test, for someone who never used ssh
+        self.guide_button = QPushButton("How to connect a workstation...")
+        self.guide_button.setToolTip("step by step: the address, a key so no password is asked, "
+                                     "SMAPpy there, and what to type here -- or an AI assistant's help")
+        self.guide_button.clicked.connect(self.show_guide)
+        row = QHBoxLayout()
+        row.addWidget(self.guide_button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self._guide = None
         self.hosts = jobs.hosts()
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self.show_host)
@@ -274,6 +284,16 @@ class HostsPage(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.refresh()
+
+    def show_guide(self) -> None:
+        """The page *Training hosts*, in a help window of this dialog's own: Preferences is modal, and
+        the Help window of the main window could not be read or scrolled while it is open."""
+        from .help_window import HelpWindow
+        if self._guide is None:
+            self._guide = HelpWindow(self)
+        self._guide.show_page("Panels/Training hosts")
+        self._guide.show()
+        self._guide.raise_()
 
     def refresh(self, select: int = 0) -> None:
         self.list.blockSignals(True)

@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
 ---
 
 ## What it does
@@ -36,15 +36,27 @@ background as grey and as grainy.  It is drawn again a moment after an
 estimate is changed.  *Write job* writes the job folder beside the movie, in
 `<movie>_decode/`, and lists it on the left.
 
-**Train.**  Choose a job on the left, where it trains (*run on*), and
+**Train.**  Choose a job in the list, where it trains (*run on*), and
 *Start*.  The
 training runs as a program of its own, so it goes on when this window or
 SMAPpy is closed, and is listed again when it opens.  *Stop* stops it after
 the epoch it is in, with its checkpoint written; *Start* again goes on from
 there.
 
+**It stops when it no longer improves.**  *epochs* is the most it trains.
+With *stop when it no longer improves* on, it finishes earlier once the
+test set's loss has not improved by more than 0.5 % over the last 100
+epochs, nor its [Jaccard index](plugin:Panels/Glossary) by more than 0.005,
+and never before epoch 150.  (The Jaccard index is the molecules found
+divided by those found, missed and invented together: 1 is perfect.)  On the trainings of the proof of concept (1000
+epochs each) this stopped between epochs 300 and 560, with the Jaccard
+within 0.004 of the 1000th epoch's: half to two thirds of the time saved.
+The RMSEs are not read: they rise while a training learns, as it finds more
+of the harder molecules.  Turned off, it trains every epoch, as DECODE did.
+
 **On a workstation.**  The workstations are listed in *File > Preferences*,
-*Training hosts* (*Training hosts...* at the top of this window, and at the
+*Training hosts* ([how to connect one](plugin:Panels/Training hosts), step by
+step) (*Training hosts...* at the top of this window, and at the
 foot of the DECODE fitter's *model*, which offers the same list as its
 *run on*): a name, what `ssh` is given (an alias of your
 `~/.ssh/config`, or `user@host`), the folder job folders go to there, and
@@ -88,22 +100,51 @@ movie, microscope, PSF calibration and *run on* filled in.
 This page.
 
 ### Jobs
-Every job this computer prepared or started, with its state and where it
-trains: *new* (not trained yet), *running*, *interrupted* (its training
-stopped without saying so: the computer slept or the process was killed --
-*Start* goes on from its last checkpoint), *stopped*, *finished* or *error*
-(also a training that refused to start; *Follow* says why).  A job on a
-workstation that could not be reached says *not reached*, and its tooltip
-what ssh said.
+Every job this computer prepared or started, running ones first, each with a
+symbol and a colour for its state:
 
-### Add folder...
-List a job folder made elsewhere, or one taken off the list.
+- ▶ *running*, with its epoch;
+- ○ *not started*;
+- ⏸ *paused*: stopped with *Stop*; *Start* goes on from its last
+  checkpoint;
+- ✕ *failed*: an error, a training that refused to start, or one that
+  *died* -- ended without saying so, because the computer slept or the
+  process was killed.  *Start* goes on from its last checkpoint here too;
+  the tooltip and *Follow* say why it failed;
+- ✓ *done*: *converged at epoch N* when it stopped improving, or *all N
+  epochs*, with the test set's Jaccard and lateral RMSE.
+
+*run on* is where it trains.  A job on a workstation that could not be
+reached says *not reached*, and its tooltip what ssh said.
+
+Jobs in a training host's folder that this list lacks -- started from
+another computer, or taken off this list -- are found every minute, in the
+background, and listed in italics with ↗ before their name.  Double-click
+one to add it: its job files are copied here, and its progress is followed
+from then on as for a job sent from here.
+
+### Add existing job...
+List a job folder made elsewhere, or one taken off the list.  The movie is
+not chosen here but under *Prepare*.
 
 ### Remove from list
-Takes the job off the list; its folder stays where it is.
+Takes the job off the list; its folder stays where it is, and a training
+running goes on.
 
 ### Prepare
-The movie, its PSF calibration and the density to train at.  *LD*, *HD* and *UHD*
+The movie, its PSF calibration, the density to train at, and a model to
+*start from*.
+
+*start from* is a warm start: the training begins with that model's
+network instead of a random one, and learns the new data from there.  A
+model trained for other data -- another sample, another density, a
+calibration of another day -- is still a better start than a random
+network: it already knows what a spot is, and in earlier tests with DECODE
+it trained faster (not yet measured in SMAPpy).  It must be a network of the
+same shape (the window says so when it is not).  The DECODE fitter's *Train
+a model...* fills in the fitter's own model.
+
+*LD*, *HD* and *UHD*
 are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  A model
 trained dense also localizes sparse data well: the example package's, trained
 at 50, found 96 % of the molecules at one in 40 x 40 pixels.
@@ -131,8 +172,8 @@ or, with no prefit, from those typed in, the camera read from the movie and
 *microscope*.
 
 ### Train
-Where it trains (*run on*: this computer, or a training host) and how long.  The test loss is within 2 % of its final value after
-about 150 epochs; the example data's models were trained for 1000.
+Where it trains (*run on*: this computer, or a training host), the most
+epochs, and whether it may stop before them.
 
 ### Start
 Starts the chosen job where *run on* says, or goes on with it from its last

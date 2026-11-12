@@ -20,7 +20,7 @@ PANELS = {"Panels/Render tab", "Panels/Regions tab", "Panels/ROI manager",
           "Panels/Batch window",
           "Panels/Camera editor", "Panels/Glossary", "Panels/Your own plugins",
           "Panels/Bead selector", "Panels/Microscope manager", "Panels/Assistant",
-          "Panels/DECODE training"}
+          "Panels/DECODE training", "Panels/Training hosts"}
 # pages beside the panels that belong to no widget, so name no controls
 WIDGETLESS = {"Panels/Glossary", "Panels/Your own plugins"}
 

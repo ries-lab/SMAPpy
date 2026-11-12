@@ -124,6 +124,19 @@ class Status:
     epochs: Optional[int] = None
     last: Optional[dict] = None         # the last epoch line
     message: str = ""
+    converged: bool = False             # finished because it no longer improved (`progress.converged`)
+
+    @property
+    def group(self) -> str:
+        """What the list shows: *not started*, *running*, *paused* (stopped by hand: *Start* goes
+        on), *failed* (an error, or a training that died -- the computer slept, the process was
+        killed; *Start* goes on from its last checkpoint too) or *done*."""
+        return GROUPS[self.state]
+
+
+#: `Status.state` as the list groups it
+GROUPS = {"new": "not started", "running": "running", "stopped": "paused", "interrupted": "failed",
+          "error": "failed", "missing": "failed", "finished": "done"}
 
 
 def status(entry: Entry) -> Status:
@@ -147,7 +160,11 @@ def status(entry: Entry) -> Status:
         if lock is None or (entry.host is None and lock.get("host") == socket.gethostname()
                             and not _alive(lock.get("pid", 0))):
             state = "interrupted"
-    return Status(state, epoch=None if last is None else last.get("epoch"), epochs=epochs, last=last, message=message)
+    end = next((line for line in reversed(lines) if line["kind"] == "finished"), {}) if state == "finished" else {}
+    if state == "interrupted" and not message:
+        message = "the training ended without saying so (the computer slept, or it was killed)"
+    return Status(state, epoch=None if last is None else last.get("epoch"), epochs=epochs, last=last, message=message,
+                  converged=bool(end.get("converged")))
 
 
 def _refusal(log: Path) -> str:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import importlib.util
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
@@ -24,13 +25,15 @@ from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
-                               QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QTabWidget,
-                               QToolButton, QVBoxLayout, QWidget, QFileDialog)
+from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+                               QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStatusBar,
+                               QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from ..plugins import param
 from .widgets import note_style
 from ..plugins.fit import TIFF_FILTER, CameraSettings
+from ..plugins.fit_decode import MODEL_FILTER
 
 METHOD = "decode-v0.10.2"
 CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
@@ -38,7 +41,65 @@ DENSITIES = (("LD", "LD, 15 in 40 x 40 px"), ("HD", "HD, 25 in 40 x 40 px"), ("U
 REFRESH_MS = 5000
 TRY_FRAMES = 20
 FOLLOW_S = 15                           # a host's jobs followed this often
+SCAN_S = 60                             # the hosts' folders looked through for jobs not listed here this often
 GROW = 4                                # blocks times this while the prefit has too few fully-on frames
+
+
+# ----------------------------------------------------------------------------- the jobs table
+COLUMNS = ("", "job", "state", "run on", "result")
+#: the list's groups (`jobs.Status.group`) in its order, each with a symbol and a colour: mid
+#: tones that read on a light and a dark window, the symbol for whoever does not see the colour
+ORDER = ("running", "not started", "paused", "failed", "done")
+SYMBOLS = {"running": "\u25b6", "not started": "\u25cb", "paused": "\u23f8", "failed": "\u2715", "done": "\u2713"}
+COLOURS = {"running": "#2e9e44", "not started": "#8a8a8a", "paused": "#c06000", "failed": "#e0453a",
+           "done": "#3a7bd5"}
+FOUND = "found:"                          # the key of a row found on a host, not on this list
+
+
+def state_text(status) -> str:
+    """A job's state as the list says it, with its epoch."""
+    epoch = "" if status.epoch is None else f"epoch {status.epoch}"
+    of = f" of {status.epochs}" if status.epochs and status.group == "running" else ""
+    if status.group == "done":
+        how = f"converged at epoch {status.epoch}" if status.converged else f"all {(status.epoch or 0) + 1} epochs"
+        return f"done, {how}"
+    if status.group == "failed":
+        died = "died" if status.state == "interrupted" else "failed"
+        return f"{died}" + (f" at {epoch}" if epoch else "") + (", Start resumes" if status.epoch is not None else "")
+    return status.group + (f", {epoch}{of}" if epoch else "")
+
+
+def _result(status) -> str:
+    metrics = (status.last or {}).get("metrics") or {}
+    if status.group == "failed":
+        return status.message
+    if not metrics or metrics.get("jaccard") is None:
+        return ""
+    lateral = metrics.get("rmse_lat_nm")
+    return f"test set: Jaccard {metrics['jaccard']:.3f}" + (f", lateral {lateral:.0f} nm" if lateral else "")
+
+
+def job_row(entry, status, problem=None) -> dict:
+    """What the table shows of a job on this computer's list."""
+    tip = entry.folder + ("" if entry.remote is None else f"\non {entry.host}: {entry.remote}")
+    if status.message:
+        tip += f"\n{status.message}"
+    if problem is not None:
+        tip += f"\nnot reached: {problem}"
+    return {"key": entry.folder, "group": status.group, "name": entry.name, "foreign": False, "tip": tip,
+            "state": state_text(status) + (" (not reached)" if problem is not None else ""),
+            "run_on": "this computer" if entry.host is None else entry.host, "result": _result(status)}
+
+
+def found_row(found) -> dict:
+    """What the table shows of a job on a host that this list lacks: started from another computer."""
+    from ..training.jobs import GROUPS, Status
+    status = Status(found.state, epoch=found.epoch, converged=found.converged)
+    return {"key": FOUND + found.host + ":" + found.remote, "group": GROUPS[found.state],
+            "name": "\u2197 " + found.name, "foreign": True, "state": state_text(status), "run_on": found.host,
+            "result": "from another computer: double-click to add it here",
+            "tip": f"on {found.host}: {found.remote}\nnot on this computer's list -- started from another computer, "
+                   f"or taken off this list.  Double-click to add it: its progress is followed from then on."}
 
 
 def _where_choices():
@@ -55,6 +116,9 @@ class PrepareSettings:
                              help="the bead calibration the network learns the PSF from, the one the data were taken with")
     density: str = param("LD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
+    start_from: str = param("", label="start from", kind="open_file", file_filter=MODEL_FILTER,
+                            help="a trained model the training starts from (a warm start), even one for "
+                                 "other data: it trains faster than from scratch; empty: from scratch")
     camera: CameraSettings = param(default_factory=CameraSettings, label="microscope", collapsed=True, kind="microscope")
     blocks: int = param(10, label="blocks", min=1, advanced=True,
                         help="blocks of the movie the prefit fits, spread over it")
@@ -81,7 +145,10 @@ class TrainSettings:
     """Where and how long a job trains."""
     run_on: str = param("here", label="run on", choices=lambda: _where_choices(),
                         help="this computer, or a training host (Training hosts... above)")
-    epochs: int = param(1000, label="epochs", min=1, help="how long it trains; the test loss is within 2 % of its last by about 150")
+    epochs: int = param(1000, label="epochs", min=1, help="the most it trains")
+    until_converged: bool = param(True, label="stop when it no longer improves",
+                                  help="finish before the epochs when the test loss and Jaccard have not "
+                                       "improved over 100 epochs (after 150 at least)")
     device: str = param("auto", label="device", choices=(("auto", "auto"), ("cuda", "CUDA"), ("mps", "Apple GPU"),
                                                          ("cpu", "CPU")), advanced=True,
                         help="where the network trains; auto: the fastest there")
@@ -216,9 +283,41 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
                           data={"path": str(Path(s.movie).resolve()), "frames": prepared.n_frames,
                                 "camera_roi": None if cam.roi is None else list(cam.roi),
                                 "em_on": bool(cam.is_em)})
+    if s.start_from:
+        problem = start_problem(s.start_from, params)
+        if problem:
+            raise ValueError(problem)
+        job.base_model = BASE_MODEL
     out = jobfile.write(folder, job, params, load_spline_calibration(s.calibration))
+    if s.start_from:
+        shutil.copyfile(s.start_from, out / BASE_MODEL)
     jobs.add(out)
     return out
+
+
+BASE_MODEL = "base_model.safetensors"
+
+
+def start_problem(path, params: dict) -> str:
+    """Why the model at ``path`` cannot start this job's training, or "": a DECODE model with the
+    network the job builds (its architecture and frame window; the method's or DECODE's defaults)."""
+    import yaml
+    from importlib.resources import files
+    from ..training import model_file
+    if not Path(path).is_file():
+        return f"{Path(path).name}: no such model file"
+    meta = model_file.read_metadata(path)
+    if meta.get("method") != METHOD:
+        return f"{Path(path).name} is not a DECODE model"
+    # DECODE's defaults under the method's own (its reference file, read here: decode_smlm's
+    # param_io imports torch, which this window must not)
+    reference = yaml.safe_load((files("decode_smlm") / "utils" / "reference_files" / "reference.yaml").read_text(encoding="utf-8"))
+    hyper = {**reference["HyperParameter"], **(params.get("HyperParameter") or {})}
+    for key in ("architecture", "channels_in"):
+        if key in meta and str(meta[key]) != str(hyper.get(key)):
+            return (f"{Path(path).name} has another network ({key} {meta[key]}, the job's {hyper.get(key)}): "
+                    f"start from scratch, or from a model of the same network")
+    return ""
 
 
 def torch_here() -> bool:
@@ -233,6 +332,8 @@ def start_here(folder, train: TrainSettings, python: str = sys.executable) -> su
     command = [python, "-m", "decode_smlm.cli", "train", str(folder), "--epochs", str(train.epochs)]
     if train.device != "auto":
         command += ["--device", train.device]
+    if not train.until_converged:
+        command += ["--all-epochs"]
     log = open(folder / "train.log", "a", encoding="utf-8")
     try:
         return subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -328,20 +429,36 @@ class TrainWindow(QWidget):
         self.follower = HostFollower()
         self.references = {}              # a job's CRLB reference, by folder
 
-        # the jobs
-        self.job_list = QListWidget()
-        self.job_list.currentItemChanged.connect(lambda *_: self.refresh())
-        add_button, remove_button = QPushButton("Add folder..."), QPushButton("Remove from list")
+        # the jobs: a table across the window, a symbol and a colour a state, those running first
+        self.job_list = QTableWidget(0, len(COLUMNS))
+        self.job_list.setHorizontalHeaderLabels(COLUMNS)
+        self.job_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.job_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.job_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.job_list.verticalHeader().setVisible(False)
+        self.job_list.verticalHeader().setDefaultSectionSize(self.job_list.fontMetrics().height() + 6)
+        header = self.job_list.horizontalHeader()
+        for column in range(len(COLUMNS)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(len(COLUMNS) - 1, QHeaderView.Stretch)
+        self.job_list.currentCellChanged.connect(lambda *_: self.refresh())
+        self.job_list.cellDoubleClicked.connect(lambda row, _: self.adopt_row(row))
+        self.others = []                  # jobs on the hosts this list lacks, as the follower last found them
+        add_button, remove_button = QPushButton("Add existing job..."), QPushButton("Remove from list")
+        add_button.setToolTip("put a job folder back on the list: one taken off it, or made on another computer")
+        remove_button.setToolTip("take the job off the list; its folder, and a training running, stay")
         add_button.clicked.connect(self.add_folder)
         remove_button.clicked.connect(self.remove_selected)
         left = QWidget()
         lv = QVBoxLayout(left)
-        lv.addWidget(QLabel("Jobs"))
-        lv.addWidget(self.job_list)
+        lv.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
+        row.addWidget(QLabel("Jobs"))
+        row.addStretch(1)
         row.addWidget(add_button)
         row.addWidget(remove_button)
         lv.addLayout(row)
+        lv.addWidget(self.job_list)
 
         # Prepare
         self.prepare_form = SettingsForm(PrepareSettings)
@@ -426,15 +543,16 @@ class TrainWindow(QWidget):
         self.tabs = QTabWidget()
         for widget, title in ((prepare, "Prepare"), (train, "Train"), (follow, "Follow"), (tryit, "Try")):
             self.tabs.addTab(widget, title)
-        splitter = QSplitter()
+        splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(left)
         splitter.addWidget(self.tabs)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(1, 4)
+        splitter.setSizes([170, 780])
         self.status_bar = QStatusBar()
         layout = QVBoxLayout(self)
         # what the window is for, the hosts it trains on, and the "?" every plugin's title bar has
         top = QHBoxLayout()
-        intro = QLabel("Train a DECODE network for your data: prepare a job from the movie and its bead "
+        intro = QLabel("Train a DECODE network for your data: prepare a job from the movie and its PSF "
                        "calibration, train it here or on a training host, then use it in the DECODE fitter.")
         intro.setWordWrap(True)
         intro.setStyleSheet(note_style())
@@ -463,7 +581,7 @@ class TrainWindow(QWidget):
         if settings is not None:
             self.take_fitter(settings)
         self.reload_jobs()
-        self.resize(1100, 800)
+        self.resize(900, 1000)
 
     # ---------------------------------------------------------- jobs
     def show_help(self) -> None:
@@ -485,6 +603,8 @@ class TrainWindow(QWidget):
         model = getattr(settings, "model", None)
         if model is not None and getattr(model, "calibration", ""):
             values["calibration"] = model.calibration
+        if model is not None and getattr(model, "path", ""):
+            values["start_from"] = model.path          # the fitter's model: a warm start for these data
         camera = getattr(settings, "camera", None)
         if camera is not None:
             from dataclasses import asdict
@@ -496,29 +616,60 @@ class TrainWindow(QWidget):
             self.train_form.set_values({"run_on": run_on})
 
     def reload_jobs(self) -> None:
+        from PySide6.QtGui import QBrush, QColor, QFont
         from ..training import jobs
-        chosen = self.selected_folder()
+        chosen = self.job_list.currentRow()
+        chosen = None if chosen < 0 else self.job_list.item(chosen, 0).data(Qt.UserRole)
+        self.others = list(self.follower.others)
+        rows = [job_row(entry, jobs.status(entry), self.follower.problems.get(entry.folder))
+                for entry in jobs.entries()]
+        rows += [found_row(found) for found in self.others]
+        rows.sort(key=lambda r: ORDER.index(r["group"]))
         self.job_list.blockSignals(True)
-        self.job_list.clear()
-        for entry in jobs.entries():
-            status = jobs.status(entry)
-            where = "" if entry.host is None else f" on {entry.host}"
-            epoch = "" if status.epoch is None else f", epoch {status.epoch}"
-            item = QListWidgetItem(f"{entry.name}: {status.state}{epoch}{where}")
-            item.setData(Qt.UserRole, entry.folder)
-            problem = self.follower.problems.get(entry.folder)
-            item.setToolTip(entry.folder + ("" if entry.remote is None else f"\non {entry.host}: {entry.remote}")
-                            + ("" if problem is None else f"\nnot reached: {problem}"))
-            if problem is not None:
-                item.setText(item.text() + " (not reached)")
-            self.job_list.addItem(item)
-            if entry.folder == chosen:
-                self.job_list.setCurrentItem(item)
+        self.job_list.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            cells = (SYMBOLS[r["group"]], r["name"], r["state"], r["run_on"], r["result"])
+            for column, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setToolTip(r["tip"])
+                if column == 0:
+                    item.setData(Qt.UserRole, r["key"])
+                    item.setForeground(QBrush(QColor(COLOURS[r["group"]])))
+                    item.setTextAlignment(Qt.AlignCenter)
+                if r["foreign"]:
+                    font = QFont()
+                    font.setItalic(True)
+                    item.setFont(font)
+                self.job_list.setItem(i, column, item)
+            if r["key"] == chosen:
+                self.job_list.setCurrentCell(i, 0)
         self.job_list.blockSignals(False)
 
     def selected_folder(self) -> Optional[str]:
-        item = self.job_list.currentItem()
-        return None if item is None else item.data(Qt.UserRole)
+        """The chosen job's folder here; None for none, or for a job found on a host and not added."""
+        row = self.job_list.currentRow()
+        if row < 0 or self.job_list.item(row, 0) is None:
+            return None
+        key = self.job_list.item(row, 0).data(Qt.UserRole)
+        return None if key is None or key.startswith(FOUND) else key
+
+    def select_job(self, folder) -> None:
+        for i in range(self.job_list.rowCount()):
+            if self.job_list.item(i, 0).data(Qt.UserRole) == str(folder):
+                self.job_list.setCurrentCell(i, 0)
+
+    def adopt_row(self, row: int) -> None:
+        """A job found on a host, double-clicked: put on this list, its progress followed from now."""
+        item = self.job_list.item(row, 0)
+        key = None if item is None else item.data(Qt.UserRole)
+        if not key or not key.startswith(FOUND):
+            return
+        found = next((f for f in self.others if FOUND + f.host + ":" + f.remote == key), None)
+        if found is None:
+            return
+        from ..training import remote
+        self.status_bar.showMessage(f"adding {found.name} from {found.host}")
+        self._work("adopted", lambda report: remote.adopt(found))
 
     def selected_entry(self):
         from ..training import jobs
@@ -549,7 +700,10 @@ class TrainWindow(QWidget):
             self.reload_jobs()
             entry = self.selected_entry()
             if entry is None:
-                self.follow_label.setText("no job chosen")
+                row = self.job_list.currentRow()
+                key = None if row < 0 or self.job_list.item(row, 0) is None else self.job_list.item(row, 0).data(Qt.UserRole)
+                self.follow_label.setText("on a training host, not on this list: double-click it to add it"
+                                          if key and key.startswith(FOUND) else "no job chosen")
                 return
             from ..training import jobs, progress
             status = jobs.status(entry)
@@ -558,7 +712,7 @@ class TrainWindow(QWidget):
                 self.references[entry.folder] = for_job(entry.folder)
             text = draw_progress(self.follow_figure, progress.read(entry.folder), self.references[entry.folder])
             self.follow_canvas.draw_idle()
-            self.follow_label.setText(f"{entry.name}: {status.state}; {text}"
+            self.follow_label.setText(f"{entry.name}: {state_text(status)}; {text}"
                                       + (f" -- {status.message}" if status.message else ""))
         except Exception as error:                         # a half-written file, a folder going away
             print(f"DECODE training: {error}")
@@ -597,6 +751,11 @@ class TrainWindow(QWidget):
             self.train_note.setText(value)
             self.tabs.setCurrentIndex(2)
             self.reload_jobs()
+        elif kind == "adopted":
+            self.follower.others = [f for f in self.follower.others
+                                    if (f.host, f.name) != (value.host, Path(value.remote).name)]
+            self.reload_jobs()
+            self.status_bar.showMessage(f"{value.name} is on this list now: followed from {value.host}")
         elif kind == "stopping":
             self.train_note.setText("asked to stop: it stops after the epoch it is in, its checkpoint written there")
 
@@ -675,9 +834,7 @@ class TrainWindow(QWidget):
             self.status_bar.showMessage(f"{type(error).__name__}: {error}")
             return
         self.reload_jobs()
-        for i in range(self.job_list.count()):
-            if self.job_list.item(i).data(Qt.UserRole) == str(folder):
-                self.job_list.setCurrentRow(i)
+        self.select_job(folder)
         self.status_bar.showMessage(f"job written: {folder}")
         self.tabs.setCurrentIndex(1)
 
@@ -776,7 +933,7 @@ def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> st
         report({"message": f"sending {Path(folder).name} to {h.name}"})
         entry = remote.send(folder, h)
     report({"message": f"starting it on {h.name}"})
-    remote.start(entry, train.epochs, train.device)
+    remote.start(entry, train.epochs, train.device, all_epochs=not train.until_converged)
     return f"started on {h.name}: {entry.remote}; its output in train.log there"
 
 
@@ -796,6 +953,7 @@ class HostFollower:
 
     def __init__(self):
         self.last, self.thread, self.problems = 0.0, None, {}
+        self.others, self.host_problems, self.last_scan = [], {}, -1e9     # jobs on the hosts not listed here
 
     def poke(self, now=None) -> None:
         import threading
@@ -823,6 +981,10 @@ class HostFollower:
                 self.problems.pop(entry.folder, None)
             except Exception as error:                     # an unreachable host: said in the list's tooltip
                 self.problems[entry.folder] = str(error)
+        import time
+        if time.monotonic() - self.last_scan >= SCAN_S:
+            self.last_scan = time.monotonic()
+            self.others, self.host_problems = remote.others(jobs.entries())
 
 
 def try_on_data(folder, frames: int = TRY_FRAMES):

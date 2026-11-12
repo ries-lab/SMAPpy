@@ -91,6 +91,10 @@ papers and in other software.
   distribution that is a sum of several bell curves, each with its weight;
   DECODE describes where the molecules of a frame are as such a sum, one
   bell curve a pixel, weighted by the pixel's detection probability.
+* **Jaccard index** (also called the Jaccard score): how well a fit finds the
+  molecules of a simulation, the molecules found divided by those found,
+  missed and invented together -- 1 when every molecule is found and nothing
+  else, 0 when none is.
 
 ## Camera
 

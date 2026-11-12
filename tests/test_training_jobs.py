@@ -3,6 +3,8 @@ import json
 import os
 import socket
 
+import numpy as np
+
 from smappy.training import jobs, progress
 
 
@@ -61,3 +63,26 @@ def test_a_training_that_refused_to_start_is_an_error_with_its_reason(tmp_path):
     assert s.state == "error" and s.message.startswith("smappy-decode: job was prepared")
     (folder / jobs.LOG).write_text("UserWarning: something harmless\n")
     assert jobs.status(jobs.Entry(str(folder))).state == "new"
+
+
+def _curve(n, plateau_from, seed=0, tau=30.0):
+    rng = np.random.default_rng(seed)
+    lines = []
+    for e in range(n):
+        x = min(e, plateau_from)
+        lines.append({"kind": "epoch", "epoch": e, "loss_test": 300.0 + 100.0 * np.exp(-x / tau) + rng.normal(0, 0.2),
+                      "metrics": {"jaccard": 0.4 - 0.3 * np.exp(-x / tau)}})
+    return lines
+
+
+def test_a_training_converges_once_neither_loss_nor_jaccard_improved_over_the_window():
+    from smappy.training.progress import converged
+    still = _curve(260, plateau_from=400, tau=150.0)   # still improving at 260
+    assert converged(still) is None
+    flat = _curve(260, plateau_from=120)               # flat from 120: 140 epochs without gain
+    why = converged(flat)
+    assert why is not None and "last 100 epochs" in why
+    assert converged(flat[:140]) is None               # never before 150 epochs
+    assert converged(flat, {"jaccard_tol": -1.0}) is None    # a rule the job changes
+    restarted = flat + [{"kind": "restart", "epoch": 259}] + _curve(50, plateau_from=10)
+    assert converged(restarted) is None                # a restart's run begins again
