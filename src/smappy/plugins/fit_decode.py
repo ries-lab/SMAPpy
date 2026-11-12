@@ -54,8 +54,10 @@ class DecodeModelSettings:
                       help="a trained DECODE model (.safetensors): a job folder's model.safetensors, "
                            "or an original DECODE model exported")
     calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
-                             help="the data's bead calibration, which the model must have been trained "
-                                  "on; empty: the one listed for this file's microscope, else unchecked")
+                             advanced=True,
+                             help="only checked, never used to localize: the data's bead calibration, which "
+                                  "the model must have been trained on; empty: the one listed for this "
+                                  "file's microscope, else unchecked")
     run_on: str = param("here", label="run on", choices=lambda: _where_choices(),
                         help="this computer, or a training host (Training hosts... below): the frames "
                              "are read and converted here and sent there, the network runs there")

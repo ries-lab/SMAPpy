@@ -27,6 +27,9 @@ from .widgets import note_style
 BESPOKE = {"render": "the render view"}
 
 
+_GUIDE = None                     # the open *How to connect a workstation* window (`HostsPage.show_guide`)
+
+
 def _buttons(*pairs) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
@@ -259,7 +262,6 @@ class HostsPage(QWidget):
         row.addWidget(self.guide_button)
         row.addStretch(1)
         layout.addLayout(row)
-        self._guide = None
         self.hosts = jobs.hosts()
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self.show_host)
@@ -286,14 +288,22 @@ class HostsPage(QWidget):
         self.refresh()
 
     def show_guide(self) -> None:
-        """The page *Training hosts*, in a help window of this dialog's own: Preferences is modal, and
-        the Help window of the main window could not be read or scrolled while it is open."""
+        """The page *Training hosts* in a help window above Preferences.  Preferences is modal, so
+        the main window's Help window could not be scrolled while it is open; this one is modal
+        itself, in front until closed.  It has no parent and is kept by the module, not by this
+        page: a window made a child of the dialog was deleted with it while macOS still handed
+        it focus, and SMAPpy crashed when Preferences closed."""
         from .help_window import HelpWindow
-        if self._guide is None:
-            self._guide = HelpWindow(self)
-        self._guide.show_page("Panels/Training hosts")
-        self._guide.show()
-        self._guide.raise_()
+        global _GUIDE
+        guide = HelpWindow()
+        guide.setAttribute(Qt.WA_DeleteOnClose, True)
+        guide.setWindowModality(Qt.ApplicationModal)
+        guide.show_page("Panels/Training hosts")
+        guide.resize(760, 820)
+        _GUIDE = guide
+        guide.show()
+        guide.raise_()
+        guide.activateWindow()
 
     def refresh(self, select: int = 0) -> None:
         self.list.blockSignals(True)

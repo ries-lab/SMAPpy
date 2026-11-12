@@ -265,3 +265,25 @@ def test_a_job_can_start_from_a_model_of_the_same_network_and_refuses_another(mo
     prepared.settings.start_from = str(other)
     with pytest.raises(ValueError, match="another network"):
         write_job(prepared, prepared.estimates, default_folder(path, cal_path))
+
+
+def test_the_connection_guide_opens_above_preferences_and_outlives_it():
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout
+    app = QApplication.instance() or QApplication([])
+    from smappy.gui import preferences
+    dialog = QDialog()
+    page = preferences.HostsPage()
+    QVBoxLayout(dialog).addWidget(page)
+    page.guide_button.click()
+    guide = preferences._GUIDE
+    # modal itself, so it can be scrolled while Preferences is open; not the dialog's child, so the
+    # dialog going does not take it along (that crashed SMAPpy on macOS)
+    assert guide.isModal() or guide.windowModality() == Qt.ApplicationModal
+    assert guide.parent() is None and guide.current == "Panels/Training hosts"
+    dialog.deleteLater()
+    app.processEvents()
+    assert guide.isVisible()
+    guide.close()
+    app.processEvents()
