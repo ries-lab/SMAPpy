@@ -36,7 +36,28 @@ from .io import CROP_FOLD, RAW_TH, crop_of, pixel_columns
 
 METHOD = "decode-v0.10.2"
 ARCHITECTURES = ("SigmaMUNet",)
-BATCH = 32
+BATCH = 0                 # frames through the network at once; 0: as many as half the free memory holds
+# SMAPpy's: the network's memory per pixel of a batch in inference, measured with the example's
+# SigmaMUNet (48 features): 1830 bytes on CUDA (an H100), 2050 -- 2110 on Apple's GPU (MPS, its
+# driver's pools); the margin over it for the post-processing and the allocator
+BYTES_PER_PIXEL = 2500
+MEMORY_SHARE = 0.5        # of the device's free memory a batch may take
+MAX_BATCH = 256
+CPU_BATCH = 8             # on the CPU the batch changes the time little; memory is the system's
+
+
+def auto_batch(device: str, rows: int, columns: int) -> int:
+    """Frames of ``rows`` x ``columns`` a batch takes on ``device``: half of what is free there, at
+    `BYTES_PER_PIXEL`, from 1 to `MAX_BATCH`; `CPU_BATCH` on the CPU."""
+    kind = str(device).split(":")[0]
+    if kind == "cuda":
+        free = torch.cuda.mem_get_info(torch.device(device))[0]
+    elif kind == "mps":
+        free = torch.mps.recommended_max_memory() - torch.mps.driver_allocated_memory()
+    else:
+        return CPU_BATCH
+    n = int(MEMORY_SHARE * free // (BYTES_PER_PIXEL * rows * columns))
+    return max(1, min(MAX_BATCH, n))
 
 
 def _namespace(meta: dict):
@@ -144,8 +165,9 @@ class Predictor:
         torch.backends.cudnn.allow_tf32 = False
         try:
             with torch.no_grad():
-                for start in range(0, n, self.batch_size):
-                    stop = min(start + self.batch_size, n)
+                size = self.batch_size or auto_batch(self.device, h, w)
+                for start in range(0, n, size):
+                    stop = min(start + size, n)
                     # frames start .. stop-1 of the middle, each with its neighbours: (b, 2k+1, h, w)
                     batch = torch.stack([x[i:i + 2 * k + 1] for i in range(start, stop)]).to(self.device)
                     y = self.model(batch)

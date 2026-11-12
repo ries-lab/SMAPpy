@@ -55,4 +55,4 @@ def _load(model: bytes, hello: dict):
         device = hello.get("device", "auto")
         return load_predictor(path, None if device == "auto" else device,
                               frames_mirrored=bool(hello.get("frames_mirrored", False)),
-                              raw_th=float(hello.get("raw_th", 0.1)), batch_size=int(hello.get("batch_size", 32)))
+                              raw_th=float(hello.get("raw_th", 0.1)), batch_size=int(hello.get("batch_size", 0)))

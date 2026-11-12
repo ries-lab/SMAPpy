@@ -138,7 +138,7 @@ def load_test_set(ds, path: Path):
     ds._target, ds._weight = tuple(d["target"]), d["weight"]
 
 
-def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=None):
+def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=None, metrics=None):
     from smappy import __version__
     from smappy.training import model_file
 
@@ -155,7 +155,12 @@ def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=Non
             "trained_on": trained_on(param),
             "base_model": job.base_model, "epoch": epoch, "epochs": param.HyperParameter.epochs,
             "batch_size": int(param.HyperParameter.batch_size), "learning_rate": float(param.HyperParameter.opt_param.lr),
-            "seed": job.seed, "smappy_version": __version__, "decode_version": "0.10.2"}
+            "seed": job.seed, "smappy_version": __version__, "decode_version": "0.10.2",
+            # SMAPpy's, for the fitter's model summary: what it was trained on, and how well it does
+            "calibration_source": job.calibration.get("source"), "density": (job.ranges or {}).get("density"),
+            "calibration_microscope": job.calibration.get("microscope"),
+            "test_metrics": {k: metrics.get(k) for k in ("jaccard", "rmse_lat_nm", "rmse_ax_nm", "eff_lat", "eff_ax")}
+            if metrics else None, "created": job.created}
     model_file.write(path, tensors, meta)
 
 
@@ -442,7 +447,7 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, a
                 lr_scheduler.step(val_loss)
             else:
                 lr_scheduler.step()
-        write_model(folder / MODEL, model, param, job, i, cal_em_on)
+        write_model(folder / MODEL, model, param, job, i, cal_em_on, metrics)
         _save_atomic({"epoch": i, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
                       "lr_scheduler": lr_scheduler.state_dict(), "rng": rng_state(), "restarts": restarts,
                       "batch": _ckpt_batch(batch)}, ckpt_path)
