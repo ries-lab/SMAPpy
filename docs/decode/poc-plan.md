@@ -1788,3 +1788,40 @@ port's models unchanged, no retraining: the first pair of runs that differ in on
   training, and is never worse here); what remains -- the offsets pulled in, z compressed -- is for
   the network, its output representation and its loss (step 4: anti-aliasing, the offsets' range,
   SHOT's loss).
+
+### DECODE's claimed z precision, on single frames (2026-11-12)
+
+Is `decode_B`'s z sigma too small (1.29 on the multi-frame movie of `precision_check.py`) because of
+the movie, or always?  The benchmark's simulated sets are single frames, each independent, and the
+model reads one frame: no temporal context, so the question is the network's alone.  Each matched
+localization's z error over its claimed ``z_err_nm`` (robust width, 1 where the claims are right),
+in 200 nm bins of the true z, with the bin's median bias taken off first; and the claim over the
+emitter's whole-spot CRLB (median):
+
+| true z (nm) | -700 -- -500 | -500 -- -300 | -300 -- -100 | -100 -- +100 | +100 -- +300 | +300 -- +500 | +500 -- +700 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| density 1: error / claim | 1.16 | 1.17 | 1.02 | 1.01 | 1.21 | 1.34 | 1.32 |
+| claim / CRLB | 1.08 | 1.06 | 1.06 | 1.05 | 0.94 | 0.93 | 0.88 |
+| 1000 photons: error / claim | 1.54 | 1.43 | 1.13 | 0.94 | 1.38 | 2.17 | 2.20 |
+| claim / CRLB | 0.83 | 0.91 | 0.99 | 1.04 | 0.82 | 0.69 | 0.56 |
+| 3000 photons: error / claim | 1.27 | 1.28 | 1.07 | 1.00 | 1.30 | 1.51 | 1.66 |
+| 10 000 photons: error / claim | 1.11 | 1.10 | 1.01 | 0.99 | 1.20 | 1.31 | 1.35 |
+
+- **x's claims are right everywhere** (0.96 -- 1.01 on the sparse sets, 1.08 at density 25).
+- **z's are right near the focus and too small away from it**, above it most, and the more so the
+  dimmer the spot: up to 2.2 times at 1000 photons, 1.3 at 10 000.  It is not the bias (taking the
+  bin's bias off changes the width by at most 0.1) and not density or temporal context (single
+  frames, density 1).
+- **Where it is wrong the claim is below the CRLB** -- 0.56 of it at +500 to +700 nm and 1000
+  photons -- while the real error is 1.1 -- 1.5 times the bound.  No unbiased estimator can be that
+  precise; the network claims what it cannot have.
+- **A suspect, not yet tested**: the loss trains the mixture over pixels, not each pixel's
+  component.  Where z is poorly determined, neighbouring pixels can each predict a different z with
+  a narrow sigma and the mixture still fits; the extraction then reports one component's sigma.
+  The mixture's own variance around the detection (``sum_i w_i (sigma_i^2 + mu_i^2) - mu^2`` over
+  the 3 x 3) would test it, cheaply, beside the mixture's peak.  If not, it is the sigma head's
+  training.
+- **For the benchmark**: the report should carry error over the claim per axis and by |z| on the
+  simulated sets, as it carries error over the CRLB; single frames keep the network's own
+  uncertainty apart from what temporal context and density add (the multi-frame movie, the density
+  sets).
