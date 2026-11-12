@@ -23,6 +23,10 @@ the truth carries each emitter's CRLB (the simulated sets):
   pairs do not drag; 1 where a fitter reaches the bound.  Both with the 13 x 13 bound and, as
   ``*_full``, the whole spot's.
 
+**The range that matters**, ``core``: positions, uncertainties, z bias and pixelation of the
+emitters with |z| < ``CORE_Z_NM`` (300 nm), read first; the whole range's are kept beside them, but
+a variant that gains far from focus at a cost near it is not better.
+
 **Pixelation:** the KS distance from uniform of the matched localizations' place within their
 pixel, x and y, all and in bins of |z| (`smappy.training.reference.ks_uniform`), and the sub-pixel
 histograms; the truth is uniform within its pixels, so any departure is the fitter's.
@@ -58,6 +62,7 @@ REPORTS = S.ROOT / "reports"
 Z_LIMIT = 700.0
 Z_BINS = (0, 150, 300, 450, 600, 700)          # |z| bins of the pixelation
 PHOTON_BINS = (0, 2000, 4000, 8000, 16000, 1e9)
+CORE_Z_NM = 300.0                              # |z| below it is what a fitter is for; see score_truth
 
 
 def kept(locs, keep: dict, z_limit=Z_LIMIT):
@@ -151,6 +156,24 @@ def score_truth(truth, locs, keep, px, size, shift=False):
                              "lat": robust_width(np.r_[dx[s] / cx[s], dy[s] / cy[s]]),
                              "ax": robust_width((dz[s] - np.median(dz[s])) / cz[s])})
         out["claim_width_by_z"] = rows
+    # the range that matters (Jonas, 2026-11-12): |z| < CORE_Z_NM.  Positions, uncertainties and
+    # pixelation of the emitters there, so that no variant is judged better for gains far from focus
+    # bought near it; detection stays over the whole range
+    core = np.abs(t["z_nm"][ti]) < CORE_Z_NM
+    if core.sum() >= 100:
+        c = {"n": int(core.sum()),
+             "rmse_lat_nm": float(np.sqrt(np.mean(dx[core] ** 2 + dy[core] ** 2))),
+             "rmse_ax_nm": float(np.sqrt(np.mean(dz[core] ** 2))),
+             "bias_z_nm": float(np.mean(dz[core])),
+             "ks": max(ks_uniform(fx[core]), ks_uniform(fy[core]))}
+        if len(claims) == 3:
+            c["claim_width_lat"] = robust_width(np.r_[dx[core] / cx[core], dy[core] / cy[core]])
+            c["claim_width_ax"] = robust_width(dz[core] / cz[core])
+        if "crlb_x_nm" in t:
+            bx, by, bz = (t[f"crlb_{a}_nm"][ti][core] for a in "xyz")
+            c["crlb_width_lat"] = robust_width(np.r_[dx[core] / bx, dy[core] / by])
+            c["crlb_width_ax"] = robust_width(dz[core] / bz)
+        out["core"] = c
     for key in ("crlb", "crlb_full"):
         if f"{key}_x_nm" not in t:
             continue
@@ -286,6 +309,9 @@ def rescore(run_name):
 
 
 # ----------------------------------------------------------------------------- the comparison
+CORE_COLUMNS = [("rmse_lat_nm", "lat", "{:.1f}"), ("rmse_ax_nm", "ax", "{:.1f}"), ("crlb_width_lat", "w/CR lat", "{:.2f}"),
+                ("crlb_width_ax", "w/CR ax", "{:.2f}"), ("claim_width_lat", "err/cl lat", "{:.2f}"),
+                ("claim_width_ax", "err/cl ax", "{:.2f}"), ("bias_z_nm", "dz", "{:+.1f}"), ("ks", "KS", "{:.3f}")]
 COLUMNS = [("jaccard", "J", "{:.3f}"), ("recall", "rec", "{:.3f}"), ("precision", "prec", "{:.3f}"),
            ("rmse_lat_nm", "lat", "{:.1f}"), ("rmse_ax_nm", "ax", "{:.1f}"),
            ("crlb_width_lat", "w/CR lat", "{:.2f}"), ("crlb_width_ax", "w/CR ax", "{:.2f}"),
@@ -324,6 +350,14 @@ def compare(names):
             row = _row(r["sets"][s])
             cells = [(fmt.format(row[k]) if row.get(k) is not None else "-") for k, _, fmt in COLUMNS]
             print(f"{s:22s} {n:12s} " + " ".join(f"{c:>10s}" for c in cells))
+    print(f"\n|z| < {CORE_Z_NM:.0f} nm, the range that matters: the matched emitters there")
+    print(f"{'set':22s} {'run':12s} " + " ".join(f"{h:>10s}" for _, h, _ in CORE_COLUMNS))
+    for s in sets:
+        for n, r in reports.items():
+            core = r["sets"].get(s, {}).get("scores", {}).get("core")
+            if core:
+                cells = [(fmt.format(core[k]) if core.get(k) is not None else "-") for k, _, fmt in CORE_COLUMNS]
+                print(f"{s:22s} {n:12s} " + " ".join(f"{c:>10s}" for c in cells))
     print("\nreal sets: kept a frame, KS by |z|; the pair check (observed / claimed, x) at the independent lag, by claim")
     for s in sets:
         for n, r in reports.items():

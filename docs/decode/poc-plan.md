@@ -1849,3 +1849,34 @@ emitter's whole-spot CRLB (median):
   simulated sets, as it carries error over the CRLB; single frames keep the network's own
   uncertainty apart from what temporal context and density add (the multi-frame movie, the density
   sets).
+
+### Read near the focus: |z| < 300 nm (2026-11-12)
+
+Jonas: the range that matters is |z| < 300 nm; bias or a wrong sigma beyond it matters less, and
+performance near the focus must not be traded for performance far from it.  The report now gives
+the matched emitters there first (`report.py`, ``core``):
+
+| set | fitter | lat / ax RMSE (nm) | err/CRLB lat / ax | err/claim lat / ax | z bias | KS |
+|---|---|---:|---:|---:|---:|---:|
+| density 1 | DECODE | 16.4 / 28.2 | 1.09 / 1.06 | 0.99 / 1.08 | -0.5 | 0.009 |
+| | + mixture peak | 16.4 / 28.0 | 1.08 / 1.04 | 0.99 / 1.07 | -0.4 | 0.011 |
+| | Spline 3D | 15.3 / 26.4 | 1.03 / 1.03 | 1.03 / 1.04 | +0.8 | 0.015 |
+| 1000 photons | DECODE | 30.1 / 53.5 | 1.04 / 1.07 | 0.96 / 1.20 | -1.8 | 0.026 |
+| | + mixture peak | 30.0 / 52.1 | 1.04 / 1.04 | 0.96 / 1.17 | -2.3 | 0.022 |
+| | Spline 3D | 34.9 / 57.4 | 1.02 / 1.06 | 1.02 / 1.06 | -1.1 | 0.014 |
+| 10 000 photons | DECODE | 10.1 / 16.2 | 1.07 / 1.06 | 0.97 / 1.08 | -0.3 | 0.018 |
+| | + mixture peak | 10.1 / 15.8 | 1.06 / 1.04 | 0.96 / 1.06 | -0.3 | 0.018 |
+| | Spline 3D | 10.0 / 16.3 | 1.00 / 1.02 | 1.00 / 1.02 | +0.4 | 0.011 |
+| density 25 | DECODE | 29.0 / 44.3 | 1.65 / 1.68 | 1.05 / 1.20 | -1.8 | 0.014 |
+| | + mixture peak | 28.7 / 43.8 | 1.63 / 1.63 | 1.04 / 1.17 | -1.7 | 0.010 |
+
+- **Near the focus DECODE is close to the bound and its own claims**: error over CRLB 1.04 -- 1.09
+  sparse (Spline 3D 1.00 -- 1.03), its sigma_z within 8 -- 20 %, its z bias a couple of nm.  The
+  overconfident sigma_z and the pull to the focus of the sections above are mostly beyond 300 nm.
+- **The mixture peak's gain is mostly far from the focus**: near it the KS moves from 0.009 to
+  0.011 (density 1), 0.026 to 0.022 (1000 photons), 0.018 to 0.018 (10 000) -- not the halving of
+  the whole range.  It is never worse in RMSE or the bound, so it stays the default extraction,
+  but it is not a near-focus fix.
+- **Near the focus the pixelation is the photons'**: DECODE's KS 0.009 sparse and bright against
+  0.026 at 1000 photons (Spline 3D 0.011 -- 0.015), so step 4's pixelation work is judged on the dim
+  sets near the focus first.
