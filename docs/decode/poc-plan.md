@@ -1546,6 +1546,11 @@ lower):
   region is not what a frame's edge looked like in training.  A distinct value would have to be
   trained for (padding drawn into the training's frames), which spends some of the network on the
   padding; not tried.
+- **-1, -100 and NaN** (network input; `--methods`, `results/edges_more.jsonl`): -1 as 0 photons
+  (inside recall 0.78, precision 0.85 at density 5), -100 finds nothing anywhere (recall 0.01),
+  NaN nothing at all -- a NaN spreads through every convolution until the whole frame is NaN.
+  The further from the data, the more of the frame is lost: the pad's value reaches every
+  pixel through the U-Net's downsampled levels, which see the whole 64 px frame.
 - **Mirrored on the crop's grid** (the padding's first pixels placed so that the crop's first row
   and column fall where they did, a multiple of 8 in): the inside as the crop's within 0.009 px
   (1 nm), the same order as the uncut frame's own difference from the crop (0.006 px), and its

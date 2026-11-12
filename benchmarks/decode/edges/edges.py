@@ -104,7 +104,7 @@ def padded(predictor, photons, how):
     if how in ("edge", "reflect"):
         x = np.pad(photons, pad, mode=how)
     else:
-        v = float(how.split()[1])
+        v = float(how.split()[1])           # "nan" too: float("nan")
         s = predictor.metadata["scaling"]
         cam = predictor.metadata.get("camera") or {}
         value = (v * s["input_scale"] + s["input_offset"]) * float(cam.get("qe") or 1) + float(cam.get("spur_noise") or 0)
@@ -177,7 +177,7 @@ def same_inside(ref, other, h, w):
         d, _ = cKDTree(np.c_[other["x_px"][b], other["y_px"][b]]).query(np.c_[ref["x_px"][a], ref["y_px"][a]])
         hit += int((d <= SAME_PX).sum())
         dist.append(d)
-    return hit / max(int(keep.sum()), 1), float(np.median(np.concatenate(dist)))
+    return hit / max(int(keep.sum()), 1), float(np.median(np.concatenate(dist))) if dist else float("inf")
 
 
 def main():
@@ -186,6 +186,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--densities", nargs="*", default=["5", "15"])
     ap.add_argument("--device", default=None)
+    ap.add_argument("--methods", nargs="*", default=None, help="these only (crop is always run)")
     a = ap.parse_args()
     meta = json.loads((ROOT / "sets.json").read_text())
     px = tuple(meta["pixel_nm"])
@@ -198,7 +199,7 @@ def main():
         tz = np.load(folder / "truth.npz")
         t = {"frame": tz["frame"], "x_px": tz["x_px"] - CUT[1].start, "y_px": tz["y_px"] - CUT[0].start, "z_nm": tz["z_nm"]}
         fits = {}
-        for method in METHODS:
+        for method in ("crop", *[m for m in (a.methods or METHODS) if m != "crop"]):
             if method == "crop":
                 cols = run(predictor, frames)
             elif method == "uncut":
@@ -216,7 +217,7 @@ def main():
                 f"[{r['lo']}-{r['hi']}) rec {r['recall']:.2f} prec {r['precision']:.2f} {r['rmse_lat_nm']:4.0f}"
                 for r in rows), flush=True)
     (HERE / "results").mkdir(exist_ok=True)
-    with open(HERE / "results" / "edges.jsonl", "w") as f:
+    with open(HERE / "results" / ("edges.jsonl" if not a.methods else "edges_more.jsonl"), "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
 
