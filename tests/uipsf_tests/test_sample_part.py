@@ -190,8 +190,15 @@ def test_spline_3d_2c_on_auto_finds_the_focus_from_the_main_channel_and_fits_hei
     from smappy.calibrate.dual import load_dual_color_calibration, save_dual_color_calibration
     from smappy.pipeline import FitSettings
     from smappy.plugins import Context
-    from smappy.plugins.fit import (CameraSettings, DetectionSettings, DualModelSettings, DualSplineFit,
-                                    DualSplineFitSettings, OutputSettings, SourceSettings)
+    from smappy.plugins.fit import (
+        CameraSettings,
+        DetectionSettings,
+        DualModelSettings,
+        DualSplineFit,
+        DualSplineFitSettings,
+        OutputSettings,
+        SourceSettings,
+    )
     from tests.uipsf_tests.test_smappy_dual import PIXEL, SHAPE, TRANSFORM, _dual_calibration, _model
     model, shared = _model()
     dual = _dual_calibration(model, shared, tmp_path)
