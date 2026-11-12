@@ -1,6 +1,6 @@
 ---
-version: "13"
-covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration]
+version: "14"
+covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration, smappy.plugins.fit.DualSplineFit.with_focus]
 ---
 
 ## What it does
@@ -410,13 +410,19 @@ metadata is taken to start at the chip's corner, with a warning.
 
 ### model.sample.focus
 Shown for a dual-colour calibration made with the pupil (Zernike) method,
-which carries its two-channel model.  *typed* draws both PSFs for molecules
+which carries its two-channel model.  Both PSFs are then drawn for molecules
 in the sample with the focus *focus depth* above the coverslip, normalised
-together so that each keeps its share of the light, and z is then the
-height above the coverslip, as in
-[Spline 3D](plugin:Localize/Spline 3D)'s *focus*.  *as calibrated*, the
-default, fits the beads' splines as they are.  Spline 3D's *auto* and *in
-situ* are not offered here yet: type the focus.
+together so that each keeps its share of the light, and z is the height
+above the coverslip, as in [Spline 3D](plugin:Localize/Spline 3D)'s *focus*.
+*auto*, the default, finds the focus before the fit as Spline 3D does, from
+the main channel alone: its spots, its spline and the model's main channel
+drawn at depth, until the lowest localizations sit on the coverslip.  The
+secondary would only add its own aberrations to an edge both channels see.
+The focus found is written into the settings as typed, so the history and
+the file say what was fitted with, and a Preview finds it once for the Run
+after it.  *typed* takes it as typed; *as calibrated* fits the beads'
+splines as they are, z above their focus.  Without torch, *auto* fits as
+calibrated and warns.  Spline 3D's *in situ* is not offered here yet.
 
 ### model.sample.focus_nm
 How far the objective was moved up from the coverslip, as its focus drive

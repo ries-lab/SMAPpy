@@ -179,3 +179,63 @@ def test_a_decode_job_learns_the_psf_drawn_in_the_sample_and_records_where(files
     assert job.calibration["sample_depth"]["focus_nm"] == 600.0
     written = load_spline_calibration(folder / job.calibration["file"])
     assert written.parameters["sample_depth"]["method"] == "typed"
+
+
+@pytest.mark.slow
+def test_spline_3d_2c_on_auto_finds_the_focus_from_the_main_channel_and_fits_heights(tmp_path, monkeypatch):
+    """The whole plugin: split frames of molecules through 800 nm of sample with the focus 600 nm in, drawn from
+    a two-channel pupil model; a dual calibration that carries it.  *auto* writes the focus it found as typed,
+    and z is the height above the coverslip."""
+    import tifffile
+    from smappy.calibrate.dual import load_dual_color_calibration, save_dual_color_calibration
+    from smappy.pipeline import FitSettings
+    from smappy.plugins import Context
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings, DualModelSettings, DualSplineFit,
+                                    DualSplineFitSettings, OutputSettings, SourceSettings)
+    from tests.uipsf_tests.test_smappy_dual import PIXEL, SHAPE, TRANSFORM, _dual_calibration, _model
+    model, shared = _model()
+    dual = _dual_calibration(model, shared, tmp_path)
+    dual.main.parameters["model_file"] = "pair_3dcal.uipsf.h5"          # the model is the fixture's, below
+    path = tmp_path / "pair_model_3dcal.h5"
+    save_dual_color_calibration(path, dual)
+    (tmp_path / "pair_3dcal.uipsf.h5").write_bytes(b"")
+    learned = SimpleNamespace(model=model, shared=shared, n_channels=2, config=None)
+    monkeypatch.setattr(depth, "load", lambda path, channels=1: learned)
+    assert depth.has_model(load_dual_color_calibration(path).main)
+
+    from uipsf.model.channels import inverse_map
+    rng = np.random.default_rng(7)
+    centres = [(14.0, 14.0), (34.0, 14.0), (14.0, 34.0), (34.0, 34.0)]
+    n_frames = 120
+    n = n_frames * len(centres)
+    h = np.where(rng.random(n) < 0.3, 0.0, rng.uniform(0, 800, n))
+    xy = np.array(centres * n_frames) + rng.uniform(-0.5, 0.5, (n, 2))
+    photons = rng.lognormal(np.log(6000), 0.2, n)
+    H = torch.tensor(TRANSFORM / TRANSFORM[2, 2])
+    second = inverse_map(H, torch.as_tensor(xy, dtype=torch.float64)).numpy()
+    frames = np.full((n_frames, *SHAPE), 15.0)
+    for c, where in enumerate((xy, second)):
+        pixel = np.rint(where).astype(int)
+        local = np.c_[(where - pixel) * PIXEL, np.full(n, -600.0)]
+        psf = sample_psf(model, shared, local, roi_px=21, upsample=3, channel=c, depth_nm=h).double().numpy()
+        for k in range(n):
+            (ix, iy), f = pixel[k], k // len(centres)
+            frames[f, iy - 10:iy + 11, ix - 10:ix + 11] += photons[k] * psf[k]
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (rng.poisson(frames) + 100).astype(np.uint16))
+
+    settings = DualSplineFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=PIXEL / 1000),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=10.0),
+        model=DualModelSettings(calibration=str(path)), fit=FitSettings(roisize=13),
+        output=OutputSettings(save=False))
+    plugin = DualSplineFit()
+    assert plugin.describe(None, settings).shown["model.sample"]               # auto, the default
+    result = plugin.run(Context(), settings)
+    used = result.settings.model.sample
+    assert used.focus == "typed" and used.focus_nm == pytest.approx(600.0, abs=60)
+    z = np.asarray(result.locs["z_nm"])
+    assert np.quantile(z, 0.15) == pytest.approx(0.0, abs=60)            # the lowest on the coverslip
+    assert np.quantile(z, 0.95) == pytest.approx(760.0, abs=80)
+    assert plugin.describe(None, settings).hints["model.sample.focus_nm"].endswith("found before")

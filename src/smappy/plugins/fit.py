@@ -1248,6 +1248,9 @@ class _FitPlugin(Plugin):
                     updates["model.calibration"] = drawn[1]
                     updates.update(self.calibration_extras)
                     self._default_calibration = drawn[1]
+                    if kind == "dual":
+                        # a split camera is drawn with the beads' splines as they are (`simulate.camera`)
+                        updates["model.sample.focus"] = "calibrated"
                     if kind == "single":
                         # the focus the frames were drawn for, typed, else the beads' spline as it is
                         from ..simulate.source import recipe_sample
@@ -1867,9 +1870,10 @@ class DualModelSettings(_LinkedChannels):
                                   "microscope and state (the menu: all found); one from PSF "
                                   "calibration in Dual colour mode; or a fitted .h5, for the one it "
                                   "was fitted with")
-    # a pupil (Zernike) calibration only (`DualSplineFit._sample_form`): both PSFs drawn for a focus typed in
-    # the sample (`calibrate.depth.dual_depth_calibration`); *auto* and *in situ* are Spline 3D's alone so far
-    sample: SampleSettings = param(default_factory=lambda: SampleSettings(focus="calibrated"),
+    # a pupil (Zernike) calibration only (`DualSplineFit._sample_form`): both PSFs drawn for the focus in the
+    # sample (`calibrate.depth.dual_depth_calibration`), on *auto* found from the main channel's spots before
+    # the fit (`DualSplineFit.with_focus`); *in situ* is Spline 3D's alone so far
+    sample: SampleSettings = param(default_factory=SampleSettings,
                                    label="in the sample",
                                    help="a pupil calibration's two PSFs drawn for a focus in the sample: z "
                                         "is then the height above the coverslip")
@@ -1890,14 +1894,13 @@ class DualModelSettings(_LinkedChannels):
         if not self.calibration:
             raise ValueError("a two-channel fit needs a dual-colour calibration")
         calibration = load_dual_color_calibration(self.calibration)
-        if self.sample.focus == "calibrated":
+        # *auto* is resolved to typed before a fit (`DualSplineFit.with_focus`); what reads the calibration
+        # before that -- its geometry, a registration measured -- reads the beads' splines
+        if self.sample.focus != "typed":
             return calibration
         from ..calibrate import depth
         if not depth.has_model(calibration.main):
             return calibration
-        if self.sample.focus != "typed":
-            raise ValueError("Spline 3D 2C draws its calibration for a typed focus only: type it, or fit "
-                             "as calibrated")
         return depth.dual_at_depth(calibration, self.calibration, self.sample.focus_nm, self.sample.sample_index)
 
     def model(self, calibration, camera: Optional[CameraMetadata] = None):
@@ -2174,6 +2177,19 @@ def channel_photons(frames, camera, settings, source) -> np.ndarray:
         noise = for_layout(camera, source.layout, source.base.shape[-2:])
         return noise.to_photons(frames, camera.adu_to_photons)
     return to_photons(frames, camera) / camera.excess_noise
+
+
+class MainChannel:
+    """A `channels.ChannelSource` read as its main channel alone, (n, h, w): what `sample_rois` cuts spots from
+    for a two-channel fitter's focus on *auto* (`DualSplineFit.with_focus`)."""
+
+    def __init__(self, source):
+        self.source = source
+        self.n_frames = source.n_frames
+
+    def frames(self, chunk: int = 100, start: int = 0, stop: Optional[int] = None):
+        for first, block in self.source.frames(chunk=chunk, start=start, stop=stop):
+            yield first, block[:, 0]
 
 
 def sample_rois(source, camera, finder, roisize: int, src) -> np.ndarray:
@@ -2723,7 +2739,9 @@ class DualSplineFit(_TwoChannelFit):
     #     as every fitter reports them; not counted from the main channel's corner
     # 12: the calibration pass a two-channel fit, its pairs one per channel, no seam measured
     # 13: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`), drawn on either
-    version = "13"
+    # 14: *in the sample* on auto by default: a pupil (Zernike) dual calibration drawn for the focus found from
+    #     the main channel's lowest localizations, z the height above the coverslip (`calibrate.depth`)
+    version = "14"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
 
@@ -2735,9 +2753,76 @@ class DualSplineFit(_TwoChannelFit):
             pass
         return state
 
+    def _focus_key(self, settings) -> tuple:
+        """What a focus found on *auto* depends on: the movie and its range, the calibration, the sample's index,
+        the detection, the fit box and the camera.  A Preview finds it once for these, the Run after it uses it."""
+        m, src = settings.model, settings.source
+
+        def stamp(path):
+            try:
+                return (str(path), Path(path).stat().st_mtime)
+            except OSError:
+                return (str(path), None)
+        return ("2C", stamp(src.path), stamp(m.calibration), m.sample.sample_index, src.start, src.stop,
+                repr(settings.detection), settings.fit.roisize, repr(getattr(settings, "region", None)),
+                repr(settings.camera), repr(getattr(settings, "channels", None)))
+
+    def with_focus(self, ctx: Context, settings, source, camera, finder):
+        """*focus* on *auto* found before the fit and written in as typed, as Spline 3D's is: from the main
+        channel alone -- its spots, its spline and the pupil model's channel 0 drawn at depth
+        (`calibrate.depth.auto_focus` with the two-channel model) -- the lowest localizations' edge on the
+        coverslip.  The other channel would only add its own aberrations to an edge both see.  A calibration
+        without a model, or no torch, fits as calibrated, said."""
+        from ..calibrate import depth
+        m = settings.model
+        if m.sample.focus != "auto":
+            return settings
+        as_calibrated = replace(settings, model=replace(m, sample=replace(m.sample, focus="calibrated")))
+        # the calibration as this run read it (`registration`, read once), the beads' splines on *auto*
+        main = getattr(self.registration(settings), "main", None)
+        if main is None or not depth.has_model(main):
+            return as_calibrated
+        try:
+            import torch  # noqa: F401 -- only asked whether it is there
+        except ImportError:
+            ctx.warn("focus on auto needs torch to draw the PSFs in the sample (pip install smappy-smlm[uipsf]): "
+                     "fitted as calibrated, z above the beads' focus")
+            return as_calibrated
+        if settings.source.live:
+            raise ValueError("a focus on auto needs the frames before the fit: type it for a live fit")
+        key = self._focus_key(settings)
+        found = depth.found(key)
+        if found is not None:
+            ctx.report(f"focus auto: {found.focus_nm:.0f} nm above the coverslip, as found before")
+        else:
+            images = sample_rois(MainChannel(source), camera, settings.detection.finder(settings.fit.n_threads),
+                                 settings.fit.roisize, settings.source)
+            if not len(images):
+                raise ValueError("no spots found in the main channel of the frames the focus is looked for in: "
+                                 "review detection, or type the focus")
+            images = depth.in_beads_orientation(images, main, camera.em_on)
+            found = depth.auto_focus(main, images, m.sample.sample_index, n_threads=settings.fit.n_threads,
+                                     report=ctx.report, learned=depth.model_of(main, channels=2))
+            ctx.report(f"focus on auto: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
+                       f"of {found.n} localizations in the main channel, {len(found.passes)} passes")
+            for note in found.notes:
+                ctx.report(f"focus auto: {note}")
+            for message in found.messages:
+                ctx.warn(f"focus auto: {message}")
+            depth.remember(key, found)
+        return replace(settings, model=replace(m, sample=replace(m.sample, focus="typed",
+                                                                  focus_nm=round(found.focus_nm, 1))))
+
+    def focus_plots(self, settings, camera) -> dict:
+        from ..calibrate import depth
+        if settings.model.sample.focus != "auto":
+            return {}
+        found = depth.found(self._focus_key(settings))
+        return {} if found is None or found.heights is None else {"focus": focus_plot(found, settings)}
+
     def _sample_form(self, settings, state) -> None:
         """*in the sample* only for a dual calibration that carries its pupil (Zernike) model
-        (`calibrate.depth.sample_state`), its focus typed or as calibrated."""
+        (`calibrate.depth.sample_state`): auto, typed or as calibrated."""
         from ..calibrate.depth import sample_state
         try:
             path = self.with_calibration(settings).model.calibration
@@ -2754,15 +2839,23 @@ class DualSplineFit(_TwoChannelFit):
                     main = None
                 self._sample_key, self._sample_main = key, main
             main = self._sample_main
-        shown, active, hints = sample_state(main, settings.model.sample, prefix="model.sample.")
+        from ..calibrate.depth import found
+        known = found(self._focus_key(settings)) if settings.model.sample.focus == "auto" else None
+        shown, active, hints = sample_state(main, settings.model.sample, prefix="model.sample.", found=known)
         shown["model.sample"] = shown.pop("model.sample.focus")
+        if known is not None:
+            hints["model.sample.focus_nm"] += ", found before"
         state.shown.update(shown)
         state.active.update(active)
         state.hints.update(hints)
-        state.choices["model.sample.focus"] = [("typed", "typed"), ("calibrated", "as calibrated")]
+        state.choices["model.sample.focus"] = [("auto", "auto"), ("typed", "typed"), ("calibrated", "as calibrated")]
 
     def registration_path(self, settings) -> str:
-        return f"{settings.model.calibration}|{settings.model.registration.path}"
+        # the focus too: the PSFs read are drawn for it (`DualModelSettings.load`), and *auto* is resolved to a
+        # typed focus after the registration was first read, which must not be kept for the fit
+        sample = settings.model.sample
+        drawn = f"|{sample.focus_nm}|{sample.sample_index}" if sample.focus == "typed" else ""
+        return f"{settings.model.calibration}|{settings.model.registration.path}{drawn}"
 
     def read_registration(self, settings):
         """The dual-colour calibration: both PSFs, and its registration or the file's in place of it."""
