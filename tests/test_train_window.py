@@ -84,7 +84,7 @@ def test_the_progress_curves_say_where_a_training_is_and_how_long_it_has_left(tm
         progress.append(tmp_path, "epoch", e, loss_train=None if e == 0 else 500.0 - e, loss_test=480.0 - e,
                         seconds=12.0, metrics={"jaccard": 0.1 * e, "rmse_lat_nm": 40.0, "rmse_ax_nm": 60.0})
     text = draw_progress(Figure(), progress.read(tmp_path))
-    assert text.startswith("epoch 4 of 100") and "12.0 s an epoch" in text and "0 h 19 min left" in text
+    assert text.startswith("epoch 4 of at most 100") and "12.0 s an epoch" in text and "at most 0 h 19 min left" in text
     assert draw_progress(Figure(), []) == "no epoch yet"
 
 
@@ -319,3 +319,23 @@ def test_a_prefit_whose_result_starts_the_simulated_frames_does_not_abort(movie,
             w._thread.wait()
         w.close()
         w.timer.stop()
+
+
+def test_the_curves_leave_the_first_epochs_out_of_their_range_and_show_the_efficiencies():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.gui.train_window import draw_progress
+    lines = [{"kind": "start", "epoch": 0, "epochs": 1000}]
+    for e in range(200):
+        far = e < 3                                   # the first epochs: a loss of thousands, an RMSE of 400 nm
+        lines.append({"kind": "epoch", "epoch": e, "loss_train": 5000.0 if far else 300.0 - 0.1 * e,
+                      "loss_test": 4000.0 if far else 290.0 - 0.1 * e, "seconds": 9.0,
+                      "metrics": {"jaccard": 0.3, "rmse_lat_nm": 400.0 if far else 45.0, "rmse_ax_nm": 70.0,
+                                  "eff_lat": 0.2, "eff_ax": 0.25}})
+    figure = Figure()
+    draw_progress(figure, lines, {"lateral_nm": 20.0, "axial_nm": 40.0})
+    loss, jaccard, rmse, eff = figure.axes
+    assert loss.get_ylim()[1] < 400 and rmse.get_ylim()[1] < 100      # the first epochs beyond the edge
+    assert rmse.get_ylim()[0] < 20                                     # the CRLB lines still inside
+    assert eff.get_title() == "efficiency (test set)" and len(eff.lines) == 2

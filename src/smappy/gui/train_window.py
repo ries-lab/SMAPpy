@@ -363,10 +363,34 @@ def stop(folder) -> Path:
     return path
 
 
+#: epochs left out of a curve's y range: the first ones are far off what follows (a loss of thousands,
+#: an RMSE of hundreds of nm while few molecules are matched) and would flatten the rest
+SKIP_SHARE, SKIP_MIN = 0.05, 5
+
+
+def _fit_range(ax, *curves, log=False, include=()) -> None:
+    """The y range of ``curves`` without their first epochs (`SKIP_SHARE`, at least `SKIP_MIN`),
+    and of the values ``include`` (lines drawn across it), with a margin; the first epochs still
+    drawn, beyond the edge."""
+    later = [c[min(len(c) - 1, max(SKIP_MIN, int(SKIP_SHARE * len(c)))):] for c in curves if len(c)]
+    values = np.concatenate(later + [np.asarray(include, float)])
+    values = values[np.isfinite(values) & ((values > 0) if log else True)]
+    if not len(values):
+        return
+    lo, hi = float(values.min()), float(values.max())
+    if log:
+        pad = (hi / lo) ** 0.05 if hi > lo else 1.1
+        ax.set_ylim(lo / pad, hi * pad)
+    else:
+        pad = 0.05 * (hi - lo) if hi > lo else 0.05 * abs(hi) or 1.0
+        ax.set_ylim(lo - pad, hi + pad)
+
+
 def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
-    """The curves of a job's ``progress.jsonl``: the losses, Jaccard, the RMSEs, the seconds an epoch;
-    returns a line saying where it is and how long it has left.  ``reference``, the median spot's
-    CRLB (`training.reference`), is drawn on the RMSE as dashed lines."""
+    """The curves of a job's ``progress.jsonl``: the losses, Jaccard, the RMSEs and the efficiencies
+    of the test set, each y range without the first epochs (`_fit_range`); returns a line saying
+    where it is and how long it has left at most.  ``reference``, the median spot's CRLB
+    (`training.reference`), is drawn on the RMSE as dashed lines."""
     epochs = [line for line in lines if line["kind"] == "epoch"]
     figure.clear()
     axes = figure.subplots(2, 2)
@@ -380,32 +404,44 @@ def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     def series(key, metric=False):
         return np.array([np.nan if (line.get("metrics", {}) if metric else line).get(key) is None
                          else (line["metrics"] if metric else line)[key] for line in epochs], float)
-    axes[0, 0].plot(e, series("loss_train"), label="train")
-    axes[0, 0].plot(e, series("loss_test"), label="test")
+    train, test = series("loss_train"), series("loss_test")
+    axes[0, 0].plot(e, train, label="train")
+    axes[0, 0].plot(e, test, label="test")
     axes[0, 0].set(yscale="log", title="loss", xlabel="epoch")
+    _fit_range(axes[0, 0], train, test, log=True)
     axes[0, 0].legend(fontsize=7)
     axes[0, 1].plot(e, series("jaccard", True))
     axes[0, 1].set(title="Jaccard (test set)", xlabel="epoch")
-    lateral = axes[1, 0].plot(e, series("rmse_lat_nm", True), label="lateral")[0]
-    axial = axes[1, 0].plot(e, series("rmse_ax_nm", True), label="axial")[0]
+    lat, ax_ = series("rmse_lat_nm", True), series("rmse_ax_nm", True)
+    lateral = axes[1, 0].plot(e, lat, label="lateral")[0]
+    axial = axes[1, 0].plot(e, ax_, label="axial")[0]
+    bounds = ()
     if reference:
         axes[1, 0].axhline(reference["lateral_nm"], ls="--", lw=0.8, color=lateral.get_color(), label="CRLB, median spot")
         axes[1, 0].axhline(reference["axial_nm"], ls="--", lw=0.8, color=axial.get_color())
+        bounds = (reference["lateral_nm"], reference["axial_nm"])
     axes[1, 0].set(title="RMSE (nm, test set)", xlabel="epoch")
+    _fit_range(axes[1, 0], lat, ax_, include=bounds)
     axes[1, 0].legend(fontsize=7)
-    seconds = series("seconds")
-    axes[1, 1].plot(e, seconds)
-    axes[1, 1].set(title="seconds an epoch", xlabel="epoch")
+    # the SMLM Challenge's score of the Jaccard and the RMSE together: what the early stop reads
+    # beside them, and a better sign of progress than either alone (the RMSE rises as more is found)
+    eff_lat, eff_ax = series("eff_lat", True), series("eff_ax", True)
+    axes[1, 1].plot(e, eff_lat, label="lateral")
+    axes[1, 1].plot(e, eff_ax, label="axial")
+    axes[1, 1].set(title="efficiency (test set)", xlabel="epoch")
+    _fit_range(axes[1, 1], eff_lat, eff_ax)
+    axes[1, 1].legend(fontsize=7)
     for a in axes.flat:
         a.grid(alpha=0.3)
         a.title.set_fontsize(9)
     start = next((line for line in reversed(lines) if line["kind"] == "start"), {})
     total = start.get("epochs")
+    seconds = series("seconds")
     per = float(np.nanmedian(seconds[-10:])) if np.isfinite(seconds[-10:]).any() else None
-    text = f"epoch {int(e[-1])}" + (f" of {total}" if total else "")
+    text = f"epoch {int(e[-1])}" + (f" of at most {total}" if total else "")
     if total and per:
         left = max(total - 1 - int(e[-1]), 0) * per
-        text += f", {per:.1f} s an epoch, about {int(left // 3600)} h {int(left % 3600 // 60):02d} min left"
+        text += f", {per:.1f} s an epoch, at most {int(left // 3600)} h {int(left % 3600 // 60):02d} min left"
     return text
 
 

@@ -77,9 +77,16 @@ job records the SMAPpy version that prepared it, and a training refuses a
 job of another version unless the host's *train jobs another SMAPpy version
 prepared* is on.
 
-**Follow.**  The losses, the test set's Jaccard and RMSE, and the seconds
-an epoch, read from the job's progress file every few seconds, with the time
-left.  The dashed lines on the RMSE are the
+**Follow.**  The losses, and the test set's Jaccard, RMSE and efficiency
+(the SMLM Challenge's score of the Jaccard and the RMSE together, lateral
+and axial), read from the job's progress file every few seconds; above them
+the seconds an epoch and the time left at most -- at most, since a training
+that stops improving finishes sooner.  The first epochs (5 %, at least 5)
+are left out of each panel's range, so that the curves later on are not
+flattened by a loss of thousands or an RMSE of hundreds of nm at the start;
+they are still drawn, beyond the edge.  The RMSE rising while the Jaccard
+still climbs is normal: the network finds more of the harder molecules.
+The dashed lines on the RMSE are the
 [CRLB](plugin:Panels/Glossary) of the median spot the training draws: its
 photons, background and z drawn as the training draws them, alone and
 without noise, from the job's calibration, the bound SMAPpy's spline fitter
