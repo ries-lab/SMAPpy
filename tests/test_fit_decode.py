@@ -13,7 +13,7 @@ import tifffile
 
 from smappy.io.calibration import SplineCalibration, save_spline_calibration
 from smappy.locs import Localizations
-from smappy.plugins.fit_decode import model_problems, range_warnings, read_model
+from smappy.plugins.fit_decode import model_summary, range_warnings, read_model
 from smappy.training import model_file
 from smappy.training.job import coefficients_sha256
 
@@ -32,6 +32,8 @@ def files(tmp_path):
     save_spline_calibration(tmp_path / "other.h5", _calibration(2.5))
     meta = {"method": "decode-v0.10.2", "architecture": "SigmaMUNet", "channels_in": 3,
             "calibration_sha256": coefficients_sha256(cal), "calibration_em_on": False,
+            "calibration_source": str(tmp_path / "beads.h5"), "epoch": 311, "epochs": 1000,
+            "calibration_microscope": {"name": "M2", "version": 1, "followed": ["3DA"], "states": {"3DA": "on"}},
             "trained_on": {"photons_mu_sig": [3000.0, 600.0], "background": [20.0, 60.0], "z_nm": [-400.0, 400.0]}}
     model_file.write(tmp_path / "model.safetensors", {"w": np.zeros(3, np.float32)}, meta)
     tifffile.imwrite(tmp_path / "frames.tif", np.full((4, 16, 16), 110, np.uint16), photometric="minisblack")
@@ -46,11 +48,14 @@ def _settings(files, **more):
     return fit_settings("Localize/DECODE", values)
 
 
-def test_a_model_trained_on_another_calibration_is_refused_and_its_own_passes(files):
+def test_the_model_info_says_what_the_model_was_trained_on_and_how_the_data_differ(files):
     meta = read_model(files / "model.safetensors")
-    assert model_problems(meta, str(files / "beads.h5")) == []
-    assert "another calibration" in model_problems(meta, str(files / "other.h5"))[0]
-    assert model_problems(meta, None) == []                     # nothing to compare: not refused
+    rows = dict(model_summary(meta))
+    assert rows["PSF calibration"] == "beads.h5" and rows["trained"] == "epoch 311 of at most 1000"
+    assert rows["photons a frame"] == "3,000 \u00b1 600" and "differs from the data" not in rows
+    data = {"name": "M2", "version": 1, "followed": ["3DA"], "states": {"3DA": "off"}}
+    first = model_summary(meta, data)[0]
+    assert first == ("differs from the data", "3DA on for the beads, off for the data")
 
 
 def test_a_file_that_is_not_a_decode_model_is_refused(files):
@@ -61,23 +66,25 @@ def test_a_file_that_is_not_a_decode_model_is_refused(files):
         read_model(files / "missing.safetensors")
 
 
-def test_the_form_says_why_a_model_is_refused_or_that_it_is_unchecked(files):
+def test_the_form_warns_of_other_conditions_and_else_shows_the_model_in_a_line(files, monkeypatch):
     from smappy import plugins
+    from smappy.plugins import fit_decode
     plugin = plugins.get("Localize/DECODE")()
-    state = plugin.describe(None, _settings(files, **{"model.calibration": str(files / "other.h5")}))
-    assert "another calibration" in state.notice.text
-    state = plugin.describe(None, _settings(files, **{"model.calibration": str(files / "beads.h5")}))
-    assert state.notice is None or "calibration" not in state.notice.text
-    assert "not checked" in plugin.describe(None, _settings(files)).hints["model.calibration"]
+    monkeypatch.setattr(fit_decode.DecodeFit, "data_conditions",
+                        lambda self, s: {"name": "M1", "version": 1, "followed": [], "states": {}})
+    assert "another microscope: M2 for the model's beads, M1" in plugin.describe(None, _settings(files)).notice.text
+    monkeypatch.setattr(fit_decode.DecodeFit, "data_conditions", lambda self, s: None)      # not known: no word
+    assert plugin.describe(None, _settings(files)).notice.text == \
+        "model: trained on beads.h5, microscope M2, epoch 311"
 
 
 def test_the_form_loads_no_torch(files):
     code = ("import sys; from smappy import plugins; from smappy.gui.live_session import fit_settings; "
             f"s = fit_settings('Localize/DECODE', {{'source.path': {str(files / 'frames.tif')!r}, "
             f"'model.path': {str(files / 'model.safetensors')!r}, "
-            f"'model.calibration': {str(files / 'other.h5')!r}, 'camera.conversion': 0.5, 'camera.offset': 100.0}}); "
+            f"'camera.conversion': 0.5, 'camera.offset': 100.0}}); "
             "state = plugins.get('Localize/DECODE')().describe(None, s); "
-            "print('torch' in sys.modules, 'another' in state.notice.text)")
+            "print('torch' in sys.modules, state.notice is not None)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.split() == ["False", "True"]
 

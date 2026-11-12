@@ -62,6 +62,7 @@ WINDOW_BUTTONS = {
     "psf calibration": "open_window",
     "decode training": "open_window",
     "training hosts": "File/Preferences",
+    "decode model": "describe_plugin",          # its notice: the model in a line, or how it differs
 }
 
 

@@ -139,22 +139,24 @@ class PluginPanel(QWidget):
             target.layout().addWidget(button, 0, Qt.AlignLeft)
             self.part_buttons[part] = button
         # buttons at the foot of a part opening a window (`Plugin.part_windows`),
-        # one row a part
+        # three to a row, as many as the control column holds
         self.part_window_buttons = {}
         rows = {}
         for part, label, window in plugin_cls.part_windows:
             target = self.form.fields.get(part)
             if not isinstance(target, SettingsForm):
                 continue
-            if part not in rows:
-                rows[part] = QHBoxLayout()
-                target.layout().addLayout(rows[part])
+            column = rows.setdefault(part, [])
+            if not column or column[-1].count() >= 3:
+                column.append(QHBoxLayout())
+                target.layout().addLayout(column[-1])
             button = QPushButton(label)
             button.clicked.connect(lambda _=False, w=window: self.open_window(w))
-            rows[part].addWidget(button)
+            column[-1].addWidget(button)
             self.part_window_buttons[label] = button
-        for row in rows.values():
-            row.addStretch(1)
+        for column in rows.values():
+            for row in column:
+                row.addStretch(1)
         # a field that reads the session -- the layers editor offers its
         # columns and copies its layers -- is told which one
         for leaf in self.form.leaves():

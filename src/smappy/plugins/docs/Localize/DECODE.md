@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.checked_calibration, smappy.plugins.fit_decode.model_problems, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -144,12 +144,21 @@ DECODE's example data -- are flipped before the network sees them, and the
 positions flipped back.  Where either side does not say, nothing is flipped,
 as Spline 3D does not flip.
 
-**The checks before a run.**  The model file keeps the sha256 of its
-calibration's spline coefficients.  If *PSF calibration* is given, or the
-calibration list has one for this file's microscope and state (as Spline
-3D's *auto* finds it), it must be the same calibration, or the run is
-refused.  With no calibration to compare, the form says the model is not
-checked.  These checks read the model file's header only, without loading
+**The check before a run.**  The network needs no calibration to
+localize: the PSF it knows is the one it was trained on.  What matters is
+that the data were taken under the same conditions as that calibration's
+beads.  A model trained in SMAPpy keeps them: the microscope and its setup
+version, the camera, the state of every device the PSF follows (the 3D lens,
+the filters), and the channel's colour, from the
+[microscope database](plugin:Panels/Microscope manager) as the calibration
+list described the calibration.  The data's conditions come from the same
+database.  Where they differ, the form says so under the model, and the
+run's text and its file repeat it -- a warning, not a refusal: a model of
+the same lens on another day may serve.  Where either side is not
+recorded, nothing is said.  *Model info...* lists what the model file
+says: its calibration, the conditions, the ranges it drew, how far it
+trained and how well it did on its test set, with the differences from the
+data first.  The check reads the model file's header only, without loading
 the network.
 
 **The check after a run.**  The fit's photons and background are compared
@@ -217,12 +226,6 @@ A job folder's `model.safetensors` is rewritten after every epoch of a
 training, so a training still running can be tried; take it from a finished
 training for the fit that counts.
 
-### model.calibration
-
-Set it when the calibration list does not know this microscope.  It is only
-compared with the model, never used to localize: the PSF the network knows
-is the one it was trained on.
-
 ### model.threshold
 
 0.1 is DECODE's Fit notebook's.  A low threshold keeps uncertain detections,
@@ -232,8 +235,11 @@ be undone.
 
 ### model.batch
 
-32 suits a GPU with a few GB; lower it if the GPU runs out of memory, raise
-it on a large one for speed.  On the CPU it changes the last digits only.
+0 lets SMAPpy choose: as many frames as half the GPU's free memory holds,
+at 2.5 kB a pixel (the network takes 1.8 kB a pixel on CUDA, 2.1 on an
+Apple GPU), up to 256; 8 on the CPU.  Set a number only if the GPU runs out
+of memory with others using it.  It changes the speed, never the
+localizations, beyond the last digits.
 
 ### model.run_on
 

@@ -199,6 +199,7 @@ def test_without_a_prefit_the_window_writes_the_job_from_the_estimates_typed_in(
         sim = params["Simulation"]
         assert sim["intensity_mu_sig"][0] == 4321.0 and sim["bg_uniform"] == [15.0, 90.0]
         assert sim["emitter_extent"][2] == [-600, 600] and job.camera["e_per_adu"] == 0.5
+        assert "microscope" in job.calibration and "em_on" in job.calibration    # for the fitter's check
         assert jobfile.check(folder) == []
     finally:
         w.close()

@@ -13,13 +13,17 @@ without a seam); the network is `decode_smlm.predict`, imported only when a fit 
 form, the discovery and `describe` never load torch -- the model file's header is read with
 numpy alone (`model_file.read_metadata`).
 
-**What a model is checked against** (`model_problems`):
+**What a model is checked against:**
 
-* the calibration -- the model learnt one PSF, and fits data of another as confidently as data
-  of its own.  The model file keeps the sha256 of its calibration's coefficients
-  (`training.job.coefficients_sha256`); a calibration chosen here, or the one the calibration
-  list has for this file's microscope, must have the same, or the run is refused.  With no
-  calibration to compare, the form says the model is unchecked;
+* the conditions -- the model learnt one PSF, and fits data of another as confidently as data
+  of its own.  The model file keeps the microscope its calibration's beads were taken with, the
+  states of the devices the PSF follows (the 3D lens, the filters) and the channel
+  (``calibration_microscope``, from the calibration list); data the microscope database resolves
+  otherwise are warned about in the form, the run's text and its file
+  (`calibration_list.differences`).  A warning, not a refusal: a model of the same lens on a
+  neighbouring day may serve.  There is no calibration to choose here: the network needs none, and
+  checking one the user picks checked only the pick (*Model info...* says what the model was
+  trained on);
 * the mirror: SMAPpy keeps a calibration in the orientation of the camera its beads were taken
   with, so data taken with the EM register and beads without it (or the reverse) are flipped
   before the network sees them (`predict.frames_mirrored`), from the model's
@@ -40,7 +44,6 @@ from .fit import (CameraMetadata, CameraSettings, FinishSettings, OutputSettings
                   _FitPlugin, _open)
 
 MODEL_FILTER = "DECODE models (*.safetensors);;All files (*)"
-CALIBRATION_FILTER = "Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat);;All files (*)"
 DEVICES = (("auto", "auto"), ("cpu", "CPU"), ("cuda", "CUDA"), ("mps", "Apple GPU"))
 METHOD = "decode-v0.10.2"
 #: what fraction of the fit may lie outside what the training drew before the run says so
@@ -53,11 +56,6 @@ class DecodeModelSettings:
     path: str = param("", label="trained model", kind="open_file", file_filter=MODEL_FILTER,
                       help="a trained DECODE model (.safetensors): a job folder's model.safetensors, "
                            "or an original DECODE model exported")
-    calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
-                             advanced=True,
-                             help="only checked, never used to localize: the data's bead calibration, which "
-                                  "the model must have been trained on; empty: the one listed for this "
-                                  "file's microscope, else unchecked")
     run_on: str = param("here", label="run on", choices=lambda: _where_choices(),
                         help="this computer, or a training host (Training hosts... below): the frames "
                              "are read and converted here and sent there, the network runs there")
@@ -66,8 +64,9 @@ class DecodeModelSettings:
                                   "(DECODE's raw_th); every localization keeps its own in prob")
     device: str = param("auto", label="device", choices=DEVICES, advanced=True,
                         help="where the network runs; auto: a GPU if there is one")
-    batch: int = param(32, label="frames per batch", min=1, advanced=True,
-                       help="frames through the network at once; only memory and speed depend on it")
+    batch: int = param(0, label="frames per batch", min=0, advanced=True,
+                       help="frames through the network at once; only memory and speed depend on it; "
+                            "0: as many as half the GPU's free memory holds")
 
 
 @dataclass
@@ -97,24 +96,57 @@ def read_model(path) -> dict:
     return meta
 
 
-def calibration_sha256(path) -> str:
-    """The sha256 of a calibration's coefficients as SMAPpy loads it: what a model file keeps."""
-    from ..io.calibration import load_spline_calibration
-    from ..training.job import coefficients_sha256
-    return coefficients_sha256(load_spline_calibration(path))
+def summary_line(meta: dict) -> str:
+    """The model in a line: what it was trained for and how far."""
+    bits = []
+    if meta.get("calibration_source"):
+        bits.append(f"trained on {Path(meta['calibration_source']).name}")
+    scope = meta.get("calibration_microscope") or {}
+    if scope.get("name"):
+        bits.append(f"microscope {scope['name']}")
+    if meta.get("epoch") is not None:
+        bits.append(f"epoch {meta['epoch']}")
+    jac = (meta.get("test_metrics") or {}).get("jaccard")
+    if jac is not None:
+        bits.append(f"test Jaccard {jac:.2f}")
+    return "model: " + (", ".join(bits) if bits else "trained by " + str(meta.get("trained_by") or "DECODE"))
 
 
-def model_problems(meta: dict, calibration_path: Optional[str]) -> list:
-    """Why this model must not fit data calibrated with ``calibration_path``, as sentences; empty
-    when it may, or when there is nothing to compare."""
-    problems = []
-    kept = meta.get("calibration_sha256")
-    if calibration_path and kept:
-        if calibration_sha256(calibration_path) != kept:
-            problems.append(f"the model was trained on another calibration than "
-                            f"{Path(calibration_path).name}: train one on this calibration, or "
-                            f"choose the calibration the data were taken with")
-    return problems
+def model_summary(meta: dict, data: Optional[dict] = None) -> list:
+    """``(what, value)`` rows of what a model file says about itself, for *Model info...*: the
+    calibration and the conditions it was trained for, the ranges it drew, the training, and how
+    well it did on its test set; with ``data`` (the data's conditions) the differences first."""
+    from ..calibration_list import differences
+    from ..microscope_db import one_line
+    rows = []
+    for d in differences(meta.get("calibration_microscope"), data):
+        rows.append(("differs from the data", d))
+    drew = meta.get("trained_on") or {}
+    mu = drew.get("photons_mu_sig")
+    bg = drew.get("background")
+    z = drew.get("z_nm")
+    scope = meta.get("calibration_microscope")
+    test = meta.get("test_metrics") or {}
+    rows += [
+        ("PSF calibration", Path(meta["calibration_source"]).name if meta.get("calibration_source") else "not recorded"),
+        ("calibration file", meta.get("calibration_source") or ""),
+        ("microscope", one_line(scope) if scope else "not recorded"),
+        ("EM gain of the beads", {True: "on", False: "off"}.get(meta.get("calibration_em_on"), "not recorded")),
+        ("photons a frame", f"{mu[0]:,.0f} \u00b1 {mu[1]:,.0f}" if mu else ""),
+        ("background", f"{bg[0]:g} to {bg[1]:g} photons a pixel" if bg else ""),
+        ("z", f"{z[0]:g} to {z[1]:g} nm" if z else ""),
+        ("density", str(meta.get("density") or "")),
+        ("frame window", str(meta.get("channels_in") or "")),
+        ("trained", f"epoch {meta['epoch']} of at most {meta.get('epochs')}" if meta.get("epoch") is not None else ""),
+        ("started from", str(meta.get("base_model") or "scratch")),
+        ("test set", ", ".join(f"{k} {v:.3g}" for k, v in (("Jaccard", test.get("jaccard")),
+                                                          ("lateral RMSE (nm)", test.get("rmse_lat_nm")),
+                                                          ("axial RMSE (nm)", test.get("rmse_ax_nm")))
+                               if v is not None)),
+        ("job written", str(meta.get("created") or "")),
+        ("trained by", str(meta.get("trained_by") or f"SMAPpy {meta.get('smappy_version') or ''}".strip())),
+    ]
+    return [(k, v) for k, v in rows if v not in ("", None)]
 
 
 def range_warnings(locs, meta: dict) -> list:
@@ -150,23 +182,29 @@ class DecodeFit(_FitPlugin):
     channel_part = "none"
     # a model is trained for these data in the Train window (`plugins/train_decode.py`), handed
     # the movie, microscope, PSF calibration and *run on*; the hosts are Preferences' (`HostsPage`)
-    part_windows = (("model", "Train a model...", "decode training"), ("model", "Training hosts...", "training hosts"))
+    part_windows = (("model", "Model info...", "decode model"), ("model", "Train a model...", "decode training"),
+                    ("model", "Training hosts...", "training hosts"))
     preview_help = ("localize one frame with the network and draw what it found over the frame. "
                     "Nothing is saved and the session is not touched.")
 
-    # ---------------------------------------------------------- the calibration it is checked against
-    def checked_calibration(self, settings) -> Optional[str]:
-        """The calibration the model is checked against: the one chosen, else the calibration list's
-        match for this file (as Spline 3D's *auto* finds it), else None."""
-        if settings.model.calibration:
-            return settings.model.calibration
+    # ---------------------------------------------------------- the data's conditions against the model's
+    def data_conditions(self, settings) -> Optional[dict]:
+        """The data's microscope, its devices' states and its channel (`MicroscopeResolution.summary`),
+        as the microscope database resolves them for this file; None when unknown."""
         if not settings.source.path:
             return None
         try:
-            found = self.found_calibrations(settings)
+            resolved = self.resolution(settings)
         except Exception:
             return None
-        return found[0][0].path if found and found[0][1] else None
+        return None if resolved is None else resolved.camera_metadata().microscope
+
+    def condition_warnings(self, settings, meta: dict) -> list:
+        """How the data were taken otherwise than the model's beads (`calibration_list.differences`)."""
+        from ..calibration_list import differences
+        found = differences(meta.get("calibration_microscope"), self.data_conditions(settings))
+        return [f"the model was trained for other conditions than the data's: {d}; train a model for "
+                f"these data (Train a model...)" for d in found]
 
     # ---------------------------------------------------------- the hooks of `_FitPlugin.run`
     def region_finder(self, settings, camera=None):
@@ -174,9 +212,6 @@ class DecodeFit(_FitPlugin):
 
     def model(self, settings, camera: CameraMetadata):
         meta = read_model(settings.model.path)
-        problems = model_problems(meta, self.checked_calibration(settings))
-        if problems:
-            raise ValueError(problems[0])
         device = settings.model.device
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
@@ -195,7 +230,7 @@ class DecodeFit(_FitPlugin):
         return {"source": str(source) if source is not None else None, "camera": camera.to_dict(),
                 "decode": {"model": str(settings.model.path), "device": model.device,
                            "threshold": model.raw_th, "frames_mirrored": model.frames_mirrored,
-                           "window": model.window, "calibration": self.checked_calibration(settings),
+                           "window": model.window, "calibration": meta.get("calibration_source"),
                            "model_metadata": meta},
                 "smappy_version": _version()}
 
@@ -203,32 +238,25 @@ class DecodeFit(_FitPlugin):
         """What the fit found outside what the network was trained on (`range_warnings`): in the
         run's text and in its file."""
         try:
-            return range_warnings(locs, read_model(settings.model.path))
+            meta = read_model(settings.model.path)
         except ValueError:
             return []
+        return self.condition_warnings(settings, meta) + range_warnings(locs, meta)
 
     # ---------------------------------------------------------- the form
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
-        checked = None
-        try:
-            checked = self.checked_calibration(settings)
-        except Exception:
-            pass
-        if not settings.model.calibration:
-            state.hints["model.calibration"] = (f"auto: {Path(checked).name}" if checked
-                                                else "auto: none listed; the model is not checked")
         if settings.model.path:
-            # a model the run would refuse says so over anything else; a mere remark only where
-            # the camera's form has nothing to say
+            # other conditions than the model's say so over anything else; else the model in a line,
+            # where the camera's form has nothing to say
             try:
                 meta = read_model(settings.model.path)
-                problems = model_problems(meta, checked)
-                if problems:
-                    state.notice = Notice(problems[0])
-                elif state.notice is None and not meta.get("calibration_sha256"):
-                    state.notice = Notice("the model does not say which calibration it was trained on: "
-                                          "it cannot be checked against the data's")
+                warnings = self.condition_warnings(settings, meta)
+                if warnings:
+                    more = f" (and {len(warnings) - 1} more: Model info...)" if len(warnings) > 1 else ""
+                    state.notice = Notice(warnings[0] + more)
+                elif state.notice is None:
+                    state.notice = Notice(summary_line(meta))
             except Exception as error:      # a path still being typed, a file that is not a model
                 state.notice = Notice(str(error))
         return state

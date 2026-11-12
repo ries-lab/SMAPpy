@@ -439,6 +439,8 @@ class ControlWindow(QMainWindow):
         # fitter's settings, its movie, camera and calibration the start of a job
         session.window_openers["decode training"] = \
             lambda settings=None: self.open_decode_training(settings)
+        # the DECODE fitter's *Model info...*: what the model file says, against the data
+        session.window_openers["decode model"] = self.open_decode_model
         # the DECODE fitter's and the training window's *Training hosts...*: Preferences on that page
         session.window_openers["training hosts"] = \
             lambda settings=None: self.open_preferences("Training hosts")
@@ -1892,6 +1894,35 @@ class ControlWindow(QMainWindow):
             self.decode_training_window.take_fitter(settings)
         self.decode_training_window.show()
         self.decode_training_window.raise_()
+
+    def open_decode_model(self, settings=None) -> None:
+        """*Model info...*: the DECODE fitter's model as its file describes it -- what it was
+        trained on and for, how far, how well -- with how the data's conditions differ first."""
+        from html import escape
+
+        from PySide6.QtWidgets import QDialog, QTextBrowser, QVBoxLayout
+
+        from ..plugins import fit_decode
+        path = getattr(getattr(settings, "model", None), "path", "")
+        try:
+            meta = fit_decode.read_model(path)
+        except ValueError as error:
+            QMessageBox.information(self, "Model info", str(error))
+            return
+        data = fit_decode.DecodeFit().data_conditions(settings) if settings is not None else None
+        rows = fit_decode.model_summary(meta, data)
+        cells = "".join(
+            f"<tr><td style='padding-right:12px'><b>{escape(k)}</b></td><td"
+            + (" style='color:#e0453a'" if k == "differs from the data" else "") + f">{escape(str(v))}</td></tr>"
+            for k, v in rows)
+        dialog = QDialog(self)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.setWindowTitle(f"Model info: {Path(path).name}")
+        text = QTextBrowser()
+        text.setHtml(f"<p>{escape(path)}</p><table>{cells}</table>")
+        QVBoxLayout(dialog).addWidget(text)
+        dialog.resize(620, 460)
+        dialog.show()
 
     def use_decode_model(self, path: str) -> None:
         """Put a trained model into the DECODE fitter, as `use_calibration` puts a calibration into Spline 3D."""

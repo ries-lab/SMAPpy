@@ -235,3 +235,35 @@ def chosen(scope, em_on, dual, data=None, day=None) -> Optional[Entry]:
     """*auto*'s calibration, or None."""
     found = find(scope, em_on, dual, data, day)
     return found[0][0] if found and found[0][1] else None
+
+
+def differences(beads: Optional[Dict[str, Any]], data: Optional[Dict[str, Any]]) -> List[str]:
+    """How the conditions of ``beads`` and ``data`` (`MicroscopeResolution.summary`) differ, as
+    sentences: the microscope or its setup version, the camera, each device the PSF follows (the
+    3D lens, the filters), the channel's colour.  Empty when they agree, and when either is
+    unknown: what is not recorded is not guessed at (`matches`)."""
+    beads, data = beads or {}, data or {}
+    if not beads.get("name") or not data.get("name"):
+        return []
+    out = []
+    if beads.get("name") != data.get("name"):
+        return [f"another microscope: {beads['name']} for the model's beads, {data['name']} for the data"]
+    if beads.get("version") != data.get("version"):
+        out.append(f"another setup of {data['name']}: version {beads.get('version')} for the beads, "
+                   f"{data.get('version')} for the data")
+    if beads.get("camera") and data.get("camera") and beads["camera"] != data["camera"]:
+        out.append(f"another camera: {beads['camera']} for the beads, {data['camera']} for the data")
+    before, now = beads.get("states") or {}, data.get("states") or {}
+    for device in sorted(set(beads.get("followed") or []) | set(data.get("followed") or [])):
+        a, b = before.get(device), now.get(device)
+        if a is not None and b is not None and a != b:
+            out.append(f"{device} {a} for the beads, {b} for the data")
+    first = lambda s: ((s.get("channels") or [{}])[0] or {})          # noqa: E731 -- single channel: the first
+    ca, cb = first(beads), first(data)
+    wa, wb = ca.get("wavelength_nm"), cb.get("wavelength_nm")
+    if wa and wb and abs(float(wa) - float(wb)) > 1.0:
+        out.append(f"another colour: {wa:g} nm for the beads ({ca.get('name') or 'channel'}), "
+                   f"{wb:g} nm for the data ({cb.get('name') or 'channel'})")
+    elif ca.get("name") and cb.get("name") and ca["name"] != cb["name"]:
+        out.append(f"another channel: {ca['name']} for the beads, {cb['name']} for the data")
+    return out

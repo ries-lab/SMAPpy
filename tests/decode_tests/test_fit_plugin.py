@@ -16,9 +16,9 @@ import time
 import numpy as np
 import pytest
 import tifffile
+import torch
 
 from smappy import plugins
-from smappy.io.calibration import SplineCalibration, save_spline_calibration
 from smappy.plugins import Context
 
 from .test_training import tiny_job
@@ -171,19 +171,50 @@ def test_a_live_fit_of_a_growing_file_gives_the_table_of_the_finished_file(tiny,
     _same(live.locs, fit(data.folder, tiny["model"]))
 
 
-def test_a_model_trained_on_another_calibration_is_refused(tiny, tmp_path):
-    g = np.exp(-0.5 * ((np.arange(13) - 6.0) / 2.5) ** 2)
-    coeff = np.zeros((64, 11, 13, 13), np.float32)
-    coeff[0] = (np.outer(g, g) / np.outer(g, g).sum())[None]
-    other = tmp_path / "other.h5"
-    save_spline_calibration(other, SplineCalibration(coeff=coeff, dz=100.0, z0=5.0, x0=7.0, em_on=False))
+def test_data_taken_under_other_conditions_than_the_models_beads_are_warned_about(tiny, monkeypatch):
+    from smappy.plugins import fit_decode
+    from smappy.training import model_file
+    tensors, meta = model_file.read(tiny["model"])
+    beads = {"name": "M2", "version": 1, "camera": "iXon", "followed": ["3DA"], "states": {"3DA": "on"},
+             "channels": [{"name": "red", "wavelength_nm": 670.0}]}
+    path = pathlib.Path(tiny["model"]).with_name("conditions.safetensors")
+    model_file.write(path, tensors, {**meta, "calibration_microscope": beads, "calibration_source": "/b/beads.h5",
+                                     "test_metrics": {"jaccard": 0.37, "rmse_lat_nm": 47.0}})
+    data = {**beads, "states": {"3DA": "off"}, "channels": [{"name": "green", "wavelength_nm": 580.0}]}
+    monkeypatch.setattr(fit_decode.DecodeFit, "data_conditions", lambda self, s: data)
     plugin = plugins.get(PLUGIN)()
-    with pytest.raises(ValueError, match="another calibration"):
-        plugin.run(Context(), settings(tiny["tif"], tiny["model"], **{"model.calibration": str(other)}))
-    assert "another calibration" in plugin.describe(None, settings(tiny["tif"], tiny["model"],
-                                                                   **{"model.calibration": str(other)})).notice.text
-    # its own calibration passes
-    assert len(fit(tiny["tif"], tiny["model"], **{"model.calibration": str(tiny["calibration"])}))
+    s = settings(tiny["tif"], path)
+    notice = plugin.describe(None, s).notice.text
+    assert "3DA on for the beads, off for the data" in notice and "1 more" in notice
+    result = plugin.run(Context(), s)
+    assert any("another colour: 670 nm" in line for line in result.text.splitlines())
+    rows = dict(fit_decode.model_summary(model_file.read_metadata(path), data))
+    assert rows["PSF calibration"] == "beads.h5" and "Jaccard 0.37" in rows["test set"]
+    # the same conditions: no warning, the model in a line
+    monkeypatch.setattr(fit_decode.DecodeFit, "data_conditions", lambda self, s: beads)
+    assert plugin.describe(None, s).notice.text.startswith("model: trained on beads.h5, microscope M2")
+
+
+def test_conditions_differ_by_microscope_device_and_colour_and_never_where_unknown():
+    from smappy.calibration_list import differences
+    beads = {"name": "M2", "version": 1, "followed": ["3DA"], "states": {"3DA": "on"},
+             "channels": [{"name": "red", "wavelength_nm": 670.0}]}
+    assert differences(beads, dict(beads)) == []
+    assert differences(beads, None) == [] and differences({}, beads) == []
+    assert differences(beads, {**beads, "name": "M1"}) == ["another microscope: M2 for the model's beads, M1 for the data"]
+    assert differences(beads, {**beads, "states": {"3DA": "off"}}) == ["3DA on for the beads, off for the data"]
+    assert "another colour" in differences(beads, {**beads, "channels": [{"wavelength_nm": 580.0}]})[0]
+
+
+def test_the_batch_on_auto_fills_half_the_free_memory_and_is_fixed_on_the_cpu(monkeypatch):
+    from decode_smlm import predict
+    assert predict.auto_batch("cpu", 512, 512) == predict.CPU_BATCH
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (40e9, 80e9))
+    assert predict.auto_batch("cuda", 512, 512) == int(0.5 * 40e9 // (predict.BYTES_PER_PIXEL * 512 * 512))
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (1e6, 80e9))
+    assert predict.auto_batch("cuda", 512, 512) == 1
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (1e15, 1e15))
+    assert predict.auto_batch("cuda:0", 64, 64) == predict.MAX_BATCH
 
 
 def test_frames_taken_with_em_gain_are_flipped_for_a_model_of_beads_without(tiny):
@@ -230,8 +261,8 @@ def test_the_fitters_table_of_the_packages_frames_is_the_originals(tmp_path):
     # the oracle was made with the training's camera, the Fit notebook's (plan §8, "(a) as run")
     locs = plugins.get(PLUGIN)().run(Context(), settings(
         tmp_path / "frames.tif", model, **{"camera.conversion": 5.0, "camera.offset": 398.6, "camera.em_on": True,
-                                           "camera.emgain": 100.0, "model.device": device, "model.threshold": 0.1,
-                                           "model.calibration": str(cal)})).locs
+                                           "camera.emgain": 100.0, "model.device": device,
+                                           "model.threshold": 0.1})).locs
     with h5py.File(ORACLE / "v0102_model_emitters_cpu.h5") as f:
         ref = {k: f["data"][k][()] for k in ("xyz", "frame_ix", "phot", "prob")}
     keep = ref["frame_ix"] < n
@@ -278,7 +309,7 @@ def test_the_model_part_opens_the_training_window_with_the_fitters_settings_and_
     assert DecodeFit.description == "Deep-learning fitter for high densities (DECODE)."
     assert DecodeFit.window_buttons == ()
     buttons = panel.part_window_buttons
-    assert set(buttons) == {"Train a model...", "Training hosts..."}
+    assert set(buttons) == {"Model info...", "Train a model...", "Training hosts..."}
     panel.form.set_values({"source.path": "/data/cells.tif"})
     buttons["Train a model..."].click()
     buttons["Training hosts..."].click()

@@ -279,7 +279,8 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
     cam = prepared.camera
     job = jobfile.Job.new(method=METHOD, seed=seed, device="auto", ranges=simulation(est, s.density),
                           camera={**camera_section(cam), "name": cam.camera_name},
-                          calibration={"source": str(Path(s.calibration).resolve())},
+                          calibration={"source": str(Path(s.calibration).resolve()),
+                                       **calibration_conditions(s.calibration)},
                           data={"path": str(Path(s.movie).resolve()), "frames": prepared.n_frames,
                                 "camera_roi": None if cam.roi is None else list(cam.roi),
                                 "em_on": bool(cam.is_em)})
@@ -296,6 +297,19 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
 
 
 BASE_MODEL = "base_model.safetensors"
+
+
+def calibration_conditions(path) -> dict:
+    """What the calibration's beads were taken under -- the microscope, its devices' states, the
+    channel, EM gain (`calibration_list`: the list's description, else the file's) -- for the model
+    file, so the fitter can say when data were taken otherwise (`calibration_list.differences`)."""
+    from .. import calibration_list
+    path = Path(path).resolve()
+    entry = next((e for e in calibration_list.entries() if Path(e.path).resolve() == path), None) \
+        or calibration_list.describe(path)
+    if entry is None:
+        return {}
+    return {"microscope": entry.microscope, "em_on": entry.em_on, "made": entry.made}
 
 
 def start_problem(path, params: dict) -> str:
@@ -601,10 +615,15 @@ class TrainWindow(QWidget):
         if source is not None and getattr(source, "path", ""):
             values["movie"] = source.path
         model = getattr(settings, "model", None)
-        if model is not None and getattr(model, "calibration", ""):
-            values["calibration"] = model.calibration
         if model is not None and getattr(model, "path", ""):
             values["start_from"] = model.path          # the fitter's model: a warm start for these data
+            try:                                       # and its calibration, where it is still there
+                from ..training import model_file
+                source = model_file.read_metadata(model.path).get("calibration_source")
+                if source and Path(source).is_file():
+                    values["calibration"] = source
+            except Exception:
+                pass
         camera = getattr(settings, "camera", None)
         if camera is not None:
             from dataclasses import asdict
