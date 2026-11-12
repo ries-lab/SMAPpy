@@ -219,8 +219,9 @@ class PluginPanel(QWidget):
             self.follow_roi.setToolTip("redraw while the ROI is moved, without "
                                        "touching the session")
             self.follow_roi.toggled.connect(self._on_follow)
-        # the status is where a failure is said, in red (`_on_failed`): it
-        # wraps rather than widening the row, since a message may be long
+        # the status is where a failure is said, in red (`_on_failed`): a row
+        # of its own under the buttons, wrapping -- beside them it had what a
+        # fitter's five controls leave, and a progress line was cut to a word
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -235,8 +236,7 @@ class PluginPanel(QWidget):
         buttons.addWidget(self.result_button)
         if self.follow_roi is not None:
             buttons.addWidget(self.follow_roi)
-        buttons.addWidget(self.status, 1)
-        buttons.addWidget(self.details_button)
+        buttons.addStretch(1)
         # Five controls at the style's minimum button width (80 px in Fusion)
         # are wider than the control column, and a fitter has all five: the
         # section then scrolled sideways and took its title bar -- the ? and
@@ -248,6 +248,10 @@ class PluginPanel(QWidget):
         if self.preview_frame is not None:
             self.preview_frame.setMinimumWidth(72)
         layout.addLayout(buttons)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.details_button, 0, Qt.AlignTop)
+        layout.addLayout(status_row)
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
         self.output.setFixedHeight(90)
         layout.addWidget(self.output)

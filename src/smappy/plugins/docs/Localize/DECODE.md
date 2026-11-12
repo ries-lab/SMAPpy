@@ -243,11 +243,13 @@ be undone.
 
 ### model.batch
 
-0 lets SMAPpy choose: as many frames as half the GPU's free memory holds,
-at 2.5 kB a pixel (the network takes 1.8 kB a pixel on CUDA, 2.1 on an
-Apple GPU), up to 256; 8 on the CPU.  Set a number only if the GPU runs out
-of memory with others using it.  It changes the speed, never the
-localizations, beyond the last digits.
+0 lets SMAPpy choose: on an NVIDIA GPU as many frames as half its free
+memory holds, at 2.5 kB a pixel (the network takes 1.8 kB a pixel on CUDA,
+2.1 on an Apple GPU), up to 256; on a Mac's GPU at most 3 GB -- it has no
+memory of its own and shares the computer's, and half of what macOS allows
+it put a Mac into swap, one frame a second; 8 on the CPU.  Set a number if
+the GPU runs out of memory, or the computer slows down, with others using it.
+It changes the speed, never the localizations, beyond the last digits.
 
 ### model.run_on
 

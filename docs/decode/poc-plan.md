@@ -1575,3 +1575,56 @@ lower):
   up to 1 nm when mirrored) or needs the network trained for it -- padding drawn into the
   training's frames, or emitters beyond the frame, which a training was started with and stopped.
   Item 17 is closed; the page's sentence on the lost edge pixels stands.
+
+### Following a training: what the test set says each epoch (2026-11-12)
+
+The Train window's Follow tab and the early stop, measured on the proof of concept's trainings:
+`pix_B_fixed` (the example's B calibration, 50 molecules a 40 x 40 frame, 1000 epochs), its rerun
+for 100 epochs with a snapshot every 2, and a sparse job of the Fig. 4e beads from the GUI (25 a
+frame, 3 frames in, 500 epochs).
+
+- **Each localization's error over its own molecule's CRLB** (single-emitter, its photons,
+  background and z, doubled in variance with EM gain).  On `pix_B_fixed`'s final model, at the
+  training's own threshold (it reproduces its test RMSE, 47.8 against 48.9 nm, and recall 0.318):
+  the root mean square 2.35 / 2.55 / 2.49 in x / y / z, its robust width (1.4826 MAD) 1.82 / 1.91
+  / 1.90, no bias (means within 0.07); rising with the photons, 1.8 below 2000 to 2.7 above 9000.
+  The test frames are dense and a single-emitter bound leaves the neighbours out: at density 1 and
+  >= 2000 photons (i) found 1.11.  Leaving out |error / CRLB| >= 6 (3 % of the matches) brings the
+  root mean square to the robust width: the tails are mismatches and merged pairs, so the training
+  now reports the robust width, with no cut-off to choose (`decode_smlm.training.test_crlbs`,
+  `_crlb_and_pixel_metrics`; `crlb_width_lat` / `_ax`).  Over the epochs it settles by about 30
+  (1.9 / 2.0), long before the Jaccard.
+- **The bound is the training's own PSF's** (`CubicSplinePSF.crlb_sq`, the calibration's whole
+  spot): 2 % below SMAPpy's spline fitter's laterally, 19 % in z, whose 13 x 13 pixels leave a
+  defocused spot's tails out.  0.8 s for a test set's 25 000 molecules, and no compiled SMAPpy on
+  the training host.  DECODE's own `xyz_cr` of the test set is empty.
+- **Pixelation shows on the simulated test set** (its molecules uniform within their pixels): the
+  fitted positions pile up at the pixel centres, the KS distance from uniform 0.12 at epoch 25,
+  0.045 at 100 -- still well above a uniform draw's 0.018.  It fades with training, so it is a
+  Follow panel (the latest epoch's sub-pixel histogram; `pixel_hist_rows` / `_cols`, `pixel_ks`).
+- **The loss and its outliers.**  Per frame it is a count term (the molecules against the summed
+  detection probability, times their number), a mixture term (each molecule's -log probability,
+  unbounded) and a background term.  On `pix_B_fixed` no outliers dominate: the worst 5 % of the
+  frames carry 8 % of the loss, the worst 1 % of the molecules 3 % of the mixture term.  On the
+  sparse job the loss, 23.5, is the small difference of the count term (+52.6) and the mixture term
+  (-29.4): the worst 5 % of the frames carry 22 %, and a frame's loss per molecule rises with how
+  crowded it is (0.17 below 20 molecules, 2.16 above 30).  So a fixed test set of 513 frames that
+  holds a few more crowded frames has a higher loss -- the sparse job's test loss was 7 % above its
+  training loss at the end (1.4 % at epochs 20 -- 40), the dense ones' within 0.1 -- 2 %.  Not yet
+  checked on a freshly drawn test set.
+- **The early stop judges the loss against its fall, not its value** (`training.progress`): its
+  gain over the last 100 epochs at most 1 % of how far it fell from epoch 10 to its best before
+  them; the Jaccard and both efficiencies within 0.005, both RMSEs 1 %; each the 11-epoch running
+  median; never before 150.  0.5 % of the loss's value had kept the sparse job going at epoch 436,
+  everything else settled since 400.  Replayed on the seven trainings it stops at 327 -- 397, the
+  Jaccard within 0.005 of the last epoch's.  Windows of 50 and 75 epochs lost up to 0.012 and
+  0.007 in Jaccard; 100 stays.  The rule's numbers are under the Train tab's *more*, handed to the
+  training (`--stop-rule`) and recorded in its start line.  Still open: the minimum of 150 for
+  warm starts (§7).
+- **Follow** shows six panels -- loss, Jaccard, the latest epoch's pixelation; RMSE, error over
+  CRLB, seconds an epoch -- with the rule's last 100 epochs shaded and a dashed line at their
+  median, and under them what the rule waits for, with its numbers.
+- **The batch on Apple's GPU** (found the same day): *auto* took half of what macOS lets MPS have,
+  13 GB of a 34 GB Mac, and a fit of 257 x 213 frames with a test run beside it put the Mac into
+  swap at one frame a second.  MPS has no memory of its own: the batch there is at most 3 GB now
+  (`predict.MPS_BUDGET`).
