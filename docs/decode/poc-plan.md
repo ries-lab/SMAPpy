@@ -1435,7 +1435,31 @@ Scripts in `benchmarks/decode/benchmark/`: `simulate_sets.py`, `fit_sets.py`, `s
   finds three quarters of them again; Spline 3D a quarter of its fewer.  As the simulated sets
   said, on real data.  The sum's background noise is up to half again the data's in variance,
   which costs both; not separated here (a control adding only the second frame's noise would).
-- **Not yet:** the SMLM Challenge 2016 3D-AS set (trainings running).
+- **The SMLM Challenge 2016, 3D-AS** (`benchmarks/decode/challenge/fit_and_score.py`, 2026-11-12):
+  the four training sets (MT0, N1 and N2 noise, low and high density) with their truth.  Spline 3D
+  with SMAPpy's bead calibration of the challenge's beads (fit box 13); the port's model trained for
+  each noise level on the same calibration (`prepare_jobs.py`, 1000 epochs on the H100, threshold
+  0.5).  The challenge's z is the opposite of the z SMAPpy reads off the bead stack, so the truth's
+  is negated; one shift per fit taken off first (the calibration's centre is the bead average's:
+  +25 and -70 nm laterally, the same for both).  Matched within 250 nm and 500 nm in z, the
+  challenge's tolerances; efficiencies as the challenge's:
+
+  | set | fitter | Jaccard | recall | precision | RMSE lat / ax (nm) | eff. lat / ax |
+  |---|---|---:|---:|---:|---:|---:|
+  | N1.LD | Spline 3D | 0.666 | 0.694 | 0.943 | 26.1 / 43.7 | 0.58 / 0.60 |
+  | N1.LD | DECODE | 0.904 | 0.929 | 0.972 | 21.7 / 33.2 | 0.76 / 0.81 |
+  | N1.HD | Spline 3D | 0.364 | 0.402 | 0.795 | 80.8 / 166.9 | -0.03 / -0.05 |
+  | N1.HD | DECODE | 0.763 | 0.783 | 0.968 | 35.7 / 47.7 | 0.57 / 0.66 |
+  | N2.LD | Spline 3D | 0.518 | 0.536 | 0.938 | 43.5 / 80.8 | 0.35 / 0.37 |
+  | N2.LD | DECODE | 0.786 | 0.812 | 0.962 | 38.1 / 59.0 | 0.56 / 0.64 |
+  | N2.HD | Spline 3D | 0.316 | 0.337 | 0.836 | 85.6 / 179.0 | -0.10 / -0.13 |
+  | N2.HD | DECODE | 0.649 | 0.661 | 0.972 | 50.4 / 73.3 | 0.39 / 0.49 |
+
+  DECODE ahead on every set and every measure, by most at high density, where Spline 3D's
+  matches are mostly overlapping spots fitted as one (an RMSE of 80 nm inside a 250 nm
+  tolerance).  The models at epoch 210 had scored within 0.01 in Jaccard of these: the training
+  had converged long before its 1000 epochs.  Not compared with the challenge's published
+  leaderboard here: its scores are on the hidden test sets, these on the training sets' truth.
 
 ### (h), first step: the window here (2026-11-11)
 
