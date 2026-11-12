@@ -14,6 +14,10 @@ challenge's efficiencies; the mean offset in x, y, z and z's in 100 nm bins of t
 the truth carries each emitter's CRLB (the simulated sets):
 
 * ``rmse_over_crlb_lat`` / ``_ax``: the RMSE over the root mean square of the matched emitters' bounds;
+* ``claim_width_lat`` / ``_ax``, ``claim_width_by_z``: the robust width of each error over the
+  fitter's own claimed uncertainty (``x_err_nm`` ...), 1 where its claims are right; z by 200 nm bins
+  of the true z, each bin's bias taken off (DECODE's sigma_z is right at the focus and up to twice
+  too small away from it, poc-plan);
 * ``crlb_width_lat`` / ``_ax``: the robust width (1.4826 MAD) of each localization's error over its own
   emitter's bound, x and y pooled -- the Train window's Follow measure, which mismatches and merged
   pairs do not drag; 1 where a fitter reaches the bound.  Both with the 13 x 13 bound and, as
@@ -94,6 +98,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
     ok = kept(locs, keep)
     f = {"frame": np.asarray(locs["frame"])[ok].astype(np.int64), "x_px": np.asarray(locs["x_nm"], float)[ok] / px[0],
          "y_px": np.asarray(locs["y_nm"], float)[ok] / px[1], "z_nm": np.asarray(locs["z_nm"], float)[ok]}
+    claims = {a: np.asarray(locs[f"{a}_err_nm"], float)[ok] for a in "xyz" if f"{a}_err_nm" in locs}
     out = {}
     if shift:
         import score_sets
@@ -108,6 +113,7 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         out["shift_nm"] = [d[0] * px[0], d[1] * px[1], d[2]]
     keep_f = _inside(f["x_px"], f["y_px"], w, h)
     f = {k: v[keep_f] for k, v in f.items()}
+    claims = {a: v[keep_f] for a, v in claims.items()}
     keep_t = _inside(truth["x_px"], truth["y_px"], w, h)
     t = {k: np.asarray(v)[keep_t] for k, v in truth.items() if np.ndim(v) == 1 and len(v) == len(keep_t)}
     ti, fi = match(t, f, px)
@@ -131,6 +137,20 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         "ks_x": ks_uniform(fx), "ks_y": ks_uniform(fy),
         "ks_by_abs_z": _binned_ks(fx, fy, np.abs(t["z_nm"][ti]), Z_BINS),
         "subpixel_x": subpixel_histogram(fx), "subpixel_y": subpixel_histogram(fy)})
+    if len(claims) == 3 and tp:
+        # the fitter's own uncertainty against its error: 1 where its claims are right.  z in bins of the
+        # true z with each bin's bias taken off -- the claim is of the spread, not of a bias
+        cx, cy, cz = (claims[a][fi] for a in "xyz")
+        out["claim_width_lat"] = robust_width(np.r_[dx / cx, dy / cy])
+        out["claim_width_ax"] = robust_width(dz / cz)
+        rows = []
+        for lo in range(-int(Z_LIMIT), int(Z_LIMIT), 200):
+            s = (t["z_nm"][ti] >= lo) & (t["z_nm"][ti] < lo + 200)
+            if s.sum() >= 200:
+                rows.append({"lo": float(lo), "hi": float(lo + 200), "n": int(s.sum()),
+                             "lat": robust_width(np.r_[dx[s] / cx[s], dy[s] / cy[s]]),
+                             "ax": robust_width((dz[s] - np.median(dz[s])) / cz[s])})
+        out["claim_width_by_z"] = rows
     for key in ("crlb", "crlb_full"):
         if f"{key}_x_nm" not in t:
             continue
@@ -269,7 +289,9 @@ def rescore(run_name):
 COLUMNS = [("jaccard", "J", "{:.3f}"), ("recall", "rec", "{:.3f}"), ("precision", "prec", "{:.3f}"),
            ("rmse_lat_nm", "lat", "{:.1f}"), ("rmse_ax_nm", "ax", "{:.1f}"),
            ("crlb_width_lat", "w/CR lat", "{:.2f}"), ("crlb_width_ax", "w/CR ax", "{:.2f}"),
-           ("rmse_over_crlb_lat", "rmse/CR lat", "{:.2f}"), ("bias_z_nm", "dz", "{:+.1f}"),
+           ("rmse_over_crlb_lat", "rmse/CR lat", "{:.2f}"), ("claim_width_lat", "err/cl lat", "{:.2f}"),
+           ("claim_width_ax", "err/cl ax", "{:.2f}"), ("claim_ax_worst", "err/cl ax max", "{:.2f}"),
+           ("bias_z_nm", "dz", "{:+.1f}"),
            ("ks_max", "KS", "{:.3f}"), ("ks_far", "KS |z|>450", "{:.3f}"), ("fps", "frames/s", "{:.0f}")]
 
 
@@ -279,6 +301,8 @@ def _row(entry):
     far = [b["ks"] for b in s.get("ks_by_abs_z", []) if b["lo"] >= 450]
     s["ks_far"] = max(far) if far else None
     s["fps"] = entry.get("frames_per_s")
+    by_z = [b["ax"] for b in s.get("claim_width_by_z", []) if b["ax"] is not None]
+    s["claim_ax_worst"] = max(by_z) if by_z else None
     return s
 
 

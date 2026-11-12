@@ -71,6 +71,7 @@ rules, unchanged.
 |---|---|---|
 | detection | `jaccard`, `recall`, `precision` | what was found and what was invented |
 | accuracy | `rmse_lat_nm`, `rmse_ax_nm`, `eff_lat`, `eff_ax` | the challenge's numbers |
+| own claims | `claim_width_lat` / `_ax`, `claim_width_by_z` | each error over the fitter's claimed uncertainty, 1 where right; z per 200 nm of true z, bias off |
 | against the bound | `rmse_over_crlb_lat` / `_ax` | RMSE over the matched emitters' root-mean-square CRLB |
 | | `crlb_width_lat` / `_ax`, `crlb_width_by_photons` | 1.4826 MAD of each error over its own emitter's CRLB: Follow's measure, blind to mismatches; 1 at the bound |
 | | `..._full` | the same against the whole spot's bound |
