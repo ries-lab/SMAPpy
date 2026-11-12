@@ -79,10 +79,13 @@ rules, unchanged.
 | speed | `frames_per_s` | wall time of the fit, file and peak finding included, the device recorded |
 
 Real sets have no truth: localizations a frame, the KS distance of the kept ones (at least 1000
-photons) by |z| and photons, and the consecutive-frame check -- a molecule on in two frames
-localized twice; the robust spread of the difference over the root of the two claimed variances,
-by bins of the claim, 1 where the claimed precision is the real one
-(`benchmarks/decode/pixelation/consecutive_frames.py`).
+photons) by |z| and photons, and the pair check -- a molecule on in two frames localized twice;
+each pair's difference over the root of its two claimed variances, its robust width, overall and by
+bins of the claim, 1 where the claimed precision is the real one.  The two frames are as far apart
+as the fitter needs for its two fits to share no input: 3 for a model reading 3 frames, whose
+errors in consecutive frames correlate by 0.73 (`precision_check.py`, which tests a model's claims
+on a simulated movie of molecules on for several frames).  On real data the ratio grows with the
+frames apart for every fitter (the sample moves), so it is compared at the least such distance.
 
 `python report.py --compare RUN RUN ...` prints the runs side by side with their parts and costs.
 

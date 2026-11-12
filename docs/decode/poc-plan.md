@@ -1685,22 +1685,51 @@ four, its KS 0.023 -- 0.027 on N1 and 0.056 -- 0.057 on N2, 0.14 -- 0.15 beyond 
   dimmer the spots: up to +36 nm below the focus and -40 nm above it at 1000 photons, +17 / -17 at
   3000, +10 / -16 at 10 000 (100 nm bins of the true z).  Spline 3D's is within 3 nm between -500 and
   +500 nm and 25 -- 40 nm in the outer bins at 1000 and 3000 photons, where it keeps few spots.
-- **Real data** (5000 frames each; DECODE at prob >= 0.5, both at >= 1000 photons):
+- **Real data** (5000 frames each; DECODE at prob >= 0.5, both at >= 1000 photons).  The pair check
+  is each pair's difference over the root of its two claims, its robust width, the frames far enough
+  apart for the two fits to share no frame (below):
 
-  | movie | fitter | kept a frame | KS | KS \|z\| 600 -- 700 | observed / claimed, x, claim 0 -- 5 nm | 20 -- 30 nm | frames/s |
-  |---|---|---:|---:|---:|---:|---:|---:|
-  | example | DECODE | 220 | 0.010 | 0.065 | 1.29 | 1.01 | 118 |
-  | | Spline 3D | 105 | 0.003 | 0.019 | 3.00 | 1.13 | 278 |
-  | Fig. 4e | DECODE | 377 | 0.015 | 0.145 | 0.60 | 0.49 | 40 |
-  | | Spline 3D | 172 | 0.003 | 0.007 | 2.90 | 1.29 | 167 |
+  | movie | fitter | kept a frame | KS | KS \|z\| 600 -- 700 | pairs: frames apart | observed / claimed, x (z) | x, claim 0 -- 5 nm | 20 -- 30 nm | frames/s |
+  |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | example | DECODE (1 frame) | 220 | 0.010 | 0.065 | 1 | 1.13 (1.18) | 1.31 | 1.03 | 118 |
+  | | Spline 3D | 105 | 0.003 | 0.019 | 1 | 1.82 (1.65) | 3.15 | 1.16 | 278 |
+  | Fig. 4e | DECODE (3 frames) | 377 | 0.015 | 0.145 | 3 | 1.36 (1.32) | 1.85 | 1.20 | 40 |
+  | | Spline 3D | 172 | 0.003 | 0.007 | 1 | 1.95 (1.83) | 3.05 | 1.31 | 167 |
 
-  The example's numbers repeat the pixelation study's.  **New: on Fig. 4e DECODE's claimed
-  precision is twice what consecutive frames show** (a ratio of 0.41 -- 0.60 at every claim), where
-  on the example it is right within 30 %.  The model is the GUI's sparse job (500 epochs, photons
-  11 000 +- 8800, background 0.3 -- 410: very wide ranges drawn from the data) -- its sigma head
-  may not have learnt a broad prior well, or the pairing in frames this dense (377 a frame) favours
-  close pairs.  Not yet understood; to be looked at before Fig. 4e's model is used as a baseline.  Its pixelation far from focus
-  (0.145) is the largest of all.
+  The example's numbers repeat the pixelation study's.
+
+- **Fig. 4e's precision "mismatch" was the check's, not the model's** (`benchmarks/decode/suite/
+  precision_check.py`, 2026-11-12).  First reported here as DECODE claiming twice the precision
+  consecutive frames show (a ratio of 0.41 -- 0.60).  The Fig. 4e model reads 3 frames (t-1, t,
+  t+1; the example's `decode_B` reads 1), so it localizes frames t and t+1 from two shared frames.
+  On a simulated movie with its calibration and camera, molecules on for 4 frames on average:
+
+  | frames apart | 1 | 2 | 3 | 4 | 6 |
+  |---|---:|---:|---:|---:|---:|
+  | Fig. 4e model (3 frames), simulated: correlation of a molecule's errors | 0.73 | 0.31 | 0.05 | 0.05 | 0.05 |
+  | the same: pair check, x / z | 0.47 / 0.54 | 0.82 / 0.89 | 0.99 / 1.04 | 0.98 / 1.04 | 0.98 / 1.01 |
+  | `decode_B` (1 frame), simulated: pair check, x / z | 0.98 / 1.23 | 1.00 / 1.22 | 1.02 / 1.25 | 0.99 / 1.24 | 1.03 / 1.28 |
+  | Fig. 4e model, real: pair check, x / z | 0.52 / 0.57 | 1.05 / 1.04 | 1.36 / 1.32 | 1.39 / 1.39 | 1.39 / 1.46 |
+  | `decode_B`, the example, real: pair check, x / z | 1.13 / 1.18 | 1.25 / 1.28 | 1.32 / 1.35 | 1.34 / 1.40 | 1.38 / 1.46 |
+
+  - **Its claims are right** on simulation: each error over its claimed sigma has a robust width of
+    1.03 in x and 1.08 in z (`decode_B`: 1.02 and 1.29 -- on this simulation its z sigma is a
+    quarter too small, a finding of its own, not yet followed).
+  - **The shared frames correlate the errors** by 0.73 one frame apart, and the pair check then
+    reads ``sqrt(1 - 0.73)`` = 0.52 -- what the real movie gave (0.52).  From 3 frames apart, no
+    frame shared, it reads 1.
+  - **On real data every fitter's ratio grows with the frames apart**, the 1-frame model's and Spline
+    3D's too (1.82 to 2.59 in x), where simulation's stays flat: the sample moves between frames,
+    which no claim includes.  At 3 frames apart the Fig. 4e model (1.36) is where the example's
+    1-frame model is (1.32): calibrated alike.
+  - **The check was also biased low**: (i) took the robust spread of the pooled differences over
+    the root mean claim, which is below 1 even for right claims (a mixture's robust width is below
+    its root mean square) -- 0.5 in x for right claims on the simulation.  Normalised per pair now.
+    The table in (i) above, binned by claim, was little affected: DECODE B at 0 -- 5 nm 1.29 there,
+    1.31 per pair now (the movie's first 5000 frames).
+  - So the report pairs frames ``2 w + 1`` apart for a model of window w (`report.independent_lag`),
+    and normalises each pair by its own claims.
+
 - **Speed** on the M1 Max: DECODE 420 -- 640 frames/s of 64 x 64, 320 -- 340 on the challenge's
   (3-frame models), 118 on the example's 180 x 179, 40 on Fig. 4e's 257 x 213 (as the GUI found);
   Spline 3D 3 to 30 times faster where spots are few, slower where they crowd.  Not yet on a GPU of

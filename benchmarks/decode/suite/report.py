@@ -24,9 +24,10 @@ pixel, x and y, all and in bins of |z| (`smappy.training.reference.ks_uniform`),
 histograms; the truth is uniform within its pixels, so any departure is the fitter's.
 
 **Real sets** have no truth: localizations a frame, the KS distance of the kept ones by |z| and
-photons, and the consecutive-frame check -- a molecule on in two frames localized twice, the robust
-spread of the difference over the root of the two claimed variances (`pixelation/consecutive_frames`),
-1 where a fitter's claimed precision is what the data show.
+photons, and the pair check -- a molecule on in two frames localized twice, each pair's difference
+over the root of its two claimed variances, 1 where a fitter's claimed precision is what the data
+show; the frames as far apart as the fitter needs for the two fits to share no frame
+(`score_real`).
 
 **Speed** is the fit's wall time over its frames, file reading and peak finding included, on the
 device recorded.
@@ -148,34 +149,87 @@ def score_truth(truth, locs, keep, px, size, shift=False):
     return out
 
 
+def pairs_apart(frame, x, y, lag, within=100.0):
+    """Indices (i, j) of localizations ``lag`` frames apart that are each other's nearest within
+    ``within`` nm: mostly one molecule localized twice (`pixelation/consecutive_frames.pairs` at a lag)."""
+    from scipy.spatial import cKDTree
+    order = np.argsort(frame, kind="stable")
+    f, xs, ys = frame[order], x[order], y[order]
+    first = int(f.min())
+    starts = np.searchsorted(f, np.arange(first, f.max() + lag + 2))
+    out_i, out_j = [], []
+    for t in range(first, int(f.max()) - lag + 1):
+        a = slice(starts[t - first], starts[t - first + 1])
+        b = slice(starts[t - first + lag], starts[t - first + lag + 1])
+        if a.start == a.stop or b.start == b.stop:
+            continue
+        pa, pb = np.c_[xs[a], ys[a]], np.c_[xs[b], ys[b]]
+        d_ab, j = cKDTree(pb).query(pa, distance_upper_bound=within)
+        _, i = cKDTree(pa).query(pb, distance_upper_bound=within)
+        ok = np.isfinite(d_ab)
+        ia = np.nonzero(ok)[0]
+        mutual = i[j[ok]] == ia
+        out_i.append(a.start + ia[mutual])
+        out_j.append(b.start + j[ok][mutual])
+    if not out_i:
+        return np.zeros(0, int), np.zeros(0, int)
+    return order[np.concatenate(out_i)], order[np.concatenate(out_j)]
+
+
+#: the claims' bins of the pair check, nm (x) and nm (z)
+CLAIM_BINS = {"x": (0, 5, 10, 15, 20, 30, 50), "z": (0, 10, 20, 30, 45, 70, 120)}
+
+
+def independent_lag(locs) -> int:
+    """The least number of frames apart two localizations are fitted from no shared frame: a network
+    reading ``2 w + 1`` frames (DECODE's ``window`` w, recorded in the fit) localizes frames t and t + 1
+    from shared ones -- on the Fig. 4e movie's 3-frame model their errors correlated by 0.73
+    (`precision_check.py`) -- so the pair check compares frames that far apart; 1 for a fitter of
+    single frames."""
+    window = (locs.metadata.get("decode") or {}).get("window") or 0
+    return 2 * int(window) + 1
+
+
 def score_real(locs, keep, px):
-    """Scores of a fit of real frames: no truth, so what the localizations say of themselves."""
-    sys.path.insert(0, str(HERE.parent / "pixelation"))
-    from consecutive_frames import BINS, pairs, robust_std
+    """Scores of a fit of real frames: no truth, so what the localizations say of themselves.
+
+    **The pair check**: a molecule on in frames t and t + lag is localized twice; each pair's
+    difference over the root of its two claimed variances has a robust width of 1 where the claims
+    are right and the two fits independent.  Normalised per pair -- a robust spread of the pooled
+    differences over the root mean claim is below 1 even for right claims, a mixture's robust width
+    being below its root mean square -- in bins of the claim, at ``lag`` the fitter's independent one
+    (`independent_lag`), and at 1 for the record.  On real data it grows with the lag for every
+    fitter (the example's 1-frame model 1.13 at 1, 1.38 at 6): the sample moves between frames, which
+    no claim includes, so the least independent lag is the fair one."""
     keep = {"min_photons": 1000.0, **keep}          # the pixelation study's: dim spots are mostly misfits
     ok = kept(locs, keep)
     col = {k: np.asarray(locs[k])[ok] for k in ("frame", "x_nm", "y_nm", "z_nm", "photons", "x_err_nm", "y_err_nm", "z_err_nm")}
     frames = np.asarray(locs["frame"])
     n_frames = int(frames.max() - frames.min() + 1) if len(frames) else 0
     fx, fy = col["x_nm"] / px[0], col["y_nm"] / px[1]
+    lag = independent_lag(locs)
     out = {"n_locs": int(len(frames)), "n_kept": int(ok.sum()), "per_frame": float(ok.sum() / max(n_frames, 1)),
            "ks_x": ks_uniform(fx), "ks_y": ks_uniform(fy),
            "ks_by_abs_z": _binned_ks(fx, fy, np.abs(col["z_nm"]), Z_BINS, 2000),
            "ks_by_photons": _binned_ks(fx, fy, col["photons"], PHOTON_BINS, 2000),
-           "subpixel_x": subpixel_histogram(fx), "subpixel_y": subpixel_histogram(fy)}
-    i, j = pairs(col["frame"].astype(np.int64), col["x_nm"], col["y_nm"])
-    out["pairs"] = int(len(i))
-    for axis in ("x", "z"):
-        diff = col[f"{axis}_nm"][i] - col[f"{axis}_nm"][j]
-        claim = np.sqrt(col[f"{axis}_err_nm"][i] ** 2 + col[f"{axis}_err_nm"][j] ** 2)
-        edges = np.asarray(BINS[axis], float) * np.sqrt(2)
-        rows = []
-        for lo, hi in zip(edges[:-1], edges[1:]):
-            sel = (claim >= lo) & (claim < hi)
-            if sel.sum() >= 200:
-                rows.append({"claim_lo": float(lo / np.sqrt(2)), "claim_hi": float(hi / np.sqrt(2)), "n": int(sel.sum()),
-                             "ratio": float(robust_std(diff[sel]) / np.sqrt(np.mean(claim[sel] ** 2)))})
-        out[f"consecutive_{axis}"] = rows
+           "subpixel_x": subpixel_histogram(fx), "subpixel_y": subpixel_histogram(fy), "pair_lag": lag}
+    for at, name in ((lag, "pairs"), (1, "pairs_lag1")):
+        if name == "pairs_lag1" and lag == 1:
+            continue
+        i, j = pairs_apart(col["frame"].astype(np.int64), col["x_nm"], col["y_nm"], at)
+        out[name] = {"n": int(len(i))}
+        for axis in ("x", "z"):
+            claim = np.sqrt(col[f"{axis}_err_nm"][i] ** 2 + col[f"{axis}_err_nm"][j] ** 2)
+            v = (col[f"{axis}_nm"][i] - col[f"{axis}_nm"][j]) / claim
+            out[name][axis] = robust_width(v)
+            rows = []
+            edges = np.asarray(CLAIM_BINS[axis], float) * np.sqrt(2)      # the claim is of a difference
+            for lo, hi in zip(edges[:-1], edges[1:]):
+                sel = (claim >= lo) & (claim < hi)
+                if sel.sum() >= 200:
+                    rows.append({"claim_lo": float(lo / np.sqrt(2)), "claim_hi": float(hi / np.sqrt(2)),
+                                 "n": int(sel.sum()), "ratio": robust_width(v[sel])})
+            out[name][f"{axis}_by_claim"] = rows
     return out
 
 
@@ -246,15 +300,18 @@ def compare(names):
             row = _row(r["sets"][s])
             cells = [(fmt.format(row[k]) if row.get(k) is not None else "-") for k, _, fmt in COLUMNS]
             print(f"{s:22s} {n:12s} " + " ".join(f"{c:>10s}" for c in cells))
-    print("\nreal sets: kept a frame, KS, observed / claimed spread of consecutive frames (x) by claim")
+    print("\nreal sets: kept a frame, KS by |z|; the pair check (observed / claimed, x) at the independent lag, by claim")
     for s in sets:
         for n, r in reports.items():
             sc = r["sets"].get(s, {}).get("scores", {})
             if "per_frame" in sc:
-                cons = "  ".join(f"{b['claim_lo']:.0f}-{b['claim_hi']:.0f}:{b['ratio']:.2f}" for b in sc["consecutive_x"])
+                p = sc["pairs"]
+                cons = "  ".join(f"{b['claim_lo']:.0f}-{b['claim_hi']:.0f}:{b['ratio']:.2f}" for b in p["x_by_claim"])
                 ks = "  ".join(f"{b['lo']:.0f}-{b['hi']:.0f}:{b['ks']:.3f}" for b in sc["ks_by_abs_z"])
+                lag1 = sc.get("pairs_lag1")
                 print(f"{s:10s} {n:12s} {sc['per_frame']:6.1f}/frame  KS {_row({'scores': sc})['ks_max']:.3f}  by |z| {ks}\n"
-                      f"{'':23s} consecutive {cons}")
+                      f"{'':23s} pairs {sc['pair_lag']} apart: x {p['x']:.2f} z {p['z']:.2f}"
+                      + (f" (1 apart: x {lag1['x']:.2f} z {lag1['z']:.2f})" if lag1 else "") + f";  x by claim {cons}")
 
 
 def main():
