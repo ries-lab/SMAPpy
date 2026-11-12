@@ -212,7 +212,8 @@ def test_the_psf_calibration_section_opens_the_window_as_it_was_left(window):
     localize.open_section(instance.id)
     panel = localize.slots[instance.id].panel
     assert panel.run_button.text() == "Open"
-    assert not panel.form.fields          # everything is the window's to ask
+    # everything is the window's to ask: its settings are for a run without it (`form_in_window`)
+    assert panel.form.isHidden() and panel.title_buttons
     panel.run_button.click()
     window.psf_calibration_window.mode_box.setCurrentText("Dual colour")
     window.psf_calibration_window.hide()

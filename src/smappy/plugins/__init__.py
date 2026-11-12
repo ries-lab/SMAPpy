@@ -1005,6 +1005,13 @@ class Plugin:
     # its bead table -- and which a form and a Run button cannot be; the
     # plugin is what lets it sit in a tab, and it imports no Qt to do so.
     window: Optional[str] = None
+    # A launcher whose window is where its settings are set by hand, and whose
+    # `run` makes the same thing without it: the panel shows the launcher alone,
+    # as for one with nothing to set, and the settings are for a run with no
+    # window -- the assistant's `run_plugin`, a chain, a batch, a script.  The
+    # bead and the PSF calibration: their windows set everything a form would
+    # ask twice.
+    form_in_window: bool = False
     # More buttons beside *Open*, each ``(label, window)``: another window of
     # the GUI's, opened the same way.  *Load*'s *Add* is the window's File >
     # Open adding rather than replacing.  A launcher with nothing to set has

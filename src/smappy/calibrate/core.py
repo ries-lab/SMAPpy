@@ -32,10 +32,12 @@ class CalibrationSettings:
     dz_nm: Optional[float] = param(None, label="z step", unit="nm",
                                    help="auto: from the acquisition")
     detection_sigma_px: float = param(2., label="detection sigma", unit="px",
-                                      advanced=True)
+                                      advanced=True, help="the smoothing before beads are found")
     detection_threshold_sigma: float = param(6., label="threshold",
-                                             unit="sigma")
-    min_distance_px: float = param(25., label="min distance", unit="px")
+                                             unit="sigma", help="how far above the background "
+                                                                "noise a bead must stand")
+    min_distance_px: float = param(25., label="min distance", unit="px",
+                                   help="beads closer than this to a neighbour are dropped")
     # 5 robust σ (November 2026): on the DECODE example beads (Evolve, astigmatic) the doubles scored
     # 0.25-0.71 against a median of 0.09 (σ 0.03), 13 of 104; on Zenodo's 1ch_40nm_bead the worst of 58 beads
     # 0.16 against 0.08 (σ 0.02), and on 1ch_FD_bead, whose shapes vary over the chip, 0.73 against 0.25
@@ -45,19 +47,25 @@ class CalibrationSettings:
                                            "difference at which a bead is marked a double; auto: "
                                            "none marked")
     max_xy_shift_px: float = param(3., label="max xy shift", unit="px",
-                                   advanced=True)
+                                   advanced=True, help="the largest lateral shift the "
+                                                       "alignment allows a bead")
     max_z_shift_nm: float = param(250., label="max z shift", unit="nm",
-                                  advanced=True)
+                                  advanced=True, help="the largest shift in height the "
+                                                      "alignment allows a bead")
     alignment_range_nm: float = param(500., label="alignment range", unit="nm",
-                                      advanced=True)
+                                      advanced=True, help="the z range around the focus "
+                                                          "the alignment correlates over")
     registration_iterations: int = param(2, label="iterations", min=1,
-                                         advanced=True)
-    rejection_mad: float = param(1.5, label="rejection (MAD)", advanced=True)
+                                         advanced=True, help="alignment passes")
+    rejection_mad: float = param(1.5, label="rejection (MAD)", advanced=True,
+                                 help="the shape cut, in robust standard deviations")
     # a Gaussian sigma; deliberately not the MATLAB smoothing lambda
-    smooth_z_nm: float = param(20., label="smoothing z", unit="nm")
+    smooth_z_nm: float = param(20., label="smoothing z", unit="nm",
+                               help="the spline's smoothing along z, a Gaussian's sigma")
     smooth_xy_px: float = param(0., label="smoothing xy", unit="px",
-                                advanced=True)
-    min_beads: int = param(1, label="min beads", min=1, advanced=True)
+                                advanced=True, help="the spline's smoothing across")
+    min_beads: int = param(1, label="min beads", min=1, advanced=True,
+                           help="the fewest accepted beads to build from")
     brightness_range: Optional[float] = param(6., label="brightness range",
                                               advanced=True,
                                               help="largest accepted "

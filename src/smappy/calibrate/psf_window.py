@@ -143,6 +143,11 @@ class PSFCalibrationWindow(QMainWindow):
         self.marks: dict = {}
         self.busy = False
         self._thread = None
+        # a job the assistant started (`gui/window_actions.py`) fails into the status line and
+        # `last_error`, never a modal box: one would hold the assistant's queue on the GUI thread
+        self.quiet_job = False
+        self._job_quiet = False
+        self.last_error = ""
         self._cancel = threading.Event()
         self.stack_viewer = None
         self.pages: list = []
@@ -555,13 +560,8 @@ class PSFCalibrationWindow(QMainWindow):
     def _main_half(self):
         """The dual calibration's main half as chosen, or None on the microscope's (`OpticsSettings`
         then reads the entry's)."""
-        if not self.is_dual:
-            return None
-        try:
-            channels = self._sample_form().value().channels
-        except (ValueError, AttributeError):
-            return None
-        return None if channels.main_channel == "microscope" else channels.main_channel
+        from .psf_run import main_half
+        return main_half(self.method, self.is_dual, self._part)
 
     def _show_channels(self) -> None:
         """A dual sample's *channels* part as the fitters' is: one line on the microscope's
@@ -585,22 +585,13 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _stacks_camera(self, require: bool = False):
         """The first stack's camera, resolved with the microscope and the camera chosen here and the
-        camera numbers typed here -- what every run of this window uses."""
-        from ..io.tiff import open_stack
-        from ..plugins.fit import CameraSettings
-        from . import pupil
+        camera numbers typed here -- what every run of this window uses (`psf_run.stacks_camera`)."""
+        from .psf_run import stacks_camera
         try:
             optics = self.optics_form.value()
         except ValueError:
             optics = OpticsSettings()
-        # a fitter's camera settings: the same resolution, the last microscope used included
-        settings = CameraSettings(microscope=optics.microscope, camera=optics.camera,
-                                  **optics.camera_overrides())
-        # a path nothing is found in is opened as it is, and says what is wrong with it
-        path = (discover_acquisitions(self.paths[:1]) or [self.paths[0]])[0]
-        if require:
-            return pupil.camera_for(path, settings)
-        return settings.resolve(open_stack(path), require=False)
+        return stacks_camera(self.paths, optics, require)
 
     def _show_optics(self) -> None:
         """The first stack's camera and microscope (`microscope_db`): the line, the optics on *auto*
@@ -924,14 +915,18 @@ class PSFCalibrationWindow(QMainWindow):
             self._refresh_files()
 
     # ---------------------------------------------------------------- work
-    def error(self, exc) -> None:
-        self.status_bar.showMessage(f"{type(exc).__name__}: {exc}")
-        QMessageBox.warning(self, "PSF calibration", f"{type(exc).__name__}: {exc}")
+    def error(self, exc, quiet: bool = False) -> None:
+        self.last_error = f"{type(exc).__name__}: {exc}"
+        self.status_bar.showMessage(self.last_error)
+        if not (quiet or self.quiet_job):
+            QMessageBox.warning(self, "PSF calibration", self.last_error)
 
     def _work(self, kind: str, function) -> None:
         if self.busy:
             return
         self.busy = True
+        self._job_quiet, self.quiet_job = self.quiet_job, False
+        self.last_error = ""
         self._cancel.clear()
         self._tracker = LearningProgress()
         self.progress_bar.setValue(0)
@@ -968,10 +963,11 @@ class PSFCalibrationWindow(QMainWindow):
 
     def _finished(self, kind: str, value) -> None:
         self.busy = False
+        quiet, self._job_quiet = self._job_quiet, False
         self.progress_bar.setVisible(False)
         if kind == "error":
             self._update_buttons()
-            self.error(value)
+            self.error(value, quiet)
             return
         if kind == "halves":
             self._update_buttons()
@@ -997,62 +993,26 @@ class PSFCalibrationWindow(QMainWindow):
             self.calibrated.emit(str(value.saved), value.dual)
 
     def _list_calibration(self, path, dual: bool) -> None:
-        """Add a saved calibration to the list the fitters' *auto* chooses from (`calibration_list`),
-        described by the beads' microscope as this window resolved it -- a bead average does not
-        record it in its file -- and the day they were taken."""
-        from .. import calibration_list
-        from ..io.tiff import camera_tags, open_stack
-        from ..microscope_db import acquisition_date
-        if not getattr(self.method, "listed", True):
-            return                                 # not a PSF: the elliptical Gaussian's curves
-        camera = getattr(self, "optics_camera", None)
-        made = None
-        try:
-            day = acquisition_date(camera_tags(open_stack(self.paths[0]))) if self.paths else None
-            made = day.isoformat() if day else None
-        except Exception:
-            pass
-        try:
-            calibration_list.add(path, microscope=getattr(camera, "microscope", None) or None,
-                                 em_on=getattr(camera, "em_on", None), dual=dual, made=made,
-                                 method=self.method.label)
-        except Exception as error:                 # the list is a convenience: never the save's failure
-            print(f"PSF calibration: could not list {path}: {error}")
+        """Add a saved calibration to the list the fitters' *auto* chooses from (`psf_run.list_calibration`),
+        described by the beads' microscope as this window resolved it."""
+        from .psf_run import list_calibration
+        list_calibration(path, self.method, dual, self.paths, getattr(self, "optics_camera", None))
+
+    def _part(self, name: str):
+        """One part of the settings, by the name `psf_run.inputs` asks for it: its form's value."""
+        if name == "run":
+            run = self.run_form.value()
+            run.start_from = self.start_form.value().start_from
+            return run
+        return {"beads": self.detection_form, "in situ": self.insitu_form,
+                "in situ detection": self.insitu_detection_form, "molecules": self.molecule_form,
+                "elliptical": self.elliptical_form, "4Pi": self.fourpi_form, "microscope": self.optics_form,
+                "model": self.model_form, "spline": self.spline_form}[name].value()
 
     def _inputs(self) -> dict:
-        run = self.run_form.value()
-        run.start_from = self.start_form.value().start_from
-        insitu = self.method.sections.get("in situ", False)
-        inputs = dict(detection=self.insitu_detection_form.value() if insitu else self.detection_form.value(), run=run)
-        if insitu:
-            inputs["insitu"] = self.insitu_form.value()
-        if self.method.sections.get("elliptical", False):
-            inputs["elliptical"] = self.elliptical_form.value()
-        if self.method.sections.get("molecules", False):
-            inputs["molecules"] = self.molecule_form.value()
-        if self.method.sections.get("4Pi", False):
-            inputs["fourpi"] = self.fourpi_form.value()
-        if self.paths:
-            # a value typed that will not do stops the run, naming it: `_stacks_camera` would
-            # otherwise put the file's in its place without a word
-            self.optics_form.value()
-            # the camera every run takes: as this window resolved it, chosen and typed values
-            # included.  Incomplete, the method resolves its own and says what is missing
-            try:
-                inputs["camera"] = self._stacks_camera(require=True)
-            except ValueError:
-                pass
-        if self.method.sections["microscope"]:
-            inputs.update(optics=self.optics_form.value(), model=self.model_form.value(),
-                          spline=self.spline_form.value())
-            camera = getattr(self, "optics_camera", None)
-            missing = inputs["optics"].missing(camera, 2 if self.is_dual else 1, self._main_half())
-            if missing:
-                scope = (getattr(camera, "microscope", None) or {}).get("name")
-                raise ValueError(f"give the microscope's {' and '.join(missing)}: "
-                                 + (f"{scope} does not give it for these stacks" if scope else
-                                    "no microscope in the database recognises these stacks"))
-        return inputs
+        """The method's inputs from the forms (`psf_run.inputs`, which the plugin's run calls too)."""
+        from .psf_run import inputs
+        return inputs(self.method, self.is_dual, self.paths, self._part)
 
     def _show_detected(self, detected) -> None:
         """A new detection: its beads in the table, ringed on the Stacks page.  A calibration from an
@@ -1491,14 +1451,19 @@ class PSFCalibrationWindow(QMainWindow):
         if not path:
             return
         try:
-            saved = self.method.save_as(self.run_result, path)
+            self.save_to(path)
         except Exception as error:
             self.error(error)
-            return
+
+    def save_to(self, path) -> str:
+        """Save the calibration at ``path``, list it and hand it to its fitter: *Save as...* after its
+        dialog, and the assistant's *Save as* (`gui/window_actions.py`), which raises what went wrong."""
+        saved = self.method.save_as(self.run_result, path)
         self._update_buttons()
         self.status_bar.showMessage(f"saved {saved}")
         self._list_calibration(saved, self.run_result.dual)
         self.calibrated.emit(str(saved), self.run_result.dual)
+        return str(saved)
 
     def _use_in_fitter(self) -> None:
         if self.run_result is None or self.run_result.saved is None:

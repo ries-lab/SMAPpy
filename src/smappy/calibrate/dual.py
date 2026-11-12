@@ -1278,3 +1278,25 @@ def channel_result(result, channel):
         shifts[:, 2-mirror] *= -1
     return replace(r, calibration=(result.calibration.main if channel == 0 else result.calibration.secondary),
                    beads=collection, raw_psf=raw, shifts=shifts)
+
+
+def bead_specs(cls):
+    """The form of a calibration's settings, as a bead calibration reads them.
+
+    Dual colour's *registration* is how a movie registration is measured
+    (`RegisterSettings`); the fields a bead calibration does not read are
+    left off, and those it reads differently say so in their tooltips.  The
+    windows' forms and the calibration plugins' settings (`Plugin.specs`).
+    """
+    from dataclasses import replace
+
+    from ..plugins import param_specs
+    specs = param_specs(cls)
+    registration = specs.get('registration')
+    if registration is not None:
+        for name, spec in registration.children.items():
+            if name in BEAD_UNUSED:
+                spec.info = replace(spec.info, hidden=True)
+            elif name in BEAD_HELP:
+                spec.info = replace(spec.info, help=BEAD_HELP[name])
+    return specs

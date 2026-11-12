@@ -1405,7 +1405,10 @@ class Assistant:
           "manager (on an ROI, given its number), the 3D view, the batch "
           "window, the bead or PSF calibration, the microscope manager, the "
           "camera editor, the help window.  session_state lists them under "
-          "'windows'.  Changes nothing, so it works in suggest mode too.",
+          "'windows'.  Changes nothing, so it works in suggest mode too.  "
+          "What is inside the bead and PSF calibration windows -- files, "
+          "settings, Detect, Calibrate, Save -- is list_actions' "
+          "('Bead calibration', 'PSF calibration'); open_window is not needed first.",
           needs="windows",
           name={"type": "string", "description": "e.g. 'ROI manager', '3D view'"},
           roi={"type": "integer",
@@ -1428,7 +1431,9 @@ class Assistant:
 
     @tool("What SMAPpy's menus and buttons do, by name -- File/Open, File/Add "
           "(the Load plugin's buttons), the Render tab's layer buttons, the "
-          "tabs, View, Edit -- each with what it does and its arguments: "
+          "tabs, View, Edit, and the controls inside the bead and PSF "
+          "calibration windows (each window's State first: a job there runs "
+          "in the window and State says when it is done) -- each with what it does and its arguments: "
           "what a click would ask for (a file, a layer) is an argument.  "
           "do_action does one.  A prefix narrows it: 'File', 'Render'.",
           needs="actions",

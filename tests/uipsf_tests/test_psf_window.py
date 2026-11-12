@@ -259,10 +259,12 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     window.close()
 
 
-def test_the_plugin_opens_the_window_and_refuses_to_run_without_it():
+def test_the_plugin_opens_the_window_and_without_it_asks_for_the_stacks():
+    """By hand it opens the window; without one it runs from its settings (`tests/test_calibration_plugins.py`)."""
     from smappy.plugins.psf_calibration import PSFCalibration
     assert PSFCalibration.window == "psf calibration" and PSFCalibration.changes_locs is False
-    with pytest.raises(ValueError, match="run_calibration"):
+    assert PSFCalibration.form_in_window
+    with pytest.raises(ValueError, match="give the stacks"):
         PSFCalibration().run(None, PSFCalibration.Settings())
 
 

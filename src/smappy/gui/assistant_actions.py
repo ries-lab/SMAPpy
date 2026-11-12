@@ -12,7 +12,9 @@ A menu item is either here or in `LEFT_OUT` with the reason, and
 `tests/test_assistant_gui.py` walks the real menus to keep it so: a new item
 that is neither fails there rather than being out of the assistant's reach
 without anyone deciding it.  The Plugins menu is `open_plugin`'s and
-`run_plugin`'s, and the windows are `open_window`'s too.
+`run_plugin`'s, and the windows are `open_window`'s too; what is inside a
+window -- its fields and buttons -- is `window_actions.py`'s, by the window's
+name ("Bead calibration/Detect and calibrate"), or a reason it has none.
 """
 from __future__ import annotations
 
@@ -58,8 +60,8 @@ LEFT_OUT = {
 WINDOW_BUTTONS = {
     "open files": "File/Open",
     "add files": "File/Add",
-    "bead calibration": "open_window",
-    "psf calibration": "open_window",
+    "bead calibration": "Bead calibration/State",       # and the window's other actions
+    "psf calibration": "PSF calibration/State",
     "decode training": "open_window",
     "training hosts": "File/Preferences",
     "decode model": "describe_plugin",          # its notice: the model in a line, or how it differs
@@ -326,4 +328,7 @@ def actions_of(window) -> Dict[str, Action]:
     # the plugin and the button: the Load plugin's two are File/Open and Add
     out["File/Load/Load: Open"] = out["File/Open"]
     out["File/Load/Load: Add"] = out["File/Add"]
+    # inside the windows a button opens: their fields and buttons (`window_actions.py`)
+    from .window_actions import window_actions
+    out.update(window_actions(window))
     return out

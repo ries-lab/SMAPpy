@@ -206,6 +206,32 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   button is in `WINDOW_BUTTONS`: the GUI tests walk the real menus and the
   shipped plugins, so a new item that is neither fails there.  Before them
   "add this image and show it in a layer" had no way in but the screen.
+* **inside the windows** -- the same two tools reach the controls of the
+  windows a button opens (`gui/window_actions.py`), named by the window:
+  *Bead calibration/Add files*, */Settings*, */Detect and calibrate*,
+  */Exclude beads*, */Save*; *PSF calibration/Choose* (sample, method,
+  mode), */Settings* (one part at a time), */Detect*, */Calibrate*,
+  */Mark beads*, */Save as*.  Each is the method the click calls, on the
+  window the user sees; what a dialog would ask is an argument, and a
+  window's */State* reads it back -- its files, settings by dotted name,
+  status, the bead table.  A job runs in the window's worker and the action
+  returns at once; one the assistant started fails into *State* and the
+  status line, never a modal box, which would hold the queue
+  (`quiet_job`).  Setting the inputs and computing inside the window is
+  made in suggest mode; writing a file or handing a calibration to a fitter
+  is a proposal there.  `open_window` alone had opened the bead
+  calibration and left the assistant outside it (a user's report,
+  2026-11-12), so every window `open_window` opens has actions or a reason
+  in `WINDOWS_WITHOUT_ACTIONS` -- the batch window, DECODE training, the
+  microscope manager and the camera editor so far -- and
+  `tests/test_window_actions.py` fails on one that has neither.
+  Without a window the same calibrations are `run_plugin`'s:
+  *Localize/Bead calibration* and *Localize/PSF calibration* run from
+  their settings (`Plugin.form_in_window`: the window's settings, which the
+  panel does not show), detect, calibrate and save as the window does with
+  nothing marked by hand, through the same code (`calibrate/psf_run.py`),
+  their pages the result's figures -- so headless `smappy-mcp`, a chain and
+  a batch calibrate too.
 * **the drawn ROI and what is in it** -- `session_state` reports the ROI
   drawn in the 2D view (`Session.roi`, the one shape every plugin's
   selection is cut to) as `roi`, its shape as `set_roi` takes it and how

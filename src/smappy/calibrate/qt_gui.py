@@ -24,12 +24,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 
 from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
-from ..plugins import ParamInfo, param_specs
 from . import plots
 from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
                    calibration_save_path, collect_beads, doubles)
-from .dual import (BEAD_HELP, BEAD_UNUSED, DualColorSettings, build_dual_calibration,
-                   collect_dual_beads, mirror_axis)
+from .dual import DualColorSettings, build_dual_calibration, collect_dual_beads, mirror_axis
 from .input import discover_acquisitions
 
 PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
@@ -53,22 +51,9 @@ class _Worker(QObject):
 
 
 def _bead_specs(cls):
-    """The form of a calibration's settings, as a bead calibration reads them.
-
-    Dual colour's *registration* is how a movie registration is measured
-    (`RegisterSettings`); the fields a bead calibration does not read are
-    left off, and those it reads differently say so in their tooltips.
-    """
-    from dataclasses import replace
-    specs = param_specs(cls)
-    registration = specs.get('registration')
-    if registration is not None:
-        for name, spec in registration.children.items():
-            if name in BEAD_UNUSED:
-                spec.info = replace(spec.info, hidden=True)
-            elif name in BEAD_HELP:
-                spec.info = replace(spec.info, help=BEAD_HELP[name])
-    return specs
+    """The form of a calibration's settings, as a bead calibration reads them (`dual.bead_specs`)."""
+    from .dual import bead_specs
+    return bead_specs(cls)
 
 
 class CalibrationWindow(QMainWindow):
@@ -93,6 +78,11 @@ class CalibrationWindow(QMainWindow):
         self.excluded: set = set()
         self.busy = False
         self._thread = None
+        # a job the assistant started (`gui/window_actions.py`) fails into the status line and
+        # `last_error`, never a modal box: one would hold the assistant's queue on the GUI thread
+        self.quiet_job = False
+        self._job_quiet = False
+        self.last_error = ""
         self.mode = "Single channel"
         self.stack_viewer: Optional[QWidget] = None
 
@@ -340,14 +330,18 @@ class CalibrationWindow(QMainWindow):
     def settings(self):
         return self.form.value()
 
-    def error(self, exc) -> None:
-        self.status_bar.showMessage(f"{type(exc).__name__}: {exc}")
-        QMessageBox.warning(self, "calibration", f"{type(exc).__name__}: {exc}")
+    def error(self, exc, quiet: bool = False) -> None:
+        self.last_error = f"{type(exc).__name__}: {exc}"
+        self.status_bar.showMessage(self.last_error)
+        if not (quiet or self.quiet_job):
+            QMessageBox.warning(self, "calibration", self.last_error)
 
     def _work(self, kind: str, function) -> None:
         if self.busy:
             return
         self.busy = True
+        self._job_quiet, self.quiet_job = self.quiet_job, False
+        self.last_error = ""
         for button in (self.run_button, self.quality_button, self.rebuild_button):
             button.setEnabled(False)
         # the last job's thread may still be winding down (its `done` comes before its loop has
@@ -367,10 +361,11 @@ class CalibrationWindow(QMainWindow):
 
     def _finished(self, kind: str, value) -> None:
         self.busy = False
+        quiet, self._job_quiet = self._job_quiet, False
         for button in (self.run_button, self.quality_button, self.rebuild_button):
             button.setEnabled(True)
         if kind == "error":
-            self.error(value)
+            self.error(value, quiet)
             return
         if kind == "result":
             self.result = value
@@ -610,19 +605,25 @@ class CalibrationWindow(QMainWindow):
                                               "Calibration (*.h5 *.hdf5)")
         if not path:
             return
+        try:
+            self.save_to(path)
+        except Exception as error:
+            self.error(error)
+
+    def save_to(self, path) -> str:
+        """Save the calibration at ``path`` and hand it to its fitter: *Save calibration...* after its
+        dialog, and the assistant's *Save* (`gui/window_actions.py`), which raises what went wrong."""
+        path = str(path)
         if not path.lower().endswith(".hdf5"):
             # one .h5, whether the name was typed without it or a dialog added another
             path = str(calibration_save_path(path))
-        try:
-            self.result.save(path, overwrite=True)
-        except Exception as error:
-            self.error(error)
-            return
+        self.result.save(path, overwrite=True)
         self.saved_path = path
         self.saved_dual = self.is_dual
         self.use_button.setEnabled(True)
         self.status_bar.showMessage(f"saved {path}")
         self.calibrated.emit(path, self.is_dual)
+        return path
 
     def _use_in_fitter(self) -> None:
         path = getattr(self, "saved_path", None)

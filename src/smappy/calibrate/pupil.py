@@ -750,9 +750,17 @@ class OpticsSettings:
     emgain: Optional[float] = param(None, label="EM gain", min=0, help="auto: from the stacks")
 
     def camera_overrides(self) -> dict:
-        """The camera's numbers typed here, for `io.tiff.camera_metadata`."""
-        return {k: v for k, v in (("conversion", self.conversion), ("offset", self.offset),
-                                  ("emgain", self.emgain)) if v is not None}
+        """The camera's numbers typed here, for `io.tiff.camera_metadata`: the pixel too, in the
+        camera's µm -- typed, it is the user's word, and the beads' boxes are cut and their positions
+        measured with the camera's pixel (`pixel_size_nm`), which without it was the file's or none:
+        a stack with no pixel in its metadata or the camera database could not be calibrated with
+        the pixel typed here (2026-11-12)."""
+        out = {k: v for k, v in (("conversion", self.conversion), ("offset", self.offset),
+                                 ("emgain", self.emgain)) if v is not None}
+        if self.pixel_x_nm is not None:
+            out["pixelsize_um"] = self.pixel_x_nm / 1000
+            out["pixelsize_y_um"] = (self.pixel_y_nm or self.pixel_x_nm) / 1000
+        return out
 
     def resolved(self, camera, channels: int = 1, main: Optional[str] = None) -> dict:
         """The values a run uses: ``NA``, ``n_immersion``, ``wavelengths`` (one per channel, None where

@@ -286,10 +286,12 @@ class PluginPanel(QWidget):
                 self.window_buttons.append(extra)
             # nothing to set: the buttons can stand in the section's title
             # bar (`title_buttons`, `CollapsibleSection.put_in_title`)
+            # (a launcher whose settings are its window's, `form_in_window`, as one)
+            nothing = (not dataclasses.fields(plugin_cls.Settings)
+                       or self.plugin.form_in_window)
             self.title_buttons = ([self.run_button] + self.window_buttons
-                                  if not dataclasses.fields(plugin_cls.Settings)
-                                  else [])
-            if not dataclasses.fields(plugin_cls.Settings):
+                                  if nothing else [])
+            if nothing:
                 # nothing to set: the buttons are the panel, one row, and the
                 # summary is their tooltip rather than lines above them
                 self.form.hide()
