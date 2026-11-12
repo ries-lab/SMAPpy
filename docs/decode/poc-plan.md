@@ -1627,4 +1627,6 @@ frame, 3 frames in, 500 epochs).
 - **The batch on Apple's GPU** (found the same day): *auto* took half of what macOS lets MPS have,
   13 GB of a 34 GB Mac, and a fit of 257 x 213 frames with a test run beside it put the Mac into
   swap at one frame a second.  MPS has no memory of its own: the batch there is at most 3 GB now
-  (`predict.MPS_BUDGET`).
+  (`predict.MPS_BUDGET`).  A larger batch is hardly faster there: those frames through the job's
+  3-frame model, 36.0 frames/s at 8, 37.5 at 21 (3 GB's), 39.1 at 32 and 64, 39.4 at 96 -- for 2.2,
+  3.9, 6.0, 11.1 and 16.1 GB.  The fit ran at 40: on a Mac it is the network's compute that limits it.

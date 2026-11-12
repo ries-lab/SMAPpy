@@ -45,8 +45,9 @@ MEMORY_SHARE = 0.5        # of a CUDA device's free memory a batch may take: its
 # Apple's GPU has no memory of its own: MPS takes the computer's RAM, shared with everything else,
 # and half of what macOS lets it have (13 GB of 34) put a Mac into swap with a fit and a test run
 # beside it -- the GPU waiting on memory, one frame a second for a hundred (2026-11-12).  So a fixed
-# budget there: 21 frames of 257 x 213, 4 of 512 x 512 (the speed against the batch on MPS not yet
-# measured; 32 frames of 180 x 179, the old default, ran at 120 frames a second).
+# budget there: 21 frames of 257 x 213, 4 of 512 x 512.  A larger batch is hardly faster on MPS:
+# 257 x 213 frames through a 3-frame model on an M-series Mac, 36.0 frames/s at 8, 37.5 at 21,
+# 39.1 at 32 and 64, 39.4 at 96 -- for 2.2, 3.9, 6.0, 11.1 and 16.1 GB (2026-11-12).
 MPS_BUDGET = 3e9
 MAX_BATCH = 256
 CPU_BATCH = 8             # on the CPU the batch changes the time little; memory is the system's
