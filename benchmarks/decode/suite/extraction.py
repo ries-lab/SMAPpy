@@ -34,11 +34,13 @@ EXTRACTIONS = ("decode_lookahead", "mixture_peak", "mixture_pair")
 _OFFSETS = [(di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1)]
 
 
-def mixture_positions(y: torch.Tensor, b, i, j, mode: str = "mixture_peak", iterations: int = ITERATIONS):
+def mixture_positions(y: torch.Tensor, b, i, j, mode: str = "mixture_peak", iterations: int = ITERATIONS,
+                      sigma: str = "pixel"):
     """The mixture peak of each detection (frame ``b``, row ``i``, column ``j``) of ``y``, a network's
     output with its offsets made absolute and its scales undone: (N, 10, H, W) -- p, photons, rows,
     columns, z, the sigmas of photons, rows, columns, z, background.  Returns (M, 3): rows, columns
-    (pixels), z (nm)."""
+    (pixels), z (nm); with ``sigma`` other than "pixel" also (M, 3) uncertainties, the mixture's spread
+    about the peak (`SIGMAS`)."""
     n, _, h, w = y.shape
     di = torch.tensor([o[0] for o in _OFFSETS], device=y.device)
     dj = torch.tensor([o[1] for o in _OFFSETS], device=y.device)
@@ -66,21 +68,40 @@ def mixture_positions(y: torch.Tensor, b, i, j, mode: str = "mixture_peak", iter
         logw = torch.log(p.clamp_min(1e-12)) - 0.5 * (((x[:, None] - mu) ** 2) * inv).sum(-1) - torch.log(sig).sum(-1)
         wgt = torch.softmax(logw, 1)[..., None] * (p > 0)[..., None]
         x = (wgt * inv * mu).sum(1) / (wgt * inv).sum(1).clamp_min(1e-12)
-    return x
+    if sigma == "pixel":
+        return x
+    if sigma == "mixture":
+        # the p-weighted mixture of the neighbourhood, as the loss sees a molecule
+        wgt = (p / p.sum(1, keepdim=True).clamp_min(1e-12))[..., None]
+    elif sigma == "responsibility":
+        # the components' responsibilities at the peak: a neighbour of another molecule weighs ~0
+        logw = torch.log(p.clamp_min(1e-12)) - 0.5 * (((x[:, None] - mu) ** 2) * inv).sum(-1) - torch.log(sig).sum(-1)
+        wgt = (torch.softmax(logw, 1) * (p > 0))[..., None]
+        wgt = wgt / wgt.sum(1, keepdim=True).clamp_min(1e-12)
+    else:
+        raise ValueError(f"sigma {sigma!r}: one of {SIGMAS}")
+    spread = (wgt * (sig ** 2 + (mu - x[:, None]) ** 2)).sum(1)
+    return x, spread.sqrt()
+
+
+#: the uncertainty reported: the detection pixel's own sigma (DECODE's), the p-weighted mixture's
+#: spread about the peak over the neighbourhood, or that spread with the components' responsibilities
+#: at the peak as weights
+SIGMAS = ("pixel", "mixture", "responsibility")
 
 
 class MixturePeak:
     """A drop-in for the port's `SpatialIntegration` step: DECODE's detections and probabilities, the
     positions moved to the mixture's peak (`mixture_positions`)."""
 
-    def __init__(self, param, h, w, raw_th, mode):
+    def __init__(self, param, h, w, raw_th, mode, sigma="pixel"):
         from decode_smlm.neuralfitter.coord_transform import Offset2Coordinate
         from decode_smlm.neuralfitter.post_processing import SpatialIntegration
         from decode_smlm.neuralfitter.scale_transform import InverseParamListRescale
         self.rescale = InverseParamListRescale.parse(param)
         self.coords = Offset2Coordinate(xextent=(-0.5, h - 0.5), yextent=(-0.5, w - 0.5), img_shape=(h, w))
         self.si = SpatialIntegration(raw_th=raw_th, xy_unit="px")
-        self.raw_th, self.mode = raw_th, mode
+        self.raw_th, self.mode, self.sigma = raw_th, mode, sigma
 
     def forward(self, out):
         y = self.coords.forward(self.rescale.forward(out))
@@ -88,14 +109,19 @@ class MixturePeak:
         b, i, j = (p_ps >= self.raw_th).nonzero(as_tuple=True)
         em = self.si.forward(y.clone())          # DECODE's own: the same pixels, in the same order
         if len(b):
-            em.xyz = mixture_positions(y, b, i, j, self.mode).cpu().to(em.xyz.dtype)
+            found = mixture_positions(y, b, i, j, self.mode, sigma=self.sigma)
+            if self.sigma == "pixel":
+                em.xyz = found.cpu().to(em.xyz.dtype)
+            else:
+                em.xyz = found[0].cpu().to(em.xyz.dtype)
+                em.xyz_sig = found[1].cpu().to(em.xyz_sig.dtype)
         return em
 
 
 @contextlib.contextmanager
-def extraction(mode: str):
-    """Within it, the port's predictor extracts with ``mode`` -- a switch for the benchmark until the
-    new fitter has its own extraction part (step 3)."""
+def extraction(mode: str, sigma: str = "pixel"):
+    """Within it, the port's predictor extracts with ``mode`` and reports ``sigma`` (`SIGMAS`) -- a
+    switch for the benchmark until the new fitter has its own extraction part (step 3)."""
     from decode_smlm import predict
     if mode in (None, "decode_lookahead"):
         yield
@@ -103,7 +129,7 @@ def extraction(mode: str):
     original = predict.Predictor._post
 
     def _post(self, h, w):
-        return MixturePeak(self.param, h, w, self.raw_th, mode)
+        return MixturePeak(self.param, h, w, self.raw_th, mode, sigma)
 
     predict.Predictor._post = _post
     try:

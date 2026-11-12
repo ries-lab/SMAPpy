@@ -89,6 +89,13 @@ frames apart for every fitter (the sample moves), so it is compared at the least
 
 `python report.py --compare RUN RUN ...` prints the runs side by side with their parts and costs.
 
+**Single frames and temporal context.**  The simulated sets are independent single frames: a
+model reading several frames sees no molecule in its neighbours, so it acts as its own single-frame
+counterpart (decided with Jonas, 2026-11-12: every network compared will read several frames in the
+end, so no single-frame model is trained beside it).  What the network does alone -- its
+uncertainty, its pixelation -- is measured there; what temporal context adds on a multi-frame movie
+(`precision_check.py`, molecules on for several frames).
+
 ## A run, and how step 4 uses it
 
 A run is a YAML file in `suite/runs/`:

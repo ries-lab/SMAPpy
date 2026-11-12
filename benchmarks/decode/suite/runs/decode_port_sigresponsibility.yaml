@@ -1,0 +1,7 @@
+# The 3 x 3 mixture peak, the uncertainty the responsibility spread about it (extraction.py, SIGMAS): does the
+# mixture over pixels hold the uncertainty that one pixel's sigma lacks (poc-plan, "claimed z precision")?
+name: decode_port_sigresponsibility
+base: decode_port_mixpeak
+parts:
+  extraction: {name: mixture_peak, sigma: responsibility, about: "positions at the 3 x 3 mixture's peak; x, y and z uncertainties the responsibility-weighted spread of the components about it"}
+fit: {sigma: responsibility}

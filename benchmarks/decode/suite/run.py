@@ -81,7 +81,7 @@ def fit_decode_smlm(run, name, out, device=None):
         **_source(name), **_camera_settings(S.camera(name)), "model.path": str(model),
         "model.threshold": run["fit"].get("threshold", 0.1), "model.device": device or "auto",
         "output.path": str(out), "output.raw_frames": 0})
-    with extraction(run["fit"].get("extraction")):
+    with extraction(run["fit"].get("extraction"), run["fit"].get("sigma", "pixel")):
         plugins.get("Localize/DECODE")().run(Context(), s)
     from smappy.io.hdf5 import load_localizations
     dec = load_localizations(out).metadata.get("decode", {})           # the fitter's record, as saved

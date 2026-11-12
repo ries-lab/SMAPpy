@@ -1815,12 +1815,36 @@ emitter's whole-spot CRLB (median):
 - **Where it is wrong the claim is below the CRLB** -- 0.56 of it at +500 to +700 nm and 1000
   photons -- while the real error is 1.1 -- 1.5 times the bound.  No unbiased estimator can be that
   precise; the network claims what it cannot have.
-- **A suspect, not yet tested**: the loss trains the mixture over pixels, not each pixel's
-  component.  Where z is poorly determined, neighbouring pixels can each predict a different z with
-  a narrow sigma and the mixture still fits; the extraction then reports one component's sigma.
-  The mixture's own variance around the detection (``sum_i w_i (sigma_i^2 + mu_i^2) - mu^2`` over
-  the 3 x 3) would test it, cheaply, beside the mixture's peak.  If not, it is the sigma head's
-  training.
+- **The suspect, tested**: the loss trains the mixture over pixels, not each pixel's component.
+  Where z is poorly determined, neighbouring pixels can each predict a different z with a narrow
+  sigma and the mixture still fits; the extraction reports one component's sigma.  So the
+  uncertainty was taken as the mixture's spread about its peak over the 3 x 3,
+  ``sqrt(sum_i w_i (sigma_i^2 + (mu_i - x)^2))`` (`extraction.py`, ``sigma``; runs
+  `decode_port_sigmixture`, `decode_port_sigresponsibility`), with two weightings.  Error over the
+  claim, z, in the same bins (bias off), and x overall:
+
+  | set | sigma | x | z: -700 -- -500 | -100 -- +100 | +300 -- +500 | +500 -- +700 |
+  |---|---|---:|---:|---:|---:|---:|
+  | density 1 | the pixel's (DECODE's) | 0.97 | 1.08 | 1.01 | 1.29 | 1.22 |
+  | | mixture, weights p | 0.68 | 0.66 | 0.69 | 0.70 | 0.64 |
+  | | mixture, responsibilities at the peak | 0.95 | 1.00 | 0.99 | 1.20 | 1.13 |
+  | 1000 photons | the pixel's | 0.99 | 1.46 | 0.93 | 2.08 | 2.01 |
+  | | mixture, weights p | 0.89 | 0.89 | 0.82 | 1.01 | 0.99 |
+  | | responsibilities | 0.98 | 1.32 | 0.91 | 1.83 | 1.69 |
+  | 10 000 photons | the pixel's | 0.96 | 1.00 | 0.97 | 1.26 | 1.24 |
+  | | mixture, weights p | 0.62 | 0.63 | 0.62 | 0.65 | 0.64 |
+  | | responsibilities | 0.94 | 0.92 | 0.96 | 1.16 | 1.09 |
+
+  **Partly.**  The p-weighted mixture's spread is too wide everywhere (0.62 -- 0.89 in x, which the
+  pixel's sigma had right) -- its neighbours' p, which are DECODE's split detection, count fully
+  -- but it is flat in z: the z dependence of the missing uncertainty is in the mixture.  Weighting
+  by the responsibilities at the peak, which drops components far from it, recovers only a fifth to
+  a third of it (1000 photons, +300 -- +500 nm: 2.08 to 1.83).  So the components that disagree in z
+  are there but carry little weight at the peak; no extraction fixes the claim cleanly.  It is
+  the training's: the sigma head is fitted through a mixture that can explain a broad error by
+  several narrow components.  For step 4: a loss that scores each molecule's reported
+  uncertainty (the extracted component, or SHOT's one estimate a molecule with its own sigma), and
+  error over claim by |z| on the benchmark as the check.
 - **For the benchmark**: the report should carry error over the claim per axis and by |z| on the
   simulated sets, as it carries error over the CRLB; single frames keep the network's own
   uncertainty apart from what temporal context and density add (the multi-frame movie, the density
