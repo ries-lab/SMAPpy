@@ -1630,3 +1630,84 @@ frame, 3 frames in, 500 epochs).
   (`predict.MPS_BUDGET`).  A larger batch is hardly faster there: those frames through the job's
   3-frame model, 36.0 frames/s at 8, 37.5 at 21 (3 GB's), 39.1 at 32 and 64, 39.4 at 96 -- for 2.2,
   3.9, 6.0, 11.1 and 16.1 GB.  The fit ran at 40: on a Mac it is the network's compute that limits it.
+
+### Step 2, first round: the benchmark on both baselines (2026-11-12)
+
+The new fitter's benchmark (`docs/decode/benchmark.md`, code `benchmarks/decode/suite/`, data
+`$DECODE_SMLM_DATA/benchmark/v1/`): 8 simulated sets on calibration B, drawn once with each
+emitter's CRLB, the challenge's four 3D-AS sets, and 5000 frames each of the example movie and the
+Fig. 4e raw movie.  The port's models (`decode_B`, the challenge's N1 and N2, the Fig. 4e GUI job's)
+and Spline 3D with each context's calibration, on this Mac (DECODE on MPS, Spline 3D on the CPU).
+The simulated frames are drawn mirrored as an EMCCD reads them, and both fitters undid the mirror
+themselves (DECODE `frames_mirrored`, Spline 3D `matched_to_em`); the results agree with (i)'s,
+which were drawn unmirrored -- the path a user's data takes works.
+
+| set | fitter | J | recall | prec. | lat / ax (nm) | err/CRLB lat / ax | RMSE/CRLB lat | KS | KS \|z\| 600 -- 700 | frames/s |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| density 1 | DECODE | 0.883 | 0.940 | 0.936 | 34.5 / 30.4 | 1.14 / 0.99 | 1.20 | 0.016 | 0.084 | 532 |
+| | Spline 3D | 0.630 | 0.726 | 0.826 | 28.9 / 28.1 | 1.03 / 1.05 | 1.37 | 0.009 | 0.056 | 4605 |
+| density 5 | DECODE | 0.897 | 0.921 | 0.972 | 38.6 / 33.7 | 1.26 / 1.13 | 1.42 | 0.018 | | 595 |
+| | Spline 3D | 0.462 | 0.510 | 0.830 | 53.6 / 53.1 | 1.55 / 1.47 | 2.90 | 0.013 | | 2668 |
+| density 15 | DECODE | 0.837 | 0.856 | 0.974 | 45.8 / 44.5 | 1.58 / 1.47 | 1.93 | 0.022 | | 536 |
+| | Spline 3D | 0.225 | 0.233 | 0.861 | 77.2 / 114.2 | 4.03 / 4.06 | 6.80 | 0.015 | | 1659 |
+| density 25 | DECODE | 0.771 | 0.793 | 0.966 | 51.4 / 49.5 | 1.85 / 1.72 | 2.40 | 0.017 | | 446 |
+| | Spline 3D | 0.035 | 0.035 | 0.925 | 79.4 / 147.3 | 6.3 / 7.9 | 4.42 | 0.084 | | 345 |
+| density 50 | DECODE | 0.650 | 0.676 | 0.943 | 64.7 / 74.5 | 2.65 / 2.60 | 3.31 | 0.022 | | 423 |
+| | Spline 3D | 0.000 | 0.000 | -- | -- | -- | -- | -- | | 823 |
+| 1000 photons, bg 20 | DECODE | 0.764 | 0.780 | 0.974 | 58.0 / 67.4 | 1.06 / 1.09 | 1.12 | 0.039 | 0.090 | 627 |
+| | Spline 3D | 0.552 | 0.571 | 0.943 | 44.8 / 64.4 | 1.03 / 1.09 | 1.23 | 0.012 | -- | 5170 |
+| 3000 photons, bg 60 | DECODE | 0.882 | 0.926 | 0.949 | 45.7 / 38.4 | 1.09 / 0.99 | 1.18 | 0.029 | 0.112 | 629 |
+| | Spline 3D | 0.618 | 0.666 | 0.894 | 34.8 / 36.7 | 1.04 / 1.07 | 1.32 | 0.017 | 0.048 | 7665 |
+| 10 000 photons, bg 200 | DECODE | 0.908 | 0.979 | 0.926 | 31.8 / 22.6 | 1.17 / 1.02 | 1.36 | 0.018 | 0.085 | 637 |
+| | Spline 3D | 0.650 | 0.750 | 0.829 | 26.9 / 21.1 | 1.02 / 1.05 | 1.39 | 0.007 | 0.017 | 7403 |
+
+err/CRLB is the robust width (1.4826 MAD) of each error over its own emitter's 13 x 13 bound; the
+whole spot's bound (25 x 25) raises DECODE's by 0.03 -- 0.15 in z and laterally little (density 1:
+1.18 / 1.18; Spline 3D 1.06 / 1.21).  The KS is the larger of x and y over all matched localizations,
+the last column the |z| bin 600 -- 700 nm ("--" fewer than 500 matches there).  The challenge's sets
+came out as in (i) to the decimal (Spline 3D's identical fits; DECODE's refitted): DECODE ahead on all
+four, its KS 0.023 -- 0.027 on N1 and 0.056 -- 0.057 on N2, 0.14 -- 0.15 beyond 450 nm in N2.
+
+- **Detection:** DECODE's lead is the benchmark's largest number, as before -- Jaccard 0.88 against
+  0.63 at density 1, 0.65 against 0 at 50.  At density 1 Spline 3D's lower RMSE (28.9 against 34.5
+  nm) is over the spots it keeps (recall 0.73 against 0.94): the dim and defocused ones it loses
+  are the ones DECODE's RMSE carries.  The per-emitter measure is fair where RMSE is not: on the
+  same kind of emitters DECODE is at 1.06 -- 1.17 of the bound laterally, Spline 3D at 1.02 -- 1.04.
+- **At the bound:** neither reaches it in RMSE (1.12 -- 1.54, the tails), both nearly in the robust
+  width; DECODE's lateral width grows with the photons (1.06, 1.09, 1.17), Spline 3D's does not
+  (1.03, 1.04, 1.02).  Its z is at the bound (0.99 -- 1.09).  With density both grow, DECODE's to
+  1.6 at 15 and 2.6 at 50, Spline 3D's to 4 at 15 -- the single-emitter bound leaves neighbours out.
+- **Pixelation on the simulated sets, where the truth is uniform in its pixel:** DECODE's KS is 2 --
+  3 times Spline 3D's overall (0.016 -- 0.039 against 0.007 -- 0.017) and grows with |z| to 0.08 --
+  0.11 at 600 -- 700 nm; Spline 3D's stays at 0.02 -- 0.06 where it has enough matches.  Worst at the
+  low photons (0.039).  The step 4 target: DECODE's detection with Spline 3D's KS.
+- **z bias:** DECODE pulls z towards the focus at the range's ends, as (i) found, and more the
+  dimmer the spots: up to +36 nm below the focus and -40 nm above it at 1000 photons, +17 / -17 at
+  3000, +10 / -16 at 10 000 (100 nm bins of the true z).  Spline 3D's is within 3 nm between -500 and
+  +500 nm and 25 -- 40 nm in the outer bins at 1000 and 3000 photons, where it keeps few spots.
+- **Real data** (5000 frames each; DECODE at prob >= 0.5, both at >= 1000 photons):
+
+  | movie | fitter | kept a frame | KS | KS \|z\| 600 -- 700 | observed / claimed, x, claim 0 -- 5 nm | 20 -- 30 nm | frames/s |
+  |---|---|---:|---:|---:|---:|---:|---:|
+  | example | DECODE | 220 | 0.010 | 0.065 | 1.29 | 1.01 | 118 |
+  | | Spline 3D | 105 | 0.003 | 0.019 | 3.00 | 1.13 | 278 |
+  | Fig. 4e | DECODE | 377 | 0.015 | 0.145 | 0.60 | 0.49 | 40 |
+  | | Spline 3D | 172 | 0.003 | 0.007 | 2.90 | 1.29 | 167 |
+
+  The example's numbers repeat the pixelation study's.  **New: on Fig. 4e DECODE's claimed
+  precision is twice what consecutive frames show** (a ratio of 0.41 -- 0.60 at every claim), where
+  on the example it is right within 30 %.  The model is the GUI's sparse job (500 epochs, photons
+  11 000 +- 8800, background 0.3 -- 410: very wide ranges drawn from the data) -- its sigma head
+  may not have learnt a broad prior well, or the pairing in frames this dense (377 a frame) favours
+  close pairs.  Not yet understood; to be looked at before Fig. 4e's model is used as a baseline.  Its pixelation far from focus
+  (0.145) is the largest of all.
+- **Speed** on the M1 Max: DECODE 420 -- 640 frames/s of 64 x 64, 320 -- 340 on the challenge's
+  (3-frame models), 118 on the example's 180 x 179, 40 on Fig. 4e's 257 x 213 (as the GUI found);
+  Spline 3D 3 to 30 times faster where spots are few, slower where they crowd.  Not yet on a GPU of
+  the size the trainings use; the speed column is for comparing runs on one machine.
+- **Not run:** DECODE-Plex (not installed here; its C = 1 model would need training on B); the
+  published package's model (calibration A; (i) compared it).
+
+The baselines are what step 3's network must at least match: on calibration B, Jaccard 0.88 /
+0.90 / 0.84 / 0.77 / 0.65 over the densities, error over CRLB ~1.1 sparse, and KS 0.016 -- 0.039
+overall, 0.08 -- 0.11 far from focus -- the last the one to beat.

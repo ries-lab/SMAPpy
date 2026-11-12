@@ -1,0 +1,8 @@
+# SMAPpy's Spline 3D: the maximum-likelihood fitter whose CRLB the networks are measured against.
+name: spline3d
+fitter: spline3d
+about: Localize/Spline 3D, fit box 13, focus as calibrated, the context's calibration
+parts: {}               # not a network
+models: {}              # the calibration is the context's (sets.CONTEXTS)
+fit: {roisize: 13, focus: calibrated}
+keep: {logl_mads: 3.0, below_iteration_limit: true}

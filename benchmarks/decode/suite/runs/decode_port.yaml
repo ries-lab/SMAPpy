@@ -1,0 +1,21 @@
+# The ported DECODE v0.10.2 (src/decode_smlm), as trained in the proof of concept: a baseline.
+# A run names its parts (docs/decode/benchmark.md); the port's are DECODE's own, and what its model
+# files record (architecture, its parameters, the training's ranges and epochs) is added to the
+# report by run.py, so these names are the comparison's handles, not the whole description.
+name: decode_port
+fitter: decode_smlm
+about: DECODE v0.10.2 ported to current PyTorch, models trained by the port (1000 epochs, H100)
+parts:
+  backbone: {name: decode_unet, about: "SigmaMUNet: a U-Net per frame (shared weights), a second U-Net over their features; 48 features, depth 2 + 2, strided-convolution pooling, nearest upsampling"}
+  time_model: {name: frame_stack, about: "the frame U-Net's features of the frames in the window concatenated (1 or 3 frames, from the model)"}
+  output: {name: decode_offsets, about: "per pixel: p, photons, x, y, z offsets (+-1 pixel, tanh), their four sigmas, background"}
+  extraction: {name: decode_lookahead, about: "SpatialIntegration or NMS as the model says: p summed over 3 x 3, a local maximum above raw_th"}
+  loss: {name: decode_ppxyzb, terms: [count, mixture, background], about: "DECODE's: Gaussian count term, the Gaussian-mixture term over pixels, background MSE"}
+  schedule: {name: decode_v0102, about: "AdamW, StepLR, 1000 epochs of freshly simulated frames (pseudo_ds_size a epoch), a fixed test set"}
+models:                 # one per context (sets.CONTEXTS); paths under $DECODE_SMLM_DATA
+  B: pixelation/decode_B.safetensors
+  challenge_N1: challenge/models/N1.safetensors
+  challenge_N2: challenge/models/N2.safetensors
+  fig4e: fig4e_raw/200723_Ulf_U2OS_MT_a+b_tubulin_15ms_EM50_LP75b0_3_MMStack_Default_decode/261111_beads_3Dcal_2026-11-12/model.safetensors
+fit: {threshold: 0.1}   # the fitter's raw threshold; the scoring keeps prob >= keep.min_prob
+keep: {min_prob: 0.5}

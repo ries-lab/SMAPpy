@@ -703,6 +703,10 @@ the baselines on the benchmark, not reproduce their outputs.
    matched parameters, compute and training.  The benchmark's report includes the Follow tab's
    per-epoch measures of today's training (`decode_smlm.training`): the error over each
    molecule's CRLB as a robust width, and the sub-pixel histogram (pixelation).
+
+   **Built for C = 1** (2026-11-12): the sets, the report, a run's parts and how step 4 compares
+   them are `docs/decode/benchmark.md` (code `benchmarks/decode/suite/`); the baselines' first
+   results are in `docs/decode/poc-plan.md`, "Step 2, first round".
 3. **C = 1.**  Network, joint loss, extraction.  At least DECODE's numbers on
    the benchmark.
 4. **Tuning.**  One part at a time on C = 1, where it is cheapest.
