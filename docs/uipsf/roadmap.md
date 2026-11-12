@@ -28,8 +28,8 @@ when a milestone lands or an item moves.
   bead detection and pairing are SMAPpy's; uipsf takes a `Batch`.  Bead picking ignores faint specks and
   judges a pair by its light in both channels.
 - **The *PSF calibration* window** (`Localize/PSF calibration`): a *method* switch, bead average or pupil
-  model; *start from* a previous model; *save model*; the spline (or dual calibration) and the model file
-  saved beside the stacks; fit quality by Spline 3D (2C for pairs) with z-against-frame curves that select
+  model; *start from* a previous model; *save model*; the spline (or dual calibration) with the model
+  inside it saved beside the stacks; fit quality by Spline 3D (2C for pairs) with z-against-frame curves that select
   a bead; *Install PyTorch* when torch is missing.  The headless path is `pupil.run_calibration`.
 - **The window in two steps** (October 2026): the stacks shown on load (file and plane sliders); *Detect
   beads* rings them and estimates the learning time (`pupil.estimate_seconds`, one Gauss–Newton matrix

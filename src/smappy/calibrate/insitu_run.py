@@ -2,7 +2,7 @@
 
 smappy reads, uipsf learns, as for beads (`pupil`): the movies are read and their molecules found and
 chosen here (`insitu`), uipsf learns the pupil in rounds (`uipsf.workflows.insitu_rounds`), and the
-result is saved as the bead calibration's are -- a spline the fitter reads, the model file beside it.
+result is saved as the bead calibration's are -- a spline the fitter reads, its model inside it.
 What differs from beads (`docs/uipsf/plan.md` §9, M5):
 
 * **Frames, not stacks.**  A movie is thousands of frames, read in blocks of ``block_frames``, coarse to
@@ -428,7 +428,7 @@ def run_insitu(paths, optics, model, insitu: InSituModelSettings, detection: InS
     if run.save_model and not stopped:
         result.calibration = calibration_of(result, spline, insitu)
         path = Path(save_to) if save_to else default_save_path(paths, False)
-        result.saved, _ = save(path, cal.calibration, result.calibration, overwrite=bool(save_to))
+        result.saved = save(path, cal.calibration, result.calibration, overwrite=bool(save_to))
     return result
 
 

@@ -644,33 +644,53 @@ def objective_pupil(cal, source: str = "") -> dict:
     return dict(psf.describe(cal.shared()), source=str(source), date=_dt.date.today().isoformat())
 
 
+#: The group of a calibration file its model is kept in: uipsf's `export.model_file.EMBEDDED`, written out
+#: here so that reading whether a calibration has one needs neither uipsf nor torch.
+MODEL_GROUP = "uipsf"
+
+
 def model_path(path) -> Path:
-    """Where the model file goes beside a calibration: ``x_3dcal.h5`` -> ``x_3dcal.uipsf.h5``."""
+    """Where an older calibration's model file is beside it: ``x_3dcal.h5`` -> ``x_3dcal.uipsf.h5``.  A
+    calibration saved since November 2026 carries its model (`MODEL_GROUP`); this is read for the others."""
     path = Path(path)
     return path.with_name(path.stem + ".uipsf.h5")
 
 
-def save(path, cal, calibration, overwrite: bool = False) -> tuple[Path, Path]:
-    """The spline (or dual) ``calibration`` at ``path`` and the uipsf ``cal`` (a `Calibration`) beside it
-    (`model_path`), which re-samples it on another grid without learning again; the calibration
-    records the model file's name.  Returns both paths."""
+def carries_model(path) -> bool:
+    """Whether the calibration at ``path`` carries its model (`save`), read with h5py alone."""
+    import h5py
+    try:
+        with h5py.File(path, "r") as f:
+            group = f.get(MODEL_GROUP)
+            return isinstance(group, h5py.Group) and group.attrs.get("format") == "uipsf-model"
+    except (OSError, ValueError):
+        return False
+
+
+def save(path, cal, calibration, overwrite: bool = False) -> Path:
+    """The spline (or dual) ``calibration`` at ``path`` with the uipsf ``cal`` (a `Calibration`) inside it, in
+    the group `MODEL_GROUP`: the model re-samples the spline on another grid, at another depth, without
+    learning again.  One file, so the spline cannot travel without what it was drawn from -- a model file
+    beside it, as saved until November 2026, was lost whenever the spline alone was copied.  A model file
+    left beside it by an earlier save is removed: it would describe another run.  Returns the path."""
     import uipsf
 
     from ..io.calibration import save_spline_calibration
     from .dual import DualColorCalibration, save_dual_color_calibration
-    path, beside = Path(path), model_path(path)
-    if beside.exists() and not overwrite:
-        raise FileExistsError(f"{beside} exists")
+    path = Path(path)
     if isinstance(calibration, DualColorCalibration):
         for m in (calibration.main, calibration.secondary):
-            m.parameters["model_file"] = beside.name
-        calibration.parameters["model_file"] = beside.name
+            m.parameters.pop("model_file", None)
+        calibration.parameters.pop("model_file", None)
         save_dual_color_calibration(path, calibration, overwrite=overwrite)
     else:
-        calibration.parameters["model_file"] = beside.name
+        calibration.parameters.pop("model_file", None)
         save_spline_calibration(path, calibration, overwrite=overwrite)
-    uipsf.save_model(cal, beside)
-    return path, beside
+    uipsf.save_model(cal, path, group=MODEL_GROUP)
+    beside = model_path(path)
+    if beside.exists():
+        beside.unlink()
+    return path
 
 
 # ------------------------------------------------------------------ a whole run: what the window does
@@ -844,23 +864,25 @@ MODEL_FILTER = "uipsf model or PSF calibration (*.h5);;All files (*)"
 class RunSettings:
     """What a run starts from and leaves behind."""
     start_from: str = param("", label="start from", kind="open_file", file_filter=MODEL_FILTER,
-                            help="a previous model of this microscope (its .uipsf.h5, or the calibration "
-                                 "beside it): the start, and the reference the Zernikes are drawn against")
+                            help="a previous model of this microscope (its calibration, or an older "
+                                 ".uipsf.h5): the start, and the reference the Zernikes are drawn against")
     save_model: bool = param(True, label="save model",
                              help="save the calibration and its model beside the stacks; off: figures only")
 
 
 def load_start(path):
-    """The uipsf model at ``path``: a model file, or the calibration a model file was saved beside."""
+    """The uipsf model at ``path``: a calibration that carries its model, a model file, or a calibration an
+    older save put a model file beside."""
     import uipsf
     path = Path(path)
     beside = model_path(path)
-    if not path.name.endswith(".uipsf.h5") and beside.exists():
+    if not carries_model(path) and not path.name.endswith(".uipsf.h5") and beside.exists():
         path = beside
     try:
         return uipsf.load_model(path)
     except ValueError as error:
-        raise ValueError(f"{path.name} is not a uipsf model, and no model file is beside it") from error
+        raise ValueError(f"{path.name} is not a uipsf model and carries none, and no model file is beside "
+                         f"it") from error
 
 
 def default_save_path(paths, dual: bool) -> Path:
@@ -1011,7 +1033,7 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         # a warm run (``previous``) replaces its own run's files; a new run never overwrites
         again = previous.saved if previous is not None else None
         path = Path(save_to) if save_to else again or default_save_path(paths, dual)
-        result.saved, _ = save(path, cal, result.calibration, overwrite=bool(save_to or again))
+        result.saved = save(path, cal, result.calibration, overwrite=bool(save_to or again))
     return result
 
 

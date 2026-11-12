@@ -30,7 +30,9 @@ class BeadCalibration(Plugin):
     Settings = BeadCalibrationSettings
     # 2: no *mode*: the window's own combo is the one place it is chosen
     # 3: faint specks no longer cost a bead its isolation (`core.select_beads`): more beads are kept
-    version = "3"
+    # 4: a neighbour the detection's smoothing merged into a bead costs it its isolation, and a bead
+    #    shaped unlike the others is marked a double and left out (`core.merged_neighbours`, `judge_shapes`)
+    version = "4"
     window = "bead calibration"
 
     def run(self, ctx: Context, settings: BeadCalibrationSettings) -> Result:

@@ -4,6 +4,7 @@
 import numpy as np
 import pytest
 from smappy.calibrate.molecule_stack import MoleculeStackSettings, molecule_rois, read_file, split_sweeps
+from smappy.calibrate.pupil import carries_model
 
 import uipsf
 from uipsf_tests.molecule_sweeps import CAMERA, PHASE_NM, write_sweeps
@@ -89,7 +90,7 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     cal = load_spline_calibration(result.saved)
     assert cal.parameters["sample"] == "molecules on the coverslip in a z stack"
     assert abs(cal.parameters["height_nm"] - result.height_nm()) < 1e-6
-    assert (result.saved.parent / "cal.uipsf.h5").exists()
+    assert carries_model(result.saved) and not (result.saved.parent / "cal.uipsf.h5").exists()
 
 
 def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecules(tmp_path, monkeypatch):

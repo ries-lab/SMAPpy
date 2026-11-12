@@ -481,7 +481,7 @@ class PupilModel:
     def save_as(self, run: Run, path) -> Path:
         from .pupil import calibration_of, save
         done = run.result
-        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)  # sampled if not saved yet
+        done.saved = save(path, done.cal, calibration_of(done), overwrite=True)  # sampled if not saved yet
         run.saved = done.saved
         return run.saved
 
@@ -642,7 +642,7 @@ class InSitu:
         from .insitu_run import calibration_of
         from .pupil import save
         done = run.result
-        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)
+        done.saved = save(path, done.cal, calibration_of(done), overwrite=True)
         run.saved = done.saved
         return run.saved
 
@@ -1204,7 +1204,7 @@ class MoleculeStack:
         from .molecule_stack_run import calibration_of
         from .pupil import save
         done = run.result
-        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)
+        done.saved = save(path, done.cal, calibration_of(done), overwrite=True)
         run.saved = Path(path)
         return run.saved
 

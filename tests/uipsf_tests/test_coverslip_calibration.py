@@ -9,7 +9,7 @@ import pytest
 import tifffile
 import torch
 from smappy.calibrate.core import CalibrationSettings
-from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, learns_tilt, model_path
+from smappy.calibrate.pupil import BeadSettings, OpticsSettings, PSFModelSettings, learns_tilt
 from smappy.metadata import CameraMetadata
 
 from uipsf.export import load_model, sample_psf
@@ -134,7 +134,7 @@ def test_the_window_learns_the_coverslips_tilt_from_water_beads_and_shows_it(til
     assert "coverslip tilt x" in figure.get_suptitle()
     record = window.run_result.result.calibration.parameters
     assert np.allclose([v for v, _ in record["coverslip_tilt_deg"]], degrees)
-    saved = load_model(model_path(window.run_result.saved), device="cpu")
+    saved = load_model(window.run_result.saved, device="cpu")
     assert np.allclose(np.degrees(saved.shared["geometry.tilt"].numpy()), degrees, atol=1e-6)
     assert math.isclose(saved.model.channels[0].psf.grid.optics.n_cov, 1.52)
     window.close()

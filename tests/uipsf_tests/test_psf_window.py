@@ -10,7 +10,7 @@ from smappy.calibrate.pupil import (
     OpticsSettings,
     PSFModelSettings,
     RunSettings,
-    model_path,
+    carries_model,
     run_calibration,
 )
 from smappy.metadata import CameraMetadata
@@ -57,7 +57,7 @@ def test_the_microscope_has_no_default_for_its_na_or_wavelength():
 def test_a_run_learns_saves_beside_the_stacks_and_recalculates_into_the_same_files(stack_file):
     run = run_calibration([stack_file], False, OPTICS, MODEL, DETECTION, camera=CAMERA)
     assert len(run.cal.beads.rows) == 10 and run.saved.parent == stack_file.parent.parent
-    assert run.saved.exists() and model_path(run.saved).exists()
+    assert run.saved.exists() and carries_model(run.saved)
     assert run.calibration.parameters["method"] == "uipsf2_pupil"
     again = run_calibration([stack_file], False, OPTICS, MODEL, DETECTION, previous=run, decisions={0: "exclude"})
     assert again.saved == run.saved and again.cal.beads.rows[0].state == "excluded"
@@ -255,7 +255,7 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     assert "± halves (nm)" in columns and np.isfinite([r[columns.index("± halves (nm)")] for r in rows]).any()
     _every_page_draws(window)
     from uipsf.export import load_model
-    assert load_model(model_path(window.run_result.saved), device="cpu").halves.n_splits == 2
+    assert load_model(window.run_result.saved, device="cpu").halves.n_splits == 2
     window.close()
 
 

@@ -28,7 +28,8 @@ class PSFCalibration(Plugin):
                    "model learnt in situ from the blinking molecules of a measurement; opens its own window")
     changes_locs = False
     Settings = PSFCalibrationSettings
-    version = "1"
+    # 2: the bead detection's: merged neighbours cost isolation, doubles by shape left out (`core.judge_shapes`)
+    version = "2"
     window = "psf calibration"
 
     def run(self, ctx: Context, settings: PSFCalibrationSettings) -> Result:

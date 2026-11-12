@@ -6,7 +6,7 @@ sample, with the focus some way into it, differs on both counts: the index misma
 and sample adds a spherical aberration that grows with the depth, and the light beyond the critical
 angle (SAF) reaches the objective only from emitters within a wavelength of the coverslip.  A bead
 average cannot be moved to another depth; a pupil learnt from the beads (uipsf, `pupil`) can: its
-model file, beside the spline (`pupil.model_path`), is drawn here for emitters at every height above
+model, inside the spline's file (`pupil.save`; an older one beside it, `pupil.model_path`), is drawn here for emitters at every height above
 the coverslip with the focus at ``focus_nm`` (`uipsf.export.sample_psf` with the emitter's depth), the
 aberrations the beads' and the sample's index the beads' medium unless given.
 
@@ -68,16 +68,24 @@ EDGE_MAX_BLUR = 3.0
 
 
 def model_file(cal) -> Optional[Path]:
-    """The uipsf model file a spline calibration was sampled from, if it names one and it is there."""
-    name = (cal.parameters or {}).get("model_file")
-    if not name or cal.source is None:
+    """Where the uipsf model a spline calibration was sampled from is, if it has one: the calibration file
+    itself, which carries it since November 2026 (`pupil.carries_model`), or the model file an older save
+    put beside it and named (``parameters["model_file"]``).  `uipsf.load_model` reads either."""
+    if cal.source is None:
         return None
-    path = Path(cal.source).with_name(str(name))
+    from .pupil import carries_model
+    source = Path(cal.source)
+    if source.suffix.lower() == ".h5" and carries_model(source):
+        return source
+    name = (cal.parameters or {}).get("model_file")
+    if not name:
+        return None
+    path = source.with_name(str(name))
     return path if path.is_file() else None
 
 
 def model_of(cal):
-    """The pupil model a spline calibration was drawn from, loaded, or None: the model file beside it
+    """The pupil model a spline calibration was drawn from, loaded, or None: the model it carries
     (`model_file`), or the microscope's pupil it records (``parameters["pupil"]``, `microscope_psf`) --
     two places, one model, so that *focus* draws either alike."""
     path = model_file(cal)
@@ -177,8 +185,8 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
     if learned is None:
         learned = model_of(cal)
         if learned is None:
-            raise ValueError(f"{Path(cal.source).name if cal.source else 'the calibration'} has no pupil model "
-                             f"beside it: a focus in the sample needs a calibration made with the pupil (Zernike) "
+            raise ValueError(f"{Path(cal.source).name if cal.source else 'the calibration'} carries no pupil "
+                             f"model: a focus in the sample needs a calibration made with the pupil (Zernike) "
                              f"method, or the microscope's pupil")
     model, shared = with_medium(learned, n_med)
     dz, roi = float(cal.dz), _roi_px(cal)
@@ -444,7 +452,7 @@ def kept_path(key) -> Path:
 
 
 def keep(key, result: AutoDepth) -> Optional[Path]:
-    """The in situ ``result`` saved (`kept_path`): its spline, its model beside it, the key and the heights in
+    """The in situ ``result`` saved (`kept_path`): its spline with its model inside, the key and the heights in
     the spline's record, so `kept` gives it back without learning again.  Best effort: a cache."""
     try:
         from .pupil import save

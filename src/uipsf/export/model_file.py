@@ -4,7 +4,11 @@ uipsf's only output.  SMAPpy loads it with `load_model`, samples it with
 `LearnedPSF.psf` on a grid of its choosing and makes its spline from that
 (plan §6), so the spline's format and normalisation have one owner.
 
-**Layout** (``format = "uipsf-model"``, ``version`` = `VERSION`):
+**Where.**  A file of its own, or a group of another file: SMAPpy writes the model into its spline
+calibration (`save_model`'s ``group``, `EMBEDDED`), so that the spline and what it was drawn from travel as
+one file.  `load_model` finds it in either.
+
+**Layout** (``format = "uipsf-model"``, ``version`` = `VERSION`), from the file's or the group's root:
 
 - ``/model``: the components as a JSON description (`describe`; `build`
   makes the same model again), and every shared parameter in physical
@@ -435,53 +439,70 @@ def _np(t: torch.Tensor) -> np.ndarray:
     return t.detach().cpu().double().numpy()        # copy, then cast: MPS has no float64
 
 
-def save_model(cal, path) -> None:
-    """Write the `Calibration` ``cal`` to ``path`` (module docstring for the layout)."""
+#: The group of a SMAPpy calibration file its model is written into (`save_model`'s ``group``).
+EMBEDDED = "uipsf"
+
+
+def save_model(cal, path, group: str | None = None) -> None:
+    """Write the `Calibration` ``cal`` to ``path`` (module docstring for the layout): the whole file, or
+    with ``group`` a group of that name in an existing HDF5 file, replaced if there, the rest of the file
+    kept.  SMAPpy writes its spline calibration's model so (`EMBEDDED`), one file that cannot lose it."""
+    if group is None:
+        with h5py.File(path, "w") as f:
+            _write(f, cal)
+        return
+    with h5py.File(path, "a") as f:
+        if group in f:
+            del f[group]
+        _write(f.create_group(group), cal)
+
+
+def _write(f, cal) -> None:
+    """The layout into ``f``, a file or a group."""
     from .. import __version__
     res = cal.result
     params = res.params
-    with h5py.File(path, "w") as f:
-        version = VERSION
-        f.attrs.update(format=FORMAT, version=version, conventions=CONVENTIONS,
-                       uipsf=__version__)
-        m = f.create_group("model")
-        m.attrs["config"] = _json(describe(cal.model))
-        if getattr(cal, "geometry", None) is not None:
-            m.attrs["geometry"] = _json(cal.geometry)
-        if getattr(cal, "options", None) is not None:
-            m.attrs["options"] = _json(cal.options)
-        pg, cg = m.create_group("params"), m.create_group("crlb")
-        for n, v in cal.shared().items():
-            pg[n] = _np(v)
+    version = VERSION
+    f.attrs.update(format=FORMAT, version=version, conventions=CONVENTIONS,
+                   uipsf=__version__)
+    m = f.create_group("model")
+    m.attrs["config"] = _json(describe(cal.model))
+    if getattr(cal, "geometry", None) is not None:
+        m.attrs["geometry"] = _json(cal.geometry)
+    if getattr(cal, "options", None) is not None:
+        m.attrs["options"] = _json(cal.options)
+    pg, cg = m.create_group("params"), m.create_group("crlb")
+    for n, v in cal.shared().items():
+        pg[n] = _np(v)
+        if n in res.std:
+            cg[n] = _np(res.std[n])
+    halves = getattr(cal, "halves", None)
+    if halves is not None:
+        # optional: a file without it is read as before, so the format's version stays
+        hg = m.create_group("halves")
+        hg.attrs.update(splits=_json(halves.splits), seed=int(halves.seed))
+        for n, v in halves.std.items():
+            hg[n] = np.asarray(v, float)
+            hg[n + ".values"] = np.asarray(halves.values[n], float)
+    fg = f.create_group("fit")
+    fg.attrs.update(objective=float(res.objective), stop_reason=res.stop_reason, converged=bool(res.converged),
+                    iterations=res.iterations, condition=float(res.condition), remaining=float(res.remaining),
+                    history=_json(res.history),
+                    covariance_layout=_json([[n, a, b] for n, a, b in params.layout("shared")]))
+    fg["covariance_shared"] = _np(res.covariance_shared)
+    eg = fg.create_group("emitters")
+    for n, v in params.physical().items():
+        if params.specs[n].scope == "emitter":
+            eg[n] = _np(v)
             if n in res.std:
-                cg[n] = _np(res.std[n])
-        halves = getattr(cal, "halves", None)
-        if halves is not None:
-            # optional: a file without it is read as before, so the format's version stays
-            hg = m.create_group("halves")
-            hg.attrs.update(splits=_json(halves.splits), seed=int(halves.seed))
-            for n, v in halves.std.items():
-                hg[n] = np.asarray(v, float)
-                hg[n + ".values"] = np.asarray(halves.values[n], float)
-        fg = f.create_group("fit")
-        fg.attrs.update(objective=float(res.objective), stop_reason=res.stop_reason, converged=bool(res.converged),
-                        iterations=res.iterations, condition=float(res.condition), remaining=float(res.remaining),
-                        history=_json(res.history),
-                        covariance_layout=_json([[n, a, b] for n, a, b in params.layout("shared")]))
-        fg["covariance_shared"] = _np(res.covariance_shared)
-        eg = fg.create_group("emitters")
-        for n, v in params.physical().items():
-            if params.specs[n].scope == "emitter":
-                eg[n] = _np(v)
-                if n in res.std:
-                    eg[n + ".crlb"] = _np(res.std[n])
-        bg = f.create_group("beads")
-        bg.attrs.update(table=_json(cal.beads.as_dicts()), thresholds=_json(cal.beads.thresholds),
-                        settings=_json(cal.settings), used=_json(cal.beads.used), heldout=_json(cal.heldout))
-        dg = f.create_group("diagnostics")
-        dg.attrs["atlas"] = _json(_atlas(cal.atlas))
-        rep = cal.heldout_report
-        dg.attrs["heldout"] = _json(None if rep is None else dict(dataclasses.asdict(rep), summary=rep.summary()))
+                eg[n + ".crlb"] = _np(res.std[n])
+    bg = f.create_group("beads")
+    bg.attrs.update(table=_json(cal.beads.as_dicts()), thresholds=_json(cal.beads.thresholds),
+                    settings=_json(cal.settings), used=_json(cal.beads.used), heldout=_json(cal.heldout))
+    dg = f.create_group("diagnostics")
+    dg.attrs["atlas"] = _json(_atlas(cal.atlas))
+    rep = cal.heldout_report
+    dg.attrs["heldout"] = _json(None if rep is None else dict(dataclasses.asdict(rep), summary=rep.summary()))
 
 
 def _field_dependent(model) -> bool:
@@ -500,11 +521,33 @@ def _read(attr):
     return json.loads(attr if isinstance(attr, str) else attr.decode())
 
 
+def model_group(f):
+    """Where a model is in the open HDF5 file ``f``: the file itself (a model file), the `EMBEDDED` group
+    (a SMAPpy calibration that carries its model), or None."""
+    if f.attrs.get("format") == FORMAT:
+        return f
+    inner = f.get(EMBEDDED)
+    if isinstance(inner, h5py.Group) and inner.attrs.get("format") == FORMAT:
+        return inner
+    return None
+
+
+def has_model(path) -> bool:
+    """Whether the HDF5 file at ``path`` is a model file or carries a model; False for anything else."""
+    try:
+        with h5py.File(path, "r") as f:
+            return model_group(f) is not None
+    except (OSError, ValueError):
+        return False
+
+
 def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
-    """The model file at ``path``, ready for `LearnedPSF.psf`."""
-    with h5py.File(path, "r") as f:
-        if f.attrs.get("format") != FORMAT:
-            raise ValueError(f"{path} is not a uipsf model file")
+    """The model at ``path``, ready for `LearnedPSF.psf`: a model file, or a SMAPpy calibration carrying one
+    (`EMBEDDED`)."""
+    with h5py.File(path, "r") as root:
+        f = model_group(root)
+        if f is None:
+            raise ValueError(f"{path} is not a uipsf model file and carries no model")
         if int(f.attrs["version"]) > VERSION:
             raise ValueError(f"{path} is model-file version {int(f.attrs['version'])}; this uipsf reads up to "
                              f"{VERSION}")

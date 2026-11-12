@@ -2,7 +2,7 @@
 title: Bead calibration
 summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
 widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.merged_neighbours, smappy.calibrate.core.judge_shapes, smappy.calibrate.core.shape_scores, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
 ---
 
 ## What it does
@@ -97,7 +97,14 @@ pair closer than *min distance*: two overlapping PSFs are not one PSF.  A
 faint speck does not count as a neighbour -- a spot whose height in the
 projection is below the typical bead's divided by the square root of
 *brightness range* -- so dust beside a bead does not cost the bead; bright
-dirt and anything saturated still do.
+dirt and anything saturated still do.  The smoothing can merge a second bead
+5 to 7 pixels from the first into one spot, so the projection is searched
+again with half the smoothing, and a spot found there away from every bead
+counts as a neighbour too.  Two beads closer than that -- 2 pixels, say --
+are one spot to any search; they are told by their **shape**: each bead's
+maximum projection is compared with the median of all, and a bead far from
+it (*doubles (k)*) is marked a double and excluded, as by hand, where the
+table lets it in again.
 
 **2. Cut them out.**  Around each bead a box of *bead box* pixels (plus a
 margin, *padding*, for the alignment to shift into) is cut from every plane.
@@ -292,6 +299,37 @@ specks a low *threshold* finds: on the Zenodo example beads, 60 to 332 specks
 beside 58 beads.  The height, not the box's light, judges a neighbour: a box
 around a speck beside a bead holds the bead's light too.  With no *brightness
 range*, every neighbour counts.
+
+**Merged neighbours.**  The projection is searched again with half the
+smoothing, *detection sigma*/2, by the same rule.  A maximum found there at
+least 3 pixels from every maximum of the first search is a neighbour the
+smoothing merged into a bead; within *min distance* of a bead it counts as
+above, its height $h$ taken on the first search's scale by the ratio of the
+two smoothed projections at the bead.  The beads' own projections stay one
+maximum at half the smoothing: on the DECODE and Zenodo example beads none
+split, though an astigmatic bead's defocused lobes lie 2 pixels either side
+of its centre.  On the DECODE example beads this drops 5 of 104 beads, each
+a double 5 to 7 pixels apart.
+
+**Doubles by shape.**  Each bead's maximum projection over z, in a square
+of 17 pixels (at most the *bead box*), less the median of its border and
+clipped at zero, is moved by its centre of mass to the middle (linear
+interpolation) and divided by its sum.  Its score is the sum of its absolute
+differences from the median of all these, between 0 and 2.  The maximum
+projection does not depend on the plane a bead's focus is in, so beads at
+different heights compare.  With $s_\mathrm{med}$ the median score and
+$\sigma_s$ 1.4826 times the scores' median absolute deviation, over the
+beads with specks left out, a bead scoring above
+
+$$s_\mathrm{med} + \max\left( k\, \sigma_s, s_\mathrm{med} \right)$$
+
+is marked a double, $k$ the *doubles (k)*; it is excluded as a bead
+excluded by hand is.  Fewer than five beads have no median to go by, and
+none is marked.  On the DECODE example beads, taken on an EMCCD with an
+astigmatic lens, the doubles scored 0.22 to 0.71 against a median of 0.09
+($\sigma_s$ 0.03); on the Zenodo example beads the highest of 58 scored
+0.16 against 0.08, and of the field-dependence set's, whose shapes change
+over the chip, 0.73 against 0.25 ($\sigma_s$ 0.10): none marked in either.
 
 **Extraction.**  A box of $n + 2p$ pixels ($n$ the *bead box*, $p$ the
 *padding*) is cut from every plane; $b$, the median of its outermost pixels
@@ -494,6 +532,13 @@ Larger than twice the half-width of a defocused bead's spot, or the tails
 of a neighbour end up in the model.  Beads closer than this are both
 dropped, so dense fields lose many beads.  Faint specks do not count as
 neighbours (*brightness range* decides what is faint).
+
+### doubles (k)
+How far, in robust standard deviations of the beads' shape scores, a bead's
+shape may be from the median before it is marked a double; never closer than
+twice the median score.  Lower it if doubles are missed (look at the
+maximum projection in the bead table's selection), raise it if single beads
+are marked; auto marks none.
 
 ### smoothing z
 The width of the smoothing along z.  About one to two z steps is usual.

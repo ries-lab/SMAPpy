@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.calibrate.core.calibrate, smappy.calibrate.dual.calibrate_dual]
 ---
 

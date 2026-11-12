@@ -151,3 +151,54 @@ def test_a_two_channel_model_file_keeps_each_channels_psf_transform_and_share(op
     psf1 = model.channels[1].psf
     own = psf1(uipsf.model.channels.view(p, 1), (xyz + torch.tensor([0.0, 0.0, float(p["ch1.dz"])]))[None])[0]
     assert torch.allclose(m.psf(xyz, channel=1), float(p["ch1.share"]) * own, atol=1e-7)
+
+
+def test_a_model_written_into_a_group_of_another_file_loads_the_same_and_leaves_the_rest(calibration, tmp_path):
+    # how SMAPpy keeps a calibration's model inside its spline file (`pupil.save`)
+    from uipsf.export.model_file import EMBEDDED, has_model
+    cal, _ = calibration
+    path = tmp_path / "beads_3dcal.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["format"] = "smappy-spline-calibration"
+        f["coeff"] = np.arange(4.0)
+    assert not has_model(path)
+    save_model(cal, path, group=EMBEDDED)
+    save_model(cal, path, group=EMBEDDED)                     # written again: replaced, not refused
+    with h5py.File(path) as f:
+        assert f.attrs["format"] == "smappy-spline-calibration" and np.array_equal(f["coeff"], np.arange(4.0))
+        assert f[EMBEDDED].attrs["format"] == "uipsf-model"
+    assert has_model(path) and not has_model(tmp_path / "missing.h5")
+    xyz = torch.tensor([[0.0, 0.0, 0.0], [30.0, -20.0, 250.0]])
+    assert torch.allclose(load_model(path).psf(xyz), cal.psf(xyz), atol=1e-7)
+
+
+def test_a_calibration_saved_with_its_model_is_found_by_the_focus_and_by_start_from(calibration, tmp_path):
+    from smappy.calibrate import depth
+    from smappy.calibrate.pupil import carries_model, load_start, model_path, save, spline_calibration
+    from smappy.io.calibration import load_spline_calibration
+    cal, _ = calibration
+    path = save(tmp_path / "beads_3dcal.h5", cal, spline_calibration(cal, 50.0, 400.0, roi_size=15))
+    assert carries_model(path) and not model_path(path).exists()
+    loaded = load_spline_calibration(path)
+    assert depth.model_file(loaded) == path and depth.has_model(loaded)
+    xyz = torch.tensor([[0.0, 0.0, 100.0]])
+    assert torch.allclose(depth.model_of(loaded).psf(xyz.double()).float(), cal.psf(xyz), atol=1e-6)
+    assert torch.allclose(load_start(path).psf(xyz), cal.psf(xyz), atol=1e-7)
+
+
+def test_an_older_calibration_with_its_model_file_beside_it_is_still_read(calibration, tmp_path):
+    from smappy.calibrate import depth
+    from smappy.calibrate.pupil import load_start, model_path, spline_calibration
+    from smappy.io.calibration import load_spline_calibration, save_spline_calibration
+    cal, _ = calibration
+    spline = spline_calibration(cal, 50.0, 400.0, roi_size=15)
+    path = tmp_path / "old_3dcal.h5"
+    spline.parameters["model_file"] = model_path(path).name           # as saved until November 2026
+    save_spline_calibration(path, spline)
+    save_model(cal, model_path(path))
+    loaded = load_spline_calibration(path)
+    assert depth.model_file(loaded) == model_path(path)
+    xyz = torch.tensor([[0.0, 0.0, 100.0]])
+    assert torch.allclose(load_start(path).psf(xyz), cal.psf(xyz), atol=1e-7)
+    model_path(path).unlink()
+    assert depth.model_file(loaded) is None and not depth.has_model(loaded)

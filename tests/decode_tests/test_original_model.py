@@ -93,14 +93,15 @@ def test_the_columns_are_where_spline_3d_finds_the_molecules():
     original = load_original(PACKAGE / "param_run.yaml", PACKAGE / "model.pt", frames_mirrored=True, device=GPU)
     camera = {"baseline": 398.6, "e_per_adu": 5.0, "em_gain": 50.0}             # frames_meta.yaml's
     port = original.to_columns(original.localize(frames, camera), frames.shape, (100.0, 100.0))
-    # Spline 3D on the frames flipped as the notebook flipped them: the beads were taken without EM
-    # gain, so SMAPpy keeps the spline as it is, mirrored against these frames
+    # Spline 3D on the frames as recorded: the beads were taken without EM gain and the data with it, so
+    # SMAPpy mirrors the spline to the data (`io.calibration.matched_to_em`), as the notebook flipped the
+    # frames by hand
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        fit = api.fit(np.ascontiguousarray(frames[..., ::-1]), calibration=PACKAGE / "spline_calibration_3dcal.mat",
+        fit = api.fit(np.ascontiguousarray(frames), calibration=PACKAGE / "spline_calibration_3dcal.mat",
                       camera={"conversion": 5.0, "offset": 398.6, "pixelsize_um": 0.1, "em_on": True, "emgain": 50.0},
                       cutoff=1.7, cutoff_mode="dynamic")
-    sx = (frames.shape[-1] - 1) * 100.0 - np.asarray(fit.columns["x_nm"], np.float64)
+    sx = np.asarray(fit.columns["x_nm"], np.float64)
     sy, sz = (np.asarray(fit.columns[k], np.float64) for k in ("y_nm", "z_nm"))
     sframe = np.asarray(fit.columns["frame"]).astype(int)
     sframe -= sframe.min()

@@ -53,7 +53,24 @@ def test_an_em_mismatch_is_reported_where_the_user_reads_it(tmp_path, calibratio
     with pytest.warns(UserWarning, match="EM gain mismatch"):
         SplineFit()._model_telling(Context(progress=told.append), settings,
                                    CameraMetadata(em_on=False))
-    assert any("EM gain mismatch" in line for line in told)
+    assert any("EM gain mismatch" in line and "mirrored" in line for line in told)
+
+
+def test_beads_taken_with_the_other_em_gain_give_a_spline_mirrored_in_x(tmp_path, calibration):
+    """As the DECODE fitter flips its frames: the model of the mirrored beads, the data's way round."""
+    from smappy.io.calibration import evaluate_spline
+    calibration.em_on = False
+    path = tmp_path / "em_off.h5"
+    save_spline_calibration(path, calibration)
+    settings = SplineModelSettings(calibration=str(path))
+    with pytest.warns(UserWarning, match="mirrored in x"):
+        mirrored = settings.model(CameraMetadata(em_on=True)).calibration
+    same = settings.model(CameraMetadata(em_on=False)).calibration
+    assert mirrored.em_on is True and same.em_on is False
+    R, x, y, z = 13, 5.3, 6.4, same.coeff.shape[1] / 2 + 0.3
+    np.testing.assert_allclose(evaluate_spline(mirrored, R - 1 - x, y, z, R),
+                               evaluate_spline(same, x, y, z, R)[:, ::-1], rtol=1e-4, atol=1e-7)
+    assert settings.model(CameraMetadata(em_on=None)).calibration.coeff.shape == same.coeff.shape
 
 
 def test_a_roi_larger_than_the_calibration_is_refused(tmp_path, calibration):

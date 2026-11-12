@@ -647,7 +647,9 @@ MPS, atlas deviance 1.377, σ (66.96, 74.81) nm.  `--slow -n auto`: 132 passed, 
 
 ## The model file (`export/model_file.py`, plan §5.8)
 
-- `save_model(cal, path)` writes one HDF5 file, `format = "uipsf-model"`, `version = 1`:
+- `save_model(cal, path, group=None)` writes one HDF5 file, `format = "uipsf-model"`, `version = 1` --
+  or, with `group`, the same layout into a group of another file, which SMAPpy uses to keep the model inside
+  its spline calibration (`EMBEDDED`, "uipsf"); `load_model` finds it in either (`model_group`):
   - `/model`: the components as JSON (`describe`; `build` makes the same `ForwardModel` again), the
     optics, every shared parameter in physical units (`/model/params/<name>`) and its CRLB
     (`/model/crlb/<name>`); the Noll indices are in the description, in the coefficients' order;
@@ -656,7 +658,7 @@ MPS, atlas deviance 1.377, σ (66.96, 74.81) nm.  `--slow -n auto`: 132 passed, 
   - `/beads`: the bead table, its thresholds, the rejection settings, the held-out beads;
   - `/diagnostics`: the residual atlas and the held-out report.
   No data: the stacks are the user's files, and the file stays small.
-- `load_model(path)` returns a `LearnedPSF` (model, shared values, CRLBs and the record), not a
+- `load_model(path)` (a model file, or a calibration that carries one) returns a `LearnedPSF` (model, shared values, CRLBs and the record), not a
   `Calibration`: what SMAPpy needs is the PSF, and a `Calibration` would need the stacks back.
   `LearnedPSF.zernikes()` lists (Noll, coefficient, CRLB).
 - `LearnedPSF.psf(xyz_nm, roi_px, depth_nm, include_bead, upsample)` and `Calibration.psf` sample the
@@ -921,9 +923,9 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   bead's size left out.  One channel: clipped at zero, the brightest plane summing to one, no smoothing,
   as `_single_model`.  Two: `positive_pair_models` with smoothing off, the model's transform and split,
   so `photon_normalization` is each channel's learnt share.  `parameters` records `method = "uipsf2_pupil"`,
-  every channel's Zernikes with CRLBs, the settings, the sampling and, once saved, `model_file`.  `save`
-  writes `x_3dcal.h5` and the model file `x_3dcal.uipsf.h5` beside it; a loaded model file re-samples
-  without learning.  On 12 simulated astigmatic beads (`tests/uipsf_tests/test_pupil_spline.py`, the
+  every channel's Zernikes with CRLBs, the settings and the sampling.  `save` writes `x_3dcal.h5` with the
+  model inside it, in the group `uipsf` (until November 2026 a model file `x_3dcal.uipsf.h5` beside it,
+  named by `model_file`, which is still read); a loaded model re-samples without learning.  On 12 simulated astigmatic beads (`tests/uipsf_tests/test_pupil_spline.py`, the
   pixels integrated 8 × 8 as a camera records them), Spline 3D with the learnt model's spline fits frames
   of the true PSF with z bias 0.1 nm and spread 11.1 nm (the bead average of the same stack: −4.2 and
   13.7 nm, the same way up), photons within 0.2 % of the bead average's.
@@ -1508,7 +1510,7 @@ average and the pupil model; the window shows its section and knows nothing else
 - **Pages**: *z bins*, *Rounds and edge*, uipsf's *Pupil and Zernikes*, *Zernike table* and *Residual
   atlas*, and *Model vs data* per height bin (`insitu_views`).
 - **Saved** as the pupil model is: the spline beside the movies under the bead calibration's name, the model
-  file beside it (its geometry *in situ*, the focus with it; `export.model_file`).  The spline samples the
+  inside it (its geometry *in situ*, the focus with it; `export.model_file`).  The spline samples the
   model at the learnt focus through the used heights ± 100 nm, every 20 nm (`insitu_spline`); its z is the
   height above the plane in focus (z = 0 at the sharpest plane) or above the coverslip (the grid then
   reaching 0, since z0 must lie on it), recorded in its parameters with the focus and the offset.

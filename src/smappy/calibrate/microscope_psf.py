@@ -10,9 +10,9 @@ state -- and smappy samples the drawing into a spline, as a pupil model's calibr
 
 **One file, not a second path through the fitter.**  The spline is written to the configuration directory
 (`MICROSCOPE_FOLDER`, named by what it was drawn from, so a file is drawn once) and records the pupil and the
-optics in its parameters (``pupil``), where a pupil model's calibration names its model file.  Spline 3D then
+optics in its parameters (``pupil``), where a pupil model's calibration carries its model.  Spline 3D then
 reads it as any calibration, and its *focus* draws it for the focus in the sample from the record
-(`depth.model_of`) as it draws a bead model from the file beside it: nothing downstream knows the difference.
+(`depth.model_of`) as it draws a bead model from its calibration: nothing downstream knows the difference.
 
 **It is the beads' PSF, not the data's.**  A bead calibration of the day is better: the pupil is the
 objective's as it was when the beads were taken, the blur theirs; the coverslip, the sample's index and a

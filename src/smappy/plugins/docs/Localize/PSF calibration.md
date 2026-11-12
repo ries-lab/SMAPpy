@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.calibrate.pupil.run_calibration, smappy.calibrate.insitu_run.run_insitu]
 ---
 
@@ -24,7 +24,7 @@ Saved, it is turned into the same kind of
 [spline calibration](plugin:Panels/Glossary) the bead calibration writes, so
 [Spline 3D](plugin:Localize/Spline 3D) and
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C) read either alike, and the
-model file is kept beside it.
+model is kept inside the same file.
 
 This section only opens the [PSF calibration window](plugin:Panels/PSF calibration),
 with the *Open* button in its title bar; the window's page explains the

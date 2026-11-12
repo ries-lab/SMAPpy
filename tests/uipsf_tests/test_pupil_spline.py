@@ -8,7 +8,7 @@ import pytest
 import torch
 from smappy.calibrate.core import CalibrationSettings, calibrate
 from smappy.calibrate.input import BeadStack
-from smappy.calibrate.pupil import model_path, save, single_rois, spline_calibration, z_grid
+from smappy.calibrate.pupil import carries_model, model_path, save, single_rois, spline_calibration, z_grid
 from smappy.io.calibration import load_spline_calibration
 from smappy.metadata import CameraMetadata
 from smappy.psf import SplinePSF
@@ -101,16 +101,17 @@ def test_spline_3d_with_the_learnt_model_finds_the_true_z_and_the_bead_average_a
 
 
 @pytest.mark.long
-def test_the_calibration_and_its_model_file_are_saved_side_by_side(learnt, tmp_path):
+def test_the_calibration_carries_its_model_in_one_file(learnt, tmp_path):
     _, _, cal, _, _ = learnt
     spline = spline_calibration(cal, 50.0, 600.0, roi_size=ROI)
-    path, beside = save(tmp_path / "beads_3dcal.h5", cal, spline)
-    assert beside == model_path(path) == tmp_path / "beads_3dcal.uipsf.h5" and beside.exists()
+    model_path(tmp_path / "beads_3dcal.h5").write_bytes(b"an earlier save's")
+    path = save(tmp_path / "beads_3dcal.h5", cal, spline, overwrite=True)
+    assert carries_model(path) and not model_path(path).exists()      # the stale model file beside it removed
     loaded = load_spline_calibration(path)
-    assert loaded.parameters["model_file"] == "beads_3dcal.uipsf.h5"
+    assert "model_file" not in loaded.parameters
     assert loaded.parameters["zernikes"][0]["phase"][0][0] == 5                # Noll 5 first, with its CRLB
     assert np.allclose(loaded.coeff, spline.coeff)
-    again = spline_calibration(uipsf.load_model(beside, device="cpu"), 50.0, 600.0, roi_size=ROI)
+    again = spline_calibration(uipsf.load_model(path, device="cpu"), 50.0, 600.0, roi_size=ROI)
     assert np.allclose(again.psf, spline.psf, atol=1e-6)               # re-sampled from the file, not relearnt
     with pytest.raises(FileExistsError):
         save(path, cal, spline)

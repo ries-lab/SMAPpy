@@ -188,7 +188,7 @@ spherical aberration that grows with the depth.  And only molecules within
 about a wavelength of the coverslip send the extra light beyond the critical
 angle ([SAF](plugin:Panels/Glossary), supercritical-angle fluorescence) into
 the objective.  A calibration made with the pupil (Zernike) method keeps its
-model beside the spline.  From it, the fit draws a new spline for the sample:
+model inside the spline's file.  From it, the fit draws a new spline for the sample:
 the beads' aberrations, with molecules at every height above the coverslip
 and the objective's focus moved *position* into the sample.  z is then the
 **height above the coverslip**, not the objective's movement.

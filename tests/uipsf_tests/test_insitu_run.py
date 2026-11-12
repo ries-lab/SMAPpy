@@ -134,7 +134,7 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
     # rounds learn is test_insitu_rounds', the window's full-size model the benchmark's
     # (benchmarks/uipsf/synthetic/insitu_movie.py).
     from smappy.calibrate.insitu_run import run_insitu
-    from smappy.calibrate.pupil import model_path
+    from smappy.calibrate.pupil import carries_model
 
     import uipsf
     import uipsf.workflows
@@ -145,9 +145,9 @@ def test_a_movie_becomes_a_saved_in_situ_calibration(movie_file, tmp_path, monke
     result = run_insitu([path], OPTICS_SETTINGS, small(),
                         InSituModelSettings(focus_nm=500.0, astigmatism_nm=0.4 * 680 / (2 * np.pi), max_rounds=1),
                         SELECTION, camera=CAMERA, save_to=tmp_path / "insitu_3dcal.h5")
-    assert result.saved.exists() and model_path(result.saved).exists()
+    assert result.saved.exists() and carries_model(result.saved)
     assert result.calibration.parameters["method"] == "uipsf2_insitu"
-    learned = uipsf.load_model(model_path(result.saved), device="cpu")
+    learned = uipsf.load_model(result.saved, device="cpu")
     assert learned.model.geometry.focus_nm == pytest.approx(result.model.geometry.focus_nm)
     assert float(learned.shared["geometry.focus"]) == pytest.approx(float(result.cal.shared()["geometry.focus"]))
 
@@ -159,7 +159,6 @@ def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_
     # asserted.  Whether a tilt is found is test_tilt's (the model) and test_coverslip_calibration's (the
     # window, beads).
     from smappy.calibrate.insitu_run import run_insitu
-    from smappy.calibrate.pupil import model_path
 
     import uipsf
     import uipsf.workflows
@@ -175,7 +174,7 @@ def test_learn_coverslip_tilt_learns_it_in_situ_and_keeps_it_in_the_files(movie_
     degrees, crlb = coverslip_tilt(result.cal)
     assert np.all(np.isfinite(crlb)) and np.all(crlb > 0), (degrees, crlb)
     assert np.allclose([v for v, _ in result.calibration.parameters["coverslip_tilt_deg"]], degrees)
-    learned = uipsf.load_model(model_path(result.saved), device="cpu")
+    learned = uipsf.load_model(result.saved, device="cpu")
     assert np.allclose(np.degrees(learned.shared["geometry.tilt"].numpy()), degrees, atol=1e-6)
 
 

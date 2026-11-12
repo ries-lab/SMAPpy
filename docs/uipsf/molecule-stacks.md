@@ -35,8 +35,8 @@ of it: points at h ≈ 0, which is what a single-molecule fit needs, and what te
   the coverslip's edge, a measured focus-per-height ratio, a scalar focus prior.  With z known, the rounds are
   learn, check z, drop what fails, learn again.  Nor its twin test: the stage's z fixes the sign.
 * **What is a bead model's**: the learning (`learn_beads`: stage 1 to order 4, the beads' rejection, stage 2),
-  and the result -- a spline at the coverslip against defocus, listed for Spline 3D's *auto*, its model file
-  beside it for Spline 3D's focus model; a dual calibration for Spline 3D 2C.
+  and the result -- a spline at the coverslip against defocus, listed for Spline 3D's *auto*, its model inside
+  the same file for Spline 3D's focus model; a dual calibration for Spline 3D 2C.
 
 ## The geometry (`uipsf.model.CoverslipStackGeometry`)
 

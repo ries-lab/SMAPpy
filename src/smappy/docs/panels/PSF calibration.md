@@ -88,8 +88,11 @@ learning has its own section after them, and the bead average's are on the
 **Looking at the stacks.**  The *Stacks* page shows each added file as it was
 recorded, one plane at a time, with a slider for the file and one for the
 plane.  After *Detect beads* each bead found is ringed and numbered with its
-row in the table; after a calibration the ring's colour says whether it was
-used (blue) or rejected (red).  Clicking a ring selects the bead.
+row in the table: cyan, or red for one *too dim* or a *double?*; after a
+calibration the ring's colour says whether it was used (blue), excluded
+(grey) or rejected (red).  A mark made in the table and not yet applied by
+*Calibrate* dashes the ring, in the colour it will take.  Clicking a ring
+selects the bead.
 
 **Finding the beads** is the bead calibration's own: the same detection, the
 same settings under *beads*, the same verdict on each bead's brightness.  Of
@@ -99,8 +102,12 @@ fainter than the typical bead (below it divided by the square root of
 light, so a crowd of specks does not pull it down) is a speck, not a bead,
 and its fit would be noise.  A pair of two channels is judged by its light
 in both together.  Specks do not cost a bead its isolation either, so a lower
-*threshold* finds more beads rather than fewer.  A *too bright* bead is kept and judged by its fit, which
-shows a doublet.  The camera's numbers come from the camera database, as a fit of
+*threshold* finds more beads rather than fewer.  A second bead the detection's
+smoothing merged into the first costs it its isolation, and a bead whose shape
+is far from the others' -- two beads closer than any search can split -- is
+marked *double?* and excluded on Calibrate, a dashed red ring, where space
+lets it in again (the bead calibration's page says how both are found).  A
+*too bright* bead is kept and judged by its fit, which shows a doublet.  The camera's numbers come from the camera database, as a fit of
 the same files would take them.
 
 **Cutting** one box of raw pixels around each bead, converted to photons, with
@@ -172,8 +179,12 @@ point on the central pixel is computed on a grid through the z range every
 used bead covers,
 each pixel as the model saw it when it learnt, and normalised as the bead
 average is.
-The calibration and the model file go beside the stacks, named as the bead
-calibration names them, and the calibration goes to the fitter.
+The calibration goes beside the stacks, named as the bead calibration names
+it, with the model inside the same file, and goes to the fitter.  One file:
+the spline cannot be copied without the model it was drawn from, which
+Spline 3D's *focus* and in situ read, and *start from* starts from.  A calibration
+saved before November 2026 has its model in a `.uipsf.h5` file beside it;
+that is still read.
 
 ## In detail
 
@@ -555,8 +566,8 @@ moves by more than its noise, or after three.
 
 **What it gives.**  A spline as the pupil model's from beads -- the PSF of a
 molecule at the learnt height against defocus, z = 0 in focus -- for
-[Spline 3D](plugin:Localize/Spline 3D) on *auto*, and its model file beside
-it, which Spline 3D's focus model reads for data deeper in the sample.  The
+[Spline 3D](plugin:Localize/Spline 3D) on *auto*, with its model inside the
+same file, which Spline 3D's focus model reads for data deeper in the sample.  The
 pages: *Selection* (the molecules by defocus and state), *z check* (the bend
 -- the median offset per 100 nm of defocus -- and the scatter, in CRLBs),
 *Foci and plane*, the pupil's pages as for beads, and *Model vs data* per
@@ -745,13 +756,13 @@ are offered: in situ and the elliptical Gaussian are single-channel; the
 molecules on the coverslip single channel and dual colour.
 
 ### start from
-Pupil model only, under *model*.  A previous model of this microscope: its `.uipsf.h5` file, or the calibration
-saved beside it.  It starts the learning and is drawn beside the new
+Pupil model only, under *model*.  A previous model of this microscope: its calibration, which carries
+the model, or for an older one its `.uipsf.h5` file.  It starts the learning and is drawn beside the new
 Zernikes, so a change in the microscope shows.  Empty, the learning starts
 from the beads alone.
 
 ### save model
-On: the calibration (and for the pupil model, the model file) is saved beside
+On: the calibration (for the pupil model with the model inside it) is saved beside
 the stacks, named as the bead calibration names it and never over another
 file, and handed to the fitter.  Off: the figures only; *Save as...* still
 saves.
@@ -1235,7 +1246,7 @@ fits of half the beads); 3 splits give the error bar to about ±40 %, 5 to
 about ±30 %, and more add little when the beads are few, since the splits
 then overlap.  *Stop* stops it.  The result goes into the *Pupil and
 Zernikes* pages and the *Zernike table*, and, when the calibration was
-saved, into its model file.
+saved, into the model the calibration carries.
 
 Against the CRLB it shows what the CRLB leaves out: beads that differ from
 one another, and a learning that does not end in one place from one start.

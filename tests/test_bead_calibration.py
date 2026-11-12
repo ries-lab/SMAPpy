@@ -439,3 +439,89 @@ def test_a_region_keeps_only_the_beads_found_inside_it():
     half, _, heights, _ = find_peaks(images.astype(np.float32), CalibrationSettings(region=(40, 0, 40, 40)))
     assert sorted(whole[:, 1].tolist()) == [20, 60]
     assert half[:, 1].tolist() == [60] and len(heights) == 1
+
+
+def _beads_with_doubles(partners, seed=0, size=126, n_z=41):
+    """A z-stack of astigmatic beads on a grid 30 px apart, each with ``partners[i]`` -- (dx, dy, relative
+    brightness) or None -- a second bead beside it; Poisson counts over a background of 100."""
+    rng = np.random.default_rng(seed)
+    z = np.linspace(-1.0, 1.0, n_z)
+    sx, sy = 1.3 + 0.8 * np.clip(z, 0, None) ** 2 * 3, 1.3 + 0.8 * np.clip(-z, 0, None) ** 2 * 3
+    yy, xx = np.mgrid[0:size, 0:size]
+    stack = np.full((n_z, size, size), 100.0)
+    centres = [(gx + rng.uniform(-0.5, 0.5), gy + rng.uniform(-0.5, 0.5))
+               for gy in (18, 48, 78, 108) for gx in (18, 48, 78, 108)]
+    for i, (cx, cy) in enumerate(centres):
+        spots = [(cx, cy, 1.0)]
+        if i < len(partners) and partners[i] is not None:
+            dx, dy, b = partners[i]
+            spots.append((cx + dx, cy + dy, b))
+        for x, y, b in spots:
+            for k in range(n_z):
+                stack[k] += b * 3000 * np.exp(-(xx - x) ** 2 / (2 * sx[k] ** 2) - (yy - y) ** 2 / (2 * sy[k] ** 2)) \
+                    / (sx[k] * sy[k])
+    return rng.poisson(stack).astype(np.float32), centres
+
+
+def test_a_second_bead_the_smoothing_merges_into_the_first_costs_it_its_isolation():
+    # 6 px apart, the second at 0.6 of the first: one spot after the 2 px detection smoothing, two at 1 px
+    from smappy.calibrate.core import CalibrationSettings, find_peaks, find_stack_beads
+    images, centres = _beads_with_doubles([(6, 0, 0.6)])
+    settings = CalibrationSettings(roi_size=15, min_distance_px=12)
+    yx, _, _, merged = find_peaks(images, settings)
+    assert len(yx) == 16                                   # the pair is one spot to the detection
+    first = int(np.argmin(np.hypot(yx[:, 1] - centres[0][0], yx[:, 0] - centres[0][1])))
+    assert len(merged[first]) == 1 and all(not m for i, m in enumerate(merged) if i != first)
+    found, _ = find_stack_beads(images, settings)
+    kept = {(r['x_px'], r['y_px']) for r in found}
+    assert len(found) == 15 and (yx[first, 1], yx[first, 0]) not in kept
+
+
+def test_two_beads_closer_than_any_search_splits_are_told_by_their_shape():
+    # 2 px apart, equally bright: one spot at any smoothing, marked a double; the 15 singles are not
+    from smappy.calibrate.core import CalibrationSettings, doubles, find_stack_beads
+    images, centres = _beads_with_doubles([(1.5, 1.5, 1.0)], seed=1)
+    found, _ = find_stack_beads(images, CalibrationSettings(roi_size=15, min_distance_px=12))
+    assert len(found) == 16
+    marked = [found[i] for i in doubles(found)]
+    assert len(marked) == 1
+    assert np.hypot(marked[0]['x_px'] - centres[0][0] - 0.75, marked[0]['y_px'] - centres[0][1] - 0.75) < 1.5
+    single = [r['shape'] for r in found if not r['double']]
+    assert marked[0]['shape'] > 2 * max(single)
+    assert all('_shape' not in r for r in found)           # a record is saved as JSON
+
+
+def test_no_double_is_marked_among_single_beads_or_on_auto():
+    from smappy.calibrate.core import CalibrationSettings, doubles, find_stack_beads
+    images, _ = _beads_with_doubles([], seed=2)
+    assert doubles(find_stack_beads(images, CalibrationSettings(roi_size=15, min_distance_px=12))[0]) == []
+    images, _ = _beads_with_doubles([(1.5, 1.5, 1.0)], seed=1)
+    off = CalibrationSettings(roi_size=15, min_distance_px=12, double_k=None)
+    assert doubles(find_stack_beads(images, off)[0]) == []
+
+
+def test_a_calibration_leaves_the_doubles_out_unless_told_otherwise():
+    from smappy.calibrate.core import BeadStack, CalibrationSettings, calibrate
+    images, _ = _beads_with_doubles([(1.5, 1.5, 1.0)], seed=1)
+    stack = BeadStack(images, np.arange(len(images)) * 50.0)
+    settings = CalibrationSettings(roi_size=15, min_distance_px=12, brightness_range=None)
+    default = calibrate([stack], settings)
+    every = calibrate([stack], settings, excluded=())
+    marked = [i for i, r in enumerate(default.beads.records) if r['double']]
+    assert len(marked) == 1 and default.reasons[marked[0]] == "manual exclusion"
+    assert every.reasons[marked[0]] != "manual exclusion"
+
+
+def test_a_double_is_marked_out_in_the_table_and_its_ring_drawn_red():
+    from types import SimpleNamespace
+    from smappy.calibrate.psf_methods import BeadAverage, Detected, PupilModel, _detected_rows
+    from smappy.calibrate.stack_browser import COLOURS, MARKED, REJECTED, ring_style
+    records = [{"x_px": 10, "y_px": 10, "brightness_accepted": True},
+               {"x_px": 40, "y_px": 10, "brightness_accepted": True, "double": True}]
+    detected = Detected(SimpleNamespace(records=records), "", [])
+    assert PupilModel().detected_marks(detected) == {1: "exclude"} == BeadAverage().detected_marks(detected)
+    rows = _detected_rows(("bead", "state"), records, {1: "exclude"}, str)
+    assert rows[0][0][1] == "found" and rows[1][0][1] == "double? -> exclude on Calibrate"
+    assert ring_style("double?") == (REJECTED, "-") and ring_style("too dim")[0] == REJECTED
+    assert ring_style("found") == (COLOURS["found"], "-")
+    assert ring_style("excluded" + MARKED) == (COLOURS["excluded"], "--")

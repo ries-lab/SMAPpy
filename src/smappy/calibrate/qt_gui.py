@@ -27,7 +27,7 @@ from ..gui.widgets import CollapsibleSection
 from ..plugins import ParamInfo, param_specs
 from . import plots
 from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
-                   calibration_save_path, collect_beads)
+                   calibration_save_path, collect_beads, doubles)
 from .dual import (BEAD_HELP, BEAD_UNUSED, DualColorSettings, build_dual_calibration,
                    collect_dual_beads, mirror_axis)
 from .input import discover_acquisitions
@@ -400,7 +400,9 @@ class CalibrationWindow(QMainWindow):
             if dual:
                 beads = collect_dual_beads(paths, settings)
                 return build_dual_calibration(beads)
-            return build_calibration(collect_beads(paths, settings))
+            beads = collect_beads(paths, settings)
+            # the beads marked doubles start excluded, as by hand: the table lets them in again
+            return build_calibration(beads, excluded=doubles(beads.records))
 
         self._work("result", job)
 

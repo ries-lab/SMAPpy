@@ -794,7 +794,7 @@ microscope...*), and in situ learning starts from it.  What is missing:
   (`benchmarks/uipsf/results/lab_beads.jsonl`), so a fresh install has them.
 * **A PSF from the description**: `uipsf` builds a `VectorPSF` from a kept pupil and the
   resolved optics (a constructor beside `export.sample_psf`), so that what today needs a
-  `.uipsf.h5` beside a spline can take the microscope's instead: *Simulate*'s PSF
+  model inside a spline's calibration can take the microscope's instead: *Simulate*'s PSF
   (*microscope's default*), Spline 3D's *focus* with no model file, and a first fit of
   astigmatic data with no calibration at all (a spline sampled from it, kept as a
   calibration in `calibration_list` marked *default*, never chosen by *auto* over a measured

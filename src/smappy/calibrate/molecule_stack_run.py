@@ -5,7 +5,7 @@ smappy reads, uipsf learns, as for beads (`pupil`) and in situ (`insitu_run`): t
 molecules found and chosen here (`molecule_stack`), uipsf learns the pupil in rounds with a z check after
 each (`uipsf.workflows.molecule_stack`), and the result is saved as a bead model's -- the spline the fitter
 reads, a PSF at the coverslip against defocus, listed for Spline 3D's *auto* and usable with its focus
-model (`depth`), the model file beside it.  What it adds to a bead model:
+model (`depth`), its model inside it.  What it adds to a bead model:
 
 * **The molecules' height**, learnt (or held: *height*, under *more*), is the sample's: the pupil saved is
   the microscope's own, and the spline is drawn for a molecule at that height, the one these data show.
@@ -136,7 +136,7 @@ def run_molecule_stack(paths, optics, model, stack: MoleculeStackSettings | None
     if run.save_model and cal.result.stop_reason != "cancelled":
         result.calibration = calibration_of(result, spline)
         path = Path(save_to) if save_to else default_save_path(paths, rois.n_channels == 2)
-        result.saved, _ = save(path, cal, result.calibration, overwrite=bool(save_to))
+        result.saved = save(path, cal, result.calibration, overwrite=bool(save_to))
     return result
 
 
