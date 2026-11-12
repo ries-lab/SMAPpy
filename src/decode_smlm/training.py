@@ -271,11 +271,13 @@ def evaluate_test(test_out, ds_test, post_processor, matcher, val_loss) -> dict:
 
 # ----------------------------------------------------------------------------- the loop
 def train(folder, *, device: str | None = None, epochs: int | None = None, num_workers: int | None = None,
-          allow_other_version: bool = False, quiet: bool = False) -> str:
+          allow_other_version: bool = False, quiet: bool = False, all_epochs: bool = False) -> str:
     """Train the job in ``folder`` from where it stands; returns ``"finished"`` or ``"stopped"``.
 
     ``device`` overrides the job's (``"auto"``: CUDA, else MPS, else the CPU), ``epochs`` its
-    method's, ``num_workers`` the data loaders'.
+    method's, ``num_workers`` the data loaders'.  The training finishes before ``epochs`` when it
+    no longer improves (SMAPpy's `progress.converged`, its rule changed or turned off by the
+    method's ``HyperParameter.early_stop``), unless ``all_epochs``.
     """
     from smappy import __version__
     from smappy.training import job as jobs
@@ -298,7 +300,8 @@ def train(folder, *, device: str | None = None, epochs: int | None = None, num_w
     old = signal.signal(signal.SIGTERM, on_term) if _main_thread() else None
     try:
         with _Lock(folder):
-            return _run(folder, job, method_params, device or job.device, epochs, num_workers, stop, quiet)
+            return _run(folder, job, method_params, device or job.device, epochs, num_workers, stop, quiet,
+                        all_epochs)
     except Exception as e:
         progress.append(folder, "error", None, message=f"{type(e).__name__}: {e}")
         raise
@@ -312,7 +315,7 @@ def _main_thread() -> bool:
     return threading.current_thread() is threading.main_thread()
 
 
-def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -> str:
+def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, all_epochs=False) -> str:
     import contextlib
     import io
 
@@ -382,9 +385,19 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
     cal_em_on = load_spline_calibration(param.InOut.calibration_file).em_on
     progress.append(folder, "start", first, device=str(device), torch=torch.__version__, decode="0.10.2",
                     resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts, batch=batch)
+    # SMAPpy's: stop when it no longer improves (`progress.converged`); the method may change the
+    # rule ({window, loss_tol, jaccard_tol, min_epochs}) or turn it off (false)
+    early_stop = getattr(param.HyperParameter, "early_stop", None)
+    if hasattr(early_stop, "to_dict"):
+        early_stop = early_stop.to_dict()
     if first >= n_epochs:
         progress.append(folder, "finished", first - 1)
         return "finished"
+    if not all_epochs and early_stop is not False and first > 0:
+        why = progress.converged(progress.read(folder), early_stop)
+        if why:                           # started again on a job that had converged: done already
+            progress.append(folder, "finished", first - 1, converged=True, why=why)
+            return "finished"
 
     max_restarts = param.HyperParameter.auto_restart_param.num_restarts
     i = first
@@ -436,6 +449,10 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet) -
             (folder / STOP).unlink(missing_ok=True)
             progress.append(folder, "stopped", i, why=why)
             return "stopped"
+        why = None if all_epochs or early_stop is False else progress.converged(progress.read(folder), early_stop)
+        if why:
+            progress.append(folder, "finished", i, converged=True, why=why)
+            return "finished"
         i += 1
         if i < n_epochs:
             with quietly():

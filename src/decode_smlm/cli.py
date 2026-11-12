@@ -54,6 +54,8 @@ def main(argv=None) -> int:
     t.add_argument("--workers", type=int, default=None, help="data-loader workers, instead of the job's")
     t.add_argument("--allow-other-version", action="store_true",
                    help="train a job prepared by another SMAPpy version")
+    t.add_argument("--all-epochs", action="store_true",
+                   help="train every epoch, not stopping when the training no longer improves")
     for name, text in (("stop", "stop the training of FOLDER at its next checkpoint"),
                        ("status", "where the job in FOLDER stands")):
         sub.add_parser(name, help=text).add_argument("folder", type=Path)
@@ -71,7 +73,7 @@ def main(argv=None) -> int:
     from .training import JobError, train
     try:
         result = train(a.folder, device=a.device, epochs=a.epochs, num_workers=a.workers,
-                       allow_other_version=a.allow_other_version)
+                       allow_other_version=a.allow_other_version, all_epochs=a.all_epochs)
     except JobError as e:
         print(f"smappy-decode: {e}", file=sys.stderr)
         return 2

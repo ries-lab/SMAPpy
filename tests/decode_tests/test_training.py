@@ -216,3 +216,16 @@ def test_the_warm_up_ramps_the_rate_and_a_resume_inside_it_is_bitwise_the_run_th
     a, b = _epochs(through), _epochs(parts)
     assert [b[i]["loss_train"] for i in (2, 3)] == [a[i]["loss_train"] for i in (2, 3)]
     assert [b[i]["lr"] for i in (1, 2, 3)] == [a[i]["lr"] for i in (1, 2, 3)]
+
+
+def test_a_training_that_no_longer_improves_finishes_before_its_epochs_unless_asked_for_all(tmp_path):
+    rule = {"window": 2, "min_epochs": 3, "loss_tol": 10.0, "jaccard_tol": 10.0}     # any change is "no gain"
+    folder = tiny_job(tmp_path / "job", epochs=8, early_stop=rule)
+    assert train(folder, quiet=True) == "finished"
+    end = progress.read(folder)[-1]
+    assert end["kind"] == "finished" and end["converged"] and end["epoch"] == 2
+    assert train(folder, quiet=True) == "finished"                # started again: done already
+    assert progress.read(folder)[-1]["epoch"] == 2
+    everything = tiny_job(tmp_path / "all", epochs=5, early_stop=rule)
+    assert train(everything, quiet=True, all_epochs=True) == "finished"
+    assert progress.read(everything)[-1]["epoch"] == 4 and "converged" not in progress.read(everything)[-1]
