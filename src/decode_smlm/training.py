@@ -159,6 +159,8 @@ def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=Non
             # SMAPpy's, for the fitter's model summary: what it was trained on, and how well it does
             "calibration_source": job.calibration.get("source"), "density": (job.ranges or {}).get("density"),
             "calibration_microscope": job.calibration.get("microscope"),
+            # where in the sample a pupil calibration was drawn for (SMAPpy's `calibrate.depth`), or None: the beads'
+            "calibration_sample_depth": job.calibration.get("sample_depth"),
             "test_metrics": {k: metrics.get(k) for k in ("jaccard", "rmse_lat_nm", "rmse_ax_nm", "eff_lat", "eff_ax")}
             if metrics else None, "created": job.created}
     model_file.write(path, tensors, meta)

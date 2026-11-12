@@ -138,7 +138,9 @@ def fully_on(group_id, frame, n_in_group, logl_rel=None, z_nm=None, z_limit_nm=N
         med = np.median(ll)
         keep &= ll >= med - logl_mads * 1.4826 * np.median(np.abs(ll - med))
     if z_nm is not None and z_limit_nm is not None:
-        keep &= np.abs(np.asarray(z_nm)) < Z_EDGE * z_limit_nm
+        lo, hi = bounds(z_limit_nm)
+        centre, half = (lo + hi) / 2, (hi - lo) / 2
+        keep &= np.abs(np.asarray(z_nm) - centre) < Z_EDGE * half
     if iterations is not None and max_iterations is not None:
         keep &= np.asarray(iterations) < max_iterations
     return keep
@@ -157,8 +159,19 @@ def background_range(background) -> tuple:
     return float(low), float(hi + BG_WIDEN * width)
 
 
-def z_range(z_nm, limit_nm: float | None = None) -> tuple:
-    """The blinks' z, widened; ``limit_nm`` the calibration's half range, about its focus."""
+def bounds(limit_nm) -> tuple:
+    """(lowest, highest) z of a limit: a half range about 0, or the two ends of a spline drawn for a focus
+    in the sample, whose z is the height above the coverslip and is not symmetric about 0 (SMAPpy's
+    `calibrate.depth.z_bounds`)."""
+    if np.ndim(limit_nm) == 0:
+        return -float(limit_nm), float(limit_nm)
+    lo, hi = limit_nm
+    return float(lo), float(hi)
+
+
+def z_range(z_nm, limit_nm=None) -> tuple:
+    """The blinks' z, widened; ``limit_nm`` the calibration's half range about its focus, or its
+    (lowest, highest) z (`bounds`)."""
     if z_nm is None or len(z_nm) == 0:
         lo, hi = -Z_WITHOUT_Z_NM, Z_WITHOUT_Z_NM
     else:
@@ -166,7 +179,8 @@ def z_range(z_nm, limit_nm: float | None = None) -> tuple:
         width = hi - lo
         lo, hi = lo - Z_WIDEN * width, hi + Z_WIDEN * width
     if limit_nm is not None:
-        lo, hi = max(lo, -limit_nm), min(hi, limit_nm)
+        low, high = bounds(limit_nm)
+        lo, hi = max(lo, low), min(hi, high)
     return float(lo), float(hi)
 
 
@@ -189,7 +203,7 @@ def measured_density(n_blinks: int, area_px: float, n_frames: float) -> float:
 
 
 def estimates(blinks: dict, localizations: dict, *, area_px: float, n_frames: int,
-              z_limit_nm: float | None = None, max_iterations: int | None = None,
+              z_limit_nm=None, max_iterations: int | None = None,
               logl_mads: float = LOGL_MADS) -> Estimates:
     """The estimates from the prefit's columns, as arrays.
 
@@ -197,6 +211,7 @@ def estimates(blinks: dict, localizations: dict, *, area_px: float, n_frames: in
     ``background``, and for the fully-on frames ``group_id``, ``frame``, ``n_in_group``, with
     ``logl_rel``, ``z_nm`` and ``iterations`` where the fit has them.  ``area_px`` and
     ``n_frames`` are the area and the number of frames fitted, for the measured density.
+    ``z_limit_nm`` is the calibration's half range about its focus, or its (lowest, highest) z (`bounds`).
     """
     n_in_group = np.asarray(blinks["n_in_group"])
     on = on_time(n_in_group)
