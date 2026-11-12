@@ -121,10 +121,33 @@ def match(t_frame, t_xyz, f_frame, f_xyz, pixel_nm):
     return np.concatenate(ti), np.concatenate(fi)
 
 
-def evaluate(truth: dict, found: dict, pixel_nm) -> dict:
-    """``truth``: frame, xyz (n, 3), crlb (n, 3) or None; ``found``: frame, xyz, err (m, 3) in nm."""
+def _below_limit(truth, ti, fi, photons_min):
+    """The truth and the fits that count: a molecule with fewer than ``photons_min`` photons in the
+    frame is neither missed when not found nor a false positive when found -- DECODE's evaluation
+    (Speiser et al. 2021): below 100 photons a localization is too poor for imaging and is filtered
+    out anyway."""
+    if photons_min is None or truth.get("photons") is None:
+        return truth, ti, fi, 0
+    keep = np.asarray(truth["photons"]) >= photons_min
+    good = keep[ti]
+    dropped_fits = int((~good).sum())
+    index = np.cumsum(keep) - 1
+    new = {k: (np.asarray(v)[keep] if v is not None and np.ndim(v) >= 1 and len(v) == len(keep) else v)
+           for k, v in truth.items()}
+    return new, index[ti[good]], fi[good], dropped_fits
+
+
+PHOTONS_MIN = 100.0
+
+
+def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHOTONS_MIN) -> dict:
+    """``truth``: frame, xyz (n, 3), photons (in the frame), crlb (n, 3) or None; ``found``: frame,
+    xyz, err (m, 3) in nm.  Truth below ``photons_min`` photons counts neither way (`_below_limit`)."""
     ti, fi = match(truth["frame"], truth["xyz"], found["frame"], found["xyz"], pixel_nm)
-    tp, fp, fn = len(ti), len(found["frame"]) - len(ti), len(truth["frame"]) - len(ti)
+    truth, ti, fi, ignored = _below_limit(truth, ti, fi, photons_min)
+    tp = len(ti)
+    fp = len(found["frame"]) - len(ti) - ignored
+    fn = len(truth["frame"]) - len(ti)
     jac = tp / max(tp + fp + fn, 1)
     out = {"jaccard": jac, "recall": tp / max(tp + fn, 1), "precision": tp / max(tp + fp, 1)}
     if tp < 10:

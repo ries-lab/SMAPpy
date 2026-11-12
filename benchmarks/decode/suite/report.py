@@ -7,7 +7,9 @@
 Spline 3D's within ``logl_mads`` MADs of the median log-likelihood and not at the iteration limit;
 both with |z| inside the sets' range.  **Matched** per frame by the Hungarian algorithm, within 250 nm
 laterally and 500 nm in z (DECODE's evaluation and the challenge's), inside a margin of 7 pixels
-(Spline 3D's fit box cannot leave the frame) -- (i)'s `score_sets.match`.
+(Spline 3D's fit box cannot leave the frame) -- (i)'s `score_sets.match`.  A true molecule with
+fewer than 100 photons in its frame counts neither as missed nor, when found, as a false positive:
+DECODE's evaluation, as for netfit's test set (`smappy.netfit.metrics`).
 
 **Simulated and challenge sets:** Jaccard, recall, precision; RMSE laterally and in z, the
 challenge's efficiencies; the mean offset in x, y, z and z's in 100 nm bins of the true z; and, where
@@ -62,7 +64,8 @@ REPORTS = S.ROOT / "reports"
 Z_LIMIT = 700.0
 Z_BINS = (0, 150, 300, 450, 600, 700)          # |z| bins of the pixelation
 PHOTON_BINS = (0, 2000, 4000, 8000, 16000, 1e9)
-CORE_Z_NM = 300.0                              # |z| below it is what a fitter is for; see score_truth
+CORE_Z_NM = 300.0
+PHOTONS_MIN = 100.0                            # DECODE's evaluation: dimmer molecules count neither way                              # |z| below it is what a fitter is for; see score_truth
 
 
 def kept(locs, keep: dict, z_limit=Z_LIMIT):
@@ -122,7 +125,14 @@ def score_truth(truth, locs, keep, px, size, shift=False):
     keep_t = _inside(truth["x_px"], truth["y_px"], w, h)
     t = {k: np.asarray(v)[keep_t] for k, v in truth.items() if np.ndim(v) == 1 and len(v) == len(keep_t)}
     ti, fi = match(t, f, px)
-    tp, fp, fn = len(ti), len(f["frame"]) - len(ti), len(t["frame"]) - len(ti)
+    # DECODE's evaluation: a molecule below PHOTONS_MIN counts neither as missed nor, found, as false
+    dim = t["photons"] < PHOTONS_MIN
+    ignored = int(dim[ti].sum())
+    ti, fi = ti[~dim[ti]], fi[~dim[ti]]
+    remap = np.cumsum(~dim) - 1
+    t = {k: v[~dim] for k, v in t.items()}
+    ti = remap[ti]
+    tp, fp, fn = len(ti), len(f["frame"]) - len(ti) - ignored, len(t["frame"]) - len(ti)
     dx = (f["x_px"][fi] - t["x_px"][ti]) * px[0]
     dy = (f["y_px"][fi] - t["y_px"][ti]) * px[1]
     dz = f["z_nm"][fi] - t["z_nm"][ti]

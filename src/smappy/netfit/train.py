@@ -89,6 +89,9 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         # the context's fixed test set: the same samples for every variant (`testset.py`)
         from . import testset
         test, truth, _ = testset.load(settings.test_set, device, sch["test_samples"], window=sim.window)
+        # its loss over the targets the training learns: those from target_photons_min (the metrics
+        # count from metrics.PHOTONS_MIN, the same 100 where DECODE's settings are kept)
+        test.mask = test.mask & (test.photons >= sim.target_photons_min)
     else:
         # drawn once from the seed, its bounds once
         g_test = torch.Generator(device).manual_seed(settings.seed + 1)
@@ -100,7 +103,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         # the bound of the PSF as drawn (a mirror changes no bound), in torch: no compiled SMAPpy needed
         bound = metrics.crlbs_torch(renderer, ph, test.background.cpu().numpy()[frame], xyz[:, 2], cam.pixel_nm,
                                     bool(cam.em_gain))
-        truth = {"frame": frame, "xyz": xyz, "crlb": bound}
+        truth = {"frame": frame, "xyz": xyz, "photons": ph, "crlb": bound}
     start, seconds = 0, 0.0
     ckpt = folder / "checkpoint.pt"
     if ckpt.exists():

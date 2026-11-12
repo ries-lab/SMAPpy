@@ -84,7 +84,7 @@ def load(path, device="cpu", samples: int | None = None, window: int | None = No
     frame = np.nonzero(mask)[0]
     m = int(mask.sum())
     truth = {"frame": frame, "xyz": np.asarray(d["xyz"][:n])[mask].astype(np.float64),
-             "crlb": np.asarray(d["crlb"])[:m]}
+             "photons": np.asarray(d["photons"][:n])[mask], "crlb": np.asarray(d["crlb"])[:m]}
     if "crlb_pooled" in d:
         truth["crlb_pooled"] = np.asarray(d["crlb_pooled"])[:m]
         truth["frames_on"] = (np.asarray(d["photons_window"][:n])[mask] > 0).sum(1)

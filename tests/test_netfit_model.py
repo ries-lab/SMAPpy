@@ -75,3 +75,16 @@ def test_a_model_file_is_read_back_by_the_predictor_with_the_same_outputs(tmp_pa
         direct = model(x)
     e = extract.extract(direct, SCALING, 0.0)
     assert len(e["frame"]) == int(np.sum(cols["frame"] == 10))
+
+
+def test_a_molecule_below_100_photons_counts_neither_as_missed_nor_found_as_false():
+    from smappy.netfit.metrics import evaluate
+    xyz = np.array([[5.0, 5.0, 0.0], [20.0, 20.0, 0.0], [30.0, 8.0, 0.0], [12.0, 30.0, 0.0]])
+    truth = {"frame": np.zeros(4, int), "xyz": xyz, "photons": np.array([2000.0, 50.0, 60.0, 3000.0]), "crlb": None}
+    # found: the bright one, the dim one at 20, 20, and a false one; the dim one at 30, 8 and the
+    # bright one at 12, 30 are missed
+    found = {"frame": np.zeros(3, int), "xyz": np.array([[5.1, 5.0, 0.0], [20.0, 20.1, 0.0], [40.0, 40.0, 0.0]]),
+             "err": np.ones((3, 3))}
+    r = evaluate(truth, found, (100.0, 100.0))
+    assert r["recall"] == 0.5 and r["precision"] == 0.5           # 1 of the 2 bright; 1 of 2 counted fits
+    assert evaluate(truth, found, (100.0, 100.0), photons_min=None)["recall"] == 0.5   # 2 of 4

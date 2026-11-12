@@ -21,12 +21,14 @@ x is along the columns, y along the rows, as everywhere in SMAPpy.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
 from torch import nn
 
 SIGMA_SCALE, SIGMA_FLOOR = 3.0, 1e-3
+P0 = 0.03                     # p a pixel starts at: about 50 molecules on 40 x 40 pixels
 
 
 @dataclass
@@ -97,6 +99,19 @@ class TwoStageUNet(nn.Module):
         self.heads = nn.ModuleDict({"p": Head(features, 1, act), "phot_xyz": Head(features, 4, act),
                                     "sigma": Head(features, 4, act), "bg": Head(features, 1, act)})
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
+        self._init_heads()
+
+    def _init_heads(self, p0: float = P0):
+        """Every head's last layer at zero output -- offsets 0, the scaled values and sigmas at their
+        sigmoid's middle -- and p at ``p0``.  With PyTorch's default the y offset's tanh saturated at
+        -1 in the first epochs of a training without gradient clipping and stayed there for 100 epochs
+        (every position on the pixel's edge, KS 0.5; 2026-11-12); DECODE initialises its heads
+        itself (``init_custom``)."""
+        for head in self.heads.values():
+            last = head.net[-1]
+            nn.init.zeros_(last.weight)
+            nn.init.zeros_(last.bias)
+        nn.init.constant_(self.heads["p"].net[-1].bias, math.log(p0 / (1 - p0)))
 
     def forward(self, x):
         """``x`` (b, window, rows, columns) in network units -> (b, 10, rows, columns)."""
