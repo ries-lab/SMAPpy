@@ -96,9 +96,14 @@ spots overlap, and its RMSE is over the spots found, of which the dim ones
 are fewer.  A curve that levels out well above it has room left; one near it
 has little.
 
-**Try.**  *Try on my data* runs the newest model on the first frames of the
-movie and draws what it found.  *Use this model* puts it into the DECODE
-fitter.
+**Try.**  *Try on my data* runs the chosen job's newest model -- written
+after every epoch, so a training still running can be tried -- on the first
+20 frames of its movie, and draws the first frame with what the network
+found there at a probability of at least 0.5.  It is a look, not a fit:
+nothing is saved.
+
+**Use.**  *Use this model*, beside the jobs, puts the chosen job's newest
+model into the DECODE fitter's *trained model*.
 
 The DECODE fitter's *Train a model...* opens this window with the fitter's
 movie, microscope, PSF calibration and *run on* filled in.
@@ -135,6 +140,10 @@ another computer, or taken off this list -- are found every minute, in the
 background, and listed in italics with ↗ before their name.  Double-click
 one to add it: its job files are copied here, and its progress is followed
 from then on as for a job sent from here.
+
+### Use this model
+Puts the chosen job's newest model into the DECODE fitter's *trained model*
+(from a workstation, copied back first).  It does not fit anything.
 
 ### Add existing job...
 List a job folder made elsewhere, or one taken off the list.  The movie is
@@ -205,7 +214,3 @@ The chosen job's newest model on the movie it was prepared on.
 ### Try on my data
 The first frames of the movie through the newest model, drawn with what it
 found at a probability of at least 0.5.
-
-### Use this model
-Puts the newest model into the DECODE fitter's *trained model* (from a workstation,
-copied back first).
