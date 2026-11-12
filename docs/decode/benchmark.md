@@ -146,6 +146,14 @@ says so.  A part's settings beyond its name go into the run's YAML and the model
 report says exactly what was trained.  Network code is written new for the parts whose sources are
 GPL or AGPL (LiteLoc, SHOT): ideas only.
 
+**The spread between trainings comes first** (Jonas, 2026-11-12).  Two trainings of one model from
+different seeds need not reach the same minimum: the original DECODE's two reference runs differed
+by 0.013 in Jaccard at density 25 ((i), `poc-plan.md`).  So once there is a good base model, it is
+trained several times (seeds, at least 3 -- 5, two at a time on gpuvm and the workstation), each scored
+on the fixed test set (`netfit testset`) and the benchmark, and the spread of every number recorded.
+A difference between two variants counts only where it exceeds that spread; until then a single
+training's gain is a hint, not a result.
+
 **What step 4 will need that is not here yet**: the training's own wall time in the model file
 (today only epochs), FLOPs per frame, and the training on gpuvm launched from a run's YAML; all
 belong to the new fitter (step 3), which reads `parts` from its settings.
