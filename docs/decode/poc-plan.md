@@ -1212,8 +1212,7 @@ engine on the example package, each phase timed with the device synchronised.
   frames of 32 x 32 in milliseconds, and the plumbing tests need no trained model and no data.
 - **Not in the shipped GUI yet:** the plugin is in the tree (*Localize > DECODE*) but not pinned
   in `default.gui.yaml`, until the benchmark (i) says it should be.
-- **Left for later:** item 17's padding in place of the crop (edge pixels are still lost, as the
-  page says); the range check writes to the run's text, not to the file, since it is made after
+- **Left for later:** the range check writes to the run's text, not to the file, since it is made after
   the file is written.
 
 ### (f) and (f2), 2026-11-11
@@ -1562,5 +1561,8 @@ lower):
   it lies in, the crop's last 2 px handed to the windows -- its edge pulls in spots beyond it):
   the inside exactly the crop's; recall 0.88 -- 0.89 to the outer pixel, precision 0.80 -- 0.89
   (seams).  A quarter more network time on 512 x 512.
-- **Not decided:** which goes into the predictor (the crop stays as an option, for the tests
-  against the original's outputs).
+- **Decided: the crop stays** (2026-11-12).  Only the outer 1 -- 4 pixels of a frame differ, few
+  molecules in a real frame are there, and every alternative either moves the inside (padding,
+  up to 1 nm when mirrored) or needs the network trained for it -- padding drawn into the
+  training's frames, or emitters beyond the frame, which a training was started with and stopped.
+  Item 17 is closed; the page's sentence on the lost edge pixels stands.
