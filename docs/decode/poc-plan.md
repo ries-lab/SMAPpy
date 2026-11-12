@@ -816,7 +816,15 @@ Decided (Jonas, 2026-11-10):
 
 Still open:
 - Which single-channel 3D data set with its bead calibration is the real data
-  for (i)?
+  for (i)?  (The example package's movie served, with the SMLM Challenge 2016's
+  3D-AS sets.)
+- **The early stop, optimised** (`training.progress.converged`, 2026-11-12): its
+  constants -- 100 epochs, never before 150, the tolerances, the 11-epoch median --
+  were chosen on six trainings from scratch.  A warm start (*start from*) begins
+  near its end, so *never before 150* may make it train three times longer than
+  it needs: measure warm starts (from a model of the same microscope, of another
+  day, of other data), and choose the minimum, the window and the tolerances
+  for them -- perhaps relative to where the run began rather than to epoch 0.
 
 ## 8. The Linux workstation, as found (2026-11-10)
 
