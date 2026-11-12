@@ -29,8 +29,16 @@ import sets as S  # noqa: E402
 
 
 def load_run(name) -> dict:
+    """A run's YAML; ``base: OTHER`` takes OTHER's and changes what this one names -- a part replaced
+    whole, ``fit`` and ``keep`` merged key by key -- so that a variant states only its difference."""
     import yaml
     run = yaml.safe_load((HERE / "runs" / f"{name}.yaml").read_text())
+    if run.get("base"):
+        base = load_run(run["base"])
+        for key in ("parts", "fit", "keep", "models"):
+            run[key] = {**base.get(key, {}), **(run.get(key) or {})}
+        for key in ("fitter", "about"):
+            run.setdefault(key, base.get(key))
     run.setdefault("parts", {})
     run.setdefault("models", {})
     run.setdefault("fit", {})
@@ -67,12 +75,14 @@ def fit_decode_smlm(run, name, out, device=None):
     from smappy import plugins
     from smappy.gui.live_session import fit_settings
     from smappy.plugins import Context
+    from extraction import extraction
     model = model_path(run, S.SETS[name]["context"])
     s = fit_settings("Localize/DECODE", {
         **_source(name), **_camera_settings(S.camera(name)), "model.path": str(model),
         "model.threshold": run["fit"].get("threshold", 0.1), "model.device": device or "auto",
         "output.path": str(out), "output.raw_frames": 0})
-    plugins.get("Localize/DECODE")().run(Context(), s)
+    with extraction(run["fit"].get("extraction")):
+        plugins.get("Localize/DECODE")().run(Context(), s)
     from smappy.io.hdf5 import load_localizations
     dec = load_localizations(out).metadata.get("decode", {})           # the fitter's record, as saved
     return {"device": dec.get("device"), "model": str(model), "frames_mirrored": dec.get("frames_mirrored")}

@@ -125,6 +125,12 @@ A fit is kept and only scored again unless `--refit`, so the scoring can change 
 | `loss` | `decode_ppxyzb`: count, mixture, background | optimal transport (Sinkhorn, SHOT), an occupancy term (FD-DeepLoc), the terms' weights |
 | `schedule` | `decode_v0102` (AdamW, StepLR, 1000 epochs) | the early stop of today's training, ranges, batch |
 
+**A variant states only its difference**: `base: decode_port` takes that run's YAML and replaces
+what this one names (a part whole; `fit` and `keep` key by key).  The first are
+`decode_port_mixpeak` and `decode_port_mixpair`, the port's models with the extraction changed to
+the mixture's peak (`extraction.py`; switched into the port's predictor for the benchmark until the
+new fitter has its own extraction part) -- results in `poc-plan.md`, "Step 4's first part, early".
+
 **Matched comparisons.**  Two runs are compared when they differ in one part and their costs are
 close: the parameters (from the model file), the epochs and the training's wall time on one GPU,
 and the frames a second at inference.  The report records all four; a comparison at unmatched cost

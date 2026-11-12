@@ -1,0 +1,7 @@
+# The port's models with one part changed: the extraction, the mixture's peak over 3 x 3 pixels (extraction.py), no retraining.
+name: decode_port_mixpeak
+base: decode_port
+about: the port's models, positions at the mixture's peak (3 x 3 pixels)
+parts:
+  extraction: {name: mixture_peak, about: "DECODE's detections and probabilities; each position moved to the peak of the p-weighted Gaussian mixture of its 3 x 3 pixels, by mean shift (10 iterations)"}
+fit: {extraction: mixture_peak}

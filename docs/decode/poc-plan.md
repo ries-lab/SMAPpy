@@ -1740,3 +1740,51 @@ four, its KS 0.023 -- 0.027 on N1 and 0.056 -- 0.057 on N2, 0.14 -- 0.15 beyond 
 The baselines are what step 3's network must at least match: on calibration B, Jaccard 0.88 /
 0.90 / 0.84 / 0.77 / 0.65 over the densities, error over CRLB ~1.1 sparse, and KS 0.016 -- 0.039
 overall, 0.08 -- 0.11 far from focus -- the last the one to beat.
+
+### Step 4's first part, early: the mixture's peak as the extraction (2026-11-12)
+
+LUNAR's idea (Fu et al. 2026; their GPL code not read): DECODE's network is trained on a mixture
+over pixels -- a molecule's likelihood is ``sum_k p_k N(x; mu_k, sigma_k)`` -- but its extraction
+takes one pixel's position, so a molecule near a pixel's edge, its probability split between two
+pixels, is put where one of them says.  `benchmarks/decode/suite/extraction.py` keeps DECODE's
+detections and moves each position to the peak of the p-weighted mixture around it, in x, y and z
+(mean shift, 10 iterations, from the detection's own position): over its 3 x 3 pixels
+(`mixture_peak`) or over its pixel and the neighbour its position points to (`mixture_pair`).  The
+port's models unchanged, no retraining: the first pair of runs that differ in one part
+(`runs/decode_port_mixpeak.yaml`, `base: decode_port`).
+
+| set | KS: DECODE | 3 x 3 | pair | KS \|z\| >= 450 nm: DECODE | 3 x 3 | lateral RMSE: DECODE | 3 x 3 | axial: DECODE | 3 x 3 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| density 1 | 0.016 | **0.008** | 0.012 | 0.084 | **0.042** | 34.5 | 33.9 | 30.4 | 29.3 |
+| density 5 | 0.018 | **0.014** | 0.016 | 0.081 | **0.057** | 38.6 | 37.8 | 33.7 | 32.1 |
+| density 15 | 0.022 | **0.014** | 0.016 | 0.082 | **0.063** | 45.8 | 45.2 | 44.5 | 43.0 |
+| density 25 | 0.017 | **0.012** | 0.015 | 0.064 | **0.051** | 51.4 | 50.8 | 49.5 | 47.7 |
+| density 50 | 0.022 | 0.016 | **0.014** | 0.038 | 0.030 | 64.7 | 63.8 | 74.5 | 72.5 |
+| 1000 photons | 0.039 | **0.021** | 0.026 | 0.090 | 0.053 | 58.0 | 57.6 | 67.4 | 64.3 |
+| 3000 photons | 0.029 | **0.016** | 0.021 | 0.112 | **0.052** | 45.7 | 45.0 | 38.4 | 37.0 |
+| 10 000 photons | 0.018 | **0.012** | 0.014 | 0.085 | **0.052** | 31.8 | 30.7 | 22.6 | 21.4 |
+| challenge N1.LD / HD | 0.027 / 0.023 | 0.023 / 0.021 | 0.025 / 0.021 | 0.063 / 0.051 | 0.036 / 0.041 | 21.7 / 35.7 | 21.4 / 35.5 | 33.2 / 47.7 | 32.9 / 47.3 |
+| challenge N2.LD / HD | 0.057 / 0.056 | **0.035 / 0.032** | 0.048 / 0.044 | 0.150 / 0.141 | **0.060 / 0.039** | 38.1 / 50.4 | 37.6 / 49.9 | 59.0 / 73.3 | 58.0 / 72.4 |
+| example (real) | 0.010 | 0.006 | 0.008 | 0.065 | 0.053 | | | | |
+| Fig. 4e (real) | 0.015 | 0.011 | 0.013 | 0.145 | 0.110 | | | | |
+
+(The \|z\| column is the largest KS of the bins from 450 nm, 450 -- 600 and 600 -- 700.)
+
+- **The 3 x 3 mixture peak halves the pixelation on simulated data** -- the KS by a third to a half
+  on every set, far from focus by about half (0.08 -- 0.11 to 0.04 -- 0.06), on the challenge's noisier
+  N2 from 0.15 to 0.04 -- 0.06 -- and moves nothing else the wrong way: the Jaccard within 0.001,
+  both RMSEs 1 -- 5 % lower, the error over CRLB a little lower (density 1: 1.13 / 0.95 against 1.14 /
+  0.99), the claimed precision's check unchanged on the real movies.  The pair is in between: most of
+  the gain needs the whole neighbourhood.  It costs up to a tenth of the speed.
+- **It is not the whole answer**, as LUNAR's authors said: on simulation the KS is still 1 -- 2 times
+  Spline 3D's (0.007 -- 0.017) and far from focus 0.04 -- 0.06 against Spline 3D's 0.02 -- 0.05; on the
+  real movies the gain is smaller (0.010 to 0.006, Fig. 4e far from focus 0.145 to 0.110, Spline
+  3D 0.003 and 0.007).  The sub-pixel histogram at 1000 photons is flatter but keeps its shape --
+  more positions near the pixel centre than at the edges (from 1.16 / 0.79 of the mean to 1.08 /
+  0.87): the network's offsets themselves are pulled in, which the extraction can only partly undo.
+- **z's pull towards the focus is the network's**: the extraction leaves it (+35 / -36 nm at 1000
+  photons against +36 / -40).
+- **So**: the new fitter's extraction starts as the 3 x 3 mixture peak (it is cheap, needs no
+  training, and is never worse here); what remains -- the offsets pulled in, z compressed -- is for
+  the network, its output representation and its loss (step 4: anti-aliasing, the offsets' range,
+  SHOT's loss).
