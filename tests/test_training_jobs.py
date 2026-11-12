@@ -75,6 +75,18 @@ def _curve(n, plateau_from, seed=0, tau=30.0):
     return lines
 
 
+def test_the_pixelation_holds_a_training_back_only_where_the_rule_has_a_tolerance_for_it():
+    from smappy.training.progress import EARLY_STOP, converged
+    flat = _curve(260, plateau_from=120)
+    for e, line in enumerate(flat):                    # the KS still falling after the rest settled
+        line["metrics"]["pixel_ks"] = 0.03 + 0.02 * np.exp(-e / 200.0)
+    assert converged(flat) is not None                 # the default rule leaves it out
+    assert converged(flat, {**EARLY_STOP, "ks_tol": 0.002}) is None
+    for line in flat:
+        line["metrics"]["pixel_ks"] = 0.03
+    assert converged(flat, {**EARLY_STOP, "ks_tol": 0.002}) is not None
+
+
 def test_a_training_converges_once_neither_loss_nor_jaccard_improved_over_the_window():
     from smappy.training.progress import converged
     still = _curve(260, plateau_from=400, tau=150.0)   # still improving at 260

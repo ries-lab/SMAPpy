@@ -74,6 +74,7 @@ class TrainingSettings:
     camera: CameraModel = field(default_factory=CameraModel)
     parts: Parts = field(default_factory=Parts)
     calibration: str | None = None
+    test_set: str | None = None               # a fixed test set (`testset.py`); none: drawn from the seed
     seed: int = 0
 
     def to_dict(self) -> dict:

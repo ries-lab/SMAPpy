@@ -55,13 +55,19 @@ def draw(path, calibration, sim, cam, samples: int = SAMPLES, seed: int = 12345,
     return meta
 
 
-def load(path, device="cpu", samples: int | None = None):
-    """(Batch, truth for `metrics.evaluate`, meta) of the first ``samples`` samples."""
+def load(path, device="cpu", samples: int | None = None, window: int | None = None):
+    """(Batch, truth for `metrics.evaluate`, meta) of the first ``samples`` samples; for a model
+    reading ``window`` frames, fewer than the set holds, the middle ones (the targets are the
+    middle frame's)."""
     d = np.load(path)
     n = samples or len(d["frames"])
     t = lambda a, dt=torch.float32: torch.as_tensor(np.asarray(a[:n]), dtype=dt, device=device)
     mask = np.asarray(d["mask"][:n])
-    batch = Batch(t(d["frames"]), t(d["xyz"]), t(d["photons"]), t(d["mask"], torch.bool), t(d["background"]))
+    frames = t(d["frames"])
+    if window is not None and window < frames.shape[1]:
+        mid = frames.shape[1] // 2
+        frames = frames[:, mid - window // 2:mid + window // 2 + 1]
+    batch = Batch(frames, t(d["xyz"]), t(d["photons"]), t(d["mask"], torch.bool), t(d["background"]))
     frame = np.nonzero(mask)[0]
     truth = {"frame": frame, "xyz": np.asarray(d["xyz"][:n])[mask].astype(np.float64),
              "crlb": np.asarray(d["crlb"])[:int(mask.sum())]}
@@ -73,7 +79,7 @@ def evaluate(model_path, path, device=None, threshold=None, extraction=None) -> 
     from . import extract
     from .predict import Predictor
     p = Predictor(model_path, device, threshold=threshold, extraction=extraction)
-    batch, truth, meta = load(path, p.device)
+    batch, truth, meta = load(path, p.device, window=2 * p.window + 1)
     pixel_nm = tuple(meta["camera"]["pixel_nm"])
     outs = []
     with torch.no_grad():

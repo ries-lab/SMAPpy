@@ -106,7 +106,10 @@ QUANTITIES = (("loss_test", "loss", True, "loss_tol", "fall"),
               ("eff_lat", "efficiency lateral", False, "eff_tol", "absolute"),
               ("eff_ax", "efficiency axial", False, "eff_tol", "absolute"),
               ("rmse_lat_nm", "RMSE lateral", True, "rmse_tol", "relative"),
-              ("rmse_ax_nm", "RMSE axial", True, "rmse_tol", "relative"))
+              ("rmse_ax_nm", "RMSE axial", True, "rmse_tol", "relative"),
+              # judged only when the rule has a tolerance for it (netfit's has: its KS kept falling
+              # after the others settled; the DECODE port's rule leaves it out)
+              ("pixel_ks", "pixelation", True, "ks_tol", "absolute"))
 
 
 def rule(changes: dict | None = None) -> dict:
@@ -149,6 +152,8 @@ def stop_status(lines: list, rule: dict | None = None) -> list:
         return []
     out = []
     for name, label, lower, tol, kind in QUANTITIES:
+        if rule.get(tol) is None:
+            continue
         raw = [e.get(name) if name == "loss_test" else (e.get("metrics") or {}).get(name) for e in epochs]
         v = np.asarray(_running_median([np.nan if x is None else x for x in raw], int(rule["smooth"])))
         old, new = v[:-w], v[-w:]
@@ -196,3 +201,39 @@ def status_text(status: list) -> str:
     parts = (["waiting for: " + ", ".join(waiting)] if waiting else []) + \
             (["settled: " + ", ".join(settled)] if settled else [])
     return " \u00b7 ".join(parts)
+
+
+# ----------------------------------------------------------------------------- how fast a training got there
+#: (the quantity, its tolerance, absolute or relative): within it of its final value is "there"
+CONVERGENCE = (("loss_test", 0.01, "relative"), ("jaccard", 0.005, "absolute"),
+               ("rmse_lat_nm", 0.02, "relative"), ("rmse_ax_nm", 0.02, "relative"),
+               ("pixel_ks", 0.002, "absolute"), ("core_pixel_ks", 0.002, "absolute"),
+               ("crlb_width_lat", 0.02, "absolute"), ("crlb_width_ax", 0.02, "absolute"))
+
+
+def convergence(lines: list, smooth: int = 11) -> dict:
+    """For each quantity a training reports: its final value (the median of the last ``smooth``
+    epochs' running medians), and the epoch, and the training seconds summed to it, from which on its
+    running median stays within the tolerance of `CONVERGENCE` of that final value.  Two trainings
+    compare by these -- how good, and how soon -- not by the final value alone."""
+    import numpy as np
+    epochs = _epochs(lines)
+    if len(epochs) < smooth:
+        return {}
+    seconds = np.cumsum([float(e.get("seconds") or 0.0) for e in epochs])
+    out = {}
+    for name, tol, kind in CONVERGENCE:
+        raw = [e.get(name) if name == "loss_test" else (e.get("metrics") or {}).get(name) for e in epochs]
+        v = np.asarray(_running_median([np.nan if x is None else x for x in raw], smooth))
+        if not np.isfinite(v[-smooth:]).any():
+            continue
+        final = float(np.nanmedian(v[-smooth:]))
+        bound = tol * abs(final) if kind == "relative" else tol
+        off = ~(np.abs(v - final) <= bound)                 # NaN counts as not there
+        last_off = np.flatnonzero(off)
+        i = int(last_off[-1]) + 1 if len(last_off) else 0
+        if i >= len(v):
+            i = len(v) - 1
+        out[name] = {"final": final, "epoch": int(epochs[i]["epoch"]), "seconds": float(seconds[i]),
+                     "tolerance": tol, "kind": kind}
+    return out

@@ -144,7 +144,16 @@ def model_record(path) -> dict:
         n += k
     keys = ("method", "architecture", "arch_param", "channels_in", "post_processing", "trained_on", "epoch",
             "epochs", "batch_size", "learning_rate", "base_model")
-    return {"parameters": n, **{k: meta[k] for k in keys if k in meta}}
+    out = {"parameters": n, **{k: meta[k] for k in keys if k in meta}}
+    for k in ("train_seconds", "device", "window"):
+        if k in meta:
+            out[k] = meta[k]
+    # how fast it got there: the training's progress beside its model file, where it was kept
+    beside = pathlib.Path(path).with_name("progress.jsonl")
+    if beside.exists():
+        from smappy.training import progress
+        out["convergence"] = progress.convergence(progress.read(beside.parent))
+    return out
 
 
 def main():

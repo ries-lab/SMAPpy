@@ -30,6 +30,10 @@ from .settings import CameraModel, Part, Parts, SimulationSettings, TrainingSett
 from .simulate import draw_batch
 
 METHOD = "netfit-v1"
+# SMAPpy's early stop (`training.progress`), and the pixelation too: version 1's KS kept falling for
+# epochs after the loss, Jaccard and RMSEs had settled.  0.002 is the counting noise of the fixed test
+# set's whole KS; over the 512 samples scored each epoch the set is fixed, so a change is the model's
+STOP_RULE = {**progress.EARLY_STOP, "ks_tol": 0.002}
 
 
 def load_settings(path) -> TrainingSettings:
@@ -40,7 +44,8 @@ def load_settings(path) -> TrainingSettings:
         raw["density_per_40px"] = raw.pop("emitters_per_frame") * (40.0 / raw.get("frame_px", 40)) ** 2
     sim = SimulationSettings(**{k: tuple(v) if isinstance(v, list) else v for k, v in raw.items()})
     cam = CameraModel(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.get("camera", {}).items()})
-    return TrainingSettings(simulation=sim, camera=cam, parts=parts, calibration=d.get("calibration"), seed=d.get("seed", 0))
+    return TrainingSettings(simulation=sim, camera=cam, parts=parts, calibration=d.get("calibration"),
+                            test_set=d.get("test_set"), seed=d.get("seed", 0))
 
 
 def _calibration(path, em: bool):
@@ -83,7 +88,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     if settings.test_set:
         # the context's fixed test set: the same samples for every variant (`testset.py`)
         from . import testset
-        test, truth, _ = testset.load(settings.test_set, device, sch["test_samples"])
+        test, truth, _ = testset.load(settings.test_set, device, sch["test_samples"], window=sim.window)
     else:
         # drawn once from the seed, its bounds once
         g_test = torch.Generator(device).manual_seed(settings.seed + 1)
@@ -108,7 +113,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         progress.append(folder, "start", start, resumed=True, device=device)
     else:
         progress.append(folder, "start", 0, device=device, method=METHOD, parameters=network.parameters(model),
-                        settings=settings.to_dict())
+                        settings=settings.to_dict(), stop_rule=STOP_RULE, epochs=epochs)
     g = torch.Generator(device).manual_seed(settings.seed + 1000 + start)
     steps = max(1, sch["samples_per_epoch"] // sch["batch"])
     meta_base = {"method": METHOD, "settings": settings.to_dict(), "scaling": asdict(scaling), "window": sim.window,
@@ -156,7 +161,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         model_file.write(folder / "model.safetensors", tensors,
                          {**meta_base, "epoch": epoch, "epochs": epochs, "train_seconds": round(seconds, 1),
                           "device": device})
-        why = progress.converged(progress.read(folder)) if early_stop else None
+        why = progress.converged(progress.read(folder), STOP_RULE) if early_stop else None
         if why:
             progress.append(folder, "finished", epoch, reason=why)
             log(f"stopped: {why}")
