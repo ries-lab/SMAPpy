@@ -154,6 +154,14 @@ on the fixed test set (`netfit testset`) and the benchmark, and the spread of ev
 A difference between two variants counts only where it exceeds that spread; until then a single
 training's gain is a hint, not a result.
 
+**Training targets below 100 photons** (Jonas, 2026-11-12, to test in step 4).  netfit's version 1
+trains, as `decode_B` was trained, on targets from 100 photons in the frame (`target_photons_min`,
+DECODE's `emitter_label_photon_min`): a dimmer molecule is drawn but is no target, so the count term
+teaches the network to call it background.  Without the limit the network is shown every molecule's
+true position, which may teach it dim events better -- and help the molecules just above 100 photons
+most.  One setting; judged by the evaluation's 100-photon rule (`metrics.PHOTONS_MIN`), recall and
+precision near 100 -- 1000 photons especially.
+
 **What step 4 will need that is not here yet**: the training's own wall time in the model file
 (today only epochs), FLOPs per frame, and the training on gpuvm launched from a run's YAML; all
 belong to the new fitter (step 3), which reads `parts` from its settings.
