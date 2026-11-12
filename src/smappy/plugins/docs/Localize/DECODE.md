@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
+covers: [smappy.plugins.fit_decode.DecodeFit, smappy.plugins.fit_decode.DecodeFit.condition_warnings, smappy.plugins.fit_decode.torch_here, smappy.calibration_list.differences, smappy.plugins.fit_decode.model_summary, decode_smlm.predict.auto_batch, smappy.plugins.fit_decode.range_warnings, smappy.plugins.fit_decode.DecodeFit.checks, smappy.plugins.fit_decode.read_model, smappy.plugins.fit_decode._mirrored, smappy.window_engine.WindowEngine, smappy.pipeline.drive, smappy.training.model_file.read_metadata, smappy.plugins.fit_decode.remote_predictor, smappy.decode_remote.RemotePredictor, decode_smlm.serve.serve, decode_smlm.neuralfitter.models.model_speced_impl.SigmaMUNet, decode_smlm.neuralfitter.loss.GaussianMMLoss, decode_smlm.neuralfitter.post_processing.SpatialIntegration, decode_smlm.utils.param_io.autoset_scaling]
 ---
 
 ## What it does
@@ -26,6 +26,11 @@ original DECODE trained can be exported to one.  A model belongs to one
 calibration, one camera and one range of brightness and background, the ones
 it was trained on: it gives confident answers for data of another PSF too,
 and they are wrong.  So the fitter checks what it can (below).
+
+The network runs on PyTorch, which a plain `pip install smappy-smlm` does
+not bring: `pip install "smappy-smlm[decode]"` does.  Without it the form
+says so, and *run on* can still send the frames to a training host that
+has it.
 
 There is no peak finding and no fit box: the form has none of the other
 fitters' detection and fit parts.

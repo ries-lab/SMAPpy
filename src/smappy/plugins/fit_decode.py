@@ -96,6 +96,18 @@ def read_model(path) -> dict:
     return meta
 
 
+#: what a run on this computer says without PyTorch: the base install has none, and the fitter is
+#: in the shipped GUI; the form and *Model info...* need none, nor a run on a training host
+NO_TORCH = ("DECODE's network needs PyTorch, which this Python does not have: install it with "
+            "pip install \"smappy-smlm[decode]\", or set run on to a training host")
+
+
+def torch_here() -> bool:
+    """Whether PyTorch can be imported here, without importing it."""
+    import importlib.util
+    return importlib.util.find_spec("torch") is not None
+
+
 def summary_line(meta: dict) -> str:
     """The model in a line: what it was trained for and how far."""
     bits = []
@@ -215,6 +227,8 @@ class DecodeFit(_FitPlugin):
         device = settings.model.device
         if settings.model.run_on != "here":
             return remote_predictor(settings, meta, camera)
+        if not torch_here():
+            raise ValueError(NO_TORCH)
         from decode_smlm.predict import load_predictor
         return load_predictor(settings.model.path, None if device == "auto" else device,
                               frames_mirrored=_mirrored(meta, camera), raw_th=settings.model.threshold,
@@ -246,6 +260,9 @@ class DecodeFit(_FitPlugin):
     # ---------------------------------------------------------- the form
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         state = super().describe(ctx, settings)
+        if settings.model.run_on == "here" and not torch_here():
+            state.notice = Notice(NO_TORCH)        # said before the run, not after it
+            return state
         if settings.model.path:
             # other conditions than the model's say so over anything else; else the model in a line,
             # where the camera's form has nothing to say

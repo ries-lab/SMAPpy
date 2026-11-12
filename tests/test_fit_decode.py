@@ -98,3 +98,16 @@ def test_a_fit_brighter_than_the_training_drew_is_warned_about(files):
                             "background": np.r_[np.full(90, 30.0), np.full(10, 200.0)].astype(np.float32)})
     said = range_warnings(bright, meta)
     assert len(said) == 2 and "20%" in said[0] and "10%" in said[1]
+
+
+def test_without_torch_the_form_and_a_run_here_say_what_to_install(files, monkeypatch):
+    from smappy import plugins
+    from smappy.plugins import Context, fit_decode
+    monkeypatch.setattr(fit_decode, "torch_here", lambda: False)
+    plugin = plugins.get("Localize/DECODE")()
+    assert "smappy-smlm[decode]" in plugin.describe(None, _settings(files)).notice.text
+    with pytest.raises(ValueError, match=r"smappy-smlm\[decode\]"):
+        plugin.run(Context(), _settings(files))
+    # on a training host the network runs there: nothing to install here
+    assert "smappy-smlm" not in (plugin.describe(None, _settings(files, **{"model.run_on": "box"})).notice or
+                                 type("n", (), {"text": ""})).text
