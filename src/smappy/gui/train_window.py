@@ -69,6 +69,15 @@ def state_text(status) -> str:
     return status.group + (f", {epoch}{of}" if epoch else "")
 
 
+def state_word(status) -> str:
+    """The state alone, for the Follow line, whose curves say the epoch: *done, converged*."""
+    if status.group == "done":
+        return "done, converged" if status.converged else "done, all epochs"
+    if status.group == "failed":
+        return "died, Start resumes" if status.state == "interrupted" else "failed"
+    return status.group
+
+
 def _result(status) -> str:
     metrics = (status.last or {}).get("metrics") or {}
     if status.group == "failed":
@@ -438,11 +447,23 @@ def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     total = start.get("epochs")
     seconds = series("seconds")
     per = float(np.nanmedian(seconds[-10:])) if np.isfinite(seconds[-10:]).any() else None
+    ended = any(line["kind"] in ("finished", "stopped", "error") for line in lines[-2:])
     text = f"epoch {int(e[-1])}" + (f" of at most {total}" if total else "")
-    if total and per:
-        left = max(total - 1 - int(e[-1]), 0) * per
-        text += f", {per:.1f} s an epoch, at most {int(left // 3600)} h {int(left % 3600 // 60):02d} min left"
+    if per:
+        text += f", {per:.1f} s an epoch"
+    # the time trained: the epochs' own seconds, so a pause between a Stop and a Start is not counted
+    spent = float(np.nansum(seconds))
+    if spent > 0:
+        text += f", {_duration(spent)} {'in all' if ended else 'so far'}"
+    if total and per and not ended:
+        text += f", at most {_duration(max(total - 1 - int(e[-1]), 0) * per)} left"
     return text
+
+
+def _duration(seconds: float) -> str:
+    """``1 h 05 min``, or ``12 min`` under an hour."""
+    minutes = int(round(seconds / 60))
+    return f"{minutes // 60} h {minutes % 60:02d} min" if minutes >= 60 else f"{minutes} min"
 
 
 # ----------------------------------------------------------------------------- the window
@@ -771,7 +792,8 @@ class TrainWindow(QWidget):
                 self.references[entry.folder] = for_job(entry.folder)
             text = draw_progress(self.follow_figure, progress.read(entry.folder), self.references[entry.folder])
             self.follow_canvas.draw_idle()
-            self.follow_label.setText(f"{entry.name}: {state_text(status)}; {text}"
+            # the state without its epoch: the curves' line says the epoch, once
+            self.follow_label.setText(f"{entry.name}: {state_word(status)}; {text}"
                                       + (f" -- {status.message}" if status.message else ""))
         except Exception as error:                         # a half-written file, a folder going away
             print(f"DECODE training: {error}")

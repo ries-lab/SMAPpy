@@ -84,7 +84,9 @@ def test_the_progress_curves_say_where_a_training_is_and_how_long_it_has_left(tm
         progress.append(tmp_path, "epoch", e, loss_train=None if e == 0 else 500.0 - e, loss_test=480.0 - e,
                         seconds=12.0, metrics={"jaccard": 0.1 * e, "rmse_lat_nm": 40.0, "rmse_ax_nm": 60.0})
     text = draw_progress(Figure(), progress.read(tmp_path))
-    assert text.startswith("epoch 4 of at most 100") and "12.0 s an epoch" in text and "at most 0 h 19 min left" in text
+    assert text == "epoch 4 of at most 100, 12.0 s an epoch, 1 min so far, at most 19 min left"
+    progress.append(tmp_path, "finished", 4, converged=True)
+    assert draw_progress(Figure(), progress.read(tmp_path)).endswith("1 min in all")   # no time left
     assert draw_progress(Figure(), []) == "no epoch yet"
 
 
@@ -235,6 +237,8 @@ def test_the_table_groups_the_states_running_first_with_a_symbol_each_and_marks_
     done = jobs.Status("finished", epoch=311, epochs=1000, converged=True,
                        last={"metrics": {"jaccard": 0.371, "rmse_lat_nm": 47.2}})
     assert done.group == "done" and state_text(done) == "done, converged at epoch 311"
+    from smappy.gui.train_window import state_word
+    assert state_word(done) == "done, converged"                          # the Follow line: no epoch
     row = job_row(jobs.Entry("/x/job"), done)
     assert row["result"] == "test set: Jaccard 0.371, lateral 47 nm" and row["run_on"] == "this computer"
     assert state_text(jobs.Status("finished", epoch=999)) == "done, all 1000 epochs"
