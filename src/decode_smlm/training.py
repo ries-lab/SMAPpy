@@ -156,10 +156,6 @@ def write_model(path: Path, model, param, job, epoch: int, calibration_em_on=Non
             "base_model": job.base_model, "epoch": epoch, "epochs": param.HyperParameter.epochs,
             "batch_size": int(param.HyperParameter.batch_size), "learning_rate": float(param.HyperParameter.opt_param.lr),
             "seed": job.seed, "smappy_version": __version__, "decode_version": "0.10.2"}
-    from .neuralfitter.edge_pad import EdgePad
-    edge_pad = EdgePad.parse(param)
-    if edge_pad is not None:
-        meta["edge_pad"] = edge_pad.as_dict()       # the predictor pads with its value
     model_file.write(path, tensors, meta)
 
 

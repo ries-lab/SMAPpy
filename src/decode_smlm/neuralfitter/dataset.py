@@ -44,7 +44,6 @@ class SMLMDataset(Dataset):
         self.frame_window = frame_window
         self.pad = pad
         self.return_em = return_em
-        self.edge_pad = None        # SMAPpy: padding drawn into training frames (`edge_pad.EdgePad`)
 
         """Sanity"""
         self.sanity_check()
@@ -94,9 +93,6 @@ class SMLMDataset(Dataset):
 
         if self.em_proc is not None:
             tar_emitter = self.em_proc.forward(tar_emitter)
-
-        if self.edge_pad is not None:
-            frames, tar_emitter = self.edge_pad.forward(frames, tar_emitter)
 
         if self.tar_gen is not None:
             target = self.tar_gen.forward(tar_emitter, bg_frame)
