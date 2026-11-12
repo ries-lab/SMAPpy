@@ -80,22 +80,38 @@ def state(lines: list[dict]) -> str:
 
 #: When a training stops on its own (`converged`): over the last ``window`` epochs no quantity
 #: improved by more than its tolerance on its best before them, after at least ``min_epochs``.
-#: The quantities (`QUANTITIES`): the test loss (relative), the test set's Jaccard and its lateral
-#: and axial efficiencies (absolute), its lateral and axial RMSE (relative).  Each is the running
-#: median of ``smooth`` epochs first: early on an epoch's values scatter by about 1 in a loss of
-#: 300, 0.003 in Jaccard, 0.4 nm and 0.8 nm in the RMSEs (the test set is fixed; it is the
-#: weights that move), and one lucky epoch would otherwise set the bar.  On the proof of concept's
-#: six trainings of 1000 epochs (the example's, the pixelation study's, the SMLM challenge's)
-#: this stopped at epochs 340 -- 576, the Jaccard and both efficiencies within 0.005 of the 1000th
-#: epoch's.  The loss and the Jaccard settle last; the efficiencies and RMSEs are safeguards.  An
-#: RMSE alone is no measure of progress: it rises while a training learns, as it finds more of the
-#: harder molecules -- so it only keeps a training going while it still falls.
-EARLY_STOP = {"window": 100, "min_epochs": 150, "smooth": 11, "loss_tol": 0.005, "jaccard_tol": 0.005,
-              "eff_tol": 0.005, "rmse_tol": 0.01}
-#: (the name a progress line has it under, better when lower, the rule's tolerance, relative)
-QUANTITIES = (("loss_test", True, "loss_tol", True), ("jaccard", False, "jaccard_tol", False),
-              ("eff_lat", False, "eff_tol", False), ("eff_ax", False, "eff_tol", False),
-              ("rmse_lat_nm", True, "rmse_tol", True), ("rmse_ax_nm", True, "rmse_tol", True))
+#: The quantities (`QUANTITIES`): the test loss, against how far it has fallen so far (its gain over
+#: the window at most ``loss_tol`` of its fall from epoch ``fall_from`` to the best before the
+#: window); the test set's Jaccard and its lateral and axial efficiencies (absolute); its lateral
+#: and axial RMSE (relative).  Each is the running median of ``smooth`` epochs first: early on an
+#: epoch's values scatter by about 1 in a loss of 300, 0.003 in Jaccard, 0.4 nm and 0.8 nm in the
+#: RMSEs (the test set is fixed; it is the weights that move), and one lucky epoch would otherwise
+#: set the bar.
+#:
+#: **The loss against its fall, not its value** (2026-11-12): a loss's size is the density's -- 24
+#: at 25 molecules a 40 x 40 frame, 300 at 50 -- and 0.5 % of it kept a sparse training of 500
+#: epochs going at epoch 436, its loss falling 3 % in 100 epochs while everything else had settled
+#: since 400.  Replayed on the proof of concept's six trainings of 1000 epochs (the example's, the
+#: pixelation study's, the SMLM challenge's) and that one, this rule stops at epochs 327 -- 397,
+#: the Jaccard within 0.005 of the last epoch's.  A window of 50 epochs lost up to 0.012 in
+#: Jaccard, of 75 up to 0.007.  An RMSE alone is no measure of progress: it rises while a training
+#: learns, as it finds more of the harder molecules -- so it only keeps a training going while it
+#: still falls.
+EARLY_STOP = {"window": 100, "min_epochs": 150, "smooth": 11, "fall_from": 10, "loss_tol": 0.01,
+              "jaccard_tol": 0.005, "eff_tol": 0.005, "rmse_tol": 0.01}
+#: (the name a progress line has it under, what the status line calls it, better when lower, the
+#: rule's tolerance, how a gain is measured: "fall" -- of the fall so far, "relative", "absolute")
+QUANTITIES = (("loss_test", "loss", True, "loss_tol", "fall"),
+              ("jaccard", "Jaccard", False, "jaccard_tol", "absolute"),
+              ("eff_lat", "efficiency lateral", False, "eff_tol", "absolute"),
+              ("eff_ax", "efficiency axial", False, "eff_tol", "absolute"),
+              ("rmse_lat_nm", "RMSE lateral", True, "rmse_tol", "relative"),
+              ("rmse_ax_nm", "RMSE axial", True, "rmse_tol", "relative"))
+
+
+def rule(changes: dict | None = None) -> dict:
+    """The rule a training stops by: `EARLY_STOP` with ``changes`` over it."""
+    return {**EARLY_STOP, **(changes or {})}
 
 
 def _running_median(values: list, n: int) -> list:
@@ -108,23 +124,31 @@ def _running_median(values: list, n: int) -> list:
     return out
 
 
-def converged(lines: list, rule: dict | None = None) -> str | None:
-    """Why the training whose progress is ``lines`` may stop now, or None.  Only the epochs since
-    the last start from scratch count: a restart's run begins again.  A quantity a training does
-    not report (none matched yet) never keeps it going and never stops it."""
-    import numpy as np
-    rule = {**EARLY_STOP, **(rule or {})}
+def _epochs(lines: list) -> list:
+    """The epoch lines since the last start from scratch: a restart's run begins again, and a
+    resume repeats none."""
     epochs = []
     for line in lines:
         if line.get("kind") == "restart":
             epochs = []
         elif line.get("kind") == "epoch" and line.get("loss_test") is not None:
-            epochs = [e for e in epochs if e["epoch"] < line["epoch"]] + [line]   # a resume repeats none
+            epochs = [e for e in epochs if e["epoch"] < line["epoch"]] + [line]
+    return epochs
+
+
+def stop_status(lines: list, rule: dict | None = None) -> list:
+    """Each quantity of the rule as it stands: ``{"name", "label", "gain", "tolerance", "kind",
+    "settled", "level"}`` -- the gain over the window as the rule measures it, and ``level`` the
+    median of the window's smoothed values, what the Follow curves draw.  Empty before there is a
+    window to judge; a quantity a training does not report (none matched yet) is left out."""
+    import numpy as np
+    rule = {**EARLY_STOP, **(rule or {})}
+    epochs = _epochs(lines)
     w = int(rule["window"])
-    if len(epochs) < max(int(rule["min_epochs"]), w + 1):
-        return None
-    said = []
-    for name, lower, tol, relative in QUANTITIES:
+    if len(epochs) <= w:
+        return []
+    out = []
+    for name, label, lower, tol, kind in QUANTITIES:
         raw = [e.get(name) if name == "loss_test" else (e.get("metrics") or {}).get(name) for e in epochs]
         v = np.asarray(_running_median([np.nan if x is None else x for x in raw], int(rule["smooth"])))
         old, new = v[:-w], v[-w:]
@@ -132,10 +156,43 @@ def converged(lines: list, rule: dict | None = None) -> str | None:
             continue
         before, last = (np.nanmin(old), np.nanmin(new)) if lower else (np.nanmax(old), np.nanmax(new))
         gain = (before - last) if lower else (last - before)
-        if relative:
+        if kind == "fall":
+            start = v[min(int(rule["fall_from"]), len(old) - 1)]
+            fell = start - before if lower else before - start
+            # a loss that has not fallen yet is settled only if the window gained nothing either; the
+            # start of a training is the minimum's to guard (`min_epochs`), not this
+            if np.isfinite(fell) and fell > 0:
+                gain = gain / fell
+            else:
+                gain = 0.0 if gain <= 0 else float("inf")
+        elif kind == "relative":
             gain /= abs(before) or 1.0
-        if gain > float(rule[tol]):
-            return None
-        if name in ("loss_test", "jaccard"):
-            said.append(f"{'test loss' if name == 'loss_test' else 'Jaccard'} {last:.4g} against {before:.4g}")
-    return f"no better over the last {w} epochs: " + ", ".join(said)
+        out.append({"name": name, "label": label, "gain": float(gain), "tolerance": float(rule[tol]),
+                    "kind": kind, "settled": bool(gain <= float(rule[tol])),
+                    "level": float(np.nanmedian(new))})
+    return out
+
+
+def converged(lines: list, rule: dict | None = None) -> str | None:
+    """Why the training whose progress is ``lines`` may stop now, or None (`stop_status`)."""
+    rule = {**EARLY_STOP, **(rule or {})}
+    if len(_epochs(lines)) < max(int(rule["min_epochs"]), int(rule["window"]) + 1):
+        return None
+    status = stop_status(lines, rule)
+    if not status or not all(q["settled"] for q in status):
+        return None
+    return f"no better over the last {int(rule['window'])} epochs: " + status_text(status)
+
+
+def status_text(status: list) -> str:
+    """The rule's state in a line: what it still waits for, with the numbers, and what settled."""
+    def number(q):
+        if q["kind"] == "absolute":
+            return f"{q['gain']:+.3f}, needs \u2264 {q['tolerance']:.3f}"
+        what = " of its fall" if q["kind"] == "fall" else ""
+        return f"{100 * q['gain']:+.1f} %{what}, needs \u2264 {100 * q['tolerance']:.1f} %"
+    waiting = [f"{q['label']} ({number(q)})" for q in status if not q["settled"]]
+    settled = [q["label"] for q in status if q["settled"]]
+    parts = (["waiting for: " + ", ".join(waiting)] if waiting else []) + \
+            (["settled: " + ", ".join(settled)] if settled else [])
+    return " \u00b7 ".join(parts)

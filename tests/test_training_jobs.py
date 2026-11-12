@@ -98,4 +98,19 @@ def test_a_training_whose_rmse_still_falls_goes_on_and_one_lucky_epoch_sets_no_b
     lucky[100] = dict(lucky[100], loss_test=lucky[100]["loss_test"] - 50.0)   # one epoch far below the rest
     assert converged(lucky) is not None                    # the running median does not take it as the bar
     raw = converged(lucky, {"smooth": 1})
-    assert raw is not None and "test loss" in raw          # without it the bar is that one epoch: easier still
+    assert raw is not None and "loss" in raw               # without it the bar is that one epoch: easier still
+
+
+def test_the_loss_is_judged_against_how_far_it_has_fallen_whatever_its_size():
+    from smappy.training.progress import converged, stop_status, status_text
+    # a sparse training's loss: 24 at the end, still falling by 0.5 a hundred epochs -- 2 % of its
+    # value, but under 1 % of the 60 it has fallen since epoch 10
+    lines = []
+    for e in range(400):
+        lines.append({"kind": "epoch", "epoch": e, "loss_test": 24.0 + 60.0 * np.exp(-e / 40.0) + 0.5 * (1 - e / 400),
+                      "metrics": {"jaccard": 0.56, "eff_lat": 0.4, "eff_ax": 0.5, "rmse_lat_nm": 42.0, "rmse_ax_nm": 46.0}})
+    assert converged(lines) is not None
+    loss = stop_status(lines)[0]
+    assert loss["kind"] == "fall" and 0 < loss["gain"] < 0.01 and loss["settled"]
+    still = [dict(e, loss_test=e["loss_test"] - 0.02 * e["epoch"]) for e in lines]     # 8 more in the window
+    assert converged(still) is None and status_text(stop_status(still)).startswith("waiting for: loss")

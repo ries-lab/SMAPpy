@@ -14,6 +14,11 @@ register at high gain is 2, which the training's camera model draws and the Pois
 **The reference** is the median spot's bound: laterally ``sqrt(CRLB_x + CRLB_y)`` in nm (the pixel's
 two sizes), axially ``sqrt(CRLB_z)``.
 
+**Per molecule** the training divides each test-set localization's error by its own molecule's
+bound every epoch -- the bound of the training's own PSF, `decode_smlm.training.test_crlbs` -- and
+reports the width of that (`robust_width`), and where in their pixel its localizations fall
+(`subpixel_histogram`, `ks_uniform`): the Follow curves.
+
 It is a guide, not a bound on the test set's number: the test frames hold several spots that
 overlap and molecules on for part of a frame, and the RMSE is over the spots found -- the dim ones
 and those far from focus, whose bound is largest, are found less.  The root mean square of the
@@ -74,3 +79,41 @@ def for_job(folder) -> dict | None:
         return crlb_reference(params, folder / CALIBRATION)
     except (OSError, KeyError, TypeError, ValueError):
         return None
+
+
+# ----------------------------------------------------------------------------- the test set, per molecule
+#: the sub-pixel histogram's bins: 20 across a pixel
+PIXEL_BINS = 20
+
+
+def robust_width(values) -> float | None:
+    """The standard deviation a Gaussian would have, from the median absolute deviation (1.4826
+    MAD): what error / CRLB scatters by without its tails -- a mismatch or two molecules merged --
+    with no cut-off to choose, and from the first epochs on, where most errors are large (it holds
+    while fewer than half are outliers)."""
+    v = np.asarray(values, float)
+    v = v[np.isfinite(v)]
+    if len(v) < 10:
+        return None
+    return float(1.4826 * np.median(np.abs(v - np.median(v))))
+
+
+def subpixel_histogram(positions_px, bins: int = PIXEL_BINS) -> list:
+    """Where in their pixel positions fall, ``bins`` counts from the pixel's centre (0) through its
+    edge (0.5) back to the centre: uniform for unbiased positions, a peak at 0 and 1 for positions
+    pulled to the pixel centres (pixelation)."""
+    v = np.asarray(positions_px, float)
+    v = v[np.isfinite(v)] % 1.0
+    return np.histogram(v, bins, (0.0, 1.0))[0].astype(int).tolist()
+
+
+def ks_uniform(positions_px) -> float | None:
+    """The Kolmogorov--Smirnov distance of the positions' place within their pixel from uniform:
+    0 for none, a pixelation measure in one number."""
+    u = np.sort(np.asarray(positions_px, float) % 1.0)
+    u = u[np.isfinite(u)]
+    n = len(u)
+    if n < 10:
+        return None
+    i = np.arange(1, n + 1)
+    return float(max(np.max(i / n - u), np.max(u - (i - 1) / n)))

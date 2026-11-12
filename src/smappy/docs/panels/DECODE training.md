@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -45,20 +45,28 @@ there.
 
 **It stops when it no longer improves.**  *epochs* is the most it trains.
 With *stop when it no longer improves* on, it finishes earlier once nothing
-the test set measures has improved over the last 100 epochs: its loss by
-more than 0.5 %, its [Jaccard index](plugin:Panels/Glossary) and its lateral
-and axial efficiencies by more than 0.005, its lateral and axial RMSE by
-more than 1 % -- and never before epoch 150.  (The Jaccard index is the
-molecules found divided by those found, missed and invented together: 1 is
-perfect.  The efficiency is the SMLM Challenge's score of the Jaccard index
-and the RMSE together.)  Each is first taken as the median of 11 epochs, so
-one epoch that happens to come out well or badly does not decide.  On the
-trainings of the proof of concept (1000 epochs each) this stopped between
-epochs 340 and 576, with the Jaccard and both efficiencies within 0.005 of
-the 1000th epoch's: half to two thirds of the time saved.  The RMSE alone is
-no measure of progress -- it rises while a training learns, as it finds more
-of the harder molecules -- so it only keeps a training going while it still
-falls.  Turned off, it trains every epoch, as DECODE did.
+the test set measures has improved over the last 100 epochs, and never
+before epoch 150:
+
+- the loss by more than 1 % *of how far it has fallen so far* (from epoch
+  10 to its best before the window) -- not of its value, which is the
+  density's: 24 at 25 molecules in 40 x 40 pixels, 300 at 50;
+- its [Jaccard index](plugin:Panels/Glossary) and its lateral and axial
+  efficiencies by more than 0.005;
+- its lateral and axial RMSE by more than 1 %.
+
+(The Jaccard index is the molecules found divided by those found, missed and
+invented together: 1 is perfect.  The efficiency is the SMLM Challenge's
+score of the Jaccard index and the RMSE together.)  Each is first taken as
+the median of 11 epochs, so one epoch that happens to come out well or badly
+does not decide.  On seven trainings of 500 and 1000 epochs this stopped
+between epochs 327 and 397, with the Jaccard within 0.005 of the last
+epoch's.  A shorter window trusts a flat stretch too early: with 50 epochs
+the same trainings lost up to 0.012 in Jaccard, with 75 up to 0.007.  The
+RMSE alone is no measure of progress -- it rises while a training learns, as
+it finds more of the harder molecules -- so it only keeps a training going
+while it still falls.  The window, the minimum and the tolerances are under
+*more*.  Turned off, it trains every epoch, as DECODE did.
 
 **On a workstation.**  The workstations are listed in *File > Preferences*,
 *Training hosts* ([how to connect one](plugin:Panels/Training hosts), step by
@@ -77,16 +85,37 @@ job records the SMAPpy version that prepared it, and a training refuses a
 job of another version unless the host's *train jobs another SMAPpy version
 prepared* is on.
 
-**Follow.**  The losses, and the test set's Jaccard, RMSE and efficiency
-(the SMLM Challenge's score of the Jaccard and the RMSE together, lateral
-and axial), read from the job's progress file every few seconds; above them
-the seconds an epoch and the time left at most -- at most, since a training
-that stops improving finishes sooner.  The first epochs (5 %, at least 5)
-are left out of each panel's range, so that the curves later on are not
-flattened by a loss of thousands or an RMSE of hundreds of nm at the start;
-they are still drawn, beyond the edge.  The RMSE rising while the Jaccard
-still climbs is normal: the network finds more of the harder molecules.
-The dashed lines on the RMSE are the
+**Follow.**  Six panels, read from the job's progress file every few
+seconds: the loss, the test set's Jaccard index, and where in their pixel
+the latest epoch's localizations fall; the RMSE, each localization's error
+over its molecule's own CRLB, and the seconds an epoch.  Above them the
+state, the epoch, the time trained so far and at most how long is left; below
+them what the stop rule waits for, with its numbers -- *waiting for: loss
+(+2.6 % of its fall, needs ≤ 1.0 %) · settled: Jaccard, …*.  On the curves the
+rule judges, the last 100 epochs are shaded and a dashed line marks their
+median: where the curve stands now.  The first epochs (5 %, at least 5) are
+left out of each panel's range, and the RMSE's and the error over CRLB's
+before the Jaccard reaches a quarter of its best -- a handful of matches,
+hundreds of nm off; they are still drawn, beyond the edge.
+
+**Pixelation** is the network pulling its positions towards the pixel
+centres: the histogram of where in their pixel the localizations fall --
+0 the centre, 0.5 the edge -- is flat for unbiased positions and peaks at the
+centre for pixelated ones.  The test set's molecules are placed uniformly, so
+any shape is the network's.  It fades as a training goes on.
+
+**Error over CRLB** divides each matched localization's error by the
+single-emitter [CRLB](plugin:Panels/Glossary) of its own molecule -- its
+photons, background and z, the training's own PSF, doubled in variance with
+EM gain -- and reports how widely that scatters, as the width of a Gaussian
+(1.4826 times the median absolute deviation: two molecules merged or a
+mismatch, whose errors are many bounds, do not count, with no cut-off to
+choose).  At the bound it is 1.  The test frames are as dense as the
+training's, and a single-emitter bound leaves the neighbours out, so a dense
+training stays above 1: about 2 at 50 molecules in 40 x 40 pixels.  A
+training from before these numbers existed shows the panels empty.
+
+The dotted lines on the RMSE are the
 [CRLB](plugin:Panels/Glossary) of the median spot the training draws: its
 photons, background and z drawn as the training draws them, alone and
 without noise, from the job's calibration, the bound SMAPpy's spline fitter

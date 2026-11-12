@@ -128,8 +128,14 @@ def test_starting_here_runs_this_pythons_decode_cli_detached_with_its_log(tmp_pa
     monkeypatch.setattr(train_window.subprocess, "Popen", Fake)
     train_window.start_here(tmp_path, train_window.TrainSettings(epochs=7, device="mps"))
     assert seen["command"][:4] == [sys.executable, "-m", "decode_smlm.cli", "train"]
-    assert seen["command"][-4:] == ["--epochs", "7", "--device", "mps"] and seen["cwd"] == str(tmp_path)
+    command = seen["command"]
+    assert command[5:9] == ["--epochs", "7", "--device", "mps"] and seen["cwd"] == str(tmp_path)
     assert (tmp_path / "train.log").exists()
+    # the Train tab's rule goes along; without the tick every epoch is trained
+    rule = json.loads(command[command.index("--stop-rule") + 1])
+    assert rule == {"window": 100, "min_epochs": 150, "loss_tol": 0.01, "jaccard_tol": 0.005, "eff_tol": 0.005}
+    train_window.start_here(tmp_path, train_window.TrainSettings(epochs=7, until_converged=False))
+    assert seen["command"][-1] == "--all-epochs" and "--stop-rule" not in seen["command"]
 
 
 def test_a_sparse_movie_is_prefitted_further_until_molecules_were_fully_on_often_enough(movie):
@@ -177,7 +183,7 @@ def test_the_follow_curves_draw_the_crlb_reference_on_the_rmse(tmp_path):
     figure = Figure()
     draw_progress(figure, progress.read(tmp_path), {"lateral_nm": 12.0, "axial_nm": 30.0})
     rmse = next(a for a in figure.axes if a.get_title().startswith("RMSE"))
-    levels = sorted(line.get_ydata()[0] for line in rmse.get_lines() if line.get_linestyle() == "--")
+    levels = sorted(line.get_ydata()[0] for line in rmse.get_lines() if line.get_linestyle() == ":")   # dotted: the dashed are the window's
     assert levels == [12.0, 30.0]
 
 
@@ -336,10 +342,29 @@ def test_the_curves_leave_the_first_epochs_out_of_their_range_and_show_the_effic
         lines.append({"kind": "epoch", "epoch": e, "loss_train": 5000.0 if far else 300.0 - 0.1 * e,
                       "loss_test": 4000.0 if far else 290.0 - 0.1 * e, "seconds": 9.0,
                       "metrics": {"jaccard": 0.3, "rmse_lat_nm": 400.0 if far else 45.0, "rmse_ax_nm": 70.0,
-                                  "eff_lat": 0.2, "eff_ax": 0.25}})
+                                  "eff_lat": 0.2, "eff_ax": 0.25, "crlb_width_lat": 1.9, "crlb_width_ax": 2.1,
+                                  "pixel_hist_rows": [12] * 10 + [8] * 10, "pixel_hist_cols": [10] * 20}})
     figure = Figure()
     draw_progress(figure, lines, {"lateral_nm": 20.0, "axial_nm": 40.0})
-    loss, jaccard, rmse, eff = figure.axes
+    loss, jaccard, pixels, rmse, crlb, seconds = figure.axes
     assert loss.get_ylim()[1] < 400 and rmse.get_ylim()[1] < 100      # the first epochs beyond the edge
     assert rmse.get_ylim()[0] < 20                                     # the CRLB lines still inside
-    assert eff.get_title() == "efficiency (test set)" and len(eff.lines) == 2
+    assert crlb.get_title() == "error / CRLB, width (test set)" and crlb.get_ylim()[0] < 1.0 < crlb.get_ylim()[1]
+    assert pixels.get_title() == "pixelation, epoch 199" and seconds.get_title() == "seconds an epoch"
+    # the stop rule's window: shaded once, and a line at its median, on the curves it judges
+    assert len(jaccard.patches) == 1 and any(line.get_linestyle() == "--" for line in jaccard.lines)
+
+
+def test_the_follow_line_says_what_the_stop_rule_waits_for():
+    from smappy.gui.train_window import rule_line
+    lines = [{"kind": "start", "epoch": 0, "epochs": 1000, "stop_rule": {"window": 100, "min_epochs": 150, "smooth": 11,
+              "fall_from": 10, "loss_tol": 0.01, "jaccard_tol": 0.005, "eff_tol": 0.005, "rmse_tol": 0.01}}]
+    for e in range(200):
+        lines.append({"kind": "epoch", "epoch": e, "loss_test": 300.0 - 0.5 * e,
+                      "metrics": {"jaccard": 0.3, "eff_lat": 0.2, "eff_ax": 0.2, "rmse_lat_nm": 45.0, "rmse_ax_nm": 70.0}})
+    said = rule_line(lines)
+    assert said.startswith("waiting for: loss (") and "of its fall" in said and "settled: Jaccard" in said
+    assert rule_line([dict(lines[0], stop_rule=None)] + lines[1:]) == \
+        "trains every epoch (stop when it no longer improves is off)"
+    done = lines + [{"kind": "finished", "epoch": 199, "converged": True}]
+    assert rule_line(done).startswith("converged at epoch 199")

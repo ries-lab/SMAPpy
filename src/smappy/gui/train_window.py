@@ -162,7 +162,16 @@ class TrainSettings:
     epochs: int = param(1000, label="epochs", min=1, help="the most it trains")
     until_converged: bool = param(True, label="stop when it no longer improves",
                                   help="finish before the epochs when the test loss, Jaccard, efficiencies "
-                                       "and RMSEs have not improved over 100 epochs (after 150 at least)")
+                                       "and RMSEs have not improved over the last epochs (Follow says which)")
+    stop_window: int = param(100, label="over", unit="epochs", min=10, advanced=True,
+                             help="the last epochs the rule compares with the best before them")
+    stop_min_epochs: int = param(150, label="never before", unit="epochs", min=0, advanced=True,
+                                 help="the epochs it trains at least")
+    stop_loss_tol: float = param(1.0, label="loss within", unit="% of its fall", min=0.0, advanced=True,
+                                 help="how much the loss may still gain over the window, as a share of how "
+                                      "far it has fallen so far")
+    stop_jaccard_tol: float = param(0.005, label="Jaccard and efficiencies within", min=0.0, advanced=True,
+                                    help="how much they may still gain over the window")
     device: str = param("auto", label="device", choices=(("auto", "auto"), ("cuda", "CUDA"), ("mps", "Apple GPU"),
                                                          ("cpu", "CPU")), advanced=True,
                         help="where the network trains; auto: the fastest there")
@@ -412,6 +421,13 @@ def torch_here() -> bool:
     return importlib.util.find_spec("torch") is not None
 
 
+def stop_rule(train: TrainSettings) -> dict:
+    """The Train tab's numbers as the rule's (`training.progress.EARLY_STOP`), handed to the training."""
+    return {"window": int(train.stop_window), "min_epochs": int(train.stop_min_epochs),
+            "loss_tol": float(train.stop_loss_tol) / 100.0, "jaccard_tol": float(train.stop_jaccard_tol),
+            "eff_tol": float(train.stop_jaccard_tol)}
+
+
 def start_here(folder, train: TrainSettings, python: str = sys.executable) -> subprocess.Popen:
     """``python -m decode_smlm.cli train FOLDER`` detached, its output in ``train.log``: the training
     outlives the window, and the window follows it through its files."""
@@ -422,6 +438,9 @@ def start_here(folder, train: TrainSettings, python: str = sys.executable) -> su
         command += ["--device", train.device]
     if not train.until_converged:
         command += ["--all-epochs"]
+    else:
+        import json
+        command += ["--stop-rule", json.dumps(stop_rule(train))]
     log = open(folder / "train.log", "a", encoding="utf-8")
     try:
         return subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -460,20 +479,55 @@ def _fit_range(ax, *curves, log=False, include=()) -> None:
         ax.set_ylim(lo - pad, hi + pad)
 
 
+#: the Follow figure's bottom-right-of-centre panel: "crlb" (each localization's error over its
+#: molecule's CRLB) or "efficiency" (the SMLM Challenge's score of Jaccard and RMSE together)
+SCORE_PANEL = "crlb"
+
+
+def job_rule(lines: list) -> Optional[dict]:
+    """The rule the job's latest start stops by (its ``stop_rule``), the default where a training
+    from before said none, None where it trains every epoch."""
+    from ..training.progress import rule
+    start = next((line for line in reversed(lines) if line["kind"] == "start"), {})
+    if "stop_rule" in start:
+        return start["stop_rule"] or None
+    return rule()
+
+
+def _window(ax, e, values, window) -> None:
+    """The light extras: the last ``window`` epochs shaded, a dashed line at their median (of the
+    11-epoch running median the rule reads) -- where the curve stands now."""
+    from ..training.progress import _running_median
+    if window is None or len(e) <= window:
+        return
+    v = np.asarray(_running_median(list(values), 11), float)[-window:]
+    if not np.isfinite(v).any():
+        return
+    if not getattr(ax, "_window_shaded", False):           # once a panel, whatever its curves
+        ax.axvspan(e[-window], e[-1], color="0.5", alpha=0.12, lw=0)
+        ax._window_shaded = True
+    line = ax.lines[-1] if ax.lines else None
+    ax.axhline(float(np.nanmedian(v)), ls="--", lw=0.8, color=line.get_color() if line is not None else "k")
+
+
 def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
-    """The curves of a job's ``progress.jsonl``: the losses, Jaccard, the RMSEs and the efficiencies
-    of the test set, each y range without the first epochs (`_fit_range`); returns a line saying
-    where it is and how long it has left at most.  ``reference``, the median spot's CRLB
-    (`training.reference`), is drawn on the RMSE as dashed lines."""
+    """The curves of a job's ``progress.jsonl``, in two rows of three: the loss, the Jaccard and
+    where in their pixel this epoch's localizations fall; the RMSE, each localization's error over
+    its molecule's CRLB (or the efficiencies, `SCORE_PANEL`), and the seconds an epoch.  Each y range
+    without the first epochs (`_fit_range`); on the curves the stop rule's window shaded and a line
+    at its median (`_window`).  Returns a line saying where it is and how long it has left at most.
+    ``reference``, the median spot's CRLB (`training.reference`), is drawn on the RMSE dashed."""
     epochs = [line for line in lines if line["kind"] == "epoch"]
     figure.clear()
-    axes = figure.subplots(2, 2)
+    axes = figure.subplots(2, 3)
     if not epochs:
         for a in axes.flat:
             a.set_axis_off()
         axes[0, 0].text(0.5, 0.5, "no epoch yet", ha="center", va="center", transform=axes[0, 0].transAxes)
         return "no epoch yet"
     e = np.array([line["epoch"] for line in epochs])
+    rule_now = job_rule(lines)
+    window = int(rule_now["window"]) if rule_now else None
 
     def series(key, metric=False):
         return np.array([np.nan if (line.get("metrics", {}) if metric else line).get(key) is None
@@ -481,36 +535,86 @@ def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     train, test = series("loss_train"), series("loss_test")
     axes[0, 0].plot(e, train, label="train")
     axes[0, 0].plot(e, test, label="test")
+    _window(axes[0, 0], e, test, window)
     axes[0, 0].set(yscale="log", title="loss", xlabel="epoch")
     _fit_range(axes[0, 0], train, test, log=True)
     axes[0, 0].legend(fontsize=7)
-    axes[0, 1].plot(e, series("jaccard", True))
+    jac = series("jaccard", True)
+    axes[0, 1].plot(e, jac)
+    _window(axes[0, 1], e, jac, window)
     axes[0, 1].set(title="Jaccard (test set)", xlabel="epoch")
+    # pixelation: where in their pixel this epoch's localizations fall, uniform where unbiased
+    last = (epochs[-1].get("metrics") or {})
+    rows, cols = last.get("pixel_hist_rows"), last.get("pixel_hist_cols")
+    if rows and cols:
+        c = (np.arange(len(rows)) + 0.5) / len(rows)
+        for h, name in ((cols, "x"), (rows, "y")):
+            h = np.asarray(h, float)
+            axes[0, 2].step(c, h / max(h.mean(), 1e-9), where="mid", label=name)
+        axes[0, 2].axhline(1.0, color="k", lw=0.8, ls=":")
+        axes[0, 2].set(title=f"pixelation, epoch {int(e[-1])}", xlabel="place in the pixel (0: centre, 0.5: edge)",
+                       ylabel="relative count", ylim=(0.6, 1.4))
+        axes[0, 2].legend(fontsize=7)
+    else:
+        axes[0, 2].set_axis_off()
+        axes[0, 2].text(0.5, 0.5, "pixelation: not reported\nby this training", ha="center", va="center",
+                        transform=axes[0, 2].transAxes, fontsize=8)
+    # the RMSEs and the error over CRLB before the network finds much are over a handful of
+    # matches, hundreds of nm off: left out of their ranges, from where Jaccard reaches a quarter
+    # of its best on
+    found = np.flatnonzero(np.nan_to_num(jac) >= 0.25 * np.nanmax(np.r_[jac, 0.0])) if np.isfinite(jac).any() else []
+    first = int(found[0]) if len(found) else 0
+
+    def later(v):
+        return np.where(np.arange(len(v)) >= first, v, np.nan)
     lat, ax_ = series("rmse_lat_nm", True), series("rmse_ax_nm", True)
     lateral = axes[1, 0].plot(e, lat, label="lateral")[0]
+    _window(axes[1, 0], e, lat, window)
     axial = axes[1, 0].plot(e, ax_, label="axial")[0]
+    _window(axes[1, 0], e, ax_, window)
     bounds = ()
     if reference:
-        axes[1, 0].axhline(reference["lateral_nm"], ls="--", lw=0.8, color=lateral.get_color(), label="CRLB, median spot")
-        axes[1, 0].axhline(reference["axial_nm"], ls="--", lw=0.8, color=axial.get_color())
+        axes[1, 0].axhline(reference["lateral_nm"], ls=":", lw=0.8, color=lateral.get_color(), label="CRLB, median spot")
+        axes[1, 0].axhline(reference["axial_nm"], ls=":", lw=0.8, color=axial.get_color())
         bounds = (reference["lateral_nm"], reference["axial_nm"])
     axes[1, 0].set(title="RMSE (nm, test set)", xlabel="epoch")
-    _fit_range(axes[1, 0], lat, ax_, include=bounds)
+    _fit_range(axes[1, 0], later(lat), later(ax_), include=bounds)
     axes[1, 0].legend(fontsize=7)
-    # the SMLM Challenge's score of the Jaccard and the RMSE together: what the early stop reads
-    # beside them, and a better sign of progress than either alone (the RMSE rises as more is found)
-    eff_lat, eff_ax = series("eff_lat", True), series("eff_ax", True)
-    axes[1, 1].plot(e, eff_lat, label="lateral")
-    axes[1, 1].plot(e, eff_ax, label="axial")
-    axes[1, 1].set(title="efficiency (test set)", xlabel="epoch")
-    _fit_range(axes[1, 1], eff_lat, eff_ax)
-    axes[1, 1].legend(fontsize=7)
+    if SCORE_PANEL == "crlb":
+        # each localization's error over its molecule's single-emitter CRLB, as the width of a
+        # Gaussian (1.4826 MAD: no cut-off for the outliers); 1 where the network reaches the bound
+        wl, wa = series("crlb_width_lat", True), series("crlb_width_ax", True)
+        if np.isfinite(wl).any() or np.isfinite(wa).any():
+            axes[1, 1].plot(e, wl, label="lateral")
+            _window(axes[1, 1], e, wl, window)
+            axes[1, 1].plot(e, wa, label="axial")
+            _window(axes[1, 1], e, wa, window)
+            axes[1, 1].axhline(1.0, color="k", lw=0.8, ls=":")
+            axes[1, 1].set(title="error / CRLB, width (test set)", xlabel="epoch")
+            _fit_range(axes[1, 1], later(wl), later(wa), include=(1.0,))
+        else:
+            axes[1, 1].set_axis_off()
+            axes[1, 1].text(0.5, 0.5, "error / CRLB: not reported\nby this training", ha="center", va="center",
+                            transform=axes[1, 1].transAxes, fontsize=8)
+    else:
+        # the SMLM Challenge's score of the Jaccard and the RMSE together: what the early stop reads
+        # beside them, and a better sign of progress than either alone (the RMSE rises as more is found)
+        eff_lat, eff_ax = series("eff_lat", True), series("eff_ax", True)
+        axes[1, 1].plot(e, eff_lat, label="lateral")
+        axes[1, 1].plot(e, eff_ax, label="axial")
+        axes[1, 1].set(title="efficiency (test set)", xlabel="epoch")
+        _fit_range(axes[1, 1], eff_lat, eff_ax)
+    if axes[1, 1].lines:
+        axes[1, 1].legend(fontsize=7)
+    seconds = series("seconds")
+    axes[1, 2].plot(e, seconds)
+    axes[1, 2].set(title="seconds an epoch", xlabel="epoch")
+    _fit_range(axes[1, 2], seconds)
     for a in axes.flat:
         a.grid(alpha=0.3)
         a.title.set_fontsize(9)
     start = next((line for line in reversed(lines) if line["kind"] == "start"), {})
     total = start.get("epochs")
-    seconds = series("seconds")
     per = float(np.nanmedian(seconds[-10:])) if np.isfinite(seconds[-10:]).any() else None
     ended = any(line["kind"] in ("finished", "stopped", "error") for line in lines[-2:])
     text = f"epoch {int(e[-1])}" + (f" of at most {total}" if total else "")
@@ -523,6 +627,22 @@ def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     if total and per and not ended:
         text += f", at most {_duration(max(total - 1 - int(e[-1]), 0) * per)} left"
     return text
+
+
+def rule_line(lines: list) -> str:
+    """What the stop rule waits for, under the Follow curves (`training.progress.status_text`)."""
+    from ..training.progress import converged, status_text, stop_status
+    end = next((line for line in reversed(lines) if line["kind"] in ("finished", "stopped", "error")), None)
+    if end is not None and end.get("converged"):
+        return f"converged at epoch {end['epoch']}: no better over the last epochs"
+    rule_now = job_rule(lines)
+    if rule_now is None:
+        return "trains every epoch (stop when it no longer improves is off)"
+    status = stop_status(lines, rule_now)
+    if not status:
+        return f"the stop rule judges from epoch {max(int(rule_now['min_epochs']), int(rule_now['window']) + 1)}"
+    text = status_text(status)
+    return ("would stop now -- " + text) if converged(lines, rule_now) else text
 
 
 def _duration(seconds: float) -> str:
@@ -667,6 +787,11 @@ class TrainWindow(QWidget):
         fv = QVBoxLayout(follow)
         fv.addWidget(self.follow_label)
         fv.addWidget(self.follow_canvas, 1)
+        # what the stop rule waits for, and with which numbers (`rule_line`)
+        self.rule_label = QLabel("")
+        self.rule_label.setWordWrap(True)
+        self.rule_label.setStyleSheet(note_style())
+        fv.addWidget(self.rule_label)
 
         # Try
         self.try_button = QPushButton("Try on my data")
@@ -858,11 +983,13 @@ class TrainWindow(QWidget):
             if entry.folder not in self.references:        # once a job: a second, from its own files
                 from ..training.reference import for_job
                 self.references[entry.folder] = for_job(entry.folder)
-            text = draw_progress(self.follow_figure, progress.read(entry.folder), self.references[entry.folder])
+            lines = progress.read(entry.folder)
+            text = draw_progress(self.follow_figure, lines, self.references[entry.folder])
             self.follow_canvas.draw_idle()
             # the state without its epoch: the curves' line says the epoch, once
             self.follow_label.setText(f"{entry.name}: {state_word(status)}; {text}"
                                       + (f" -- {status.message}" if status.message else ""))
+            self.rule_label.setText(rule_line(lines))
         except Exception as error:                         # a half-written file, a folder going away
             print(f"DECODE training: {error}")
 
@@ -1127,7 +1254,8 @@ def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> st
         report({"message": f"sending {Path(folder).name} to {h.name}"})
         entry = remote.send(folder, h)
     report({"message": f"starting it on {h.name}"})
-    remote.start(entry, train.epochs, train.device, all_epochs=not train.until_converged)
+    remote.start(entry, train.epochs, train.device, all_epochs=not train.until_converged,
+                 stop_rule=stop_rule(train) if train.until_converged else None)
     return f"started on {h.name}: {entry.remote}; its output in train.log there"
 
 
