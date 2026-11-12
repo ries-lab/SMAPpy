@@ -49,8 +49,8 @@ from typing import Optional
 import numpy as np
 
 from ..plugins import param
-from .core import (CalibrationSettings, brightness_centre, classify_brightness, find_peaks, measure_peaks,
-                   saturation_of, select_beads)
+from .core import (CalibrationSettings, brightness_centre, classify_brightness, doubles, find_peaks,
+                   judge_shapes, measure_peaks, saturation_of, select_beads)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 
 KEEP = slice(1, None)            # every slice but the first (module docstring)
@@ -375,10 +375,12 @@ def single_rois(stacks, camera, settings: CalibrationSettings | None = None, sli
     candidates = []
     for st in stacks:                       # one stack in memory at a time (`input.Planes`)
         images = np.asarray(st.images, np.float32)
-        yx, _, heights = find_peaks(images, settings)
-        candidates.append(measure_peaks(images, yx, settings, saturation_of(st.images, settings), heights))
+        yx, _, heights, merged = find_peaks(images, settings)
+        candidates.append(measure_peaks(images, yx, settings, saturation_of(st.images, settings), heights,
+                                        merged))
         del images
-    found = select_beads(candidates, settings)                   # isolated, over all stacks at once
+    # isolated, over all stacks at once; a double by its shape is marked to be left out (`judge_shapes`)
+    found = judge_shapes(select_beads(candidates, settings), settings)
     if not found:
         raise ValueError("no isolated beads found: review detection and the bead box")
     # specks out before the verdict, so a crowd of them cannot drag its median down to their level
@@ -971,7 +973,8 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
     calibration window's whole run, for a script too.
 
     ``previous`` (the window's *Calibrate* again with the same beads and settings): the same ROIs, its fit as the warm start, ``decisions``
-    ({bead: "include" | "exclude"}) applied.  ``camera`` defaults to the first acquisition's, as a fit
+    ({bead: "include" | "exclude"}) applied; None leaves out the beads marked doubles (`core.judge_shapes`),
+    as the window marks them, and {} none.  ``camera`` defaults to the first acquisition's, as a fit
     would resolve it.  ``save_to`` defaults to the bead calibration's name beside the stacks.  ``rois``,
     the beads found already (the window's *Detect beads*), skips finding them again."""
     from uipsf.workflows import calibrate_beads
@@ -986,6 +989,8 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
             rois = bead_rois(paths, camera, dual=dual, settings=detection)
         start = load_start(run.start_from) if run.start_from else None
         warm = None
+    if decisions is None and previous is None:
+        decisions = {i: "exclude" for i in doubles(rois.records)} or None
     channels = 2 if dual else 1
     found = optics.optics(rois.camera, channels, main_half(rois))
     cal = calibrate_beads(rois.batch, found, learns_tilt(model, found),

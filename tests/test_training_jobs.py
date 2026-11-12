@@ -86,3 +86,16 @@ def test_a_training_converges_once_neither_loss_nor_jaccard_improved_over_the_wi
     assert converged(flat, {"jaccard_tol": -1.0}) is None    # a rule the job changes
     restarted = flat + [{"kind": "restart", "epoch": 259}] + _curve(50, plateau_from=10)
     assert converged(restarted) is None                # a restart's run begins again
+
+
+def test_a_training_whose_rmse_still_falls_goes_on_and_one_lucky_epoch_sets_no_bar():
+    from smappy.training.progress import converged
+    flat = _curve(260, plateau_from=120)
+    assert converged(flat) is not None
+    falling = [dict(e, metrics={**e["metrics"], "rmse_lat_nm": 60.0 - 0.05 * e["epoch"]}) for e in flat]
+    assert converged(falling) is None                      # 5 nm better over the window: not done
+    lucky = [dict(e) for e in flat]
+    lucky[100] = dict(lucky[100], loss_test=lucky[100]["loss_test"] - 50.0)   # one epoch far below the rest
+    assert converged(lucky) is not None                    # the running median does not take it as the bar
+    raw = converged(lucky, {"smooth": 1})
+    assert raw is not None and "test loss" in raw          # without it the bar is that one epoch: easier still

@@ -1,6 +1,6 @@
 ---
-version: "8"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of]
+version: "9"
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.io.calibration.matched_to_em, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration, smappy.calibration_list.find, smappy.calibration_list.matches, smappy.calibration_list.recorded_calibration, smappy.calibrate.depth.depth_spline, smappy.calibrate.depth.auto_focus, smappy.calibrate.depth.insitu_focus, smappy.calibrate.insitu_run.held_pupil, smappy.field_splines.bilinear, smappy.calibrate.microscope_psf.calibration_path, smappy.calibrate.microscope_psf.record, smappy.calibrate.depth.model_of]
 ---
 
 ## What it does
@@ -321,11 +321,17 @@ Calibrations from the Bead calibration tool are never mirrored.
 [EM gain](plugin:Panels/Glossary) -- the electron multiplication of an EMCCD
 camera -- the Bead calibration tool reads it from the bead files' metadata, a
 SMAP calibration carries it -- and if the data's camera says otherwise, the
-fit warns: the EM register of many EMCCDs reads out mirrored, so a model
-from beads on the other port is mirrored against the data, and every fit is
-then subtly wrong.  The fit is not stopped.  The warning stays in the
-plugin's output and its status, and goes into the run's text, so the history
-and the fitted file (`metadata["warnings"]`) keep it.  The EM gain's excess noise is
+spline is mirrored in x to match: the EM register of many EMCCDs reads out
+mirrored, so a model from beads on the other port (the conventional
+amplifier's, say, as the DECODE example beads were taken) is mirrored against
+the data.  The turn is the one above, exact, done when the model is made; the
+[DECODE](plugin:Localize/DECODE) fitter flips its frames instead, for the
+same reason.  The fit says so in a warning, which stays in the plugin's
+output and its status, and goes into the run's text, so the history and the
+fitted file (`metadata["warnings"]`) keep it.  Where either side does not
+record its EM gain, nothing is turned.  A field-dependent calibration is not
+turned -- mirroring its grid of splines needs the chip's width -- and the fit
+only warns.  The EM gain's excess noise is
 handled as in the Gaussian fitter.  So is the camera's read noise: its variance is
 added to data and model, one electron without EM gain by default (*read
 noise*), which also keeps a pixel whose spline model nears zero from

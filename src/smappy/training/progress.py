@@ -78,20 +78,41 @@ def state(lines: list[dict]) -> str:
     return "new"
 
 
-#: When a training stops on its own (`converged`): the best test loss of the last ``window``
-#: epochs no more than ``loss_tol`` of it better than the best before, and the best test-set
-#: Jaccard no more than ``jaccard_tol`` higher, after at least ``min_epochs``.  On the seven
-#: trainings of the proof of concept (1000 epochs each: the example's, the pixelation study's,
-#: the SMLM challenge's) this stopped at epochs 300 -- 560, the Jaccard within 0.004 of the
-#: 1000th epoch's and the loss within 1 %: half to two thirds of the time saved.  The RMSEs are
-#: not read: they rise as the network finds more of the harder molecules.  A window of 50 and 1 %
-#: stopped at 160 -- 355 and lost up to 0.019 in Jaccard.
-EARLY_STOP = {"window": 100, "loss_tol": 0.005, "jaccard_tol": 0.005, "min_epochs": 150}
+#: When a training stops on its own (`converged`): over the last ``window`` epochs no quantity
+#: improved by more than its tolerance on its best before them, after at least ``min_epochs``.
+#: The quantities (`QUANTITIES`): the test loss (relative), the test set's Jaccard and its lateral
+#: and axial efficiencies (absolute), its lateral and axial RMSE (relative).  Each is the running
+#: median of ``smooth`` epochs first: early on an epoch's values scatter by about 1 in a loss of
+#: 300, 0.003 in Jaccard, 0.4 nm and 0.8 nm in the RMSEs (the test set is fixed; it is the
+#: weights that move), and one lucky epoch would otherwise set the bar.  On the proof of concept's
+#: six trainings of 1000 epochs (the example's, the pixelation study's, the SMLM challenge's)
+#: this stopped at epochs 340 -- 576, the Jaccard and both efficiencies within 0.005 of the 1000th
+#: epoch's.  The loss and the Jaccard settle last; the efficiencies and RMSEs are safeguards.  An
+#: RMSE alone is no measure of progress: it rises while a training learns, as it finds more of the
+#: harder molecules -- so it only keeps a training going while it still falls.
+EARLY_STOP = {"window": 100, "min_epochs": 150, "smooth": 11, "loss_tol": 0.005, "jaccard_tol": 0.005,
+              "eff_tol": 0.005, "rmse_tol": 0.01}
+#: (the name a progress line has it under, better when lower, the rule's tolerance, relative)
+QUANTITIES = (("loss_test", True, "loss_tol", True), ("jaccard", False, "jaccard_tol", False),
+              ("eff_lat", False, "eff_tol", False), ("eff_ax", False, "eff_tol", False),
+              ("rmse_lat_nm", True, "rmse_tol", True), ("rmse_ax_nm", True, "rmse_tol", True))
+
+
+def _running_median(values: list, n: int) -> list:
+    import numpy as np
+    v = np.asarray(values, float)
+    out = []
+    for i in range(len(v)):
+        part = v[max(0, i - n + 1):i + 1]
+        out.append(float(np.nanmedian(part)) if np.isfinite(part).any() else float("nan"))
+    return out
 
 
 def converged(lines: list, rule: dict | None = None) -> str | None:
     """Why the training whose progress is ``lines`` may stop now, or None.  Only the epochs since
-    the last start from scratch count: a restart's run begins again."""
+    the last start from scratch count: a restart's run begins again.  A quantity a training does
+    not report (none matched yet) never keeps it going and never stops it."""
+    import numpy as np
     rule = {**EARLY_STOP, **(rule or {})}
     epochs = []
     for line in lines:
@@ -102,12 +123,19 @@ def converged(lines: list, rule: dict | None = None) -> str | None:
     w = int(rule["window"])
     if len(epochs) < max(int(rule["min_epochs"]), w + 1):
         return None
-    loss = [e["loss_test"] for e in epochs]
-    jac = [(e.get("metrics") or {}).get("jaccard") or 0.0 for e in epochs]
-    before, last = min(loss[:-w]), min(loss[-w:])
-    if before - last > float(rule["loss_tol"]) * abs(before):
-        return None
-    if max(jac[-w:]) - max(jac[:-w]) > float(rule["jaccard_tol"]):
-        return None
-    return (f"no better over the last {w} epochs: test loss {last:.4g} against {before:.4g}, "
-            f"Jaccard {max(jac[-w:]):.3f} against {max(jac[:-w]):.3f}")
+    said = []
+    for name, lower, tol, relative in QUANTITIES:
+        raw = [e.get(name) if name == "loss_test" else (e.get("metrics") or {}).get(name) for e in epochs]
+        v = np.asarray(_running_median([np.nan if x is None else x for x in raw], int(rule["smooth"])))
+        old, new = v[:-w], v[-w:]
+        if not (np.isfinite(old).any() and np.isfinite(new).any()):
+            continue
+        before, last = (np.nanmin(old), np.nanmin(new)) if lower else (np.nanmax(old), np.nanmax(new))
+        gain = (before - last) if lower else (last - before)
+        if relative:
+            gain /= abs(before) or 1.0
+        if gain > float(rule[tol]):
+            return None
+        if name in ("loss_test", "jaccard"):
+            said.append(f"{'test loss' if name == 'loss_test' else 'Jaccard'} {last:.4g} against {before:.4g}")
+    return f"no better over the last {w} epochs: " + ", ".join(said)

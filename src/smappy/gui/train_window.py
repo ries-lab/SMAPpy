@@ -147,8 +147,8 @@ class TrainSettings:
                         help="this computer, or a training host (Training hosts... above)")
     epochs: int = param(1000, label="epochs", min=1, help="the most it trains")
     until_converged: bool = param(True, label="stop when it no longer improves",
-                                  help="finish before the epochs when the test loss and Jaccard have not "
-                                       "improved over 100 epochs (after 150 at least)")
+                                  help="finish before the epochs when the test loss, Jaccard, efficiencies "
+                                       "and RMSEs have not improved over 100 epochs (after 150 at least)")
     device: str = param("auto", label="device", choices=(("auto", "auto"), ("cuda", "CUDA"), ("mps", "Apple GPU"),
                                                          ("cpu", "CPU")), advanced=True,
                         help="where the network trains; auto: the fastest there")

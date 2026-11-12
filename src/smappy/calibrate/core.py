@@ -36,6 +36,14 @@ class CalibrationSettings:
     detection_threshold_sigma: float = param(6., label="threshold",
                                              unit="sigma")
     min_distance_px: float = param(25., label="min distance", unit="px")
+    # 5 robust σ (November 2026): on the DECODE example beads (Evolve, astigmatic) the doubles scored
+    # 0.25-0.71 against a median of 0.09 (σ 0.03), 13 of 104; on Zenodo's 1ch_40nm_bead the worst of 58 beads
+    # 0.16 against 0.08 (σ 0.02), and on 1ch_FD_bead, whose shapes vary over the chip, 0.73 against 0.25
+    # (σ 0.10): none marked in either
+    double_k: Optional[float] = param(5., label="doubles (k)", min=1., advanced=True,
+                                      help="robust standard deviations above the median shape "
+                                           "difference at which a bead is marked a double; auto: "
+                                           "none marked")
     max_xy_shift_px: float = param(3., label="max xy shift", unit="px",
                                    advanced=True)
     max_z_shift_nm: float = param(250., label="max z shift", unit="nm",
@@ -82,6 +90,8 @@ class CalibrationSettings:
                 raise ValueError(f'{name} must be a positive integer')
         if self.roi_size < 7 or self.roi_size % 2 != 1:
             raise ValueError('roi_size must be odd and at least 7')
+        if self.double_k is not None and (not np.isfinite(self.double_k) or self.double_k <= 0):
+            raise ValueError('double_k must be positive and finite, or None')
         for name in ('detection_sigma_px', 'detection_threshold_sigma',
                      'min_distance_px', 'alignment_range_nm', 'rejection_mad'):
             v = getattr(self, name)
@@ -258,28 +268,80 @@ def saturation_of(images, settings):
     return float(np.iinfo(dtype).max) if np.issubdtype(dtype, np.integer) else None
 
 
+#: A spot found at half the *detection sigma* this far from every spot found at the whole of it is a
+#: neighbour the smoothing merged into a bead (`find_peaks`).  The beads' own projections stay one spot
+#: at half the smoothing: on the DECODE and Zenodo example beads not one bead split, where the
+#: astigmatic lobes of a defocused plane lie 2 px either side of the centre.
+MERGED_PX = 3.0
+#: Half the side of the patch of a bead's maximum projection its shape is judged by (`judge_shapes`).
+SHAPE_HALF_PX = 8
+
+
+def _maxima(projection, sigma, threshold_sigma):
+    """The 3 × 3 local maxima of ``projection`` smoothed by ``sigma`` above ``threshold_sigma`` robust
+    standard deviations of its median, as whole pixels (y, x), with the smoothed image and its median."""
+    filtered = ndimage.gaussian_filter(projection.astype(float), sigma)
+    background = np.median(filtered)
+    noise = 1.4826 * np.median(np.abs(filtered - background))
+    threshold = background + threshold_sigma * max(noise, np.finfo(float).eps)
+    peaks = (filtered == ndimage.maximum_filter(filtered, size=3)) & (filtered > threshold)
+    labels, n = ndimage.label(peaks)
+    centers = ndimage.center_of_mass(filtered, labels, np.arange(1, n + 1)) if n else []
+    return np.rint(centers).astype(int).reshape(-1, 2), filtered, background
+
+
+def merged_neighbours(projection, yx, settings):
+    """Per spot of ``yx`` (`_maxima` at *detection sigma*), the heights of the neighbours within
+    *min distance* that the smoothing merged into it: spots found at half the smoothing farther than
+    `MERGED_PX` from every spot of ``yx``.
+
+    *Detection sigma* (2 px) on top of the spot's own width blends a second bead 5-7 px from the first
+    into one maximum: on the DECODE example beads 5 of 104 doubles passed isolation so.  A neighbour's
+    height is put on the scale of the whole smoothing by the ratio of the two at the spot it lies
+    beside, so `select_beads` judges it as it judges any neighbour; the bead's own tail under it makes
+    it, if anything, taller."""
+    if not len(yx):
+        return []
+    fine_yx, fine, fine_bg = _maxima(projection, settings.detection_sigma_px / 2,
+                                     settings.detection_threshold_sigma)
+    if not len(fine_yx):
+        return [[] for _ in yx]
+    coarse_smoothed = ndimage.gaussian_filter(projection.astype(float), settings.detection_sigma_px)
+    coarse_bg = np.median(coarse_smoothed)
+    gap, _ = cKDTree(yx).query(fine_yx)
+    hidden = fine_yx[gap >= MERGED_PX]
+    out = [[] for _ in yx]
+    if not len(hidden):
+        return out
+    for i, near in enumerate(cKDTree(hidden).query_ball_point(yx, settings.min_distance_px)):
+        if not near:
+            continue
+        y, x = yx[i]
+        ratio = (coarse_smoothed[y, x] - coarse_bg) / max(fine[y, x] - fine_bg, np.finfo(float).eps)
+        out[i] = [float((fine[q, p] - fine_bg) * ratio) for q, p in hidden[near]]
+    return out
+
+
 def find_peaks(images, settings):
-    """Every bright spot of one stack ([z, y, x]): its whole pixel (y, x), the stack's projection and each
-    spot's height (the smoothed projection at it, above the projection's median).
+    """Every bright spot of one stack ([z, y, x]): its whole pixel (y, x), the stack's projection, each
+    spot's height (the smoothed projection at it, above the projection's median) and the heights of the
+    neighbours the smoothing merged into it (`merged_neighbours`).
 
     The maximum over z, smoothed by `detection_sigma_px`, above `detection_threshold_sigma` robust
     standard deviations (1.4826 × MAD) of its median; local maxima over 3 × 3, their centres of mass.
     No border or isolation here: `select_beads` decides those.  The height is local, so a spot beside a
     bead is not credited with the bead's light, as a box around it would be."""
     projection = np.max(images, axis=0)
-    filtered = ndimage.gaussian_filter(projection.astype(float), settings.detection_sigma_px)
-    background = np.median(filtered)
-    noise = 1.4826 * np.median(np.abs(filtered - background))
-    threshold = background + settings.detection_threshold_sigma * max(noise, np.finfo(float).eps)
-    peaks = (filtered == ndimage.maximum_filter(filtered, size=3)) & (filtered > threshold)
-    labels, n = ndimage.label(peaks)
-    centers = ndimage.center_of_mass(filtered, labels, np.arange(1, n + 1)) if n else []
-    yx = np.rint(centers).astype(int).reshape(-1, 2)
+    yx, filtered, background = _maxima(projection, settings.detection_sigma_px,
+                                       settings.detection_threshold_sigma)
+    # merged neighbours against every spot, before *region*: a bead just outside it still is one
+    hidden = merged_neighbours(projection, yx, settings)
     region = getattr(settings, "region", None)
     if region is not None:
-        yx = yx[in_region(yx[:, 1], yx[:, 0], region)]
+        inside = in_region(yx[:, 1], yx[:, 0], region)
+        yx, hidden = yx[inside], [h for h, keep in zip(hidden, inside) if keep]
     heights = filtered[yx[:, 0], yx[:, 1]] - background if len(yx) else np.zeros(0)
-    return yx, projection, heights
+    return yx, projection, heights, hidden
 
 
 def in_region(x, y, region) -> np.ndarray:
@@ -289,13 +351,16 @@ def in_region(x, y, region) -> np.ndarray:
     return (x >= x0) & (x < x0 + w) & (y >= y0) & (y < y0 + h)
 
 
-def measure_peaks(images, yx, settings, saturation=None, heights=None):
+def measure_peaks(images, yx, settings, saturation=None, heights=None, merged=None):
     """What a calibration records of each spot: its whole pixel, its background (one median of its box's
     border over the whole stack, which keeps the axial change of the tails), its brightness (the
     brightest plane's sum above that), its peak and whether it reaches ``saturation``, and whether its
     box (`roi_size` + `padding`) lies inside the image (``inside``).  A box at the edge is clipped, so a
     spot there is measured too: it may still be a neighbour that spoils a bead's isolation.  ``heights``
-    (`find_peaks`) are kept as ``height``, what isolation judges a neighbour by."""
+    (`find_peaks`) are kept as ``height``, what isolation judges a neighbour by, and ``merged`` as
+    ``merged``, the heights of the neighbours the detection's smoothing merged into the spot.  The
+    spot's maximum projection about its centre is kept as ``_shape`` for `judge_shapes`, which removes
+    it: a record is saved as JSON."""
     images = np.asarray(images, np.float32)
     radius = settings.roi_size//2 + settings.padding_px
     Y, X = images.shape[1:]
@@ -314,8 +379,20 @@ def measure_peaks(images, yx, settings, saturation=None, heights=None):
                         'saturation_adu': saturation,
                         'saturated': bool(saturation is not None and peak_adu >= saturation),
                         'inside': bool(radius <= y < Y - radius and radius <= x < X - radius),
-                        'height': float('nan') if heights is None else float(heights[i])})
+                        'height': float('nan') if heights is None else float(heights[i]),
+                        'merged': [] if merged is None else [float(h) for h in merged[i]],
+                        '_shape': _shape_patch(images, y, x, settings)})
     return records
+
+
+def _shape_patch(images, y, x, settings):
+    """The maximum over z of a square about (y, x), `SHAPE_HALF_PX` (at most half the bead box) either
+    side; None where it would leave the image.  The maximum keeps a bead's shape whatever plane its
+    focus is in: the DECODE example beads' foci spread over 13 planes."""
+    half = min(SHAPE_HALF_PX, settings.roi_size // 2)
+    if not (half <= y < images.shape[1] - half and half <= x < images.shape[2] - half):
+        return None
+    return np.max(images[:, y - half:y + half + 1, x - half:x + half + 1], axis=0)
 
 
 def brightness_centre(records, brightness_range, key='brightness_adu'):
@@ -342,7 +419,8 @@ def brightness_centre(records, brightness_range, key='brightness_adu'):
 def select_beads(candidates, settings):
     """The beads among every stack's spots (``candidates``: one `measure_peaks` list per stack): inside
     the image, with light above their background, and isolated -- no other spot within
-    `min_distance_px` that is itself bright enough to be a bead or saturated.  A faint speck beside a
+    `min_distance_px` that is itself bright enough to be a bead or saturated, found as a spot of its
+    own or merged into this one by the smoothing (``merged``, `merged_neighbours`).  A faint speck beside a
     bead does not cost the bead (on Zenodo `2ch_40nm_bead` a lower detection threshold lost real pairs
     to specks this way); bright dirt, a saturated blob or a neighbour beyond the border still does.
     A neighbour is judged by its local ``height`` (`find_peaks`), not its box, which beside a bead
@@ -357,7 +435,9 @@ def select_beads(candidates, settings):
             continue
         yx = np.array([(r['y_px'], r['x_px']) for r in records])
         counts = np.array([lower is None or r['saturated'] or not r['height'] < lower for r in records])
-        crowded = np.zeros(len(records), bool)
+        # a neighbour the smoothing merged into the spot counts as any other would (`merged_neighbours`)
+        crowded = np.array([any(lower is None or not h < lower for h in r.get('merged', ())) for r in records],
+                           bool)
         for a, b in cKDTree(yx).query_pairs(settings.min_distance_px):
             crowded[a] |= counts[b]
             crowded[b] |= counts[a]
@@ -370,9 +450,67 @@ def find_stack_beads(images, settings, saturation=None):
     """The beads of one stack and what is recorded of each, with its projection: `find_peaks`,
     `measure_peaks` and `select_beads` on this stack alone.  A calibration of several stacks selects
     over all of them at once (`collect_beads`, `pupil.single_rois`), so the bound is the same in each."""
-    yx, projection, heights = find_peaks(np.asarray(images, np.float32), settings)
-    records = select_beads([measure_peaks(images, yx, settings, saturation, heights)], settings)
+    yx, projection, heights, merged = find_peaks(np.asarray(images, np.float32), settings)
+    records = judge_shapes(select_beads([measure_peaks(images, yx, settings, saturation, heights, merged)],
+                                        settings), settings)
     return [{k: v for k, v in r.items() if k != 'stack'} for r in records], projection
+
+
+def shape_scores(patches):
+    """How far each patch (a bead's maximum projection, `_shape_patch`) is from the median of all: the
+    sum of absolute differences of the patches, each less the median of its border, clipped at zero,
+    shifted by its centre of mass to the middle (linear interpolation) and divided by its sum; between
+    0 and 2.  NaN for a missing or empty patch.
+
+    The maximum projection does not depend on which plane a bead's focus is in, so beads at different
+    heights compare; a double's is two spots or one spot too long, and a clump's too wide."""
+    out = np.full(len(patches), np.nan)
+    shaped = []
+    for i, patch in enumerate(patches):
+        if patch is None:
+            continue
+        patch = np.asarray(patch, float)
+        border = np.concatenate((patch[0], patch[-1], patch[1:-1, 0], patch[1:-1, -1]))
+        patch = np.clip(patch - np.median(border), 0, None)
+        total = patch.sum()
+        if not total > 0:
+            continue
+        centre = (np.asarray(patch.shape) - 1) / 2
+        patch = ndimage.shift(patch, centre - np.asarray(ndimage.center_of_mass(patch)), order=1)
+        shaped.append((i, patch / max(patch.sum(), np.finfo(float).eps)))
+    if not shaped:
+        return out
+    median = np.median([p for _, p in shaped], axis=0)
+    median /= max(median.sum(), np.finfo(float).eps)
+    for i, patch in shaped:
+        out[i] = float(np.abs(patch - median).sum())
+    return out
+
+
+def judge_shapes(records, settings, min_beads=5):
+    """Mark the beads whose shape is far from the others' (`shape_scores`) a double: ``double`` True and
+    the score as ``shape``, in place; ``_shape`` removed from every record.  Returned for chaining.
+
+    Two beads closer than the smoothing can split -- 2 px on the DECODE example beads -- are one spot to
+    any peak search; only the shape tells them.  The median score and its spread (1.4826 × MAD) come
+    from the beads, specks out (`brightness_centre`, whose noisy patches score high); a bead is a double
+    above the median plus `double_k` spreads, and never below twice the median, so a set of near-perfect
+    beads does not mark the merely good.  A speck is scored but never marked: it is *too dim* already.
+    Fewer than ``min_beads`` beads have no median to judge by, and *doubles (k)* on auto marks none."""
+    patches = [r.pop('_shape', None) for r in records]
+    scores = shape_scores(patches)
+    _, speck = brightness_centre(records, settings.brightness_range)
+    beads = np.array([speck is None or r['saturated'] or r['brightness_adu'] >= speck for r in records], bool)
+    pool = scores[beads & np.isfinite(scores)]
+    limit = None
+    if settings.double_k is not None and len(pool) >= min_beads:
+        median = float(np.median(pool))
+        spread = 1.4826 * float(np.median(np.abs(pool - median)))
+        limit = median + max(settings.double_k * spread, median)
+    for r, score, bead in zip(records, scores, beads):
+        r['shape'] = float(score)
+        r['double'] = bool(limit is not None and bead and score > limit)
+    return records
 
 
 def classify_brightness(records, settings):
@@ -454,9 +592,9 @@ def collect_beads(inputs, settings=None, progress=None):
             si = len(sources)
             sources.append({'path': stack.source, 'axes': stack.axes,
                             'shape': list(images.shape), 'z_nm': z.tolist()})
-            yx, projection, heights = find_peaks(images, settings)
+            yx, projection, heights, merged = find_peaks(images, settings)
             projections.append(projection)
-            spots = measure_peaks(images, yx, settings, saturation_of(camera_images, settings), heights)
+            spots = measure_peaks(images, yx, settings, saturation_of(camera_images, settings), heights, merged)
             candidates.append(spots)
             # cut now, the stack is released after this loop; which are beads is decided over all stacks
             for spot in spots:
@@ -464,7 +602,7 @@ def collect_beads(inputs, settings=None, progress=None):
                     y, x = spot['y_px'], spot['x_px']
                     cut[(si, x, y)] = ((images[:, y-radius:y+radius+1, x-radius:x+radius+1]
                                         - spot['background_adu']) / spot['brightness_adu'])
-    for rec in select_beads(candidates, settings):
+    for rec in judge_shapes(select_beads(candidates, settings), settings):
         records.append(dict(rec, id=len(records)))
         volumes.append(cut[(rec['stack'], rec['x_px'], rec['y_px'])])
     del cut
@@ -1016,9 +1154,18 @@ def _single_model(raw, dz_nm, s):
     return cal, raw
 
 
-def calibrate(inputs, settings=None, excluded=(), progress=None):
-    """Build one spline calibration from all selected acquisitions or bead stacks."""
-    return build_calibration(collect_beads(inputs, settings, progress), excluded, progress)
+def calibrate(inputs, settings=None, excluded=None, progress=None):
+    """Build one spline calibration from all selected acquisitions or bead stacks.  ``excluded`` (bead ids)
+    defaults to the beads `judge_shapes` marks doubles, as the window marks them; () uses every bead."""
+    beads = collect_beads(inputs, settings, progress)
+    if excluded is None:
+        excluded = doubles(beads.records)
+    return build_calibration(beads, excluded, progress)
+
+
+def doubles(records) -> list:
+    """The indices of the records `judge_shapes` marked a double."""
+    return [i for i, r in enumerate(records) if r.get('double')]
 
 
 def estimate_pair_shift(reference, moving, limits=None, z_window=None,

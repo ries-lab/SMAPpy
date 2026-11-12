@@ -1060,8 +1060,7 @@ class PSFCalibrationWindow(QMainWindow):
         self._show_detected_text()
         sources = getattr(detected.found, "sources", None) or []
         self.stack_browser.box_px = self._box_px()
-        states = getattr(self.method, "detected_states", None)
-        self.stack_browser.set_marks(detected.positions, sources, states(detected) if states else None)
+        self.stack_browser.set_marks(detected.positions, sources, self._ring_states())
         self.refresh_table()
         self._update_buttons()
 
@@ -1269,7 +1268,7 @@ class PSFCalibrationWindow(QMainWindow):
             self.tabs.setCurrentIndex(titles.index(current))
         self.tabs.blockSignals(False)
         self.stack_browser.set_marks(self.detected.positions if self.detected else self._positions(),
-                                     self._sources(), self._states())
+                                     self._sources(), self._ring_states())
         self.refresh_table()
         self._update_buttons()
         self.redraw()
@@ -1298,15 +1297,32 @@ class PSFCalibrationWindow(QMainWindow):
             getattr(result, "rois", None) or getattr(result, "beads", None))
         return list(getattr(found, "sources", None) or [])
 
-    def _states(self) -> dict:
-        """Each bead's state for its ring, from the bead table's last column the methods share; a method
-        whose table counts rather than lists (in situ) says them itself."""
-        own = getattr(self.method, "states", None)
+    def _ring_states(self) -> dict:
+        """Each bead's state for its ring (`stack_browser.ring_style`): the run's, or before one the
+        detection's -- found, or red for too dim and a double -- read from the table's state column, a
+        mark not yet applied (``state -> exclude on Calibrate``) dashed.  A method whose table counts
+        rather than lists (in situ) says them itself."""
+        from .stack_browser import MARKED
+        if self.run_result is None and self.detected is None:
+            return {}
+        own = getattr(self.method, "states" if self.run_result is not None else "detected_states", None)
         if own is not None:
-            return own(self.run_result)
-        rows = self.method.rows(self.run_result, {})
-        state = self.method.columns.index("state")
-        return {i: str(values[state]).split(":")[0] for i, (values, _) in enumerate(rows)}
+            return own(self.run_result if self.run_result is not None else self.detected)
+        if "state" not in getattr(self.method, "columns", ()):
+            return {}
+        rows = (self.method.rows(self.run_result, self.marks) if self.run_result is not None
+                else self.method.detected_rows(self.detected, self.marks))
+        column = self.method.columns.index("state")
+        states = {}
+        for i, (values, _) in enumerate(rows):
+            state, _, wish = str(values[column]).split(":")[0].partition(" -> ")
+            if wish:
+                wish = wish.split()[0]
+                # a bead left out by hand: grey where it would be used, its red kept where it is rejected
+                state = ({"exclude": "excluded" if state in ("found", "used") else state,
+                          "include": "used"}.get(wish, state) + MARKED)
+            states[i] = state
+        return states
 
     def _page_index(self) -> int:
         """The result page in front, an index into ``pages``; -1 for the Stacks page."""
@@ -1397,6 +1413,7 @@ class PSFCalibrationWindow(QMainWindow):
                                     else self.method.mark(self.run_result, bead))
         if self.run_result is None:
             self._show_detected_text()
+        self.stack_browser.set_states(self._ring_states())
         self.refresh_table()
         self.redraw()
 

@@ -204,7 +204,8 @@ def _smap_flipped(emmirror, em_on, path) -> bool:
 _REFLECT = np.array([[(-1) ** q * comb(p, q) for p in range(4)] for q in range(4)])
 
 
-def _unmirror_x(cal: SplineCalibration) -> SplineCalibration:
+def _unmirror_x(cal: SplineCalibration,
+                note: str = "x-flipped on load: SMAP built this spline from x-mirrored beads") -> SplineCalibration:
     """The same calibration in the camera's orientation: S'(u) = S(nx - u).
 
     The fitter samples ROI pixel j of an emitter at x at u = j - x + c + off
@@ -240,8 +241,7 @@ def _unmirror_x(cal: SplineCalibration) -> SplineCalibration:
         cal, coeff=np.ascontiguousarray(c.reshape(64, nz, ny, -1), np.float32),
         psf=None if psf is None else np.ascontiguousarray(psf),
         x0=None if cal.x0 is None else nx - cal.x0,
-        parameters={**cal.parameters, "smappy_conversion":
-                    "x-flipped on load: SMAP built this spline from x-mirrored beads"})
+        parameters={**cal.parameters, "smappy_conversion": note})
 
 
 def _maybe_float(v):
@@ -335,6 +335,30 @@ def warn_on_microscope_mismatch(cal, data_scope: Optional[dict]) -> None:
     if found:
         warnings.warn("the calibration does not match the data's microscope: " + "; ".join(found)
                       + ".  Use beads taken as the data were.", stacklevel=2)
+
+
+def matched_to_em(cal: SplineCalibration, data_em_on: Optional[bool]) -> SplineCalibration:
+    """``cal`` in the orientation of data taken with EM gain ``data_em_on``: mirrored in x when its beads
+    were taken the other way, as the DECODE fitter flips its frames (`fit_decode._mirrored`).
+
+    An EM register reads the chip out mirrored, so beads taken with the conventional amplifier and data
+    with EM gain (the DECODE example package's) are mirrors of each other.  The spline is reflected
+    exactly (`_unmirror_x`), not fitted again, and says so with a warning the fit shows.  Unknown on
+    either side, nothing is changed.  A field-dependent calibration is only warned about: mirroring its
+    grid of splines needs the chip's width, which a calibration does not know."""
+    if cal.em_on is None or data_em_on is None or bool(cal.em_on) == bool(data_em_on):
+        return cal
+    if getattr(cal, "field_splines", None) is not None:
+        warn_on_em_mismatch(cal, data_em_on)
+        return cal
+    out = _unmirror_x(cal, f"x-flipped for the fit: beads with EM gain {'on' if cal.em_on else 'off'}, "
+                           f"data with it {'on' if data_em_on else 'off'}")
+    out.em_on = bool(data_em_on)
+    warnings.warn(
+        f"EM gain mismatch: the calibration's beads were taken with EM gain {'on' if cal.em_on else 'off'}, "
+        f"the data with it {'on' if data_em_on else 'off'}; the PSF is mirrored in x to match the data",
+        stacklevel=2)
+    return out
 
 
 def warn_on_em_mismatch(cal: SplineCalibration, data_em_on: Optional[bool]) -> None:

@@ -435,7 +435,7 @@ def test_a_region_keeps_only_the_beads_found_inside_it():
     from smappy.calibrate.core import CalibrationSettings, find_peaks
     z, y, x = np.mgrid[0:5, 0:40, 0:80]
     images = sum(1000 * np.exp(-((x - cx) ** 2 + (y - 20) ** 2) / 4.0) for cx in (20, 60)) + 10.0 + 0 * z
-    whole, _, _ = find_peaks(images.astype(np.float32), CalibrationSettings())
-    half, _, heights = find_peaks(images.astype(np.float32), CalibrationSettings(region=(40, 0, 40, 40)))
+    whole, _, _, _ = find_peaks(images.astype(np.float32), CalibrationSettings())
+    half, _, heights, _ = find_peaks(images.astype(np.float32), CalibrationSettings(region=(40, 0, 40, 40)))
     assert sorted(whole[:, 1].tolist()) == [20, 60]
     assert half[:, 1].tolist() == [60] and len(heights) == 1

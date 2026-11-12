@@ -50,6 +50,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from .core import doubles
 from .model_views import SECTIONS
 
 #: what only averaging reads, shown with the bead average's settings and hidden for the pupil model
@@ -199,12 +200,15 @@ def _positions(records) -> list:
 
 def _detected_rows(columns, records, marks, brightness) -> list:
     """(values, greyed) per bead found, before any calibration: the method's own columns, those only a
-    calibration fills left empty; state "found" or "too dim", and a mark "-> exclude on Calibrate".
+    calibration fills left empty; state "found", "too dim" or "double?" (`core.judge_shapes`), and a mark
+    "-> exclude on Calibrate".
     ``brightness(record)`` is what the method's *brightness* column shows."""
     out = []
     for i, record in enumerate(records):
         bright = bool(record.get("brightness_accepted", True))
         state = "found" if bright else str(record.get("brightness_reason", "too dim"))
+        if record.get("double"):
+            state = "double?"
         if marks.get(i):
             state = f"{state} -> {marks[i]} on Calibrate"
         values = {"bead": i, "stack": int(record.get("stack", 0)) + 1,
@@ -264,6 +268,10 @@ class BeadAverage:
         return Detected(beads, f"{len(beads.records)} {what} found, {bright} bright enough to average; "
                                f"averaging takes seconds", _positions(beads.records))
 
+    def detected_marks(self, detected: Detected) -> dict:
+        """The beads marked doubles (`core.judge_shapes`), marked to be left out: let in again by hand."""
+        return {b: "exclude" for b in doubles(detected.found.records)}
+
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found.records, marks,
                               lambda r: f"{r.get('brightness_adu', float('nan')):.4g}")
@@ -278,7 +286,9 @@ class BeadAverage:
         elif detected is not None:
             beads = detected.found
         else:
+            # no detection to have marked the doubles in the table: left out as it would have marked them
             beads = self.detect(paths, dual, inputs, progress).found
+            excluded = sorted(set(excluded) | set(doubles(beads.records)))
         build = build_dual_calibration if dual else build_calibration
         result = build(beads, excluded=excluded, progress=_counted(progress, 0.0, 0.8))
         run = Run(result, dual)
@@ -433,6 +443,10 @@ class PupilModel:
                               f"learning takes about {duration(seconds)}{memory}", _positions(rois.records),
                         seconds)
 
+    def detected_marks(self, detected: Detected) -> dict:
+        """The beads marked doubles (`core.judge_shapes`), marked to be left out: let in again by hand."""
+        return {b: "exclude" for b in doubles(detected.found.records)}
+
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found.records, marks,
                               lambda r: r.get("brightness_reason", ""))
@@ -442,7 +456,11 @@ class PupilModel:
         from .pupil import run_calibration
         done = run_calibration(paths, dual, inputs["optics"], inputs["model"], inputs["detection"],
                                inputs["spline"], inputs["run"], camera=inputs.get("camera"),
-                               previous=None if previous is None else previous.result, decisions=marks or None,
+                               previous=None if previous is None else previous.result,
+                               # after a detection the table's marks are the decisions, doubles unmarked by
+                               # hand included; without one, None leaves the doubles out as it would mark them
+                               decisions=dict(marks or {}) if detected is not None or previous is not None
+                               else marks or None,
                                progress=progress, cancel=cancel, rois=None if detected is None else detected.found)
         return Run(done, dual, done.saved)
 
@@ -520,8 +538,11 @@ class PupilModel:
                 state = f"{state} -> {wish} on Calibrate"
             elif row.manual and wish is None:
                 state = f"{state} -> automatic on Calibrate"         # a choice by hand withdrawn
+            reason = row.reason
+            if record.get("double") and row.state == "excluded":
+                reason = f"double? (shape {record.get('shape', float('nan')):.2f})"
             out.append(((row.bead, record.get("stack", 0) + 1, f"{record.get('x_px', '')}, {record.get('y_px', '')}",
-                         record.get("brightness_reason", ""), state, row.reason,
+                         record.get("brightness_reason", ""), state, reason,
                          f"{final.get('deviance', row.scores.get('deviance', float('nan'))):.3f}",
                          f"{row.scores.get('photons', float('nan')):.2f}",
                          f"{row.scores.get('xy_offset_px', float('nan')):.2f}"),
@@ -730,6 +751,10 @@ class EllipticalGaussian:
         bright = sum(bool(r.get("brightness_accepted", True)) for r in beads.records)
         return Detected(beads, f"{len(beads.records)} beads found, {bright} bright enough; calibrating takes "
                                f"seconds", _positions(beads.records))
+
+    def detected_marks(self, detected: Detected) -> dict:
+        """The beads marked doubles (`core.judge_shapes`), marked to be left out: let in again by hand."""
+        return {b: "exclude" for b in doubles(detected.found.records)}
 
     def detected_rows(self, detected: Detected, marks: dict) -> list:
         return _detected_rows(self.columns, detected.found.records, marks,

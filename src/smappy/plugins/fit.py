@@ -473,7 +473,7 @@ class SplineModelSettings:
 
     def model(self, camera: Optional[CameraMetadata] = None,
               roisize: Optional[int] = None) -> SplinePSF:
-        from ..io.calibration import (load_spline_calibration, warn_on_em_mismatch,
+        from ..io.calibration import (load_spline_calibration, matched_to_em,
                                       warn_on_microscope_mismatch)
         if not self.calibration:
             raise ValueError("a spline fit needs a bead calibration file")
@@ -489,7 +489,8 @@ class SplineModelSettings:
             from ..calibrate.depth import in_focus
             start = in_focus(calibration)          # an in situ spline's plane in focus, else 0
         if camera is not None:
-            warn_on_em_mismatch(calibration, camera.em_on)
+            # mirrored after the focus: a PSF drawn at depth from the pupil model is in the beads' orientation
+            calibration = matched_to_em(calibration, camera.em_on)
             warn_on_microscope_mismatch(calibration, camera.microscope)
         if roisize is not None:
             # the ROI sits in the middle of the calibration grid, and a fit that
@@ -1918,7 +1919,8 @@ class SplineFit(_FitPlugin):
     #    sample, z the height above the coverslip (`calibrate.depth`)
     # 7: *focus in situ* holds a minimal bead model's γ, where it held a flat magnitude (`insitu_run.held_pupil`)
     # 8: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
-    version = "8"
+    # 9: beads taken with the other EM gain than the data: the spline mirrored in x (`matched_to_em`)
+    version = "9"
     calibration_kind = "single"
 
     def model(self, settings, camera):

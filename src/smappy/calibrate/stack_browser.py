@@ -27,6 +27,16 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QSli
 COLOURS = {"found": "#00e5ff", "used": "#1f77b4", "accepted": "#1f77b4", "held out": "#2ca02c",
            "excluded": "#7f7f7f", "manual exclusion": "#7f7f7f", "candidate": "#00e5ff", "not drawn": "#bbbbbb"}
 REJECTED = "#d62728"
+#: a state's suffix for a choice made in the table that the next Calibrate applies: its ring dashed
+MARKED = " (marked)"
+
+
+def ring_style(state: str) -> tuple:
+    """A ring's (colour, line style) for a bead's ``state``: `COLOURS`, red for any other (rejected, too
+    dim, a double); dashed for a choice not yet applied (`MARKED`)."""
+    marked = state.endswith(MARKED)
+    state = state[:-len(MARKED)] if marked else state
+    return COLOURS.get(state, REJECTED), "--" if marked else "-"
 #: files kept read
 CACHED = 2
 
@@ -125,6 +135,11 @@ class StackBrowser(QWidget):
         self.positions, self.sources, self.states = list(positions or []), list(sources or []), dict(states or {})
         self.draw()
 
+    def set_states(self, states: dict) -> None:
+        """Colour the rings anew (`ring_style`), the beads where they are."""
+        self.states = dict(states or {})
+        self.draw()
+
     def select(self, beads) -> None:
         self.selected = set(beads)
         self.draw()
@@ -211,9 +226,8 @@ class StackBrowser(QWidget):
         from matplotlib.patches import Circle
         radius = self.box_px / 2
         for s, x, y, bead in here:
-            state = self.states.get(bead, "found")
-            colour = COLOURS.get(state, REJECTED)
-            ring = Circle((x, y), radius, fill=False, edgecolor=colour, picker=True,
+            colour, style = ring_style(self.states.get(bead, "found"))
+            ring = Circle((x, y), radius, fill=False, edgecolor=colour, picker=True, linestyle=style,
                           linewidth=2.5 if bead in self.selected else 1.0)
             ring.pair_ids = np.array([bead])
             ax.add_patch(ring)
@@ -269,8 +283,8 @@ class StackBrowser(QWidget):
         here = [p for p in self.positions if p[0] == a and len(p) > 4 and p[4] == f]
         radius = self.box_px / 2
         for _, x, y, unit, _ in here:
-            colour = COLOURS.get(self.states.get(unit, "found"), REJECTED)
-            ring = Circle((x, y), radius, fill=False, edgecolor=colour, picker=True,
+            colour, style = ring_style(self.states.get(unit, "found"))
+            ring = Circle((x, y), radius, fill=False, edgecolor=colour, picker=True, linestyle=style,
                           linewidth=2.5 if unit in self.selected else 1.0)
             ring.pair_ids = np.array([unit])
             ax.add_patch(ring)

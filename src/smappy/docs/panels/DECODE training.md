@@ -44,15 +44,21 @@ the epoch it is in, with its checkpoint written; *Start* again goes on from
 there.
 
 **It stops when it no longer improves.**  *epochs* is the most it trains.
-With *stop when it no longer improves* on, it finishes earlier once the
-test set's loss has not improved by more than 0.5 % over the last 100
-epochs, nor its [Jaccard index](plugin:Panels/Glossary) by more than 0.005,
-and never before epoch 150.  (The Jaccard index is the molecules found
-divided by those found, missed and invented together: 1 is perfect.)  On the trainings of the proof of concept (1000
-epochs each) this stopped between epochs 300 and 560, with the Jaccard
-within 0.004 of the 1000th epoch's: half to two thirds of the time saved.
-The RMSEs are not read: they rise while a training learns, as it finds more
-of the harder molecules.  Turned off, it trains every epoch, as DECODE did.
+With *stop when it no longer improves* on, it finishes earlier once nothing
+the test set measures has improved over the last 100 epochs: its loss by
+more than 0.5 %, its [Jaccard index](plugin:Panels/Glossary) and its lateral
+and axial efficiencies by more than 0.005, its lateral and axial RMSE by
+more than 1 % -- and never before epoch 150.  (The Jaccard index is the
+molecules found divided by those found, missed and invented together: 1 is
+perfect.  The efficiency is the SMLM Challenge's score of the Jaccard index
+and the RMSE together.)  Each is first taken as the median of 11 epochs, so
+one epoch that happens to come out well or badly does not decide.  On the
+trainings of the proof of concept (1000 epochs each) this stopped between
+epochs 340 and 576, with the Jaccard and both efficiencies within 0.005 of
+the 1000th epoch's: half to two thirds of the time saved.  The RMSE alone is
+no measure of progress -- it rises while a training learns, as it finds more
+of the harder molecules -- so it only keeps a training going while it still
+falls.  Turned off, it trains every epoch, as DECODE did.
 
 **On a workstation.**  The workstations are listed in *File > Preferences*,
 *Training hosts* ([how to connect one](plugin:Panels/Training hosts), step by
