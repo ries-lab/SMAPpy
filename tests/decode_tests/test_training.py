@@ -216,3 +216,10 @@ def test_the_warm_up_ramps_the_rate_and_a_resume_inside_it_is_bitwise_the_run_th
     a, b = _epochs(through), _epochs(parts)
     assert [b[i]["loss_train"] for i in (2, 3)] == [a[i]["loss_train"] for i in (2, 3)]
     assert [b[i]["lr"] for i in (1, 2, 3)] == [a[i]["lr"] for i in (1, 2, 3)]
+
+
+def test_a_job_with_edge_padding_trains_and_its_model_file_says_so(tmp_path):
+    folder = tiny_job(tmp_path / "job", epochs=2, edge_pad={"p": 0.5, "max_px": 3, "value": -1.0})
+    assert train(folder, quiet=True) == "finished"
+    assert model_file.read_metadata(folder / MODEL)["edge_pad"] == {"p": 0.5, "max_px": 3, "value": -1.0}
+    assert set(_epochs(folder)) == {0, 1}

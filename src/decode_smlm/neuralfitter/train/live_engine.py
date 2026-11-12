@@ -390,6 +390,9 @@ def setup_trainer(simulator_train, simulator_test, logger, model_out, ckpt_path,
             pad=None, return_em=False)
 
         train_ds.sample(True)
+        # SMAPpy: padding drawn into the training frames, the test set's left alone (edge_pad.py)
+        from decode_smlm.neuralfitter.edge_pad import EdgePad
+        train_ds.edge_pad = EdgePad.parse(param)
 
     elif param.Simulation.mode == 'samples':
         train_ds = decode_smlm.neuralfitter.dataset.SMLMLiveSampleDataset(
