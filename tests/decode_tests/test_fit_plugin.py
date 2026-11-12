@@ -315,3 +315,12 @@ def test_the_model_part_opens_the_training_window_with_the_fitters_settings_and_
     buttons["Training hosts..."].click()
     assert [kind for kind, _ in opened] == ["training", "hosts"]
     assert opened[0][1].source.path == "/data/cells.tif" and opened[0][1].model.run_on == "here"
+
+
+def test_on_apples_gpu_the_batch_keeps_to_a_fixed_budget_of_the_shared_memory(monkeypatch):
+    from decode_smlm import predict
+    monkeypatch.setattr(torch.mps, "recommended_max_memory", lambda: 27e9, raising=False)
+    monkeypatch.setattr(torch.mps, "driver_allocated_memory", lambda: 0, raising=False)
+    # half of 27 GB would be 98 frames of 257 x 213; the budget allows 21
+    assert predict.auto_batch("mps", 257, 213) == int(predict.MPS_BUDGET // (predict.BYTES_PER_PIXEL * 257 * 213))
+    assert predict.auto_batch("mps", 257, 213) < 25

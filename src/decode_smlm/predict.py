@@ -41,19 +41,28 @@ BATCH = 0                 # frames through the network at once; 0: as many as ha
 # SigmaMUNet (48 features): 1830 bytes on CUDA (an H100), 2050 -- 2110 on Apple's GPU (MPS, its
 # driver's pools); the margin over it for the post-processing and the allocator
 BYTES_PER_PIXEL = 2500
-MEMORY_SHARE = 0.5        # of the device's free memory a batch may take
+MEMORY_SHARE = 0.5        # of a CUDA device's free memory a batch may take: its own memory
+# Apple's GPU has no memory of its own: MPS takes the computer's RAM, shared with everything else,
+# and half of what macOS lets it have (13 GB of 34) put a Mac into swap with a fit and a test run
+# beside it -- the GPU waiting on memory, one frame a second for a hundred (2026-11-12).  So a fixed
+# budget there: 21 frames of 257 x 213, 4 of 512 x 512 (the speed against the batch on MPS not yet
+# measured; 32 frames of 180 x 179, the old default, ran at 120 frames a second).
+MPS_BUDGET = 3e9
 MAX_BATCH = 256
 CPU_BATCH = 8             # on the CPU the batch changes the time little; memory is the system's
 
 
 def auto_batch(device: str, rows: int, columns: int) -> int:
-    """Frames of ``rows`` x ``columns`` a batch takes on ``device``: half of what is free there, at
-    `BYTES_PER_PIXEL`, from 1 to `MAX_BATCH`; `CPU_BATCH` on the CPU."""
+    """Frames of ``rows`` x ``columns`` a batch takes on ``device``: half of what is free on a CUDA
+    device, at most `MPS_BUDGET` on Apple's GPU, at `BYTES_PER_PIXEL`, from 1 to `MAX_BATCH`;
+    `CPU_BATCH` on the CPU."""
     kind = str(device).split(":")[0]
     if kind == "cuda":
         free = torch.cuda.mem_get_info(torch.device(device))[0]
     elif kind == "mps":
         free = torch.mps.recommended_max_memory() - torch.mps.driver_allocated_memory()
+        n = int(min(MPS_BUDGET, MEMORY_SHARE * free) // (BYTES_PER_PIXEL * rows * columns))
+        return max(1, min(MAX_BATCH, n))
     else:
         return CPU_BATCH
     n = int(MEMORY_SHARE * free // (BYTES_PER_PIXEL * rows * columns))
