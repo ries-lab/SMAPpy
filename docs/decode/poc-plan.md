@@ -1517,3 +1517,45 @@ camera sizes, the predictor with its post-processing, TF32 off.
 Any GPU fits a movie in minutes; a CPU alone does not, which is what the fitter on a workstation is
 for.  The 4090 is slightly faster than the H100 here: the network is small, and the PCIe H100 is no
 faster on it than a gaming card.
+
+### Item 17, the frame's edges: crop, padding or windows (2026-11-12)
+
+`benchmarks/decode/edges/edges.py`: (i)'s sets of calibration B at densities 5 and 15, cut from 64 x
+64 to 59 x 61 so that the crop loses 3 rows and 4 columns, the truth kept whole (an emitter beyond
+the cut may be matched, is not asked for), the port's ``decode_B``; recall and precision by the
+distance from the nearest edge, and how far the inside's detections (>= 8 px from an edge) move
+against the crop's.  Inference only, no model trained for it.  Density 5 (15 alike, a few points
+lower):
+
+| method | recall 0 -- 1 px | prec. 0 -- 1 | recall 1 -- 4 | prec. 1 -- 4 | inside: recall / prec. | inside moved |
+|---|---:|---:|---:|---:|---:|---:|
+| crop (as now) | 0.47 | 0.97 | 0.79 -- 0.91 | 0.65 -- 0.76 | 0.93 / 0.98 | 0 |
+| pad, network input 0 (110 photons, the convolutions' own padding) | 0.68 | 0.54 | 0.73 -- 0.84 | 0.16 -- 0.54 | 0.91 / 0.96 | 0.05 px |
+| pad 0 photons (input -0.79) | 0.57 | 0.20 | 0.62 -- 0.73 | 0.05 -- 0.45 | 0.81 / 0.87 | 0.12 px |
+| pad input -5 | 0.13 | 0.39 | 0.21 -- 0.32 | 0.07 -- 0.91 | 0.31 / 0.41 | 11 px |
+| pad input +5 | 0.43 | 0.95 | 0.63 -- 0.69 | 0.05 -- 0.84 | 0.83 / 0.92 | 0.13 px |
+| edge pixels repeated | 0.57 | 0.83 | 0.79 -- 0.88 | 0.94 -- 0.95 | 0.93 / 0.98 | 0.03 px |
+| mirrored, on the crop's grid of 8 | 0.87 | 0.69 | 0.80 -- 0.85 | 0.95 -- 0.97 | 0.93 / 0.98 | 0.009 px |
+| windows on the edges, seam 2 px in | 0.89 | 0.80 | 0.88 -- 0.89 | 0.84 -- 0.89 | 0.93 / 0.98 | 0 |
+| uncut (the oracle: the data beyond the cut there) | 0.86 | 0.97 | 0.92 -- 0.93 | 0.98 | 0.93 / 0.98 | 0.006 px |
+
+- **A value no frame holds tells the network nothing it was trained to read**: every constant pad
+  costs the whole frame, not only the edges -- the further from the data, the worse (input -5
+  leaves a third of the inside's molecules).  Even the network's own padding value, 110 photons
+  in its input, lowers the inside's precision to 0.96 and the edge's to 0.16 -- 0.54: a flat
+  region is not what a frame's edge looked like in training.  A distinct value would have to be
+  trained for (padding drawn into the training's frames), which spends some of the network on the
+  padding; not tried.
+- **Mirrored on the crop's grid** (the padding's first pixels placed so that the crop's first row
+  and column fall where they did, a multiple of 8 in): the inside as the crop's within 0.009 px
+  (1 nm), the same order as the uncut frame's own difference from the crop (0.006 px), and its
+  recall and precision unchanged; recall at the outer pixel 0.87 against the crop's 0.47, at a
+  precision of 0.69 there (mirrored spots), 0.95 -- 0.97 from 1 px in.  It costs at most 15 rows
+  and columns more of network.
+- **Windows on the edges** (the centre crop as now, strips and corner squares of 32 px with their
+  outer edge on the data's for the pixels it cuts, each detection from the one window whose part
+  it lies in, the crop's last 2 px handed to the windows -- its edge pulls in spots beyond it):
+  the inside exactly the crop's; recall 0.88 -- 0.89 to the outer pixel, precision 0.80 -- 0.89
+  (seams).  A quarter more network time on 512 x 512.
+- **Not decided:** which goes into the predictor (the crop stays as an option, for the tests
+  against the original's outputs).
