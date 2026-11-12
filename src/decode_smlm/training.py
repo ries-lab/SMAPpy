@@ -188,7 +188,11 @@ def load_weights(model, path: Path):
     tensors, meta = model_file.read(path)
     if meta.get("method") not in (None, METHOD):
         raise JobError(f"{path.name} is a {meta['method']} model, not {METHOD}")
-    model.load_state_dict({k: torch.from_numpy(v) for k, v in tensors.items()})
+    try:
+        model.load_state_dict({k: torch.from_numpy(v) for k, v in tensors.items()})
+    except RuntimeError as e:             # another network: said in a line, not torch's page of shapes
+        raise JobError(f"the base model {path.name} is another network than this job's: "
+                       f"{str(e).splitlines()[0]}") from e
 
 
 class _Lock:
