@@ -219,7 +219,8 @@ def test_the_warm_up_ramps_the_rate_and_a_resume_inside_it_is_bitwise_the_run_th
 
 
 def test_a_training_that_no_longer_improves_finishes_before_its_epochs_unless_asked_for_all(tmp_path):
-    rule = {"window": 2, "min_epochs": 3, "loss_tol": 10.0, "jaccard_tol": 10.0}     # any change is "no gain"
+    rule = {"window": 2, "min_epochs": 3, "loss_tol": float("inf"), "jaccard_tol": 10.0, "eff_tol": 10.0,
+            "rmse_tol": 10.0}                                                     # any change is "no gain"
     folder = tiny_job(tmp_path / "job", epochs=8, early_stop=rule)
     assert train(folder, quiet=True) == "finished"
     end = progress.read(folder)[-1]
@@ -229,3 +230,18 @@ def test_a_training_that_no_longer_improves_finishes_before_its_epochs_unless_as
     everything = tiny_job(tmp_path / "all", epochs=5, early_stop=rule)
     assert train(everything, quiet=True, all_epochs=True) == "finished"
     assert progress.read(everything)[-1]["epoch"] == 4 and "converged" not in progress.read(everything)[-1]
+
+
+def test_the_rule_on_the_command_line_is_the_one_the_training_stops_by_and_records(tmp_path):
+    from decode_smlm import cli
+    folder = tiny_job(tmp_path / "job", epochs=8)
+    # a window of 2 after 4 epochs, the loss's fall counted from epoch 0: any gain is "no gain"
+    rule = {"window": 2, "min_epochs": 4, "fall_from": 0, "loss_tol": 1e300, "jaccard_tol": 10.0, "eff_tol": 10.0,
+            "rmse_tol": 10.0}
+    assert cli.main(["train", str(folder), "--stop-rule", json.dumps(rule)]) == 0
+    lines = progress.read(folder)
+    assert lines[-1]["kind"] == "finished" and lines[-1]["converged"] and lines[-1]["epoch"] == 3
+    start = next(line for line in lines if line["kind"] == "start")
+    assert start["stop_rule"]["window"] == 2 and start["stop_rule"]["smooth"] == 11      # the rest the default's
+    with pytest.raises(SystemExit, match="no windows"):
+        cli.main(["train", str(folder), "--stop-rule", '{"windows": 3}'])

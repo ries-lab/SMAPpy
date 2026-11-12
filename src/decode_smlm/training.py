@@ -258,8 +258,67 @@ class _Capture:
     add_histogram = add_graph = add_figure
 
 
-def evaluate_test(test_out, ds_test, post_processor, matcher, val_loss) -> dict:
-    """DECODE's ``post_process_log_test`` without its figures: the metrics of this epoch."""
+#: an EM register's excess noise at high gain, in variance: the bound the camera model draws with
+EXCESS_NOISE = 2.0
+
+
+def test_crlbs(ds_test, param, psf=None):
+    """Each test-set molecule's single-emitter CRLB, ``{(frame, row, col): (rows_nm, cols_nm, z_nm)}``
+    -- the key a matched molecule is found by.  The bound is the training's own PSF's
+    (`CubicSplinePSF.crlb_sq`, the calibration's whole spot: 2 % below SMAPpy's spline fitter's
+    laterally, 19 % in z, whose 13 x 13 pixels leave the tails out), doubled in variance with EM
+    gain.  About a second for a test set's 25 000 molecules, so it is computed at every start.
+    None where it cannot be had: the metrics then go without it."""
+    em = ds_test._emitter
+    if em is None or not len(em):
+        return None
+    try:
+        if psf is None:
+            from .utils.calibration_io import spline_psf
+            sim = param.Simulation
+            psf = spline_psf(param.InOut.calibration_file, xextent=sim.psf_extent[0], yextent=sim.psf_extent[1],
+                             img_shape=sim.img_size, device="cpu", roi_size=sim.roi_size,
+                             roi_auto_center=sim.roi_auto_center)
+        bg = ds_test._target[2].mean(dim=(1, 2)) * float(param.Scaling.bg_max)
+        frame = em.frame_ix.clamp(0, len(bg) - 1)
+        bound = []
+        for a in range(0, len(em), 5000):
+            cr, _ = psf.crlb_sq(em.xyz[a:a + 5000].float(), em.phot[a:a + 5000].float(), bg[frame[a:a + 5000]].float())
+            bound.append(cr[:, :3])
+        bound = torch.cat(bound).numpy().astype(np.float64)
+    except Exception:                           # a curve of the window's, never a reason to stop training
+        return None
+    k = np.sqrt(EXCESS_NOISE if param.Camera.em_gain else 1.0)
+    py, px = (float(v) for v in param.Camera.px_size)        # DECODE's order: rows, columns
+    xyz = em.xyz.numpy()
+    return {(int(f), round(float(r), 4), round(float(c), 4)): (k * b[0] * py, k * b[1] * px, k * b[2])
+            for f, r, c, b in zip(em.frame_ix.numpy(), xyz[:, 0], xyz[:, 1], bound)}
+
+
+def _crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size) -> dict:
+    """SMAPpy's curves of an epoch (the Train window's Follow): the robust width of each matched
+    localization's error over its molecule's CRLB, laterally (rows and columns pooled) and axially,
+    and where in their pixel this epoch's localizations fall."""
+    from smappy.training.reference import ks_uniform, robust_width, subpixel_histogram
+    out = {}
+    if em_out is not None and len(em_out):
+        xyz = em_out.xyz.numpy()
+        out.update(pixel_hist_rows=subpixel_histogram(xyz[:, 0]), pixel_hist_cols=subpixel_histogram(xyz[:, 1]),
+                   pixel_ks=ks_uniform(np.r_[xyz[:, 0], xyz[:, 1]]))
+    if crlbs and tp is not None and len(tp):
+        fit, true, frame = tp.xyz.numpy(), tp_match.xyz.numpy(), tp_match.frame_ix.numpy()
+        bound = np.array([crlbs.get((int(f), round(float(r), 4), round(float(c), 4)), (np.nan,) * 3)
+                          for f, r, c in zip(frame, true[:, 0], true[:, 1])], float)
+        py, px = (float(v) for v in px_size)
+        # each localization's error over its molecule's bound: 1 where the network reaches it
+        lateral = np.r_[(fit[:, 0] - true[:, 0]) * py / bound[:, 0], (fit[:, 1] - true[:, 1]) * px / bound[:, 1]]
+        out.update(crlb_width_lat=robust_width(lateral), crlb_width_ax=robust_width((fit[:, 2] - true[:, 2]) / bound[:, 2]))
+    return out
+
+
+def evaluate_test(test_out, ds_test, post_processor, matcher, val_loss, crlbs=None, px_size=None) -> dict:
+    """DECODE's ``post_process_log_test`` without its figures: the metrics of this epoch; with
+    ``crlbs`` (`test_crlbs`) SMAPpy's error over CRLB and pixelation too."""
     import warnings
 
     from .evaluation import evaluation
@@ -277,18 +336,21 @@ def evaluate_test(test_out, ds_test, post_processor, matcher, val_loss) -> dict:
                                    logger=cap, step=0)
     metrics = {METRICS.get(k[5:], k[5:]): v for k, v in cap.scalars.items() if k.startswith("eval/")}
     metrics.update({k: v for k, v in cap.scalars.items() if k.startswith("loss_cmp/")})
+    if px_size is not None:
+        metrics.update(_crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size))
     return metrics
 
 
 # ----------------------------------------------------------------------------- the loop
 def train(folder, *, device: str | None = None, epochs: int | None = None, num_workers: int | None = None,
-          allow_other_version: bool = False, quiet: bool = False, all_epochs: bool = False) -> str:
+          allow_other_version: bool = False, quiet: bool = False, all_epochs: bool = False,
+          stop_rule: dict | None = None) -> str:
     """Train the job in ``folder`` from where it stands; returns ``"finished"`` or ``"stopped"``.
 
     ``device`` overrides the job's (``"auto"``: CUDA, else MPS, else the CPU), ``epochs`` its
     method's, ``num_workers`` the data loaders'.  The training finishes before ``epochs`` when it
     no longer improves (SMAPpy's `progress.converged`, its rule changed or turned off by the
-    method's ``HyperParameter.early_stop``), unless ``all_epochs``.
+    method's ``HyperParameter.early_stop``, and ``stop_rule`` over that), unless ``all_epochs``.
     """
     from smappy import __version__
     from smappy.training import job as jobs
@@ -312,7 +374,7 @@ def train(folder, *, device: str | None = None, epochs: int | None = None, num_w
     try:
         with _Lock(folder):
             return _run(folder, job, method_params, device or job.device, epochs, num_workers, stop, quiet,
-                        all_epochs)
+                        all_epochs, stop_rule)
     except Exception as e:
         progress.append(folder, "error", None, message=f"{type(e).__name__}: {e}")
         raise
@@ -326,7 +388,8 @@ def _main_thread() -> bool:
     return threading.current_thread() is threading.main_thread()
 
 
-def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, all_epochs=False) -> str:
+def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, all_epochs=False,
+         stop_rule=None) -> str:
     import contextlib
     import io
 
@@ -374,8 +437,11 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, a
         else:
             save_test_set(ds_test, folder / TEST_SET)
         dl_train, dl_test = setup_dataloader(param, ds_train, ds_test)
+        crlb_table[0] = test_crlbs(ds_test, param)
         return ds_train, ds_test, model, optimizer, criterion, lr_scheduler, grad_mod, post_processor, matcher, \
             dl_train, dl_test
+
+    crlb_table = [None]                   # the test set's molecules' CRLBs, set by `setup`
 
     (ds_train, ds_test, model, optimizer, criterion, lr_scheduler, grad_mod, post_processor, matcher,
      dl_train, dl_test) = setup(job.seed + 1000 * restarts)
@@ -394,13 +460,16 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, a
     n_epochs = param.HyperParameter.epochs
     from smappy.io.calibration import load_spline_calibration
     cal_em_on = load_spline_calibration(param.InOut.calibration_file).em_on
-    progress.append(folder, "start", first, device=str(device), torch=torch.__version__, decode="0.10.2",
-                    resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts, batch=batch)
     # SMAPpy's: stop when it no longer improves (`progress.converged`); the method may change the
     # rule ({window, loss_tol, jaccard_tol, min_epochs}) or turn it off (false)
     early_stop = getattr(param.HyperParameter, "early_stop", None)
     if hasattr(early_stop, "to_dict"):
         early_stop = early_stop.to_dict()
+    if stop_rule and early_stop is not False:            # the Train window's, over the method's
+        early_stop = {**(early_stop or {}), **stop_rule}
+    progress.append(folder, "start", first, device=str(device), torch=torch.__version__, decode="0.10.2",
+                    resumed=ckpt is not None, epochs=n_epochs, seed=job.seed, restarts=restarts, batch=batch,
+                    stop_rule=None if all_epochs or early_stop is False else progress.rule(early_stop))
     if first >= n_epochs:
         progress.append(folder, "finished", first - 1)
         return "finished"
@@ -442,7 +511,8 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, a
              dl_train, dl_test) = setup(job.seed + 1000 * restarts)
             i = 0
             continue
-        metrics = evaluate_test(test_out, ds_test, post_processor, matcher, float(val_loss))
+        metrics = evaluate_test(test_out, ds_test, post_processor, matcher, float(val_loss),
+                                crlbs=crlb_table[0], px_size=param.Camera.px_size)
         lr = lr_trained if i >= 1 else optimizer.param_groups[0]["lr"]
         if i >= 1:
             if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):

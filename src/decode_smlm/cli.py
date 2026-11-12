@@ -56,6 +56,9 @@ def main(argv=None) -> int:
                    help="train a job prepared by another SMAPpy version")
     t.add_argument("--all-epochs", action="store_true",
                    help="train every epoch, not stopping when the training no longer improves")
+    t.add_argument("--stop-rule", default=None,
+                   help="the rule for stopping, as JSON over SMAPpy's (training.progress.EARLY_STOP): "
+                        "window, min_epochs, smooth, loss_tol, jaccard_tol, eff_tol, rmse_tol")
     for name, text in (("stop", "stop the training of FOLDER at its next checkpoint"),
                        ("status", "where the job in FOLDER stands")):
         sub.add_parser(name, help=text).add_argument("folder", type=Path)
@@ -73,7 +76,8 @@ def main(argv=None) -> int:
     from .training import JobError, train
     try:
         result = train(a.folder, device=a.device, epochs=a.epochs, num_workers=a.workers,
-                       allow_other_version=a.allow_other_version, all_epochs=a.all_epochs)
+                       allow_other_version=a.allow_other_version, all_epochs=a.all_epochs,
+                       stop_rule=_stop_rule(a.stop_rule))
     except JobError as e:
         print(f"smappy-decode: {e}", file=sys.stderr)
         return 2
@@ -82,6 +86,20 @@ def main(argv=None) -> int:
         return 130
     print(result)
     return 0
+
+
+def _stop_rule(text):
+    """``--stop-rule``'s JSON, or None; a key the rule does not have is refused, not ignored."""
+    if not text:
+        return None
+    import json
+
+    from smappy.training.progress import EARLY_STOP
+    rule = json.loads(text)
+    unknown = sorted(set(rule) - set(EARLY_STOP))
+    if unknown:
+        raise SystemExit(f"smappy-decode: --stop-rule: no {', '.join(unknown)} (the rule has {', '.join(EARLY_STOP)})")
+    return rule
 
 
 if __name__ == "__main__":
