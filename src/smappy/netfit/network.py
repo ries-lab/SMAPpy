@@ -55,16 +55,26 @@ def _block(c_in, c_out, act):
 
 
 class UNet(nn.Module):
-    def __init__(self, c_in: int, features: int, depth: int, act):
+    """``upsample_kernel`` 3 (an activation after it) or 1 (DECODE's: linear); ``pool_act`` an activation
+    after the stride-2 convolution (DECODE has none); ``out_conv`` a linear 1 x 1 convolution at the end,
+    as DECODE's U-Nets end, so the features handed on are not cut at zero."""
+
+    def __init__(self, c_in: int, features: int, depth: int, act, upsample_kernel: int = 3,
+                 pool_act: bool = True, out_conv: bool = False):
         super().__init__()
         f = [features * 2 ** level for level in range(depth + 1)]
         self.first = _block(c_in, f[0], act)
-        self.down = nn.ModuleList(nn.Sequential(nn.Conv2d(f[i], f[i], 2, stride=2), act()) for i in range(depth))
+        self.down = nn.ModuleList(nn.Sequential(nn.Conv2d(f[i], f[i], 2, stride=2), *([act()] if pool_act else []))
+                                  for i in range(depth))
         self.enc = nn.ModuleList(_block(f[i], f[i + 1], act) for i in range(depth))
-        self.up = nn.ModuleList(nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"),
-                                              nn.Conv2d(f[i + 1], f[i], 3, padding=1), act())
-                                for i in reversed(range(depth)))
+        if upsample_kernel == 3:
+            up = lambda i: nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"),
+                                         nn.Conv2d(f[i + 1], f[i], 3, padding=1), act())
+        else:
+            up = lambda i: nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"), nn.Conv2d(f[i + 1], f[i], 1))
+        self.up = nn.ModuleList(up(i) for i in reversed(range(depth)))
         self.dec = nn.ModuleList(_block(2 * f[i], f[i], act) for i in reversed(range(depth)))
+        self.out = nn.Conv2d(f[0], f[0], 1) if out_conv else nn.Identity()
         self.depth = depth
 
     def forward(self, x):
@@ -74,7 +84,7 @@ class UNet(nn.Module):
         x = skips.pop()
         for up, dec in zip(self.up, self.dec):
             x = dec(torch.cat([up(x), skips.pop()], 1))
-        return x
+        return self.out(x)
 
 
 class Head(nn.Module):
@@ -90,15 +100,28 @@ class TwoStageUNet(nn.Module):
     """``unet2``: a U-Net per frame, shared, then one over their concatenated features, then heads."""
 
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
-                 activation: str = "relu"):
+                 activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
+                 init: str = "default", p_clamp: float | None = None):
+        """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
+        Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
+        and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details, there to find which of them
+        pixelation depends on (2026-11-12); the defaults are version 1's."""
         super().__init__()
         act = _ACTIVATIONS[activation]
         self.window = window
-        self.frame = UNet(1, features, depth_frame, act)
-        self.union = UNet(window * features, features, depth_union, act)
+        style = {"upsample_kernel": upsample_kernel, "pool_act": pool_act, "out_conv": out_conv}
+        self.frame = UNet(1, features, depth_frame, act, **style)
+        self.union = UNet(window * features, features, depth_union, act, **style)
+        self.p_clamp = p_clamp
         self.heads = nn.ModuleDict({"p": Head(features, 1, act), "phot_xyz": Head(features, 4, act),
                                     "sigma": Head(features, 4, act), "bg": Head(features, 1, act)})
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
+        if init == "kaiming":
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+        elif init != "default":
+            raise ValueError(f"init {init!r}: default or kaiming")
         self._init_heads()
 
     def _init_heads(self, p0: float = P0):
@@ -119,7 +142,10 @@ class TwoStageUNet(nn.Module):
         feats = self.frame(x.reshape(b * t, 1, h, w)).reshape(b, -1, h, w)
         u = self.union(feats)
         values = self.heads["phot_xyz"](u)
-        return torch.cat([torch.sigmoid(self.heads["p"](u)), torch.sigmoid(values[:, :1]), torch.tanh(values[:, 1:]),
+        logit = self.heads["p"](u)
+        if self.p_clamp is not None:
+            logit = logit.clamp(-self.p_clamp, self.p_clamp)
+        return torch.cat([torch.sigmoid(logit), torch.sigmoid(values[:, :1]), torch.tanh(values[:, 1:]),
                           torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR,
                           torch.sigmoid(self.heads["bg"](u))], 1)
 

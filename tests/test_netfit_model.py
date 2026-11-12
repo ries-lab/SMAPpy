@@ -21,8 +21,9 @@ def _maps(h=8, w=8):
     return out
 
 
-def test_the_network_gives_ten_maps_the_size_of_its_frames():
-    model = network.TwoStageUNet(features=8)
+@pytest.mark.parametrize("style", [{}, {"upsample_kernel": 1, "pool_act": False, "out_conv": True, "init": "kaiming", "p_clamp": 8.0}])
+def test_the_network_gives_ten_maps_the_size_of_its_frames(style):
+    model = network.TwoStageUNet(features=8, **style)
     assert model(torch.zeros(2, 3, 16, 24)).shape == (2, 10, 16, 24)
 
 

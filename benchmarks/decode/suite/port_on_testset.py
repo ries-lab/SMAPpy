@@ -23,11 +23,12 @@ def main():
     ap.add_argument("test_set")
     ap.add_argument("--keep", type=float, default=0.5)
     ap.add_argument("--out")
+    ap.add_argument("--shuffled", action="store_true", help="the neighbouring frames from other samples")
     a = ap.parse_args()
     meta = model_file.read_metadata(a.model)
     p = load_predictor(a.model, None, frames_mirrored=not meta.get("calibration_em_on", False), raw_th=0.1)
     w = p.window
-    batch, truth, tmeta = testset.load(a.test_set, "cpu", window=2 * w + 1)
+    batch, truth, tmeta = testset.load(a.test_set, "cpu", window=2 * w + 1, shuffled=a.shuffled)
     frames = batch.frames.numpy()
     found = {"frame": [], "xyz": [], "err": []}
     px = tuple(tmeta["camera"]["pixel_nm"])
@@ -39,13 +40,13 @@ def main():
         found["err"].append(np.c_[cols["x_err_pix"][keep] * px[0], cols["y_err_pix"][keep] * px[1], cols["z_err_nm"][keep]])
     found = {k: np.concatenate(v) for k, v in found.items()}
     r = metrics.evaluate(truth, found, px)
-    r.update(model=a.model, test_set=a.test_set, keep=a.keep)
+    r.update(model=a.model, test_set=a.test_set, keep=a.keep, shuffled=a.shuffled)
     if a.out:
         open(a.out, "w").write(json.dumps(r, indent=1))
     keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
             "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
     print({k: round(r[k], 4) for k in keys if r.get(k) is not None})
-    for b in r.get("by_abs_z", []):
+    for b in r.get("by_abs_z", []) + r.get("by_frames_on", []):
         print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()})
 
 
