@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from ..calibrate.depth import SampleSettings
 from ..plugins import param
 from .structure import preset_choices
 
@@ -147,6 +148,12 @@ class OpticsSettings:
                                   "calibration by Spline 3D; for a split camera a "
                                   "dual-colour one, its two PSFs, halves and "
                                   "registration, by Spline 3D 2C")
+    # a pupil (Zernike) calibration only (`calibrate.depth.SampleSettings`): the frames drawn for a focus in the
+    # sample, typed -- a simulation has no movie to find one in -- or the beads' spline as it is
+    sample: SampleSettings = param(default_factory=lambda: SampleSettings(focus="calibrated"),
+                                   label="in the sample",
+                                   help="a pupil calibration drawn for a focus in the sample: the scene's z "
+                                        "is then the height above the coverslip")
 
 
 @dataclass

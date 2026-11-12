@@ -26,6 +26,7 @@ from ..locs import Localizations
 from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
                               split_position_param)
+from ..calibrate.depth import SampleSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
@@ -452,7 +453,9 @@ class SplineModelSettings:
                              help="empty: auto, the calibration listed for this file's microscope "
                                   "and state (the menu: all found, and the microscope's pupil); a bead "
                                   "calibration .h5 or a SMAP _3dcal.mat; a fitted .h5, for the "
-                                  "calibration it was fitted with; or 'microscope', its kept pupil")
+                                  "calibration it was fitted with; or 'microscope', its kept pupil.  "
+                                  "A pupil (Zernike) calibration adds focus: the PSF drawn for the "
+                                  "focus in the sample")
     # shown only for a calibration with a pupil model beside it (`SplineFit._focus_form`); one
     # place in the sample, the focus, known three ways, or the beads' spline as it is
     focus: str = param("auto", label="focus", choices=FOCUS_CHOICES,
@@ -460,7 +463,7 @@ class SplineModelSettings:
                             "model, z then the height above the coverslip: auto, from the lowest "
                             "localizations; in situ, learnt from the molecules with the beads' "
                             "aberrations; typed; or as calibrated, the beads' PSF at the coverslip")
-    focus_nm: float = param(0.0, label="position", unit="nm", min=0.0,
+    focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                             help="how far into the sample the objective was moved from the "
                                  "coverslip; typed here, else found at Preview or Run")
     sample_index: Optional[float] = param(None, label="sample index", min=1.0, max=2.0,
@@ -1245,6 +1248,13 @@ class _FitPlugin(Plugin):
                     updates["model.calibration"] = drawn[1]
                     updates.update(self.calibration_extras)
                     self._default_calibration = drawn[1]
+                    if kind == "single":
+                        # the focus the frames were drawn for, typed, else the beads' spline as it is
+                        from ..simulate.source import recipe_sample
+                        sample = recipe_sample(settings.source.path)
+                        updates.update({"model.focus": "calibrated"} if sample is None else
+                                       {"model.focus": "typed", "model.focus_nm": sample.focus_nm,
+                                        "model.sample_index": sample.sample_index})
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
             # the file it is given.  Copying turned the file's numbers into the
@@ -1857,6 +1867,12 @@ class DualModelSettings(_LinkedChannels):
                                   "microscope and state (the menu: all found); one from PSF "
                                   "calibration in Dual colour mode; or a fitted .h5, for the one it "
                                   "was fitted with")
+    # a pupil (Zernike) calibration only (`DualSplineFit._sample_form`): both PSFs drawn for a focus typed in
+    # the sample (`calibrate.depth.dual_depth_calibration`); *auto* and *in situ* are Spline 3D's alone so far
+    sample: SampleSettings = param(default_factory=lambda: SampleSettings(focus="calibrated"),
+                                   label="in the sample",
+                                   help="a pupil calibration's two PSFs drawn for a focus in the sample: z "
+                                        "is then the height above the coverslip")
     link_xy: bool = _link_xy()
     link_z: bool = param(True, label="link z",
                          help="one z for both channels: this is the sqrt(2)")
@@ -1873,16 +1889,27 @@ class DualModelSettings(_LinkedChannels):
         from ..calibrate.dual import load_dual_color_calibration
         if not self.calibration:
             raise ValueError("a two-channel fit needs a dual-colour calibration")
-        return load_dual_color_calibration(self.calibration)
+        calibration = load_dual_color_calibration(self.calibration)
+        if self.sample.focus == "calibrated":
+            return calibration
+        from ..calibrate import depth
+        if not depth.has_model(calibration.main):
+            return calibration
+        if self.sample.focus != "typed":
+            raise ValueError("Spline 3D 2C draws its calibration for a typed focus only: type it, or fit "
+                             "as calibrated")
+        return depth.dual_at_depth(calibration, self.calibration, self.sample.focus_nm, self.sample.sample_index)
 
     def model(self, calibration, camera: Optional[CameraMetadata] = None):
+        from ..calibrate.depth import in_focus
         from ..io.calibration import warn_on_em_mismatch, warn_on_microscope_mismatch
         from ..psf import GlobalSplinePSF
         if camera is not None:
             warn_on_em_mismatch(calibration.main, camera.em_on)
             warn_on_microscope_mismatch(calibration.main, camera.microscope)
-        # the secondary as the channel layer cuts it, flipped back along a mirror
-        return GlobalSplinePSF(calibration.layer_splines(), self.shared())
+        # the secondary as the channel layer cuts it, flipped back along a mirror; a drawn pair's fits
+        # start at its plane in focus, as Spline 3D's do
+        return GlobalSplinePSF(calibration.layer_splines(), self.shared(), z_start_nm=in_focus(calibration.main))
 
 
 @dataclass
@@ -1920,7 +1947,8 @@ class SplineFit(_FitPlugin):
     # 7: *focus in situ* holds a minimal bead model's γ, where it held a flat magnitude (`insitu_run.held_pupil`)
     # 8: a fit region on two channels a part of the sample: copied onto the other channel (`region_copies`)
     # 9: beads taken with the other EM gain than the data: the spline mirrored in x (`matched_to_em`)
-    version = "9"
+    # 10: and *focus* on auto's spots mirrored into the beads' orientation (`depth.in_beads_orientation`)
+    version = "10"
     calibration_kind = "single"
 
     def model(self, settings, camera):
@@ -2078,6 +2106,7 @@ class SplineFit(_FitPlugin):
             if not len(images):
                 raise ValueError("no spots found in the frames the focus is looked for in: review "
                                  "detection, or type the focus")
+            images = depth.in_beads_orientation(images, cal, camera.em_on)
             found = depth.auto_focus(cal, images, m.sample_index, n_threads=settings.fit.n_threads,
                                      report=ctx.report)
             ctx.report(f"focus on auto: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
@@ -2697,6 +2726,40 @@ class DualSplineFit(_TwoChannelFit):
     version = "13"
     Settings = DualSplineFitSettings
     calibration_kind = "dual"
+
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        state = super().describe(ctx, settings)
+        try:
+            self._sample_form(settings, state)
+        except Exception:
+            pass
+        return state
+
+    def _sample_form(self, settings, state) -> None:
+        """*in the sample* only for a dual calibration that carries its pupil (Zernike) model
+        (`calibrate.depth.sample_state`), its focus typed or as calibrated."""
+        from ..calibrate.depth import sample_state
+        try:
+            path = self.with_calibration(settings).model.calibration
+        except Exception:
+            path = settings.model.calibration
+        main = None
+        if path and Path(path).is_file():
+            key = (str(path), Path(path).stat().st_mtime)
+            if getattr(self, "_sample_key", None) != key:
+                from ..calibrate.dual import load_dual_color_calibration
+                try:
+                    main = load_dual_color_calibration(path).main
+                except Exception:
+                    main = None
+                self._sample_key, self._sample_main = key, main
+            main = self._sample_main
+        shown, active, hints = sample_state(main, settings.model.sample, prefix="model.sample.")
+        shown["model.sample"] = shown.pop("model.sample.focus")
+        state.shown.update(shown)
+        state.active.update(active)
+        state.hints.update(hints)
+        state.choices["model.sample.focus"] = [("typed", "typed"), ("calibrated", "as calibrated")]
 
     def registration_path(self, settings) -> str:
         return f"{settings.model.calibration}|{settings.model.registration.path}"

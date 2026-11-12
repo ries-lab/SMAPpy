@@ -1,6 +1,6 @@
 ---
 version: "13"
-covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
+covers: [smappy.psf.GlobalSplinePSF, smappy.calibrate.dual.ChannelTransform.layout, smappy.calibrate.dual.DualColorCalibration.layer_splines, smappy.calibrate.dual.mirrored_spline, smappy.multichannel.paired_candidates, smappy.multichannel.build_link, smappy.multichannel.MultiChannelEngine, smappy.dualfit.paired_to_localizations, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.calibrate.dual.with_registration, smappy.plugins.fit.DualSplineFit, smappy.calibration_list.find, smappy.plugins.fit.finish_localizations, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.calibrate.depth.dual_depth_calibration]
 ---
 
 ## What it does
@@ -407,6 +407,23 @@ on the camera chip, so a movie from another camera ROI is cut where its
 pixels lie in them; one made without the camera ROI (*ROI-local*) needs a
 movie of the bead image's size, and a movie with no camera ROI in its
 metadata is taken to start at the chip's corner, with a warning.
+
+### model.sample.focus
+Shown for a dual-colour calibration made with the pupil (Zernike) method,
+which carries its two-channel model.  *typed* draws both PSFs for molecules
+in the sample with the focus *focus depth* above the coverslip, normalised
+together so that each keeps its share of the light, and z is then the
+height above the coverslip, as in
+[Spline 3D](plugin:Localize/Spline 3D)'s *focus*.  *as calibrated*, the
+default, fits the beads' splines as they are.  Spline 3D's *auto* and *in
+situ* are not offered here yet: type the focus.
+
+### model.sample.focus_nm
+How far the objective was moved up from the coverslip, as its focus drive
+reads.  Drawing both PSFs takes a few seconds, once per focus.
+
+### model.sample.sample_index
+1.33 for water and most buffers; *auto* takes the beads' medium.
 
 ### model.registration.path
 A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a

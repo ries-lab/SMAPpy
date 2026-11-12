@@ -141,6 +141,22 @@ def recipe_calibration(path) -> Optional[Tuple[str, str]]:
     return ("dual" if dual_of(settings) else "single"), settings.optics.calibration
 
 
+def recipe_sample(path):
+    """The focus in the sample a recipe's single-camera spline was drawn for (`calibrate.depth.SampleSettings`,
+    typed), if it was: what *Fit this* hands Spline 3D beside the calibration, so it fits the PSF the frames
+    were made with.  None otherwise."""
+    try:
+        if not is_simulation(path):
+            return None
+        settings = read_recipe(path)
+    except (OSError, ValueError):
+        return None
+    sample = getattr(settings.optics, "sample", None)
+    if not settings.optics.calibration or dual_of(settings) or sample is None or sample.focus != "typed":
+        return None
+    return sample
+
+
 def dual_of(settings) -> Optional[dict]:
     """How `camera.render` draws a split camera's two halves, or None for
     one camera: the second half's PSF width, the first's on *auto*."""

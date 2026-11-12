@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHea
                                QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
                                QWidget)
 
+from ..calibrate.depth import SampleSettings
 from ..plugins import param
 from .widgets import note_style
 from ..plugins.fit import TIFF_FILTER, CameraSettings
@@ -123,6 +124,10 @@ class PrepareSettings:
                        help="the acquisition the model is for: the prefit reads blocks of it, the job lands beside it")
     calibration: str = param("", label="PSF calibration", kind="open_file", file_filter=CALIBRATION_FILTER,
                              help="the bead calibration the network learns the PSF from, the one the data were taken with")
+    # a pupil (Zernike) calibration only: drawn for the focus in the sample, as Spline 3D's *focus* draws it
+    sample: SampleSettings = param(default_factory=SampleSettings, label="in the sample",
+                                   help="where in the sample the pupil calibration is drawn for: the network "
+                                        "learns that PSF, and its z is the height above the coverslip")
     density: str = param("LD", label="density", choices=DENSITIES,
                          help="how many molecules a training frame holds: LD, HD or UHD, as SMAP's")
     start_from: str = param("", label="start from", kind="open_file", file_filter=MODEL_FILTER,
@@ -174,6 +179,8 @@ class Prepared:
     localizations: dict
     n_frames: int
     sample: np.ndarray = field(repr=False, default=None)   # a few frames, counts, for the figure
+    calibration: object = field(repr=False, default=None)  # the spline the network learns: drawn in the sample, or the beads'
+    focus: object = None                                     # calibrate.depth.AutoDepth: how *auto* or *in situ* found it
 
 
 def _source(path):
@@ -181,28 +188,71 @@ def _source(path):
     return _open(SourceSettings(path=str(path)), watch=False)
 
 
-def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
-    """Spline 3D on blocks of the movie (`training.prefit`) and DECODE's estimates of them."""
+def in_the_sample(settings: PrepareSettings, source, camera, report=lambda entry: None):
+    """``(spline, found)``: the calibration drawn for the focus in the sample (`calibrate.depth.for_sample`),
+    *auto* from the movie's spots as Spline 3D finds them with its default detection and fit box; a bead
+    average, or *as calibrated*, as it is."""
+    from ..calibrate import depth
+    from ..io.calibration import load_spline_calibration
+    cal = load_spline_calibration(settings.calibration)
+    sample = settings.sample
+    if not depth.has_model(cal) or sample.focus in ("calibrated", "typed"):
+        return depth.for_sample(cal, sample)
+    from ..plugins.fit import DetectionSettings, FitSettings, SourceSettings, sample_rois
+    report({"message": f"focus {'on auto' if sample.focus == 'auto' else 'in situ'}: spots from the movie"})
+    images = sample_rois(source, camera, DetectionSettings().finder(), FitSettings().roisize,
+                         SourceSettings(path=str(settings.movie)))
+
+    def tell(text):
+        report({"message": text})
+    return depth.for_sample(cal, sample, images=images, paths=[str(settings.movie)], camera=camera,
+                            report=tell)
+
+
+def prefit_model(cal, camera):
+    """What the prefit fits with: a spline drawn in the sample as Spline 3D fits it -- mirrored for the
+    camera's EM, each fit started at the plane in focus -- or the bead calibration's path, which
+    `api.fit` loads, mirrors and checks against the microscope itself."""
+    from ..calibrate.depth import in_focus
+    from ..io.calibration import matched_to_em
+    from ..psf import SplinePSF
+    if not (cal.parameters or {}).get("sample_depth"):
+        return cal.source
+    return SplinePSF(matched_to_em(cal, camera.em_on), z_start_nm=in_focus(cal))
+
+
+def z_limits(cal):
+    """The z the estimates may reach (`decode_smlm.prefit.bounds`): a drawn spline's two ends, heights above
+    the coverslip; a bead spline's half range about its focus."""
     from decode_smlm import prefit as estimates_of
 
-    from ..io.calibration import load_spline_calibration
+    from ..calibrate.depth import z_bounds
+    return z_bounds(cal) if (cal.parameters or {}).get("sample_depth") else estimates_of.z_limit(cal)
+
+
+def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared:
+    """Spline 3D on blocks of the movie (`training.prefit`) and DECODE's estimates of them, with the
+    calibration drawn for the focus in the sample first where it carries a pupil model (`in_the_sample`)."""
+    from decode_smlm import prefit as estimates_of
+
     from ..training.prefit import prefit
     if not settings.movie or not settings.calibration:
         raise ValueError("choose the movie and its bead calibration")
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
+    cal, focus = in_the_sample(settings, source, camera, report)
     report({"message": f"fitting {settings.blocks} blocks of {settings.block_frames} frames with Spline 3D"})
 
     def read(a, b):
         return np.concatenate([block for _, block in source.frames(chunk=b - a, start=a, stop=b)])
-    cal = load_spline_calibration(settings.calibration)
+    model = prefit_model(cal, camera)
     blocks = settings.blocks
     while True:
-        found = prefit(read, source.n_frames, camera, settings.calibration, n_blocks=blocks,
+        found = prefit(read, source.n_frames, camera, model, n_blocks=blocks,
                        block_frames=settings.block_frames)
         blinks, locs = found.columns()
         est = estimates_of.estimates(blinks, locs, area_px=found.area_px, n_frames=found.n_frames,
-                                     z_limit_nm=estimates_of.z_limit(cal), max_iterations=found.max_iterations)
+                                     z_limit_nm=z_limits(cal), max_iterations=found.max_iterations)
         # a sparse movie (the SMLM challenge's: one molecule a frame) has too few fully-on frames in
         # the default blocks, and SMAP's rule from whole blinks, which takes over then, put the
         # challenge's photons at 3 times the truth: fit more of it, up to the whole movie
@@ -212,7 +262,8 @@ def run_prefit(settings: PrepareSettings, report=lambda entry: None) -> Prepared
         report({"message": f"{est.n_fully_on} frames a molecule was fully on in, too few: "
                            f"fitting {more} blocks of {settings.block_frames} frames"})
         blocks = more
-    return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)))
+    return Prepared(settings, camera, est, blinks, locs, source.n_frames, sample=read(0, min(4, source.n_frames)),
+                    calibration=cal, focus=focus)
 
 
 def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared:
@@ -223,6 +274,7 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
         raise ValueError("choose the movie and its bead calibration")
     source = _source(settings.movie)
     camera = settings.camera.resolve(source)
+    cal, focus = in_the_sample(settings, source, camera)
     est = Estimates(on_time_frames=s.on_time_frames, lifetime_frames=lifetime(s.on_time_frames),
                     intensity_mu_sig=(s.photons, s.photons_sd), intensity_from="by hand", n_fully_on=0,
                     background=(s.background_min, s.background_max), z_nm=(s.z_min_nm, s.z_max_nm),
@@ -230,7 +282,8 @@ def prepared_by_hand(settings: PrepareSettings, s: EstimateSettings) -> Prepared
     n = min(4, source.n_frames)
     sample = np.concatenate([block for _, block in source.frames(chunk=n, start=0, stop=n)])
     empty = {"photons": np.zeros(0), "background": np.zeros(0)}
-    return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample)
+    return Prepared(settings, camera, est, empty, empty, source.n_frames, sample=sample, calibration=cal,
+                    focus=focus)
 
 
 def by_hand(prepared: Optional[Prepared]) -> bool:
@@ -289,7 +342,8 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
     job = jobfile.Job.new(method=METHOD, seed=seed, device="auto", ranges=simulation(est, s.density),
                           camera={**camera_section(cam), "name": cam.camera_name},
                           calibration={"source": str(Path(s.calibration).resolve()),
-                                       **calibration_conditions(s.calibration)},
+                                       **calibration_conditions(s.calibration),
+                                       **sample_record(prepared.calibration)},
                           data={"path": str(Path(s.movie).resolve()), "frames": prepared.n_frames,
                                 "camera_roi": None if cam.roi is None else list(cam.roi),
                                 "em_on": bool(cam.is_em)})
@@ -298,7 +352,8 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
         if problem:
             raise ValueError(problem)
         job.base_model = BASE_MODEL
-    out = jobfile.write(folder, job, params, load_spline_calibration(s.calibration))
+    cal = prepared.calibration if prepared.calibration is not None else load_spline_calibration(s.calibration)
+    out = jobfile.write(folder, job, params, cal)
     if s.start_from:
         shutil.copyfile(s.start_from, out / BASE_MODEL)
     jobs.add(out)
@@ -306,6 +361,16 @@ def write_job(prepared: Prepared, est, folder, params: Optional[dict] = None, se
 
 
 BASE_MODEL = "base_model.safetensors"
+
+
+def sample_record(cal) -> dict:
+    """``{"sample_depth": ...}`` of a spline drawn for a focus in the sample, for the job and the model
+    file (``calibration_sample_depth``), so the fitter can say what the network's z is; {} for the beads'."""
+    record = (getattr(cal, "parameters", None) or {}).get("sample_depth")
+    if not record:
+        return {}
+    keep = ("focus_nm", "n_med", "in_focus_height_nm", "method", "blur_nm")
+    return {"sample_depth": {k: record[k] for k in keep if record.get(k) is not None}}
 
 
 def calibration_conditions(path) -> dict:
@@ -539,6 +604,8 @@ class TrainWindow(QWidget):
 
         # Prepare
         self.prepare_form = SettingsForm(PrepareSettings)
+        self._calibration_key = self._calibration_value = None
+        self.prepare_form.changed.connect(self._prepare_changed)
         # typed by hand, or filled by *Prefit* and changed after
         self.estimate_form = SettingsForm(EstimateSettings)
         self.simulated = None             # frames the training would draw, in photons; with torch only
@@ -656,6 +723,7 @@ class TrainWindow(QWidget):
         if settings is not None:
             self.take_fitter(settings)
         self.reload_jobs()
+        self._prepare_changed()
         self.resize(900, 1000)
 
     # ---------------------------------------------------------- jobs
@@ -852,6 +920,35 @@ class TrainWindow(QWidget):
         elif kind == "stopping":
             self.train_note.setText("asked to stop: it stops after the epoch it is in, its checkpoint written there")
 
+    def _prepare_changed(self) -> None:
+        """*in the sample* only for a pupil (Zernike) calibration (`calibrate.depth.sample_state`), its rows as
+        *focus* reads them.  On a signal, so it may raise; it is said, never thrown."""
+        from ..calibrate.depth import sample_state
+        try:
+            s = self.prepare_form.value()
+            shown, active, hints = sample_state(self._calibration(s.calibration), s.sample)
+            shown["sample"] = shown.pop("sample.focus")
+            self.prepare_form.set_shown(shown)
+            self.prepare_form.set_active(active)
+            self.prepare_form.set_hints(hints)
+        except Exception as error:
+            print(f"DECODE training: {error}")
+
+    def _calibration(self, path):
+        """The calibration at ``path``, loaded once while it is unchanged, or None: the form asks with every change."""
+        try:
+            key = (str(path), Path(path).stat().st_mtime)
+        except (OSError, TypeError):
+            return None
+        if key != self._calibration_key:
+            from ..io.calibration import load_spline_calibration
+            try:
+                value = load_spline_calibration(path)
+            except Exception:
+                value = None
+            self._calibration_key, self._calibration_value = key, value
+        return self._calibration_value
+
     def prefit(self) -> None:
         settings = self.prepare_form.value()
         self.status_bar.showMessage("prefit: reading the movie")
@@ -868,8 +965,11 @@ class TrainWindow(QWidget):
         self.simulated = None
         self.draw_prepared()
         self.simulate()
+        from ..calibrate.depth import describe_sample
+        where = describe_sample(prepared.calibration)
         self.status_bar.showMessage(f"prefit: {est.n_blinks} blinks, {est.n_localizations} localizations; "
-                                    f"photons from {est.intensity_from} ({est.n_fully_on} fully-on frames)")
+                                    f"photons from {est.intensity_from} ({est.n_fully_on} fully-on frames)"
+                                    + (f"; {where}" if where else ""))
 
     def draw_prepared(self) -> None:
         from decode_smlm.figures import draw_frames, draw_ranges, photons
@@ -898,7 +998,8 @@ class TrainWindow(QWidget):
                 self._simulate_later.start()
                 return
             est = with_settings(self.prepared.estimates, self.estimate_form.value())
-            params, calibration = method_params(self.prepared, est), self.prepared.settings.calibration
+            params = method_params(self.prepared, est)
+            calibration = self.prepared.calibration or self.prepared.settings.calibration
             self._work("simulated", lambda report: simulated_frames(params, calibration))
         except Exception as error:
             print(f"DECODE training: {error}")

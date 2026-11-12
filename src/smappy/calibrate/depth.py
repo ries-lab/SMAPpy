@@ -53,6 +53,8 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from ..params import param
+
 #: how far the spline reaches below the coverslip, into the glass, nm (module docstring)
 BELOW_NM = 300.0
 #: the auto focus stops once the edge of the heights is this close to the coverslip, nm
@@ -84,13 +86,13 @@ def model_file(cal) -> Optional[Path]:
     return path if path.is_file() else None
 
 
-def model_of(cal):
+def model_of(cal, channels: int = 1):
     """The pupil model a spline calibration was drawn from, loaded, or None: the model it carries
     (`model_file`), or the microscope's pupil it records (``parameters["pupil"]``, `microscope_psf`) --
     two places, one model, so that *focus* draws either alike."""
     path = model_file(cal)
     if path is not None:
-        return load(path)
+        return load(path) if channels == 1 else load(path, channels)
     kept = (cal.parameters or {}).get("pupil")
     if kept:
         from .microscope_psf import learned
@@ -106,9 +108,10 @@ def has_model(cal) -> bool:
 _LOADED: dict = {}
 
 
-def load(path):
+def load(path, channels: int = 1):
     """The model file at ``path`` (`uipsf.load_model`), on the CPU, kept while it is unchanged: loading takes a
-    second, and the form and every fit of a batch ask again."""
+    second, and the form and every fit of a batch ask again.  ``channels``: as many as the caller draws, one
+    but for a dual calibration (`dual_depth_calibration`)."""
     try:
         import torch
         import uipsf
@@ -120,11 +123,12 @@ def load(path):
     if key not in _LOADED:
         _LOADED.clear()
         learned = uipsf.load_model(path, device=torch.device("cpu"), dtype=torch.float64)
-        if learned.n_channels != 1:
-            raise ValueError(f"{path.name} is a model of {learned.n_channels} channels: a focus in the sample is "
-                             f"drawn for one channel")
         _LOADED[key] = learned
-    return _LOADED[key]
+    learned = _LOADED[key]
+    if learned.n_channels != channels:
+        raise ValueError(f"{path.name} is a model of {learned.n_channels} channel(s): a focus in the sample is "
+                         f"drawn here for {channels}")
+    return learned
 
 
 def medium(learned) -> float:
@@ -147,16 +151,17 @@ def with_medium(learned, n_med: Optional[float]):
     return build(config, device=torch.device("cpu"), dtype=torch.float64), learned.shared
 
 
-def draw(model, shared, focus_nm: float, heights_nm, roi_px: int, field_xy=None) -> np.ndarray:
+def draw(model, shared, focus_nm: float, heights_nm, roi_px: int, field_xy=None, channel: int = 0) -> np.ndarray:
     """The PSF [N, Y, X] of emitters on the central pixel at ``heights_nm`` above the coverslip, the focus
     ``focus_nm`` into the sample as the objective was moved; the bead's size left out, the learnt blur kept.
     A negative height is in the glass: an emitter at the coverslip with the focus that much farther.
-    ``field_xy``: where on the chip, for a field-dependent model (its centre if None)."""
+    ``field_xy``: where on the chip, for a field-dependent model (its centre if None); ``channel`` of a model of
+    several, its defocus offset and photon share included (`uipsf.export.sample_psf`)."""
     from uipsf.export import sample_psf
     h = np.asarray(heights_nm, float)
     xyz = np.zeros((len(h), 3))
     xyz[:, 2] = -float(focus_nm) + np.minimum(h, 0.0)
-    psf = sample_psf(model, shared, xyz, roi_px, depth_nm=np.maximum(h, 0.0), field_xy=field_xy)
+    psf = sample_psf(model, shared, xyz, roi_px, depth_nm=np.maximum(h, 0.0), field_xy=field_xy, channel=channel)
     return psf.double().numpy()
 
 
@@ -216,6 +221,55 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
                              field_splines=field)
 
 
+def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None):
+    """`depth_spline` for a dual-colour calibration whose two-channel pupil model it carries (`pupil.save`):
+    both channels drawn for the focus ``focus_nm`` on one grid of heights, normalised jointly as
+    `pupil.dual_calibration` normalises them (`core.positive_pair_models`), so each keeps its photon share;
+    the calibration's map and split as they are.  z is the height above the coverslip, as `depth_spline`'s."""
+    from .core import CalibrationSettings, positive_pair_models
+    from .dual import DualColorCalibration
+    main = dual.main
+    learned = model_of(main, channels=2)
+    if learned is None:
+        raise ValueError(f"{Path(main.source).name if main.source else 'the calibration'} carries no pupil "
+                         f"model: a focus in the sample needs a dual calibration made with the pupil (Zernike) "
+                         f"method")
+    model, shared = with_medium(learned, n_med)
+    dz, roi = float(main.dz), _roi_px(main)
+    half = (main.shape[0] - 1) * dz / 2
+    focus = in_focus_height(model, shared, focus_nm, half)
+    high = float(np.ceil((focus + half) / dz) * dz)
+    n = int(np.ceil((high - max(focus - half, -BELOW_NM)) / dz))
+    heights = high - np.arange(n + 1) * dz
+    raw = np.stack([np.maximum(draw(model, shared, focus_nm, heights, roi, channel=c), 0) for c in range(2)])
+    (first, second), _ = positive_pair_models(raw, dz, CalibrationSettings(roi_size=roi, smooth_z_nm=0.0,
+                                                                           smooth_xy_px=0.0))
+    record = {"focus_nm": float(focus_nm), "n_med": medium(learned) if n_med is None else float(n_med),
+              "in_focus_height_nm": focus, "heights_nm": [float(heights[-1]), float(high)], "method": "typed"}
+    for drawn, old in ((first, main), (second, dual.secondary)):
+        drawn.z0 = high / dz                       # plane 0 the highest: z the height above the coverslip
+        drawn.source, drawn.em_on, drawn.pixelsize_um = old.source, old.em_on, old.pixelsize_um
+        drawn.parameters = {**(old.parameters or {}), **(drawn.parameters or {}), "sample_depth": record,
+                            "z_reference": "the coverslip: z is the height above it"}
+    return DualColorCalibration(first, second, dual.transformation, dict(dual.geometry),
+                                {**(dual.parameters or {}), "sample_depth": record})
+
+
+_DUAL: dict = {}
+
+
+def dual_at_depth(dual, path, focus_nm: float, n_med: Optional[float] = None):
+    """`dual_depth_calibration`, kept for the last few (file, focus, index): the form's Preview and every file of
+    a batch ask for the same pair, and drawing it takes seconds."""
+    path = Path(path)
+    key = (str(path), path.stat().st_mtime, round(float(focus_nm), 1), None if n_med is None else round(float(n_med), 4))
+    if key not in _DUAL:
+        if len(_DUAL) >= 4:
+            _DUAL.pop(next(iter(_DUAL)))
+        _DUAL[key] = dual_depth_calibration(dual, focus_nm, n_med)
+    return _DUAL[key]
+
+
 _DRAWN: dict = {}
 
 
@@ -250,6 +304,16 @@ def brightest(images: np.ndarray, n: int = AUTO_ROIS) -> np.ndarray:
     edge = np.concatenate([images[:, 0], images[:, -1], images[:, 1:-1, 0], images[:, 1:-1, -1]], axis=1)
     signal = images.sum(axis=(1, 2)) - np.median(edge, axis=1) * images[0].size
     return np.argsort(-signal, kind="stable")[:n]
+
+
+def in_beads_orientation(images: np.ndarray, cal, data_em_on) -> np.ndarray:
+    """``images`` mirrored in x into the orientation of ``cal``'s beads where the data were taken with the other
+    EM gain (`io.calibration.matched_to_em`, which mirrors the spline for the fit instead): the auto focus fits
+    the bead spline and its drawings, all in the beads' orientation, and a diagonal astigmatism seen mirrored
+    reads every height with the wrong sign.  Unknown on either side, as they are."""
+    if getattr(cal, "em_on", None) is None or data_em_on is None or bool(cal.em_on) == bool(data_em_on):
+        return images
+    return np.ascontiguousarray(np.asarray(images)[..., ::-1])
 
 
 def fitted_heights(cal, images: np.ndarray, iterations: int = AUTO_ITERATIONS, n_threads: int = 0):
@@ -491,3 +555,144 @@ def kept(key) -> Optional[AutoDepth]:
 def _jsonable(value):
     import json
     return json.loads(json.dumps(value, default=str))
+
+
+# ------------------------------------------------------------------ the sample, one part for every consumer
+
+#: *focus*'s choices, Spline 3D's (`plugins.fit.FOCUS_CHOICES`) and the sample part's
+SAMPLE_FOCUS_CHOICES = (("auto", "auto"), ("insitu", "in situ"), ("typed", "typed"),
+                        ("calibrated", "as calibrated"))
+
+
+@dataclass
+class SampleSettings:
+    """Where in the sample a pupil (Zernike) calibration is drawn: the part of everything else that takes a
+    spline and is not Spline 3D -- the DECODE training, *Simulate* -- with Spline 3D's own fields, names and
+    meanings (`plugins.fit.SplineModelSettings`), which keeps them in its *model* part so that saved settings
+    stay valid.  Shown only for a calibration that carries a model (`sample_state`); a bead average has none.
+    The bead's size is never drawn, nor the beads' damping of the supercritical ring (`VectorPSF.for_emitters`):
+    the SAF comes from the emitter's depth alone, the magnitude being the model's as learnt."""
+    from ..params import param as _param
+    focus: str = _param("auto", label="focus", choices=SAMPLE_FOCUS_CHOICES,
+                        help="where the focus is in the sample, for the PSF drawn there from the pupil model, z "
+                             "then the height above the coverslip: auto, from the lowest localizations; in situ, "
+                             "learnt from the molecules with the beads' aberrations; typed; or as calibrated, the "
+                             "beads' PSF at the coverslip")
+    focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
+                             help="how far into the sample the objective was moved from the coverslip; typed "
+                                  "here, else found from the movie")
+    sample_index: Optional[float] = param(None, label="sample index", min=1.0, max=2.0, advanced=True,
+                                           help="the sample's refractive index; auto: the beads' medium the "
+                                                "model was learnt with")
+
+
+def sample_state(cal, sample, prefix: str = "sample.", found: Optional[AutoDepth] = None):
+    """(shown, active, hints) of a `SampleSettings` part at ``prefix`` for the calibration ``cal`` (loaded, or
+    None): the part only where ``cal`` carries a model, the depth typed only on *typed*, what *auto* and *in
+    situ* resolve to where ``found`` says.  Never loads the model: the form asks with every change."""
+    has = cal is not None and has_model(cal)
+    drawn = has and sample.focus != "calibrated"
+    shown = {prefix + "focus": has, prefix + "focus_nm": drawn, prefix + "sample_index": drawn}
+    active = {prefix + "focus_nm": sample.focus == "typed"}
+    hints = {}
+    if drawn and sample.focus in ("auto", "insitu"):
+        word = "auto" if sample.focus == "auto" else "in situ"
+        hints[prefix + "focus_nm"] = (f"{word}: {found.focus_nm:.0f} nm" if found is not None
+                                      else f"{word}: found from the movie")
+    path = model_file(cal) if drawn else None
+    if path is not None:
+        # the beads' medium, where the model is loaded already (it is after a first drawing): loading it for
+        # the form would take a second, and torch
+        learned = _LOADED.get((str(path), path.stat().st_mtime))
+        hints[prefix + "sample_index"] = f"auto: {medium(learned):g}" if learned is not None else \
+            "auto: the beads' medium"
+    return shown, active, hints
+
+
+def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lambda text: None,
+               warn=None, cancel=None):
+    """``(spline, found)``: ``cal`` drawn for the sample ``sample`` says (`SampleSettings`), and the
+    `AutoDepth` that found its focus, or None.  The one way a consumer other than Spline 3D resolves the part:
+
+    * a calibration without a model, or *as calibrated*: ``cal`` itself;
+    * *typed*: drawn at the typed depth (`at_depth`);
+    * *auto*: the focus from ``images`` -- spots as the fit cuts them, photons with the read noise's variance
+      added (`plugins.fit.sample_rois`), in the data's orientation, ``camera`` saying its EM gain
+      (`in_beads_orientation`) -- by `auto_focus`, then drawn there;
+    * *in situ*: learnt from the movies at ``paths`` with ``camera`` (`insitu_focus`), started where *auto*
+      puts it when there are ``images``.
+
+    The spline records how its focus was found (``parameters["sample_depth"]["method"]``).  Without torch,
+    *auto* is said through ``warn`` and falls back to the calibration as it is, as Spline 3D's does: the
+    default must not stop work that ran before; the others refuse."""
+    if cal is None or not has_model(cal) or sample.focus == "calibrated":
+        return cal, None
+    try:
+        import torch  # noqa: F401 -- only asked whether it is there
+    except ImportError:
+        if sample.focus == "auto":
+            (warn or report)("focus on auto needs torch to draw the PSF in the sample (pip install "
+                             "smappy-smlm[uipsf]): the calibration as it is, z above the beads' focus")
+            return cal, None
+        raise ValueError("a focus in the sample draws the PSF with uipsf, which needs torch: pip install "
+                         "smappy-smlm[uipsf]")
+    n_med = sample.sample_index
+    found = None
+    if sample.focus == "typed":
+        spline = at_depth(cal, sample.focus_nm, n_med)
+    elif sample.focus == "auto":
+        if images is None or not len(images):
+            raise ValueError("focus on auto needs spots from the movie: none were found; type the focus")
+        found = auto_focus(cal, in_beads_orientation(images, cal, getattr(camera, "em_on", None)), n_med,
+                           report=report)
+        spline = at_depth(cal, found.focus_nm, n_med)
+    elif sample.focus == "insitu":
+        if not paths or camera is None:
+            raise ValueError("a focus in situ is learnt from the movie: choose it")
+        start = None
+        if images is not None and len(images):
+            try:
+                start = auto_focus(cal, in_beads_orientation(images, cal, getattr(camera, "em_on", None)), n_med,
+                                   report=report).focus_nm
+            except ValueError:
+                pass
+        found = insitu_focus(cal, paths, camera, n_med, start, progress=report, cancel=cancel)
+        spline = found.spline
+    else:
+        raise ValueError(f"focus must be one of {[k for k, _ in SAMPLE_FOCUS_CHOICES]}, not {sample.focus!r}")
+    if found is not None:
+        for message in found.messages:
+            (warn or report)(f"focus {found.method}: {message}")
+    # a copy: `at_depth` keeps the spline it hands out, and a typed and an auto focus share it
+    import copy
+    spline = copy.copy(spline)
+    spline.parameters = dict(spline.parameters or {})
+    record = dict(spline.parameters.get("sample_depth") or {})
+    record.setdefault("method", {"typed": "typed", "auto": "auto", "insitu": "in situ"}[sample.focus])
+    spline.parameters["sample_depth"] = record
+    return spline, found
+
+
+def z_bounds(cal) -> tuple:
+    """(lowest, highest) z in nm a calibration's spline holds, by its convention emitter = -(index - z0) dz:
+    the plane 0 the highest.  A drawn spline's z is the height above the coverslip and is not symmetric
+    about 0; a bead spline's is about its focus."""
+    nz = cal.shape[0]
+    return float(-(nz - 1 - cal.z0) * cal.dz), float(cal.z0 * cal.dz)
+
+
+def describe_sample(cal) -> str:
+    """One line on where a spline is drawn for: '' for one at the coverslip (a bead calibration)."""
+    record = (getattr(cal, "parameters", None) or {}).get("sample_depth") or {}
+    return describe_record(record)
+
+
+def describe_record(record: dict) -> str:
+    if not record or record.get("focus_nm") is None:
+        return ""
+    text = f"focus {float(record['focus_nm']):.0f} nm into the sample"
+    if record.get("method"):
+        text += f" ({record['method']})"
+    if record.get("n_med") is not None:
+        text += f", n = {float(record['n_med']):g}"
+    return text + ", z the height above the coverslip"

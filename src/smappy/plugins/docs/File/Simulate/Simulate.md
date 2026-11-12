@@ -1,6 +1,6 @@
 ---
 version: "4"
-covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem, smappy.simulate.camera.fourpi_model, smappy.simulate.camera.closed_form_fourpi, smappy.simulate.camera.cavity_phases, smappy.simulate.source.fourpi_path, smappy.fourpi.add_frames]
+covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem, smappy.simulate.camera.fourpi_model, smappy.simulate.camera.closed_form_fourpi, smappy.simulate.camera.cavity_phases, smappy.simulate.source.fourpi_path, smappy.fourpi.add_frames, smappy.simulate.camera.spline_for]
 ---
 
 ## What it does
@@ -647,6 +647,25 @@ yours.  Choosing one draws it into a spline at its own emission and this
 names that file: the frames are drawn with the microscope's PSF, and *Fit
 this* fits them with it.  Change the pixel size first: the spline is drawn
 in the pixel it was chosen at.
+
+### optics.sample.focus
+Shown for a calibration made with the pupil (Zernike) method, or a
+microscope's pupil.  *typed* draws the frames with the PSF of a molecule in
+the sample with the focus *focus depth* above the coverslip, as
+[Spline 3D](plugin:Localize/Spline 3D)'s *focus* draws it; the scene's z is
+then the height above the coverslip, so a structure meant to sit in the
+sample wants z from 0 up.  *as calibrated*, the default, draws the beads'
+spline, z above its focus.  *auto* and *in situ* find a focus in a movie,
+which a simulation does not have.  *Fit this* hands the same focus to
+Spline 3D.
+
+### optics.sample.focus_nm
+A few hundred nm for a cell on the coverslip, more for a thick sample.  Its
+effect is largest near the coverslip, where the light beyond the critical
+angle reaches the objective only from the molecules close to it.
+
+### optics.sample.sample_index
+1.33 for water; *auto* takes the beads' medium the calibration was made in.
 
 ### localizations.min_photons
 Keep it low: the dim localizations are part of real data.  Filter them away

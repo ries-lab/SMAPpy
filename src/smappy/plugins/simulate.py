@@ -255,6 +255,24 @@ class Simulate(Plugin):
     #    two-colour fitters report positions
     version = "4"
 
+    def _sample_form(self, settings, state, single: bool) -> None:
+        """*in the sample* for a one-camera spline drawn from a pupil (Zernike) calibration only
+        (`calibrate.depth.sample_state`); its focus typed or as calibrated, the two a simulation can draw."""
+        from ..calibrate.depth import sample_state
+        from ..simulate.camera import spline_calibration
+        cal = None
+        if single:
+            try:
+                cal = spline_calibration(settings.optics.calibration)
+            except Exception:
+                cal = None
+        shown, active, hints = sample_state(cal, settings.optics.sample, prefix="optics.sample.")
+        shown["optics.sample"] = shown.pop("optics.sample.focus")
+        state.shown.update(shown)
+        state.active.update(active)
+        state.hints.update(hints)
+        state.choices["optics.sample.focus"] = [("typed", "typed"), ("calibrated", "as calibrated")]
+
     def describe(self, ctx: Optional[Context], settings: SimulateSettings) -> FormState:
         """The preset's key parameters at the top; each component's fields
         those it reads; the camera's settings for a camera only; and, for
@@ -286,6 +304,7 @@ class Simulate(Plugin):
         state.keys = key_labels(settings, keys)
         state.hints["preset"] = "modified" if modified(settings) else ""
         state.notice = motion_notice(settings)
+        self._sample_form(settings, state, drawn and not settings.camera.split and not settings.camera.fourpi)
         # the pupils kept with the microscopes, drawn into a spline when one is chosen (`react`)
         from ..calibrate.microscope_psf import choices
         try:

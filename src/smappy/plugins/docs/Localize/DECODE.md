@@ -161,7 +161,10 @@ database.  Where they differ, the form says so under the model, and the
 run's text and its file repeat it -- a warning, not a refusal: a model of
 the same lens on another day may serve.  Where either side is not
 recorded, nothing is said.  *Model info...* lists what the model file
-says: its calibration, the conditions, the ranges it drew, how far it
+says: its calibration, the conditions, where in the sample its PSF was drawn
+(*PSF drawn for*: a focus depth, z the height above the coverslip, for a
+pupil calibration trained with *in the sample*; else the beads', z above
+their focus), the ranges it drew, how far it
 trained and how well it did on its test set, with the differences from the
 data first.  The check reads the model file's header only, without loading
 the network.

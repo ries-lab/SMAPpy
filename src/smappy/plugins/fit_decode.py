@@ -116,12 +116,25 @@ def summary_line(meta: dict) -> str:
     scope = meta.get("calibration_microscope") or {}
     if scope.get("name"):
         bits.append(f"microscope {scope['name']}")
+    depth = meta.get("calibration_sample_depth") or {}
+    if depth.get("focus_nm") is not None:
+        bits.append(f"focus {float(depth['focus_nm']):.0f} nm in the sample")
     if meta.get("epoch") is not None:
         bits.append(f"epoch {meta['epoch']}")
     jac = (meta.get("test_metrics") or {}).get("jaccard")
     if jac is not None:
         bits.append(f"test Jaccard {jac:.2f}")
     return "model: " + (", ".join(bits) if bits else "trained by " + str(meta.get("trained_by") or "DECODE"))
+
+
+def _drawn_for(meta: dict) -> str:
+    """Where in the sample the network's PSF was drawn, and so what its z is (`calibrate.depth`)."""
+    from ..calibrate.depth import describe_record
+    drawn = describe_record(meta.get("calibration_sample_depth") or {})
+    if drawn:
+        return drawn
+    # a SMAPpy job names its calibration; a model from elsewhere (DECODE's own, exported) says nothing
+    return "the beads: z above their focus" if meta.get("calibration_source") else "not recorded"
 
 
 def model_summary(meta: dict, data: Optional[dict] = None) -> list:
@@ -144,6 +157,7 @@ def model_summary(meta: dict, data: Optional[dict] = None) -> list:
         ("calibration file", meta.get("calibration_source") or ""),
         ("microscope", one_line(scope) if scope else "not recorded"),
         ("EM gain of the beads", {True: "on", False: "off"}.get(meta.get("calibration_em_on"), "not recorded")),
+        ("PSF drawn for", _drawn_for(meta)),
         ("photons a frame", f"{mu[0]:,.0f} \u00b1 {mu[1]:,.0f}" if mu else ""),
         ("background", f"{bg[0]:g} to {bg[1]:g} photons a pixel" if bg else ""),
         ("z", f"{z[0]:g} to {z[1]:g} nm" if z else ""),

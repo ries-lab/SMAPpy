@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.reference.crlb_reference, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -171,8 +171,23 @@ are SMAP's: 15, 25 and 50 molecules in a frame of 40 x 40 pixels.  A model
 trained dense also localizes sparse data well: the example package's, trained
 at 50, found 96 % of the molecules at one in 40 x 40 pixels.
 
+*in the sample* appears for a calibration made with the pupil (Zernike)
+method, and is [Spline 3D](plugin:Localize/Spline 3D)'s *focus*: the
+calibration is drawn for a molecule at each height above the coverslip, with
+the objective's focus *focus depth* into the sample, and the network learns
+that PSF rather than the beads' on the coverslip.  Its z is then the height
+above the coverslip.  *auto* finds the focus from the movie's lowest
+molecules, as Spline 3D does, before the prefit; *in situ* learns it, in
+minutes; *typed* takes it as typed; *as calibrated* uses the beads' spline
+as it is.  The drawing never includes the bead's size, nor the beads'
+damping of the light beyond the critical angle: those belonged to the
+calibration, not to a molecule.  One network serves one focus: data taken
+at another depth want a network of their own.  The DECODE fitter's
+*Model info...* says which focus a model was trained for.
+
 ### Prefit
-Fits the blocks and fills *Estimates*.  It takes as long as Spline 3D takes
+Fits the blocks and fills *Estimates*, with the calibration drawn in the
+sample where *in the sample* says so; the status line then names the focus.  It takes as long as Spline 3D takes
 on those frames, seconds to a minute.  A sparse movie, where too few molecules were
 seen fully on in a frame (fewer than 200 such frames), is fitted further,
 four times the blocks at a time, up to the whole movie: the photons are

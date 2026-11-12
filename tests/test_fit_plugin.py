@@ -55,7 +55,7 @@ def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place()
     # the model is each fitter's own, and the two-channel ones share links
     assert [list(cls.specs()["model"].children) for cls in
             (DualSplineFit, DualGaussianFit)] == [
-        ["calibration", "link_xy", "link_z", "link_photons", "link_background",
+        ["calibration", "sample", "link_xy", "link_z", "link_photons", "link_background",
          "photon_ratio", "registration"],
         ["sigma", "link_xy", "link_photons", "link_background", "link_sigma",
          "photon_ratio", "registration"]]

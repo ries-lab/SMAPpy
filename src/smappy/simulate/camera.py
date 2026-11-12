@@ -83,8 +83,7 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
             elif dual is None and s.optics.calibration:
                 if is_dual_calibration(s.optics.calibration):
                     raise ValueError(psf_problem(replace(s, output="camera")))
-                _draw_spline(image, frame, px, xyz[rows, 2], em.photons[rows],
-                             spline_calibration(s.optics.calibration))
+                _draw_spline(image, frame, px, xyz[rows, 2], em.photons[rows], spline_for(s.optics))
             elif dual is None:
                 _draw(image, frame, px, em.photons[rows], *_widths(xyz[rows, 2], s.optics))
             else:
@@ -150,6 +149,7 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
                      "conversion": s.camera.conversion, "offset": s.camera.offset,
                      "em_gain": s.camera.em_gain,
                      "psf": s.optics.calibration or "gaussian",
+                     "psf_sample_depth": sample_record(s.optics),
                      "read_noise": s.camera.read_noise, "sigma_nm": s.optics.sigma_nm,
                      "astigmatism": ([s.optics.focal_offset_nm, s.optics.depth_nm]
                                      if s.optics.astigmatism else None)})
@@ -307,6 +307,33 @@ def spline_calibration(path):
         from ..io.calibration import load_spline_calibration
         _SPLINES[key] = load_spline_calibration(path)
     return _SPLINES[key]
+
+
+def spline_for(optics):
+    """The spline the frames are drawn with: the calibration, or, for a pupil (Zernike) one with a focus typed
+    in the sample (``optics.sample``), drawn there (`calibrate.depth.for_sample`), z the height above the
+    coverslip.  *auto* and *in situ* find a focus in a movie, which a simulation does not have."""
+    cal = spline_calibration(optics.calibration)
+    sample = getattr(optics, "sample", None)
+    if sample is None or sample.focus == "calibrated":
+        return cal
+    from ..calibrate.depth import for_sample, has_model
+    if not has_model(cal):
+        return cal
+    if sample.focus != "typed":
+        raise ValueError("a simulation has no movie to find the focus in: type it (in the sample, focus typed)")
+    return for_sample(cal, sample)[0]
+
+
+def sample_record(optics):
+    """Where in the sample the frames' PSF was drawn (``parameters["sample_depth"]``), or None: the beads'."""
+    sample = getattr(optics, "sample", None)
+    if not optics.calibration or sample is None or sample.focus != "typed":
+        return None
+    try:
+        return (spline_for(optics).parameters or {}).get("sample_depth")
+    except Exception:
+        return None
 
 
 def _draw_spline(image, frame, xy_px, z_nm, photons, cal) -> None:
