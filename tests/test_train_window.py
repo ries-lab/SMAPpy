@@ -288,3 +288,34 @@ def test_the_connection_guide_opens_above_preferences_and_outlives_it():
     assert guide.isVisible()
     guide.close()
     app.processEvents()
+
+
+def test_a_prefit_whose_result_starts_the_simulated_frames_does_not_abort(movie, monkeypatch):
+    """*Prefit*'s result starts the next job, the simulated frames, from the worker's own signal:
+    the window replaced its QThread while that one was still winding down, and Qt aborted the
+    program ("QThread: Destroyed while thread is still running") after every prefit with torch."""
+    pytest.importorskip("PySide6")
+    import time
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from smappy.gui import train_window
+    path, cal_path = movie
+    monkeypatch.setattr(train_window, "torch_here", lambda: True)
+    monkeypatch.setattr(train_window, "simulated_frames", lambda params, cal, n_frames=2: np.zeros((n_frames, 40, 40)))
+    w = train_window.TrainWindow()
+    try:
+        w.prepare_form.set(_prepare_settings(path, cal_path))
+        w.prefit()
+        deadline = time.monotonic() + 60
+        while w.simulated is None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert w.prepared is not None and w.simulated is not None
+        w.write()                                          # what was asked for when it crashed
+        assert "job written" in w.status_bar.currentMessage()
+    finally:
+        if w._thread is not None:
+            w._thread.quit()
+            w._thread.wait()
+        w.close()
+        w.timer.stop()

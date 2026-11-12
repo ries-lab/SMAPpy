@@ -741,7 +741,19 @@ class TrainWindow(QWidget):
         if self.busy:
             return
         self.busy = True
+        # the last job's thread may still be winding down: its `done`, which runs this window's
+        # `_finished`, is emitted before its loop has quit, and *Prefit*'s starts the simulated
+        # frames from there.  Dropping the last reference to a QThread still running aborts the
+        # program (Qt: "QThread: Destroyed while thread is still running") -- it crashed SMAPpy
+        # after every prefit with torch installed.  So it is let finish first; its work is done,
+        # so this is the quit of an idle loop.
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait()
         self._thread = QThread()
+        # Qt's default thread stack (512 kB on macOS) is too small for HDF5, which the prefit reads
+        # (the calibration): a bus error, as in the calibration windows
+        self._thread.setStackSize(32 * 1024 * 1024)
         self._worker = _Worker(kind, function)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)

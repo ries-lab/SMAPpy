@@ -938,6 +938,12 @@ class PSFCalibrationWindow(QMainWindow):
         self.progress_bar.setFormat("%p%")
         self.progress_bar.setVisible(True)
         self._update_buttons()
+        # the last job's thread may still be winding down (its `done` comes before its loop has
+        # quit): replacing a QThread still running aborts the program, as the DECODE training
+        # window did after every prefit (`train_window.TrainWindow._work`)
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait()
         self._thread = QThread()
         self._thread.setStackSize(32 * 1024 * 1024)
         self._worker = _Worker(kind, function)
