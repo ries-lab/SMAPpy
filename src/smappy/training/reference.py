@@ -1,4 +1,4 @@
-"""The precision a training could reach at best: the CRLB of the spots it draws, for the Follow curves.
+"""The precision a training could reach at best: the CRLB of the spots it draws.
 
 DECODE's test set reports the RMSE of the emitters it found (`decode_smlm.training`, laterally the
 root mean square of the distance in x and y, axially of z).  How close that is to what the data

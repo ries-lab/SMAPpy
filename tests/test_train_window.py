@@ -171,7 +171,7 @@ def test_the_crlb_reference_is_the_gaussian_bound_of_a_bright_spot_and_doubles_i
     assert crlb_reference(params, cal, spots=200)["lateral_nm"] == pytest.approx(np.sqrt(2) * found["lateral_nm"], rel=1e-3)
 
 
-def test_the_follow_curves_draw_the_crlb_reference_on_the_rmse(tmp_path):
+def test_the_rmse_panel_draws_the_curves_alone(tmp_path):
     import matplotlib
     matplotlib.use("Agg")
     from matplotlib.figure import Figure
@@ -181,10 +181,9 @@ def test_the_follow_curves_draw_the_crlb_reference_on_the_rmse(tmp_path):
     progress.append(tmp_path, "epoch", 0, loss_train=1.0, loss_test=1.0, seconds=1.0,
                     metrics={"jaccard": 0.5, "rmse_lat_nm": 40.0, "rmse_ax_nm": 60.0})
     figure = Figure()
-    draw_progress(figure, progress.read(tmp_path), {"lateral_nm": 12.0, "axial_nm": 30.0})
+    draw_progress(figure, progress.read(tmp_path))
     rmse = next(a for a in figure.axes if a.get_title().startswith("RMSE"))
-    levels = sorted(line.get_ydata()[0] for line in rmse.get_lines() if line.get_linestyle() == ":")   # dotted: the dashed are the window's
-    assert levels == [12.0, 30.0]
+    assert [line.get_label() for line in rmse.get_lines()] == ["lateral", "axial"]
 
 
 def test_without_a_prefit_the_window_writes_the_job_from_the_estimates_typed_in(movie):
@@ -345,10 +344,10 @@ def test_the_curves_leave_the_first_epochs_out_of_their_range_and_show_the_effic
                                   "eff_lat": 0.2, "eff_ax": 0.25, "crlb_width_lat": 1.9, "crlb_width_ax": 2.1,
                                   "pixel_hist_rows": [12] * 10 + [8] * 10, "pixel_hist_cols": [10] * 20}})
     figure = Figure()
-    draw_progress(figure, lines, {"lateral_nm": 20.0, "axial_nm": 40.0})
+    draw_progress(figure, lines)
     loss, jaccard, pixels, rmse, crlb, seconds = figure.axes
     assert loss.get_ylim()[1] < 400 and rmse.get_ylim()[1] < 100      # the first epochs beyond the edge
-    assert rmse.get_ylim()[0] < 20                                     # the CRLB lines still inside
+    assert rmse.get_ylim()[0] > 30                                     # no CRLB line stretches it down
     assert crlb.get_title() == "error / CRLB, width (test set)" and crlb.get_ylim()[0] < 1.0 < crlb.get_ylim()[1]
     assert pixels.get_title() == "pixelation, epoch 199" and seconds.get_title() == "seconds an epoch"
     # the stop rule's window: shaded once, and a line at its median, on the curves it judges

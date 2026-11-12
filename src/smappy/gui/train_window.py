@@ -510,13 +510,14 @@ def _window(ax, e, values, window) -> None:
     ax.axhline(float(np.nanmedian(v)), ls="--", lw=0.8, color=line.get_color() if line is not None else "k")
 
 
-def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
+def draw_progress(figure, lines: list) -> str:
     """The curves of a job's ``progress.jsonl``, in two rows of three: the loss, the Jaccard and
     where in their pixel this epoch's localizations fall; the RMSE, each localization's error over
     its molecule's CRLB (or the efficiencies, `SCORE_PANEL`), and the seconds an epoch.  Each y range
     without the first epochs (`_fit_range`); on the curves the stop rule's window shaded and a line
     at its median (`_window`).  Returns a line saying where it is and how long it has left at most.
-    ``reference``, the median spot's CRLB (`training.reference`), is drawn on the RMSE dashed."""
+    The median spot's CRLB is no longer drawn on the RMSE: it stretched its axis to where the curves
+    never come, and the error over each molecule's own CRLB says the same per molecule."""
     epochs = [line for line in lines if line["kind"] == "epoch"]
     figure.clear()
     axes = figure.subplots(2, 3)
@@ -568,17 +569,12 @@ def draw_progress(figure, lines: list, reference: Optional[dict] = None) -> str:
     def later(v):
         return np.where(np.arange(len(v)) >= first, v, np.nan)
     lat, ax_ = series("rmse_lat_nm", True), series("rmse_ax_nm", True)
-    lateral = axes[1, 0].plot(e, lat, label="lateral")[0]
+    axes[1, 0].plot(e, lat, label="lateral")
     _window(axes[1, 0], e, lat, window)
-    axial = axes[1, 0].plot(e, ax_, label="axial")[0]
+    axes[1, 0].plot(e, ax_, label="axial")
     _window(axes[1, 0], e, ax_, window)
-    bounds = ()
-    if reference:
-        axes[1, 0].axhline(reference["lateral_nm"], ls=":", lw=0.8, color=lateral.get_color(), label="CRLB, median spot")
-        axes[1, 0].axhline(reference["axial_nm"], ls=":", lw=0.8, color=axial.get_color())
-        bounds = (reference["lateral_nm"], reference["axial_nm"])
     axes[1, 0].set(title="RMSE (nm, test set)", xlabel="epoch")
-    _fit_range(axes[1, 0], later(lat), later(ax_), include=bounds)
+    _fit_range(axes[1, 0], later(lat), later(ax_))
     axes[1, 0].legend(fontsize=7)
     if SCORE_PANEL == "crlb":
         # each localization's error over its molecule's single-emitter CRLB, as the width of a
@@ -683,7 +679,6 @@ class TrainWindow(QWidget):
         self.busy, self.prepared = False, None
         self._thread = self._worker = None
         self.follower = HostFollower()
-        self.references = {}              # a job's CRLB reference, by folder
 
         # the jobs: a table across the window, a symbol and a colour a state, those running first
         self.job_list = QTableWidget(0, len(COLUMNS))
@@ -980,11 +975,8 @@ class TrainWindow(QWidget):
                 return
             from ..training import jobs, progress
             status = jobs.status(entry)
-            if entry.folder not in self.references:        # once a job: a second, from its own files
-                from ..training.reference import for_job
-                self.references[entry.folder] = for_job(entry.folder)
             lines = progress.read(entry.folder)
-            text = draw_progress(self.follow_figure, lines, self.references[entry.folder])
+            text = draw_progress(self.follow_figure, lines)
             self.follow_canvas.draw_idle()
             # the state without its epoch: the curves' line says the epoch, once
             self.follow_label.setText(f"{entry.name}: {state_word(status)}; {text}"
