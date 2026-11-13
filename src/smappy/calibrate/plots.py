@@ -448,6 +448,66 @@ def draw_beads(figure, result, selected=(), excluded=(), dual=False):
                     " · red: rejected", fontsize=9)
 
 
+# ------------------------------------------------------------------- the CRLB
+def draw_crlb(figure, result, dual=False, pixel_nm="auto"):
+    """The precision the calibration allows against z, its Cramér-Rao lower bound (`calibrate.crlb`):
+    x, y and z in nm on one axis, as SMAP draws it; in dual colour the joint bound of a Spline 3D 2C
+    fit, solid, and each half's alone.  ``pixel_nm`` converts x and y; "auto" reads the beads' camera,
+    once per result, and where nothing gives it `crlb.ASSUMED_PIXEL_NM` is taken and the title says
+    so.  Returns the status line."""
+    from . import crlb
+    if pixel_nm == "auto":
+        pixel_nm = getattr(result, "_crlb_pixel_nm", "unread")
+        if pixel_nm == "unread":
+            pixel_nm = crlb.pixel_size_nm(result)
+            try:
+                result._crlb_pixel_nm = pixel_nm
+            except AttributeError:                     # a frozen result: read again next time
+                pass
+    assumed = not pixel_nm
+    pixel_nm = crlb.ASSUMED_PIXEL_NM if assumed else float(pixel_nm)
+    cal = result.calibration
+    if dual:
+        from ..psf import signal_integral
+        main, secondary = cal.layer_splines()
+        z = crlb.z_range_nm(main)
+        # each half alone with its share of the same emitter's photons: what it adds to the joint fit
+        curves = [("both", "-", crlb.dual_crlb(main, secondary, z)),
+                  ("main", "--", crlb.spline_crlb(main, z, crlb.PHOTONS * signal_integral(main))),
+                  ("secondary", ":", crlb.spline_crlb(secondary, z,
+                                                      crlb.PHOTONS * signal_integral(secondary)))]
+    else:
+        z = crlb.z_range_nm(cal)
+        curves = [("", "-", crlb.spline_crlb(cal, z))]
+    figure.clear()
+    ax = figure.subplots()
+    for name, style, bound in curves:
+        suffix = f", {name}" if name else ""
+        ax.plot(z, bound["x_px"] * pixel_nm, style, color="C0", label="x" + suffix)
+        ax.plot(z, bound["y_px"] * pixel_nm, style, color="C1", label="y" + suffix)
+        ax.plot(z, bound["z_nm"], style, color="C2", label="z" + suffix)
+    ax.set(xlabel="z (nm)", ylabel="CRLB (nm)")
+    # scaled to the first curve (the joint fit's in dual colour): a half alone can lose z where its
+    # PSF is symmetric, and its peak would flatten everything else
+    first = np.concatenate([curves[0][2]["x_px"] * pixel_nm, curves[0][2]["y_px"] * pixel_nm,
+                            curves[0][2]["z_nm"]])
+    top = 1.5 * np.nanmax(first) if np.isfinite(first).any() else None
+    ax.set_ylim(0, top)
+    ax.grid(alpha=.3)
+    ax.legend(fontsize=7)
+    _sizes(ax)
+    size = (f"pixel size unknown: {pixel_nm:g} nm assumed for x and y" if assumed
+            else f"pixel size {pixel_nm:g} nm")
+    ax.set_title(f"Cramér-Rao lower bound: {crlb.PHOTONS:g} photons, {crlb.BACKGROUND:g} background "
+                 f"photons per pixel, {crlb.ROISIZE} px fit box\n{size}", fontsize=9,
+                 **({"color": "#c06000"} if assumed else {}))
+    best = curves[0][2]
+    at = int(np.nanargmin(np.abs(z)))
+    return (f"CRLB at focus: x {best['x_px'][at] * pixel_nm:.3g} nm, y {best['y_px'][at] * pixel_nm:.3g} nm, "
+            f"z {best['z_nm'][at]:.3g} nm ({crlb.PHOTONS:g} photons, {crlb.BACKGROUND:g} background"
+            + (f"; {pixel_nm:g} nm pixels ASSUMED" if assumed else "") + ")")
+
+
 # --------------------------------------------------------------- the pupil model's fit quality
 
 def draw_pupil_fit_quality(figure, diagnostics, selected=(), excluded=()):

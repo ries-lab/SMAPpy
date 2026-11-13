@@ -326,7 +326,7 @@ def bead_calibration_actions(control) -> List[Action]:
         Action(f"{name}/Calculate fit quality", "Fit the beads back with the fitter the data will "
                "meet, for the Fit quality page; returns at once.", quality, shows=True),
         Action(f"{name}/Show page", "Bring a page of plots to the front: Overview, "
-               "Transformation, Fit quality, Field diagnostics, Bead diagnostics.", page,
+               "Transformation, Fit quality, Field diagnostics, Bead diagnostics, CRLB.", page,
                {"page": {"type": "string"}}, ("page",), shows=True),
         Action(f"{name}/Save", "Save the calibration (.h5) -- by default beside the stacks, as "
                "the window's dialog offers; a path given is under the output folder or the "

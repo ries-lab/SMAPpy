@@ -361,6 +361,7 @@ class BeadAverage:
         if dual:
             pages.append(Page("Field diagnostics", lambda f, s, e: plots.draw_field(f, result, s, e)))
         pages.append(Page("Bead diagnostics", lambda f, s, e: plots.draw_beads(f, result, s, e, dual=dual)))
+        pages.append(Page("CRLB", lambda f, s, e: plots.draw_crlb(f, result, dual=dual), follows_selection=False))
         return pages
 
     def rows(self, run: Run, marks: dict) -> list:

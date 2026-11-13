@@ -30,7 +30,7 @@ from .core import (CalibrationSettings, build_calibration, calibration_save_defa
 from .dual import DualColorSettings, build_dual_calibration, collect_dual_beads, mirror_axis
 from .input import discover_acquisitions
 
-PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
+PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics", "CRLB")
 COLUMNS = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation",
            "residual", "state")
 
@@ -514,8 +514,10 @@ class CalibrationWindow(QMainWindow):
                 else:
                     self.status_bar.showMessage(plots.draw_fit_quality(
                         figure, self.diagnostics, self.profile_data, selected))
-            else:
+            elif page == 4:
                 plots.draw_beads(figure, result, selected, excluded, dual=self.is_dual)
+            else:
+                self.status_bar.showMessage(plots.draw_crlb(figure, result, dual=self.is_dual))
         except Exception as error:
             self.status_bar.showMessage(f"could not draw: {type(error).__name__}: {error}")
             return
