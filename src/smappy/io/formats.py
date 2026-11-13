@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -363,10 +364,9 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
             entries = _sml_entries_v5(m["saveloc"])
         except (AttributeError, TypeError, ValueError):
             pass
+    numbers = None
     if filenumber is not None and entries:
-        columns = _in_files(columns, filenumber, len(entries))
-    # the table's camera is the first file's, as a session's is
-    info = entries[0][1] if entries else {}
+        columns, numbers = _in_files(columns, filenumber, len(entries))
     if "frame" in columns:
         columns["frame"] = (np.asarray(columns["frame"]) - 1).astype(np.int64)  # MATLAB is 1-based
     for name in ("channel", "iterations"):
@@ -375,22 +375,54 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     for name, values in columns.items():
         if values.dtype == np.float64:
             columns[name] = values.astype(np.float32)
-    px = pixel_sizes(info.get("pixelsize_um"))
-    px = px and px[0]                   # the file's one number: its x pixel
-    metadata = {"units": "nm", "source": str(path), "smap": info}
-    camera = _sml_camera(info)
-    if camera:
-        metadata["camera"] = camera
+    # the table's metadata is the first file's, as a session's is
+    info = entries[0][1] if entries else {}
+    metadata = _sml_metadata(path, info)
+    if numbers is not None and len(entries) > 1:
+        # several files stay several, each with its own name, camera and
+        # frame time, as a saved session's do (`session._saved_files`): the
+        # positions of an experiment share the camera's coordinates, and as
+        # one file each one's sites held the others' localizations
+        columns["filenumber"] = numbers.astype(np.int32)
+        counts = np.bincount(numbers, minlength=len(entries))
+        metadata["files"] = [_sml_file(path, k, name, own, int(counts[k]), columns).to_dict()
+                             for k, (name, own) in enumerate(entries)]
     if sites:
         metadata["roi_project"] = sites
     locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "SMAP",
-                          pixelsize_nm=px * 1000 if px else None, metadata=info)
+                          pixelsize_nm=_sml_pixel_nm(info), metadata=info)
+
+
+def _sml_metadata(path: Path, info: Dict) -> Dict:
+    """One SMAP file's metadata: its `_sml_info` and its camera."""
+    metadata = {"units": "nm", "source": str(path), "smap": info}
+    camera = _sml_camera(info)
+    if camera:
+        metadata["camera"] = camera
+    return metadata
+
+
+def _sml_pixel_nm(info: Dict) -> Optional[float]:
+    px = pixel_sizes(info.get("pixelsize_um"))
+    return px[0] * 1000 if px else None     # the file's one number: its x pixel
+
+
+def _sml_file(path: Path, number: int, name: str, info: Dict, n: int,
+              columns: Dict) -> FileInfo:
+    """File ``number`` (from 0) of a SMAP file of several.  SMAP names it by
+    the path it was loaded from, on whichever computer that was: the name
+    here is its last part, the path the whole."""
+    label = re.split(r"[\\/]", name)[-1] if name else ""
+    return FileInfo(label or f"{path.name} [{number + 1}]", name or str(path), "SMAP", n=n,
+                    pixelsize_nm=_sml_pixel_nm(info), metadata=_sml_metadata(path, info),
+                    columns=[c for c in columns if c != "filenumber"])
 
 
 def _in_files(columns: Dict[str, np.ndarray], filenumber: np.ndarray,
-              n_files: int) -> Dict[str, np.ndarray]:
-    """The rows of SMAP's files, numbered from 1, without those of none.
+              n_files: int) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    """The rows of SMAP's files, numbered from 1, without those of none, and
+    their files numbered from 0.
 
     A row whose ``filenumber`` names none of the file's files is shown by
     SMAP nowhere.  In the files where they were found (two experiments,
@@ -399,11 +431,12 @@ def _in_files(columns: Dict[str, np.ndarray], filenumber: np.ndarray,
     ``origin`` and ``groupindex`` -- leftovers of a SMAP step -- and read
     as localizations they sat at (0, 0) in frame -1.
     """
-    number = np.asarray(filenumber).ravel()
+    number = np.asarray(filenumber).ravel().astype(np.int64)
     keep = (number >= 1) & (number <= n_files)
     if keep.all():
-        return columns
-    return {name: np.asarray(values)[keep] for name, values in columns.items()}
+        return columns, number - 1
+    return ({name: np.asarray(values)[keep] for name, values in columns.items()},
+            number[keep] - 1)
 
 
 def _sml_info(get: Callable) -> Dict:

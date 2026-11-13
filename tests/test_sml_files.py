@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from smappy.io.formats import load
+from smappy.session import Session
 
 CAMERA = {"cam_pixelsize_um": [0.127, 0.127], "conversion": 5.0, "offset": 398.6,
           "emgain": 200.0, "EMon": 1, "roi": [137.0, 286.0, 223.0, 208.0],
@@ -99,3 +100,51 @@ def test_rows_of_no_file_are_left_out_not_read_as_localizations_at_the_origin(tm
     assert len(locs) == 5
     assert np.all(locs["frame"] >= 0) and np.all(locs["x_nm"] > 0)
     assert np.allclose(np.sort(locs["photons"]), np.sort(rows["phot"][rows["filenumber"] > 0]))
+
+
+def _open(path):
+    session = Session()
+    session.add_file(*load(path))
+    return session
+
+
+@pytest.mark.parametrize("write", [write_sml, write_sml_v5])
+def test_the_files_of_a_smap_file_open_as_files_each_with_its_own_camera(tmp_path, write):
+    """As one file, the positions of an experiment, which share the camera's
+    coordinates, lay on top of each other."""
+    files = [("C:\\data\\Pos0_sml.mat", CAMERA), ("C:\\data\\Pos1_sml.mat", CAMERA),
+             ("all_average_sites_F_3_sml.mat", AVERAGE)]
+    rows = _rows([0, 1, 1, 2, 2, 2, 3, 3])
+    session = _open(write(tmp_path / "several_sml.mat", files, rows))
+    assert session.file_names() == ["Pos0_sml.mat", "Pos1_sml.mat",
+                                    "all_average_sites_F_3_sml.mat"]
+    assert session.files[1].path == "C:\\data\\Pos1_sml.mat"
+    assert [f.pixelsize_nm for f in session.files] == pytest.approx([127, 127, 100])
+    assert [f.frame_time_ms for f in session.files][:2] == pytest.approx([35.31, 35.31])
+    assert session.files[2].metadata["camera"]["roi"] == [0, 0, 512, 512]
+    # each row in its file: SMAP counts from 1, and the row of none is gone
+    kept = rows["filenumber"] > 0
+    assert np.array_equal(session.locs["filenumber"], rows["filenumber"][kept] - 1)
+    assert np.allclose(session.locs["photons"], rows["phot"][kept])
+
+
+def test_a_smap_file_of_several_saved_as_hdf5_opens_as_the_same_files(tmp_path):
+    files = [("C:\\data\\Pos0_sml.mat", CAMERA), ("C:\\data\\Pos1_sml.mat", CAMERA),
+             ("all_average_sites_F_3_sml.mat", AVERAGE)]
+    rows = _rows([1, 1, 2, 2, 2, 3, 3])
+    smap = _open(write_sml(tmp_path / "several_sml.mat", files, rows))
+    smap.save(tmp_path / "several.hdf5")
+    again = _open(tmp_path / "several.hdf5")
+    assert again.file_names() == smap.file_names()
+    assert [f.pixelsize_nm for f in again.files] == pytest.approx([127, 127, 100])
+    for name in smap.locs.columns:
+        assert np.array_equal(again.locs[name], smap.locs[name]), name
+
+
+def test_a_smap_file_of_one_file_stays_one_file(tmp_path):
+    path = write_sml(tmp_path / "one_sml.mat", [("C:\\data\\Pos0_sml.mat", CAMERA)],
+                     _rows([1, 1, 1]))
+    locs, info = load(path)
+    assert "files" not in locs.metadata and "filenumber" not in locs
+    session = _open(path)
+    assert session.file_names() == ["one_sml.mat"] and len(session.locs) == 3

@@ -340,9 +340,10 @@ def _saved_files(locs: Localizations, info: FileInfo) -> Optional[List[FileInfo]
     `filenumber` of every row.  Opened again, they are three files again --
     the rows numbered as they were, each with its name, frame time and
     metadata -- and no longer one file whose second and third had lost what
-    they were.
+    they were.  A SMAP `_sml.mat` of several files comes the same way
+    (`formats._load_sml`).
     """
-    if info.format != "smappy" or "filenumber" not in locs:
+    if info.format not in ("smappy", "SMAP") or "filenumber" not in locs:
         return None
     entries = locs.metadata.get("files")
     if not isinstance(entries, list) or len(entries) < 2 \
