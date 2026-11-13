@@ -213,3 +213,14 @@ def test_a_spline_calibration_keeps_the_grid_limit_warning(monkeypatch):
         spline = spline_calibration(learned, 50.0, 500.0, 11)
     assert spline.field_splines.shape == (2, 2)
     assert "2 × 2" in spline.parameters["field_warning"] and spline.parameters["field_blend_error"] > 1e-6
+
+
+def test_a_field_too_few_beads_cannot_determine_is_reported_so_rather_than_failing():
+    """4 beads for the 14 coefficients of a linear field left an indefinite covariance, whose square roots
+    stopped the report (and the PSF calibration window's *State* with it)."""
+    from uipsf.diagnostics import field_report
+    from uipsf.workflows import learn_beads
+    model, truth, batch = field_beads(n=4, truth_field={(6, 1, 0): 0.3}, dtype=torch.float32)
+    rep = field_report(learn_beads(model, batch, first_order=None))
+    assert not rep.determined and not rep.significant and rep.n_beads == 4
+    assert "not determined by 4 beads" in rep.summary()

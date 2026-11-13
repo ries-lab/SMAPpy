@@ -28,6 +28,11 @@ during them.  Before it, Windows measured nothing and a rule of 16 kB per value 
 about right and NA 1.50's up to ten times too large.
 
 Where even that fails `measure` returns None, and the caller falls back to a rule.
+
+A CUDA card on Windows does not fail when it is full: the driver (WDDM's system-memory fallback) hands out
+system memory instead, and the work crawls -- a customer's 8 GB card held 7.7 GB while the process grew by 34
+GB of system memory, its bandwidth at 1-2 %.  Torch's allocator then holds more than the card has, which
+`cuda_spill` reports after a run (`reset_cuda_spill` before it): the one sign of it a program can read.
 """
 from __future__ import annotations
 
@@ -45,6 +50,7 @@ def measure(fn, device) -> tuple[object, int | None]:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
         start = torch.cuda.memory_allocated(device)
+        _note_reserved()                    # the peak about to be reset, for `cuda_spill`
         torch.cuda.reset_peak_memory_stats(device)
         out = fn()
         torch.cuda.synchronize(device)
@@ -74,6 +80,34 @@ def measure(fn, device) -> tuple[object, int | None]:
     out = fn()
     peak = meter.peak()
     return out, None if peak is None else max(0, peak - start)
+
+
+# The most torch's allocator reserved on any CUDA card since `reset_cuda_spill`, beyond that card's memory;
+# kept here because `measure` resets the allocator's own peaks.
+_SPILL = [0]
+
+
+def _note_reserved() -> None:
+    if not (torch.cuda.is_available() and torch.cuda.is_initialized()):
+        return
+    for i in range(torch.cuda.device_count()):
+        over = torch.cuda.max_memory_reserved(i) - torch.cuda.get_device_properties(i).total_memory
+        _SPILL[0] = max(_SPILL[0], int(over))
+
+
+def reset_cuda_spill() -> None:
+    """Start counting `cuda_spill` afresh: before a run."""
+    _SPILL[0] = 0
+    if torch.cuda.is_available() and torch.cuda.is_initialized():
+        for i in range(torch.cuda.device_count()):
+            torch.cuda.reset_peak_memory_stats(i)
+
+
+def cuda_spill() -> int:
+    """Bytes torch's allocator held beyond a CUDA card's own memory since `reset_cuda_spill`: where the driver
+    moved work into system memory (module docstring), 0 where it did not or there is no card."""
+    _note_reserved()
+    return max(0, _SPILL[0])
 
 
 class _MacMeter:

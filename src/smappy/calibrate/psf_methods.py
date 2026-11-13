@@ -144,13 +144,26 @@ class LearningProgress:
 
 def memory_text(plan, dual: bool = False) -> str:
     """", at most 8.5 GB of the 14 GB free, 4 beads at a time": what `pupil.estimate_memory` found, for the
-    line after *Detect beads*; empty where nothing could be measured."""
+    line after *Detect beads*; empty where nothing could be measured.  On a CUDA card its own free memory,
+    and a warning when even one bead does not fit there."""
     if plan is None or plan.peak_bytes is None:
         return ""
     what = "pairs" if dual else "beads"
-    free = "" if plan.available_bytes is None else f" of the {plan.available_bytes / 1e9:.0f} GB free"
+    where = " on the graphics card" if getattr(plan, "on_card", False) else ""
     held = plan.peak_bytes / 1e9
+    if plan.available_bytes is not None and plan.peak_bytes > plan.available_bytes:
+        return (f", {held:.1f} GB for one {what[:-1]}, more than the {plan.available_bytes / 1e9:.1f} GB "
+                f"free{where}: it will be slow -- fewer slices or a smaller box need less")
+    free = "" if plan.available_bytes is None else f" of the {plan.available_bytes / 1e9:.1f} GB free{where}"
     return f", at most {held:.1f} GB{free}, {plan.chunk} {what if plan.chunk != 1 else what[:-1]} at a time"
+
+
+def spill_text(spilled: int) -> str:
+    """What a run that went beyond the graphics card's memory says after it (`uipsf.memory.cuda_spill`)."""
+    if not spilled:
+        return ""
+    return (f"the graphics card's memory ran out and its driver used about {spilled / 1e9:.0f} GB of system "
+            "memory instead, which makes learning slow: fewer beads, slices or a smaller box need less")
 
 
 def duration(seconds: float) -> str:
@@ -453,7 +466,10 @@ class PupilModel:
 
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
             marks: Optional[dict] = None, detected: Optional[Detected] = None) -> Run:
+        from uipsf.memory import cuda_spill, reset_cuda_spill
+
         from .pupil import run_calibration
+        reset_cuda_spill()
         done = run_calibration(paths, dual, inputs["optics"], inputs["model"], inputs["detection"],
                                inputs["spline"], inputs["run"], camera=inputs.get("camera"),
                                previous=None if previous is None else previous.result,
@@ -462,7 +478,7 @@ class PupilModel:
                                decisions=dict(marks or {}) if detected is not None or previous is not None
                                else marks or None,
                                progress=progress, cancel=cancel, rois=None if detected is None else detected.found)
-        return Run(done, dual, done.saved)
+        return Run(done, dual, done.saved, extra={"spilled": cuda_spill()})
 
     def finish(self, run: Run, progress=None) -> Run:
         """The fit quality (Spline 3D on every bead) and the model against the data, kept with the run;
@@ -578,8 +594,10 @@ class PupilModel:
         # and when the saved spline grid is too coarse for the field (`field_splines.limit_warning`)
         spline = getattr(run.result, "calibration", None)
         limit = (getattr(spline, "parameters", None) or {}).get("field_warning")
+        spill = spill_text(run.extra.get("spilled", 0))
         return (f"{len(cal.beads.used)} of {len(cal.beads.rows)} beads used" + (f"; {numbers}" if numbers else "")
-                + ("" if field is None else f"; {field.summary()}") + ("" if limit is None else f"; {limit}"))
+                + ("" if field is None else f"; {field.summary()}") + ("" if limit is None else f"; {limit}")
+                + (f"; {spill}" if spill else ""))
 
 
 class InSitu:

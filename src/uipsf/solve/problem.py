@@ -157,32 +157,40 @@ class MemoryPlan:
     """What a fit of a batch will hold, before it runs (`memory_plan`)."""
     chunk: int                  # emitters computed at once
     peak_bytes: int | None      # the most one chunk's normal equations hold, above what is in use now
-    available_bytes: int | None  # what the system had available when asked
+    available_bytes: int | None  # what was free when asked: the card's on CUDA, else the system's
+    on_card: bool = False        # ``available_bytes`` is a CUDA card's
+    tangents: int = 1            # Jacobian columns per batch, the run's and the measurement's
 
 
 def memory_plan(model, noise, batch, device=None) -> MemoryPlan:
     """The chunk a `Problem` of ``batch`` will take and what it will hold at most, measured on one emitter
-    (`_measured_bytes`) even where all the emitters fit: the figure a window shows before a run.  On CUDA
-    the allocator's figure for one emitter times the chunk; None where nothing can be measured."""
+    (`_measured_bytes`) even where all the emitters fit: the figure a window shows before a run.  Measured
+    at the tangents the run will use (`Problem.tangents`): one bead at 16 tangents is another figure than at
+    1 (a customer's RTX 3070 Ti, November 2026: the plan measured 16, the run took 1).  What was free is the
+    card's on CUDA -- the system's memory said "89 GB of the 88 GB free" of an 8 GB card -- and the
+    system's elsewhere.  None for the peak where nothing can be measured."""
     from ..device import available_memory_bytes
     device = batch.data.device if device is None else torch.device(device)
     problem = Problem(model, noise, batch, device=device)
+    cuda = device.type == "cuda"
+    free = _cuda_free(device) if cuda else available_memory_bytes()
     if problem.peak_bytes is not None:
-        return MemoryPlan(problem.chunk_size, problem.peak_bytes, available_memory_bytes())
-    one = max(1, min(TANGENT_MAX if device.type == "cpu" else 16,
-                     TANGENT_BUDGET.get(device.type, 2 ** 21) // batch.data[0].numel()))
-    each = _measured_bytes(model, noise, batch, device, one)
+        return MemoryPlan(problem.chunk_size, problem.peak_bytes, free, cuda, problem.tangents)
+    each = _measured_bytes(model, noise, batch, device, problem.tangents)
     peak = None if not each else int(MEASURED_MARGIN * each) * problem.chunk_size
-    return MemoryPlan(problem.chunk_size, peak, available_memory_bytes())
+    return MemoryPlan(problem.chunk_size, peak, free, cuda, problem.tangents)
+
+
+def _cuda_free(device) -> int:
+    """Bytes free on the CUDA ``device`` -- other programs' use counted, a DECODE training's on the same card
+    too -- with what torch's allocator holds unused, which it hands out again."""
+    free, _ = torch.cuda.mem_get_info(device)
+    return int(free + torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
 
 
 def _cuda_room(device) -> int:
-    """Bytes a chunk may take on the CUDA ``device``: `CUDA_SHARE` of what is free -- other programs' use
-    counted, a DECODE training's on the same card too -- with what torch's allocator holds unused, which it
-    hands out again."""
-    free, _ = torch.cuda.mem_get_info(device)
-    free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-    return int(CUDA_SHARE * free)
+    """Bytes a chunk may take on the CUDA ``device``: `CUDA_SHARE` of what is free (`_cuda_free`)."""
+    return int(CUDA_SHARE * _cuda_free(device))
 
 
 def _cuda_budget(device) -> int:
@@ -239,10 +247,19 @@ class Problem:
         self.peak_bytes = None
         # what the memory holds, a caller's chunk too: one emitter measured where it might not all fit
         room = _cuda_room(self.device) if cuda else _host_available(self.device)
+        measured = None
         if room is not None and min(self.chunk_size, batch.n_emitters) * per_emitter * HOST_BYTES_ROUGH > room:
             one = (tangents or max(1, min(cap, budget // per_emitter))) if measure else None
             each = _measured_bytes(model, noise, batch, self.device, one) if measure else None
+            # Even one emitter does not fit: fewer tangents, each a column of images the emitter holds at once,
+            # measured again.  A customer's 8 GB card (November 2026) measured one bead of 61 × 27² at ~7 GB
+            # with 16 tangents, where half the card was 3.7 GB: the chunk of one went to the driver's system
+            # memory and the fit crawled.
+            while each and tangents is None and one > 1 and int(MEASURED_MARGIN * each) > room:
+                one = max(1, one // 2)
+                each = _measured_bytes(model, noise, batch, self.device, one)
             if each:
+                measured = one
                 each = int(MEASURED_MARGIN * each)
                 # after the measurement emptied MPS' cache
                 room = _cuda_room(self.device) if cuda else _host_available(self.device)
@@ -250,6 +267,8 @@ class Problem:
                 self.peak_bytes = self.chunk_size * each
             elif not cuda:                  # on CUDA the rule above has sized it already
                 self.chunk_size = max(1, min(self.chunk_size, room // (HOST_BYTES_PER_VALUE * per_emitter)))
+        if tangents is None and measured is not None:
+            tangents = measured             # what the chunk was sized by: the run holds what was measured
         if tangents is None:
             tangents = max(1, min(cap, budget // (min(self.chunk_size, batch.n_emitters) * per_emitter)))
             # a model whose columns barely use JVPs can take more at once than the JVPs' budget allows

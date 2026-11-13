@@ -2608,6 +2608,21 @@ thread samples the process's use every millisecond while the bead is measured (`
 left for a system with neither is NA 1.50's 40 kB.  `benchmarks/uipsf/memory_check.py` prints all of it on the
 machine at hand.
 
+**A bead that does not fit at its tangents, and the spill seen (13 November 2026).**  The customer's 8 GB RTX 3070
+Ti (Windows, SMAPpy 0.6.6), logged with nvidia-smi every 0.5 s: 10 beads of 61 × 27² held the card at 7.7 GB
+while the process grew from 2 to 36.5 GB of system memory (WDDM's fallback), the GPU "100 %" busy at 1-2 % of its
+bandwidth and ~100 of 310 W; learning took 2.5 min against the 39 s estimate, 4 beads 25 s.  Three things now:
+
+- One bead measured ~7 GB at 16 tangents where half the card was 3.7 GB, so even a chunk of one spilled.  When one
+  emitter does not fit, `Problem` halves the tangents and measures again until it does, or until one tangent.
+- The run takes the tangents the chunk was sized by; before, it took the budget's (1 here) while the window's
+  plan had measured at 16.  `memory_plan` measures at `Problem.tangents`, the run's.
+- The plan's free memory is the card's on CUDA (`MemoryPlan.on_card`): it said "89.1 GB of the 88 GB free",
+  the system's.  The window says when even one bead is more than the card has.
+
+After a run the window says when torch's allocator held more than the card has (`memory.cuda_spill`), the one
+sign of the driver's fallback a program can read.
+
 ## Phase masks in the pupil (November 2026; `model/mask.py`, S1 of `docs/uipsf/scanned-psfs.md`)
 
 A mask is an analytic design Φ(u′, v′) in units of the objective's pupil radius, placed on the pupil by

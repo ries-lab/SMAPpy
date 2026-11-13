@@ -1,5 +1,6 @@
 """The PSF calibration's views of the model against the data, and its progress bar: Qt-free parts."""
 import numpy as np
+import pytest
 from matplotlib.figure import Figure
 
 from smappy.calibrate.core import build_calibration
@@ -99,3 +100,37 @@ def test_the_bar_follows_a_fit_whose_gain_falls_geometrically_and_never_goes_bac
 
 def test_a_duration_reads_at_a_glance():
     assert [duration(s) for s in (12, 300, 7200)] == ["12 s", "5 min", "2.0 h"]
+
+
+def test_the_memory_line_says_the_graphics_cards_free_memory_and_when_one_bead_will_not_fit():
+    """A customer's 8 GB card read "at most 89.1 GB of the 88 GB free": the system's memory, beside a card
+    that held a tenth of it."""
+    pytest.importorskip("torch")
+    from smappy.calibrate.psf_methods import memory_text, spill_text
+    from uipsf.solve import MemoryPlan
+    gb = 10 ** 9
+    assert memory_text(MemoryPlan(2, int(3.2 * gb), int(7.4 * gb), True, 2)) == \
+        ", at most 3.2 GB of the 7.4 GB free on the graphics card, 2 beads at a time"
+    assert memory_text(MemoryPlan(4, int(8.5 * gb), 14 * gb)) == ", at most 8.5 GB of the 14.0 GB free, 4 beads at a time"
+    too_big = memory_text(MemoryPlan(1, int(9.1 * gb), int(7.4 * gb), True, 1))
+    assert "9.1 GB for one bead, more than the 7.4 GB free on the graphics card" in too_big
+    assert spill_text(0) == "" and "about 34 GB of system memory" in spill_text(34 * gb)
+
+
+def test_what_the_allocator_held_beyond_a_card_is_the_spill_and_a_reset_forgets_it(monkeypatch):
+    torch = pytest.importorskip("torch")
+
+    from uipsf import memory
+    reserved = [12 * 2 ** 30]
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda i=None: reserved[0])
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda i=None: None)
+    monkeypatch.setattr(torch.cuda, "get_device_properties",
+                        lambda i: type("P", (), {"total_memory": 8 * 2 ** 30})())
+    memory.reset_cuda_spill()
+    assert memory.cuda_spill() == 4 * 2 ** 30
+    reserved[0] = 6 * 2 ** 30
+    memory.reset_cuda_spill()
+    assert memory.cuda_spill() == 0

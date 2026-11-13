@@ -64,8 +64,14 @@ most -- so a run of an afternoon is never started by accident.  The memory is
 measured, not guessed: the model's work for one bead is run once and what it
 held is read from the system (the graphics card's own count on a Mac's GPU
 or a CUDA card), and learning then takes as many beads at a time as fit in
-80 % of the memory free at that moment, counting each at 1.25 times what one
-bead held.  More memory only lets more beads go at once, which is hardly
+80 % of the memory free at that moment -- half of the graphics card's free
+memory on a CUDA card -- counting each at 1.25 times what one bead held.
+Where even one bead does not fit, it is computed in smaller pieces (fewer
+Jacobian columns at once) until it does, and the line says so if it never
+does.  On a CUDA card the memory said is the card's own.  After a run the
+summary says when the card's memory ran out and its driver used system
+memory instead, which Windows does rather than fail, and which makes
+learning many times slower.  More memory only lets more beads go at once, which is hardly
 faster: 19 beads of 100 slices of 27 × 27 pixels on a laptop's GPU took 40 s
 in fours, about 2 GB a bead, where all at once had filled 32 GB and swapped.
 When a run ends, the memory it used is handed back to the computer.  *Calibrate* then learns from them; pressed first, it

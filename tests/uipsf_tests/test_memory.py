@@ -142,6 +142,33 @@ def test_on_cuda_the_chunk_is_what_one_emitter_measured_on_the_card_leaves_room_
     assert Problem(model, Poisson(), batch, chunk_size=256, device="cuda").chunk_size == 2   # in situ's too
 
 
+
+def test_on_cuda_a_bead_that_does_not_fit_at_many_tangents_is_measured_and_run_at_fewer(monkeypatch):
+    """A customer's 8 GB card: one bead measured ~7 GB at 16 tangents where half the card was 3.7 GB, and the
+    chunk of one went to system memory.  The tangents are halved until one bead fits, the run takes the count
+    that was measured, and the plan says the card's free memory, not the system's."""
+    from uipsf.solve import memory_plan, problem
+    model, _, batch = small_beads(OPTICS, n=6)
+    per_tangent = 100 * 2 ** 20
+    measured = []
+
+    def each(model, noise, batch, device, tangents):     # a bead's memory grows with its tangents
+        measured.append(tangents)
+        return per_tangent * tangents
+
+    free = int(3 * problem.MEASURED_MARGIN * per_tangent / problem.CUDA_SHARE)   # room for 3 tangents' worth
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (free, 8 * 2 ** 30))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device=None: 0)
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device=None: 0)
+    monkeypatch.setattr(problem, "_measured_bytes", each)
+    monkeypatch.setattr(problem, "_cuda_budget", lambda device: 16 * batch.data[0].numel())  # 16 tangents a bead
+    run = Problem(model, Poisson(), batch, device="cuda")
+    assert measured == [16, 8, 4, 2] and run.tangents == 2 and run.chunk_size == 1
+    assert run.peak_bytes == int(problem.MEASURED_MARGIN * 2 * per_tangent) <= int(problem.CUDA_SHARE * free)
+    plan = memory_plan(model, Poisson(), batch, device="cuda")
+    assert plan.on_card and plan.available_bytes == free and plan.tangents == run.tangents
+    assert plan.peak_bytes == run.peak_bytes
+
 def _sampling_meter():
     """A sampling meter on this process's memory now, by the system's own count, with its release."""
     from uipsf import memory
