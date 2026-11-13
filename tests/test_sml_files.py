@@ -37,10 +37,18 @@ def _rows(numbers, seed=0):
             "filenumber": numbers.astype(np.uint16)}
 
 
-def write_sml(path, files, rows):
-    """``files`` a list of (name, info): one a struct, several a struct array."""
+def write_sml(path, files, rows, sites=()):
+    """``files`` a list of (name, info): one a struct, several a struct array;
+    ``sites`` SMAP's ROI manager sites (`test_sml_sites._site`)."""
     with h5py.File(path, "w") as f:
-        refs = f.create_group("#refs#")
+        if sites:
+            from test_sml_sites import _Writer
+            f.create_group("saveloc/siteexplorer")
+            writer = _Writer(f)
+            writer.objects("saveloc/siteexplorer/sites", "SEsites", list(sites))
+            refs = writer.refs
+        else:
+            refs = f.create_group("#refs#")
         loc = f.create_group("saveloc/loc")
         for k, v in rows.items():
             loc[k] = np.asarray(v)[None]
@@ -148,3 +156,23 @@ def test_a_smap_file_of_one_file_stays_one_file(tmp_path):
     assert "files" not in locs.metadata and "filenumber" not in locs
     session = _open(path)
     assert session.file_names() == ["one_sml.mat"] and len(session.locs) == 3
+
+
+def test_each_smap_site_is_an_roi_on_its_own_file_holding_its_files_localizations(tmp_path):
+    """As one file, a site held the localizations of every position at its
+    place: here Pos1's site and Pos0's localizations are at the same spot."""
+    from test_sml_sites import _site
+    files = [("C:\\data\\Pos0_sml.mat", CAMERA), ("C:\\data\\Pos1_sml.mat", CAMERA)]
+    rows = _rows([1] * 30 + [2] * 20)
+    rows["xnm"][:] = 1000 + np.random.default_rng(1).normal(0, 20, 50)
+    rows["ynm"][:] = 2000 + np.random.default_rng(2).normal(0, 20, 50)
+    rows["frame"] *= 100                 # apart in time: no two merged into a blink
+    on_pos1 = _site(4, (1000.0, 2000.0))
+    on_pos1["info"]["filenumber"] = 2.0
+    on_pos0 = _site(9, (1000.0, 2000.0))
+    path = write_sml(tmp_path / "sites_sml.mat", files, rows, sites=[on_pos1, on_pos0])
+    project = _open(path).rois
+    rois = {r.number: r for r in project.rois.values()}
+    assert project.sources[rois[4].file_id].number == 1
+    assert project.sources[rois[9].file_id].number == 0
+    assert len(project.indices(rois[4])) == 20 and len(project.indices(rois[9])) == 30

@@ -348,8 +348,9 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
             if "filenumber" in loc:
                 filenumber = np.array(loc["filenumber"]).ravel()
-            sites = _sml_sites(f)
             entries = _sml_entries_h5(f)
+            # the sites on their files where the localizations are on theirs
+            sites = _sml_sites(f, len(entries) if filenumber is not None else 1)
     else:                                                    # MATLAB v5-v7
         import scipy.io as sio
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
@@ -511,18 +512,18 @@ SML_LISTS = ("list1", "list2", "list3", "list4")
 DIRECTION_LINE = "direction"            # `roi_manager.core.DIRECTION`
 
 
-def _sml_sites(f) -> Optional[dict]:
+def _sml_sites(f, n_files: int = 1) -> Optional[dict]:
     """The ROI manager's sites of a v7.3 `_sml.mat`, as an ROI project
     (`ROIProject.from_dict`), or None.  SMAP keeps them as objects, which
     `io.mcos` reads; a v5-v7 file keeps them in a store that is not read."""
     from .mcos import read_objects
     sites = read_objects(f, "saveloc/siteexplorer/sites")
-    return sml_sites_project(sites) if sites else None
+    return sml_sites_project(sites, n_files) if sites else None
 
 
-def sml_sites_project(sites: List[dict]) -> Optional[dict]:
+def sml_sites_project(sites: List[dict], n_files: int = 1) -> Optional[dict]:
     """SMAP's sites -- each a dict of an ``SEsites`` object's properties --
-    as an ROI project of one file.
+    as an ROI project.
 
     A site is an ROI at its ``pos`` (nm), numbered by its SMAP ID, with
     *use* and the comment.  Its lines (µm in SMAP) become named lines in nm:
@@ -536,9 +537,11 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
     orientation line when *rotate* is on (a setting the file does not keep),
     so for such a site the polygon is turned by that angle.  The keyword
     lists ``list1``-``list4`` become annotations with the keywords SMAP
-    offered; a list of nothing but ``empty`` is not one.  All sites go to
-    the first file, as the localizations do.  The ROI size is not in the
-    file (SMAP keeps it in its GUI's settings), so the project's stays.
+    offered; a list of nothing but ``empty`` is not one.  A site is on its
+    file, SMAP's ``info.filenumber`` counted from 1, where the localizations
+    are read as ``n_files`` files; on the first where they are one.  The
+    ROI size is not in the file (SMAP keeps it in its GUI's settings), so
+    the project's stays.
     """
     rois, lists, numbers = [], {}, []
     for site in sites:
@@ -563,12 +566,16 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
             value = _numbers(entry.get("value"))
             if value is not None and value.size and 1 <= int(value[0]) <= len(words):
                 annotations[name] = words[int(value[0]) - 1]
+        file = _numbers((site.get("info") or {}).get("filenumber")
+                        if isinstance(site.get("info"), dict) else None)
+        file = int(file[0]) - 1 if file is not None and file.size \
+            and 1 <= file[0] <= n_files else 0
         ident = _numbers(site.get("ID"))
         number = int(ident[0]) if ident is not None and ident.size else len(rois) + 1
         numbers.append(number)
         use = _numbers(note.get("use"))
         comment = note.get("comments")
-        rois.append({"file_id": "file0", "center": [float(pos[0]), float(pos[1])],
+        rois.append({"file_id": f"file{file}", "center": [float(pos[0]), float(pos[1])],
                      "number": number, "polygon": _sml_shape(note.get("line3")),
                      "lines": lines, "use": bool(use[0]) if use is not None and use.size else True,
                      "comment": comment if isinstance(comment, str) else "",
@@ -578,7 +585,8 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
         return None
     names = [DIRECTION_LINE] + [n for _, n in SML_LINES[1:]
                                 if any(n in r["lines"] for r in rois)]
-    project = {"format_version": 1, "sources": [{"id": "file0", "number": 0, "name": ""}],
+    sources = [{"id": f"file{k}", "number": k, "name": ""} for k in range(max(n_files, 1))]
+    project = {"format_version": 1, "sources": sources,
                "rois": rois, "next_number": max(numbers) + 1, "line_names": names}
     if lists:
         project["annotation_lists"] = lists
