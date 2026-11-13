@@ -217,7 +217,7 @@ def test_an_image_moved_lands_where_the_localizations_land():
     session.run(plugin, s)                                   # the localizations
     np.testing.assert_array_equal(original.data, plane)      # left as it was
     moved = session.layers[1].image                          # the layer shows the move
-    assert moved.name == "wf_T" and moved.placement is None
+    assert moved.name == "wf_T"
     assert len(session.layers) == 2 and any(im is original for im in session.images)
     values = moved.values_at(np.asarray(session.locs["x_nm"]),
                              np.asarray(session.locs["y_nm"]))
@@ -410,3 +410,24 @@ def test_the_main_window_opens_transform_on_a_named_transformation(app, tmp_path
     # the data's, not the GUI's: the workspace does not carry it
     assert "transformations" not in window.collect_workspace().to_dict()
     window.close()
+
+
+def test_an_image_an_old_file_placed_is_resampled_where_it_was_placed(tmp_path):
+    """Transform once moved an image by an affine placement kept in the file's
+    attributes; such a file opens with the image resampled to where it was."""
+    import h5py
+    from smappy.io.hdf5 import load_images
+    plane = np.zeros((20, 30), np.float32)
+    _blobs(plane, [5], [8])                           # around pixel (row 5, col 8)
+    session = Session(points())
+    session.add_image(ImageData(plane, 10.0, x0=0.0, y0=0.0, name="wf"))
+    path = session.save(tmp_path / "old.hdf5")
+    turn = typed(angle_deg=90.0, centre=(0.0, 0.0))   # x, y -> y, -x
+    with h5py.File(path, "a") as f:
+        m = turn.matrix
+        f["images/0"].attrs["placement"] = np.array(
+            [[m[0, 0], m[0, 1], m[0, 3]], [m[1, 0], m[1, 1], m[1, 3]], [0, 0, 1.0]])
+    back = load_images(path)[0]
+    x, y, _ = turn.apply(np.array([85.0]), np.array([55.0]))   # the blob's centre, placed
+    assert back.values_at(x, y)[0] == pytest.approx(1.0)
+    assert back.bounds == pytest.approx((0.0, -300.0, 200.0, 0.0))

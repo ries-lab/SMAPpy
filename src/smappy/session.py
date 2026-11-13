@@ -1548,18 +1548,7 @@ class Session:
 
     def _here(self, label: str, text: str = "") -> Edit:
         """The current state as a step, for the other side of the stack."""
-        return Edit(label=label, locs=self.locs, text=text,
-                    placements=self._placements())
-
-    def _placements(self) -> tuple:
-        """Every image there is with where it is: a few numbers each."""
-        images = list(self.images)
-        for layer in self.layers:
-            image = layer.image if layer.is_image else None
-            if image is not None and all(image is not im for im in images):
-                images.append(image)
-        return tuple((im, None if im.placement is None else np.array(im.placement))
-                     for im in images)
+        return Edit(label=label, locs=self.locs, text=text)
 
     def _restore(self, edit: Edit) -> None:
         """Put a remembered table back, rebinding every layer onto it.
@@ -1571,10 +1560,6 @@ class Session:
         self._take_tables(self._new_tables(edit.locs, self._group_settings))
         self.files = [FileInfo.from_dict(f)
                       for f in self.locs.metadata.get("files", [])] or self.files
-        for image, placement in edit.placements:
-            image.placement = None if placement is None else np.array(placement)
-        if edit.placements:
-            self.changed("layer")
 
     @property
     def can_undo(self) -> bool:
@@ -2139,8 +2124,7 @@ class Session:
         # is what changed them -- a measurement can be repeated from the file
         # and would only record that somebody looked.  `Plugin.logged`
         # overrides the rule either way; see it for when that is right.
-        changed = (result.locs is not None or bool(result.files)
-                   or bool(result.placements))
+        changed = result.locs is not None or bool(result.files)
         # read before the table changes: a layer drops a bound on a column
         # the new table does not have the moment it is set
         renamed = self._renamed_bounds(result.renamed_columns)
@@ -2173,8 +2157,6 @@ class Session:
         if result.locs is not None:
             # a correction is in no file yet; a fit that wrote its table is
             self.set_unsaved(not result.saved)
-        if result.placements:
-            self._place_images(plugin, result)
         for image in result.image_layers or ():
             self.add_image(image)
         for image in result.image_sources or ():
@@ -2246,25 +2228,6 @@ class Session:
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)
-
-    def _place_images(self, plugin: Plugin, result: Result) -> None:
-        """Move the image layers a result moved, as one undo step -- with the
-        table change, when the same result made one (`set_locs` pushed the
-        step already, with the placements as they were)."""
-        images = []
-        for index in result.placements:
-            layer = (self.layers[int(index)]
-                     if 0 <= int(index) < len(self.layers) else None)
-            if layer is None or not layer.is_image or layer.image.is_empty:
-                raise ValueError(f"layer {int(index) + 1} shows no image")
-            images.append(layer.image)
-        if result.locs is None:
-            self._push_undo(plugin.path.rsplit("/", 1)[-1], result.text or "")
-        for image, placement in zip(images, result.placements.values()):
-            image.placement = (None if placement is None
-                               else np.array(placement, np.float64))
-        self.changed("layer")
-        self.set_unsaved(True)
 
     def show_preview(self, plugin: Plugin, result: Result) -> None:
         """What a preview has to show beyond its figures, put in place here,

@@ -6,8 +6,7 @@ channel, a rendered TIFF, the camera frames a fit kept -- and the result is
 a **new image layer** beside it, never the original rewritten: the original
 is what was measured, and comparing the two is how the settings are judged
 (SMAP's *replace, not append* is gone for the same reason).  The new image
-keeps the original's pixel size, corner and placement (`ImageData.placement`),
-so it lies exactly over it and over the localizations.
+keeps the original's pixel size and corner, so it lies exactly over it and over the localizations.
 
 **Operations are a list**, ticked on or off, each with a part shown while it
 is ticked, applied in the order of `_STEPS`: the background first, then the
@@ -114,8 +113,7 @@ def process_plane(plane: np.ndarray, settings: ProcessImageSettings,
 
 def process_image(image, settings: ProcessImageSettings, frame: int = 0):
     """A new `ImageData`: ``image`` processed, the plane ``frame`` or every
-    plane (``settings.planes``), at the same pixel size, corner and
-    placement."""
+    plane (``settings.planes``), at the same pixel size and corner."""
     from ..images import ImageData
     pixel = float(np.sqrt(np.prod(image.pixelsize_xy)))
     frames = None if image.frames is None else np.asarray(image.frames)
@@ -133,8 +131,7 @@ def process_image(image, settings: ProcessImageSettings, frame: int = 0):
         data.astype(np.float32), image.pixelsize, x0=image.x0, y0=image.y0,
         name=f"{image.name or 'image'} ({words})", frame=shown,
         metadata={"processed_from": image.name, "operations": words},
-        pixelsize_y=image.pixelsize_y, frames=frames,
-        placement=None if image.placement is None else np.array(image.placement))
+        pixelsize_y=image.pixelsize_y, frames=frames)
 
 
 def _image_layers(session) -> List[int]:

@@ -4,8 +4,7 @@ Wave 5, step 5b (`docs/smap_porting/wave5_design.md`), SMAP's RegisterLocs
 cross-correlation and XYZdisplacement: how far a *target* layer lies from a
 *reference* layer, in x and y and optionally z.  Each layer is a picture on
 one common grid -- localizations as they show, binned at *bin*; an image
-layer looked up on the same grid (`ImageData.resample`, its placement
-honoured) -- and the shift is where their cross-correlation peaks.
+layer looked up on the same grid (`ImageData.resample`) -- and the shift is where their cross-correlation peaks.
 
 **No third correlation.**  The correlation is `correlation._xcorr`, the FFT
 correlation of Spatial statistics' correlation image (step 17c), and the
@@ -90,8 +89,7 @@ def histogram(x, y, grid: Grid) -> np.ndarray:
 
 
 def image_on(image, grid: Grid, frame: Optional[int] = None) -> np.ndarray:
-    """An `ImageData` looked up on the grid (nearest pixel, its placement
-    honoured); zero outside it."""
+    """An `ImageData` looked up on the grid (nearest pixel); zero outside it."""
     return np.asarray(image.resample(grid.fov, frame).weight, float)
 
 

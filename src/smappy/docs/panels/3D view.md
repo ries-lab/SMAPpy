@@ -295,7 +295,7 @@ coordinates are $(U, V)\,t$ with $t = 1 - d/f$, and the plane fixes
 $$t = \frac{R_{22} f}{R_{22} f - (R_{02} U + R_{12} V)} .$$
 
 The data point $\mathbf{q} + R^{T} \mathbf{v}$ is then looked up in the
-image, nearest pixel, through the image's own placement.  A plane seen edge
+image, nearest pixel.  A plane seen edge
 on ($R_{22} = 0$), or behind the eye ($t \leq 0.05$), is not drawn.  A
 z-stack shows its plane nearest $q_z$, and nothing when $q_z$ is more than
 half a step beyond its first or last plane; any other image shows what the

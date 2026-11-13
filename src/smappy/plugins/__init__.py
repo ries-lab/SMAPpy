@@ -880,10 +880,6 @@ class Result:
     # ``(name, plugin path)`` of the evaluations this run left on the
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()
-    # Images moved, ``{layer index: placement}`` (`ImageData.placement`, a
-    # 3x3 affine in nm).  One undo step with the table, logged as a table
-    # change is.  No shipped plugin sets it since Transform resamples.
-    placements: Dict[int, Any] = field(default_factory=dict)
     # New image layers (`ImageData`), each added as a source and a layer of
     # its own after the others: Process image's result.  Not a table change,
     # so not an undo step nor logged; the layer is removed like any other.

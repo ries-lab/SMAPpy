@@ -304,7 +304,8 @@ def region_nm(region, pixelsize_nm: Tuple[float, float]) -> Tuple[float, float, 
 # ---------------------------------------------------------------- an image
 def transform_image(data: np.ndarray, grid: np.ndarray, transformation: Transformation,
                     inside: Optional[Tuple[float, float, float, float]] = None,
-                    out_grid: Optional[np.ndarray] = None) -> np.ndarray:
+                    out_grid: Optional[np.ndarray] = None,
+                    out_shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
     """``data`` -- one plane (ny, nx) or a stack (n, ny, nx) -- moved by
     ``transformation`` and resampled on its own pixel grid.
 
@@ -312,20 +313,21 @@ def transform_image(data: np.ndarray, grid: np.ndarray, transformation: Transfor
     (0, 0) at (0, 0), to nm (`ImageData.grid`).  Each output pixel's centre is
     taken back through the inverse map and the input read there, bilinearly;
     a point that lands outside the image, or outside ``inside`` (x0, y0, x1,
-    y1 in nm: the part of the image that moves), is zero.  ``out_grid`` is
-    the output's grid, by default the input's.  Resampled, as
+    y1 in nm: the part of the image that moves), is zero.  ``out_grid`` and
+    ``out_shape`` (ny, nx) are the output's grid and size, by default the
+    input's.  Resampled, as
     SMAP's ApplyTransform did, so that every kind of map can move an image:
-    a projective or polynomial map bends the pixel grid, and an image moved
-    by a placement alone could only follow an affine one.  A polynomial's
+    a projective or polynomial map bends the pixel grid.  A polynomial's
     inverse is the one fitted the other way (`Transformation.inverse`).
     """
     from scipy.ndimage import map_coordinates
     data = np.asarray(data)
     planes = data if data.ndim == 3 else data[None]
     ny, nx = planes.shape[-2:]
+    my, mx = (ny, nx) if out_shape is None else (int(out_shape[0]), int(out_shape[1]))
     grid = np.asarray(grid, np.float64)
     out = grid if out_grid is None else np.asarray(out_grid, np.float64)
-    u, v = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
+    u, v = np.meshgrid(np.arange(mx) + 0.5, np.arange(my) + 0.5)
     u, v = u.ravel(), v.ravel()
     x = out[0, 0] * u + out[0, 1] * v + out[0, 2]
     y = out[1, 0] * u + out[1, 1] * v + out[1, 2]
@@ -338,7 +340,7 @@ def transform_image(data: np.ndarray, grid: np.ndarray, transformation: Transfor
     if inside is not None:
         x0, y0, x1, y1 = inside
         keep &= (sx >= x0) & (sx < x1) & (sy >= y0) & (sy < y1)
-    moved = np.zeros((len(planes), ny * nx), np.float32)
+    moved = np.zeros((len(planes), my * mx), np.float32)
     if keep.any():
         where = [cv[keep], cu[keep]]
         for k, plane in enumerate(planes):
@@ -346,7 +348,7 @@ def transform_image(data: np.ndarray, grid: np.ndarray, transformation: Transfor
             # zero would darken; beyond it `keep` already says zero
             moved[k, keep] = map_coordinates(np.asarray(plane, np.float32), where,
                                              order=1, mode="nearest")
-    moved = moved.reshape(len(planes), ny, nx)
+    moved = moved.reshape(len(planes), my, mx)
     return moved if data.ndim == 3 else moved[0]
 
 

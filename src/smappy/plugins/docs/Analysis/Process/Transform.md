@@ -224,8 +224,7 @@ outside the image, or outside the moving channel's rectangle, gives 0.  A
 chip rectangle of $w \times h$ pixels starting at pixel $(x, y)$ covers
 $(x - \frac{1}{2})\,p_x$ to $(x + w - \frac{1}{2})\,p_x$ in x, pixel $i$
 centred on $i\,p_x$ as a localization's `x_nm` is, with $p_x$ the camera
-pixel of the table (else of the image).  A placement an image saved by an
-earlier version carries is resampled in.
+pixel of the table (else of the image).
 
 **What is recorded.**  The table's metadata gets a line in
 `transformations` for every move: when, the name, which rows and how many,

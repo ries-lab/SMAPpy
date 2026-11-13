@@ -367,7 +367,7 @@ def load_results(path) -> Dict[str, object]:
 # Pixel images kept with the table: the camera frames a fit kept
 # (`smappy.rawframes`) and any image a layer showed when the file was saved.
 # One group each under /images, the pixels in a dataset chunked by plane and
-# the placement in its attributes, so that a plane is read without the rest.
+# the grid in its attributes, so that a plane is read without the rest.
 #
 # Written with mode "a", after the table: `save_localizations` starts the file
 # again, and anything written before it would be gone.
@@ -402,9 +402,6 @@ def save_images(path, images) -> None:
                             "path": str(im.path or ""),
                             "metadata": json.dumps(im.metadata or {},
                                                    default=_json_default)})
-            if im.placement is not None:
-                # where Transform moved it (`ImageData.placement`)
-                g.attrs["placement"] = np.asarray(im.placement, np.float64)
 
 
 class StoredStack:
@@ -461,19 +458,40 @@ def load_images(path) -> List:
                 data = g["data"]
                 a = g.attrs
                 px, py = float(a.get("pixelsize", 1.0)), float(a.get("pixelsize_y", 0) or 0)
-                out.append(ImageData(
+                image = ImageData(
                     data=StoredStack(path, f"{IMAGES}/{key}/data", data.shape, data.dtype),
                     pixelsize=px, pixelsize_y=py if py and py != px else None,
                     x0=float(a.get("x0", 0.0)), y0=float(a.get("y0", 0.0)),
                     name=str(a.get("name", "")), path=str(a.get("path", "")) or None,
                     kind=str(a.get("kind", "image")),
                     frames=g["frames"][()] if "frames" in g else None,
-                    metadata=json.loads(a.get("metadata", "{}")),
-                    placement=(np.asarray(a["placement"], np.float64)
-                               if "placement" in a else None)))
+                    metadata=json.loads(a.get("metadata", "{}")))
+                if "placement" in a:
+                    image = _placed(image, np.asarray(a["placement"], np.float64))
+                out.append(image)
     except (OSError, KeyError, ValueError, TypeError):
         return out
     return out
+
+
+def _placed(image, placement: np.ndarray):
+    """An image a file saved with an affine placement (Transform moved images
+    that way until 2026-11), resampled where it was placed: on a plain grid
+    of its pixel size around the placed corners, read in full."""
+    from ..transformation import transform_image
+    ny, nx = image.shape
+    px, py = image.pixelsize_xy
+    placed = placement @ image.grid
+    corners = placed @ np.array([[0, nx, 0, nx], [0, 0, ny, ny], [1, 1, 1, 1]], float)
+    x0, y0 = corners[0].min(), corners[1].min()
+    shape = (max(1, int(np.ceil((corners[1].max() - y0) / py - 1e-9))),
+             max(1, int(np.ceil((corners[0].max() - x0) / px - 1e-9))))
+    grid = np.array([[px, 0.0, x0], [0.0, py, y0], [0.0, 0.0, 1.0]])
+    from ..transformation import Transformation
+    image.data = transform_image(np.asarray(image.data, np.float32), placed,
+                                 Transformation(), None, grid, shape)
+    image.x0, image.y0 = float(x0), float(y0)
+    return image
 
 
 def load_localizations(path) -> Localizations:

@@ -22,8 +22,8 @@ Departures from SMAP:
   original, `<name>_T` (and, on request, a TIFF, SMAP's `_T.tif`): a source,
   not a layer, and the layers that showed the original show it instead --
   only those, a layer of any other image is left alone.  It was once moved by
-  a placement instead, lossless but only by affine maps -- and a bead map is
-  projective, so the image of a split chip could not follow its own
+  an affine placement instead, lossless but no use for a bead map, which is
+  projective: the image of a split chip could not follow its own
   localizations.  By default only the *secondary channel* moves, onto the
   main one, the half a two-channel fit's map moves; the main channel is cut
   out beside it.
@@ -527,7 +527,6 @@ class Transform(Plugin):
         if transformation.moves_z:
             raise ValueError("an image has no z: this transformation moves "
                              "localizations in z")
-        out_grid = _plain_grid(image)
         secondary = (settings.part == "secondary"
                      and settings.source in ("named", "recorded", "file"))
         made = []
@@ -537,16 +536,16 @@ class Transform(Plugin):
                 # the main channel stays where it is, cut out beside the moved
                 # one: the two channels as two layers, as the localizations are
                 made.append(_image_like(image, transform_image(
-                    image.data, image.grid, Transformation(), main, out_grid),
+                    image.data, image.grid, Transformation(), main),
                     _named(image, "_main"), None, "main"))
             moved = _image_like(image, transform_image(
-                image.data, image.grid, transformation, other, out_grid),
+                image.data, image.grid, transformation, other),
                 _named(image, "_T"), transformation, "secondary")
             what = "secondary channel moved onto the main" + (
                 ", the main cut beside it" if made else "")
         else:
             moved = _image_like(image, transform_image(
-                image.data, image.grid, transformation, None, out_grid),
+                image.data, image.grid, transformation),
                 _named(image, "_T"), transformation, "all")
             what = "moved"
         made.append(moved)
@@ -607,13 +606,6 @@ def channel_rects(ctx: Optional[Context], transformation, image, locs=None):
 def _overlaps(rect, bounds) -> bool:
     return (rect[0] < bounds[2] and bounds[0] < rect[2]
             and rect[1] < bounds[3] and bounds[1] < rect[3])
-
-
-def _plain_grid(image) -> np.ndarray:
-    """The image's grid without a placement: where the new image's pixels
-    are (an old file's placement is resampled in, not carried on)."""
-    px, py = image.pixelsize_xy
-    return np.array([[px, 0.0, image.x0], [0.0, py, image.y0], [0.0, 0.0, 1.0]])
 
 
 def _named(image, suffix: str) -> str:

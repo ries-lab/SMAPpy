@@ -5,14 +5,13 @@ An `ImageData` sits at ``(x0, y0)`` in the coordinates of the table with a
 pixel of ``pixelsize`` (nm), and can be resampled onto any `FieldOfView`, so
 a viewer treats it like a rendered layer: the same LUT, contrast and gamma.
 
-Its **placement** moves it further: an affine map (3x3, nm) applied after
-that grid, which *Transform* set before 2026-11, when it moved an image
-without resampling it; files saved then still carry one, and the view looks
-each pixel up through its inverse.  *Transform* now resamples an image into
-a new one (`transformation.transform_image`), as a bead map, being
-projective, cannot be followed by a placement.
-``x0``, ``y0`` and the pixel size stay what the file says, and the Render
-tab's fields still set them.
+``x0``, ``y0`` and the pixel size are what the file says, and the Render
+tab's fields set them.  Anything more -- a turn, a mirror, a channel map --
+is *Transform*'s, which resamples the image into a new one
+(`transformation.transform_image`).  An image once carried an affine
+*placement* for that, looked up through without resampling; it could not
+follow a projective bead map and was removed in 2026-11 (a file saved with
+one is resampled as it is read, `io.hdf5.load_images`).
 
 A stack says what its planes are -- ``axis`` "z" (a z-stack, with ``z0_nm``
 and ``z_step_nm``), "t" (a time series, ``frame_time_s``) or "" (not known,
@@ -55,9 +54,6 @@ class ImageData:
     kind: str = "image"
     # per plane: its camera frame number, -1 for an average; None for a file
     frames: Optional[np.ndarray] = None
-    # an affine map of the table's x, y (3x3, nm) after the grid above; None
-    # is where the grid puts it.  Set by Transform before 2026-11; read from such files.
-    placement: Optional[np.ndarray] = None
 
     @classmethod
     def empty(cls) -> "ImageData":
@@ -252,29 +248,16 @@ class ImageData:
     @property
     def grid(self) -> np.ndarray:
         """Pixel (column, row) -- the outer edge of pixel (0, 0) at (0, 0) --
-        to table x, y: the grid and then the placement, as one 3x3."""
+        to table x, y, as a 3x3."""
         px, py = self.pixelsize_xy
-        m = np.array([[px, 0.0, self.x0], [0.0, py, self.y0], [0.0, 0.0, 1.0]])
-        return m if self.placement is None else np.asarray(self.placement) @ m
-
-    def place(self, matrix: np.ndarray) -> None:
-        """Move the image by ``matrix`` (3x3 affine, nm) after where it is."""
-        current = np.eye(3) if self.placement is None else np.asarray(self.placement)
-        moved = np.asarray(matrix, float) @ current
-        self.placement = None if np.allclose(moved, np.eye(3), atol=1e-12) else moved
+        return np.array([[px, 0.0, self.x0], [0.0, py, self.y0], [0.0, 0.0, 1.0]])
 
     @property
     def bounds(self) -> Tuple[float, float, float, float]:
-        """(x0, y0, x1, y1) covered by the pixels -- of the placed corners,
-        when the placement turns the image."""
+        """(x0, y0, x1, y1) covered by the pixels."""
         ny, nx = self.shape
         px, py = self.pixelsize_xy
-        if self.placement is None:
-            return (self.x0, self.y0, self.x0 + nx * px, self.y0 + ny * py)
-        corners = self.grid @ np.array([[0, nx, 0, nx], [0, 0, ny, ny], [1, 1, 1, 1]],
-                                       float)
-        return (float(corners[0].min()), float(corners[1].min()),
-                float(corners[0].max()), float(corners[1].max()))
+        return (self.x0, self.y0, self.x0 + nx * px, self.y0 + ny * py)
 
     def resample(self, fov: FieldOfView, frame: Optional[int] = None,
                  plane: Optional[np.ndarray] = None) -> RenderedImage:
@@ -294,9 +277,6 @@ class ImageData:
         px, py = self.pixelsize_xy
         xs = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
         ys = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
-        if self.placement is not None:
-            return RenderedImage(fov, self._placed(plane, xs, ys), None, n_locs=0,
-                                 count_area=PER_UM2)
         ix = np.floor((xs - self.x0) / px).astype(np.int64)
         iy = np.floor((ys - self.y0) / py).astype(np.int64)
         okx, oky = (ix >= 0) & (ix < nx), (iy >= 0) & (iy < ny)
@@ -307,11 +287,6 @@ class ImageData:
         # a camera's values are as they are at every zoom: an absolute
         # maximum is one of them, not a density (`render.absolute_imax`)
         return RenderedImage(fov, out, None, n_locs=0, count_area=PER_UM2)
-
-    def _placed(self, plane: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
-        """Nearest neighbour through the placement: each view pixel's centre
-        taken back to the image's pixels, the grid no longer separable."""
-        return self.values_at(xs[None, :], ys[:, None], plane=plane)
 
     def values_at(self, x, y, frame: Optional[int] = None,
                   plane: Optional[np.ndarray] = None) -> np.ndarray:

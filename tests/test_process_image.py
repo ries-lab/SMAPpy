@@ -128,11 +128,10 @@ def session_with(image):
     return session
 
 
-def test_the_new_layer_has_the_original_s_placement():
+def test_the_new_layer_lies_on_the_original_s_grid():
     plane = (slope() + spot()).astype(np.float32)
     image = ImageData(plane, 100.0, x0=300.0, y0=-200.0, name="wf",
                       pixelsize_y=110.0)
-    image.place(np.array([[0.9, -0.2, 40.0], [0.2, 0.9, -15.0], [0.0, 0.0, 1.0]]))
     session = session_with(image)
     n = len(session.layers)
     s = ProcessImageSettings(bg=BackgroundSettings(sigma_nm=1000.0))
@@ -140,7 +139,6 @@ def test_the_new_layer_has_the_original_s_placement():
     assert len(session.layers) == n + 1
     new = session.layers[-1].image
     assert new is not image and new.data.dtype == np.float32
-    np.testing.assert_allclose(new.placement, image.placement)
     np.testing.assert_allclose(new.grid, image.grid)
     assert new.bounds == pytest.approx(image.bounds)
     assert new.name == "wf (background subtracted)"
@@ -150,7 +148,7 @@ def test_the_new_layer_has_the_original_s_placement():
     assert new.data[30, 40] == pytest.approx(100.0, rel=0.02)
 
 
-def test_an_unplaced_image_stays_unplaced_and_a_preview_adds_nothing():
+def test_a_preview_adds_nothing():
     session = session_with(ImageData(slope().astype(np.float32), 50.0, name="wf"))
     plugin = plugins.get(PATH)()
     n = len(session.layers)
@@ -158,7 +156,6 @@ def test_an_unplaced_image_stays_unplaced_and_a_preview_adds_nothing():
     result = plugin.preview(session.context(0), s)
     assert len(session.layers) == n and not result.image_layers
     session.run(plugin, s)
-    assert session.layers[-1].image.placement is None
     assert "contrast normalised" in session.layers[-1].name
 
 
