@@ -202,6 +202,13 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     if bf16 and not str(device).startswith("cuda"):
         raise ValueError("precision bf16 needs a CUDA device")
     snapshots = sorted(float(v) for v in sch.get("snapshots", SNAPSHOTS))
+    # ``channels_last``: the convolutions' memory layout the GPU's tensor cores prefer; ``compile``:
+    # the training's forward pass through torch.compile -- the module itself stays as it is, so the
+    # checkpoint, the model file and the evaluation see plain parameter names (both opt-in)
+    channels_last = bool(sch.get("channels_last")) and str(device).startswith("cuda")
+    if channels_last:
+        model = model.to(memory_format=torch.channels_last)
+    forward = torch.compile(model) if sch.get("compile") else model
     rule = stop_rule(sch["samples_per_epoch"])
     if settings.test_set:
         # the context's fixed test set: the same samples for every variant (`testset.py`)
@@ -244,14 +251,17 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         if sch.get("prefetch", True) and str(device).startswith("cuda") else None
     try:
         _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
-                     steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log)
+                     steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
+                     forward, channels_last)
     finally:
         if feed is not None:
             feed.close()
 
 
 def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
-                 steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log):
+                 steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
+                 forward=None, channels_last=False):
+    forward = model if forward is None else forward
     sim, cam, parts = settings.simulation, settings.camera, settings.parts
     sch = parts.schedule.settings
     ckpt = folder / "checkpoint.pt"
@@ -263,8 +273,10 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
         for _ in range(steps):
             batch = feed.get() if feed is not None else draw_batch(renderer, sim, cam, batch_size, g)
             x = (batch.frames - scaling.input_offset) / scaling.input_scale
+            if channels_last:
+                x = x.contiguous(memory_format=torch.channels_last)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
-                out = model(x)
+                out = forward(x)
             value, t = loss.loss(out.float(), batch, scaling, parts.loss)
             opt.zero_grad(set_to_none=True)
             value.backward()
