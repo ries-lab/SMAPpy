@@ -22,11 +22,22 @@ The steps, each a function:
    ``significance`` robust standard deviations of the filtered frame.  A defocused spot, dim at its peak,
    is found at its own size.  Only inside the illuminated circle (`illumination_radius`): the
    illumination is a circle a little larger than the image's inscribed circle, and the corners are dark.
-4. **Selection** (`select`), stringent because free or loosely bound dye images too: the Gaussian centred,
-   its widths those of the curve within ``width_tol``, no neighbour within reach with a fifth of its light
-   (weaker ones masked, at most ``max_masked`` of the region), its photons from half its defocus bin's
-   median up to the bin's bulk (the brightest are overlaps), then at most ``molecules`` drawn evenly over
-   100 nm bins of defocus (`insitu.quotas`), so the far defocus, with fewer detections, keeps its share.
+4. **Selection** (`select`), stringent because free or loosely bound dye images too: the Gaussian centred
+   (within a curve width, at least `MAX_OFF_CENTRE_PX`), its widths those of the curve within ``width_tol``
+   (twice that beyond `SHAPE_WIDE_NM`), no neighbour within reach with a fifth of its light (weaker ones
+   masked, at most ``max_masked`` of the region), its photons in one window for every z, set by the spots in
+   focus, from half their median (a quarter out of focus) to their bulk (`brightness_window`), then at most ``molecules`` drawn evenly over 100 nm bins of defocus
+   (`insitu.quotas`), so the far defocus, with fewer detections, keeps its share.
+
+   Out of focus the limits widen with the spot (the user's decision, 13 November 2026, on M2's AB sweeps):
+   a defocused spot's Gaussian is less sure of its centre and its widths, and with the in-focus limits half
+   the spots beyond ±600 nm were rejected for being off centre.  The brightness window is the in-focus
+   spots' because the molecules on the glass are one population at every z: a window per defocus bin, as
+   before, took its median from what the bin held, and beyond ±800 nm that was mostly the bright tail and
+   overlaps, 3-9 times the in-focus median.  Significance 3.5 rather than 5 found 45 % more spots there; 3
+   added 2500 detections on those sweeps of which the shape check kept 50.  With all of it the AB sweeps gave
+   4859 molecules for 3790, twice as many beyond ±600 nm, and a model 465 nats better on them, its z bend
+   over ±1 µm 12 nm rms for 18.
 
 torch is imported only in `MoleculeStackROIs.batch`.
 """
@@ -50,10 +61,19 @@ REGION_NM = 2600.0
 CURVE_SPAN_NM, CURVE_STEP_NM, CURVE_MIN = 1100.0, 50.0, 5
 #: a z step's spots above the file's median brightness that the width curve takes them from, not the step's own
 BRIGHT_MIN = 20
-#: defocus bins for the brightness window (nm) and for drawing evenly (nm)
-BRIGHTNESS_BIN_NM, DRAW_BIN_NM = 200.0, 100.0
-#: a spot's Gaussian further than this from its region's centre (px) went to a neighbour
+#: defocus bins for drawing evenly (nm)
+DRAW_BIN_NM = 100.0
+#: a spot's Gaussian further than this from its region's centre (px), or than the curve's width at its defocus
+#: where that is wider, went to a neighbour
 MAX_OFF_CENTRE_PX = 1.5
+#: beyond this defocus (nm) a spot's widths may differ from the curve's by twice ``width_tol``
+SHAPE_WIDE_NM = 400.0
+#: the spots that set the brightness window: within this defocus (nm), where detection misses few
+IN_FOCUS_NM = 300.0
+#: the window's lower end, a share of the in-focus median: half of it within `SHAPE_WIDE_NM` of focus, and
+#: beyond, half of it times the elliptical Gaussian's under-count of a defocused spot's photons (0.55 to 0.96
+#: of them on M2's AB model, 21 px regions)
+BRIGHT_LOW, BRIGHT_LOW_DEFOCUSED = 0.5, 0.25
 #: the reach of a spot, and the ellipse masked about a weaker neighbour, in σ of the curve's widths
 REACH_SIGMA = 2.5
 #: a z step bigger than this many median steps starts a sweep (the stage moving back)
@@ -77,7 +97,7 @@ class MoleculeStackSettings:
                                              advanced=True,
                                              help="molecules only inside this circle about the image's "
                                                   "centre; auto: the circle inscribed in the image")
-    significance: float = param(5.0, label="significance", min=1.0, advanced=True,
+    significance: float = param(3.5, label="significance", min=1.0, advanced=True,
                                 help="a detection's peak in the matched filter, in robust standard "
                                      "deviations of the filtered frame")
     roi_px: Optional[int] = param(None, label="region", unit="px", min=7, advanced=True,
@@ -435,6 +455,25 @@ def neighbours(s: dict, roi_px: int, share: float) -> tuple[np.ndarray, np.ndarr
     return rejected, masks
 
 
+def brightness_window(photons, d_nm, alive) -> tuple[np.ndarray, float]:
+    """(each spot's lowest photons [n], the highest any may have): one window for every z, set by the
+    in-focus spots (within `IN_FOCUS_NM`): from `BRIGHT_LOW` of their median (`BRIGHT_LOW_DEFOCUSED` beyond
+    `SHAPE_WIDE_NM`, where the Gaussian counts too few) up to their bulk, the median + 3 robust SDs in log,
+    where the overlaps begin.  All the spots set it when fewer than 20 are in focus."""
+    photons, d = np.asarray(photons, float), np.asarray(d_nm, float)
+    ok = np.asarray(alive, bool) & np.isfinite(photons) & (photons > 0)
+    ref = ok & (np.abs(d) < IN_FOCUS_NM)
+    if ref.sum() < 20:
+        ref = ok
+    if not ref.any():
+        return np.zeros(len(d)), np.inf
+    logn = np.log(photons[ref])
+    med = float(np.median(logn))
+    mad = 1.4826 * float(np.median(np.abs(logn - med)))
+    share = np.where(np.abs(d) <= SHAPE_WIDE_NM, BRIGHT_LOW, BRIGHT_LOW_DEFOCUSED)
+    return share * math.exp(med), math.exp(med + 3 * mad)
+
+
 def select(s: dict, settings: MoleculeStackSettings, roi_px: int) -> tuple[list, np.ndarray]:
     """(each spot's state, its mask [n, R, R]) by the rules of the module docstring (4): "not drawn" (a
     candidate for `draw`), or "rejected: <rule>"."""
@@ -449,26 +488,19 @@ def select(s: dict, settings: MoleculeStackSettings, roi_px: int) -> tuple[list,
                 state[i] = "rejected: " + reason
     fitted = np.isfinite(g["photons"]) & np.isfinite(g["sigma_x_pix"]) & np.isfinite(g["sigma_y_pix"])
     out(~fitted, "fit failed")
+    # the limits widen with the spot out of focus (module docstring, 4)
+    off_limit = np.maximum(MAX_OFF_CENTRE_PX, np.hypot(s["sx_curve"], s["sy_curve"]) / math.sqrt(2))
+    tol = np.where(np.abs(s["d_nm"]) <= SHAPE_WIDE_NM, settings.width_tol, 2 * settings.width_tol)
     with np.errstate(invalid="ignore"):
-        out(~(np.hypot(g["x_roi"] - h, g["y_roi"] - h) < MAX_OFF_CENTRE_PX), "off centre")
-        out(~((np.abs(np.log(g["sigma_x_pix"] / s["sx_curve"])) < settings.width_tol)
-              & (np.abs(np.log(g["sigma_y_pix"] / s["sy_curve"])) < settings.width_tol)), "shape")
+        out(~(np.hypot(g["x_roi"] - h, g["y_roi"] - h) < off_limit), "off centre")
+        out(~((np.abs(np.log(g["sigma_x_pix"] / s["sx_curve"])) < tol)
+              & (np.abs(np.log(g["sigma_y_pix"] / s["sy_curve"])) < tol)), "shape")
     rejected, masks = neighbours(s, roi_px, settings.neighbour_fraction)
     out(rejected | ((~masks).mean((1, 2)) > settings.max_masked), "neighbour")
     alive = np.array([st == "candidate" for st in state])
-    # brightness per bin of defocus: from half the median up to the bulk, median + 3 robust SDs in log
-    with np.errstate(divide="ignore", invalid="ignore"):
-        logn = np.log(np.where(alive, g["photons"], np.nan))
-    bright = np.zeros(n, bool)
-    bins = np.round(s["d_nm"] / BRIGHTNESS_BIN_NM).astype(int)
-    for b in np.unique(bins):
-        m = alive & (bins == b)
-        if m.sum() < 10:
-            continue
-        med = np.median(logn[m])
-        mad = 1.4826 * np.median(np.abs(logn[m] - med))
-        bright |= m & (logn >= med + np.log(0.5)) & (logn <= med + 3 * mad)
-    out(alive & ~bright, "brightness")
+    lo, hi = brightness_window(g["photons"], s["d_nm"], alive)
+    with np.errstate(invalid="ignore"):
+        out(alive & ~((g["photons"] >= lo) & (g["photons"] <= hi)), "brightness")
     return ["not drawn" if st == "candidate" else st for st in state], masks
 
 

@@ -184,7 +184,7 @@ def _measure_pairs(frames, frame, main_xy, sec_xy, d_frames, curves, roi, rects)
 
 def _select_pairs(m: dict, settings: MoleculeStackSettings, roi: int):
     """Each pair's state and both channels' masks [n, 2, R, R] (module docstring)."""
-    from .molecule_stack import BRIGHTNESS_BIN_NM, MAX_OFF_CENTRE_PX
+    from .molecule_stack import MAX_OFF_CENTRE_PX, SHAPE_WIDE_NM, brightness_window
     n = len(m["frame"])
     h = roi // 2
     state = ["candidate"] * n
@@ -201,26 +201,20 @@ def _select_pairs(m: dict, settings: MoleculeStackSettings, roi: int):
         judged = photons[:, c] >= CHANNEL_SHARE * np.maximum(total, 1e-9)
         fitted = np.isfinite(g["photons"]) & np.isfinite(g["sigma_x_pix"]) & np.isfinite(g["sigma_y_pix"])
         out(judged & ~fitted, "fit failed")
+        # the limits widen with the spot out of focus, as one channel's (`molecule_stack`, 4)
+        off_limit = np.maximum(MAX_OFF_CENTRE_PX, np.hypot(ch["sx_curve"], ch["sy_curve"]) / np.sqrt(2))
+        tol = np.where(np.abs(ch["d_nm"]) <= SHAPE_WIDE_NM, settings.width_tol, 2 * settings.width_tol)
         with np.errstate(invalid="ignore"):
-            out(judged & ~(np.hypot(g["x_roi"] - h, g["y_roi"] - h) < MAX_OFF_CENTRE_PX), "off centre")
-            out(judged & ~((np.abs(np.log(g["sigma_x_pix"] / ch["sx_curve"])) < settings.width_tol)
-                           & (np.abs(np.log(g["sigma_y_pix"] / ch["sy_curve"])) < settings.width_tol)), "shape")
+            out(judged & ~(np.hypot(g["x_roi"] - h, g["y_roi"] - h) < off_limit), "off centre")
+            out(judged & ~((np.abs(np.log(g["sigma_x_pix"] / ch["sx_curve"])) < tol)
+                           & (np.abs(np.log(g["sigma_y_pix"] / ch["sy_curve"])) < tol)), "shape")
         rejected, mask = neighbours(ch, roi, settings.neighbour_fraction)
         out(judged & (rejected | ((~mask).mean((1, 2)) > settings.max_masked)), "neighbour")
         masks.append(mask)
     alive = np.array([st == "candidate" for st in state])
-    with np.errstate(divide="ignore", invalid="ignore"):
-        logn = np.log(np.where(alive, total, np.nan))
-    bright = np.zeros(n, bool)
-    bins = np.round(m["d_nm"] / BRIGHTNESS_BIN_NM).astype(int)
-    for b in np.unique(bins):
-        k = alive & (bins == b)
-        if k.sum() < 10:
-            continue
-        med = np.median(logn[k])
-        mad = 1.4826 * np.median(np.abs(logn[k] - med))
-        bright |= k & (logn >= med + np.log(0.5)) & (logn <= med + 3 * mad)
-    out(alive & ~bright, "brightness")
+    # one window for every z, the in-focus pairs' (`molecule_stack.brightness_window`), on both channels' sum
+    lo, hi = brightness_window(total, m["d_nm"], alive)
+    out(alive & ~((total >= lo) & (total <= hi)), "brightness")
     return ["not drawn" if st == "candidate" else st for st in state], np.stack(masks, 1)
 
 

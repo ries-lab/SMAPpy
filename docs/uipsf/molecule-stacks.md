@@ -38,6 +38,20 @@ of it: points at h ≈ 0, which is what a single-molecule fit needs, and what te
   and the result -- a spline at the coverslip against defocus, listed for Spline 3D's *auto*, its model inside
   the same file for Spline 3D's focus model; a dual calibration for Spline 3D 2C.
 
+## Out of focus (13 November 2026)
+
+M2's AB sweeps (10 sweeps of 61 frames at 50 nm, ±1.5 µm): at the prototype's selection the used molecules
+per 200 nm fell from ~735 at focus to 100 at −800 nm, and those left were the bright tail -- the median
+photons 3.5k at focus, 14k at −800, 30k at −1000 -- because the brightness window was set per defocus bin
+from what the bin held, and the fixed 1.5 px off-centre limit rejected half the spots beyond ±600 nm.  The
+selection now widens with the spot (`molecule_stack`, its docstring's step 4): off centre within the curve's
+width, the shape's tolerance doubled beyond 400 nm, one brightness window from the in-focus spots, significance
+3.5.  4911 molecules for 3790 on AB, twice as many beyond ±600 nm; learnt from them, the model was 465 nats
+better on them (scored on one fixed set, each model localising every molecule again), γ 0.13 for 0.07, the z
+bend over ±1 µm 12 nm rms for 18.  What did not help: significance 3 (2500 more detections, 50 more used,
+the rest failing the shape), fit regions of 25 or 31 px (wider widths of faint spots, fewer found), the
+template from the learnt model's widths, and following a molecule through a sweep (AB is on for 1.27 frames).
+
 ## The geometry (`uipsf.model.CoverslipStackGeometry`)
 
 A detection in frame k of sweep s at chip position (u, v) µm from the field's centre is at defocus

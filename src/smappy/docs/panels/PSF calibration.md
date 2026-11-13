@@ -529,12 +529,25 @@ circle a little larger than the image's inscribed circle, and the corners
 are dark and full of false detections.
 
 **Choosing them**, stringently, since free and loosely bound dye images too:
-the spot's Gaussian centred in its region, its widths within 30 % of the
-curve's on both axes (*shape*), no neighbour within reach with a fifth of
-its light (weaker ones are masked), its photons from half the median of its
-200 nm defocus bin up to the bin's bulk (the brightest are overlaps), and
-then at most *molecules* drawn evenly over 100 nm bins of defocus, so that
-the far defocus, where fewer are found, keeps its share.  The table counts
+the spot's Gaussian centred in its region (within 1.5 pixels, or the
+curve's width where that is wider), its widths within 30 % of the curve's
+on both axes (*shape*; twice that beyond 400 nm of defocus), no neighbour
+within reach with a fifth of its light (weaker ones are masked), its photons
+in one window for every z, set by the spots within 300 nm of focus: from
+half their median (a quarter beyond 400 nm, where the Gaussian counts a
+defocused spot's photons short) up to their bulk, since the brightest are
+overlaps.  Then at most *molecules* are drawn evenly over 100 nm bins of
+defocus, so that the far defocus, where fewer are found, keeps its share.
+
+Out of focus a spot is broader and its Gaussian less sure of its centre
+and widths, so those limits widen with it; and the molecules on the glass
+are one population at every z, so the brightness window is the in-focus
+spots'.  A window per defocus bin, as before, took its median from what
+that bin held, and far out of focus that was mostly overlaps and the
+brightest blinks, several times the in-focus median.  On M2's sweeps of
+November 2026 the defaults (with *significance* 3.5) found twice as many
+molecules beyond ±600 nm, and the model learnt from them described those
+molecules better.  The table counts
 them by state and rule; the *Stacks* page rings each on its frame.
 
 **The geometry.**  A molecule found in frame k of sweep s, at (u, v) on the

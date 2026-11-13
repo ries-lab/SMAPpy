@@ -47,12 +47,14 @@ def test_the_molecules_are_found_at_each_files_focus_and_drawn_evenly_over_the_d
     assert rois.curve.shape == "astigmatic" and rois.sweeps == 4
     used = rois.ids("used")
     assert len(used) == 150
-    counts = np.histogram(rois.defocus_nm[used], np.arange(-1050, 1051, 100))[0]
-    # evenly over the defocus the molecules pass at: at the far end the curve's 15-pixel fits lose the spots
-    filled = counts[counts > 0]
-    inner = filled[1:-1]                          # the outermost bins only partly inside the sweeps' span
-    assert len(filled) >= 14 and inner.max() - inner.min() <= 2
-    assert len(rois.ids("not drawn")) > 0
+    edges = np.arange(-1050, 1051, 100)
+    counts = np.histogram(rois.defocus_nm[used], edges)[0]
+    left = np.histogram(rois.defocus_nm[rois.ids("not drawn")], edges)[0]
+    # evenly over the defocus the molecules pass at: every bin with molecules left over took the same share
+    # (within one), and a bin that ran short took all it had, which is never more than that share
+    assert (counts > 0).sum() >= 14 and left.sum() > 0
+    share = counts[left > 0]
+    assert share.max() - share.min() <= 1 and counts[left == 0].max() <= share.max()
     batch, _ = rois.batch()
     assert tuple(batch.data.shape[1:]) == (1, 1, 25, 25) and batch.stack_id.max() == 3
     assert np.allclose(batch.z_nm[:, 0].numpy(), -rois.defocus_nm[used], atol=1e-3)
