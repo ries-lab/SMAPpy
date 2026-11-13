@@ -343,8 +343,10 @@ dominating a fit at low background (see
 **The focus in the sample.**  The pupil model is drawn
 (`smappy.calibrate.depth`) for an emitter at height $h$ with the objective
 moved $f$ (*focus depth*) from the coverslip: the stage defocus $-f$, and the
-emitter's depth $h$ in the sample.  The sample's index is the beads' medium
-unless *sample index* says otherwise.  The bead's size is left out and the
+emitter's depth $h$ in the sample.  The sample's index is the one the
+calibration was learnt with (recorded with the spline as `sample_index`)
+unless *sample index* chooses another; *index matched* is the model's
+immersion index.  The bead's size is left out and the
 learnt blur kept.  The planes are the calibration's $dz$ apart, as many about
 the plane in focus as the bead spline has about its own.  They reach at most
 300 nm below the coverslip, into the glass, where an emitter is drawn as one
@@ -493,9 +495,24 @@ reads, not the true distance in the sample.  An error of a few hundred
 nanometres changes little.  On *auto* and *in situ* it shows what was found
 for this file, once a Preview or a Run has found it.
 
+### model.medium
+What the *sample* is in, which can differ from what the calibration's
+emitters were in.  *auto* draws the PSF at the index the calibration was
+learnt with (*auto (as calibrated)*, the number beside it showing it): right for a
+calibration made in the same medium as the data, such as molecules on glass
+in the same buffer.  For beads calibrated in water and cells imaged in a
+dSTORM buffer, choose *blinking buffer* (1.345: a GLOX buffer with about
+10 % w/v glucose; fixed cells in PBS are about 1.340); for a mounting medium
+matched to the oil, *index matched*, and the depth then hardly matters.
+*water* for live cells in medium.  When the PSF is drawn for another index
+than the calibration's, a line under the form says so: expected for beads in
+water and a sample in buffer, worth a second look for a calibration made in
+the data's own medium.  A spline from a bead average has no model and no
+index to draw at.
+
 ### model.sample_index
-1.33 for water and most buffers, around 1.45 for glycerol-based mounting
-media, 1.52 for a medium matched to the oil (the depth then hardly matters).
+In grey, the index the choice stands for; typing over it makes the choice
+*typed*.  Around 1.45 for glycerol-based mounting media.
 
 ### model.z_start_nm
 Worth moving only when most of the data is far from focus on one side, where

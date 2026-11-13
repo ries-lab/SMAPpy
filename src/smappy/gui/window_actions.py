@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ..assistant.tools import Action, ToolError, _plain, _replaced, _within
+from ..calibrate.medium import FIELDS as MEDIUM_FIELDS
 
 #: How many rows of a bead table *State* gives: a stack of a few hundred beads in full is
 #: thousands of numbers, of which a model reads the counts and the odd bead.
@@ -381,6 +382,11 @@ def psf_calibration_actions(control) -> List[Action]:
                 values["start_from"] = w.start_form.value().start_from
                 if not w.method.sections["start from"]:
                     values.pop("start_from")
+            if part == "microscope" and isinstance(values, dict):
+                # the sample's index is the optics', shown in a form of its own (`medium_form`)
+                sample = _values(w.medium_form)
+                if isinstance(sample, dict):
+                    values.update({k: sample[k] for k in MEDIUM_FIELDS})
             out[part] = values
         return out
 
@@ -478,6 +484,13 @@ def psf_calibration_actions(control) -> List[Action]:
                 _set_form(w.start_form, start, "run")
             if values:
                 _set_form(w.run_form, values, "run")
+        elif chosen == "microscope":
+            values = dict(values or {})
+            medium = {k: values.pop(k) for k in list(values) if k in MEDIUM_FIELDS}
+            if medium:
+                _set_form(w.medium_form, medium, "microscope")
+            if values:
+                _set_form(w.optics_form, values, "microscope")
         else:
             _set_form(parts[chosen], values, chosen)
         return {"settings": part_values(w)}

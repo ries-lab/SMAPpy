@@ -27,6 +27,8 @@ from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.dual import (RegisterSettings, layout_param, main_channel_param,
                               split_position_param)
 from ..calibrate.depth import SampleSettings
+from ..calibrate.medium import (cleared, differs, for_drawing, index_field, medium_field, mismatch_text, resolve,
+                               settle)
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
@@ -466,13 +468,19 @@ class SplineModelSettings:
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                             help="how far into the sample the objective was moved from the "
                                  "coverslip; typed here, else found at Preview or Run")
-    sample_index: Optional[float] = param(None, label="sample index", min=1.0, max=2.0,
-                                          advanced=True,
-                                          help="the sample's refractive index; auto: the beads' "
-                                               "medium the model was learnt with")
+    # the sample's index, a choice with presets, as the sample part's (`calibrate.medium`, `depth.SampleSettings`)
+    medium: str = medium_field("the index the calibration was learnt with")
+    sample_index: Optional[float] = index_field()
     z_start_nm: float = param(0.0, label="start z", unit="nm", advanced=True,
                               help="where each fit starts in z, relative to "
                                    "the calibration's focal plane")
+
+    def __post_init__(self):
+        settle(self.medium, self.sample_index)      # refuses an unknown choice; the pair is read by `resolve`
+
+    def n_med(self):
+        """What `depth` is handed as the sample's index (`medium.for_drawing`)."""
+        return for_drawing(self.medium, self.sample_index)
 
     def model(self, camera: Optional[CameraMetadata] = None,
               roisize: Optional[int] = None) -> SplinePSF:
@@ -486,7 +494,7 @@ class SplineModelSettings:
             # a run resolves *auto* to typed first, and *in situ* to its own spline
             # (`SplineFit.with_focus`); a model without either is the beads' spline
             from ..calibrate.depth import at_depth, in_focus
-            calibration = at_depth(calibration, self.focus_nm, self.sample_index)
+            calibration = at_depth(calibration, self.focus_nm, self.n_med())
             start = in_focus(calibration)
         elif self.focus == "calibrated":
             from ..calibrate.depth import in_focus
@@ -1205,6 +1213,16 @@ class _FitPlugin(Plugin):
         return hints
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
+        if changed.endswith(("medium", "sample_index")):
+            # the sample's index left *typed*: its number dropped, or *auto* would read it as typed again
+            # (`calibrate.medium.settle`); a number typed over: *typed*
+            prefix = changed.rsplit(".", 1)[0] + "." if "." in changed else ""
+            part = settings
+            for name in filter(None, prefix.split(".")):
+                part = getattr(part, name, None)
+            if hasattr(part, "sample_index") and hasattr(part, "medium"):
+                return cleared(changed, part.medium, part.sample_index, prefix + "medium",
+                               prefix + "sample_index") or None
         if changed.endswith("cutoff_mode"):
             # the number is on the other mode's scale: its default instead
             prefix = changed[:-len("cutoff_mode")]
@@ -1257,6 +1275,7 @@ class _FitPlugin(Plugin):
                         sample = recipe_sample(settings.source.path)
                         updates.update({"model.focus": "calibrated"} if sample is None else
                                        {"model.focus": "typed", "model.focus_nm": sample.focus_nm,
+                                        "model.medium": sample.medium,
                                         "model.sample_index": sample.sample_index})
             # The camera is *not* copied in: a field on auto shows the file's
             # value as a grey hint (`describe`) and stays auto, so the run reads
@@ -1901,7 +1920,7 @@ class DualModelSettings(_LinkedChannels):
         from ..calibrate import depth
         if not depth.has_model(calibration.main):
             return calibration
-        return depth.dual_at_depth(calibration, self.calibration, self.sample.focus_nm, self.sample.sample_index)
+        return depth.dual_at_depth(calibration, self.calibration, self.sample.focus_nm, self.sample.n_med())
 
     def model(self, calibration, camera: Optional[CameraMetadata] = None):
         from ..calibrate.depth import in_focus
@@ -2002,6 +2021,7 @@ class SplineFit(_FitPlugin):
         shown = has or m.focus in ("typed", "insitu")
         state.shown["model.focus"] = shown
         state.shown["model.focus_nm"] = shown and m.focus != "calibrated"
+        state.shown["model.medium"] = shown and m.focus != "calibrated"
         state.shown["model.sample_index"] = shown and m.focus != "calibrated"
         state.active["model.focus_nm"] = m.focus == "typed"
         if m.focus in ("auto", "insitu"):
@@ -2011,13 +2031,24 @@ class SplineFit(_FitPlugin):
                                              if found is not None else f"{word}: found at Preview or Run")
         if shown and has and m.focus != "calibrated":
             try:
+                immersion = None
                 if isinstance(drawable, str):           # the microscope's pupil, not drawn yet
                     from ..microscope_db import pupil_of
                     medium = (pupil_of(self._scope(settings)[0]) or {}).get("n_medium")
                 else:
-                    medium = depth.medium(depth.model_of(drawable))
+                    # recorded with the spline since November 2026 (`pupil.learnt_index`), else the model's
+                    medium = depth.learnt_index(drawable)
+                    immersion = depth.learnt_immersion(drawable)
+                    if medium is None:
+                        medium = depth.medium(depth.model_of(drawable))
+                state.hints["model.medium"] = "as calibrated"
+                stands = resolve("" if m.medium == "typed" else m.medium, None, medium, immersion)
+                state.hints["model.sample_index"] = ("the immersion's" if stands == "matched" else
+                                                     "as calibrated" if stands is None else stands)
                 if medium is not None:
-                    state.hints["model.sample_index"] = f"auto: {float(medium):g}"
+                    drawn = resolve(m.medium, m.sample_index, float(medium), immersion)
+                    if state.notice is None and drawn != "matched" and differs(drawn, medium):
+                        state.notice = Notice(mismatch_text(float(drawn), float(medium)), kind="info")
             except Exception:
                 pass
 
@@ -2043,7 +2074,7 @@ class SplineFit(_FitPlugin):
                 return (str(path), Path(path).stat().st_mtime)
             except OSError:
                 return (str(path), None)
-        key = [m.focus, stamp(src.path), stamp(m.calibration), m.sample_index]
+        key = [m.focus, stamp(src.path), stamp(m.calibration), m.n_med()]
         if m.focus == "auto":
             key += [src.start, src.stop, repr(settings.detection), settings.fit.roisize,
                     repr(getattr(settings, "region", None)), repr(settings.camera)]
@@ -2110,7 +2141,7 @@ class SplineFit(_FitPlugin):
                 raise ValueError("no spots found in the frames the focus is looked for in: review "
                                  "detection, or type the focus")
             images = depth.in_beads_orientation(images, cal, camera.em_on)
-            found = depth.auto_focus(cal, images, m.sample_index, n_threads=settings.fit.n_threads,
+            found = depth.auto_focus(cal, images, m.n_med(), n_threads=settings.fit.n_threads,
                                      report=ctx.report)
             ctx.report(f"focus on auto: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
                        f"of {found.n} localizations, {len(found.passes)} passes")
@@ -2122,7 +2153,7 @@ class SplineFit(_FitPlugin):
                                          source, camera, finder, cal).focus_nm
             except ValueError:
                 pass
-            found = depth.insitu_focus(cal, [settings.source.path], camera, m.sample_index, start,
+            found = depth.insitu_focus(cal, [settings.source.path], camera, m.n_med(), start,
                                        progress=ctx.report, cancel=ctx.stop)
             if depth.keep(key, found) is None:
                 raise ValueError("the focus learnt in situ could not be kept for the fit: see the "
@@ -2154,7 +2185,7 @@ def focus_plot(found, settings):
             from ..io.calibration import load_spline_calibration
             try:
                 focus_height = in_focus(at_depth(load_spline_calibration(settings.model.calibration),
-                                                 found.focus_nm, settings.model.sample_index))
+                                                 found.focus_nm, settings.model.n_med()))
             except Exception:
                 focus_height = None
         if focus_height is not None:
@@ -2763,7 +2794,7 @@ class DualSplineFit(_TwoChannelFit):
                 return (str(path), Path(path).stat().st_mtime)
             except OSError:
                 return (str(path), None)
-        return ("2C", stamp(src.path), stamp(m.calibration), m.sample.sample_index, src.start, src.stop,
+        return ("2C", stamp(src.path), stamp(m.calibration), m.sample.n_med(), src.start, src.stop,
                 repr(settings.detection), settings.fit.roisize, repr(getattr(settings, "region", None)),
                 repr(settings.camera), repr(getattr(settings, "channels", None)))
 
@@ -2801,7 +2832,7 @@ class DualSplineFit(_TwoChannelFit):
                 raise ValueError("no spots found in the main channel of the frames the focus is looked for in: "
                                  "review detection, or type the focus")
             images = depth.in_beads_orientation(images, main, camera.em_on)
-            found = depth.auto_focus(main, images, m.sample.sample_index, n_threads=settings.fit.n_threads,
+            found = depth.auto_focus(main, images, m.sample.n_med(), n_threads=settings.fit.n_threads,
                                      report=ctx.report, learned=depth.model_of(main, channels=2))
             ctx.report(f"focus on auto: {found.focus_nm:.0f} nm above the coverslip, from the lowest "
                        f"of {found.n} localizations in the main channel, {len(found.passes)} passes")
@@ -2849,12 +2880,18 @@ class DualSplineFit(_TwoChannelFit):
         state.active.update(active)
         state.hints.update(hints)
         state.choices["model.sample.focus"] = [("auto", "auto"), ("typed", "typed"), ("calibrated", "as calibrated")]
+        sample = settings.model.sample
+        if state.notice is None and shown.get("model.sample.medium"):
+            from ..calibrate.depth import index_notice
+            text = index_notice(main, sample.medium, sample.sample_index)
+            if text:
+                state.notice = Notice(text, kind="info")
 
     def registration_path(self, settings) -> str:
         # the focus too: the PSFs read are drawn for it (`DualModelSettings.load`), and *auto* is resolved to a
         # typed focus after the registration was first read, which must not be kept for the fit
         sample = settings.model.sample
-        drawn = f"|{sample.focus_nm}|{sample.sample_index}" if sample.focus == "typed" else ""
+        drawn = f"|{sample.focus_nm}|{sample.n_med()}" if sample.focus == "typed" else ""
         return f"{settings.model.calibration}|{settings.model.registration.path}{drawn}"
 
     def read_registration(self, settings):

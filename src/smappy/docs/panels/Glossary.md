@@ -75,6 +75,10 @@ papers and in other software.
   aberration): immersion oil and a watery sample bend light differently, so
   the PSF of a molecule deep in the sample gains a spherical aberration, and
   its focus moves less than the objective does.
+* **sample index** (also called the medium's or the sample's refractive
+  index, n_med): the refractive index of what the molecules sit in -- water
+  1.33, a dSTORM blinking buffer about 1.345, a mounting medium up to the
+  oil's 1.52.  It sets the index mismatch and the SAF.
 * **SAF** (supercritical-angle fluorescence): light that only a molecule
   within about a wavelength of the coverslip sends into the objective, at
   angles beyond the critical one; it makes those molecules brighter.

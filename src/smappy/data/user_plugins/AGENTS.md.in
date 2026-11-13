@@ -90,6 +90,7 @@ line of text, `Optional[float] = param(None, ...)` a box that may be empty.
 | `advanced=True` | hidden under *more* |
 | `kind` | `"open_file"`, `"save_file"`, `"dir"` (a path with a browse button), `"text"` (a wide line), `"preset"` (a name from saved settings, with *save...* and *delete*; `store=` gives the folders) |
 | `beside=True` | on the row of the field before it: `photons [5000] ± [2500]` |
+| `type_over=True` | an `Optional[float]` without an *auto* tick: what *auto* stands for (`describe`'s hint) in grey, typed over to set it, ↺ to give it back |
 
 A field whose type is another settings dataclass is a section of its own.
 A field `List[X]` of a settings dataclass `X` is a list the user adds to,

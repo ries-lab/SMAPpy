@@ -824,13 +824,36 @@ The immersion oil's refractive index; auto: the microscope's, else 1.518 (the
 standard oils of Olympus, Leica and Zeiss).
 
 ### sample index
-The refractive index of the medium the beads sit in: water or PBS 1.33, a
-mounting medium up to the immersion's.  On *auto* each mode keeps its own
-assumption: water for one objective, and for *4Pi* the immersion's, the
-buffer taken as index-matched.  Typed, it is the sample's in every mode --
-in *4Pi* the buffer between the two coverslips -- and *learn sample index*
-starts from it.  A buffer is often measured only when it is matched, so
-when it may not be, type the best guess and learn it.
+At the head of *model*, not under *microscope*: it is the sample's, and it
+often needs changing.  The refractive index of the medium the emitters sit
+in -- the beads' or the molecules' -- which decides how much light beyond
+the critical angle reaches the objective (supercritical-angle fluorescence,
+SAF) and the spherical aberration that grows with depth when it differs from
+the immersion's:
+
+* *water, 1.33*: beads in water or PBS, live cells in medium.
+* *blinking buffer, 1.345*: fixed cells or molecules on glass in a dSTORM
+  buffer -- a GLOX buffer with about 10 % w/v glucose measures 1.345 at
+  690 nm, 1.340 with 5 %; PFA-fixed cells in PBS are about 1.340 on average,
+  nucleoli 1.35.  On AF647 molecules on glass in such a buffer a model learnt
+  at 1.345 fitted better than at 1.33 and its astigmatism and coma came
+  closer to the same day's beads.
+* *index matched*: the immersion's, for a mounting medium matched to the oil.
+* *typed*: the number beside it, *n*, which on the others shows the index
+  they stand for in grey.
+
+On *auto* each mode keeps its own assumption: water for one objective, and
+for *4Pi* the immersion's, the buffer taken as index-matched; the box says
+which.  The index is saved with the calibration, and a fitter that draws the
+PSF for another one says so.  Choose what the *calibration's* emitters sat
+in: beads in water are water, even when the cells will be in buffer -- the
+fitter's own *sample index* draws the PSF for the sample.  Learning the index
+(*learn sample index*) is no substitute: in situ, learnt freely, it ran to
+1.41.
+
+### n
+In grey, the index the choice stands for; typing over it makes the choice
+*typed*, and ↺ gives it back.  *learn sample index* starts from it.
 
 ### coverslip index
 The coverslip's refractive index.  Leave it on *auto* with an oil objective;
@@ -917,7 +940,7 @@ the aperture comes out smaller is not understood; the sample's index does
 not explain it.
 
 ### learn sample index
-Off by default: the sample's index is *sample index* under *microscope*.
+Off by default: the sample's index is *sample index* at the head of *model*.
 On, it is learnt from that value, one index for every channel and for both
 objectives of a 4Pi, and saved with the model -- a diagnostic, for when the
 buffer's index is not known.  The index decides where the critical angle

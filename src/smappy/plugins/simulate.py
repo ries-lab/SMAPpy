@@ -341,6 +341,11 @@ class Simulate(Plugin):
         file no longer shown cannot decide the structure."""
         if changed == "preset" and settings.preset:
             return preset_values(settings.preset)
+        if changed in ("optics.sample.medium", "optics.sample.sample_index"):
+            from ..calibrate.medium import cleared
+            sample = settings.optics.sample
+            return cleared(changed, sample.medium, sample.sample_index, "optics.sample.medium",
+                           "optics.sample.sample_index") or None
         from ..calibrate.microscope_psf import MICROSCOPE, simulation_path
         if changed == "optics.calibration" and settings.optics.calibration.startswith(MICROSCOPE + ":"):
             # a microscope's pupil from the menu, drawn at the simulation's pixel and kept as a file: the

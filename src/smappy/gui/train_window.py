@@ -721,6 +721,7 @@ class TrainWindow(QWidget):
         self.prepare_form = SettingsForm(PrepareSettings)
         self._calibration_key = self._calibration_value = None
         self.prepare_form.changed.connect(self._prepare_changed)
+        self.prepare_form.field_changed.connect(self._prepare_field)
         # typed by hand, or filled by *Prefit* and changed after
         self.estimate_form = SettingsForm(EstimateSettings)
         self.simulated = None             # frames the training would draw, in photons; with torch only
@@ -1038,6 +1039,20 @@ class TrainWindow(QWidget):
             self.status_bar.showMessage(f"{value.name} is on this list now: followed from {value.host}")
         elif kind == "stopping":
             self.train_note.setText("asked to stop: it stops after the epoch it is in, its checkpoint written there")
+
+    def _prepare_field(self, name: str) -> None:
+        """The sample's index left *typed*: its number dropped; a number typed over: *typed*
+        (`calibrate.medium.cleared`)."""
+        if name not in ("sample.medium", "sample.sample_index"):
+            return
+        from ..calibrate.medium import cleared
+        try:
+            sample = self.prepare_form.value().sample
+        except ValueError:
+            return
+        drop = cleared(name, sample.medium, sample.sample_index, "sample.medium", "sample.sample_index")
+        if drop:
+            self.prepare_form.set_values(drop)
 
     def _prepare_changed(self) -> None:
         """*in the sample* only for a pupil (Zernike) calibration (`calibrate.depth.sample_state`), its rows as

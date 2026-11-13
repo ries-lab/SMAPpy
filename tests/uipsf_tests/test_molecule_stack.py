@@ -116,8 +116,9 @@ def test_the_window_offers_molecule_stacks_as_a_sample_and_detects_their_molecul
     assert window.detect_button.text() == "Detect molecules"
     form = window.model_form
     assert not form.row_layouts["bead_diameter_nm"].isRowVisible(form.fields["bead_diameter_nm"])
-    window.optics_form.set_values(dict(NA=1.45, wavelength_nm=680.0, n_immersion=1.518, n_medium=1.334,
+    window.optics_form.set_values(dict(NA=1.45, wavelength_nm=680.0, n_immersion=1.518,
                                        pixel_x_nm=110.0, pixel_y_nm=110.0))
+    window.medium_form.set_values(dict(medium="typed", n_medium=1.334))
     window.molecule_form.set_values(dict(molecules=60))
     window.detect()
     start = time.time()

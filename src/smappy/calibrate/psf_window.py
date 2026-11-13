@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import List, Optional
 
@@ -53,6 +53,7 @@ from .insitu import InSituSettings
 from .insitu_run import InSituModelSettings
 from .molecule_stack import MoleculeStackSettings
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
+from .medium import FIELDS as MEDIUM_FIELDS
 from .qt_gui import _bead_specs
 
 
@@ -285,12 +286,20 @@ class PSFCalibrationWindow(QMainWindow):
         from ..gui.microscope_form import MicroscopeForm
         self.optics_form = MicroscopeForm(OpticsSettings)
         self.optics_form.field_changed.connect(self._optics_changed)
+        self.optics_form.set_shown({name: False for name in MEDIUM_FIELDS})
         self.optics_camera = None
+        # the sample's index (`calibrate.medium`): the optics' fields, shown at the head of the model where it
+        # is seen, not in the microscope control, locked and folded -- it is the sample's, not the microscope's
+        from ..plugins import param_specs
+        specs = param_specs(OpticsSettings)
+        self.medium_form = SettingsForm(OpticsSettings, {name: specs[name] for name in MEDIUM_FIELDS})
+        self.medium_form.field_changed.connect(self._medium_changed)
         self.model_form = SettingsForm(BeadSettings)
         self.model_form.changed.connect(self._show_model)       # the magnitude decides the SAF damping's row
         model = QWidget()
         mlayout = QVBoxLayout(model)
         mlayout.setContentsMargins(0, 0, 0, 0)
+        mlayout.addWidget(self.medium_form)
         mlayout.addWidget(self.start_form)
         mlayout.addWidget(self.model_form)
         self.spline_form = SettingsForm(SplineSettings)
@@ -458,7 +467,7 @@ class PSFCalibrationWindow(QMainWindow):
         except ValueError:                           # a field that does not read: leave the form as it is
             return
         try:
-            optics = self.optics_form.value()
+            optics = self._optics()
             na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
             ring = na is not None and self._sample_index(optics, True) < na
         except Exception:                            # no stacks, or values that do not read: index-matched
@@ -550,8 +559,29 @@ class PSFCalibrationWindow(QMainWindow):
         if name in ("microscope", "camera", "conversion", "offset", "emgain", "pixel_x_nm", "pixel_y_nm"):
             self._undetect("the microscope changed")
             self._show_optics()
-        elif name in ("n_immersion", "n_coverslip", "NA", "n_medium"):   # the coverslip's rows, the SAF damping's
+        elif name in ("n_immersion", "n_coverslip", "NA"):   # the coverslip's rows, the SAF damping's
             self._show_optics()
+
+    def _medium_changed(self, name: str) -> None:
+        """The sample's index chosen: the number dropped when it leaves *typed* (`medium.cleared`), and the
+        SAF damping's row and the hints shown again."""
+        from .medium import cleared
+        try:
+            value = self.medium_form.value()
+        except ValueError:
+            return
+        drop = cleared(name, value.medium, value.n_medium, "medium", "n_medium")
+        if drop:
+            self.medium_form.set_values(drop)
+        self._show_optics()
+
+    def _optics(self) -> OpticsSettings:
+        """The microscope control's values with the sample's index from its own form (`medium_form`); on *auto*
+        there, the control's own, which a script that set the control whole (`optics_form.set`) gave it."""
+        sample, optics = self.medium_form.value(), self.optics_form.value()
+        if sample.medium == "" and sample.n_medium is None:
+            return optics
+        return replace(optics, medium=sample.medium, n_medium=sample.n_medium)
 
     def _sample_form(self) -> SettingsForm:
         """The form of the sample being calibrated: the one whose *channels* part a dual calibration reads."""
@@ -588,7 +618,7 @@ class PSFCalibrationWindow(QMainWindow):
         camera numbers typed here -- what every run of this window uses (`psf_run.stacks_camera`)."""
         from .psf_run import stacks_camera
         try:
-            optics = self.optics_form.value()
+            optics = self._optics()
         except ValueError:
             optics = OpticsSettings()
         return stacks_camera(self.paths, optics, require)
@@ -618,12 +648,19 @@ class PSFCalibrationWindow(QMainWindow):
             except Exception as error:               # a file that cannot be read says so when it is run
                 print(f"PSF calibration: the stacks' camera: {error}")
                 details = {"line": f"the stacks cannot be read: {error}", "status": "missing"}
-        # the sample's index on auto: water's, or the immersion's for 4Pi (`OpticsSettings.sample_index`)
+        # the sample's index on auto: water's, or the immersion's for 4Pi (`OpticsSettings.sample_index`); the
+        # number in grey what the choice stands for
         fourpi = bool(getattr(self, "method", None) is not None and self.method.sections.get("4Pi", False))
-        hints["n_medium"] = OpticsSettings().sample_index(fourpi, hints.get("n_immersion") or 1.518)
+        try:
+            medium = self.medium_form.value().medium
+        except ValueError:
+            medium = "typed"
+        stands = OpticsSettings(medium="" if medium == "typed" else medium)
+        self.medium_form.set_hints({"medium": "matched" if fourpi else "water",
+                                    "n_medium": stands.sample_index(fourpi, hints.get("n_immersion"))})
         self.optics_form.set_hints({name: hints.get(name) for name in
                                     ("NA", "n_immersion", "wavelength_nm", "wavelength2_nm",
-                                     "n_medium", "n_coverslip", "coverslip_um",
+                                     "n_coverslip", "coverslip_um",
                                      "pixel_x_nm", "pixel_y_nm", "conversion", "offset", "emgain",
                                      "camera")})
         self.optics_form.set_details(details)
@@ -631,7 +668,7 @@ class PSFCalibrationWindow(QMainWindow):
         optics = self.method.sections.get("microscope", False)      # a model: the optics too
         layered = optics and self._coverslip_matters()
         self.optics_form.set_shown({"NA": optics, "n_immersion": optics, "wavelength_nm": optics,
-                                    "wavelength2_nm": optics and self.is_dual, "n_medium": optics,
+                                    "wavelength2_nm": optics and self.is_dual, "medium": False, "n_medium": False,
                                     "n_coverslip": optics, "coverslip_um": layered,
                                     "emgain": bool(self.optics_camera is not None
                                                    and self.optics_camera.is_em)})
@@ -649,7 +686,7 @@ class PSFCalibrationWindow(QMainWindow):
         in_situ = self.method.sections.get("in situ", False)
         kind = "insitu" if in_situ else "molecules" if self.method.sections.get("molecules", False) else "beads"
         try:
-            optics = self.optics_form.value()
+            optics = self._optics()
             na = optics.resolved(self.optics_camera)["NA"] if self.optics_camera is not None else optics.NA
         except Exception:                            # no stacks, or values that do not read: the ring shown
             optics, na = None, None
@@ -673,7 +710,7 @@ class PSFCalibrationWindow(QMainWindow):
     def _coverslip_matters(self) -> bool:
         """Whether the coverslip is a layer of its own for these stacks, with the indices as typed or found."""
         try:
-            optics = self.optics_form.value()
+            optics = self._optics()
         except ValueError:
             return False
         try:
@@ -708,7 +745,7 @@ class PSFCalibrationWindow(QMainWindow):
         if not self.method.sections.get("microscope", False):
             return []
         try:
-            optics = self.optics_form.value()
+            optics = self._optics()
         except ValueError:
             return []
         return optics.missing(camera, 2 if self.is_dual else 1, self._main_half())
@@ -1004,9 +1041,11 @@ class PSFCalibrationWindow(QMainWindow):
             run = self.run_form.value()
             run.start_from = self.start_form.value().start_from
             return run
+        if name == "microscope":
+            return self._optics()
         return {"beads": self.detection_form, "in situ": self.insitu_form,
                 "in situ detection": self.insitu_detection_form, "molecules": self.molecule_form,
-                "elliptical": self.elliptical_form, "4Pi": self.fourpi_form, "microscope": self.optics_form,
+                "elliptical": self.elliptical_form, "4Pi": self.fourpi_form,
                 "model": self.model_form, "spline": self.spline_form}[name].value()
 
     def _inputs(self) -> dict:

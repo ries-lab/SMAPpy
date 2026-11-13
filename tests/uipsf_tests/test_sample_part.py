@@ -58,8 +58,14 @@ def test_the_sample_part_is_shown_only_for_a_calibration_that_carries_a_model(fi
     shown, _, _ = depth.sample_state(average, SampleSettings())
     assert not any(shown.values())
     shown, active, hints = depth.sample_state(pupil, SampleSettings())
-    assert shown == {"sample.focus": True, "sample.focus_nm": True, "sample.sample_index": True}
+    assert shown == {"sample.focus": True, "sample.focus_nm": True, "sample.medium": True,
+                     "sample.sample_index": True}
     assert not active["sample.focus_nm"] and hints["sample.focus_nm"].startswith("auto")
+    # the number in grey: the index the calibration was learnt with -- read from its parameters, without the
+    # model -- or the preset's
+    assert hints["sample.sample_index"] == pytest.approx(1.33) and hints["sample.medium"] == "as calibrated"
+    assert depth.sample_state(pupil, SampleSettings(medium="buffer"))[2]["sample.sample_index"] == 1.345
+    assert depth.sample_state(pupil, SampleSettings(medium="matched"))[2]["sample.sample_index"] == 1.518
     shown, active, _ = depth.sample_state(pupil, SampleSettings(focus="calibrated"))
     assert shown["sample.focus"] and not shown["sample.focus_nm"]
     assert depth.sample_state(pupil, SampleSettings(focus="typed"))[1]["sample.focus_nm"]
@@ -246,3 +252,18 @@ def test_spline_3d_2c_on_auto_finds_the_focus_from_the_main_channel_and_fits_hei
     assert np.quantile(z, 0.15) == pytest.approx(0.0, abs=60)            # the lowest on the coverslip
     assert np.quantile(z, 0.95) == pytest.approx(760.0, abs=80)
     assert plugin.describe(None, settings).hints["model.sample.focus_nm"].endswith("found before")
+
+
+def test_a_preset_sample_index_draws_the_psf_there_and_says_it_differs_from_the_calibration(files):
+    _, pupil = files
+    assert pupil.parameters["sample_index"] == pytest.approx(1.33)
+    assert depth.index_notice(pupil, "", None) is None                 # auto: as calibrated
+    assert depth.index_notice(pupil, "water", None) is None
+    assert "1.345" in depth.index_notice(pupil, "buffer", None)
+    buffer, _ = depth.for_sample(pupil, SampleSettings(focus="typed", focus_nm=600.0, medium="buffer"))
+    assert buffer.parameters["sample_depth"]["n_med"] == pytest.approx(1.345)
+    matched, _ = depth.for_sample(pupil, SampleSettings(focus="typed", focus_nm=600.0, medium="matched"))
+    assert matched.parameters["sample_depth"]["n_med"] == pytest.approx(1.518)
+    # the plane in focus at the focus itself when matched, lower by about n_med / n_imm in buffer
+    assert depth.in_focus(matched) == pytest.approx(600.0, abs=30.0)
+    assert depth.in_focus(buffer) < depth.in_focus(matched) - 30.0

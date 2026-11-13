@@ -54,6 +54,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from ..params import param
+from .medium import differs, for_drawing, index_field, medium_field, mismatch_text, settle
 
 #: how far the spline reaches below the coverslip, into the glass, nm (module docstring)
 BELOW_NM = 300.0
@@ -136,11 +137,26 @@ def medium(learned) -> float:
     return float(learned.model.channels[0].psf.grid.optics.n_med)
 
 
-def with_medium(learned, n_med: Optional[float]):
-    """(model, shared) of ``learned`` with the sample's index ``n_med`` (None: the model's own).  Only the
-    optics change: the pupil, the blur and every learnt value are the beads'."""
-    if n_med is None or abs(float(n_med) - medium(learned)) < 1e-9:
+def resolved_medium(learned, n_med) -> float:
+    """The sample's index ``n_med`` stands for (`medium.for_drawing`): None the model's own, "matched" its
+    immersion's, else the number."""
+    if n_med is None:
+        return medium(learned)
+    if n_med == "matched":
+        return float(learned.model.channels[0].psf.grid.optics.n_imm)
+    return float(n_med)
+
+
+def _index_key(n_med):
+    return None if n_med is None else n_med if isinstance(n_med, str) else round(float(n_med), 4)
+
+
+def with_medium(learned, n_med):
+    """(model, shared) of ``learned`` with the sample's index ``n_med`` (None: the model's own; "matched": its
+    immersion's).  Only the optics change: the pupil, the blur and every learnt value are the beads'."""
+    if n_med is None or abs(resolved_medium(learned, n_med) - medium(learned)) < 1e-9:
         return learned.model, learned.shared
+    n_med = resolved_medium(learned, n_med)
     import copy
 
     import torch
@@ -212,7 +228,7 @@ def depth_spline(cal, focus_nm: float, n_med: Optional[float] = None, learned=No
         field = FieldSplines(np.stack([spline_coefficients(n.astype(np.float32)) for n in nodes]), field.xs, field.ys)
     parameters = dict(cal.parameters or {})
     parameters.update({
-        "sample_depth": {"focus_nm": float(focus_nm), "n_med": medium(learned) if n_med is None else float(n_med),
+        "sample_depth": {"focus_nm": float(focus_nm), "n_med": resolved_medium(learned, n_med),
                          "in_focus_height_nm": focus, "heights_nm": [float(heights[-1]), float(high)]},
         "z_reference": "the coverslip: z is the height above it",
         "z_convention": "emitter_nm = -(index-z0)*dz"})
@@ -244,7 +260,7 @@ def dual_depth_calibration(dual, focus_nm: float, n_med: Optional[float] = None)
     raw = np.stack([np.maximum(draw(model, shared, focus_nm, heights, roi, channel=c), 0) for c in range(2)])
     (first, second), _ = positive_pair_models(raw, dz, CalibrationSettings(roi_size=roi, smooth_z_nm=0.0,
                                                                            smooth_xy_px=0.0))
-    record = {"focus_nm": float(focus_nm), "n_med": medium(learned) if n_med is None else float(n_med),
+    record = {"focus_nm": float(focus_nm), "n_med": resolved_medium(learned, n_med),
               "in_focus_height_nm": focus, "heights_nm": [float(heights[-1]), float(high)], "method": "typed"}
     for drawn, old in ((first, main), (second, dual.secondary)):
         drawn.z0 = high / dz                       # plane 0 the highest: z the height above the coverslip
@@ -262,7 +278,7 @@ def dual_at_depth(dual, path, focus_nm: float, n_med: Optional[float] = None):
     """`dual_depth_calibration`, kept for the last few (file, focus, index): the form's Preview and every file of
     a batch ask for the same pair, and drawing it takes seconds."""
     path = Path(path)
-    key = (str(path), path.stat().st_mtime, round(float(focus_nm), 1), None if n_med is None else round(float(n_med), 4))
+    key = (str(path), path.stat().st_mtime, round(float(focus_nm), 1), _index_key(n_med))
     if key not in _DUAL:
         if len(_DUAL) >= 4:
             _DUAL.pop(next(iter(_DUAL)))
@@ -281,7 +297,7 @@ def at_depth(cal, focus_nm: float, n_med: Optional[float] = None, learned=None):
     kept = json.dumps((cal.parameters or {}).get("pupil"), sort_keys=True, default=str) if learned is None else None
     key = (str(cal.source), id(cal) if cal.source is None else None,
            path.stat().st_mtime if path else kept if kept != "null" else id(learned),
-           round(float(focus_nm), 1), None if n_med is None else round(float(n_med), 4))
+           round(float(focus_nm), 1), _index_key(n_med))
     if key not in _DRAWN:
         if len(_DRAWN) >= 4:
             _DRAWN.pop(next(iter(_DRAWN)))
@@ -388,7 +404,7 @@ def auto_focus(cal, images: np.ndarray, n_med: Optional[float] = None, iteration
     report("focus on auto: fitting the bead spline")
     first = edge_of(cal)
     optics = learned.model.channels[0].psf.grid.optics
-    n = medium(learned) if n_med is None else float(n_med)
+    n = resolved_medium(learned, n_med)
     paraxial = n / optics.n_imm                     # the edge's shift per nm of focus
     focus = max(0.0, -first.shift_nm)               # the bead spline's z is the objective's movement
     passes, edges = [], []
@@ -440,7 +456,7 @@ def insitu_focus(cal, paths, camera, n_med: Optional[float] = None, focus_nm: Op
     # the objective's NA: a minimal pupil's grid reaches beyond it (`MinimalPupil`)
     na = float(getattr(learned.model.channels[0].psf.pupil, "na", o.NA))
     optics = OpticsSettings(NA=na, wavelength_nm=o.wavelength_nm, n_immersion=o.n_imm,
-                            n_medium=o.n_med if n_med is None else float(n_med), n_coverslip=o.n_cov,
+                            medium="typed", n_medium=resolved_medium(learned, n_med), n_coverslip=o.n_cov,
                             coverslip_um=o.d_cov_nm / 1000, pixel_x_nm=o.pixel_size_nm[0],
                             pixel_y_nm=o.pixel_size_nm[1])
     model = BeadSettings.from_options(learned.options)
@@ -581,9 +597,16 @@ class SampleSettings:
     focus_nm: float = param(0.0, label="focus depth", unit="nm", min=0.0,
                              help="how far into the sample the objective was moved from the coverslip; typed "
                                   "here, else found from the movie")
-    sample_index: Optional[float] = param(None, label="sample index", min=1.0, max=2.0, advanced=True,
-                                           help="the sample's refractive index; auto: the beads' medium the "
-                                                "model was learnt with")
+    # the sample's index, a choice with presets (`calibrate.medium`): the number keeps its old name
+    medium: str = medium_field("the index the calibration was learnt with")
+    sample_index: Optional[float] = index_field()
+
+    def __post_init__(self):
+        settle(self.medium, self.sample_index)      # refuses an unknown choice; the pair is read by `resolve`
+
+    def n_med(self):
+        """What `depth` is handed as the sample's index (`medium.for_drawing`)."""
+        return for_drawing(self.medium, self.sample_index)
 
 
 def sample_state(cal, sample, prefix: str = "sample.", found: Optional[AutoDepth] = None):
@@ -592,21 +615,58 @@ def sample_state(cal, sample, prefix: str = "sample.", found: Optional[AutoDepth
     situ* resolve to where ``found`` says.  Never loads the model: the form asks with every change."""
     has = cal is not None and has_model(cal)
     drawn = has and sample.focus != "calibrated"
-    shown = {prefix + "focus": has, prefix + "focus_nm": drawn, prefix + "sample_index": drawn}
+    shown = {prefix + "focus": has, prefix + "focus_nm": drawn, prefix + "medium": drawn,
+             prefix + "sample_index": drawn}
     active = {prefix + "focus_nm": sample.focus == "typed"}
     hints = {}
     if drawn and sample.focus in ("auto", "insitu"):
         word = "auto" if sample.focus == "auto" else "in situ"
         hints[prefix + "focus_nm"] = (f"{word}: {found.focus_nm:.0f} nm" if found is not None
                                       else f"{word}: found from the movie")
-    path = model_file(cal) if drawn else None
-    if path is not None:
-        # the beads' medium, where the model is loaded already (it is after a first drawing): loading it for
-        # the form would take a second, and torch
-        learned = _LOADED.get((str(path), path.stat().st_mtime))
-        hints[prefix + "sample_index"] = f"auto: {medium(learned):g}" if learned is not None else \
-            "auto: the beads' medium"
+    if drawn:
+        hints[prefix + "medium"] = "as calibrated"
+        hints[prefix + "sample_index"] = stands_for(cal, sample.medium)
     return shown, active, hints
+
+
+def stands_for(cal, medium_choice: str):
+    """What the sample part's number shows in grey for ``medium_choice`` (`calibrate.medium`): the index it
+    stands for with ``cal``, or a word where that is not known without loading the model."""
+    from .medium import resolve
+    learnt = learnt_index(cal)
+    value = resolve("" if medium_choice == "typed" else medium_choice, None, learnt, learnt_immersion(cal))
+    return ("the immersion's" if value == "matched" else "as calibrated" if value is None else value)
+
+
+def learnt_index(cal) -> Optional[float]:
+    """The sample's index ``cal``'s model was learnt with: recorded in its parameters (`pupil.learnt_index`),
+    else the model's own where it is loaded already (it is after a first drawing) -- loading it for a form
+    would take a second, and torch; None where neither says."""
+    params = getattr(cal, "parameters", None) or {}
+    if params.get("sample_index") is not None:
+        return float(params["sample_index"])
+    if (params.get("pupil") or {}).get("n_medium") is not None:      # the microscope's pupil
+        return float(params["pupil"]["n_medium"])
+    path = model_file(cal)
+    learned = _LOADED.get((str(path), path.stat().st_mtime)) if path is not None else None
+    return medium(learned) if learned is not None else None
+
+
+def learnt_immersion(cal) -> Optional[float]:
+    """The immersion's index ``cal``'s model was learnt with, where its parameters record it."""
+    value = (getattr(cal, "parameters", None) or {}).get("n_immersion")
+    return None if value is None else float(value)
+
+
+def index_notice(cal, medium_choice: str, number) -> Optional[str]:
+    """A line for the form when the PSF is drawn for another sample index than ``cal`` was learnt with
+    (`medium.mismatch_text`); None when they agree or either is unknown."""
+    from .medium import resolve
+    learnt = learnt_index(cal)
+    drawn = resolve(medium_choice, number, learnt, learnt_immersion(cal))
+    if drawn == "matched" or not differs(drawn, learnt):
+        return None
+    return mismatch_text(float(drawn), learnt)
 
 
 def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lambda text: None,
@@ -636,7 +696,7 @@ def for_sample(cal, sample, *, images=None, paths=None, camera=None, report=lamb
             return cal, None
         raise ValueError("a focus in the sample draws the PSF with uipsf, which needs torch: pip install "
                          "smappy-smlm[uipsf]")
-    n_med = sample.sample_index
+    n_med = sample.n_med()
     found = None
     if sample.focus == "typed":
         spline = at_depth(cal, sample.focus_nm, n_med)

@@ -111,6 +111,8 @@ class _Field(QWidget):
             if isinstance(box, QCheckBox):
                 box.setMinimumWidth(box.sizeHint().width() + 12)
         self.set(spec.default)
+        if info.type_over:
+            self.type_over()
 
     def _fill(self, choices) -> None:
         """Put ``choices`` in the box.  Used to build it and to refresh it."""

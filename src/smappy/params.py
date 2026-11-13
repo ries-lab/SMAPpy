@@ -47,6 +47,9 @@ class ParamInfo:
     # and the item's bool field its tick sets ("" for none)
     item_name: str = "name"
     item_on: str = "on"
+    # an optional number without an *auto* box: the value it stands for shown in grey, typing over it
+    # makes it the user's, ↺ gives it back (`gui.params._Field.type_over`, the microscope control's way)
+    type_over: bool = False
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):

@@ -277,6 +277,9 @@ def insitu_spline(model, shared: dict, heights_nm: tuple, dz_nm: float, roi_size
                                "roi_size": int(roi_size), "upsample": int(up)}}
     if getattr(camera, "microscope", None):
         parameters["microscope"] = dict(camera.microscope)    # the movie's: what the model describes
+    optics = getattr(getattr(getattr(model, "psf", model), "grid", None), "optics", None)
+    if optics is not None:                                    # the sample's index it was learnt at (`pupil.learnt_index`)
+        parameters.update(sample_index=float(optics.n_med), n_immersion=float(optics.n_imm))
     psf = psf.astype(np.float32)
     return SplineCalibration(spline_coefficients(psf), float(dz_nm), float(z0), x0=(roi_size - 1) / 2, psf=psf,
                              em_on=None if camera is None else bool(camera.is_em),

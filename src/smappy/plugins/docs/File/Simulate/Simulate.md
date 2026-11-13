@@ -664,8 +664,13 @@ A few hundred nm for a cell on the coverslip, more for a thick sample.  Its
 effect is largest near the coverslip, where the light beyond the critical
 angle reaches the objective only from the molecules close to it.
 
+### optics.sample.medium
+What the simulated sample is in: *auto* the index the calibration was learnt
+with, *water* 1.33, *blinking buffer* 1.345, *index matched* the immersion's.
+*Fit this* hands the same choice to Spline 3D.
+
 ### optics.sample.sample_index
-1.33 for water; *auto* takes the beads' medium the calibration was made in.
+In grey, the index the choice stands for; typing over it makes it *typed*.
 
 ### localizations.min_photons
 Keep it low: the dim localizations are part of real data.  Filter them away

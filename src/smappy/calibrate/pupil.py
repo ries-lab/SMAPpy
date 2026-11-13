@@ -52,6 +52,7 @@ from ..plugins import param
 from .core import (CalibrationSettings, brightness_centre, classify_brightness, doubles, find_peaks,
                    judge_shapes, measure_peaks, saturation_of, select_beads)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
+from .medium import WATER, index_field, medium_field, resolve, settle
 
 KEEP = slice(1, None)            # every slice but the first (module docstring)
 
@@ -505,6 +506,17 @@ def _upsample(learned, upsample) -> int:
     return int(learned.model.channels[0].psf.upsample if upsample is None else upsample)
 
 
+def learnt_index(learned) -> dict:
+    """The sample's and the immersion's index the model was learnt with (``sample_index``, ``n_immersion``),
+    recorded in the spline's parameters so that a fitter can say, without loading the model, when it draws
+    the PSF for another sample (`calibrate.medium.mismatch_text`); {} where the model does not say."""
+    try:
+        optics = learned.model.channels[0].psf.grid.optics
+        return {"sample_index": float(optics.n_med), "n_immersion": float(optics.n_imm)}
+    except AttributeError:
+        return {}
+
+
 def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
     options = getattr(learned, "options", None)
     if options is not None and not isinstance(options, dict):
@@ -513,6 +525,7 @@ def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
     from uipsf.diagnostics import coverslip_tilt
     tilt = coverslip_tilt(learned)
     extra = {} if tilt is None else {"coverslip_tilt_deg": [[float(v), float(e)] for v, e in zip(*tilt, strict=True)]}
+    extra.update(learnt_index(learned))
     return {"method": "uipsf2_pupil", "zernikes": _zernikes(learned), "options": options or {}, **extra,
             "sampling": {"dz_nm": float(dz_nm), "z_range_nm": float(z_range_nm), "roi_size": int(roi_size),
                          "upsample": _upsample(learned, upsample)},
@@ -695,10 +708,6 @@ def save(path, cal, calibration, overwrite: bool = False) -> Path:
 
 # ------------------------------------------------------------------ a whole run: what the window does
 
-#: the sample's index on *auto* for one objective (`OpticsSettings.sample_index`)
-WATER = 1.33
-
-
 @dataclass
 class OpticsSettings:
     """The microscope.  Each field on *auto* takes the microscope database's value for the file's
@@ -725,12 +734,11 @@ class OpticsSettings:
     n_immersion: Optional[float] = param(None, label="immersion index", min=1.0, max=2.0,
                                          help="the immersion medium's refractive index; auto: the "
                                               "microscope's, else oil's 1.518")
-    # auto keeps each mode's own assumption: water for one objective, index-matched for 4Pi (`fourpi_beads.learn`);
-    # typed, it is every mode's, and *learn sample index* starts from it
-    n_medium: Optional[float] = param(None, label="sample index", min=1.0, max=2.0, advanced=True,
-                                      help="the beads' medium: water 1.33, air 1.0, a mounting medium up to "
-                                           "the immersion's (index matched); auto: water's, the immersion's for "
-                                           "4Pi")
+    # the sample's index, a choice with presets (`medium`): auto keeps each mode's own assumption, water for one
+    # objective, index-matched for 4Pi (`fourpi_beads.learn`); *learn sample index* starts from it.  Not the
+    # microscope's, so the PSF window shows the two in a form of their own, outside the microscope control
+    medium: str = medium_field("water's 1.33, the immersion's for 4Pi")
+    n_medium: Optional[float] = index_field()
     n_coverslip: Optional[float] = param(None, label="coverslip index", min=1.0, max=2.0, advanced=True,
                                          help="auto: the microscope's for its objective, else the immersion's")
     # the thickness is the sample's, not the objective's: the design thickness is the microscope's
@@ -825,17 +833,22 @@ class OpticsSettings:
         found = self.resolved(camera, channels, main)
         if found["pixel"] is None:
             pixel_size_nm(camera)                    # its error names what is missing
-        return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"], n_med=self.sample_index(),
+        return [Optics(NA=found["NA"], wavelength_nm=w, n_imm=found["n_immersion"],
+                       n_med=self.sample_index(n_immersion=found["n_immersion"]),
                        pixel_size_nm=found["pixel"], n_cov=found["n_coverslip"],
                        d_cov_nm=found["coverslip_um"] * 1000, d_cov_design_nm=found["coverslip_design_um"] * 1000)
                 for w in found["wavelengths"]]
 
+    def __post_init__(self):
+        settle(self.medium, self.n_medium)          # refuses an unknown choice; the pair is read by `resolve`
+
     def sample_index(self, fourpi: bool = False, n_immersion: Optional[float] = None) -> float:
-        """The sample's index: as typed, else water's (`WATER`), or for 4Pi the immersion's ``n_immersion``, its
-        sample taken as index-matched."""
-        if self.n_medium is not None:
-            return float(self.n_medium)
-        return float(n_immersion) if fourpi and n_immersion else WATER
+        """The sample's index (`calibrate.medium`): a preset's, typed, or the immersion's ``n_immersion`` when
+        index matched; on *auto* water's (`WATER`), or for 4Pi the immersion's, its sample taken as
+        index-matched."""
+        n_imm = float(n_immersion) if n_immersion else 1.518
+        auto = n_imm if fourpi and n_immersion else WATER
+        return float(resolve(self.medium, self.n_medium, auto, n_imm))
 
     def coverslip_matters(self, camera) -> bool:
         """Whether the coverslip is a layer of its own here, an index other than the immersion's (a water or

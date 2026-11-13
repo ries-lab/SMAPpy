@@ -199,7 +199,9 @@ that PSF rather than the beads' on the coverslip.  Its z is then the height
 above the coverslip.  *auto* finds the focus from the movie's lowest
 molecules, as Spline 3D does, before the prefit; *in situ* learns it, in
 minutes; *typed* takes it as typed; *as calibrated* uses the beads' spline
-as it is.  The drawing never includes the bead's size, nor the beads'
+as it is.  Its *sample index* is Spline 3D's: what the sample is in -- on
+*auto* the calibration's own, *blinking buffer* (1.345) for fixed cells in a
+dSTORM buffer when the beads were in water.  The drawing never includes the bead's size, nor the beads'
 damping of the light beyond the critical angle: those belonged to the
 calibration, not to a molecule.  One network serves one focus: data taken
 at another depth want a network of their own.  The DECODE fitter's

@@ -428,8 +428,15 @@ calibrated and warns.  Spline 3D's *in situ* is not offered here yet.
 How far the objective was moved up from the coverslip, as its focus drive
 reads.  Drawing both PSFs takes a few seconds, once per focus.
 
+### model.sample.medium
+What the sample is in, as Spline 3D's *sample index*: *auto* the index the
+calibration was learnt with, *blinking buffer* (1.345) for fixed cells in a
+dSTORM buffer imaged with beads calibrated in water, *index matched* for a
+medium matched to the oil.  A line under the form says when the PSFs are
+drawn for another index than the calibration's.
+
 ### model.sample.sample_index
-1.33 for water and most buffers; *auto* takes the beads' medium.
+In grey, the index the choice stands for; typing over it makes it *typed*.
 
 ### model.registration.path
 A `_2ct.h5` from [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) or a
