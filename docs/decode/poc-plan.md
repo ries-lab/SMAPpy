@@ -1929,5 +1929,9 @@ from 100 photons, no gradient clipping.  Near focus is |z| < 300 nm.
   netfit's two seeds differ by 0.010, as much as the gap to the port's one training (0.542).
   Pixelation is a property of the training as much as of the method: the KS moves from 0.012 to
   0.023 between seeds, so a variant's pixelation is judged on several trainings, not one.
+- **DECODE's network details** (v1f: Kaiming init, 1 x 1 upsampling, no activation after pooling,
+  a linear output convolution, p clamped; one training so far): Jaccard 0.454, 49.9 / 86.3 nm near
+  focus, KS 0.023 / 0.019 -- the Jaccard above every v1d seed and at the port's, so the details
+  look like the 0.004; the pixelation at the top of the range.  A second seed runs.
 - **Targets without the 100-photon limit** (v1d_B_p0, every molecule a target): Jaccard 0.449,
   50.5 / 87.6 nm, KS 0.020 / 0.018 -- inside the seeds' range.  The limit makes no difference.
