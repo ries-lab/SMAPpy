@@ -1321,7 +1321,7 @@ calibration.  Both methods have:
 
 The bead average's other pages are the bead calibration's (*Overview*,
 *Transformation* for dual colour, *Fit quality*, *Field diagnostics*, *Bead
-diagnostics*), explained on its page.  The pupil model's:
+diagnostics*, *CRLB*), explained on its page.  The pupil model's:
 
 - **Pupil and Zernikes**: above, the model's few numbers with their CRLBs, each
   where it was learnt -- the minimal pupil's γ and ring height h, the blur σ (beyond

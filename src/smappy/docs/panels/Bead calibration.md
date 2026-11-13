@@ -702,6 +702,28 @@ Dual colour: per half, brightness against lateral shift, and the shape
 residual against the z shift and against the correlation, coloured by what
 each pair was used for.
 
+### CRLB
+How precisely a fit with this calibration could localize a molecule at each
+height: the [Cramér-Rao lower bound](plugin:Panels/Glossary) (CRLB) of x,
+y and z against z, all in nm on one graph, for a molecule of 2000 photons on
+a background of 20 photons per pixel, in the fitters' 13-pixel box, with the
+photons and background fitted too.  It is computed from the spline itself,
+with the model the fitter evaluates and Poisson noise only: on an EMCCD,
+whose gain doubles the variance, the real precision is about √2 worse.  x
+and y are converted with the pixel size the beads' camera gives (the file,
+then the camera database); where neither does, 100 nm is assumed, and the
+title says so in orange.  The status line gives the values at focus.  Good:
+a z bound that stays low and smooth over the range you want to image; a
+bound that climbs steeply marks where the PSF stops changing with z, and a
+jagged curve a noisy model -- more beads, or more smoothing.  It scales as
+one over the square root of the photons, so at 500 photons it is twice as
+large.  In dual colour the solid lines are both halves fitted together, as
+Spline 3D 2C does, with 2000 photons shared between them by the beads'
+split; dashed and dotted are the main and the secondary half alone, each
+with its share of them, and the axis is scaled to the solid lines.  Where
+one half's bound climbs and the other's does not, that half carries the
+measurement there.
+
 ### Exclude / include
 Marks the selected beads in the table as excluded (or includes them again);
 space does the same.  Takes effect on *Recalculate*.

@@ -24,7 +24,7 @@ from pathlib import Path
 from ..calibrate.dual import DualColorSettings
 from . import Context, FormState, Plot, Plugin, Result, param, register
 
-PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
+PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics", "CRLB")
 
 
 @dataclass
@@ -107,6 +107,7 @@ def pages(result, dual: bool, quality=None) -> dict:
                               if dual else (plots.draw_fit_quality, (diagnostics, profiles, [])))
     out["Bead diagnostics"] = (lambda figure, *a: plots.draw_beads(figure, *a, dual=dual),
                                (result, [], excluded))
+    out["CRLB"] = (lambda figure, *a: plots.draw_crlb(figure, *a, dual=dual), (result,))
     return {name: Plot(lambda figure, d=draw, a=args: d(figure, *a), panels=2, size=(9.0, 6.0),
                        summary=False)
             for name, (draw, args) in sorted(out.items(), key=lambda kv: PAGES.index(kv[0]))}
