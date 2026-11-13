@@ -261,10 +261,63 @@ def _h5_scalar(group, name):
     """A number or a MATLAB char array stored by ``save -v7.3``."""
     if name not in group:
         return None
-    v = np.array(group[name])
+    return _h5_value(group[name])
+
+
+def _h5_value(dataset):
+    v = np.array(dataset)
     if v.dtype.kind == "u" and v.dtype.itemsize == 2:      # a char array
         return bytes(v.ravel().astype("uint8")).decode("latin-1").strip("\x00")
     return v.ravel()
+
+
+def _sml_entries_h5(f) -> List[Tuple[str, Dict]]:
+    """``saveloc.file`` of a v7.3 file: each file's name and `_sml_info`.
+
+    SMAP saves every file it had open, and a file of several is common: the
+    positions of one experiment loaded together, and the image of averaged
+    sites, which SMAP adds as a file of its own.  MATLAB writes one file as
+    a struct, its fields the values, and several as a struct array, each
+    field a column of references, one per file -- where reading the fields
+    as values found nothing, and such a file came in without its pixel size
+    and camera.
+    """
+    import h5py
+    file = f["saveloc"].get("file")
+    if not isinstance(file, h5py.Group):
+        return []
+    infos, names = file.get("info"), file.get("name")
+    if isinstance(infos, h5py.Dataset) and h5py.check_ref_dtype(infos.dtype):
+        infos = [f[r] for r in np.ravel(infos[()])]
+        names = ([f[r] for r in np.ravel(names[()])] if isinstance(names, h5py.Dataset)
+                 and h5py.check_ref_dtype(names.dtype) else [None] * len(infos))
+    elif isinstance(infos, h5py.Group):
+        infos, names = [infos], [names]
+    else:
+        return []
+    entries = []
+    for inf, name in zip(infos, names):
+        name = _h5_value(name) if isinstance(name, h5py.Dataset) else None
+        info = (_sml_info(lambda k, inf=inf: _h5_scalar(inf, k))
+                if isinstance(inf, h5py.Group) else {})
+        entries.append((name if isinstance(name, str) else "", info))
+    return entries
+
+
+def _sml_entries_v5(saveloc) -> List[Tuple[str, Dict]]:
+    """The same of a v5-v7 file, read by scipy: ``file`` is one struct or an
+    array of them."""
+    files = getattr(saveloc, "file", None)
+    if files is None:
+        return []
+    entries = []
+    for each in np.ravel(np.asarray(files, dtype=object)):
+        inf = getattr(each, "info", None)
+        info = (_sml_info(lambda k: np.atleast_1d(getattr(inf, k))
+                          if hasattr(inf, k) else None) if inf is not None else {})
+        name = getattr(each, "name", "")
+        entries.append((name if isinstance(name, str) else "", info))
+    return entries
 
 
 def _superseded(name: str, names) -> bool:
@@ -280,7 +333,7 @@ def _superseded(name: str, names) -> bool:
 
 def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     import h5py
-    columns, info, sites = {}, {}, None
+    columns, entries, sites = {}, [], None
     try:
         f = h5py.File(path, "r")
     except OSError:
@@ -293,11 +346,7 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                     continue
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
             sites = _sml_sites(f)
-            file = f["saveloc"].get("file")
-            if file is not None and "info" in file:
-                # `file` may be a struct array: the first file's info then
-                inf = file["info"]
-                info = _sml_info(lambda k: _h5_scalar(inf, k))
+            entries = _sml_entries_h5(f)
     else:                                                    # MATLAB v5-v7
         import scipy.io as sio
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
@@ -307,12 +356,11 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 continue
             columns[SML_COLUMNS.get(name, name)] = np.atleast_1d(getattr(loc, name))
         try:
-            files = m["saveloc"].file
-            first = files[0] if isinstance(files, np.ndarray) else files
-            info = _sml_info(lambda k: np.atleast_1d(getattr(first.info, k))
-                             if hasattr(first.info, k) else None)
+            entries = _sml_entries_v5(m["saveloc"])
         except (AttributeError, TypeError, ValueError):
             pass
+    # the table's camera is the first file's, as a session's is
+    info = entries[0][1] if entries else {}
     if "frame" in columns:
         columns["frame"] = (np.asarray(columns["frame"]) - 1).astype(np.int64)  # MATLAB is 1-based
     for name in ("channel", "iterations"):
