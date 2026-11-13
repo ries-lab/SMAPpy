@@ -145,7 +145,7 @@ class _Prefetch:
 
 
 def load_settings(path) -> TrainingSettings:
-    d = json.loads(Path(path).read_text())
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
     parts = Parts(**{k: Part(**v) for k, v in d.get("parts", {}).items()})
     raw = dict(d.get("simulation", {}))
     if "emitters_per_frame" in raw:          # before the density (2026-11-12): per frame of frame_px
@@ -182,7 +182,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
           early_stop: bool = True):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "settings.json").write_text(json.dumps(settings.to_dict(), indent=1))
+    (folder / "settings.json").write_text(json.dumps(settings.to_dict(), indent=1), encoding="utf-8")
     sim, cam, parts = settings.simulation, settings.camera, settings.parts
     sch = parts.schedule.settings
     epochs = epochs or sch["epochs"]
@@ -367,7 +367,7 @@ def main(argv=None):
         from . import testset
         r = testset.evaluate(a.model, a.test_set, a.device, shuffled=a.shuffled)
         if a.out:
-            Path(a.out).write_text(json.dumps(r, indent=1))
+            Path(a.out).write_text(json.dumps(r, indent=1), encoding="utf-8")
         keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
                 "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
         print({k: round(r[k], 4) for k in keys if r.get(k) is not None})
