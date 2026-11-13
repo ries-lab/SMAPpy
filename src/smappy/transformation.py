@@ -14,14 +14,14 @@ Three kinds, by what they can do:
 * **affine** -- a 4x4 matrix on ``(x, y, z, 1)`` in nm.  Shift, rotation,
   scale and mirror are all of this kind, and so is their composition, so the
   typed operations are multiplied into one matrix rather than kept as a list.
-  The only kind that can move an image layer (`ImageData.placement`): an
-  affine map of a pixel grid is still a grid, so nothing is resampled.
 * **projective** -- a 3x3 matrix on ``(x, y, 1)`` in nm, z unchanged: the map
-  of a `_2ct.h5` (*Calibrate transform*), converted from chip pixels.  A
-  projective map bends the pixel grid's straight spacing, so an image would
-  have to be resampled to follow it, and is refused instead.
+  of a `_2ct.h5` (*Calibrate transform*), converted from chip pixels.
 * **polynomial** -- the third-order map of a `_2ct.h5` fitted that way, kept
   in chip pixels with the pixel size it is to be read with.
+
+Any of them moves an image too, which is resampled (`transform_image`), as
+SMAP's ApplyTransform wrote a `_T.tif`: a bead map is projective, and an
+image that could only follow affine maps could not follow it.
 
 The rotation is SMAP's (TransformLocsManually): ``x' = cos(a) x + sin(a) y``,
 ``y' = -sin(a) x + cos(a) y``, which is counterclockwise as the picture shows
@@ -136,26 +136,6 @@ class Transformation:
             return False
         return not np.allclose(self.matrix[2], [0, 0, 1, 0]) \
             or not np.allclose(self.matrix[:2, 2], 0)
-
-    def planar(self) -> np.ndarray:
-        """The 3x3 affine of x and y, for moving an image (`ImageData.placement`).
-
-        Refused for what an image cannot follow without being resampled --
-        the projective and polynomial maps -- and for a move in z, which an
-        image does not have.
-        """
-        if self.kind != "affine":
-            raise ValueError(f"a {self.kind} map cannot move an image: it bends "
-                             "the pixel grid, and the image would have to be "
-                             "resampled.  Images take shift, rotation, scale, "
-                             "mirror and affine maps")
-        if self.moves_z:
-            raise ValueError("an image has no z: this transformation moves "
-                             "localizations in z")
-        m = self.matrix
-        return np.array([[m[0, 0], m[0, 1], m[0, 3]],
-                         [m[1, 0], m[1, 1], m[1, 3]],
-                         [0.0, 0.0, 1.0]])
 
     # ------------------------------------------------------------- showing
     def __str__(self) -> str:
@@ -278,6 +258,12 @@ def from_channel_transform(transform, pixelsize_nm: Tuple[float, float],
     h = s @ np.asarray(transform.transformation, float) @ np.linalg.inv(s)
     h = h / h[2, 2]
     origin = dict(origin or {})
+    regions = channel_regions(getattr(transform, "geometry", None))
+    if regions:
+        # where the two channels lie on the chip (chip pixels), kept with the
+        # map and so with every table it moved: what *Transform* cuts an
+        # image's secondary half by
+        origin["channel_regions"] = regions
     if getattr(transform, "polynomial", None) is not None:
         return Transformation("polynomial", h, transform.polynomial, (px, py),
                               "third-order polynomial channel map", origin)
@@ -290,6 +276,78 @@ def from_channel_transform(transform, pixelsize_nm: Tuple[float, float],
         return t
     return Transformation("projective", h, description="projective channel map",
                           origin=origin)
+
+
+def channel_regions(geometry) -> Optional[list]:
+    """The channels' rectangles on the chip, ``[[x, y, width, height], ...]``
+    in chip pixels, main first, from a registration's geometry or a table's
+    ``metadata["channels"]`` (both `channels.ChannelLayout.to_dict`); None
+    when it names none -- a geometry from before they were kept."""
+    if not isinstance(geometry, dict):
+        return None
+    record = geometry.get("channels") if "regions" not in geometry else geometry
+    regions = (record or {}).get("regions") if isinstance(record, dict) else None
+    if not regions or len(regions) < 2:
+        return None
+    return [[int(v) for v in r[:4]] for r in regions]
+
+
+def region_nm(region, pixelsize_nm: Tuple[float, float]) -> Tuple[float, float, float, float]:
+    """A chip rectangle ``(x, y, width, height)`` in pixels as ``(x0, y0, x1,
+    y1)`` in nm.  Pixel ``i`` is centred on ``i * pixel``, as a localization's
+    ``x_nm`` is, so the rectangle starts half a pixel before its first."""
+    x, y, w, h = (float(v) for v in region[:4])
+    px, py = float(pixelsize_nm[0]), float(pixelsize_nm[1])
+    return (x - 0.5) * px, (y - 0.5) * py, (x + w - 0.5) * px, (y + h - 0.5) * py
+
+
+# ---------------------------------------------------------------- an image
+def transform_image(data: np.ndarray, grid: np.ndarray, transformation: Transformation,
+                    inside: Optional[Tuple[float, float, float, float]] = None,
+                    out_grid: Optional[np.ndarray] = None) -> np.ndarray:
+    """``data`` -- one plane (ny, nx) or a stack (n, ny, nx) -- moved by
+    ``transformation`` and resampled on its own pixel grid.
+
+    ``grid`` is the 3x3 from pixel (column, row), the outer edge of pixel
+    (0, 0) at (0, 0), to nm (`ImageData.grid`).  Each output pixel's centre is
+    taken back through the inverse map and the input read there, bilinearly;
+    a point that lands outside the image, or outside ``inside`` (x0, y0, x1,
+    y1 in nm: the part of the image that moves), is zero.  ``out_grid`` is
+    the output's grid, by default the input's.  Resampled, as
+    SMAP's ApplyTransform did, so that every kind of map can move an image:
+    a projective or polynomial map bends the pixel grid, and an image moved
+    by a placement alone could only follow an affine one.  A polynomial's
+    inverse is the one fitted the other way (`Transformation.inverse`).
+    """
+    from scipy.ndimage import map_coordinates
+    data = np.asarray(data)
+    planes = data if data.ndim == 3 else data[None]
+    ny, nx = planes.shape[-2:]
+    grid = np.asarray(grid, np.float64)
+    out = grid if out_grid is None else np.asarray(out_grid, np.float64)
+    u, v = np.meshgrid(np.arange(nx) + 0.5, np.arange(ny) + 0.5)
+    u, v = u.ravel(), v.ravel()
+    x = out[0, 0] * u + out[0, 1] * v + out[0, 2]
+    y = out[1, 0] * u + out[1, 1] * v + out[1, 2]
+    sx, sy, _ = transformation.inverse().apply(x, y)
+    back = np.linalg.inv(grid)
+    # the input's pixel indices, pixel i centred on i
+    cu = back[0, 0] * sx + back[0, 1] * sy + back[0, 2] - 0.5
+    cv = back[1, 0] * sx + back[1, 1] * sy + back[1, 2] - 0.5
+    keep = (cu > -0.5) & (cu < nx - 0.5) & (cv > -0.5) & (cv < ny - 0.5)
+    if inside is not None:
+        x0, y0, x1, y1 = inside
+        keep &= (sx >= x0) & (sx < x1) & (sy >= y0) & (sy < y1)
+    moved = np.zeros((len(planes), ny * nx), np.float32)
+    if keep.any():
+        where = [cv[keep], cu[keep]]
+        for k, plane in enumerate(planes):
+            # "nearest" only for the half pixel at the edge, which a constant
+            # zero would darken; beyond it `keep` already says zero
+            moved[k, keep] = map_coordinates(np.asarray(plane, np.float32), where,
+                                             order=1, mode="nearest")
+    moved = moved.reshape(len(planes), ny, nx)
+    return moved if data.ndim == 3 else moved[0]
 
 
 # ------------------------------------------------------------- the table

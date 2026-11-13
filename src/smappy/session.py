@@ -871,6 +871,22 @@ class Session:
             self.changed("images")
         return image
 
+    def _replace_shown_images(self, pairs) -> None:
+        """Every image layer showing an ``original`` of ``pairs`` shows its
+        ``new`` image instead, at the same plane and projection: the images
+        are of one shape, a moved copy (`Result.images_replaced`)."""
+        switched = False
+        for original, new in pairs:
+            self.add_source(new)
+            for layer in self.layers:
+                if layer.is_image and layer.image is original:
+                    frame, planes = layer.frame, layer.image_planes
+                    layer.show_image(new, frame)
+                    layer.image_planes = planes
+                    switched = True
+        if switched:
+            self.changed("layer")
+
     def open_image(self, path, pixelsize: Optional[float] = None,
                    x0: float = 0.0, y0: float = 0.0) -> Layer:
         """A file's images, a layer each (`open_images`); the first layer."""
@@ -2163,6 +2179,8 @@ class Session:
             self.add_image(image)
         for image in result.image_sources or ():
             self.add_source(image)
+        if result.images_replaced:
+            self._replace_shown_images(result.images_replaced)
         for name, transformation in (result.transformations or {}).items():
             self.add_transformation(name, transformation)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it

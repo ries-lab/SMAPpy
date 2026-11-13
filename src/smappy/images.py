@@ -6,10 +6,11 @@ pixel of ``pixelsize`` (nm), and can be resampled onto any `FieldOfView`, so
 a viewer treats it like a rendered layer: the same LUT, contrast and gamma.
 
 Its **placement** moves it further: an affine map (3x3, nm) applied after
-that grid, which *Transform* sets (`smappy.transformation`) when an image
-rather than the localizations should move -- rotated, scaled, mirrored or
-shifted.  The pixels are never resampled for it: the view looks each of its
-pixels up through the inverse, so a move is lossless and undone exactly.
+that grid, which *Transform* set before 2026-11, when it moved an image
+without resampling it; files saved then still carry one, and the view looks
+each pixel up through its inverse.  *Transform* now resamples an image into
+a new one (`transformation.transform_image`), as a bead map, being
+projective, cannot be followed by a placement.
 ``x0``, ``y0`` and the pixel size stay what the file says, and the Render
 tab's fields still set them.
 
@@ -55,7 +56,7 @@ class ImageData:
     # per plane: its camera frame number, -1 for an average; None for a file
     frames: Optional[np.ndarray] = None
     # an affine map of the table's x, y (3x3, nm) after the grid above; None
-    # is where the grid puts it.  Set by Transform, never by resampling.
+    # is where the grid puts it.  Set by Transform before 2026-11; read from such files.
     placement: Optional[np.ndarray] = None
 
     @classmethod

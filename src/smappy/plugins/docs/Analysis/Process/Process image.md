@@ -19,7 +19,7 @@ seen and compared with the localizations.  Two operations, ticked on or off:
 
 The result is a **new image layer**, added after the others and placed
 exactly over the original -- the same pixel size, the same corner, the same
-placement if [Transform](plugin:Analysis/Process/Transform) moved it -- so it
+placement, which an image saved by an older Transform may carry -- so it
 lies over the localizations as the original does.  The original is never
 changed: show the two side by side to judge the settings, and remove the new
 layer in the Render tab if they were wrong.  *Preview* draws the result

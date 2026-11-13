@@ -2,9 +2,10 @@
 
 The typed operations are checked against coordinates worked out by hand, the
 rest against what they are for: a _2ct.h5 brings the second camera onto the
-first, an image moved by placement lands where the localizations moved by the
-same transformation land, another file's drift corrects a file of the same
-frames and refuses one of other frames.
+first, an image resampled by a transformation is bright where the localizations
+moved by it land -- the secondary half of a split chip on the main one, by a
+bead map or the move a two-channel fit records -- another file's drift corrects
+a file of the same frames and refuses one of other frames.
 """
 import dataclasses
 
@@ -17,11 +18,10 @@ from smappy.images import ImageData
 from smappy.locs import Localizations
 from smappy.plugins import Context
 from smappy.plugins.transform import TransformSettings, TypedSettings, settings_for
-from smappy.render import FieldOfView
 from smappy.session import Session
 from smappy.transformation import (Transformation, check_same_frames,
                                    load_transformation, save_transformation,
-                                   transform_table, typed)
+                                   typed)
 
 PATH = "Analysis/Process/Transform"
 
@@ -187,66 +187,137 @@ def test_named_transformations_are_saved_with_the_file_and_not_the_workspace(tmp
 
 
 # ------------------------------------------------------------------ images
-def test_an_image_moved_by_placement_lands_where_the_localizations_land():
-    """Bright pixels at the localizations, moved by one transformation as an
-    image and as localizations: the moved image is bright where the moved
-    localizations are."""
+def _blobs(plane, rows, cols):
+    """3 x 3 squares of ones: bilinear sampling of one is 1 near its middle."""
+    for r, c in zip(rows, cols):
+        plane[r - 1:r + 2, c - 1:c + 2] = 1.0
+
+
+def test_an_image_moved_lands_where_the_localizations_land():
+    """Bright squares at the localizations, moved by one transformation as an
+    image and as localizations: the new image is bright where the moved
+    localizations are, and the original stays as it was."""
     rng = np.random.default_rng(1)
     pixel = 20.0
     plane = np.zeros((60, 80), np.float32)
-    ij = np.column_stack([rng.integers(5, 55, 30), rng.integers(5, 75, 30)])
-    plane[ij[:, 0], ij[:, 1]] = 1.0
-    x = (ij[:, 1] + 0.5) * pixel + 300.0      # the pixel centres, image at x0=300
-    y = (ij[:, 0] + 0.5) * pixel + 100.0
+    rows, cols = rng.integers(8, 52, 20), rng.integers(8, 72, 20)
+    _blobs(plane, rows, cols)
+    x = (cols + 0.5) * pixel + 300.0      # the pixel centres, image at x0=300
+    y = (rows + 0.5) * pixel + 100.0
     locs = Localizations({"x_nm": x, "y_nm": y, "frame": np.zeros(len(x), int)}, {})
     session = Session(locs)
-    session.add_image(ImageData(plane, pixel, x0=300.0, y0=100.0, name="wf"))
-    s = TransformSettings(typed=TypedSettings(angle_deg=30, scale=1.25,
+    session.add_image(ImageData(plane.copy(), pixel, x0=300.0, y0=100.0, name="wf"))
+    s = TransformSettings(typed=TypedSettings(angle_deg=10, scale=1.05,
                                               mirror="x", shift_x_nm=-70,
-                                              centre="given", centre_x_nm=900,
+                                              centre="given", centre_x_nm=1100,
                                               centre_y_nm=700))
     plugin = plugins.get(PATH)()
+    original = session.layers[1].image
     session.run(plugin, dataclasses.replace(s, target=2))    # the image layer
     session.run(plugin, s)                                   # the localizations
-    image = session.layers[1].image
-    assert image.placement is not None
-    fov = FieldOfView(-1500.0, -1500.0, 4.0, 1250, 1250)
-    picture = image.resample(fov).weight
-    col = np.floor((np.asarray(session.locs["x_nm"]) - fov.x0) / fov.pixelsize).astype(int)
-    row = np.floor((np.asarray(session.locs["y_nm"]) - fov.y0) / fov.pixelsize).astype(int)
-    assert picture[row, col].min() == 1.0
-    assert picture.sum() < 0.1 * picture.size      # and not everywhere
+    np.testing.assert_array_equal(original.data, plane)      # left as it was
+    moved = session.layers[1].image                          # the layer shows the move
+    assert moved.name == "wf_T" and moved.placement is None
+    assert len(session.layers) == 2 and any(im is original for im in session.images)
+    values = moved.values_at(np.asarray(session.locs["x_nm"]),
+                             np.asarray(session.locs["y_nm"]))
+    inside = ((np.asarray(session.locs["x_nm"]) > 320) & (np.asarray(session.locs["x_nm"]) < 1880)
+              & (np.asarray(session.locs["y_nm"]) > 120) & (np.asarray(session.locs["y_nm"]) < 1280))
+    assert inside.sum() > 10
+    assert values[inside].min() > 0.9
+    assert moved.data.sum() < 0.2 * moved.data.size        # and not everywhere
 
 
-def test_an_image_move_is_one_undo_step_and_a_projective_map_is_refused(tmp_path):
+def _split_chip(tmp_path, perspective=2e-6):
+    """A 64 x 128 chip, main channel left, secondary right, and a projective
+    map of the secondary onto the main kept in a _2ct.h5 with its regions;
+    squares in the main half and their partners where the map sends them
+    from in the secondary."""
+    from smappy.calibrate.dual import ChannelTransform, map_points
+    from smappy.calibrate.transform import save_channel_transform
+    angle = np.radians(1.0)
+    h = np.array([[np.cos(angle), np.sin(angle), -64.5],
+                  [-np.sin(angle), np.cos(angle), 1.5],
+                  [perspective, 0.0, 1.0]])
+    regions = [[0, 0, 64, 64], [64, 0, 64, 64]]
+    path = tmp_path / "beads_2ct.h5"
+    save_channel_transform(path, ChannelTransform(h, {"channels": {"regions": regions}}, {}))
+    rng = np.random.default_rng(3)
+    main = np.column_stack([rng.integers(8, 56, 15), rng.integers(8, 56, 15)])  # (col, row)
+    partner = np.rint(map_points(np.linalg.inv(h), main.astype(float))).astype(int)
+    main = np.rint(map_points(h, partner.astype(float))).astype(int)  # on whole pixels both
+    plane = np.zeros((64, 128), np.float32)
+    _blobs(plane, main[:, 1], main[:, 0])
+    _blobs(plane, partner[:, 1], partner[:, 0])
+    pixel = 100.0
+    # pixel i centred on i * pixel, as a localization's x_nm is
+    image = ImageData(plane, pixel, x0=-0.5 * pixel, y0=-0.5 * pixel, name="wf")
+    return path, h, regions, image, main * pixel
+
+
+def test_a_projective_bead_map_moves_only_the_secondary_half_onto_the_main(tmp_path):
+    path, h, regions, image, main_nm = _split_chip(tmp_path)
     session = Session(points())
-    image = ImageData(np.ones((10, 10), np.float32), 10.0, name="wf")
+    session.add_image(image)
+    other = session.add_image(ImageData(np.ones((4, 4), np.float32), 100.0, name="bf"))
+    session.add_image(image)                         # a second layer of the same image
+    session.run(plugins.get(PATH)(), TransformSettings(target=2, source="file",
+                                                       path=str(path)))
+    moved = session.layers[1].image
+    assert session.layers[3].image is moved           # every layer that showed it
+    assert other.image.name == "bf"                   # and only those
+    kept = next(im for im in session.images if im.name == "wf_main")
+    assert moved.name == "wf_T" and len(session.layers) == 4
+    x, y = main_nm[:, 0], main_nm[:, 1]
+    assert moved.values_at(x, y).min() > 0.8           # the partners on the main ones
+    assert kept.values_at(x, y).min() == 1.0
+    assert not moved.data[:, 64:].any() and not kept.data[:, 64:].any()
+
+
+def test_the_move_a_two_channel_fit_records_moves_its_image(tmp_path):
+    """Overlay channels records its map with the table; Transform's *recorded*
+    source finds it on auto and moves the image of the same chip by it."""
+    from smappy.calibrate.transform import load_transform
+    from smappy.channel_overlay import overlay_table
+    path, h, regions, image, main_nm = _split_chip(tmp_path)
+    fitted = Localizations({"x_nm": np.array([100.0, 7000.0]), "y_nm": np.array([100.0, 200.0]),
+                            "frame": np.zeros(2, int), "camera_channel": np.array([0, 1])},
+                           {"pixelsize_nm": 100.0})
+    session = Session(overlay_table(fitted, load_transform(path), path=path))
     session.add_image(image)
     plugin = plugins.get(PATH)()
-    session.run(plugin, TransformSettings(target=2, typed=TypedSettings(shift_x_nm=40)))
-    assert image.bounds[0] == pytest.approx(40.0)
-    session.undo()
-    assert image.placement is None and image.bounds[0] == 0.0
-    session.redo()
-    assert image.bounds[0] == pytest.approx(40.0)
-    p = Transformation("projective", np.array([[1, 0, 0], [0, 1, 0], [1e-4, 0, 1]]))
+    s = TransformSettings(target=2, source="recorded")
+    state = plugin.describe(Context(session=session), s)
+    assert any("overlay channels" in label for _, label in state.choices["recorded"])
+    session.run(plugin, s)
+    moved = session.layers[1].image
+    assert moved.values_at(main_nm[:, 0], main_nm[:, 1]).min() > 0.8
+
+
+def test_an_image_without_channel_regions_says_to_move_it_whole(tmp_path):
+    session = Session(points())
+    session.add_image(ImageData(np.ones((10, 10), np.float32), 10.0, name="wf"))
+    p = Transformation("projective", np.array([[1, 0, 5], [0, 1, 0], [1e-6, 0, 1]]))
     session.add_transformation("bent", p)
-    with pytest.raises(ValueError, match="resampled"):
+    plugin = plugins.get(PATH)()
+    with pytest.raises(ValueError, match="whole image"):
         session.run(plugin, settings_for("bent", target=2))
+    session.run(plugin, dataclasses.replace(settings_for("bent", target=2), part="all"))
+    assert session.layers[1].image.name == "wf_T"
     with pytest.raises(ValueError, match="no z"):
         session.run(plugin, TransformSettings(target=2, typed=TypedSettings(shift_z_nm=5)))
 
 
-def test_an_image_placement_is_saved_with_the_file(tmp_path):
+def test_the_moved_image_is_saved_as_a_tiff_with_its_pixel_size(tmp_path):
+    from smappy.images import load_images
     session = Session(points())
-    image = ImageData(np.arange(12, dtype=np.float32).reshape(3, 4), 10.0, name="wf")
-    session.add_image(image)
+    session.add_image(ImageData(np.arange(12, dtype=np.float32).reshape(3, 4), 10.0, name="wf"))
     session.run(plugins.get(PATH)(), TransformSettings(
-        target=2, typed=TypedSettings(angle_deg=90, centre="origin")))
-    path = session.save(tmp_path / "moved.hdf5")
-    from smappy.io.hdf5 import load_images
-    back = load_images(path)[0]
-    np.testing.assert_allclose(back.placement, image.placement)
+        target=2, typed=TypedSettings(shift_x_nm=10, centre="origin"),
+        image_to=str(tmp_path / "wf_T.tif")))
+    back = load_images(tmp_path / "wf_T.tif")[0]
+    assert back.pixelsize == pytest.approx(10.0)
+    np.testing.assert_allclose(back.data, session.layers[1].image.data)
 
 
 # ------------------------------------------------------------------- drift

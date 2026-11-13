@@ -146,7 +146,8 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
 | `region_filter` | the region filter's conditions after the run, as dicts (`region_filter.Condition.to_dict`), set by `Session.set_region_filter`; None leaves them (`plugins/region_filter.py`) |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
-| `placements` | `{layer index: 3x3 affine}`, image layers moved (`ImageData.placement`, nm): *Transform*'s image target, one undo step and a log line like a table change |
+| `images_replaced` | `(original, new)` image pairs: every image layer showing the original shows the new one at the same plane; the new one goes in `image_sources` too (*Transform*'s `<name>_T`) |
+| `placements` | `{layer index: 3x3 affine}`, image layers moved (`ImageData.placement`, nm): one undo step and a log line like a table change; no shipped plugin sets it since *Transform* resamples an image into a new layer (`Result.image_layers`), but older files carry placements |
 | `image_layers` | new images (`ImageData`), each added as a source and an image layer after the others (`Session.add_image`): *Process image*'s result; not an undo step and not logged |
 | `transformations` | `{name: Transformation}` (`smappy.transformation`) added to the session's named transformations (`Session.transformations`), saved with the localization file (not the workspace) |
 | `recipe` | the table change as a `ColumnRecipe`, which follows a table a fit is still appending to |

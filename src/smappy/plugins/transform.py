@@ -5,10 +5,11 @@ in one plugin (wave 5, step 5a; `docs/smap_porting/wave5_design.md`).  What
 moves is the *target*: a file's localizations, optionally one `channel` --
 their coordinates change, logged and undoable, never only the display, so
 measurements, exports and ROIs agree with the picture -- or an image layer,
-moved by its placement (`ImageData.placement`) and never resampled.  What
-it is moved by is the *source*: typed values, a named transformation of the
-session, a transformation file (`_2ct.h5`, or this plugin's own `_T.h5`), or
-the drift of another file.  The maths is in `smappy.transformation`, and a
+resampled into a new image, `<name>_T`, which the layers that showed the
+original then show.  What it is moved by is the *source*: typed
+values, a named transformation of the session, a move a loaded file records
+(a two-channel fit's *Overlay channels*), a transformation file (`_2ct.h5`,
+or this plugin's own `_T.h5`), or the drift of another file.  The maths is in `smappy.transformation`, and a
 drift is applied by `Drift.apply`: nothing applies a transformation twice.
 
 Departures from SMAP:
@@ -17,11 +18,15 @@ Departures from SMAP:
   centre, then shift.  SMAP shifted first and then scaled and rotated about
   the view's centre; here the centre is the middle of the moved localizations,
   the origin or typed, since a plugin does not read the view.
-* **An image is moved, not resampled.**  SMAP's ApplyTransform wrote a
-  transformed copy of the TIFF (`_T.tif`); here the image's placement changes
-  and the view looks its pixels up through it, so nothing is lost and undo
-  is exact.  Only maps that keep the pixel grid a grid can do that, so the
-  projective and polynomial maps are refused for images.
+* **An image is resampled, as in SMAP**, into a new image beside the
+  original, `<name>_T` (and, on request, a TIFF, SMAP's `_T.tif`): a source,
+  not a layer, and the layers that showed the original show it instead --
+  only those, a layer of any other image is left alone.  It was once moved by
+  a placement instead, lossless but only by affine maps -- and a bead map is
+  projective, so the image of a split chip could not follow its own
+  localizations.  By default only the *secondary channel* moves, onto the
+  main one, the half a two-channel fit's map moves; the main channel is cut
+  out beside it.
 * **Precisions and widths stay**, under a scale too, as in SMAP's
   ChangeCamPixelsize, which scaled positions only.  Mirror is about the
   centre, not about SMAP's fixed 256-pixel chip middle, and of the whole
@@ -48,7 +53,15 @@ from ..locs import Localizations
 
 PATH = "Analysis/Process/Transform"
 SOURCES = (("typed", "typed"), ("named", "named transformation"),
+           ("recorded", "recorded in a loaded file"),
            ("file", "transformation file"), ("drift", "drift of another file"))
+# what of an image moves: a channel map takes the secondary half of the chip
+# onto the main one, so by default only that half is read
+PARTS = (("secondary", "secondary channel onto main"),
+         ("all", "the whole image"))
+# the move *recorded* takes on auto: the two halves of a two-channel fit put
+# on top of each other (`channel_overlay.RECORD_NAME`)
+OVERLAY = "overlay channels"
 TRANSFORM_FILTER = "Transformation (*_T.h5 *_2ct.h5 *.h5 *.hdf5)"
 DRIFT_FILTER = "Drift-corrected file (*.h5 *.hdf5)"
 # the most points the Preview draws of each kind: enough to see a structure
@@ -101,6 +114,10 @@ def _no_names():
     return [("", "-")]
 
 
+def _no_records():
+    return [("", "auto: the last overlay of channels")]
+
+
 @dataclass
 class TransformSettings:
     target: int = param(0, label="target", choices=_targets,
@@ -114,6 +131,9 @@ class TransformSettings:
     typed: TypedSettings = param(default_factory=TypedSettings)
     named: str = param("", label="name", choices=_no_names,
                        help="one of the session's named transformations")
+    recorded: str = param("", label="move", choices=_no_records,
+                          help="a move the loaded table records, such as a "
+                               "two-channel fit's overlay of its channels")
     path: str = param("", label="from file", kind="open_file",
                       file_filter=TRANSFORM_FILTER,
                       help="a _T.h5 this plugin wrote, or a _2ct.h5 of "
@@ -124,6 +144,13 @@ class TransformSettings:
     drift_path: str = param("", label="drift of", kind="open_file",
                             file_filter=DRIFT_FILTER,
                             help="a drift-corrected file of the same frames")
+    part: str = param("secondary", label="what moves", choices=PARTS,
+                      advanced=True,
+                      help="of an image: its secondary channel, cut by the "
+                           "chip regions the map or the fit records, or all")
+    image_to: str = param("", label="save image", kind="save_file",
+                          file_filter="TIFF (*.tif *.tiff)", advanced=True,
+                          help="the moved image as a TIFF too (SMAP's _T.tif)")
     keep_as: str = param("", label="keep as",
                          help="a name: the transformation joins the "
                               "session's named ones")
@@ -212,6 +239,51 @@ def drift_of(path):
                      "COMET or RCC and save it, or use its _driftc file")
 
 
+def record_key(record: dict) -> str:
+    """How a recorded move is named in the form and in saved settings: its
+    name and its time, which no two moves of one table share."""
+    return f"{record.get('name') or 'unnamed'} ({record.get('time', '')})"
+
+
+def recorded_moves(metadata) -> list:
+    """``[(key, record, file)]``: every move a table records that carries its
+    transformation -- not a drift, which has none -- the table's own and
+    each opened file's (``metadata["files"][n]["metadata"]``), once each."""
+    metadata = metadata or {}
+    found, seen = [], set()
+    sources = [(metadata, -1)] + [
+        ((f.get("metadata") or {}) if isinstance(f, dict) else {}, n)
+        for n, f in enumerate(metadata.get("files") or [])]
+    for meta, file in sources:
+        for record in meta.get("transformations") or []:
+            if not isinstance(record, dict) or not record.get("transformation"):
+                continue
+            key = record_key(record)
+            if key not in seen:
+                seen.add(key)
+                found.append((key, record, file))
+    return found
+
+
+def recorded_transformation(metadata, key: str = ""):
+    """``(Transformation, record, file)`` of the move ``key`` names, or on
+    "" (auto) the last overlay of two channels."""
+    from ..transformation import Transformation
+    moves = recorded_moves(metadata)
+    if key:
+        chosen = [m for m in moves if m[0] == key]
+    else:
+        chosen = [m for m in moves if m[1].get("name") == OVERLAY][-1:]
+    if not chosen:
+        have = ", ".join(m[0] for m in moves) or "none"
+        want = repr(key) if key else "an overlay of two channels"
+        raise ValueError(f"the loaded table records no {want}; the moves it "
+                         f"records: {have}.  Fit as two channels and overlay "
+                         "them, or choose a transformation file")
+    _, record, file = chosen[0]
+    return Transformation.from_dict(record["transformation"]), record, file
+
+
 def _pixel_sizes(ctx: Context, locs: Localizations, file: int):
     """The camera pixel a file's nm were made with, for a _2ct.h5."""
     from ..locs import table_pixel_sizes
@@ -230,21 +302,24 @@ def _pixel_sizes(ctx: Context, locs: Localizations, file: int):
 @register("Analysis/Process/Transform")
 class Transform(Plugin):
     """Shift, rotate, scale or mirror a file's localizations or an image
-    layer, or apply a named transformation, a transformation file or
-    another file's drift."""
+    layer, or apply a named transformation, a move a loaded file records, a
+    transformation file or another file's drift."""
 
-    description = ("Move a file's localizations (or one channel of them) or "
-                   "an image layer: typed shift, rotation, scale and mirror, "
-                   "a named transformation, a transformation file, or the "
-                   "drift of another file recorded at the same time.")
+    description = ("Move a file's localizations (or one channel of them), or "
+                   "resample an image into a new one, <name>_T: typed shift, "
+                   "rotation, scale and mirror, a named transformation, a move "
+                   "a loaded file records (a two-channel fit's overlay), a "
+                   "transformation file, or the drift of another file recorded "
+                   "at the same time.")
     Settings = TransformSettings
     name = "Apply transform"
     changes_locs = True
     # every localization of the file moves, whatever the layer merges
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
     preview_help = ("draw the target before (pale) and after (strong) over "
-                    "the rest, without moving anything")
+                    "the rest, or the moved image under the localizations, "
+                    "without moving anything")
 
     def changes_locs_for(self, settings) -> bool:
         return settings is None or int(settings.target) == 0
@@ -257,10 +332,14 @@ class Transform(Plugin):
         state = FormState(shown={
             "file": not image, "channel": not image,
             "typed": typed, "named": source == "named",
-            "path": source == "file", "invert": source in ("named", "file"),
+            "recorded": source == "recorded",
+            "path": source == "file",
+            "invert": source in ("named", "recorded", "file"),
             "drift_path": source == "drift",
-            "keep_as": source in ("typed", "file"),
+            "keep_as": source in ("typed", "recorded", "file"),
             "write_to": source != "drift",
+            "part": image and source in ("named", "recorded", "file"),
+            "image_to": image,
             "typed.shift_z_nm": not image,
             "typed.centre_x_nm": typed and settings.typed.centre == "given",
             "typed.centre_y_nm": typed and settings.typed.centre == "given"})
@@ -278,12 +357,19 @@ class Transform(Plugin):
         if "channel" in locs and len(locs):
             state.choices["channel"] = [(-1, "all")] + [
                 (int(c), str(int(c))) for c in np.unique(np.asarray(locs["channel"]))]
+        moves = recorded_moves(session.locs.metadata)
+        state.choices["recorded"] = _no_records() + [(k, k) for k, _, _ in moves]
         names = list(session.transformations)
         state.choices["named"] = [(n, n) for n in names] or _no_names()
         if source == "named" and not names:
             state.notice = Notice("the session has no named transformations: "
                                   "keep one here with *keep as*, or measure one "
                                   "with Register layers", kind="info")
+        elif source == "recorded" and not moves:
+            state.notice = Notice("the loaded table records no moves: fit as "
+                                  "two channels and overlay them (Overlay "
+                                  "channels), or choose a transformation file",
+                                  kind="info")
         elif image and source == "drift":
             state.notice = Notice("an image has no frames to follow a drift: "
                                   "choose the localizations")
@@ -364,10 +450,18 @@ class Transform(Plugin):
                                  f"{settings.named!r}; it has "
                                  + (", ".join(named) or "none"))
             t = named[settings.named]
+        elif source == "recorded":
+            metadata = None if ctx.session is None else ctx.session.locs.metadata
+            if metadata is None and locs is not None:
+                metadata = locs.metadata
+            t, _, _ = recorded_transformation(metadata, settings.recorded)
         elif source == "file":
             if not settings.path:
                 raise ValueError("choose a transformation file")
-            sizes = None if locs is None else _pixel_sizes(ctx, locs, int(settings.file))
+            sizes = None if locs is None else _pixel_sizes(ctx, locs, max(int(settings.file), 0))
+            if sizes is None and image is not None:
+                # no table to say the camera pixel: the image is the camera's
+                sizes = image.pixelsize_xy
             t = load_transformation(settings.path, sizes)
         else:
             raise ValueError(f"unknown source {source!r}")
@@ -417,6 +511,7 @@ class Transform(Plugin):
                                        overwrite=True))
 
     def _move_image(self, ctx: Context, settings: TransformSettings, apply: bool):
+        from ..transformation import Transformation, transform_image
         session = ctx.session
         index = int(settings.target) - 1
         if session is None or not 0 <= index < len(session.layers) \
@@ -429,25 +524,129 @@ class Transform(Plugin):
         image = layer.image
         locs = session.locs if len(session.locs) else None
         transformation = self._transformation(ctx, settings, locs, None, image)
-        matrix = transformation.planar()
-        current = np.eye(3) if image.placement is None else np.asarray(image.placement)
-        placement = matrix @ current
-        text = f"image layer {index + 1} ({layer.name}): {transformation}"
-        plot = _plot_image(image, placement, locs)
+        if transformation.moves_z:
+            raise ValueError("an image has no z: this transformation moves "
+                             "localizations in z")
+        out_grid = _plain_grid(image)
+        secondary = (settings.part == "secondary"
+                     and settings.source in ("named", "recorded", "file"))
+        made = []
+        if secondary:
+            main, other = channel_rects(ctx, transformation, image, locs)
+            if _overlaps(main, image.bounds):
+                # the main channel stays where it is, cut out beside the moved
+                # one: the two channels as two layers, as the localizations are
+                made.append(_image_like(image, transform_image(
+                    image.data, image.grid, Transformation(), main, out_grid),
+                    _named(image, "_main"), None, "main"))
+            moved = _image_like(image, transform_image(
+                image.data, image.grid, transformation, other, out_grid),
+                _named(image, "_T"), transformation, "secondary")
+            what = "secondary channel moved onto the main" + (
+                ", the main cut beside it" if made else "")
+        else:
+            moved = _image_like(image, transform_image(
+                image.data, image.grid, transformation, None, out_grid),
+                _named(image, "_T"), transformation, "all")
+            what = "moved"
+        made.append(moved)
+        text = (f"image layer {index + 1} ({layer.name}): {what}, {transformation}; "
+                + ", ".join(im.name for im in made) + " added to the images, "
+                "the layers that showed the original now show " + moved.name)
+        plot = _plot_image(made, locs)
+        data = {"transformation": transformation}
         if not apply:
-            return Result(text=text, plot=plot, settings=settings,
-                          data={"transformation": transformation,
-                                "placement": placement})
+            return Result(text=text, plot=plot, settings=settings, data=data)
         written = self._write(transformation, settings)
         if written:
             text += f"; written to {written}"
+        if settings.image_to:
+            text += f"; the image saved as {write_tiff(settings.image_to, moved)}"
         kept = {}
-        if settings.keep_as.strip() and settings.source in ("typed", "file"):
+        if settings.keep_as.strip() and settings.source in ("typed", "recorded", "file"):
             kept[settings.keep_as.strip()] = transformation
-        return Result(text=text, plot=plot, settings=settings,
-                      placements={index: placement}, transformations=kept,
-                      data={"transformation": transformation,
-                            "placement": placement}, written=written)
+        # sources, not layers: the layers that showed the original show the
+        # moved image now, and the rest pick it (or the main cut) as they like
+        return Result(text=text, plot=plot, settings=settings, image_sources=made,
+                      images_replaced=[(image, moved)],
+                      transformations=kept, data=data, written=written)
+
+
+# ------------------------------------------------------------------ images
+def channel_rects(ctx: Optional[Context], transformation, image, locs=None):
+    """``(main, secondary)``, each channel's rectangle on the chip in nm
+    (x0, y0, x1, y1): from the map itself, which keeps the regions it was
+    measured between (`transformation.from_channel_transform`), else from
+    what the loaded fit records (``metadata["channels"]``), read with the
+    camera pixel of the table, else of the image."""
+    from ..transformation import channel_regions, region_nm
+    regions = transformation.origin.get("channel_regions")
+    metadata = {}
+    if ctx is not None and ctx.session is not None:
+        metadata = ctx.session.locs.metadata or {}
+    elif locs is not None:
+        metadata = locs.metadata or {}
+    if not regions:
+        found = [channel_regions(metadata.get("channels"))] + [
+            channel_regions(((f.get("metadata") or {}) if isinstance(f, dict) else {})
+                            .get("channels"))
+            for f in metadata.get("files") or []]
+        regions = next((r for r in found if r), None)
+    if not regions:
+        raise ValueError("neither the transformation nor the loaded table says "
+                         "where the two channels lie on the chip: set *what "
+                         "moves* to the whole image")
+    pixel = transformation.pixelsize_nm
+    if pixel is None and locs is not None and ctx is not None:
+        pixel = _pixel_sizes(ctx, locs, 0)
+    if pixel is None:
+        pixel = image.pixelsize_xy
+    return region_nm(regions[0], pixel), region_nm(regions[1], pixel)
+
+
+def _overlaps(rect, bounds) -> bool:
+    return (rect[0] < bounds[2] and bounds[0] < rect[2]
+            and rect[1] < bounds[3] and bounds[1] < rect[3])
+
+
+def _plain_grid(image) -> np.ndarray:
+    """The image's grid without a placement: where the new image's pixels
+    are (an old file's placement is resampled in, not carried on)."""
+    px, py = image.pixelsize_xy
+    return np.array([[px, 0.0, image.x0], [0.0, py, image.y0], [0.0, 0.0, 1.0]])
+
+
+def _named(image, suffix: str) -> str:
+    """``wf.tif`` -> ``wf_T.tif``: the name SMAP gave a moved image."""
+    name = Path(image.name or "image")
+    return f"{name.stem}{suffix}{name.suffix}"
+
+
+def _image_like(image, data, name: str, transformation, part: str):
+    """A new image on ``image``'s grid holding ``data``."""
+    from ..images import ImageData
+    metadata = dict(image.metadata)
+    metadata["transformed"] = {
+        "from": image.name, "part": part,
+        "transformation": None if transformation is None else transformation.to_dict()}
+    return ImageData(np.ascontiguousarray(data, np.float32), image.pixelsize,
+                     image.x0, image.y0, name=name, frame=image.frame,
+                     metadata=metadata, pixelsize_y=image.pixelsize_y,
+                     frames=None if image.frames is None else np.array(image.frames))
+
+
+def write_tiff(path, image) -> Path:
+    """``image`` as a float TIFF, its pixel size in the resolution tags as
+    SMAP writes it (pixels per centimetre, which ImageJ reads as µm)."""
+    import tifffile
+    path = Path(path)
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        path = path.with_suffix(".tif")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    per_cm = 1e7 / float(image.pixelsize)
+    tifffile.imwrite(str(path), np.asarray(image.data, np.float32),
+                     resolution=(per_cm, per_cm), resolutionunit="CENTIMETER")
+    return path
 
 
 # ------------------------------------------------------------------ figures
@@ -482,27 +681,31 @@ def _plot_locs(before: Localizations, after: Localizations, rows: np.ndarray) ->
     return Plot(draw)
 
 
-def _plot_image(image, placement: np.ndarray, locs: Optional[Localizations]) -> Plot:
-    """The image's outline where it was and where it goes, over the
-    localizations."""
-    ny, nx = image.shape
-    px, py = image.pixelsize_xy
-    grid = np.array([[px, 0.0, image.x0], [0.0, py, image.y0], [0.0, 0.0, 1.0]])
-    corners = np.array([[0, nx, nx, 0, 0], [0, 0, ny, ny, 0], [1, 1, 1, 1, 1]], float)
-    current = np.eye(3) if image.placement is None else np.asarray(image.placement)
-    was = current @ grid @ corners
-    goes = placement @ grid @ corners
+def _plot_image(images: list, locs: Optional[Localizations]) -> Plot:
+    """The new images in colour -- the main channel green, the moved one
+    magenta, so that what lies on its partner is white -- under a sample of
+    the localizations: a good map puts them on the same structures."""
+    colours = [(0.2, 0.9, 0.2), (1.0, 0.0, 1.0)] if len(images) == 2 else [(1.0, 1.0, 1.0)]
+    first = images[0]
+    ny, nx = first.shape
+    px, py = first.pixelsize_xy
+    rgb = np.zeros((ny, nx, 3), np.float32)
+    for image, colour in zip(images, colours):
+        plane = np.asarray(image.plane_at(image.frame), np.float32)
+        lit = plane[plane > 0]
+        top = float(np.percentile(lit, 99.5)) if lit.size else 1.0
+        rgb += np.clip(plane / (top or 1.0), 0, 1)[..., None] * np.asarray(colour, np.float32)
+    rgb = np.clip(rgb, 0, 1)
+    extent = (first.x0, first.x0 + nx * px, first.y0 + ny * py, first.y0)
     sample = None if locs is None else _sample(len(locs))
 
     def draw(ax) -> None:
+        ax.imshow(rgb, extent=extent, interpolation="nearest")
         if sample is not None and len(sample):
             ax.plot(np.asarray(locs["x_nm"])[sample], np.asarray(locs["y_nm"])[sample],
-                    ",", color="0.6", label="localizations")
-        ax.plot(was[0], was[1], "--", color="#6baed6", label="image before")
-        ax.plot(goes[0], goes[1], "-", color="#d62728", label="image after")
-        ax.plot(goes[0, :1], goes[1, :1], "o", color="#d62728", ms=4)  # pixel (0, 0)
-        ax.set(xlabel="x (nm)", ylabel="y (nm)", title="the image's outline")
-        ax.set_aspect("equal", adjustable="datalim")
-        ax.invert_yaxis()
-        ax.legend(fontsize=7, loc="upper right")
+                    ",", color="#ffd92f", alpha=0.6, label="localizations")
+            ax.legend(fontsize=7, loc="upper right", markerscale=6)
+        ax.set(xlabel="x (nm)", ylabel="y (nm)",
+               title="main green, moved magenta" if len(images) == 2 else "the moved image")
+        ax.set_aspect("equal")
     return Plot(draw)

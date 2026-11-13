@@ -881,8 +881,8 @@ class Result:
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()
     # Images moved, ``{layer index: placement}`` (`ImageData.placement`, a
-    # 3x3 affine in nm): Transform's image target.  One undo step with the
-    # table, logged as a table change is.
+    # 3x3 affine in nm).  One undo step with the table, logged as a table
+    # change is.  No shipped plugin sets it since Transform resamples.
     placements: Dict[int, Any] = field(default_factory=dict)
     # New image layers (`ImageData`), each added as a source and a layer of
     # its own after the others: Process image's result.  Not a table change,
@@ -891,6 +891,10 @@ class Result:
     # Images to keep as sources an image layer can show, without a layer
     # each (`Session.add_source`): the confocal channels of an `.msr`.
     image_sources: Sequence = ()
+    # ``(original, new)`` image pairs: every layer showing the original shows
+    # the new one instead, at the same plane -- Transform's moved image, which
+    # is what that layer was for.  The new one is among the sources above.
+    images_replaced: Sequence = ()
     # Named transformations to keep in the session's list,
     # ``{name: Transformation}`` (`Session.transformations`): Transform's
     # *keep as*, and what Register layers measures.
