@@ -486,6 +486,9 @@ class Source:
         self.path = path
         self.number = number          # the table's `filenumber`
         self.state: Optional[ViewState] = None
+        # the other layers' views of this file, by layer: what the panes
+        # draw beside `state` (`ROIProject.view`)
+        self.layer_states: Dict[int, ViewState] = {}
         self.fingerprint = ""
 
 
@@ -496,7 +499,9 @@ class ROIProject:
     The data stays in the session: a plugin may replace the table (a drift
     correction, a fit), and the project follows (`sync`).  ``layer`` says
     which layer's filter and grouping the ROIs follow; the layer's *file*
-    choice is deliberately ignored, since an ROI already knows its file.  A
+    choice is deliberately ignored, since an ROI already knows its file.
+    The panes draw every visible layer that shows the file, as the main
+    view does (`view`); the ROIs are measured on this one.  A
     script makes ROIs through a headless session, ``Session(locs).rois``, so
     it sees the filters and grouping the GUI would.
     """
@@ -1759,9 +1764,7 @@ class ROIProject:
         if self._built != signature:
             self._rebuild(names)
             self._built = signature
-        layer = self.session.layers[min(self.layer, len(self.session.layers) - 1)]
-        if layer.is_image:
-            layer = self.session.layers[self.session.first_locs_layer()]
+        layer = self.session.layers[self.layer_index()]
         self.filters = layer.ranges
         self.inverted = layer.inverted
         self.grouped = layer.grouped
@@ -1773,6 +1776,25 @@ class ROIProject:
         for source in self.sources.values():         # the states follow the layer
             if source.state is not None:
                 self._apply(source)
+            for i, state in source.layer_states.items():
+                if i < len(self.session.layers) and not self.session.layers[i].is_image:
+                    self._follow(state, self.session.layers[i])
+
+    def layer_index(self) -> int:
+        """The layer the ROIs follow, as `layer` names it: the first
+        localization layer in place of an image layer or one not there."""
+        layers = self.session.layers
+        index = min(self.layer, len(layers) - 1)
+        return self.session.first_locs_layer() if layers[index].is_image else index
+
+    @staticmethod
+    def _follow(state: ViewState, layer) -> None:
+        """Put a session layer's bounds, grouping and look on a file's view
+        of it: the axes stay the positions, as `sync` keeps them."""
+        state.settings = replace(layer.state.settings, axes=RenderAxes())
+        state.display = layer.state.display
+        state.use_grouped = layer.grouped
+        state.set_ranges(layer.ranges, layer.inverted)
 
     def _rebuild(self, names: List[str]) -> None:
         """Sources for the session's files, keeping the ids ROIs refer to."""
@@ -1865,6 +1887,48 @@ class ROIProject:
             source.state = ViewState(tables=self._tables(source))
             self._apply(source)
         return source.state
+
+    def view(self, file_id) -> tuple:
+        """The session's layers as the panes draw file ``file_id``: what the
+        main view shows of that file, so the two look alike.
+
+        A `LayerSnapshot` per layer, in order, for `render_panels` to add up.
+        Each visible localization layer that shows this file is its own view
+        of the file's rows, under that layer's bounds, grouping and look --
+        the layer the ROIs follow being `state`; image layers are drawn as
+        they are, and hidden layers are left out, as there.  A layer showing
+        other files only is left out too: drawn with its own files it put
+        another file's molecules over this file's ROIs, and with this file's
+        it showed what the main view does not.  When that leaves no
+        localization layer, the one the ROIs follow is drawn regardless, as
+        before: a pane with nothing in it is no use for placing ROIs.  The
+        axes are the positions whatever the layers' (`sync`).
+        """
+        from ..layer_state import LayerSnapshot, snapshot_layer
+        source = self.sources[file_id]
+        primary = self.layer_index()
+        out, drawn = [], False
+        for i, layer in enumerate(self.session.layers):
+            if not layer.visible or layer.is_image:
+                out.append(snapshot_layer(layer))
+                continue
+            if layer.files is not None and source.number not in layer.files:
+                out.append(LayerSnapshot(name=layer.name, visible=False))
+                continue
+            if i == primary:
+                state = self.state(file_id)
+            else:
+                state = source.layer_states.get(i)
+                if state is None:
+                    state = ViewState(tables=self.state(file_id).tables)
+                    self._follow(state, layer)
+                    source.layer_states[i] = state
+            out.append(state.snapshot(name=layer.name))
+            drawn = True
+        if not drawn:
+            out[primary] = self.state(file_id).snapshot(
+                name=self.session.layers[primary].name)
+        return tuple(out)
 
     # ------------------------------------------------ measuring in an ROI
     def _file_mask(self, locs: Localizations, number: int) -> Optional[np.ndarray]:

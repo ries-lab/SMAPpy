@@ -298,3 +298,47 @@ def test_the_region_histograms_are_a_titled_grid_and_say_which_measures_had_no_v
     assert titles == ["radius (nm)", "n corners", "angle (°)"]
     assert grid_shape(12) == (3, 4) and grid_shape(4) == (2, 2)
     assert measure_title("sigma_c_nm") == "sigma c (nm)"
+
+
+def test_the_panes_draw_every_visible_layer_of_the_file_as_the_main_view_does():
+    from smappy.layer_state import render_panels
+    from smappy.render import FieldOfView
+    p, a = rois_of(table(np.arange(7) * 10.0), table([0.0, 5.0]), filters={})
+    b = p.source_of(1)
+    session = p.session
+    first_layer = session.layers[0]
+    first_layer.set_files(None)                 # both layers show both files
+    second = session.add_layer(like=0)
+    second.set_ranges({'photons': (500, None)})
+    p.sync()
+
+    first, other = p.view(a.id)
+    assert first.visible and other.visible
+    # each layer its own bounds over this file's rows alone
+    assert first.indices.tolist() == list(range(7))
+    assert other.locs['photons'][other.indices].tolist() == [500, 600, 700]
+    assert len(p.view(b.id)[1].indices) == 0
+
+    # the picture is the layers added up, as the main view adds them
+    fov = FieldOfView.fit((-10, 70), (-10, 10), 80, 20)
+    (rgb,), _ = render_panels(p.view(a.id), fov)
+    alone = first.image(fov, white_background=False)[0]
+    assert rgb.sum() > np.clip(alone, 0, 1).sum()
+
+    # a bound moved in the main view follows on sync; a hidden layer is left out
+    second.set_ranges({'photons': (700, None)})
+    p.sync()
+    other = p.view(a.id)[1]
+    assert other.locs['photons'][other.indices].tolist() == [700]
+    second.visible = False
+    assert not p.view(a.id)[1].visible
+
+    # a layer that shows the other file alone is not drawn over this one's
+    # ROIs; with none left, the layer the ROIs follow is drawn regardless
+    second.visible = True
+    second.set_files([1])
+    assert not p.view(a.id)[1].visible and p.view(b.id)[1].visible
+    first_layer.set_files([1])
+    first, other = p.view(a.id)
+    assert first.visible and not other.visible
+    assert first.locs['x_nm'][first.indices].tolist() == list(np.arange(7) * 10.0)

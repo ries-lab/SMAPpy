@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where ROIs are found, looked at one by one, kept or excluded, and measured.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.members, smappy.roi_manager.core.narrow, smappy.roi_manager.core.ROIProject.set_ranges, smappy.roi_manager.core.ROIProject.outline, smappy.roi_manager.core.ROIProject.rim_distance, smappy.roi_manager.core.ROIProject.summary, smappy.gui.roi_ranges.RangePanel]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject.view, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.members, smappy.roi_manager.core.narrow, smappy.roi_manager.core.ROIProject.set_ranges, smappy.roi_manager.core.ROIProject.outline, smappy.roi_manager.core.ROIProject.rim_distance, smappy.roi_manager.core.ROIProject.summary, smappy.gui.roi_ranges.RangePanel]
 ---
 
 ## What it does
@@ -66,8 +66,21 @@ is one picture of the localizations; its filter, also called bounds, is the
 lowest and highest values a localization's attributes may have; [merge
 blinks](plugin:Panels/Glossary), also called grouping or linking, combines
 the localizations in consecutive frames that come from one blinking event
-into one.)  The images in this window are drawn with that layer's settings
-too.
+into one.)
+
+The images in this window show what the main view shows of the file: every
+visible layer that shows this file, each with its own filter, merging and
+colours, added up as the main view adds them -- two channels in two layers
+are drawn in their two colours.  A layer hidden in the Render tab, or set to
+show only other files, is left out, so the molecules of another file are
+never drawn over this file's ROIs; if that leaves no layer, the first layer
+is drawn anyway.  Three things still differ from the main view.  The images
+are always of x and y, whatever the layers' axes, because an ROI is a
+place.  The 2D view's own ROI and the 3D view's slab are not applied.  And
+contrast is set for each image separately, so the same molecules can look
+brighter or dimmer than in the main view at another zoom; set the
+layer's scale to *absolute* in the Render tab to put both on one scale.  The ROIs
+are measured on the first layer alone, whatever the images show.
 
 ## How it works
 

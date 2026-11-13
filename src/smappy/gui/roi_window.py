@@ -114,8 +114,11 @@ def _lowered(label: str) -> str:
     return label
 
 
-def emphasised(snapshot, fov, marks) -> np.ndarray:
+def emphasised(snapshot, fov, marks, base=None) -> np.ndarray:
     """The picture of tracks with the ROIs' tracks marked in it, not over it.
+
+    ``base`` is the picture to mark them in, RGB on ``fov`` -- every layer
+    the pane draws -- or None for ``snapshot``'s own.
 
     ``marks`` is ``[(rows_of, style)]``, drawn in that order: the rows
     ``rows_of(locs)`` picks drawn again `ROI_WIDTH` times as wide -- in
@@ -127,7 +130,7 @@ def emphasised(snapshot, fov, marks) -> np.ndarray:
     the way a shape's outline is drawn, hid the track's own colours, which
     a track coloured by time is looked at for."""
     from dataclasses import replace
-    rgb, _ = snapshot.image(fov)
+    rgb = snapshot.image(fov)[0] if base is None else base
     rgb = np.asarray(rgb, float) * OTHERS_DIM
     keep = np.asarray(snapshot.mask, bool)
     width = snapshot.settings.line_width
@@ -267,15 +270,20 @@ class ImagePane(QWidget):
             return True
         return super().eventFilter(obj, event)
 
-    def render(self, state, x0: float, x1: float, y0: float, y1: float,
+    def render(self, view, x0: float, x1: float, y0: float, y1: float,
                emphasis=None) -> None:
         """The picture of ``x0..x1, y0..y1``; ``emphasis``, marks of track
-        ROIs to draw into it (`emphasised`)."""
+        ROIs to draw into it (`emphasised`).
+
+        ``view`` is ``(layers, state)``: the layers' snapshots to add up, as
+        the main view does (`ROIProject.view`), and the state of the layer
+        the ROIs follow, whose tracks the marks pick."""
+        from ..layer_state import render_panels
+        layers, state = view
         fov = FieldOfView.fit((x0, x1), (y0, y1), *canvas_pixels(self.graphics))
-        if emphasis is None:
-            rgb, _ = state.image(fov)
-        else:
-            rgb = emphasised(state.snapshot(), fov, emphasis)
+        (rgb,), _ = render_panels(layers, fov)
+        if emphasis is not None:
+            rgb = emphasised(state.snapshot(), fov, emphasis, base=rgb)
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0), padding=0)
@@ -810,8 +818,9 @@ class ROIManagerWindow(QMainWindow):
                 pane.clear()
             return
         state = project.state(file_id)
+        view = (project.view(file_id), state)
         x0, y0, x1, y1 = state.index.bounds
-        self.file_pane.render(state, x0, x1, y0, y1, self._emphasis())
+        self.file_pane.render(view, x0, x1, y0, y1, self._emphasis())
         rois = project.rois_of(file_id)
         preview = project.segment_preview
         if preview is not None and preview.get("file_id") == file_id:
@@ -831,7 +840,7 @@ class ROIManagerWindow(QMainWindow):
             self.zoom_center = centre
         half = self.zoom_pane.width_nm / 2
         emphasis = self._emphasis()
-        self.zoom_pane.render(state, centre[0] - half, centre[0] + half,
+        self.zoom_pane.render(view, centre[0] - half, centre[0] + half,
                               centre[1] - half, centre[1] + half, emphasis)
         self._draw_outlines(self.zoom_pane, rois, preview)
         if self.draft_track is not None:
@@ -848,7 +857,7 @@ class ROIManagerWindow(QMainWindow):
                              centre[0] - half, centre[0] - half],
                             [centre[1] - half, centre[1] - half, centre[1] + half,
                              centre[1] + half, centre[1] - half])
-        self._draw_roi_pane(state)
+        self._draw_roi_pane(view)
 
     # ----------------------------------------------------------------- tiles
     @property
@@ -1053,7 +1062,7 @@ class ROIManagerWindow(QMainWindow):
             return list(rois)
         return self._near(list(rois), fov.x0, fov.x1, fov.y0, fov.y1)
 
-    def _draw_roi_pane(self, state) -> None:
+    def _draw_roi_pane(self, view) -> None:
         project = self.project
         roi = project.rois.get(self.active) if self.active else None
         centre = self.draft if self.draft is not None else (
@@ -1072,7 +1081,7 @@ class ROIManagerWindow(QMainWindow):
         half = width / 2
         self.roi_pane.width_nm = width
         emphasis = self._emphasis()
-        self.roi_pane.render(state, centre[0] - half, centre[0] + half,
+        self.roi_pane.render(view, centre[0] - half, centre[0] + half,
                              centre[1] - half, centre[1] + half, emphasis)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})

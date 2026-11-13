@@ -204,7 +204,8 @@ def track_window():
 def test_a_track_is_selected_by_a_click_on_its_line_in_the_manager(app):
     session, project, window = track_window()
     along_x, along_y = sorted(project.rois.values(), key=lambda r: r.ids["track_id"])
-    window.zoom_pane.render(project.state(along_x.file_id), -200, 200, -200, 200)
+    window.zoom_pane.render((project.view(along_x.file_id), project.state(along_x.file_id)),
+                            -200, 200, -200, 200)
     assert window._roi_at(60, 1) is along_x
     assert window._roi_at(1, -60) is along_y
     assert window._roi_at(60, 60) is None
@@ -240,7 +241,7 @@ def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
     assert not header.size.isEnabled()
 
     file_id = next(iter(project.sources))
-    window.zoom_pane.render(project.state(file_id), -200, 200, -200, 200)
+    window.zoom_pane.render((project.view(file_id), project.state(file_id)), -200, 200, -200, 200)
     window._zoom_clicked(3, 70)                 # off both lines, nearer y's
     assert window.draft_track.ids == {"track_id": 2}
     # drawn thicker in its own colours, not covered by a line of one colour
