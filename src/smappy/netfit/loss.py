@@ -60,10 +60,11 @@ def terms(out, batch, scaling, chunk: int = 64) -> dict:
 
 
 def loss(out, batch, scaling, part=None) -> tuple:
-    """The batch's loss and its terms' means, for the part ``part`` (`settings.Part`)."""
+    """The batch's loss and its terms' means (0-d tensors), for the part ``part`` (`settings.Part`)."""
     settings = part.settings if part is not None else {}
     names = settings.get("terms", ["count", "mixture", "background"])
     weights = settings.get("weights", {})
     t = terms(out, batch, scaling)
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
-    return total, {k: float(v.detach().mean()) for k, v in t.items()}
+    # the terms as tensors: a float() here would wait for the GPU every step (`train`)
+    return total, {k: v.detach().mean() for k, v in t.items()}

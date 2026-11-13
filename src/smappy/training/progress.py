@@ -4,8 +4,9 @@ A reader -- the Train window, ``smappy-decode status``, ``tail -f`` over ssh -- 
 without talking to the training.  Every line has ``kind``, ``time`` (ISO, local, with its offset)
 and ``epoch``.  The kinds (docs/decode/poc-plan.md §5): ``start`` (versions, device), ``epoch``
 (``loss_train``, ``loss_test``, ``lr``, ``seconds`` and ``metrics``, the method's own values),
-``sample`` (the path of an npz), ``restart`` (why), ``stopped``, ``finished`` and ``error``
-(``message``).  A reader ignores keys it does not know, so a method adds values without the
+``sample`` (the path of an npz), ``snapshot`` (netfit: a model kept after ``samples`` samples
+and its ``metrics`` on the whole fixed test set), ``restart`` (why), ``stopped``, ``finished`` and
+``error`` (``message``).  A reader ignores keys it does not know, so a method adds values without the
 window changing; a line cut short by a crash, the last, is skipped.
 """
 from __future__ import annotations
@@ -17,7 +18,7 @@ import os
 from pathlib import Path
 
 NAME = "progress.jsonl"
-KINDS = ("start", "epoch", "sample", "restart", "stopped", "finished", "error")
+KINDS = ("start", "epoch", "sample", "snapshot", "restart", "stopped", "finished", "error")
 
 
 def _clean(value):

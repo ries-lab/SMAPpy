@@ -141,6 +141,12 @@ class TwoStageUNet(nn.Module):
         b, t, h, w = x.shape
         feats = self.frame(x.reshape(b * t, 1, h, w)).reshape(b, -1, h, w)
         u = self.union(feats)
+        # the heads in full precision, whatever the backbone ran in: in bf16 an output of z over
+        # +-1000 nm resolves only about 4 nm (`train`'s ``precision``)
+        with torch.autocast(u.device.type, enabled=False):
+            return self._heads(u.float())
+
+    def _heads(self, u):
         values = self.heads["phot_xyz"](u)
         logit = self.heads["p"](u)
         if self.p_clamp is not None:
