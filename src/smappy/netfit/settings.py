@@ -60,12 +60,13 @@ class Parts:
     output: Part = field(default_factory=lambda: Part("offsets"))
     extraction: Part = field(default_factory=lambda: Part("lookahead"))
     loss: Part = field(default_factory=lambda: Part("mixture", {"terms": ["count", "mixture", "background"]}))
-    # DECODE's: AdamW, the rate times 0.9 every 10 epochs, gradients clipped (the norm 0.03 is
-    # recalled from DECODE's training, not read: a setting to revisit if training is unstable);
-    # an epoch is 10 000 samples, DECODE's pseudo_ds_size.  The rate is the port's decode_B's.
+    # The port's decode_B's: AdamW, the rate times 0.9 every 10 epochs, no gradient clipping, an
+    # epoch of 32 768 samples (its pseudo_ds_size).  The epoch's size sets how fast the rate falls
+    # per sample: at 10 000 netfit pixelated half as much again as the port and found fewer
+    # molecules; at 32 768 it matched it (2026-11-13, docs/decode/poc-plan.md).
     schedule: Part = field(default_factory=lambda: Part("adamw_step", {
-        "lr": 6e-4, "weight_decay": 0.1, "step_epochs": 10, "gamma": 0.9, "clip_norm": 0.03,
-        "batch": 64, "samples_per_epoch": 10000, "epochs": 1000, "test_samples": 512, "threshold": 0.5}))
+        "lr": 6e-4, "weight_decay": 0.1, "step_epochs": 10, "gamma": 0.9, "clip_norm": None,
+        "batch": 64, "samples_per_epoch": 32768, "epochs": 1000, "test_samples": 512, "threshold": 0.5}))
 
 
 @dataclass

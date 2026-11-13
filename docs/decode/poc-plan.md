@@ -1880,3 +1880,42 @@ the matched emitters there first (`report.py`, ``core``):
 - **Near the focus the pixelation is the photons'**: DECODE's KS 0.009 sparse and bright against
   0.026 at 1000 photons (Spline 3D 0.011 -- 0.015), so step 4's pixelation work is judged on the dim
   sets near the focus first.
+
+### Step 3: netfit version 1 against the port, like for like (2026-11-12 -- 13)
+
+netfit (`src/smappy/netfit/`, written new, BSD) against the port, both trained for context B and
+scored on the one fixed test set (`netfit/testset.py`: 2048 samples of 3 x 64 x 64 frames, 259 816
+molecules blinking over them, each with its CRLB and the window's pooled CRLB), molecules from 100
+photons counted as in DECODE's evaluation.  Every training as the port's decode_B was: targets
+from 100 photons, no gradient clipping.  Near focus is |z| < 300 nm.
+
+| model | frames | samples / epoch | Jaccard | near focus lat / ax (nm) | KS all / near focus | pooled width, 2 / 3 frames on |
+|---|---:|---:|---:|---:|---:|---:|
+| port decode_B | 1 | 32 768 | 0.452 | 50.1 / 86.5 | 0.014 / 0.011 | -- |
+| netfit v1b | 1 | 10 000 | 0.441 | 50.7 / 86.4 | 0.022 / 0.019 | -- |
+| netfit v1d | 1 | 32 768 | 0.450 | 50.3 / 87.3 | 0.014 / 0.013 | -- |
+| port pix_B_t3 | 3 | 32 768 | 0.542 | 40.3 / 69.6 | 0.024 / 0.018 | 2.23 / 2.38 |
+| netfit v1c | 3 | 10 000 | 0.517 | 40.8 / 70.8 | 0.031 / 0.022 | 2.33 / 2.51 |
+| netfit v1e | 3 | 32 768 | 0.533 | 40.5 / 70.5 | 0.024 / 0.019 | 2.24 / 2.39 |
+
+- **The gap was the schedule.**  With an epoch of 10 000 samples netfit pixelated half as much
+  again as the port and found fewer molecules; at the port's 32 768 it matches it.  The rate falls
+  0.9 every 10 epochs in both, so a shorter epoch makes it fall about three times faster per
+  sample (3.8 M samples seen against 12 M).  Before that was found two things were ruled out:
+  netfit's extraction on the port's raw output gives the port's KS (0.015 against 0.014), and both
+  networks' offsets read at each molecule's own pixel pixelate alike (KS 0.016 -- 0.020) -- the
+  gap was in the p map, which pixel takes a molecule near an edge.  DECODE's network details
+  (Kaiming init, 1 x 1 upsampling, no activation after pooling, a linear output convolution, p
+  clamped) are options of ``unet2`` (`network.TwoStageUNet`), not needed for this.
+- **Temporal context**: 3 frames take the near-focus error from 50 to 40 nm lateral and 87 to
+  70 nm axial, and the Jaccard from 0.45 to 0.53 -- 0.54, in both.  They cost pixelation in both
+  (KS 0.014 to 0.024).
+- **Neither pools well**: a molecule on in 2 or 3 frames is localized at 2.2 -- 2.4 times the
+  pooled bound, the same in both, so this is DECODE's and the target for step 4.  With the
+  neighbours shuffled (`testset.load(shuffled=True)`) both lose what context gave and more (Jaccard
+  0.44 -- 0.45, 59 nm near focus): a 3-frame model is not a 1-frame model on single frames.
+- **Convergence**: v1d settles by about 220 epochs (50 min on the 4090), v1e by about 290 (110 min
+  on the H100).
+- **Still open**: whether the 3-frame Jaccard difference (0.533 against 0.542) is more than the
+  spread between trainings -- seeds 1 and 2 of v1d and of the port, seed 1 of v1e, were run the
+  night of 2026-11-12; and training without the 100-photon target limit (v1d_B_p0).
