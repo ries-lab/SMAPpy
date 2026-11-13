@@ -43,7 +43,7 @@ def test_the_bead_calibration_runs_without_its_window_and_saves_beside_the_stack
     assert saved.endswith(".h5") and str(beads.parent) in saved
     assert calibration_list.describe(saved) is not None      # a calibration the fitters read
     assert result.data["fitter"] == "Localize/Spline 3D"
-    assert list(result.plots) == ["Overview", "Bead diagnostics"]
+    assert list(result.plots) == ["Overview", "Bead diagnostics", "CRLB"]
     _drawn(result)
 
 
