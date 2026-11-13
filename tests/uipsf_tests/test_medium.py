@@ -183,3 +183,23 @@ def test_the_models_line_says_the_learnt_index(optics):
     source = SimpleNamespace(model=model, shared=shared,
                              result=SimpleNamespace(std={"optics.n_med": torch.tensor(0.0011)}))
     assert "sample index 1.3612 ± 0.0011" in model_text(source)
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="Apple's GPU only")
+def test_the_sample_index_has_forward_derivatives_under_vmap_on_apples_gpu():
+    """The solver's shared columns are vmap(jvp): on Apple's GPU a 0-d index failed every operation with a Python
+    number there, and *learn sample index* stopped in situ (November 2026).  The fields' and the depth's
+    derivatives in n_med agree with the CPU's."""
+    from torch.func import jvp, vmap
+
+    from uipsf.optics import medium
+    o = uipsf.Optics(NA=1.43, wavelength_nm=690.0, n_imm=1.516, n_med=1.33, pixel_size_nm=(127, 116))
+    out = {}
+    for dev in ("cpu", "mps"):
+        g = uipsf.PupilGrid.build(o, 32, device=dev, dtype=torch.float32)
+        n = torch.tensor(1.36, device=dev)
+
+        def f(n, g=g):
+            return medium.fields(g, n).abs().sum() + medium.maps(g, n).kz_med.real.sum()
+        out[dev] = vmap(lambda t, f=f, n=n: jvp(f, (n,), (t,))[1])(torch.ones(2, device=dev)).cpu()
+    assert torch.allclose(out["cpu"], out["mps"], rtol=1e-4)

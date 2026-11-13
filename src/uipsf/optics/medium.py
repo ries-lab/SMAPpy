@@ -41,7 +41,10 @@ def maps(grid, n_med: torch.Tensor) -> SimpleNamespace:
     ``kz_med`` complex, cycles/nm; ``kappa`` its imaginary part, how fast the supercritical light decays in
     the sample (`MinimalPupil`'s ring)."""
     o = grid.optics
-    n = n_med.to(grid.dtype)
+    # [1, 1], not 0-d: on Apple's GPU a 0-d tensor under the solver's vmap(jvp) fails every operation with a
+    # Python number ("unsupported operand type(s) for /: 'Tensor' and 'float'", torch 2.14), which stopped
+    # *learn sample index* in situ; a [1, 1] one broadcasts against the [P, P] maps alike and does not
+    n = n_med.to(grid.dtype).reshape(1, 1)
     rho = grid.rho.real if grid.rho.is_complex() else grid.rho
     s = rho * o.NA                                          # n·sin θ, the same in every layer
     cos_med = _root(1 - (s / n) ** 2, eps(grid))            # complex, +i branch beyond the critical angle
