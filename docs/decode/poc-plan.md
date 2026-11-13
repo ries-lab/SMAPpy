@@ -1916,6 +1916,18 @@ from 100 photons, no gradient clipping.  Near focus is |z| < 300 nm.
   0.44 -- 0.45, 59 nm near focus): a 3-frame model is not a 1-frame model on single frames.
 - **Convergence**: v1d settles by about 220 epochs (50 min on the 4090), v1e by about 290 (110 min
   on the H100).
-- **Still open**: whether the 3-frame Jaccard difference (0.533 against 0.542) is more than the
-  spread between trainings -- seeds 1 and 2 of v1d and of the port, seed 1 of v1e, were run the
-  night of 2026-11-12; and training without the 100-photon target limit (v1d_B_p0).
+- **The spread between trainings** (seeds 0, 1, 2; the night of 2026-11-12):
+
+  | model | frames | Jaccard | near focus lat (nm) | KS all | KS near focus |
+  |---|---:|---|---|---|---|
+  | port | 1 | 0.452, 0.453, 0.453 | 50.1 -- 50.4 | 0.014, 0.0185, 0.012 | 0.011, 0.013, 0.011 |
+  | netfit v1d | 1 | 0.450, 0.449, 0.447 | 50.0 -- 50.5 | 0.014, 0.023, 0.019 | 0.013, 0.021, 0.014 |
+  | netfit v1e | 3 | 0.533, 0.523 | 40.5, 40.9 | 0.024, 0.030 | 0.019, 0.022 |
+
+  Precision is the same in every training.  Detection is not quite: at 1 frame every netfit
+  training is below every port one, by about 0.004 in Jaccard -- small, but real.  At 3 frames
+  netfit's two seeds differ by 0.010, as much as the gap to the port's one training (0.542).
+  Pixelation is a property of the training as much as of the method: the KS moves from 0.012 to
+  0.023 between seeds, so a variant's pixelation is judged on several trainings, not one.
+- **Targets without the 100-photon limit** (v1d_B_p0, every molecule a target): Jaccard 0.449,
+  50.5 / 87.6 nm, KS 0.020 / 0.018 -- inside the seeds' range.  The limit makes no difference.
