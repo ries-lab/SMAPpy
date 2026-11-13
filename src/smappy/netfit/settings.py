@@ -55,7 +55,13 @@ class Part:
 @dataclass
 class Parts:
     """The swappable parts (`docs/decode/benchmark.md`): version 1's are DECODE's."""
-    backbone: Part = field(default_factory=lambda: Part("unet2", {"features": 48, "depth_frame": 2, "depth_union": 2}))
+    # DECODE's network details (v1f): Kaiming init is most of their gain in Jaccard, +0.008 at 6 M
+    # samples; the other four reach it 1 - 2 M samples sooner (2026-11-13, docs/decode/poc-plan.md).
+    # Spelt out, not `TwoStageUNet`'s defaults, which stay version 1's so that a model saved before
+    # is built as it was trained.
+    backbone: Part = field(default_factory=lambda: Part("unet2", {
+        "features": 48, "depth_frame": 2, "depth_union": 2, "upsample_kernel": 1, "pool_act": False,
+        "out_conv": True, "init": "kaiming", "p_clamp": 8.0}))
     time_model: Part = field(default_factory=lambda: Part("frame_stack"))
     output: Part = field(default_factory=lambda: Part("offsets"))
     extraction: Part = field(default_factory=lambda: Part("lookahead"))

@@ -105,7 +105,8 @@ class TwoStageUNet(nn.Module):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details, there to find which of them
-        pixelation depends on (2026-11-12); the defaults are version 1's."""
+        pixelation depends on (2026-11-12); the defaults here are version 1's, so that a model saved
+        without them is built as it was trained -- a new training's are DECODE's (`settings.Parts`)."""
         super().__init__()
         act = _ACTIVATIONS[activation]
         self.window = window

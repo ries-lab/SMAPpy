@@ -89,3 +89,13 @@ def test_a_molecule_below_100_photons_counts_neither_as_missed_nor_found_as_fals
     r = evaluate(truth, found, (100.0, 100.0))
     assert r["recall"] == 0.5 and r["precision"] == 0.5           # 1 of the 2 bright; 1 of 2 counted fits
     assert evaluate(truth, found, (100.0, 100.0), photons_min=None)["recall"] == 0.5   # 2 of 4
+
+
+def test_a_new_training_gets_decodes_network_and_a_model_saved_without_its_details_version_1s():
+    from smappy.netfit.settings import Part, Parts
+    new = network.build(Parts(), 3)
+    assert new.p_clamp == 8.0 and isinstance(new.frame.out, torch.nn.Conv2d)
+    old = Parts(backbone=Part("unet2", {"features": 48, "depth_frame": 2, "depth_union": 2}))
+    v1 = network.build(old, 3)
+    assert v1.p_clamp is None and isinstance(v1.frame.out, torch.nn.Identity)
+    assert sum(p.numel() for p in new.parameters()) != sum(p.numel() for p in v1.parameters())

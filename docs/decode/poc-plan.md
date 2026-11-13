@@ -1932,6 +1932,22 @@ from 100 photons, no gradient clipping.  Near focus is |z| < 300 nm.
 - **DECODE's network details** (v1f: Kaiming init, 1 x 1 upsampling, no activation after pooling,
   a linear output convolution, p clamped; one training so far): Jaccard 0.454, 49.9 / 86.3 nm near
   focus, KS 0.023 / 0.019 -- the Jaccard above every v1d seed and at the port's, so the details
-  look like the 0.004; the pixelation at the top of the range.  A second seed runs.
+  look like the 0.004; the pixelation at the top of the range.  The second seed: 0.454, KS 0.020.
+- **Which of the details** (an ablation, 6 M samples, two seeds, snapshots scored on all of set B):
+  Jaccard at 1 / 2 / 6 M samples, the seeds' mean --
+
+  | backbone | 1 M | 2 M | 6 M |
+  | --- | ---: | ---: | ---: |
+  | version 1 | 0.424 | 0.435 | 0.447 |
+  | version 1, Kaiming init | 0.438 | 0.449 | 0.455 |
+  | v1f without Kaiming init | 0.440 | 0.448 | 0.451 |
+  | v1f | 0.451 | 0.451 | 0.456 |
+
+  Kaiming init is most of the gain: PyTorch's default is about 2.4 times smaller, and the network
+  learns slowly while the rate is high.  The other four details add little at the end but reach
+  it 1 - 2 M samples sooner.  Near-focus lateral RMSE 50.2 - 51.0 nm in all; the KS scatters by
+  training, not by variant.  A snapshot's Jaccard moves by about 0.004 from one to the next, as
+  much as the seeds.  **v1f's details are netfit's defaults since** (`settings.Parts`; the
+  network's own defaults stay version 1's, so a model saved before is built as it was trained).
 - **Targets without the 100-photon limit** (v1d_B_p0, every molecule a target): Jaccard 0.449,
   50.5 / 87.6 nm, KS 0.020 / 0.018 -- inside the seeds' range.  The limit makes no difference.
