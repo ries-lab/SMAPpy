@@ -333,7 +333,7 @@ def _superseded(name: str, names) -> bool:
 
 def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     import h5py
-    columns, entries, sites = {}, [], None
+    columns, entries, sites, filenumber = {}, [], None, None
     try:
         f = h5py.File(path, "r")
     except OSError:
@@ -345,6 +345,8 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 if name in SML_DROP or _superseded(name, loc):
                     continue
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
+            if "filenumber" in loc:
+                filenumber = np.array(loc["filenumber"]).ravel()
             sites = _sml_sites(f)
             entries = _sml_entries_h5(f)
     else:                                                    # MATLAB v5-v7
@@ -355,10 +357,14 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
             if name in SML_DROP or _superseded(name, loc._fieldnames):
                 continue
             columns[SML_COLUMNS.get(name, name)] = np.atleast_1d(getattr(loc, name))
+        if "filenumber" in loc._fieldnames:
+            filenumber = np.atleast_1d(loc.filenumber)
         try:
             entries = _sml_entries_v5(m["saveloc"])
         except (AttributeError, TypeError, ValueError):
             pass
+    if filenumber is not None and entries:
+        columns = _in_files(columns, filenumber, len(entries))
     # the table's camera is the first file's, as a session's is
     info = entries[0][1] if entries else {}
     if "frame" in columns:
@@ -380,6 +386,24 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "SMAP",
                           pixelsize_nm=px * 1000 if px else None, metadata=info)
+
+
+def _in_files(columns: Dict[str, np.ndarray], filenumber: np.ndarray,
+              n_files: int) -> Dict[str, np.ndarray]:
+    """The rows of SMAP's files, numbered from 1, without those of none.
+
+    A row whose ``filenumber`` names none of the file's files is shown by
+    SMAP nowhere.  In the files where they were found (two experiments,
+    November 2026: 1,493 of 2.9 M rows and 57,246 of 22.4 M, all with
+    ``filenumber`` 0) they were all zeros but for ``class``,
+    ``origin`` and ``groupindex`` -- leftovers of a SMAP step -- and read
+    as localizations they sat at (0, 0) in frame -1.
+    """
+    number = np.asarray(filenumber).ravel()
+    keep = (number >= 1) & (number <= n_files)
+    if keep.all():
+        return columns
+    return {name: np.asarray(values)[keep] for name, values in columns.items()}
 
 
 def _sml_info(get: Callable) -> Dict:

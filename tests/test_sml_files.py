@@ -84,3 +84,18 @@ def test_a_smap_file_of_several_files_has_its_camera_read(tmp_path, write):
     camera = locs.metadata["camera"]
     assert camera["conversion"] == 5.0 and camera["roi"] == [137, 286, 223, 208]
     assert camera["frame_time_ms"] == pytest.approx(35.31)
+
+
+@pytest.mark.parametrize("write", [write_sml, write_sml_v5])
+def test_rows_of_no_file_are_left_out_not_read_as_localizations_at_the_origin(tmp_path, write):
+    """SMAP shows a row whose ``filenumber`` names none of its files nowhere;
+    those found were all zeros, and came in at (0, 0) in frame -1."""
+    files = [("C:\\data\\Pos0_sml.mat", CAMERA), ("C:\\data\\Pos1_sml.mat", CAMERA)]
+    rows = _rows([0, 1, 1, 2, 0, 2, 2])
+    for name in ("xnm", "ynm", "frame", "phot"):
+        rows[name][rows["filenumber"] == 0] = 0
+    path = write(tmp_path / "leftovers_sml.mat", files, rows)
+    locs, _ = load(path)
+    assert len(locs) == 5
+    assert np.all(locs["frame"] >= 0) and np.all(locs["x_nm"] > 0)
+    assert np.allclose(np.sort(locs["photons"]), np.sort(rows["phot"][rows["filenumber"] > 0]))
