@@ -174,8 +174,10 @@ class LoadAuto(Plugin):
     # conversion (units, first frame) is a part of its own; 5: Abberior
     # `.msr` files, m2410 MINFLUX exports, and a MINFLUX localization's cfr
     # from the iteration that measures it; 6: a MINFLUX localization's
-    # precision is the Cramér-Rao bound of its pattern, not 150 nm / sqrt(N)
-    version = "6"
+    # precision is the Cramér-Rao bound of its pattern, not 150 nm / sqrt(N);
+    # 7: a SMAP file of several files opens as those files, its sites on
+    # theirs, without the rows of none
+    version = "7"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
         """The csv part is shown for a csv only, the MSR part for an `.msr`."""
