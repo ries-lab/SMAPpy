@@ -121,3 +121,56 @@ def test_what_the_allocators_keep_after_a_run_is_handed_back():
     assert torch.mps.driver_allocated_memory() >= 64 * 2 ** 20
     device.release_memory()
     assert torch.mps.driver_allocated_memory() < 64 * 2 ** 20
+
+
+def test_on_cuda_the_chunk_is_what_one_emitter_measured_on_the_card_leaves_room_for(monkeypatch):
+    """The bytes-per-value rule was a small model's: one NA 1.50 bead costs up to 25 times it, and an NVIDIA
+    card on Windows, full, moved the rest into system memory.  One emitter measured caps the chunk."""
+    from uipsf.solve import problem
+    model, _, batch = small_beads(OPTICS, n=6)
+    each = 10 * 2 ** 20
+    free = int(2.5 * problem.MEASURED_MARGIN * each / problem.CUDA_SHARE)    # room for two and a half
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (free, 24 * 2 ** 30))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device=None: 0)
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device=None: 0)
+    monkeypatch.setattr(problem, "_measured_bytes", lambda *a: each)
+    small = Problem(model, Poisson(), batch, device="cuda")
+    assert small.chunk_size == 2 and small.peak_bytes == 2 * int(problem.MEASURED_MARGIN * each)
+    assert Problem(model, Poisson(), batch, chunk_size=256, device="cuda").chunk_size == 2   # in situ's too
+
+
+def _sampling_meter():
+    """A sampling meter on this process's memory now, by the system's own count, with its release."""
+    from uipsf import memory
+    if sys.platform == "win32":
+        return memory._SamplingMeter(memory._windows_private_bytes, memory._windows_heapmin)
+    if sys.platform == "darwin":
+        mac = memory._MacMeter()
+        return memory._SamplingMeter(lambda: int(mac._fields()[mac.FOOTPRINT]), mac.release)
+    return memory._SamplingMeter(memory._linux_rss, memory._LinuxMeter().release)
+
+
+def test_the_sampling_meter_sees_a_peak_the_work_held_and_freed(monkeypatch):
+    """Windows keeps no peak that can be reset, so the process's use is sampled while the work runs: 200 MB
+    held for 20 ms and freed again is the peak, not the end."""
+    import time
+
+    from uipsf import memory
+    use = [10 * 2 ** 20]
+    monkeypatch.setattr(memory, "_METER", memory._SamplingMeter(lambda: use[0]))
+
+    def work():
+        use[0] += 200 * 2 ** 20
+        time.sleep(0.02)
+        use[0] -= 200 * 2 ** 20
+        return "done"
+    assert memory.measure(work, "cpu") == ("done", 200 * 2 ** 20)
+
+
+def test_this_systems_counter_of_current_use_answers_and_counts_new_pages(monkeypatch):
+    """The counter a sampling meter reads here (Windows' private bytes, Linux's VmRSS, macOS' footprint): an
+    answer, and pages written counted -- at least some: the allocator may hand back pages it kept."""
+    from uipsf import memory
+    monkeypatch.setattr(memory, "_METER", _sampling_meter())
+    out, held = memory.measure(lambda: float(torch.ones(50 * 2 ** 20)[-1]), "cpu")
+    assert out == 1.0 and held is not None and 0 < held < 400 * 2 ** 20

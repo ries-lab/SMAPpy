@@ -20,7 +20,14 @@ glibc's `malloc_trim`): pages it kept from earlier work are reused without the f
 measurement of the same work read 0 where the first read 83 MB.  Released first, one emitter of a small model
 read 214 MB three times in three, and chunks of 2, 3 and 6 held 0.94 to 0.97 times that per emitter.
 
-Elsewhere (Windows' CPU) `measure` returns None, and the caller falls back to a rule.
+Where the system keeps no peak that can be reset -- Windows, and a Linux container that forbids writing to
+clear_refs -- the process's current use is sampled every millisecond on a thread while the work runs
+(`_SamplingMeter`: Windows' private bytes, Linux's ``VmRSS``).  A sample can miss a peak shorter than that,
+which `solve.problem.MEASURED_MARGIN` covers; torch's operations release the GIL, so the thread samples
+during them.  Before it, Windows measured nothing and a rule of 16 kB per value chunked M2's NA 1.43 beads
+about right and NA 1.50's up to ten times too large.
+
+Where even that fails `measure` returns None, and the caller falls back to a rule.
 """
 from __future__ import annotations
 
@@ -135,13 +142,92 @@ class _LinuxMeter:
         return self._status("VmHWM")
 
 
+class _SamplingMeter:
+    """The process's current use (``current``, bytes or None), sampled every `SAMPLE_SECONDS` on a thread
+    between `reset` and `peak`: for a system whose peak cannot be reset (module docstring)."""
+    SAMPLE_SECONDS = 0.001
+
+    def __init__(self, current, release=None):
+        self.current, self._release = current, release
+        self._thread, self._max = None, None
+
+    def release(self):
+        if self._release is not None:
+            self._release()
+
+    def reset(self) -> int | None:
+        import threading
+        start = self.current()
+        if start is None:
+            return None
+        self._max, self._stop = start, threading.Event()
+
+        def sample():
+            while not self._stop.is_set():
+                now = self.current()
+                if now is not None and now > self._max:
+                    self._max = now
+                self._stop.wait(self.SAMPLE_SECONDS)
+        self._thread = threading.Thread(target=sample, daemon=True)
+        self._thread.start()
+        return start
+
+    def peak(self) -> int | None:
+        if self._thread is None:
+            return None
+        now = self.current()            # the end too: work shorter than one sample
+        self._stop.set()
+        self._thread.join()
+        self._thread = None
+        return max(self._max, now) if now is not None else self._max
+
+
+class _CountersEx(ctypes.Structure):
+    """Windows' PROCESS_MEMORY_COUNTERS_EX, for `K32GetProcessMemoryInfo`."""
+    _fields_ = [("cb", ctypes.c_uint32), ("PageFaultCount", ctypes.c_uint32)] + [
+        (name, ctypes.c_size_t) for name in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+            "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage", "PeakPagefileUsage",
+            "PrivateUsage")]
+
+
+def _windows_private_bytes():
+    """The process's private bytes now (what it has committed, swapped or not), or None."""
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    counters = _CountersEx()
+    counters.cb = ctypes.sizeof(_CountersEx)
+    if not kernel32.K32GetProcessMemoryInfo(ctypes.c_void_p(kernel32.GetCurrentProcess()),
+                                            ctypes.byref(counters), counters.cb):
+        return None
+    return int(counters.PrivateUsage)
+
+
+def _windows_heapmin():
+    """Hand the C runtime's freed heap pages back (``_heapmin``), so that work reusing them is counted."""
+    try:
+        ctypes.cdll.ucrtbase._heapmin()
+    except (OSError, AttributeError):
+        pass
+
+
+def _linux_rss():
+    return _LinuxMeter()._status("VmRSS")
+
+
 def _meter():
     try:
         if sys.platform == "darwin":
             return _MacMeter()
-        if sys.platform.startswith("linux") and os.path.exists("/proc/self/clear_refs"):
-            meter = _LinuxMeter()
-            return meter if meter.trim is not None else None    # unreleased pages would be under-counted
+        if sys.platform == "win32":
+            return _SamplingMeter(_windows_private_bytes, _windows_heapmin) if _windows_private_bytes() else None
+        if sys.platform.startswith("linux"):
+            linux = _LinuxMeter()
+            if linux.trim is None:              # musl: unreleased pages would be under-counted
+                return None
+            if os.path.exists("/proc/self/clear_refs") and linux.reset() is not None:
+                return linux
+            return _SamplingMeter(_linux_rss, linux.release)    # a container that forbids clear_refs
     except (OSError, AttributeError):
         return None
     return None

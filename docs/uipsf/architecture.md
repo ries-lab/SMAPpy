@@ -2582,7 +2582,8 @@ one emitter cached per model, region shape, device and tangents (one normal equa
 | 6 beads of 31 × 15², P 64, CPU | 214 MB | 0.94 to 0.97 × |
 
 Smaller chunks cost little speed (M6: 0.40 s a bead in chunks of 1, 0.29 in chunks of 4); more than 4 tangents
-gained nothing there and doubled the memory at 16.  Windows' CPU, where nothing is measured, keeps the rule.
+gained nothing there and doubled the memory at 16.  Windows' CPU, where nothing was measured, kept the rule
+(until 13 November, below).
 `memory_plan` is the same figure before a run, measured even where the beads fit: the PSF calibration window
 shows it after *Detect beads* (`smappy.calibrate.pupil.estimate_memory`).  A solver's ``cancel`` is the
 `Problem`'s while it runs (`solve.stop.stoppable`) and is checked before every chunk, so *Stop* ends a fit
@@ -2594,6 +2595,18 @@ into its free space.  After the window's estimates an M6 bead measured 1.0 GB th
 went at once, and a calibration through the window peaked at 35.6 GB and took 442 s; measured so, 9.2 GB and 44 s.
 After every job the PSF calibration window hands back what torch's allocators kept (`device.release_memory`:
 Metal's or CUDA's cache, the CPU allocator's free pages): 3-4 GB stayed counted as the program's after a run.
+
+**CUDA and Windows measured too (13 November 2026).**  The report: uiPSF in SMAPpy "consumes too much memory" on
+the lab's Windows PC.  There the chunk came from rules -- 6 kB per pixel value on CUDA, 16 kB on Windows' CPU --
+while one bead costs, per value, 5-26 kB at NA 1.43 (M2, 64 pupil samples) and 39-164 kB at NA 1.50 (128
+samples), on the CPU and Apple's GPU alike: up to 25 times the CUDA rule, and a full card on Windows spills into
+system memory.  Now a CUDA chunk is capped by one emitter measured with the card's allocator, as on the hosts,
+against half of what the card has free (other programs' use counted).  On decodebox's 4090 with 8.5 GB of 25
+free (a DECODE training beside it), 24 NA 1.50 beads: the rule alone one chunk of 24, measured chunks of 3,
+predicted 4.2 GB, held 2.0.  Where no peak can be reset -- Windows, a Linux container forbidding clear_refs -- a
+thread samples the process's use every millisecond while the bead is measured (`memory._SamplingMeter`); the rule
+left for a system with neither is NA 1.50's 40 kB.  `benchmarks/uipsf/memory_check.py` prints all of it on the
+machine at hand.
 
 ## Phase masks in the pupil (November 2026; `model/mask.py`, S1 of `docs/uipsf/scanned-psfs.md`)
 

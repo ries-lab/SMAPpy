@@ -322,6 +322,7 @@ def test_on_cuda_a_chunk_is_what_the_cards_free_memory_holds(optics, monkeypatch
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (int(free), 8 * 2 ** 30))
     monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device=None: 0)
     monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device=None: 0)
+    monkeypatch.setattr(problem, "_measured_bytes", lambda *a: None)                # the rule alone
     assert Problem(model, Poisson(), batch, device="cuda").chunk_size == 3
     assert Problem(model, Poisson(), batch, chunk_size=256, device="cuda").chunk_size == 3
     assert Problem(model, Poisson(), batch, chunk_size=2, device="cuda").chunk_size == 2

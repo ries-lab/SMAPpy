@@ -80,6 +80,10 @@ TANGENT_BUDGET = {"cpu": 2 ** 21, "mps": 2 ** 21}
 # ~4 kB per value of a chunk and ~0.5 kB per value of each tangent).  An 8 GB card on Windows does not
 # fail when it is full -- the driver moves the excess into system memory and the fit crawls -- so each
 # `Problem` takes half of what is free, at `CUDA_BYTES_PER_VALUE`, at most the 2²¹ of the other devices.
+# That rule sizes the tangents; the chunk is then capped by one emitter measured with the card's own
+# allocator, as on the hosts below: the rule was Zenodo's small model, and one bead of M2's (NA 1.43, 64
+# pupil samples) costs 5 to 26 kB per value, one of NA 1.50 (128 samples) 39 to 164 kB (CPU and Apple's
+# GPU, November 2026) -- up to 25 times the rule, which on Windows went into system memory as above.
 CUDA_BYTES_PER_VALUE = 6000
 CUDA_SHARE = 0.5
 
@@ -103,7 +107,9 @@ CUDA_SHARE = 0.5
 # only where `HOST_BYTES_ROUGH` per value says the beads might not all fit in one chunk.
 MEASURED_MARGIN = 1.25
 HOST_SHARE = 0.8
-HOST_BYTES_PER_VALUE = 16000     # where nothing can be measured (Windows' CPU): the x86 measurement above
+# where nothing can be measured (`uipsf.memory` has a meter on every system it knows; this is for the rest):
+# one bead at one tangent on the CPU, NA 1.50's 39 kB per value (16 kB, the x86 rule before, was a small model's)
+HOST_BYTES_PER_VALUE = 40000
 HOST_BYTES_ROUGH = 100000        # above anything measured: below this, every emitter in one chunk is safe
 
 
@@ -170,12 +176,19 @@ def memory_plan(model, noise, batch, device=None) -> MemoryPlan:
     return MemoryPlan(problem.chunk_size, peak, available_memory_bytes())
 
 
-def _cuda_budget(device) -> int:
-    """Output values per batch that fit on the CUDA ``device`` (`CUDA_SHARE` of what is free, counting
-    what torch's allocator holds unused, which it hands out again), at most 2²¹."""
+def _cuda_room(device) -> int:
+    """Bytes a chunk may take on the CUDA ``device``: `CUDA_SHARE` of what is free -- other programs' use
+    counted, a DECODE training's on the same card too -- with what torch's allocator holds unused, which it
+    hands out again."""
     free, _ = torch.cuda.mem_get_info(device)
     free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-    return int(max(1, min(2 ** 21, CUDA_SHARE * free // CUDA_BYTES_PER_VALUE)))
+    return int(CUDA_SHARE * free)
+
+
+def _cuda_budget(device) -> int:
+    """Output values per batch that fit on the CUDA ``device`` (`_cuda_room` at `CUDA_BYTES_PER_VALUE`), at
+    most 2²¹."""
+    return int(max(1, min(2 ** 21, _cuda_room(device) // CUDA_BYTES_PER_VALUE)))
 
 
 # At most this many tangents per batch.  x86 CPUs (Linux, Windows) are fastest with few: on 4 cloud
@@ -195,7 +208,8 @@ class Problem:
         the device (on CUDA what the card has free, `_cuda_budget`), at most 16 (`TANGENT_MAX` on the
         CPU); all emitters in one chunk unless even one tangent would exceed it, or the chunk the memory
         available: on the CPU and MPS what one emitter is measured to hold (`_measured_bytes`; ``measure=False``
-        skips it, the rule `HOST_BYTES_PER_VALUE` then), on CUDA the card's free memory.  ``peak_bytes`` is
+        skips it, the rule `HOST_BYTES_PER_VALUE` then), on CUDA the card's free memory, by the rule and
+        by one emitter measured with the card's allocator.  ``peak_bytes`` is
         what a chunk is expected to hold at most, where it was measured (None otherwise).
         Measured on an M1 Pro (dim beads, 41 slices of 21², n_max 6, one `normal_equations`):
 
@@ -218,22 +232,24 @@ class Problem:
                   else TANGENT_BUDGET.get(self.device.type, 2 ** 21))
         fits = max(1, budget // per_emitter)
         self.chunk_size = chunk_size or min(batch.n_emitters, fits)
-        if self.device.type == "cuda":      # a caller's chunk too (in situ's 256): what the card holds
+        cuda = self.device.type == "cuda"
+        if cuda:                            # a caller's chunk too (in situ's 256): what the card holds
             self.chunk_size = min(self.chunk_size, fits)
         cap = TANGENT_MAX if self.device.type == "cpu" else 16
         self.peak_bytes = None
-        if self.device.type != "cuda":      # what the system's memory holds, a caller's chunk too
-            room = _host_available(self.device)
-            if room is not None and min(self.chunk_size, batch.n_emitters) * per_emitter * HOST_BYTES_ROUGH > room:
-                one = (tangents or max(1, min(cap, budget // per_emitter))) if measure else None
-                each = _measured_bytes(model, noise, batch, self.device, one) if measure else None
-                if each:
-                    each = int(MEASURED_MARGIN * each)
-                    room = _host_available(self.device)         # after the measurement emptied MPS' cache
-                    self.chunk_size = max(1, min(self.chunk_size, room // each))
-                    self.peak_bytes = self.chunk_size * each
-                else:
-                    self.chunk_size = max(1, min(self.chunk_size, room // (HOST_BYTES_PER_VALUE * per_emitter)))
+        # what the memory holds, a caller's chunk too: one emitter measured where it might not all fit
+        room = _cuda_room(self.device) if cuda else _host_available(self.device)
+        if room is not None and min(self.chunk_size, batch.n_emitters) * per_emitter * HOST_BYTES_ROUGH > room:
+            one = (tangents or max(1, min(cap, budget // per_emitter))) if measure else None
+            each = _measured_bytes(model, noise, batch, self.device, one) if measure else None
+            if each:
+                each = int(MEASURED_MARGIN * each)
+                # after the measurement emptied MPS' cache
+                room = _cuda_room(self.device) if cuda else _host_available(self.device)
+                self.chunk_size = max(1, min(self.chunk_size, room // each))
+                self.peak_bytes = self.chunk_size * each
+            elif not cuda:                  # on CUDA the rule above has sized it already
+                self.chunk_size = max(1, min(self.chunk_size, room // (HOST_BYTES_PER_VALUE * per_emitter)))
         if tangents is None:
             tangents = max(1, min(cap, budget // (min(self.chunk_size, batch.n_emitters) * per_emitter)))
             # a model whose columns barely use JVPs can take more at once than the JVPs' budget allows
