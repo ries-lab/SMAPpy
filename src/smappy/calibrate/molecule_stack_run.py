@@ -7,7 +7,7 @@ each (`uipsf.workflows.molecule_stack`), and the result is saved as a bead model
 reads, a PSF at the coverslip against defocus, listed for Spline 3D's *auto* and usable with its focus
 model (`depth`), its model inside it.  What it adds to a bead model:
 
-* **The molecules' height**, learnt (or held: *height*, under *more*), is the sample's: the pupil saved is
+* **The molecules' height**, held at 5 nm (*height*, under *more*) or learnt on *auto*, is the sample's: the pupil saved is
   the microscope's own, and the spline is drawn for a molecule at that height, the one these data show.
 * **The z check** -- the bend, the scatter against the CRLB, the molecules that left the plane -- and the
   foci per sweep with the focal plane's slope are kept with the calibration's record.

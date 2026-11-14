@@ -84,12 +84,15 @@ PSF_SHAPES = (("auto", "auto"), ("astigmatic", "astigmatic"), ("round", "round (
 @dataclass
 class MoleculeStackSettings:
     """How molecules are found and chosen in z sweeps.  One number to set, *molecules*; under *more* what
-    depends on the data, and the molecules' height when learning it goes wrong; the rest hidden, the
+    depends on the data, and the molecules' height (held at 5 nm, learnt on *auto*); the rest hidden, the
     prototype's on M5's AF647 (November 2026)."""
     molecules: int = param(4000, label="molecules", min=50,
                            help="how many spots to learn from at most, drawn evenly over the defocus")
-    height_nm: Optional[float] = param(None, label="height", unit="nm", min=0.0, max=200.0, advanced=True,
-                                       help="the molecules' height above the glass; auto: learnt")
+    # held at 5 nm by default (the user's decision, 14 November 2026): a dye on its linker sits a few nm above
+    # the glass, and the height is told by the SAF ring's brightness alone, which the pupil's magnitude can
+    # trade with; learnt it came to 10-11 nm on M5's AF647 (docs/uipsf/molecule-stacks.md)
+    height_nm: Optional[float] = param(5.0, label="height", unit="nm", min=0.0, max=200.0, advanced=True,
+                                       help="the molecules' height above the glass, held; auto: learnt")
     psf_shape: str = param("auto", label="PSF", choices=PSF_SHAPES, advanced=True,
                            help="how each file's focus is found: where σx = σy (astigmatic) or the spot is "
                                 "smallest (round); auto: from the widths")

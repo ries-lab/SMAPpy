@@ -1187,7 +1187,9 @@ class PSFCalibrationWindow(QMainWindow):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         def text(value):
-            return f"{value:.4g}" if isinstance(value, float) else str(value)
+            if isinstance(value, float):
+                return "" if value != value else f"{value:.4g}"      # NaN: nothing there, blank
+            return str(value)
         from PySide6.QtGui import QColor
         for i, (row, colour) in enumerate(zip(rows, colours)):
             for j, value in enumerate(row):

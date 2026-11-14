@@ -231,3 +231,40 @@ def test_without_saf_damping_the_ring_is_a_points_on_the_coverslip():
     pupil = model.psf.pupil
     assert not pupil.ring and "pupil.ring_h" not in {s.name for s in pupil.specs()}
     assert not build(describe(model), device="cpu").psf.pupil.saf_damping
+
+
+def test_every_value_the_model_learnt_or_held_is_in_the_line_and_the_zernike_tables_last_rows():
+    """Besides the modes, the table holds every other number of the model -- learnt with its CRLB, held
+    without -- and the page's line every one learnt: none left for the reader to find in the file."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from uipsf.diagnostics.figures import model_text, model_values, zernike_table
+    model = bead_model(OPTICS, BeadSettings(psf=PSFModelSettings(zernike_order=4), drift="linear", fit_tilt=True), ROI,
+                       z_max_nm=1000, device="cpu")
+    shared = {"pupil.phase": torch.zeros(len(model.psf.pupil.phase_modes)), "pupil.magnitude": torch.zeros(0),
+              "pupil.gamma": torch.tensor(0.35), "pupil.ring_h": torch.tensor(60.0), "psf.sigma": torch.tensor([21.0]),
+              "geometry.drift_rate": torch.tensor([[30.0, 10.0], [-15.0, 20.0]]),
+              "geometry.tilt": torch.tensor([0.01, 0.0]), "geometry.z_scale": torch.tensor(0.97),
+              "emitter.xyz": torch.zeros(3, 3), "something.new": torch.tensor([1.5, 2.5])}
+    crlb = {"pupil.gamma": torch.tensor(0.002), "psf.sigma": torch.tensor([0.5]),
+            "geometry.z_scale": torch.tensor(0.004), "something.new": torch.tensor([0.1, 0.2])}
+    source = SimpleNamespace(model=model, shared=shared, crlb=crlb)
+    rows = {(r["parameter"], r["element"]): r for r in model_values(source)}
+    assert rows[("γ (apodisation)", "")]["value"] == pytest.approx(0.35)
+    assert rows[("γ (apodisation)", "")]["error"] == pytest.approx(0.002)
+    assert rows[("SAF ring height h", "")]["how"] == "held"                    # no CRLB: held
+    assert rows[("drift rate", "stack 2 y")]["value"] == pytest.approx(20.0)
+    assert rows[("coverslip tilt", "x")]["value"] == pytest.approx(np.degrees(0.01))
+    assert rows[("z scale", "")]["how"] == "learnt"
+    assert rows[("something.new", "2")]["value"] == pytest.approx(2.5)         # unknown: under its own name
+    assert not any("emitter" in p or p.startswith("pupil.phase") for p, _ in rows)
+    text = model_text(source)
+    assert "z scale 0.97 ± 0.004" in text and "something.new 1 1.5 ± 0.1, 2 2.5 ± 0.2" in text
+    # the table: the modes, then these
+    columns, table, colours = zernike_table(source)
+    extra = [row for row in table if row[1] == ""]
+    assert len(extra) == len(rows) and columns[-4:] == ["value", "± (value)", "unit", "learnt or held"]
+    assert {(row[2], row[3]) for row in extra} == set(rows)
+    assert all(np.isnan(row[columns.index("value")]) for row in table if row[1] != "")

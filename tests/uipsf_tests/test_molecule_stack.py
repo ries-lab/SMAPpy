@@ -72,7 +72,8 @@ def test_a_run_recovers_the_pupil_the_height_and_the_sweeps_foci_and_saves_a_spl
     model = BeadSettings(psf=PSFModelSettings(zernike_order=4))
     out = tmp_path / "cal.h5"
     result = run_molecule_stack(truth["paths"], optics, model,
-                                MoleculeStackSettings(molecules=150, roi_px=17, max_rounds=2),
+                                MoleculeStackSettings(molecules=150, roi_px=17, max_rounds=2,
+                                                      height_nm=None),     # learnt, to be recovered
                                 run=RunSettings(save_model=True), camera=CAMERA, save_to=out, device="cpu")
     shared = result.cal.shared()
     pupil = result.cal.model.psf.pupil

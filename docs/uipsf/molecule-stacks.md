@@ -58,8 +58,8 @@ A detection in frame k of sweep s at chip position (u, v) µm from the field's c
 z_k − f_s − (a·u + b·v) + δz_e: z_k the stage's nominal z in SMAPpy's sign, f_s a focus per sweep, (a, b) the
 focal plane's slope, δz_e the molecule's own offset from the plane, held at 0 while learning (a prior of 0.5 nm)
 and freed by the z check.  Every molecule is at one height h above the glass (``geometry.height``), its z in
-the sample: a property of the sample, never of the optics, learnt from the glass (0.5 nm), bounded to (0, 200)
-nm, held at a value under *more*.
+the sample: a property of the sample, never of the optics: held at 5 nm by default (*height* under *more*, the user's
+decision of 14 November 2026), or on *auto* learnt from the glass (0.5 nm), bounded to (0, 200) nm.
 
 **The SAF sees only h** -- not the plane's slope, the sweep's focus or a molecule's δz, which are all the
 defocus's, through the immersion.  And the height enters through the SAF's decay alone, exp(−2πκh)

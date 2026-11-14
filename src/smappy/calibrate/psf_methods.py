@@ -247,6 +247,24 @@ def _model_page(run: Run) -> Page:
     return Page("Model vs data", draw, controls={"section": SECTIONS, "average": False})
 
 
+def _crlb_page(run: Run, calibration_of) -> Page:
+    """*CRLB*: the precision the run's spline allows against z (`plots.draw_crlb`), as the bead average's.  A run
+    not yet saved has no spline: it is sampled once as saving would (``calibration_of``) and kept with the run,
+    never in its result, whose spline is the one Save writes with the window's *spline* settings."""
+    from . import plots
+
+    def draw(figure, selected, excluded):
+        cal = getattr(run.result, "calibration", None)
+        if cal is None:
+            cal = run.extra.get("crlb spline")
+            if cal is None:
+                cal = calibration_of(run.result)
+                run.result.calibration = None
+                run.extra["crlb spline"] = cal
+        return plots.draw_crlb(figure, run.result, dual=run.dual, calibration=cal)
+    return Page("CRLB", draw, follows_selection=False)
+
+
 def _counted(report, start: float, end: float):
     """A report that puts a step's own "i/n" messages into the run's fraction between ``start`` and
     ``end`` (`LearningProgress`), for steps that only count."""
@@ -529,6 +547,8 @@ class PupilModel:
                 pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=run.result.start, halves=halves)))
+        from .pupil import calibration_of
+        pages.append(_crlb_page(run, calibration_of))
 
         def quality(figure, selected, excluded):
             found = run.extra.get("quality")
@@ -685,6 +705,8 @@ class InSitu:
                 pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=result.start)))
+        from .insitu_run import calibration_of
+        pages.append(_crlb_page(run, calibration_of))
 
         def versus(figure, selected, excluded):
             views = run.extra.get("views")
@@ -1249,6 +1271,8 @@ class MoleculeStack:
                 pages.append(Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False))
         pages.append(Page("Zernike table", None, follows_selection=False,
                           table=lambda: zernike_table(cal, reference=result.start)))
+        from .molecule_stack_run import calibration_of
+        pages.append(_crlb_page(run, calibration_of))
 
         def versus(figure, selected, excluded):
             views = run.extra.get("views")

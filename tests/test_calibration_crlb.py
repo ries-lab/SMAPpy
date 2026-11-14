@@ -80,3 +80,28 @@ def test_the_page_draws_a_built_calibration_with_its_values_at_focus():
     draw_crlb(figure, result, pixel_nm=50.0)
     assert "assumed" not in figure.axes[0].get_title()
     np.testing.assert_allclose(figure.axes[0].lines[0].get_ydata(), x100 / 2)
+
+
+def test_a_pupil_runs_page_samples_its_spline_once_and_leaves_the_result_unsaved():
+    """The pupil model, in situ and the molecules have no spline until saved: the page samples one as saving
+    would, keeps it with the run, not the result, and reads its pixel size from it."""
+    from types import SimpleNamespace
+
+    from matplotlib.figure import Figure
+
+    from smappy.calibrate.psf_methods import Run, _crlb_page
+    cal = astigmatic()
+    cal.pixelsize_um = np.array([0.11, 0.11])
+    calls = []
+
+    def calibration_of(result):
+        calls.append(result)
+        result.calibration = cal                        # as the methods' own calibration_of caches it
+        return cal
+    run = Run(SimpleNamespace(calibration=None), dual=False)
+    page = _crlb_page(run, calibration_of)
+    figure = Figure()
+    line = page.draw(figure, [], [])
+    page.draw(figure, [], [])
+    assert len(calls) == 1 and run.result.calibration is None and run.extra["crlb spline"] is cal
+    assert "pixel size 110 nm" in figure.axes[0].get_title() and "ASSUMED" not in line

@@ -562,8 +562,9 @@ $$d = z_k - f_s - (a u + b v)$$
 with z_k the stage's z, f_s a **focus per sweep** (the stage drifts between
 sweeps, about ten seconds apart) and (a, b) the **focal plane's slope** --
 the coverslip's tilt, shared by all sweeps.  All molecules sit at one
-**height** h above the glass, their z in the sample, learnt from 0: the
-dye's linker and whatever holds it.  It is the sample's, never the
+**height** h above the glass, their z in the sample: the dye's linker and
+whatever holds it.  It is held at 5 nm by default; *auto* under *more*
+(*height*) learns it from 0.  It is the sample's, never the
 microscope's, and it is the only thing the supercritical (SAF) light sees:
 that light decays as $e^{-2\pi\kappa h}$ above the glass, κ its decay
 rate, so the height is told by how bright the outermost ring of the pupil
@@ -574,8 +575,8 @@ pupil and the foci take it up rather than the height.
 The model saved is the objective's: the learnt pupil with that phase taken
 out, kept as its Zernikes and h.  A fit then draws each molecule with the
 whole physics of its own z -- its SAF and its phase -- and needs only one
-height per molecule.  If the learnt height runs off, hold it under *more*
-(*height*).
+height per molecule.  Learnt, the height is told by the ring's brightness
+alone, which the pupil's magnitude can trade with: if it runs off, hold it.
 
 **Learning, in rounds.**  The pupil, the foci, the plane and the height are
 learnt as from beads -- the low orders first, molecules judged by how well
@@ -593,7 +594,8 @@ molecule at the learnt height against defocus, z = 0 in focus -- for
 same file, which Spline 3D's focus model reads for data deeper in the sample.  The
 pages: *Selection* (the molecules by defocus and state), *z check* (the bend
 -- the median offset per 100 nm of defocus -- and the scatter, in CRLBs),
-*Foci and plane*, the pupil's pages as for beads, and *Model vs data* per
+*Foci and plane*, the pupil's pages as for beads (*CRLB* among them, the
+spline drawn at the molecules' height), and *Model vs data* per
 defocus bin.  On M5's AF647 (November 2026) the bend was about 5 nm rms over
 ±600 nm and the scatter 1.75 CRLB; the bins at +900 and +1000 nm break away,
 which the spline's range on *auto* leaves out (it reaches to the 2nd and 98th
@@ -1188,12 +1190,13 @@ the filter matched to the frame's defocus, in robust standard deviations of
 the filtered frame: 5 on M5's AF647.
 
 ### height
-Molecules on the coverslip: on *auto* learnt, one height for all of them.
-Hold it at a value when the learnt one runs to its bound (200 nm) or is
-unlikely for the sample: it trades with the pupil's apodisation (γ), the
-two damping the outer pupil alike.  On M5's AF647 it came to 11 ± 1 nm with
-γ 0.448.  Molecules that are not all at one height, or off the focal plane,
-make it come out higher.
+Molecules on the coverslip: one height for all of them, held at 5 nm by
+default -- a dye on its linker a few nm above the glass.  On *auto* it is
+learnt; then it trades with the pupil's apodisation (γ), the two damping
+the outer pupil alike, so hold it again if the learnt one runs to its bound
+(200 nm) or is unlikely for the sample.  Learnt on M5's AF647 it came to
+11 ± 1 nm with γ 0.448.  Molecules that are not all at one height, or off
+the focal plane, make it come out higher.
 
 ### PSF
 How each file's focus is found: where σx = σy behind a cylindrical lens
@@ -1350,11 +1353,14 @@ The bead average's other pages are the bead calibration's (*Overview*,
 *Transformation* for dual colour, *Fit quality*, *Field diagnostics*, *Bead
 diagnostics*, *CRLB*), explained on its page.  The pupil model's:
 
-- **Pupil and Zernikes**: above, the model's few numbers with their CRLBs, each
+- **Pupil and Zernikes**: above, the model's numbers with their CRLBs, each
   where it was learnt -- the minimal pupil's γ and ring height h, the blur σ (beyond
   the pixel's), the stage's drift (*linear per stack*: the rate
-  per stack, nm per µm; *free per slice*: its rms) and the coverslip's tilt; the
-  summary line under the run says the same.  On the left the learnt phase and magnitude over the
+  per stack, nm per µm; *free per slice*: its rms) and the coverslip's tilt,
+  then every other value learnt: the sample index, the z scale, the
+  molecules' height (held too, marked so), the focal plane's slope, the
+  sweeps' foci (their range), a second channel's photon share and z offset.
+  The summary line under the run says the same.  On the left the learnt phase and magnitude over the
   pupil, the phase in the *units* chosen above the page: nm of wavefront,
   the first and the one shown, waves times the *emission* wavelength; waves,
   radians / 2π; or radians, as the model is fitted.  An aberration's size in
@@ -1394,8 +1400,20 @@ diagnostics*, *CRLB*), explained on its page.  The pupil model's:
   *Uncertainty from halves...* also the halves' uncertainty (*± halves*, in
   nm, and for the magnitude) and *halves / CRLB*, above 1 where the
   CRLB is optimistic.  The key
-  aberrations' rows in their colours; *Copy* puts the table on the
+  aberrations' rows in their colours.  Below the modes, one row for every
+  other number of the model, learnt or held, in four columns of their own
+  (*value*, its CRLB, *unit*, *learnt or held*): γ, the ring height, the
+  NA, the blur, the sample index, the z scale, the coverslip's tilt, the
+  drift, the molecules' height, the focal plane's slope, each sweep's focus,
+  a second channel's registration, share and z offset -- the whole model
+  in one table.  A held value has no CRLB.  *Copy* puts the table on the
   clipboard, tab-separated, for a spreadsheet.
+- **CRLB**: how precisely a fit with the saved spline could localize a
+  molecule at each height, x, y and z in nm, as on the bead calibration's
+  page ([Bead calibration](plugin:Panels/Bead calibration), *CRLB*).  The
+  pupil model's, in situ's and the molecules' too: before the calibration is
+  saved, the spline is sampled for the page as saving would, with the
+  default *spline* settings.
 - **Residual atlas**: where the model and the data disagree, grouped by
   slice, defocus, distance from the spot's centre and position on the field.
   Each group's mean deviance is about 1 where the model is right; a group
@@ -1422,7 +1440,8 @@ deviance, photon score and offset from the box's centre.
 
 For *in situ* the table counts the frames and molecules in each state: used,
 held out, not drawn, and rejected with the reason.  Its pages are *Pupil and
-Zernikes*, *Zernike table* and *Residual atlas* as above, and:
+Zernikes*, *Zernike table*, *CRLB* (the spline at the focus learnt) and
+*Residual atlas* as above, and:
 
 - **z bins**: the frames by their height -- the Gaussian's estimate before
   calibrating, the model's after -- stacked by state.  A height with nothing

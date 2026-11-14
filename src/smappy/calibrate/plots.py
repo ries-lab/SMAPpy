@@ -449,14 +449,18 @@ def draw_beads(figure, result, selected=(), excluded=(), dual=False):
 
 
 # ------------------------------------------------------------------- the CRLB
-def draw_crlb(figure, result, dual=False, pixel_nm="auto"):
+def draw_crlb(figure, result, dual=False, pixel_nm="auto", calibration=None):
     """The precision the calibration allows against z, its Cramér-Rao lower bound (`calibrate.crlb`):
     x, y and z in nm on one axis, as SMAP draws it; in dual colour the joint bound of a Spline 3D 2C
-    fit, solid, and each half's alone.  ``pixel_nm`` converts x and y; "auto" reads the beads' camera,
-    once per result, and where nothing gives it `crlb.ASSUMED_PIXEL_NM` is taken and the title says
-    so.  Returns the status line."""
+    fit, solid, and each half's alone.  ``calibration`` the spline (or dual) calibration, by default
+    ``result.calibration``.  ``pixel_nm`` converts x and y; "auto" takes the spline's own pixel size,
+    else reads the beads' camera once per result, and where nothing gives it `crlb.ASSUMED_PIXEL_NM`
+    is taken and the title says so.  Returns the status line."""
     from . import crlb
+    cal = calibration if calibration is not None else result.calibration
     if pixel_nm == "auto":
+        pixel_nm = crlb.spline_pixel_nm(cal)
+    if pixel_nm is None:
         pixel_nm = getattr(result, "_crlb_pixel_nm", "unread")
         if pixel_nm == "unread":
             pixel_nm = crlb.pixel_size_nm(result)
@@ -466,7 +470,6 @@ def draw_crlb(figure, result, dual=False, pixel_nm="auto"):
                 pass
     assumed = not pixel_nm
     pixel_nm = crlb.ASSUMED_PIXEL_NM if assumed else float(pixel_nm)
-    cal = result.calibration
     if dual:
         from ..psf import signal_integral
         main, secondary = cal.layer_splines()

@@ -895,7 +895,10 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   `LearnedPSF` alike through `zernikes` and `pupil_maps`.  The phase is drawn in rad, waves or nm
   (`PHASE_UNITS`, `phase_scale`), nm unless told otherwise: `PHASE_UNIT` is the one switch for every
   learning's figures and tables, SMAPpy's 4Pi pupils too (`phase_factor`); the model and its files stay
-  in rad.  With a `HalfSplits` the half-split uncertainty is drawn beside the CRLB.
+  in rad.  With a `HalfSplits` the half-split uncertainty is drawn beside the CRLB.  Every other number of
+  the model -- learnt with its CRLB, or held -- is `model_values` (labels and units in `VALUES`; a parameter
+  it does not know under its own name, so none is left out): the *Pupil and Zernikes* line names each one
+  learnt (`model_text`), and `zernike_table` puts them all below the modes, in columns of their own.
 - **Half-split uncertainty** (`diagnostics.halves`): `half_splits` learns the calibration again on K
   complementary random halves of its used beads, each cold from the run's own start with every bead of
   the half pinned in by a decision, and estimates the full fit's standard deviation as the root mean
@@ -1508,7 +1511,8 @@ average and the pupil model; the window shows its section and knows nothing else
   (`InSituSettings`) under *more*.  One channel: *mode* is disabled.
 - **The table counts** frames and molecules by state; no marks (thousands of molecules are chosen by rule).
 - **Pages**: *z bins*, *Rounds and edge*, uipsf's *Pupil and Zernikes*, *Zernike table* and *Residual
-  atlas*, and *Model vs data* per height bin (`insitu_views`).
+  atlas*, the spline's *CRLB* (`psf_methods._crlb_page`, as the pupil model's and the molecules'), and
+  *Model vs data* per height bin (`insitu_views`).
 - **Saved** as the pupil model is: the spline beside the movies under the bead calibration's name, the model
   inside it (its geometry *in situ*, the focus with it; `export.model_file`).  The spline samples the
   model at the learnt focus through the used heights ± 100 nm, every 20 nm (`insitu_spline`); its z is the

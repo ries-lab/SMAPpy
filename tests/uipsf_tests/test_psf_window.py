@@ -158,7 +158,7 @@ def test_the_bead_average_calibrates_in_the_window_as_in_the_bead_calibration(st
     wait()
     run = window.run_result
     assert run is not None, window.status_bar.currentMessage()
-    assert _titles(window) == ["Stacks", "Overview", "Model vs data", "Fit quality", "Bead diagnostics"]
+    assert _titles(window) == ["Stacks", "Overview", "Model vs data", "Fit quality", "Bead diagnostics", "CRLB"]
     assert run.saved.exists() and handed == [(str(run.saved), False)]
     assert window.bead_table.rowCount() == 10 and window.bead_table.columnCount() == 8
     assert {"quality", "views"} <= set(run.extra)                             # without a button
@@ -200,8 +200,8 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     window.run()
     wait()
     assert window.run_result is not None, window.status_bar.currentMessage()
-    assert {"Stacks", "Pupil and Zernikes", "Residual atlas", "Zernike table", "Model vs data", "Fit quality",
-            "Beads"} <= set(_titles(window))
+    assert {"Stacks", "Pupil and Zernikes", "Residual atlas", "Zernike table", "CRLB", "Model vs data",
+            "Fit quality", "Beads"} <= set(_titles(window))
     assert window.detected is not None                                        # Calibrate detected first
     _every_page_draws(window)
     assert window.bead_table.rowCount() == 10

@@ -144,10 +144,130 @@ def drift_text(source) -> str:
     return ""
 
 
+#: every parameter a model can learn besides the Zernike modes and the emitters' own: (label, unit, scale, the
+#: names of its elements).  `model_values` reports these; one it does not know comes under its own name, so a new
+#: parameter is never left out of the table, only less nicely named
+VALUES = {
+    "pupil.gamma": ("γ (apodisation)", "", 1.0, None),
+    "pupil.ring_h": ("SAF ring height h", "nm", 1.0, None),
+    "pupil.na": ("NA", "", 1.0, None),
+    "psf.sigma": ("blur σ", "nm", 1.0, ("x", "y")),
+    "optics.n_med": ("sample index", "", 1.0, None),
+    "geometry.z_scale": ("z scale", "", 1.0, None),
+    "geometry.tilt": ("coverslip tilt", "°", 180.0 / np.pi, ("x", "y")),
+    "geometry.height": ("molecules' height", "nm", 1.0, None),
+    "geometry.plane": ("focal plane slope", "nm/µm", 1.0, ("x", "y")),
+    "geometry.focus": ("focus", "nm", 1.0, "sweep"),
+    "geometry.drift_rate": ("drift rate", "nm/µm", 1.0, "stack xy"),
+    "transform": ("registration", "", 1.0, ("h11", "h12", "h13", "h21", "h22", "h23", "h31", "h32")),
+    "share": ("photon share", "", 1.0, None),
+    "dz": ("z offset", "nm", 1.0, None),
+    "field.phase": ("field-dependent phase term", "rad", 1.0, "term"),
+}
+#: per slice or frame, many numbers each: summarised by their rms about the mean (drift) or spread (factors)
+SUMMARISED = {"geometry.drift": ("drift rms", "nm"), "intensity.slice_factor": ("brightness factor per slice", ""),
+              "intensity.frame_factor": ("brightness factor per frame", "")}
+#: the pupil's own maps and modes, which the pupil's page and the Zernike rows show
+_NOT_VALUES = ("pupil.phase", "pupil.magnitude", "pupil.phase_map", "pupil.magnitude_map")
+
+
+def model_values(source) -> list[dict]:
+    """Every number the model learnt or held besides the Zernike modes and the emitters' own, one dict per
+    element: ``channel`` (1-based), ``parameter`` (its label), ``element`` ("x", "sweep 3", ""), ``value``,
+    ``error`` (the CRLB; NaN where held), ``unit`` and ``how`` ("learnt" or "held").  A parameter held at a
+    value the model does not keep among its parameters -- in situ's γ, a ring height held -- is a row too.
+    Many-valued per-slice parameters (the free drift, brightness factors) come as a summary row each."""
+    shared = _shared(source)
+    std = source.result.std if hasattr(source, "result") else getattr(source, "crlb", {})
+    rows = []
+
+    def add(c, label, element, value, error, unit, how):
+        rows.append({"channel": c + 1, "parameter": label, "element": element, "value": float(value),
+                     "error": float(error), "unit": unit, "how": how})
+
+    n_channels = source.model.n_channels
+    for c in range(n_channels):
+        pre = prefix(c)
+        pupil = source.model.channels[c].psf.pupil
+        for name in sorted(k for k in shared if (k.startswith(pre) if pre else not k.startswith("ch"))):
+            base = name[len(pre):]
+            if base.startswith("emitter.") or base in _NOT_VALUES:
+                continue
+            values = torch.as_tensor(shared[name]).detach().cpu().double().numpy()
+            learnt = name in std
+            how = "learnt" if learnt else "held"
+            if base in SUMMARISED:
+                label, unit = SUMMARISED[base]
+                if base == "geometry.drift":
+                    d = values.reshape(-1, 3) - values.reshape(-1, 3).mean(0)
+                    axes = getattr(source.model.geometry, "drift_axes", "xyz")
+                    for i, a in enumerate("xyz"):
+                        if a in axes:
+                            add(c, label, f"{a}, {len(d)} slices", np.sqrt(np.mean(d[:, i] ** 2)), np.nan, unit, how)
+                else:
+                    v = values.reshape(-1)
+                    add(c, label, f"mean of {len(v)}, ± their sd", v.mean(), v.std(), unit, how)
+                continue
+            label, unit, scale, elements = VALUES.get(base, (base, "", 1.0, None))
+            errors = (torch.as_tensor(std[name]).detach().cpu().double().numpy() if learnt
+                      else np.full(values.shape, np.nan))
+            if elements == "stack xy":
+                v, e = values.reshape(-1, 2), errors.reshape(-1, 2)
+                for k in range(len(v)):
+                    for i, a in enumerate("xy"):
+                        add(c, label, f"stack {k + 1} {a}", v[k, i], e[k, i], unit, how)
+                continue
+            v, e = values.reshape(-1) * scale, errors.reshape(-1) * scale
+            for k in range(len(v)):
+                if len(v) == 1:
+                    element = ""
+                elif isinstance(elements, tuple) and len(elements) == len(v):
+                    element = elements[k]
+                elif isinstance(elements, str):
+                    element = f"{elements} {k + 1}"
+                else:
+                    element = str(k + 1)
+                add(c, label, element, v[k], e[k], unit, how)
+        # held at values outside the parameters: in situ's γ from the beads, a ring height held
+        if pre + "pupil.gamma" not in shared and getattr(pupil, "held_gamma", None) is not None:
+            add(c, VALUES["pupil.gamma"][0], "", pupil.held_gamma, np.nan, "", "held")
+        if getattr(pupil, "ring", False) and getattr(pupil, "held_ring_h", None) is not None:
+            add(c, VALUES["pupil.ring_h"][0], "", pupil.held_ring_h, np.nan, "nm", "held")
+    return rows
+
+
+def _others_text(source, channel: int) -> list[str]:
+    """`model_text`'s parts for what it does not name itself: the molecules' height, the focal plane's slope and
+    the sweeps' foci, the z scale, a dual channel's share, offset and registration, field terms."""
+    own = {VALUES[k][0] for k in ("pupil.gamma", "pupil.ring_h", "pupil.na", "psf.sigma", "optics.n_med",
+                                  "geometry.tilt", "geometry.drift_rate")} | {SUMMARISED["geometry.drift"][0]}
+    groups: dict = {}
+    for row in model_values(source):
+        if row["channel"] != channel + 1 or row["parameter"] in own:
+            continue
+        groups.setdefault(row["parameter"], []).append(row)
+    parts = []
+    for label, rows in groups.items():
+        if all(r["how"] == "held" for r in rows) and label not in ("molecules' height",):
+            continue                         # held at its start (a z scale of 1, a registration): the table says it
+        unit = rows[0]["unit"]
+        unit = ("" if unit in ("", "°") else " ") + unit
+        if len(rows) <= 3:
+            text = ", ".join((f"{r['element']} " if r["element"] else "") + _pm(r["value"], r["error"], "{:.3g}")
+                             for r in rows)
+            held = " held" if all(r["how"] == "held" for r in rows) else ""
+            parts.append(f"{label} {text}{unit}{held}")
+        else:
+            v = np.array([r["value"] for r in rows])
+            parts.append(f"{label} {v.min():.3g} … {v.max():.3g}{unit} over {len(v)}")
+    return parts
+
+
 def model_text(source, channel: int = 0) -> str:
-    """The model's few physical numbers in a line, with their CRLBs: the minimal pupil's γ and ring height,
+    """The model's physical numbers in a line, with their CRLBs: the minimal pupil's γ and ring height,
     the blur (beyond the pixel's where the model has it under σ), a learnt sample index, the stage's drift and the
-    coverslip's tilt, each where the model has it."""
+    coverslip's tilt, each where the model has it, then every other value it learnt (`model_values`; the
+    molecules' height also when held).  Every value, held ones too, is in `zernike_table`'s last rows."""
     psf = source.model.channels[channel].psf
     pre = prefix(channel)
     parts = []
@@ -162,6 +282,8 @@ def model_text(source, channel: int = 0) -> str:
             parts.append("NA " + _pm(na[0][0], na[1][0], "{:.3f}"))
     elif getattr(psf.pupil, "held_gamma", None) is not None:          # in situ: the bead model's γ
         parts.append(f"γ {psf.pupil.held_gamma:.3f} held")
+    if getattr(psf.pupil, "ring", False) and getattr(psf.pupil, "held_ring_h", None) is not None:
+        parts.append(f"ring h {psf.pupil.held_ring_h:.0f} nm held")
     sigma = _learnt(source, pre + "psf.sigma")
     if sigma is not None:
         parts.append("blur σ " + "/".join(_pm(v, e, "{:.1f}") for v, e in zip(*sigma, strict=True)) + " nm"
@@ -170,6 +292,7 @@ def model_text(source, channel: int = 0) -> str:
     if n_med is not None:
         parts.append("sample index " + _pm(n_med[0][0], n_med[1][0], "{:.4f}"))
     parts += [t for t in (drift_text(source), tilt_text(source)) if t]
+    parts += _others_text(source, channel)
     return "; ".join(parts)
 
 
@@ -311,7 +434,9 @@ def draw_pupil_and_zernikes(fig, source, channel: int = 0, reference=None, refer
 def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[tuple], list]:
     """(columns, rows, colours) of every channel's Zernike coefficients with their CRLBs, and
     ``reference``'s beside them: the numbers of `draw_zernikes`, to read or copy, each key aberration's
-    row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted."""
+    row in its bars' colour (`FAMILY_COLOURS`, None for the others).  NaN where a mode was not fitted.
+    Below the modes, every other value the model learnt or held (`model_values`), in four columns of their
+    own: so that the table is the whole model's numbers, not its Zernikes alone."""
     from ..optics.zernike import noll_to_nm
     # the phase in `PHASE_UNIT` first, the others after the magnitude
     first, *others = unit_choices()
@@ -352,6 +477,17 @@ def zernike_table(source, reference=None, halves=None) -> tuple[list[str], list[
                 row += (start_phase.get(j, float("nan")) * phase_scale(reference, c, first)[0],
                         start_magnitude.get(j, float("nan")))
             rows.append(tuple(float(v) if isinstance(v, (np.floating, float)) else v for v in row))
+    # every other value the model learnt or held (`model_values`), below the modes: the parameter in *name*,
+    # its element in *aberration*, and its own columns at the end, NaN in the phase's
+    values = model_values(source)
+    if values:
+        width = len(columns)
+        columns += ["value", "± (value)", "unit", "learnt or held"]
+        rows = [row + (float("nan"), float("nan"), "", "") for row in rows]
+        for v in values:
+            row = [float("nan")] * width
+            row[:6] = [v["channel"], "", v["parameter"], v["element"], "", ""]
+            rows.append(tuple(row) + (v["value"], v["error"], v["unit"], v["how"]))
     colours = [FAMILY_COLOURS.get(row[3]) for row in rows]
     return columns, rows, colours
 

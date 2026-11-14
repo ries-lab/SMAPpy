@@ -119,6 +119,17 @@ def _named(rows):
     return dict(zip(("x_px", "y_px", "photons", "z_nm", "background"), rows.T))
 
 
+def spline_pixel_nm(cal) -> float | None:
+    """The pixel size a spline (or a dual calibration's main channel) records, nm, or None: the pupil
+    model's, in situ's and the molecules' splines carry their camera's, the bead average's may not."""
+    main = getattr(cal, "main", cal)
+    size = getattr(main, "pixelsize_um", None)
+    if size is None:
+        return None
+    size = np.atleast_1d(np.asarray(size, float))
+    return float(np.mean(size)) * 1000 if size.size and np.all(np.isfinite(size)) and np.all(size > 0) else None
+
+
 def pixel_size_nm(result) -> float | None:
     """The beads' pixel size in the sample, from the first stack's camera (its file, then the camera
     database, which knows the microscope where the file names it), or None: the calibration itself
