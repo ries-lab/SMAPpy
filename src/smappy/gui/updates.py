@@ -9,7 +9,7 @@ error worth a dialog.
 
 What it finds is offered, never installed unasked: the dialog gives the
 command for this installation (`smappy.updates.update_command`) and copies
-it, and where the install is pip or uv, *Update and restart* hands it to
+it, and where the install is pip, uv or pixi, *Update and restart* hands it to
 `smappy.updater`, which installs once SMAPpy has closed and starts it again;
 the next start says how that went (`Updates.report_last_update`).
 """
@@ -78,7 +78,20 @@ class UpdateChecker(QObject):
 
 def install_commands() -> Optional[List[List[str]]]:
     """What *Update and restart* would run here, or None where it is not offered."""
-    return updater.commands(updates.how_installed(), sys.executable)
+    return updater.commands(updates.how_installed(), sys.executable,
+                            workspace=updates.pixi_environment(), pip=updates.has_pip())
+
+
+# where `updates.update_command` has none: an installer it does not know,
+# and no pip to fall back on
+NO_COMMAND = ("SMAPpy cannot tell how it was installed here, and this environment "
+              "has no pip: update it with the tool that installed it")
+
+
+def by_hand() -> str:
+    """The end of a failure's message: the command to run, or why there is none."""
+    command = updates.update_command()
+    return f"To try by hand, close SMAPpy and run:\n{command}" if command else NO_COMMAND + "."
 
 
 def message(newest: Optional[str], error: str = "", installed: Optional[str] = None,
@@ -91,13 +104,18 @@ def message(newest: Optional[str], error: str = "", installed: Optional[str] = N
                 f'<a href="{updates.PYPI_PAGE}">{updates.PYPI_PAGE}</a>.')
     if not updates.is_newer(newest, installed):
         return f"SMAPpy {installed} is the newest version."
+    changes = (f'<a href="{updates.changes_url(installed, newest)}">'
+               f'What changed since {installed}</a>')
+    command = updates.update_command()
+    if not command:
+        return (f"<b>SMAPpy {newest} is available</b>; you have {installed}.<br><br>"
+                f"{NO_COMMAND}.<br><br>{changes}")
     how = ("<i>Update and restart</i> closes SMAPpy (close any other SMAPpy windows "
            "first), installs it and starts it again. Or close SMAPpy and run this in a "
            "terminal" if restart else "To update, close SMAPpy and run this in a terminal")
     return (f"<b>SMAPpy {newest} is available</b>; you have {installed}.<br><br>"
             f"{how} (Copy puts it on the clipboard):"
-            f"<pre>{_escape(updates.update_command())}</pre>"
-            f'<a href="{updates.changes_url(installed, newest)}">What changed since {installed}</a>')
+            f"<pre>{_escape(command)}</pre>{changes}")
 
 
 def _escape(text: str) -> str:
@@ -116,7 +134,8 @@ def show_result(parent: QWidget, newest: Optional[str], error: str = "",
     box.setTextInteractionFlags(Qt.TextBrowserInteraction)   # links open; the command selects
     box.setText(message(newest, error, restart=restart))
     update = box.addButton("Update and restart", QMessageBox.AcceptRole) if restart else None
-    copy = box.addButton("Copy command", QMessageBox.ActionRole) if newer else None
+    copy = (box.addButton("Copy command", QMessageBox.ActionRole)
+            if newer and updates.update_command() else None)
     box.addButton(QMessageBox.Close)
     if update is not None:
         box.setDefaultButton(update)
@@ -186,8 +205,7 @@ class Updates(QObject):
             updater.start_helper(plan)
         except OSError as error:
             QMessageBox.warning(self.window, "Update and restart",
-                                f"Could not start the update: {error}\n\n"
-                                f"Close SMAPpy and run:\n{updates.update_command()}")
+                                f"Could not start the update: {error}\n\n{by_hand()}")
             return
         self.window.leaving = True
         QApplication.quit()
@@ -212,8 +230,7 @@ class Updates(QObject):
             # what to do first, then what the installer said, then the log
             ok = bool(done.get("ok"))
             parts = [updates.failure_advice(ok), "" if ok else updates.log_error(),
-                     f"The whole output is in {done.get('log')}. To try by hand, close "
-                     f"SMAPpy and run:\n{updates.update_command()}"]
+                     f"The whole output is in {done.get('log')}. {by_hand()}"]
             box.setInformativeText("\n\n".join(part for part in parts if part))
             box.setDetailedText(updates.log_tail())
             box.exec()
