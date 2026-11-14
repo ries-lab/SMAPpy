@@ -15,8 +15,10 @@ register at high gain is 2, which the training's camera model draws and the Pois
 two sizes), axially ``sqrt(CRLB_z)``.
 
 **Per molecule** the training divides each test-set localization's error by its own molecule's
-bound every epoch -- the bound of the training's own PSF, `decode_smlm.training.test_crlbs` -- and
-reports the width of that (`robust_width`), and where in their pixel its localizations fall
+bound every epoch -- the bound of the training's own PSF, `decode_smlm.training.test_crlbs`: alone,
+with its frame's neighbours and with the frames read around it as well (`joint_crlb`) -- and
+reports the width of that (`robust_width`), overall and by the nearest neighbour's distance and
+the frames the molecule is on in, and where in their pixel its localizations fall
 (`subpixel_histogram`, `ks_uniform`): the Follow curves.
 
 It is a guide, not a bound on the test set's number: the test frames hold several spots that
