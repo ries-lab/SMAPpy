@@ -1598,6 +1598,18 @@ frame, 3 frames in, 500 epochs).
   spot): 2 % below SMAPpy's spline fitter's laterally, 19 % in z, whose 13 x 13 pixels leave a
   defocused spot's tails out.  0.8 s for a test set's 25 000 molecules, and no compiled SMAPpy on
   the training host.  DECODE's own `xyz_cr` of the test set is empty.
+- **The joint bound, 2026-11-14** (`smappy/training/joint_crlb.py`, `test_crlbs`): the inverse of
+  one Fisher matrix over every molecule whose spot overlaps, a background each group, and over the
+  frames the network reads with a molecule's x, y, z shared; float64, scaled by its diagonal (the
+  float32 `torch.inverse` was half a percent off on one spot), Cholesky, BLAS on one thread.  Two
+  spots 1.2 pixels apart at 10 000 photons: a maximum-likelihood fit scatters within 6 % of it,
+  2 - 5 times the single-emitter bound.  A prior of a pixel laterally and the z range's spread
+  axially caps it where two spots merge.  On a 40 x 40, 512-frame test set the median joint bound
+  is 1.4 times the single one at HD and 2.3 at UHD -- the "about 2" Follow showed at UHD was mostly the
+  bound -- and with the three frames 0.85 and 1.2.  6 and 17 s at the start (four cores).  Follow
+  draws the width against the joint bound dashed and splits it by the nearest neighbour and the
+  frames a molecule is on in (`crlb_width_*_joint`, `_context`, `crlb_by_neighbour`,
+  `crlb_by_frames_on`).
 - **Pixelation shows on the simulated test set** (its molecules uniform within their pixels): the
   fitted positions pile up at the pixel centres, the KS distance from uniform 0.12 at epoch 25,
   0.045 at 100 -- still well above a uniform draw's 0.018.  It fades with training, so it is a

@@ -2,7 +2,7 @@
 title: DECODE training
 summary: Prepares a DECODE training from a movie -- a short Spline 3D fit of it sets what the training simulates -- writes it as a job folder beside the movie, trains it on this computer or a workstation over ssh, follows its curves and tries the model on the data.
 widget: smappy.gui.train_window.TrainWindow
-covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
+covers: [smappy.gui.train_window.run_prefit, smappy.gui.train_window.prepared_by_hand, smappy.gui.train_window.write_job, smappy.gui.train_window.default_folder, smappy.gui.train_window.start_here, smappy.gui.train_window.stop, smappy.gui.train_window.draw_progress, smappy.gui.train_window.try_on_data, smappy.gui.train_window.start_on_host, smappy.gui.train_window.HostFollower, smappy.training.jobs.status, smappy.training.remote, smappy.training.remote.others, smappy.training.remote.adopt, smappy.training.progress.converged, smappy.training.progress.stop_status, smappy.training.reference.robust_width, smappy.training.reference.subpixel_histogram, decode_smlm.training.test_crlbs, smappy.training.joint_crlb.bounds, smappy.gui.train_window._split_panel, smappy.gui.train_window.rule_line, smappy.training.jobs.Status, smappy.gui.preferences.HostsPage, smappy.gui.train_window.simulated_frames, smappy.training.prefit.prefit, decode_smlm.prefit.estimates, smappy.gui.train_window.in_the_sample, smappy.calibrate.depth.for_sample]
 ---
 
 ## What it does
@@ -85,10 +85,13 @@ job records the SMAPpy version that prepared it, and a training refuses a
 job of another version unless the host's *train jobs another SMAPpy version
 prepared* is on.
 
-**Follow.**  Six panels, read from the job's progress file every few
+**Follow.**  Nine panels, read from the job's progress file every few
 seconds: the loss, the test set's Jaccard index, and where in their pixel
 the latest epoch's localizations fall; the RMSE, each localization's error
-over its molecule's own CRLB, and the seconds an epoch.  Above them the
+over its molecule's own CRLB, and the seconds an epoch; and, in the bottom
+row, the latest epoch's error over CRLB split by how close the nearest other
+molecule is and by how many of the frames the network reads the molecule is
+on in.  Above them the
 state, the epoch, the time trained so far and at most how long is left; below
 them what the stop rule waits for, with its numbers -- *waiting for: loss
 (+2.6 % of its fall, needs ≤ 1.0 %) · settled: Jaccard, …*.  On the curves the
@@ -104,15 +107,43 @@ centres: the histogram of where in their pixel the localizations fall --
 centre for pixelated ones.  The test set's molecules are placed uniformly, so
 any shape is the network's.  It fades as a training goes on.
 
-**Error over CRLB** divides each matched localization's error by the
-single-emitter [CRLB](plugin:Panels/Glossary) of its own molecule -- its
-photons, background and z, the training's own PSF, doubled in variance with
-EM gain -- and reports how widely that scatters, as the width of a Gaussian
-(1.4826 times the median absolute deviation: two molecules merged or a
-mismatch, whose errors are many bounds, do not count, with no cut-off to
-choose).  At the bound it is 1.  The test frames are as dense as the
-training's, and a single-emitter bound leaves the neighbours out, so a dense
-training stays above 1: about 2 at 50 molecules in 40 x 40 pixels.  A
+**Error over CRLB** divides each matched localization's error by a
+[CRLB](plugin:Panels/Glossary) of its own molecule -- its photons,
+background and z, the training's own PSF, doubled in variance with EM gain --
+and reports how widely that scatters, as the width of a Gaussian (1.4826
+times the median absolute deviation: two molecules merged or a mismatch,
+whose errors are many bounds, do not count, with no cut-off to choose).  At
+the bound it is 1.  Three bounds are computed for every molecule of the test
+set when a training starts:
+
+* **alone** -- the single-emitter bound: the molecule on its own spot with a
+  background of its own.  It leaves the neighbours out, so a dense training
+  stays above 1 against it: about 2 at 50 molecules in 40 x 40 pixels.
+* **+ neighbours** -- the joint bound of the molecule and every molecule whose
+  spot overlaps its own in the frame, all their positions, photons and the
+  background fitted together.  A spot beside another is localized worse than
+  alone, because some of its photons could be the other's; how much worse
+  this bound says.  Where two molecules are closer than the spot's width it
+  grows without limit -- they cannot be told apart -- while a network puts a
+  merged pair near its middle, a pixel or so off.  So each position carries
+  a prior of a pixel laterally and of the training's z range axially, which
+  caps the bound there and moves a bound of a tenth of a pixel by half a
+  percent.
+* **+ neighbours, frames** -- the same over the frames the network reads (three
+  by default): a molecule on in the frames before and after is at the same
+  place there, so its position is one parameter over them, and its bound
+  falls -- to the single frame's over the root of three when it is on in all
+  three at the same brightness.
+
+The error over CRLB panel draws the width against the first (solid) and the
+last (dashed, *joint*).  The bottom row splits the latest epoch's: by the
+nearest other molecule's distance, laterally and axially, and by the frames
+read the molecule is on in, laterally, with the number of matches in each bin
+in grey.  Against *alone* the closest pairs are far above 1 and molecules on
+in three frames can be below it; against the last bound both should sit near
+1 if the network uses what the frames hold.  A curve below 1 for the closest
+pairs is not an error: the bound is for an estimator that is never biased,
+and a network that has learnt where molecules lie can do better there.  A
 training from before these numbers existed shows the panels empty.
 
 

@@ -119,9 +119,11 @@ clusters = ["hdbscan>=0.8.44"]
 # window that uses it says what to type (docs/uipsf/plan.md §7.4).
 uipsf = ["torch>=2.4"]
 # decode_smlm (src/decode_smlm), the port of DECODE to current PyTorch (docs/decode/poc-plan.md),
-# likewise; tqdm for its training and inference loops' progress bars.  TensorBoard stays optional:
+# likewise; tqdm for its training and inference loops' progress bars; threadpoolctl to hold BLAS to
+# one thread for the test set's joint bounds, whose factors of a few hundred parameters were three
+# times slower on OpenBLAS's four (smappy.training.joint_crlb).  TensorBoard stays optional:
 # the training writes its own log.  The package is GPL-3.0, DECODE's (THIRD_PARTY_NOTICES.md).
-decode = ["torch>=2.4", "tqdm>=4.60"]
+decode = ["torch>=2.4", "tqdm>=4.60", "threadpoolctl>=3.1"]
 # What the test suite needs beyond the package: `pip install -e .[test]`.
 # pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
 test = ["pytest>=8.4", "pytest-timeout>=2.1", "pytest-xdist>=3.2"]

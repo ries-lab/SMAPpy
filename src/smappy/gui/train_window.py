@@ -510,17 +510,57 @@ def _window(ax, e, values, window) -> None:
     ax.axhline(float(np.nanmedian(v)), ls="--", lw=0.8, color=line.get_color() if line is not None else "k")
 
 
+#: the bounds the error is divided by, as the Follow panels name and colour them
+#: (`decode_smlm.training.test_crlbs`): the molecule alone, with its frame's neighbours, and with
+#: the frames the network reads around it too
+BOUNDS = (("single", "alone", "C0"), ("joint", "+ neighbours", "C2"), ("context", "+ neighbours, frames", "C3"))
+
+
+def _split_panel(ax, split: Optional[dict], key: str, axis: str, title: str, xlabel: str) -> None:
+    """One of the bottom row's panels: the latest epoch's error / CRLB width per bin of ``key``
+    against each bound; a note where the training reported none."""
+    if not split or not split.get(key):
+        ax.set_axis_off()
+        ax.text(0.5, 0.5, f"{title}:\nnot reported by this training", ha="center", va="center",
+                transform=ax.transAxes, fontsize=8)
+        return
+    if key == "edges_nm":                   # the bins side by side: the closest ones are the few that matter
+        edges = np.asarray(split[key], float)
+        x = np.arange(len(edges), dtype=float)
+        labels = [f"{int(a)}-{int(b)}" for a, b in zip(edges[:-1], edges[1:])] + [f">{int(edges[-1])}"]
+    else:
+        x = np.asarray(split[key], float)
+        labels = [str(int(v)) for v in x]
+    for name, label, colour in BOUNDS:
+        values = split.get(f"{name}_{axis}")
+        if values is None:
+            continue
+        y = np.array([np.nan if v is None else v for v in values], float)
+        ax.plot(x, y, "o-", color=colour, label=label, ms=3)
+    ax.axhline(1.0, color="k", lw=0.8, ls=":")
+    ax.set_xticks(x, labels, fontsize=6, rotation=30 if key == "edges_nm" else 0)
+    n = split.get("n") or []
+    ax.set(title=title, xlabel=xlabel)
+    if n:
+        ax.text(0.99, 0.97, "n = " + " ".join(str(int(v)) for v in n), ha="right", va="top",
+                transform=ax.transAxes, fontsize=6, color="0.4")
+    ax.legend(fontsize=6, loc="best")
+
+
 def draw_progress(figure, lines: list) -> str:
-    """The curves of a job's ``progress.jsonl``, in two rows of three: the loss, the Jaccard and
+    """The curves of a job's ``progress.jsonl``, in three rows of three: the loss, the Jaccard and
     where in their pixel this epoch's localizations fall; the RMSE, each localization's error over
-    its molecule's CRLB (or the efficiencies, `SCORE_PANEL`), and the seconds an epoch.  Each y range
+    its molecule's CRLB (or the efficiencies, `SCORE_PANEL`), and the seconds an epoch; and the
+    latest epoch's error over CRLB against each of the three bounds (`BOUNDS`), by the distance to
+    the nearest other molecule laterally and axially, and by the frames read the molecule is on in.
+    Each y range
     without the first epochs (`_fit_range`); on the curves the stop rule's window shaded and a line
     at its median (`_window`).  Returns a line saying where it is and how long it has left at most.
     The median spot's CRLB is no longer drawn on the RMSE: it stretched its axis to where the curves
     never come, and the error over each molecule's own CRLB says the same per molecule."""
     epochs = [line for line in lines if line["kind"] == "epoch"]
     figure.clear()
-    axes = figure.subplots(2, 3)
+    axes = figure.subplots(3, 3)
     if not epochs:
         for a in axes.flat:
             a.set_axis_off()
@@ -578,16 +618,21 @@ def draw_progress(figure, lines: list) -> str:
     axes[1, 0].legend(fontsize=7)
     if SCORE_PANEL == "crlb":
         # each localization's error over its molecule's single-emitter CRLB, as the width of a
-        # Gaussian (1.4826 MAD: no cut-off for the outliers); 1 where the network reaches the bound
+        # Gaussian (1.4826 MAD: no cut-off for the outliers); 1 where the network reaches the bound;
+        # dashed against the bound with its neighbours and frames (`BOUNDS`), where reported
         wl, wa = series("crlb_width_lat", True), series("crlb_width_ax", True)
+        cl, ca = series("crlb_width_lat_context", True), series("crlb_width_ax_context", True)
         if np.isfinite(wl).any() or np.isfinite(wa).any():
-            axes[1, 1].plot(e, wl, label="lateral")
+            axes[1, 1].plot(e, wl, label="lateral", color="C0")
             _window(axes[1, 1], e, wl, window)
-            axes[1, 1].plot(e, wa, label="axial")
+            axes[1, 1].plot(e, wa, label="axial", color="C1")
             _window(axes[1, 1], e, wa, window)
+            if np.isfinite(cl).any():
+                axes[1, 1].plot(e, cl, "--", label="lateral, joint", color="C0", alpha=0.7)
+                axes[1, 1].plot(e, ca, "--", label="axial, joint", color="C1", alpha=0.7)
             axes[1, 1].axhline(1.0, color="k", lw=0.8, ls=":")
             axes[1, 1].set(title="error / CRLB, width (test set)", xlabel="epoch")
-            _fit_range(axes[1, 1], later(wl), later(wa), include=(1.0,))
+            _fit_range(axes[1, 1], later(wl), later(wa), later(cl), later(ca), include=(1.0,))
         else:
             axes[1, 1].set_axis_off()
             axes[1, 1].text(0.5, 0.5, "error / CRLB: not reported\nby this training", ha="center", va="center",
@@ -602,6 +647,17 @@ def draw_progress(figure, lines: list) -> str:
         _fit_range(axes[1, 1], eff_lat, eff_ax)
     if axes[1, 1].lines:
         axes[1, 1].legend(fontsize=7)
+    # the latest epoch's error / CRLB split: where crowding and the neighbouring frames matter
+    neighbour, frames_on = last.get("crlb_by_neighbour"), last.get("crlb_by_frames_on")
+    _split_panel(axes[2, 0], neighbour, "edges_nm", "lat", f"lateral by neighbour, epoch {int(e[-1])}",
+                 "nearest other molecule (nm)")
+    _split_panel(axes[2, 1], neighbour, "edges_nm", "ax", f"axial by neighbour, epoch {int(e[-1])}",
+                 "nearest other molecule (nm)")
+    _split_panel(axes[2, 2], frames_on, "frames", "lat", f"lateral by frames on, epoch {int(e[-1])}",
+                 "frames read the molecule is on in")
+    for a in axes[2]:
+        if a.lines:
+            a.set_ylabel("error / CRLB", fontsize=7)
     seconds = series("seconds")
     axes[1, 2].plot(e, seconds)
     axes[1, 2].set(title="seconds an epoch", xlabel="epoch")

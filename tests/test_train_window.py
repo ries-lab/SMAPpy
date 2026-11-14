@@ -345,13 +345,51 @@ def test_the_curves_leave_the_first_epochs_out_of_their_range_and_show_the_effic
                                   "pixel_hist_rows": [12] * 10 + [8] * 10, "pixel_hist_cols": [10] * 20}})
     figure = Figure()
     draw_progress(figure, lines)
-    loss, jaccard, pixels, rmse, crlb, seconds = figure.axes
+    loss, jaccard, pixels, rmse, crlb, seconds = figure.axes[:6]
     assert loss.get_ylim()[1] < 400 and rmse.get_ylim()[1] < 100      # the first epochs beyond the edge
     assert rmse.get_ylim()[0] > 30                                     # no CRLB line stretches it down
     assert crlb.get_title() == "error / CRLB, width (test set)" and crlb.get_ylim()[0] < 1.0 < crlb.get_ylim()[1]
     assert pixels.get_title() == "pixelation, epoch 199" and seconds.get_title() == "seconds an epoch"
     # the stop rule's window: shaded once, and a line at its median, on the curves it judges
     assert len(jaccard.patches) == 1 and any(line.get_linestyle() == "--" for line in jaccard.lines)
+
+
+def test_the_bottom_row_splits_the_latest_error_over_crlb_by_neighbour_and_frames_against_each_bound():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.gui.train_window import draw_progress
+    edges = [0, 200, 400, 600, 800, 1200, 2000]
+    by_neighbour = {"edges_nm": edges, "n": [30, 80, 120, 150, 300, 400, 200],
+                    "single_lat": [3.0, 2.2, 1.6, 1.3, 1.15, 1.1, 1.1], "joint_lat": [1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1],
+                    "context_lat": [1.4] * 7, "single_ax": [2.5] * 7, "joint_ax": [None] + [1.2] * 6,
+                    "context_ax": [1.5] * 7}
+    by_frames = {"frames": [1, 2, 3], "n": [100, 400, 300], "single_lat": [1.5, 1.2, 1.0],
+                 "joint_lat": [1.1, 0.9, 0.7], "context_lat": [1.1, 1.1, 1.1], "single_ax": [1.4] * 3,
+                 "joint_ax": [1.1] * 3, "context_ax": [1.1] * 3}
+    metrics = {"jaccard": 0.5, "rmse_lat_nm": 30.0, "rmse_ax_nm": 50.0, "crlb_width_lat": 1.6, "crlb_width_ax": 1.7,
+               "crlb_width_lat_context": 1.1, "crlb_width_ax_context": 1.2,
+               "crlb_by_neighbour": by_neighbour, "crlb_by_frames_on": by_frames}
+    lines = [{"kind": "start", "epoch": 0, "epochs": 10}] + [
+        {"kind": "epoch", "epoch": e, "loss_train": 10.0, "loss_test": 9.0, "seconds": 1.0, "metrics": metrics}
+        for e in range(10)]
+    figure = Figure()
+    draw_progress(figure, lines)
+    crlb = figure.axes[4]
+    assert [line.get_label() for line in crlb.lines if not line.get_label().startswith("_")][:4] == \
+        ["lateral", "axial", "lateral, joint", "axial, joint"]
+    lateral, axial, frames = figure.axes[6:9]
+    assert lateral.get_title() == "lateral by neighbour, epoch 9" and frames.get_title() == "lateral by frames on, epoch 9"
+    drawn = {line.get_label(): line.get_ydata() for line in lateral.lines if not line.get_label().startswith("_")}
+    assert set(drawn) == {"alone", "+ neighbours", "+ neighbours, frames"}
+    assert drawn["alone"][0] == 3.0 and len(drawn["alone"]) == 7 == len(lateral.get_xticks())   # the last open
+    assert np.isnan(next(line for line in axial.lines if line.get_label() == "+ neighbours").get_ydata()[0])
+    assert [t.get_text() for t in lateral.get_xticklabels()][-1] == ">2000"
+    # a training from before: the row says so
+    old = [dict(line, metrics={"jaccard": 0.5}) if line["kind"] == "epoch" else line for line in lines]
+    figure = Figure()
+    draw_progress(figure, old)
+    assert not figure.axes[6].axison and "not reported" in figure.axes[6].texts[0].get_text()
 
 
 def test_the_follow_line_says_what_the_stop_rule_waits_for():
