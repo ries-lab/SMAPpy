@@ -26,6 +26,18 @@ the session, does not.
 Hiding is also the safer half of the pair: a removal lasts only as long as the
 undo history behind it, and is one save away from being permanent, so a run
 that would leave nothing behind is refused rather than performed.
+
+**Binding-event edges** are a region of another kind, in time: the first
+and last frame of each DNA-PAINT binding event, where the imager bound or
+left during the exposure (Steen et al. 2024, Picasso's
+``select_binding_event_cores``; the work is `group.event_cores`).  The plan
+had it as a tick of *merge blinks*; it is here instead because what it
+makes is a table of localizations -- the cores -- not of merged blinks, its
+linking (a tenth of a pixel, no dark frame) is its own and not the layer's
+merge, and *remove* and *hide* are the two things one wants of it: a new
+table, or a flag to filter on.  Hidden edges are flagged with the rule
+*any* for merging, not *all*: every merged blink has edges, and *all*
+would hide every one.
 """
 from __future__ import annotations
 
@@ -87,7 +99,8 @@ def drop(locs: Localizations, keep: np.ndarray) -> Localizations:
     return locs[np.asarray(keep, dtype=bool)]
 
 
-def hide(locs: Localizations, keep: np.ndarray, field: str = "use") -> Localizations:
+def hide(locs: Localizations, keep: np.ndarray, field: str = "use",
+         grouped: str = "all") -> Localizations:
     """The table with ``field`` cleared where ``keep`` is false.
 
     Combined with whatever the column already said, never overwriting it: two
@@ -103,8 +116,9 @@ def hide(locs: Localizations, keep: np.ndarray, field: str = "use") -> Localizat
     out = Localizations(columns, dict(locs.metadata))
     # Once the localizations are linked, a blink is visible only if all of its
     # localizations are: hiding a region and then grouping should not bring
-    # half of it back as blinks that straddle the edge.
-    remember(out, field, "", grouped="all")
+    # half of it back as blinks that straddle the edge.  ``grouped`` is
+    # "any" for binding-event edges, which every blink has.
+    remember(out, field, "", grouped=grouped)
     # and the bound that hides them travels with the table, so a reopened file
     # hides them again: a filter belongs to the session, the flag to the file,
     # and the docstring's "survives a reload" was true of the flag only
@@ -157,7 +171,45 @@ def included_rois_mask(ctx: Context) -> Tuple[np.ndarray, str]:
     return project.rows_of(used), f"the {len(used)} included ROIs"
 
 
+def edges_mask(locs: Localizations, settings: "EdgeSettings") -> Tuple[np.ndarray, str]:
+    """Which localizations are binding-event edges -- in the first or last
+    frame of their event, or in an event of fewer than *min localizations*
+    (`group.event_cores`) -- and how to name them.  Linked per file and
+    channel, as merging blinks is."""
+    from ..group import CORE_RADIUS_PIX, event_cores
+    from ..locs import table_pixel_sizes
+    if "frame" not in locs:
+        raise ValueError("binding events need a 'frame' attribute")
+    radius = settings.within_nm
+    if radius is None:
+        try:
+            radius = CORE_RADIUS_PIX * float(np.mean(table_pixel_sizes(locs)))
+        except ValueError:
+            raise ValueError("the table does not record its pixel size, so a "
+                             "tenth of a pixel is not known: set within") from None
+    x, y = positions(locs)
+    present = [np.asarray(locs[n]) for n in ("filenumber", "channel") if n in locs]
+    blocks = np.stack(present, axis=1) if present else None
+    core, event = event_cores(x, y, locs["frame"], radius, settings.dark_frames,
+                              settings.min_locs, blocks)
+    n_events = len(np.unique(event))
+    return ~core, (f"the first and last frames of {n_events} binding events "
+                   f"(linked within {radius:.3g} nm)")
+
+
 # --------------------------------------------------------------- the plugin
+
+@dataclass
+class EdgeSettings:
+    within_nm: Optional[float] = param(None, label="within", unit="nm", min=0.0,
+                                       help="how far a localization may be from "
+                                            "the event's position in the frame "
+                                            "before; auto: a tenth of a pixel")
+    dark_frames: int = param(0, label="dark frames", unit="frames", min=0,
+                             help="frames an event may miss and continue")
+    min_locs: int = param(3, label="min localizations", min=1,
+                          help="an event with fewer is all edges")
+
 
 @dataclass
 class RemoveSettings:
@@ -168,9 +220,11 @@ class RemoveSettings:
     region: str = param("roi", label="region",
                         choices=(("roi", "the drawn ROI"),
                                  ("selection", "the selection (filter, ROI, slab)"),
-                                 ("rois", "all included ROIs")),
+                                 ("rois", "all included ROIs"),
+                                 ("edges", "binding-event edges")),
                         help="the drawn ROI on its own, everything that decides "
-                             "what is on screen, or the ROI manager's used ROIs")
+                             "what is on screen, the ROI manager's used ROIs, or "
+                             "the first and last frame of each binding event")
     action: str = param("remove", label="action",
                         choices=(("remove", "remove them from the table"),
                                  ("hide", "keep them, flagged and filtered out")),
@@ -179,6 +233,8 @@ class RemoveSettings:
                              "with the file")
     field: str = param("use", label="flag", advanced=True,
                        help="the attribute hiding writes: 1 visible, 0 hidden")
+    edges: EdgeSettings = param(default_factory=EdgeSettings, label="binding events",
+                                help="how localizations are linked into events")
 
 
 @register("Analysis/Process/Remove Localizations")
@@ -192,7 +248,8 @@ class RemoveLocalizations(Plugin):
     version = "1"
 
     def describe(self, ctx, settings: RemoveSettings) -> FormState:
-        return FormState(active={"field": settings.action == "hide"})
+        return FormState(active={"field": settings.action == "hide"},
+                         shown={"edges": settings.region == "edges"})
 
     def _keep(self, ctx: Context, settings: RemoveSettings) -> Tuple[np.ndarray, str]:
         """Which localizations survive, and how to say what was done."""
@@ -204,6 +261,8 @@ class RemoveLocalizations(Plugin):
             where = str(ctx.selection)
         elif settings.region == "rois":
             inside, where = included_rois_mask(ctx)
+        elif settings.region == "edges":
+            inside, where = edges_mask(locs, settings.edges)
         else:
             roi = current_roi(ctx)
             if roi is None:
@@ -235,7 +294,8 @@ class RemoveLocalizations(Plugin):
         going = int((~keep).sum())
         if settings.action == "hide":
             field = check_field(settings.field, ctx.locs)
-            locs = hide(ctx.locs, keep, field)
+            locs = hide(ctx.locs, keep, field,
+                        grouped="any" if settings.region == "edges" else "all")
             hidden = int((np.asarray(locs[field]) < 0.5).sum())
             text = (f"hid {going} of {len(ctx.locs)} localizations "
                     f"{settings.which} {where}; {hidden} hidden in all, "

@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.remove_locs.region_mask, smappy.plugins.remove_locs.current_roi, smappy.plugins.remove_locs.drop, smappy.plugins.remove_locs.hide, smappy.plugins.remove_locs.check_field, smappy.plugins.remove_locs.included_rois_mask, smappy.roi_manager.core.ROIProject.rows_of, smappy.regions.Region.mask]
+covers: [smappy.plugins.remove_locs.region_mask, smappy.plugins.remove_locs.current_roi, smappy.plugins.remove_locs.drop, smappy.plugins.remove_locs.hide, smappy.plugins.remove_locs.check_field, smappy.plugins.remove_locs.included_rois_mask, smappy.roi_manager.core.ROIProject.rows_of, smappy.regions.Region.mask, smappy.plugins.remove_locs.edges_mask, smappy.group.event_cores]
 ---
 
 ## What it does
@@ -28,6 +28,20 @@ from the file.  A hidden localization is one slider away, now or next week.
 It needs a table and, for the usual use, an [ROI](plugin:Panels/Glossary)
 (region of interest: a rectangle, polygon or line with a width) drawn in the
 render window.
+
+The region can also be one in time: the **binding-event edges** of
+DNA-PAINT, in which a short DNA strand carrying the dye (the imager) binds
+to its target for a few frames and leaves again.  The imager rarely binds
+exactly as a frame starts or leaves exactly as one ends, so the first and
+the last frame of each binding event saw it for only part of the exposure:
+those localizations have too few photons and a worse precision.  Removing
+them -- keeping the event's *core* -- is the selection of Steen et al.
+([2024](https://doi.org/10.1038/s41592-024-02374-8)), as Picasso
+([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)) does
+it, and is worth doing before anything that weighs localizations by their
+photons or their precision, or averages them into one position per site.
+It needs the localizations' frames and, for the default linking distance,
+the table's pixel size.
 
 ## How it works
 
@@ -76,6 +90,43 @@ narrow it, as for a measurement in the ROI).  *remove* the localizations
 *outside* them and a field of a few hundred segmented pores shrinks to the
 pores, which makes a much smaller file; for clusters, a filter on
 `cluster_id` $\geq$ 1 does the same without the ROI manager.
+
+With *region* set to *binding-event edges*, the localizations are first
+linked into binding events: a localization joins an event when it lies in
+the frame after the event's last one (with *dark frames* above 0, up to
+that many frames later) and within *within* of the event's position --
+by default a tenth of a camera pixel, 13 nm for a 130 nm pixel.  "Inside"
+is then every localization in the first or the last frame of its event,
+and every localization of an event with fewer than *min localizations*
+(with three, such an event has no frame that is neither).  Files and
+channels are linked apart.
+
+```figure The photons of simulated binding events, each localization's photons in proportion to the part of the frame the imager was bound (the truth: the whole frame, 3000 photons, dashed).  All localizations (grey) have a tail of dim ones -- the edges; the cores (orange) are the whole frames.
+from smappy.simulate.binding import bound_intervals
+from smappy.group import event_cores
+rng = np.random.default_rng(1)
+site, start, end = bound_intervals(30, 20000, 8.0, 1500.0, rng)
+first = np.floor(start).astype(int)
+span = np.ceil(end).astype(int) - first
+which = np.repeat(np.arange(len(site)), span)
+frame = first[which] + np.concatenate([np.arange(n) for n in span])
+cover = np.minimum(end[which], frame + 1.0) - np.maximum(start[which], frame)
+lit = cover >= 0.5
+which, frame, cover = which[lit], frame[lit], cover[lit]
+order = np.argsort(frame, kind="stable")
+which, frame, cover = which[order], frame[order], cover[order]
+s = site[which]
+xy = np.column_stack([s % 6, s // 6]) * 1000.0 + rng.normal(0, 2, (len(s), 2))
+photons = rng.poisson(3000 * cover)
+core, _ = event_cores(xy[:, 0], xy[:, 1], frame, 13.0)
+ax = fig.subplots()
+bins = np.linspace(1000, 3400, 49)
+ax.hist(photons, bins, color="0.6", label=f"all, mean {photons.mean():.0f}")
+ax.hist(photons[core], bins, color="#e07a1f", alpha=0.8,
+        label=f"cores, mean {photons[core].mean():.0f}")
+ax.axvline(3000, color="k", ls="--", lw=1)
+ax.set_xlabel("photons"); ax.set_ylabel("localizations"); ax.legend(fontsize=8)
+```
 
 **2. Which side goes.**  The setting *remove* chooses: *the localizations
 inside* empties the region, *the localizations outside* keeps it and nothing
@@ -131,6 +182,29 @@ is hidden as a whole rather than coming back as a blink with half a
 flag.  See [Math Parser](plugin:Analysis/Process/Math Parser) for how
 recipes work.
 
+**Binding-event edges.**  The events are linked by the same walk as
+[merge blinks](plugin:Panels/Glossary) uses, given no precision, so that
+its test is a circle: a localization joins when its distance from the
+event's running position is less than *within*.  The running position is
+the mean of the last position and the new one, each time a localization
+joins; Picasso tests the distance to the last localization alone.  Two
+consecutive localizations of one event are $\sqrt{2}\sigma$ apart along
+each axis (with $\sigma$ the precision), and one from the running position
+about $1.15\sigma$, so at the same radius an event breaks in two a little
+less often here.  Either way the radius must be several times the
+precision: at 13 nm, localizations precise to 5 nm break an event between
+two frames about one time in eight (one in five with Picasso's test), and
+each break makes two more edges; precise to 3 nm, about one time in 800.  In both programs the first localization in range in the next frame
+joins, not the nearest.  Picasso's constants are the defaults: a tenth of
+a pixel, no dark frame, three localizations.
+
+Hidden rather than removed, the edges are flagged with the rule *any* for
+merging, not *all*: every merged blink has edges, so with *all* every one
+would be hidden.  A merged blink is then shown when it has a core, but its
+position and photons are still merged from all its localizations, the
+edges included.  To merge blinks from their cores alone, *remove* the
+edges.
+
 **The flag's name.**  *flag* must be a word of letters, digits and
 underscores that does not start with a digit, so that it can be used in a
 filter and in an expression.  `group_id` and `n_in_group` are refused,
@@ -148,6 +222,22 @@ screen and nothing else.
 *the drawn ROI* needs an ROI in the render window, *all included ROIs* at
 least one used ROI in the ROI manager; the plugin refuses to run without
 them.
+
+### edges.within_nm
+The default, a tenth of a camera pixel, is Picasso's and suits DNA-PAINT,
+whose bright events are localized to a few nanometres.  For dimmer data
+raise it to about three times the precision; too small and events break
+into pieces, each with edges of its own, too large and two sites close
+together are linked into one event.
+
+### edges.dark_frames
+0, as in Picasso: one frame without a localization ends the event.  With 1,
+an event missed in one frame (a localization lost to the filter) stays one
+event, but two bindings of one site a frame apart are joined.
+
+### edges.min_locs
+Three is the least that leaves a core.  Raise it to keep only long events,
+whose cores are many frames.
 
 ### action
 Prefer *hide* while deciding; *remove* makes a smaller table and file, which
@@ -194,6 +284,17 @@ Based on SMAP's `Process/Modify/RemoveLocs`
   hide as well as remove, and remove the inside instead.
 
 ## References
+
+* Steen PR, Unterauer EM, Masullo LA, Kwon J, Perovic A, Jevdokimenko K,
+  Opazo F, Fornasiero EF, Jungmann R. The DNA-PAINT palette: a
+  comprehensive performance analysis of fluorescent dyes. *Nat Methods*
+  21, 1755 (2024).
+  [doi:10.1038/s41592-024-02374-8](https://doi.org/10.1038/s41592-024-02374-8)
+  -- the selection of binding-event cores (Extended Data Fig. 1f).
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198 (2017).
+  [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, whose `select_binding_event_cores` this follows.
 
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).

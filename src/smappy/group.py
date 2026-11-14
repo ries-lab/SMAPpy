@@ -845,6 +845,54 @@ def last_frames(locs: Localizations, ids) -> np.ndarray:
     return out
 
 
+#: Picasso's constants for binding-event cores
+#: (``postprocess.select_binding_event_cores``): the linking radius in camera
+#: pixels, the dark frames allowed and the localizations an event needs
+CORE_RADIUS_PIX, CORE_DARK_FRAMES, CORE_MIN_LOCS = 0.1, 0, 3
+
+
+def event_cores(x, y, frame, radius: float, dark_frames: int = CORE_DARK_FRAMES,
+                min_locs: int = CORE_MIN_LOCS, blocks: Optional[np.ndarray] = None
+                ) -> Tuple[np.ndarray, np.ndarray]:
+    """The localizations in the cores of binding events, and each one's
+    event: ``(core, event)``, a mask and a 1-based event id.
+
+    Steen et al. 2024 (Nat Methods, doi:10.1038/s41592-024-02374-8), as
+    Picasso writes it (jungmannlab/picasso, MIT;
+    ``postprocess.select_binding_event_cores``): localizations are linked
+    into binding events -- within ``radius`` from one frame to the next, at
+    most ``dark_frames`` frames apart -- and a localization is kept when its
+    event has at least ``min_locs`` localizations and it is in neither the
+    event's first nor its last frame.  In those two frames the imager bound
+    or left during the exposure, so the spot had only part of the photons
+    and a worse precision.  An event of fewer than three has nothing but
+    such frames.
+
+    The linking is `connect`'s, with its precision test given no precision:
+    a circle of ``radius`` about the running position (a two-point mean of
+    the last localizations), where Picasso's is a circle about the last
+    localization alone.  The running position wanders less, so an event
+    breaks slightly less often at the same radius; both join the first
+    localization in range, not the nearest.  ``blocks`` keeps files and
+    channels apart, as Picasso's ``group`` keeps picks apart.
+    """
+    frame = np.asarray(np.rint(np.asarray(frame, np.float64)), np.int64)
+    n = len(frame)
+    if n == 0:
+        return np.zeros(0, bool), np.zeros(0, np.int64)
+    event = connect(x, y, frame, radius, int(dark_frames), blocks,
+                    precision=np.zeros(n), k=1.0, dx_min=radius)
+    size = int(event.max()) + 1
+    count = np.bincount(event, minlength=size)
+    first = np.full(size, np.iinfo(np.int64).max, np.int64)
+    last = np.full(size, -1, np.int64)
+    np.minimum.at(first, event, frame)
+    np.maximum.at(last, event, frame)
+    core = ((count[event] >= int(min_locs)) & (frame != first[event])
+            & (frame != last[event]))
+    return core, event
+
+
 def _link_precision(locs: Localizations) -> np.ndarray:
     """The lateral precision in the unit of the positions linking runs on."""
     from .render import POSITION_FIELDS
