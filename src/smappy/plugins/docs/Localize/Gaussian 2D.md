@@ -1,6 +1,6 @@
 ---
 version: "5"
-covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem]
+covers: [smappy.plugins.fit.in_region, smappy.plugins.fit.RegionFinder, smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper, smappy.plugins.fit.region_copies, smappy.plugins.fit.region_problem, smappy.detect.TemporalMedian, smappy.detect.median_bounds, smappy.plugins.fit.median_frames, smappy.plugins.fit.fitted_frame]
 ---
 
 ## What it does
@@ -108,6 +108,56 @@ the spread of the noise, so the cutoff is "$f$ noise widths above the typical
 maximum" whatever the background.  The **absolute** cutoff is a fixed
 number, in photons of the filtered image.  Lower values find dimmer
 molecules and more noise.
+
+**A background that the filter leaves: the temporal median.**  The
+difference of Gaussians removes only background smoother than its wide
+Gaussian.  A background uneven on the scale of a few pixels -- the haze of
+free imager strands in DNA-PAINT, out-of-focus fluorescence in a cell --
+stays, and its bumps are local maxima like any spot.  They raise the
+dynamic cutoff, so dim spots are missed, and with an absolute cutoff they
+become candidates themselves.  Such a background usually changes slowly
+from frame to frame, while a molecule is on for a few frames only.  With
+*temporal median* ticked, every pixel of a frame has the median of that
+pixel over the frames about it subtracted -- *median of* 51 frames by
+default -- and what is below zero is set to zero, before the filter
+(Martens et al. [2022](https://doi.org/10.3389/fbinf.2021.817254), as
+Picasso does it, [Schnitzbauer et al.
+2017](https://doi.org/10.1038/nprot.2017.024)).  The background is gone,
+and a molecule on for fewer than half the frames of the window is not in
+the median and stays.  This is for finding candidates only: the fit boxes
+are cut from the frame in photons, so the fit sees the background and
+fits it as before, and the photons come out whole.  **Preview** shows the
+frame less its median in the filtered panel.
+
+```figure A simulated frame with a patchy background added that swells and fades slowly over the movie (left), filtered with the difference of Gaussians alone (middle), and after its temporal median was subtracted (right).  Circled: the candidates above the dynamic cutoff; crosses: the molecules on in this frame.  In the middle the patches set the cutoff, and most molecules are missed.
+from scipy import ndimage
+from smappy.detect import TemporalMedian
+rng = np.random.default_rng(1)
+patches = ndimage.gaussian_filter(rng.normal(size=frames.shape[1:]), 2.0)
+patches = 400 * (patches - patches.min()) / np.ptp(patches)
+slow = 1 + 0.3 * np.cos(2 * np.pi * np.arange(len(frames)) / len(frames))
+uneven = rng.poisson(patches[None] * slow[:, None, None]) / camera.conversion
+hazy = to_photons(frames + uneven, camera)
+plain, plain_filtered = detection.finder()(hazy)
+cleaned, cleaned_filtered = detection.finder()(TemporalMedian(51)(hazy, 0))
+tx, ty = np.asarray(truth["x_nm"]) / 100, np.asarray(truth["y_nm"]) / 100
+on = (np.asarray(truth["photons"]) > 1000) & (tx < 63) & (ty < 63)
+f = int(np.argmax(np.bincount(np.asarray(truth["frame"])[on], minlength=len(frames))))
+on &= np.asarray(truth["frame"]) == f
+fig.set_size_inches(9, 3.2)
+axes = fig.subplots(1, 3)
+axes[0].imshow(hazy[f], cmap="gray")
+axes[0].set_title("frame, patchy background", fontsize=9)
+for ax, found, image, title in ((axes[1], plain, plain_filtered, "filter alone"),
+                                (axes[2], cleaned, cleaned_filtered, "less the median")):
+    here = found[found.frame == f]
+    ax.imshow(image[f], cmap="magma")
+    ax.scatter(here.x, here.y, s=160, facecolors="none", edgecolors="#34c3ff", lw=1.2)
+    ax.plot(tx[on], ty[on], "+", color="#7fff7f", ms=8)
+    ax.set_title(f"{title}: {len(here)} candidates", fontsize=9)
+for ax in axes:
+    ax.set_xticks([]); ax.set_yticks([])
+```
 
 **3. Cutting fit boxes.**  A small square, the [fit box](plugin:Panels/Glossary)
 (also called ROI size or fitting window; *fit box*, 13 pixels), is cut around
@@ -280,6 +330,27 @@ in batches of about 15 000 boxes (a script can set `max_block_rois` and
 `n_threads`), on all cores, in C++.  Reading the file runs in
 the background while the previous block is processed.
 
+**The temporal median.**  The median is taken once per *median every*
+frames (by default once per window, as in Picasso's `TemporalMedianMovie`):
+the frames are tiled that many at a time, and each tile shares the median
+of *median of* frames centred on it -- with the defaults, of the tile's own
+51 frames -- shifted inwards at the start and end of the movie so that it
+always has that many.  Picasso reads any frame of the movie when it likes;
+the fit here reads the movie in blocks, in order (*frames per block*, 200),
+and a live acquisition has no frames after the newest.  So the frames of
+the last tile of a block, whose window reaches past the block, take the
+*median of* frames up to the block's end -- some before the tile, where
+the background was nearly the same -- and the next block takes the tile's
+own window again.  Each window's median is computed once, and the 51
+frames before a block are kept.  On a split chip each channel keeps its
+own, and **Preview** reads the frames of its frame's tile and fits them all,
+so that it finds what the run would.  On simulated frames, 64 by 64
+pixels, 1000 frames, spots of 800 photons on for four frames on average,
+on 30 photons of background plus patches of up to 150 photons about two
+pixels across, with the default dynamic cutoff: the filter alone found
+4350 of 7589 spots with 17 false ones, and less the median 7290 with 48
+false ones.  On a flat background the two find the same.
+
 **Compared with the papers.**  The fit and its CRLB are those of
 [Smith et al. 2010](https://doi.org/10.1038/nmeth.1449), and the steps those
 of [Li et al. 2018](https://doi.org/10.1038/nmeth.4661), with these
@@ -346,6 +417,24 @@ puts that mode's default here (1.7, or 20 photons), since the number means
 something else in the other mode.  Use **Preview** to see what it finds.  In
 a script, `smappy.fit(..., cutoff=..., cutoff_mode="absolute")` and
 `smappy-fit --cutoff-mode absolute` say the same.
+
+### detection.temporal_median
+Tick it when the frames have a background with structure -- patches,
+filaments, a haze that is brighter in some places -- that changes more
+slowly than the molecules blink, which is DNA-PAINT's usual case.  Leave it
+off for dSTORM or PALM with a flat background: it costs a little time and
+gains nothing.  A molecule on for more than half of the window (a sticky
+imager, a bead) is in the median and is lost, so it is not for beads.
+
+### detection.median_window
+Longer than the longest bright events, several times so; 51 frames is
+Picasso's.  A shorter window follows a quickly changing background
+(bleaching in the first frames) more closely.
+
+### detection.median_stride
+1 takes the median for every frame, centred on it: exact, and 51 times
+as many medians as the default.  The default is fine for a background that
+changes over hundreds of frames.
 
 ### model.elliptical
 Six parameters instead of five: a width in x and one in y.  For astigmatic
@@ -457,7 +546,8 @@ Based on SMAP's `fit_fastsimple` workflow and its `MLE_GPU_Yiming` fitter
 * **Read noise** is one variance for the whole chip, added to data and model
   (1 electron by default without EM gain); SMAP's sCMOS mode reads a
   per-pixel variance map instead, which is not ported.
-* No Anscombe transform or background estimation before detection.
+* No Anscombe transform before detection, and no background estimate
+  but the *temporal median*, which SMAP does not have.
 * **Raw frames by number, not by spacing.**  SMAP's CameraConverter keeps
   every `diffrawframes`-th frame after the average; here a number of frames
   is kept, spaced evenly over the fitted range, so that a long acquisition
@@ -490,3 +580,12 @@ Based on SMAP's `fit_fastsimple` workflow and its `MLE_GPU_Yiming` fitter
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).
   [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
+* Martens KJA, Turkowyd B, Endesfelder U. Raw data to results: a hands-on
+  introduction and overview of computational analysis for single-molecule
+  localization microscopy. *Front Bioinform* 1, 817254 (2022).
+  [doi:10.3389/fbinf.2021.817254](https://doi.org/10.3389/fbinf.2021.817254)
+  -- the temporal median filter before detection.
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198 (2017).
+  [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, whose `TemporalMedianMovie` the *temporal median* follows.
