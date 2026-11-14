@@ -74,11 +74,16 @@ inside every wheel and source distribution**.  The ports, as of this writing:
   *Segment regions*' *like examples*;
 * `smappy/plugins/clusters.py` -- the SMLM clusterer's local maxima
   (`clusterer._cluster`) and its frame analysis as a cluster filter;
+* `smappy/molecules.py` -- RESI's cluster centres
+  (`clusterer.find_cluster_centers`) and G5M (`g5m.py`: the constrained
+  Gaussian mixture, its Sparrow test, BIC search, p-value and post-filter;
+  itself derived from scikit-learn's GaussianMixture, BSD-3-Clause), as
+  *Molecular mapping*;
 * `smappy/io/picasso.py` -- Picasso's HDF5 localization files, read and
   written (a file format, not code).
 
-The plan for the rest -- G5M, SPINNA, drift from DNA origami -- is
-`docs/dna-paint.md`; each method's own paper is cited on its plugin's page.
+The plan is `docs/dna-paint.md`; each method's own paper is cited on its
+plugin's page.
 
 ## Dependencies
 
