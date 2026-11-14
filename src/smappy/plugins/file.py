@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -348,6 +348,18 @@ EXPORT_FILTER = ("Text (*.csv *.tsv *.txt);;Picasso HDF5 (*.hdf5 *.h5);;"
                  "All files (*)")
 
 
+def picasso_groups(locs) -> List[str]:
+    """The attributes *Picasso group* offers: every id -- a name ending in
+    ``_id`` -- and every other integer attribute.  On merged blinks an id
+    written as a recipe (`cluster_id`, `molecule_id`) is a float, so the
+    name, not the type, is what finds it.  Not the frame, nor the merge's
+    own numbers, which on merged blinks are one per row."""
+    from ..group import GROUP_COLUMNS
+    return [n for n in locs.keys()
+            if n != "frame" and n not in GROUP_COLUMNS
+            and (n.endswith("_id") or np.asarray(locs[n]).dtype.kind in "iu")]
+
+
 def export_format(settings) -> str:
     """The format ``settings`` write: the one chosen, or the file name's."""
     if settings.format:
@@ -376,8 +388,8 @@ class ExportSettings:
                           help="the attributes to write; all ticked writes every "
                                "attribute, also those a later table adds")
     group: str = param("", label="Picasso group",
-                       help="an integer attribute written as Picasso's group, "
-                            "its picks: cluster_id, roi_id, ...")
+                       help="an id attribute written as Picasso's group, its "
+                            "picks: cluster_id, molecule_id, pick_id, ...")
 
 
 @register("File/Export/Localizations")
@@ -399,9 +411,7 @@ class ExportLocalizations(Plugin):
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             locs = ctx.locs
             state.choices["columns"] = list(locs.keys())
-            state.choices["group"] = [("", "none")] + [
-                (n, n) for n in locs.keys()
-                if np.asarray(locs[n]).dtype.kind in "iu" and n != "frame"]
+            state.choices["group"] = [("", "none")] + [(n, n) for n in picasso_groups(locs)]
         return state
 
     def run(self, ctx: Context, settings: ExportSettings) -> Result:
@@ -427,8 +437,14 @@ class ExportLocalizations(Plugin):
                 locs, path, columns=columns or None,
                 names="ThunderSTORM" if fmt == "ThunderSTORM" else "smappy")
         elif fmt == "Picasso":
+            # merged blinks are Picasso's linked table, whose `len` needs
+            # each blink's last frame, from the localizations; the steps
+            # appended to the file's metadata are the session's log
+            events = view.ungrouped()[0] if locs.metadata.get("grouped") else None
+            history = getattr(ctx.session, "history", None)
             written = writer_named("Picasso").save(
-                locs, path, group=settings.group or None, report=said.append)
+                locs, path, None if history is None else {"history": history},
+                group=settings.group or None, report=said.append, events=events)
         elif fmt == "smappy HDF5":
             if columns:
                 from ..locs import Localizations

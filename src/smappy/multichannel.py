@@ -298,6 +298,10 @@ class MultiChannelEngine:
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
         if self.detection == "pairs":
             self.stats["matched"] = 0
+        # a temporal median over the channels, pixel by pixel, as for one
+        # (`pipeline.LocalizationEngine`): found on, cut from the photons
+        background = getattr(self.finder, "background", None)
+        self._background = background() if callable(background) else None
 
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
@@ -314,7 +318,9 @@ class MultiChannelEngine:
             channels = to_photons(frames, self.camera) / self.camera.excess_noise
         else:
             channels = noise.to_photons(frames, self.camera.adu_to_photons)
-        candidates = self.find(channels, first_frame)
+        detect = (channels if self._background is None
+                  else self._background(channels, first_frame))
+        candidates = self.find(detect, first_frame)
         roisize = self.settings.roisize
         positions, residual, keep = channel_candidates(candidates, self.layout, roisize,
                                                        self.drift)
