@@ -294,7 +294,7 @@ PRIOR_PX = 1.0
 CHUNK_FRAMES = 64
 
 
-def test_crlbs(ds_test, param, psf=None):
+def test_crlbs(ds_test, param, psf=None, joint: bool = True):
     """Each test-set molecule's bounds, ``{"index": {(frame, row, col): i}, "single", "joint",
     "context": (n, 3) nm (rows, columns, z), "nn_nm": (n,), "frames_on": (n,)}`` -- the key a
     matched molecule is found by.
@@ -307,8 +307,9 @@ def test_crlbs(ds_test, param, psf=None):
     SMAPpy's spline fitter's laterally, 19 % in z, whose 13 x 13 pixels leave the tails out),
     doubled in variance with EM gain.  ``nn_nm`` is the distance to the frame's nearest other
     molecule, ``frames_on`` in how many of the frames read it is on: what the curves split by.
-    6 s at every start at the HD density, 17 s at UHD (512 frames, four cores); None where it
-    cannot be had: the metrics then go without it."""
+    6 s at every start at the HD density, 17 s at UHD (512 frames, four cores); without ``joint``
+    the single bound alone, about a second, and no *joint*, *context*.  None where it cannot be
+    had: the metrics then go without it."""
     from smappy.training import joint_crlb
     em = ds_test._emitter
     if em is None or not len(em):
@@ -321,7 +322,7 @@ def test_crlbs(ds_test, param, psf=None):
         z_range = param.Simulation.emitter_extent[2]
         prior = (PRIOR_PX, PRIOR_PX, (float(z_range[1]) - float(z_range[0])) / np.sqrt(12.0), None)
         n = len(em)
-        out = {k: np.full((n, 3), np.nan) for k in ("single", "joint", "context")}
+        out = {k: np.full((n, 3), np.nan) for k in (("single", "joint", "context") if joint else ("single",))}
         frame = em.frame_ix.numpy().astype(int)
         last = int(frame.max())
         bg = np.r_[bg, np.full(max(0, last + 1 - len(bg)), bg[-1])]   # an emitter on just past the end
@@ -331,6 +332,8 @@ def test_crlbs(ds_test, param, psf=None):
             mine = (spots.frame >= lo) & (spots.frame <= hi)
             rows = np.flatnonzero((frame >= lo - context) & (frame <= hi + context))[mine]
             out["single"][rows] = joint_crlb.single_bounds(spots, excess)[mine, :3]
+            if not joint:
+                continue
             with joint_crlb.one_blas_thread():
                 matrices = joint_crlb.frame_matrices(spots, excess)
                 for name, w in (("joint", 0), ("context", context)):
@@ -381,15 +384,17 @@ def _crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size) -> dict:
             # each localization's error over its molecule's bound: 1 where the network reaches it
             r = err[sel] / bound[at][sel]
             return robust_width(np.r_[r[:, 0], r[:, 1]]), robust_width(r[:, 2])
+        names = [name for name in ("single", "joint", "context") if name in crlbs]
         for name, suffix in (("single", ""), ("joint", "_joint"), ("context", "_context")):
-            out[f"crlb_width_lat{suffix}"], out[f"crlb_width_ax{suffix}"] = widths(crlbs[name])
+            if name in crlbs:
+                out[f"crlb_width_lat{suffix}"], out[f"crlb_width_ax{suffix}"] = widths(crlbs[name])
         nn = crlbs["nn_nm"][at]
         edges = list(NEIGHBOUR_EDGES_NM) + [None]
         split = {"edges_nm": list(NEIGHBOUR_EDGES_NM), "n": []}
         for i, lo in enumerate(NEIGHBOUR_EDGES_NM):
             sel = (nn >= lo) & ((nn < edges[i + 1]) if edges[i + 1] is not None else True)
             split["n"].append(int(sel.sum()))
-            for name in ("single", "joint", "context"):
+            for name in names:
                 lat, ax = widths(crlbs[name], sel)
                 split.setdefault(f"{name}_lat", []).append(lat)
                 split.setdefault(f"{name}_ax", []).append(ax)
@@ -400,7 +405,7 @@ def _crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size) -> dict:
             sel = on == k
             split["frames"].append(k)
             split["n"].append(int(sel.sum()))
-            for name in ("single", "joint", "context"):
+            for name in names:
                 lat, ax = widths(crlbs[name], sel)
                 split.setdefault(f"{name}_lat", []).append(lat)
                 split.setdefault(f"{name}_ax", []).append(ax)
@@ -436,13 +441,15 @@ def evaluate_test(test_out, ds_test, post_processor, matcher, val_loss, crlbs=No
 # ----------------------------------------------------------------------------- the loop
 def train(folder, *, device: str | None = None, epochs: int | None = None, num_workers: int | None = None,
           allow_other_version: bool = False, quiet: bool = False, all_epochs: bool = False,
-          stop_rule: dict | None = None) -> str:
+          stop_rule: dict | None = None, joint_bounds: bool = True) -> str:
     """Train the job in ``folder`` from where it stands; returns ``"finished"`` or ``"stopped"``.
 
     ``device`` overrides the job's (``"auto"``: CUDA, else MPS, else the CPU), ``epochs`` its
     method's, ``num_workers`` the data loaders'.  The training finishes before ``epochs`` when it
     no longer improves (SMAPpy's `progress.converged`, its rule changed or turned off by the
     method's ``HyperParameter.early_stop``, and ``stop_rule`` over that), unless ``all_epochs``.
+    ``joint_bounds`` False leaves the test set's joint bounds out (`test_crlbs`): the error over
+    CRLB against the single-emitter bound alone, and up to 16 s less at every start.
     """
     from smappy import __version__
     from smappy.training import job as jobs
@@ -466,7 +473,7 @@ def train(folder, *, device: str | None = None, epochs: int | None = None, num_w
     try:
         with _Lock(folder):
             return _run(folder, job, method_params, device or job.device, epochs, num_workers, stop, quiet,
-                        all_epochs, stop_rule)
+                        all_epochs, stop_rule, joint_bounds)
     except Exception as e:
         progress.append(folder, "error", None, message=f"{type(e).__name__}: {e}")
         raise
@@ -481,7 +488,7 @@ def _main_thread() -> bool:
 
 
 def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, all_epochs=False,
-         stop_rule=None) -> str:
+         stop_rule=None, joint_bounds=True) -> str:
     import contextlib
     import io
 
@@ -529,7 +536,7 @@ def _run(folder, job, method_params, device, epochs, num_workers, stop, quiet, a
         else:
             save_test_set(ds_test, folder / TEST_SET)
         dl_train, dl_test = setup_dataloader(param, ds_train, ds_test)
-        crlb_table[0] = test_crlbs(ds_test, param)
+        crlb_table[0] = test_crlbs(ds_test, param, joint=joint_bounds)
         return ds_train, ds_test, model, optimizer, criterion, lr_scheduler, grad_mod, post_processor, matcher, \
             dl_train, dl_test
 
