@@ -83,6 +83,10 @@ inside every wheel and source distribution**.  The ports, as of this writing:
   `StructureSimulator`, `get_NN_dist`, `NND_score`, `SPINNA.fit_stoichiometry`,
   `fit_coarse_to_fine`, `_run_bootstrap`, `fit_le`, `get_le_from_props`), as
   *SPINNA*;
+* `smappy/fiducials.py` -- drift from picked DNA origami
+  (`postprocess.undrift_from_fiducials`, `_undrift_from_picked_coordinate`),
+  as *Fiducials*' *markers* = structures, fitted with one spline and an
+  offset per marker rather than averaged frame by frame;
 * `smappy/io/picasso.py` -- Picasso's HDF5 localization files, read and
   written (a file format, not code).
 

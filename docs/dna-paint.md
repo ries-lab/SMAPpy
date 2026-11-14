@@ -22,7 +22,7 @@ analysis sits in Render's *Postprocess* menu, mostly as
 | pick similar | *Segment regions*' *like examples* |
 | show trace, select picks by trace | *Binding kinetics*' trace in the ROI manager |
 | RCC, NeNA, DBSCAN, HDBSCAN | *RCC*, *Localization Precision*, *Find clusters* -- equal or better |
-| undrift from picked | *Fiducials* with ROIs -- for beads only (below) |
+| undrift from picked | *Fiducials* with *markers* = structures, from ROIs or an id column |
 | AIM | not ported: decided *skip* ([survey/candidates.md](survey/candidates.md)), COMET and RCC cover it |
 | sCMOS maps | *Camera noise calibration* |
 | HDF5 + yaml files | the *Picasso* reader and writer, `io/picasso.py` |
