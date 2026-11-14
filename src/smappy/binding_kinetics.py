@@ -76,8 +76,12 @@ from .plugins.blinking import Blinks, blinks_of, bursts, dark_frames
 LINK_GAP = 3
 #: the trace's windows over the acquisition
 WINDOWS = 50
-#: Picasso's frame analysis: twentieths, and the bounds it rejects at
+#: Picasso's frame analysis: twentieths, and the bounds it rejects at --
+#: a mean frame outside these fractions of the acquisition, or more than
+#: `FRAME_PEAK_MAX` of the localizations in one twentieth
 FRAME_BINS = 20
+FRAME_MEAN_BOUNDS = (0.2, 0.8)
+FRAME_PEAK_MAX = 0.8
 ESTIMATORS = (("ml", "maximum likelihood"), ("cdf", "cumulative fit (Picasso)"))
 
 

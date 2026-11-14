@@ -108,7 +108,7 @@ C++ in `csrc/` if speed matters).  Needs `xy_err_nm` (SMAPpy has it).  Test data
 matching to score recovery.
 
 #### SMLM clusterer with frame analysis (RESI) -- Picasso  (S, MIT)
-What it does (`clusterer._cluster`, `clusterer.py:198`; Schichthaerle 2021,
+What it does (`clusterer._cluster`, `clusterer.py:198`; Schlichthaerle 2021,
 Reinhardt 2023).  Count neighbours within `radius` for each localization (point
 itself included); a **local maximum** is a point whose count equals the maximum
 over its neighbourhood and exceeds `min_locs`; each local maximum in order labels
@@ -351,7 +351,7 @@ that needs frame blocks (the pipeline already reads blocks).
 * Masullo LA, Kowalewski R, et al. Spatial and stoichiometric in situ analysis of biomolecular oligomerization at single-protein resolution. Nat Commun 2025;16:4202 -- SPINNA. [10.1038/s41467-025-59500-z](https://doi.org/10.1038/s41467-025-59500-z)
 * Hellmeier J, et al. Quantification of absolute labeling efficiency at the single-protein level. Nat Methods 2024;21:1702 -- SPINNA's LE fit. [10.1038/s41592-024-02242-5](https://doi.org/10.1038/s41592-024-02242-5)
 * Reinhardt SCM, Masullo LA, Baudrexel I, Steen PR, et al. Ångström-resolution fluorescence microscopy. Nature 2023 -- RESI, SMLM clusterer. [10.1038/s41586-023-05925-9](https://doi.org/10.1038/s41586-023-05925-9)
-* Schichthaerle T, et al. Nat Commun 2021 -- the local-maximum clusterer. [10.1038/s41467-021-22606-1](https://doi.org/10.1038/s41467-021-22606-1)
+* Schlichthaerle T, et al. Nat Commun 2021 -- the local-maximum clusterer. [10.1038/s41467-021-22606-1](https://doi.org/10.1038/s41467-021-22606-1)
 * Jungmann R, et al. Quantitative super-resolution imaging with qPAINT. Nat Methods 2016 -- qPAINT. [10.1038/nmeth.3804](https://doi.org/10.1038/nmeth.3804)
 * Steen PR, et al. Nat Methods 2024 (Ext. Data Fig. 1f) -- binding-event cores. [10.1038/s41592-024-02374-8](https://doi.org/10.1038/s41592-024-02374-8)
 * Huang F, et al. Video-rate nanoscopy using sCMOS camera-specific single-molecule localization algorithms. Nat Methods 2013 -- sCMOS maps. [10.1038/nmeth.2488](https://doi.org/10.1038/nmeth.2488)

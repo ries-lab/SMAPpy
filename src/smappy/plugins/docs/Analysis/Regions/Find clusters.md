@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.voronoi_clusters, smappy.plugins.clusters.hdbscan_clusters, smappy.plugins.clusters.by_size, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.FindClusters.run, smappy.plugins.clusters.FindClusters.preflight]
+covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.voronoi_clusters, smappy.plugins.clusters.hdbscan_clusters, smappy.plugins.clusters.by_size, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.FindClusters.run, smappy.plugins.clusters.FindClusters.preflight, smappy.plugins.clusters.local_maxima, smappy.plugins.clusters.frame_analysis]
 ---
 
 ## What it does
@@ -8,7 +8,7 @@ covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smapp
 Finds clusters -- places where localizations lie closer together than
 elsewhere -- and names them.  Nothing has to be said about how many clusters
 there are; a cluster may have any shape, and what is not crowded belongs to
-none.  Three *algorithms*, each with its own settings, of which the form
+none.  Four *algorithms*, each with its own settings, of which the form
 shows only the chosen one's:
 
 * **DBSCAN** ([DBSCAN](plugin:Panels/Glossary), density-based spatial
@@ -28,6 +28,22 @@ shows only the chosen one's:
   one field, which a single radius cannot.  It needs the optional package
   hdbscan (`pip install "smappy-smlm[clusters]"`), and cannot be stopped
   once it runs (see below).
+* **local maxima** (the SMLM clusterer of
+  [Picasso](https://doi.org/10.1038/nprot.2017.024), from
+  [Schlichthaerle et al. 2021](https://doi.org/10.1038/s41467-021-22606-1)
+  and used for RESI by
+  [Reinhardt et al. 2023](https://doi.org/10.1038/s41586-023-05925-9)): for
+  [DNA-PAINT](plugin:Panels/Glossary), where every binding site gives a
+  tight cloud of localizations a few nanometres wide.  A cluster is the
+  neighbourhood of a localization that has more neighbours than any of its
+  own neighbours -- one cluster per site, even where sites lie closer
+  together than DBSCAN can keep apart.
+
+*Frame analysis*, a tick for every algorithm, drops the clusters whose
+localizations bunch in time.  A DNA-PAINT site is visited by imager strands
+at random throughout the acquisition; an imager that sticks to the glass,
+or dirt, gives a cloud of localizations that all come in one stretch of
+time, and looks like a site in the picture.
 
 What it gives is a **name for every cluster**, written onto the table:
 `cluster_id` (1 for the largest cluster, 2 for the next, ..., 0 for a
@@ -159,6 +175,69 @@ for ax in (left, right):
 left.set_ylabel("y (nm)")
 ```
 
+### Local maxima
+
+**1. Neighbours.**  For every localization the others within the *radius*
+are counted, as for DBSCAN.
+
+**2. Centres.**  A localization with more than *minimum size* neighbours
+(itself included) and no neighbour with more is a **local maximum**: the
+middle of a site's cloud.
+
+**3. Clusters.**  The local maxima, those with most neighbours first, each
+take their neighbours that no other has taken yet.  A local maximum that
+an earlier one has already taken gives its free neighbours to that
+cluster: two maxima closer than the radius are one cluster.  A cluster with
+fewer than *minimum size* localizations is dropped.
+
+Unlike DBSCAN, nothing chains: a cluster reaches at most one radius from
+its centre, so two sites 20 nm apart stay two clusters with a radius of
+8 nm, where DBSCAN joins them through the localizations between them.
+
+```figure Pairs of DNA-PAINT sites 20 nm apart (3 nm localization precision; a colour per true site, left). Local maxima with an 8 nm radius finds every site (middle); DBSCAN with the same radius joins many pairs (right).
+from smappy.plugins.clusters import local_maxima
+rng = np.random.default_rng(0)
+parts, truth = [], []
+for i in range(6):
+    for j in range(6):
+        for dx in (0.0, 20.0):
+            n = int(rng.integers(20, 60))
+            parts.append(rng.normal(0, 3.0, (n, 2)) + [i * 100 + dx, j * 100])
+            truth.append(np.full(n, len(truth) + 1))
+pts = np.vstack(parts)
+truth = np.concatenate(truth)
+answers = [("the truth", truth), ("local maxima", local_maxima(pts, 8.0, 10)),
+           ("DBSCAN", dbscan(pts, 8.0, 9))]
+fig.set_size_inches(9, 3.4)
+axes = fig.subplots(1, 3, sharex=True, sharey=True)
+for ax, (name, lab) in zip(axes, answers):
+    none = lab == 0
+    ax.scatter(pts[none, 0], pts[none, 1], s=1, c="0.75", linewidths=0)
+    ax.scatter(pts[~none, 0], pts[~none, 1], s=1, c=lab[~none] % 20,
+               cmap="tab20", linewidths=0)
+    ax.set_title(f"{name}: {lab.max()}", fontsize=9)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x (nm)")
+axes[0].set_ylabel("y (nm)")
+```
+
+### Frame analysis
+
+With *frame analysis* ticked, each cluster is looked at in time, on its
+localizations even on a layer that merges blinks.  Each localization's
+place in the acquisition is a fraction from 0 (the first frame) to 1 (the
+last).  A cluster is dropped -- its localizations get `cluster_id` 0 -- when
+
+* the mean of its localizations' places is below 0.2 or above 0.8: it
+  shows up only at the start or only at the end; or
+* more than 80 % of its localizations fall into one twentieth of the
+  acquisition: it was there only for a short while.
+
+The remaining clusters are numbered again, without gaps.  These are the
+numbers that [Binding kinetics](plugin:Analysis/Measure/Binding kinetics)
+gives each region (`mean_frame_rel`, `peak_window_fraction`), so a cluster
+dropped here would fail there too.
+
 ### HDBSCAN
 
 **1. Core distances.**  For every localization, the distance to its
@@ -234,6 +313,50 @@ clustering of SharpViSu,
 [Andronov et al. 2016](https://doi.org/10.1038/srep24084)) sets the
 threshold instead where the data's distribution of cell areas crosses that
 of a random one, from simulations, which is not done here.
+
+### Local maxima
+
+With $N_r(i)$ the localizations within $r$ of $i$, itself included, $i$
+is a local maximum when
+
+$$N_r(i) > m \quad \mathrm{and} \quad N_r(i) \geq N_r(j) \ \mathrm{for\ every} \ j \ \mathrm{within} \ r \ \mathrm{of} \ i ,$$
+
+$m$ the *minimum size*.  Ties are allowed, so a site whose densest point
+is shared by several localizations has several maxima; they are within $r$
+of each other and come out as one cluster.
+
+**Order.**  Picasso takes the maxima in the order of the table.  Here they
+are taken most neighbours first, ties in the order of the cell search, so
+the answer does not depend on how the table is sorted.  The clusters are
+the same as Picasso's in number and members; a localization between two
+maxima may go to the other one (fewer than 1 in 100 on pairs of sites
+20 nm apart).
+
+**3D.**  With *in 3D* ticked and `z_nm` in the table, z is scaled by
+*radius* / *z radius* before the search, so the neighbourhood is an
+ellipsoid *radius* wide and *z radius* high -- Picasso's anisotropic
+radius, for z measured less precisely than x and y.
+
+**How it is computed.**  The counts are DBSCAN's cell search; the
+neighbours of the localizations that may be maxima are listed by the same
+search, in chunks of 200,000.  3.7 million localizations take about 9 s.
+
+### Frame analysis
+
+For localization $i$ of a file whose acquisition runs from frame $f_0$ to
+$f_1$, its place is
+
+$$t_i = \frac{f_i - f_0 + 1/2}{f_1 - f_0 + 1} .$$
+
+A cluster $C$ is dropped when
+
+$$\bar{t}_C < 0.2 \quad \mathrm{or} \quad \bar{t}_C > 0.8 \quad \mathrm{or} \quad \max_b \, n_{C,b} > 0.8 \, n_C ,$$
+
+with $n_C$ its localizations and $n_{C,b}$ those with $t$ in the
+twentieth $b$, $[b/20, (b+1)/20)$.  The acquisition is the file's recorded
+number of frames where a file has one (a simulation records it), else its
+first and last localization.  Picasso uses the frames of the table it was
+given and the frame numbers as they are; the difference is half a frame.
 
 ### HDBSCAN
 
@@ -312,11 +435,38 @@ more localizations as noise and keep only well-defined clusters.
 ### hdbscan.use_z
 As for DBSCAN.
 
+### local_maxima.radius_nm
+About twice the [localization precision](plugin:Panels/Glossary), as
+Picasso advises -- twice the NeNA value of
+[Localization Precision](plugin:Analysis/Measure/Localization Precision).
+Too large and neighbouring sites merge; too small and the sites' edges are
+left out, and a dim site has too few neighbours to be a maximum.
+
+### local_maxima.min_points
+Below the localizations a site gives over the acquisition and above what
+the background gathers within one radius.  Picasso's default is 10; with
+long acquisitions sites give hundreds, and a higher value keeps out
+unspecific binding.
+
+### local_maxima.use_z
+As for DBSCAN.
+
+### local_maxima.z_radius_nm
+Twice the precision in z, which in astigmatic 3D is about two to three
+times that in x and y.
+
+### frame_analysis
+Tick it for DNA-PAINT, where Picasso's SMLM clusterer has it on.  Leave it
+off for dyes that bleach -- in STORM or PALM most localizations come early,
+and every cluster would fail -- and for acquisitions shorter than a few
+hundred frames, where a twentieth holds only a few frames.
+
 ## Output
 
 * **The table**, with `cluster_id` and `n_in_cluster`.
 * **Text**: how many clusters, how many localizations are in one, and the
-  algorithm's settings: DBSCAN's radius as used, Voronoi's mean density.
+  algorithm's settings: DBSCAN's radius as used, Voronoi's mean density;
+  with *frame analysis*, how many clusters failed it.
 * **Figure**: the clusters in colour, the rest grey; and how large they
   are.  A good result is one colour per structure.  Many small clusters
   inside one structure mean the radius is too small; a few huge ones, that
@@ -339,9 +489,11 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   their own, for any clusterer's ids.
 * **Files** are clustered one at a time, and on a layer that merges blinks
   the blinks.
-* **Voronoi and HDBSCAN** are new: SMAP's `ClusterVoronoi` computes only
-  the Voronoi density (here [Neighbourhood](plugin:Analysis/Process/Neighbourhood)),
-  and SMAP has no HDBSCAN.
+* **Voronoi, HDBSCAN and local maxima** are new: SMAP's `ClusterVoronoi`
+  computes only the Voronoi density (here
+  [Neighbourhood](plugin:Analysis/Process/Neighbourhood)), and SMAP has no
+  HDBSCAN.  Local maxima and *frame analysis* are ported from Picasso
+  (MIT licence), `clusterer._cluster` and `clusterer._frame_analysis`.
 
 ## References
 
@@ -372,6 +524,18 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   Data Mining (PAKDD 2013)*, Lecture Notes in Computer Science 7819,
   160-172 (2013).
   [doi:10.1007/978-3-642-37456-2_14](https://doi.org/10.1007/978-3-642-37456-2_14)
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198-1228
+  (2017). [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, where local maxima and frame analysis come from.
+* Schlichthaerle T, Lindner C, Jungmann R. Super-resolved visualization of
+  single DNA-based tension sensors in cell adhesion. *Nat Commun* 12, 2510
+  (2021). [doi:10.1038/s41467-021-22606-1](https://doi.org/10.1038/s41467-021-22606-1)
+  -- the local-maximum clustering.
+* Reinhardt SCM, Masullo LA, Baudrexel I, Steen PR, et al.
+  Ångström-resolution fluorescence microscopy. *Nature* 617, 711-716
+  (2023). [doi:10.1038/s41586-023-05925-9](https://doi.org/10.1038/s41586-023-05925-9)
+  -- its use for RESI, and the frame analysis.
 * McInnes L, Healy J, Astels S. hdbscan: Hierarchical density based
   clustering. *J Open Source Softw* 2, 205 (2017).
   [doi:10.21105/joss.00205](https://doi.org/10.21105/joss.00205) -- the

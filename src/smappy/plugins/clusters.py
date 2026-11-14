@@ -1,4 +1,5 @@
-"""Clusters as regions: *Find clusters*, by DBSCAN, Voronoi or HDBSCAN.
+"""Clusters as regions: *Find clusters*, by DBSCAN, Voronoi, HDBSCAN or
+local maxima.
 
 `docs/regions.md` ("Clusters") has the decisions.  A clusterer writes
 ``cluster_id`` -- 1, 2, ... by size, 0 for a localization in no cluster -- and
@@ -61,7 +62,27 @@ several trees are equally minimal.  It is one call that Stop cannot
 interrupt, so `FindClusters.preflight` asks before a long run.  SMAP had
 none.
 
-All three write the same columns through `with_clusters`, numbered by size
+**Local maxima** is Picasso's SMLM clusterer (jungmannlab/picasso, MIT;
+`clusterer._cluster`; Schlichthaerle et al. 2021, Reinhardt et al. 2023),
+made for DNA-PAINT: a point with more neighbours within the radius than any
+of its neighbours is a site's centre, and its neighbours its cluster.  Two
+sites closer than DBSCAN's chain of core points stay apart, where DBSCAN
+joins them; the radius is about twice the precision (Picasso recommends twice
+the NeNA value) and so a few nanometres.  Ported in `local_maxima`; it departs
+only in taking the maxima most neighbours first, not in the table's order.
+In 3D z is scaled by the radius over a *z radius*, Picasso's anisotropic
+neighbourhood.  Picasso's default radius and minimum size, 10 nm and 10.
+
+**Frame analysis** (Picasso's `clusterer._frame_analysis`, on by default in
+its SMLM clusterer, a tick here for every algorithm) makes noise of a cluster
+whose localizations bunch in time: the mean of their place in the
+acquisition outside 20-80 %, or more than 80 % of them in one twentieth of
+it.  A DNA-PAINT site binds at random through the whole acquisition; a
+sticky imager or dirt binds once, for long.  The thresholds and the place in
+the acquisition are *Binding kinetics*' (`binding_kinetics.frame_spread`),
+so a cluster that fails here has the values that fail there.
+
+All four write the same columns through `with_clusters`, numbered by size
 (`by_size`), one file at a time, blinks or localizations as the layer shows.
 What was measured per cluster goes back onto its localizations with
 *Regions to attribute* (`region_column.py`).
@@ -264,6 +285,138 @@ def hdbscan_clusters(points: np.ndarray, min_cluster_size: int = 10,
     return by_size(found)
 
 
+def local_maxima(points: np.ndarray, radius: float, min_points: int,
+                 progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
+    """Picasso's SMLM clusterer (`clusterer._cluster`): a cluster label per
+    point, 1, 2, ... largest first, 0 for none.
+
+    Each point's neighbours within ``radius`` are counted, itself included.
+    A **local maximum** has more than ``min_points`` and no neighbour with
+    more; each maximum takes its neighbours that no earlier maximum took, and
+    a maximum already taken hands its free neighbours to the cluster that
+    took it -- two maxima closer than the radius are one cluster.  Clusters
+    of fewer than ``min_points`` are none.  ``points`` (n, 2) or (n, 3); in
+    3D the caller scales z so the neighbourhood is a sphere of ``radius``
+    (Picasso's anisotropic radius, `cluster_3D`).
+
+    Where it departs from Picasso: the maxima are taken **most neighbours
+    first**, ties in the order of the cell search, where Picasso takes them
+    in the order of the table -- the same clusters, but not depending on how
+    the table is sorted.  The counts and the neighbour lists come from the
+    cell search of `csrc/neighbours.cpp` (`Index.query`, `Index.pairs`), in
+    chunks, rather than from a k-d tree's lists.
+    """
+    from .._neighbours import Index, cell_order
+    points = np.asarray(points, dtype=float)
+    n = len(points)
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    if not radius > 0:
+        raise ValueError("the radius must be positive")
+    use_z = points.shape[1] > 2
+    x, y = points[:, 0], points[:, 1]
+    z = points[:, 2] if use_z else None
+    x0, y0, x1 = float(x.min()), float(y.min()), float(x.max())
+    r = float(radius)
+    index = Index(x, y, z, None, x0, y0, x1, r)
+    order = cell_order(x, y, x0, y0, x1, r)
+
+    def zs(rows):
+        return None if z is None else z[rows]
+
+    counts = np.empty(n, dtype=np.int64)
+    for start in range(0, n, COUNT_CHUNK):
+        rows = order[start:start + COUNT_CHUNK]
+        counts[rows] = index.query(x[rows], y[rows], zs(rows), None, 8, 0.0,
+                                   r if use_z else 0.0)
+        if progress is not None:
+            progress(0.4 * min(start + COUNT_CHUNK, n) / n)
+    # the most neighbours any neighbour has; every point is its own neighbour,
+    # so each point asked about has a run of pairs, in the order asked
+    most = np.empty(n, dtype=np.int64)
+    rank = np.empty(n, dtype=np.int64)
+    rank[order] = np.arange(n)
+    # asked in cell order, as the counts were: the search reuses its cells
+    candidates = np.flatnonzero(counts > min_points)
+    candidates = candidates[np.argsort(rank[candidates])]
+    for start in range(0, len(candidates), COUNT_CHUNK):
+        rows = candidates[start:start + COUNT_CHUNK]
+        asked, found, _ = index.pairs(x[rows], y[rows], zs(rows), use_z)
+        asked, found = np.asarray(asked), np.asarray(found)
+        starts = np.flatnonzero(np.r_[True, asked[1:] != asked[:-1]])
+        most[rows[asked[starts]]] = np.maximum.reduceat(counts[found], starts)
+        if progress is not None:
+            progress(0.4 + 0.3 * min(start + COUNT_CHUNK, len(candidates))
+                     / max(len(candidates), 1))
+    peaks = candidates[counts[candidates] == most[candidates]]
+    # most neighbours first; `candidates` is in cell order, kept for ties
+    peaks = peaks[np.argsort(-counts[peaks], kind="stable")]
+    found = np.full(n, -1, dtype=np.int64)
+    if len(peaks):
+        asked, near, _ = index.pairs(x[peaks], y[peaks], zs(peaks), use_z)
+        asked, near = np.asarray(asked), np.asarray(near)
+        bounds = np.searchsorted(asked, np.arange(len(peaks) + 1))
+        for k, i in enumerate(peaks):
+            neighbours = near[bounds[k]:bounds[k + 1]]
+            label = found[i] if found[i] >= 0 else k
+            found[neighbours[found[neighbours] < 0]] = label
+    if progress is not None:
+        progress(1.0)
+    member = found >= 0
+    sizes = np.bincount(found[member], minlength=len(peaks))
+    found[member & (sizes[np.maximum(found, 0)] < min_points)] = -1
+    return by_size(found)
+
+
+def frame_analysis(labels: np.ndarray, frame: np.ndarray, file: Optional[np.ndarray],
+                   spans: Dict[int, Tuple[int, int]]) -> Tuple[np.ndarray, int]:
+    """Picasso's frame analysis (`clusterer._frame_analysis`) as a filter:
+    ``(labels, rejected)``, the labels with every cluster that fails set to
+    0 and the rest numbered again 1, 2, ... in their order, and how many
+    failed.
+
+    A cluster fails when the mean of its localizations' place in the
+    acquisition -- ``(frame - first + 1/2) / frames`` of its file, as
+    *Binding kinetics*' `frame_spread` -- is outside `FRAME_MEAN_BOUNDS`, or
+    when one twentieth of the acquisition holds more than `FRAME_PEAK_MAX` of
+    them: a sticky imager, dirt that binds for a while, a site that appeared
+    late.  ``spans`` is each file's first and last frame.  All clusters at
+    once, by counting into bins, not a loop over clusters.
+    """
+    from ..binding_kinetics import FRAME_BINS, FRAME_MEAN_BOUNDS, FRAME_PEAK_MAX
+    labels = np.asarray(labels, dtype=np.int64).copy()
+    frame = np.asarray(frame, dtype=float)
+    file = (np.zeros(len(frame), np.int64) if file is None
+            else np.asarray(file, np.int64))
+    member = np.flatnonzero(labels > 0)
+    if not len(member):
+        return labels, 0
+    rel = np.full(len(member), np.nan)
+    for f, (lo, hi) in spans.items():
+        here = file[member] == f
+        rel[here] = (frame[member][here] - lo + 0.5) / (hi - lo + 1)
+    known = np.isfinite(rel)
+    if not known.all():
+        raise ValueError("frame analysis needs each file's frames: a file has none")
+    rel = np.clip(rel, 0.0, 1.0)
+    lab = labels[member]
+    m = int(lab.max()) + 1
+    n = np.bincount(lab, minlength=m).astype(float)
+    mean = np.bincount(lab, weights=rel, minlength=m) / np.maximum(n, 1)
+    bins = np.minimum((rel * FRAME_BINS).astype(np.int64), FRAME_BINS - 1)
+    peak = np.bincount(lab * FRAME_BINS + bins,
+                       minlength=m * FRAME_BINS).reshape(m, FRAME_BINS).max(axis=1)
+    lo, hi = FRAME_MEAN_BOUNDS
+    fails = (mean < lo) | (mean > hi) | (peak > FRAME_PEAK_MAX * n)
+    fails[0] = False
+    rejected = int(fails[1:][n[1:] > 0].sum())
+    labels[fails[labels]] = 0
+    kept = np.unique(labels[labels > 0])
+    renumber = np.zeros(m, dtype=np.int64)
+    renumber[kept] = np.arange(1, len(kept) + 1)
+    return renumber[labels], rejected
+
+
 # above this many seconds a run asks first (`FindClusters.preflight`)
 ASK_ABOVE_S = 20.0
 
@@ -313,27 +466,49 @@ class HDBSCANSettings:
                                                   "table has z_nm")
 
 
-ALGORITHMS = (("dbscan", "DBSCAN"), ("voronoi", "Voronoi"), ("hdbscan", "HDBSCAN"))
+@dataclass
+class LocalMaximaSettings:
+    radius_nm: float = param(10.0, label="radius", unit="nm", min=0.1,
+                             help="a site's localizations lie within it; about "
+                                  "twice the precision (NeNA)")
+    min_points: int = param(10, label="minimum size", min=1,
+                            help="localizations a cluster has at least")
+    use_z: bool = param(True, label="in 3D", help="cluster in x, y and z when the "
+                                                  "table has z_nm")
+    z_radius_nm: float = param(20.0, label="z radius", unit="nm", min=0.1, beside=True,
+                               help="the neighbourhood's half height in z")
+
+
+ALGORITHMS = (("dbscan", "DBSCAN"), ("voronoi", "Voronoi"), ("hdbscan", "HDBSCAN"),
+              ("local_maxima", "local maxima"))
 
 
 @dataclass
 class FindClustersSettings:
     algorithm: str = param("dbscan", label="algorithm", choices=ALGORITHMS,
                            help="DBSCAN: a radius and a count; Voronoi: dense "
-                                "cells that touch; HDBSCAN: no radius")
+                                "cells that touch; HDBSCAN: no radius; local "
+                                "maxima: one cluster per DNA-PAINT site")
     dbscan: DBSCANSettings = param(default_factory=DBSCANSettings, label="DBSCAN")
     voronoi: VoronoiSettings = param(default_factory=VoronoiSettings, label="Voronoi")
     hdbscan: HDBSCANSettings = param(default_factory=HDBSCANSettings, label="HDBSCAN")
+    local_maxima: LocalMaximaSettings = param(default_factory=LocalMaximaSettings,
+                                              label="local maxima")
+    frame_analysis: bool = param(False, label="frame analysis",
+                                 help="no cluster where its localizations bunch "
+                                      "in time: a sticky imager")
 
 
 @register("Analysis/Regions/Find clusters")
 class FindClusters(Plugin):
-    """Finds clusters -- by DBSCAN, Voronoi density or HDBSCAN -- and names
-    them: cluster_id and n_in_cluster."""
+    """Finds clusters -- by DBSCAN, Voronoi density, HDBSCAN or local maxima
+    -- and names them: cluster_id and n_in_cluster."""
 
     Settings = FindClustersSettings
     changes_locs = True
     version = "2"
+    # tried on one ROI before the field: Picasso's "test clustering"
+    follow_roi = True
 
     def describe(self, ctx: Optional[Context], settings: FindClustersSettings
                  ) -> FormState:
@@ -353,7 +528,7 @@ class FindClusters(Plugin):
         million), one call that Stop cannot interrupt.  DBSCAN, a second per
         100 k, asks nothing.
         """
-        if settings.algorithm == "dbscan":
+        if settings.algorithm in ("dbscan", "local_maxima"):
             return None
         try:
             mask = np.asarray(ctx.selection.mask, dtype=bool)
@@ -393,10 +568,14 @@ class FindClusters(Plugin):
             raise ValueError(f"{name} needs x_nm and y_nm: the table has "
                              f"{', '.join(sorted(table.keys()))}")
         use_z = {"dbscan": settings.dbscan.use_z, "hdbscan": settings.hdbscan.use_z,
-                 "voronoi": False}[algorithm]
+                 "voronoi": False, "local_maxima": settings.local_maxima.use_z}[algorithm]
         if use_z and "z_nm" in table:
             columns.append("z_nm")
         points = np.column_stack([np.asarray(table[c], dtype=float) for c in columns])
+        if algorithm == "local_maxima" and points.shape[1] > 2:
+            # Picasso's anisotropic radius: z scaled so the sphere is the radius
+            lm = settings.local_maxima
+            points[:, 2] *= lm.radius_nm / lm.z_radius_nm
         use &= np.isfinite(points).all(axis=1)
         files = (np.asarray(table["filenumber"]) if "filenumber" in table
                  else np.zeros(len(table), dtype=np.int64))
@@ -423,6 +602,9 @@ class FindClusters(Plugin):
                 found, mean = voronoi_clusters(points[rows], s.factor, s.min_size,
                                                progress)
                 used.append(mean)
+            elif algorithm == "local_maxima":
+                s = settings.local_maxima
+                found = local_maxima(points[rows], s.radius_nm, s.min_points, progress)
             else:
                 s = settings.hdbscan
                 progress(0.0)
@@ -433,6 +615,12 @@ class FindClusters(Plugin):
             labels[rows] = found
         if grouped:
             labels = _per_localization(whole, table, labels)
+        rejected = None
+        if settings.frame_analysis:
+            # on the localizations, as Picasso's: a blink's frames all count
+            labels, rejected = frame_analysis(labels, whole["frame"], (
+                whole["filenumber"] if "filenumber" in whole else None),
+                _spans(ctx, whole))
         n_clusters = int(labels.max(initial=0))
         # the files and channels the layer shows are clustered afresh; the
         # others keep their clusters, numbered above them (`replaced_rows`)
@@ -443,11 +631,15 @@ class FindClusters(Plugin):
         text = (f"{n_clusters} clusters of {clustered} localizations, "
                 f"{int(replaced.sum()) - clustered} in none; " + _how(settings, used)
                 + (" (blinks)" if grouped else "")
+                + (f"; {rejected} failed the frame analysis" if rejected is not None
+                   else "")
                 + (f"; {n_kept} clusters of other files or channels kept"
                    if n_kept else ""))
         locs = with_clusters(whole, labels)
         data: Dict[str, Any] = {"clusters": n_clusters, "algorithm": algorithm,
                                 "kept": n_kept}
+        if rejected is not None:
+            data["frame_analysis_rejected"] = rejected
         if algorithm == "dbscan":
             data["radius_nm"] = used
         elif algorithm == "voronoi":
@@ -472,9 +664,27 @@ def _how(settings: FindClustersSettings, used) -> str:
         return (f"Voronoi, dense above {v.factor:g} x the mean density ("
                 + ", ".join(f"{m:.0f}" for m in used) + f" /um^2), at least "
                 f"{v.min_size} localizations")
+    if settings.algorithm == "local_maxima":
+        m = settings.local_maxima
+        return (f"local maxima, radius {m.radius_nm:g} nm, at least "
+                f"{m.min_points} localizations")
     h = settings.hdbscan
     return (f"HDBSCAN, minimum size {h.min_cluster_size}, "
             f"{h.min_samples or h.min_cluster_size} neighbours")
+
+
+def _spans(ctx: Context, whole: Localizations) -> Dict[int, Tuple[int, int]]:
+    """Each file's first and last frame of the acquisition, as *Binding
+    kinetics* finds them: the file's ``n_frames`` where it is recorded, else
+    its first and last localization."""
+    from ..binding_kinetics import spans_of
+    from .binding_kinetics import acquisition
+    if "frame" not in whole:
+        raise ValueError("frame analysis needs the frame column")
+    file = whole["filenumber"] if "filenumber" in whole else None
+    seen = spans_of(whole["frame"], file)
+    known = acquisition(ctx, whole, list(seen), None) or {}
+    return {**seen, **known}
 
 
 def _per_localization(locs: Localizations, grouped: Localizations,
