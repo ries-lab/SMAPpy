@@ -85,11 +85,34 @@ def from_info(info: Sequence[Dict], key: str):
     return next((d[key] for d in info if key in d), None)
 
 
+def unwritten(dataset) -> bool:
+    """A table with rows declared and nothing ever written into it.
+
+    HDF5 reads what was never written as the fill value, so such a file
+    loads without complaint as millions of localizations at frame 0 and
+    (0, 0) -- one 1.5 kB file declared 16.6 million (a converter that made
+    the dataset by its shape and stopped before its data, November 2026).
+    Data kept outside the file (external raw files, a virtual dataset) has
+    no storage here either and is not this."""
+    import h5py
+    if not dataset.shape or dataset.shape[0] == 0:
+        return False
+    plist = dataset.id.get_create_plist()
+    if plist.get_layout() not in (h5py.h5d.CONTIGUOUS, h5py.h5d.CHUNKED):
+        return False
+    return plist.get_external_count() == 0 and dataset.id.get_storage_size() == 0
+
+
 def load(path: Path):
     import h5py
 
     from .formats import FileInfo
     with h5py.File(path, "r") as f:
+        if unwritten(f["locs"]):
+            raise ValueError(
+                f"{Path(path).name} declares {f['locs'].shape[0]:,} localizations but "
+                f"holds none: its /locs table was made and never written, so every row "
+                f"would read as 0. Whatever wrote the file stopped before its data.")
         records = f["locs"][...]
     columns = {}
     for name in records.dtype.names:
