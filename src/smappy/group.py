@@ -819,6 +819,32 @@ def attach(locs: Localizations, grouped: Localizations,
     apply_recipes(locs)
 
 
+def last_frames(locs: Localizations, ids) -> np.ndarray:
+    """The last frame of each merged blink ``ids`` names (`group_id`), read
+    from the localizations ``locs`` that `attach` numbered; -1 for an id none
+    of them has.
+
+    The grouped table keeps where a blink starts (``frame``, the min) and how
+    many localizations it has (`n_in_group`), not where it ends: with dark
+    frames allowed the two do not give it, and a column per blink that only
+    Picasso's ``len`` reads would cost every merge a pass.  So it is read
+    from the localizations when it is wanted.
+    """
+    ids = np.asarray(ids, np.int64)
+    if "group_id" not in locs or "frame" not in locs:
+        return np.full(len(ids), -1, np.int64)
+    gid = np.asarray(locs["group_id"], np.int64)
+    frame = np.asarray(locs["frame"], np.int64)
+    size = max(int(gid.max()) if gid.size else 0, int(ids.max()) if ids.size else 0) + 1
+    last = np.full(size, -1, np.int64)
+    used = gid > 0                          # 0: in no blink (`USE`, not linked yet)
+    np.maximum.at(last, gid[used], frame[used])
+    out = np.full(len(ids), -1, np.int64)
+    valid = ids > 0
+    out[valid] = last[ids[valid]]
+    return out
+
+
 def _link_precision(locs: Localizations) -> np.ndarray:
     """The lateral precision in the unit of the positions linking runs on."""
     from .render import POSITION_FIELDS

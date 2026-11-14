@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.file.ExportLocalizations, smappy.plugins.file.export_format, smappy.io.formats._save_csv, smappy.io.picasso.records, smappy.io.picasso.save, smappy.gui.params.ColumnsField]
+covers: [smappy.plugins.file.ExportLocalizations, smappy.plugins.file.export_format, smappy.io.formats._save_csv, smappy.io.picasso.records, smappy.io.picasso.save, smappy.io.picasso._linked, smappy.io.picasso.metadata_list, smappy.io.picasso.steps, smappy.group.last_frames, smappy.plugins.file.picasso_groups, smappy.gui.params.ColumnsField]
 ---
 
 ## What it does
@@ -74,16 +74,37 @@ its pixel size, which a fitted one does -- and z in nanometres:
 | `net_gradient` | 0: a number of Picasso's own spot detection, which this program does not have |
 | `z`, `lpz` | `z_nm`, `z_err_nm`, for a 3D table |
 | `group` | the *Picasso group* attribute, if one is chosen |
+| `len`, `n`, `photon_rate` | for merged blinks only: see below |
 
 A field the table has no attribute for is written as 0, and the text says
 which.  The metadata Picasso needs -- `Width`, `Height` and `Frames` --
 and the `Pixelsize` go into the file (`/metadata`, as Picasso 0.9 and later
 embed it) and into a `.yaml` beside it (for older versions).  The width
 and height are the camera region the fit read where the table records it,
-and otherwise as many pixels as the positions need.  Picasso throws away,
+and otherwise as many pixels as the positions need -- but never less than
+the file the table was read from, if that was Picasso's.  Picasso throws away,
 without saying so, every localization with a value missing, a negative
 position, width or precision, or a position outside the image; the export
 leaves those out itself and says how many.
+
+**Merged blinks** are written as Picasso writes a *linked* table, in which
+each row is one binding event: `n` is the number of localizations merged
+into it (`n_in_group`), `len` the frames from its first to its last, dark
+frames bridged by the merge included -- three localizations in frames 10,
+11 and 13 are `n` 3 and `len` 4 -- and `photon_rate` its photons over `n`.
+The merged table keeps only where a blink starts, so its last frame is read
+from the localizations it was merged from.  The localizations themselves
+are written without these three fields, as Picasso's unlinked files are.  A
+table read from a linked Picasso file keeps the `len` and `n` it came with.
+
+**The metadata.**  Picasso's metadata is a list, one entry for each step
+that made the file, and Picasso reads a value from the last entry that
+has it.  A table read from a Picasso file keeps that list, and the export
+appends one entry of its own -- *smappy* and its version, the image size
+and pixel size, and the steps of the session's history that changed the
+table, with their settings -- as Picasso's own steps do.  So a file that
+goes from Picasso to here and back still says what Picasso did to it,
+followed by what was done here.
 
 ## Parameters
 
@@ -96,7 +117,10 @@ which is what a chain or a batch wants.
 ### group
 Picasso shows its *picks* by this attribute.  Writing `cluster_id` there, for
 example, makes every cluster a pick in Picasso; leave it on *none* for a
-plain table.
+plain table.  Every id attribute is offered -- any whose name ends in `_id`,
+such as `cluster_id`, `molecule_id` or a Picasso file's own `pick_id` --
+and any other whole-numbered one.  On merged blinks an id is a number per
+blink, written as a whole number; a blink with none is written as -1.
 
 ## Output
 
