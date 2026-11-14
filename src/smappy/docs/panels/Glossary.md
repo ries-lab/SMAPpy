@@ -232,6 +232,20 @@ papers and in other software.
 * **labelling efficiency** (also called degree of labelling, or effective
   labelling efficiency): the fraction of the target proteins that carry a
   label which is detected.
+* **label uncertainty** (also called the linkage error): how far a detected
+  label sits from the centre of its protein -- the size of the antibody or
+  nanobody and the error of the position together, as a standard deviation.
+* **oligomer** (its **oligomeric state**, or stoichiometry): a complex of a
+  few copies of one protein -- a dimer of two, a trimer of three; a monomer
+  is a protein on its own.
+* **nearest-neighbour distance** (NND; the k-th NND): the distance from a
+  molecule to the closest other molecule (or to the k-th closest).
+* **Kolmogorov-Smirnov statistic** (KS, D): the largest gap between two
+  cumulative distributions -- 0 when two sets of numbers are spread alike,
+  1 when they do not overlap at all.
+* **bootstrap**: an error found by repeating the analysis on data made
+  again -- resampled from the data, or simulated from the answer (a
+  parametric bootstrap) -- and taking the spread of the answers.
 
 ## Tracking
 
