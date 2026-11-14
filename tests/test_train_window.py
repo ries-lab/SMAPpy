@@ -136,6 +136,10 @@ def test_starting_here_runs_this_pythons_decode_cli_detached_with_its_log(tmp_pa
     assert rule == {"window": 100, "min_epochs": 150, "loss_tol": 0.01, "jaccard_tol": 0.005, "eff_tol": 0.005}
     train_window.start_here(tmp_path, train_window.TrainSettings(epochs=7, until_converged=False))
     assert seen["command"][-1] == "--all-epochs" and "--stop-rule" not in seen["command"]
+    # the joint bounds, on unless turned off
+    assert "--no-joint-bounds" not in seen["command"]
+    train_window.start_here(tmp_path, train_window.TrainSettings(joint_bounds=False))
+    assert "--no-joint-bounds" in seen["command"]
 
 
 def test_a_sparse_movie_is_prefitted_further_until_molecules_were_fully_on_often_enough(movie):

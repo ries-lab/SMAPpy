@@ -1,6 +1,7 @@
 """The benchmark's report: one JSON per run, every set scored the same way (`docs/decode/benchmark.md`).
 
     python benchmarks/decode/suite/report.py RUN [...]        # score the kept fits again
+    python benchmarks/decode/suite/report.py --joint RUN      # ... against the joint bound too
     python benchmarks/decode/suite/report.py --compare RUN [...]
 
 **Kept** before scoring, by the run's ``keep``: a network's localizations at ``prob`` >= ``min_prob``;
@@ -23,7 +24,11 @@ the truth carries each emitter's CRLB (the simulated sets):
 * ``crlb_width_lat`` / ``_ax``: the robust width (1.4826 MAD) of each localization's error over its own
   emitter's bound, x and y pooled -- the Train window's Follow measure, which mismatches and merged
   pairs do not drag; 1 where a fitter reaches the bound.  Both with the 13 x 13 bound and, as
-  ``*_full``, the whole spot's.
+  ``*_full``, the whole spot's;
+* with ``--joint`` the same against each emitter's joint bound, its overlapping neighbours fitted
+  with it (``*_joint``, `sets.joint_bounds`), and all three by the nearest other emitter's
+  distance (``crlb_width_by_neighbour``): what crowding costs, which a single-emitter bound leaves
+  in the fitter's account.
 
 **The range that matters**, ``core``: positions, uncertainties, z bias and pixelation of the
 emitters with |z| < ``CORE_Z_NM`` (300 nm), read first; the whole range's are kept beside them, but
@@ -65,6 +70,8 @@ Z_LIMIT = 700.0
 Z_BINS = (0, 150, 300, 450, 600, 700)          # |z| bins of the pixelation
 PHOTON_BINS = (0, 2000, 4000, 8000, 16000, 1e9)
 CORE_Z_NM = 300.0
+#: the nearest other emitter's distance the joint bound's widths are split by, nm
+NEIGHBOUR_EDGES_NM = (0, 200, 400, 600, 800, 1200, 2000)
 PHOTONS_MIN = 100.0                            # DECODE's evaluation: dimmer molecules count neither way                              # |z| below it is what a fitter is for; see score_truth
 
 
@@ -179,16 +186,17 @@ def score_truth(truth, locs, keep, px, size, shift=False):
         if len(claims) == 3:
             c["claim_width_lat"] = robust_width(np.r_[dx[core] / cx[core], dy[core] / cy[core]])
             c["claim_width_ax"] = robust_width(dz[core] / cz[core])
-        if "crlb_x_nm" in t:
-            bx, by, bz = (t[f"crlb_{a}_nm"][ti][core] for a in "xyz")
-            c["crlb_width_lat"] = robust_width(np.r_[dx[core] / bx, dy[core] / by])
-            c["crlb_width_ax"] = robust_width(dz[core] / bz)
+        for key, sfx in (("crlb", ""), ("crlb_joint", "_joint")):
+            if f"{key}_x_nm" in t:
+                bx, by, bz = (t[f"{key}_{a}_nm"][ti][core] for a in "xyz")
+                c[f"crlb_width_lat{sfx}"] = robust_width(np.r_[dx[core] / bx, dy[core] / by])
+                c[f"crlb_width_ax{sfx}"] = robust_width(dz[core] / bz)
         out["core"] = c
-    for key in ("crlb", "crlb_full"):
+    for key in ("crlb", "crlb_full", "crlb_joint"):
         if f"{key}_x_nm" not in t:
             continue
         bx, by, bz = (t[f"{key}_{a}_nm"][ti] for a in "xyz")
-        sfx = "" if key == "crlb" else "_full"
+        sfx = key[4:]
         out[f"rmse_over_crlb_lat{sfx}"] = float(lat / np.sqrt(np.nanmean(bx ** 2 + by ** 2)))
         out[f"rmse_over_crlb_ax{sfx}"] = float(ax / np.sqrt(np.nanmean(bz ** 2)))
         out[f"crlb_width_lat{sfx}"] = robust_width(np.r_[dx / bx, dy / by])
@@ -199,6 +207,20 @@ def score_truth(truth, locs, keep, px, size, shift=False):
                 {"lo": float(lo), "hi": float(hi), "n": int(s.sum()), "lat": robust_width(np.r_[dx[s] / bx[s], dy[s] / by[s]]),
                  "ax": robust_width(dz[s] / bz[s])}
                 for lo, hi in zip(PHOTON_BINS[:-1], PHOTON_BINS[1:]) for s in [(ph >= lo) & (ph < hi)] if s.sum() >= 200]
+    if "nn_nm" in t:
+        # the joint bound against the single-emitter ones, by how close the nearest other emitter is
+        nn = t["nn_nm"][ti]
+        rows = []
+        for lo, hi in zip(NEIGHBOUR_EDGES_NM, (*NEIGHBOUR_EDGES_NM[1:], np.inf)):
+            s = (nn >= lo) & (nn < hi)
+            row = {"lo": float(lo), "hi": None if np.isinf(hi) else float(hi), "n": int(s.sum())}
+            for key, sfx in (("crlb", ""), ("crlb_full", "_full"), ("crlb_joint", "_joint")):
+                if f"{key}_x_nm" in t and s.sum() >= 10:
+                    bx, by, bz = (t[f"{key}_{a}_nm"][ti][s] for a in "xyz")
+                    row[f"lat{sfx}"] = robust_width(np.r_[dx[s] / bx, dy[s] / by])
+                    row[f"ax{sfx}"] = robust_width(dz[s] / bz)
+            rows.append(row)
+        out["crlb_width_by_neighbour"] = rows
     return out
 
 
@@ -293,27 +315,31 @@ def challenge_truth(name):
             "z_nm": -a[:, 4], "photons": a[:, 5]}
 
 
-def score_set(name, locs, keep):
+def score_set(name, locs, keep, joint=False):
+    """``joint``: against the joint bound too (`sets.joint_bounds`, about 15 s the first time a set)."""
     spec = S.SETS[name]
     cam = S.camera(name)
     px = (cam["pixelsize_um"] * 1000, cam.get("pixelsize_y_um", cam["pixelsize_um"]) * 1000)
     if spec["kind"] == "simulated":
         truth = dict(np.load(S.SETS_DIR / name / "truth.npz"))
+        if joint:
+            truth.update(S.joint_bounds(name))
         return score_truth(truth, locs, keep, px, (S.SIZE, S.SIZE))
     if spec["kind"] == "challenge":
         return score_truth(challenge_truth(spec["name"]), locs, keep, px, (64, 64), shift=True)
     return score_real(locs, keep, px)
 
 
-def rescore(run_name):
-    """Score a run's kept fits again, keeping its record of how each was made."""
+def rescore(run_name, joint=False):
+    """Score a run's kept fits again, keeping its record of how each was made; ``joint``: against
+    the joint bound too."""
     from smappy.io.hdf5 import load_localizations
     from run import load_run
     path = REPORTS / f"{run_name}.json"
     report = json.loads(path.read_text())
     run = load_run(run_name)
     for name, entry in report["sets"].items():
-        entry["scores"] = score_set(name, load_localizations(FITS / run_name / f"{name}.hdf5"), run["keep"])
+        entry["scores"] = score_set(name, load_localizations(FITS / run_name / f"{name}.hdf5"), run["keep"], joint)
     path.write_text(json.dumps(report, indent=1))
     return report
 
@@ -325,7 +351,8 @@ CORE_COLUMNS = [("rmse_lat_nm", "lat", "{:.1f}"), ("rmse_ax_nm", "ax", "{:.1f}")
 COLUMNS = [("jaccard", "J", "{:.3f}"), ("recall", "rec", "{:.3f}"), ("precision", "prec", "{:.3f}"),
            ("rmse_lat_nm", "lat", "{:.1f}"), ("rmse_ax_nm", "ax", "{:.1f}"),
            ("crlb_width_lat", "w/CR lat", "{:.2f}"), ("crlb_width_ax", "w/CR ax", "{:.2f}"),
-           ("rmse_over_crlb_lat", "rmse/CR lat", "{:.2f}"), ("claim_width_lat", "err/cl lat", "{:.2f}"),
+           ("rmse_over_crlb_lat", "rmse/CR lat", "{:.2f}"),
+           ("crlb_width_lat_joint", "w/CRj lat", "{:.2f}"), ("crlb_width_ax_joint", "w/CRj ax", "{:.2f}"), ("claim_width_lat", "err/cl lat", "{:.2f}"),
            ("claim_width_ax", "err/cl ax", "{:.2f}"), ("claim_ax_worst", "err/cl ax max", "{:.2f}"),
            ("bias_z_nm", "dz", "{:+.1f}"),
            ("ks_max", "KS", "{:.3f}"), ("ks_far", "KS |z|>450", "{:.3f}"), ("fps", "frames/s", "{:.0f}")]
@@ -384,11 +411,13 @@ def compare(names):
 
 def main():
     args = sys.argv[1:]
+    joint = "--joint" in args             # against the joint bound too: about 15 s a set the first time
+    args = [a for a in args if a != "--joint"]
     if args and args[0] == "--compare":
         compare(args[1:])
     else:
         for n in args:
-            rescore(n)
+            rescore(n, joint)
         compare(args)
 
 

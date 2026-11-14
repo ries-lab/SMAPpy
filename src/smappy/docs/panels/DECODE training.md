@@ -143,7 +143,10 @@ in grey.  Against *alone* the closest pairs are far above 1 and molecules on
 in three frames can be below it; against the last bound both should sit near
 1 if the network uses what the frames hold.  A curve below 1 for the closest
 pairs is not an error: the bound is for an estimator that is never biased,
-and a network that has learnt where molecules lie can do better there.  A
+and a network that has learnt where molecules lie can do better there.  The
+joint bounds take 6 s at every start of a training at the HD density, 17 s
+at UHD; *joint CRLB* under the Train tab's *more* turned off leaves them out,
+and the panels then show the single-emitter bound alone.  A
 training from before these numbers existed shows the panels empty.
 
 

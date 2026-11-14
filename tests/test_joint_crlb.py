@@ -203,3 +203,27 @@ def test_nearest_neighbour_is_per_frame():
     d = nearest_neighbour([0, 0, 0, 1], [[0, 0], [3, 4], [10, 0], [0, 0.5]])
     assert d[:3] == pytest.approx([5.0, 5.0, np.hypot(7, 4)])
     assert np.isinf(d[3])
+
+
+def test_smappys_spline_spots_are_drawn_as_the_simulation_draws_them_and_alone_give_the_calibrations_crlb():
+    from smappy.calibrate.crlb import spline_crlb
+    from smappy.simulate.camera import _draw_spline
+    from smappy.training.joint_crlb import spline_spots
+    from test_calibration_crlb import astigmatic
+    cal = astigmatic()
+    rng = np.random.default_rng(0)
+    n = 30
+    frame, x, y = rng.integers(0, 3, n), rng.uniform(2, 30, n), rng.uniform(2, 30, n)
+    z, photons = rng.uniform(-500, 500, n), rng.uniform(1000, 5000, n)
+    drawn = np.zeros((3, 32, 32))
+    _draw_spline(drawn, frame, np.c_[x, y], z, photons, cal)
+    s = spline_spots(cal, frame, x, y, z, photons, np.zeros(3), (32, 32))
+    h = s.model.shape[1]
+    canvas = np.zeros((3, 32 + 2 * h, 32 + 2 * h))
+    for f, (r, c), m in zip(s.frame, s.corner, s.model):
+        canvas[f, r + h:r + 2 * h, c + h:c + 2 * h] += m
+    assert canvas[:, h:h + 32, h:h + 32] == pytest.approx(drawn, abs=1e-9)
+    one = spline_spots(cal, [0], [16.0], [16.0], [300.0], [2000.0], [20.0], (32, 32))
+    want = spline_crlb(cal, 300.0, photons=2000, background=20, roisize=h)
+    assert single_bounds(one)[0] == pytest.approx([want["x_px"][0], want["y_px"][0], want["z_nm"][0],
+                                                   want["photons"][0]], rel=1e-6)

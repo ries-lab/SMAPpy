@@ -90,7 +90,7 @@ def send(folder, h: Host, runner=None) -> Entry:
 
 
 def train_command(h: Host, remote: str, epochs: int, device: str = "auto", all_epochs: bool = False,
-                  stop_rule: Optional[dict] = None) -> str:
+                  stop_rule: Optional[dict] = None, joint_bounds: bool = True) -> str:
     """The shell line that starts the training there, detached: it outlives the ssh session."""
     d = _quote_dir(remote)
     train = f"{h.command} train {d} --epochs {int(epochs)}"
@@ -100,15 +100,17 @@ def train_command(h: Host, remote: str, epochs: int, device: str = "auto", all_e
         train += f" --stop-rule {shlex.quote(json.dumps(stop_rule))}"
     if device and device != "auto":
         train += f" --device {shlex.quote(device)}"
+    if not joint_bounds:
+        train += " --no-joint-bounds"
     if h.allow_other_version:
         train += " --allow-other-version"
     return f"cd {d} && rm -f {STOP} && (nohup {train} >> {LOG} 2>&1 < /dev/null &) && echo started"
 
 
 def start(entry: Entry, epochs: int, device: str = "auto", runner=None, all_epochs: bool = False,
-          stop_rule: Optional[dict] = None) -> None:
+          stop_rule: Optional[dict] = None, joint_bounds: bool = True) -> None:
     h = _host_of(entry)
-    ssh(h, train_command(h, entry.remote, epochs, device, all_epochs, stop_rule), runner=runner)
+    ssh(h, train_command(h, entry.remote, epochs, device, all_epochs, stop_rule, joint_bounds), runner=runner)
 
 
 def stop(entry: Entry, runner=None) -> None:
