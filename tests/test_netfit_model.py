@@ -141,7 +141,7 @@ def test_the_pixel_modulation_reads_a_cosines_amplitude_and_uniform_positions_as
 def test_blur_keeps_a_constant_and_step_4s_backbones_give_the_same_maps():
     x = torch.full((1, 4, 8, 8), 3.0)
     assert torch.allclose(network.Blur(4)(x), x)
-    for style in ({"blur": True}, {"block": "residual"}, {"offset_range": 2.0}):
+    for style in ({"blur": True}, {"block": "residual"}, {"block": "convnext"}, {"block": "dilated"}, {"offset_range": 2.0}):
         model = network.TwoStageUNet(features=8, **style)
         assert model(torch.zeros(2, 3, 16, 24)).shape == (2, 10, 16, 24)
 

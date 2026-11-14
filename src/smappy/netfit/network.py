@@ -79,7 +79,42 @@ class ResBlock(nn.Module):
         return self.act(self.body(x) + self.skip(x))
 
 
-BLOCKS = {"plain": _block, "residual": ResBlock}
+class LayerNorm2d(nn.Module):
+    """LayerNorm over the channels of each pixel, as ConvNeXt's."""
+
+    def __init__(self, c):
+        super().__init__()
+        self.norm = nn.LayerNorm(c)
+
+    def forward(self, x):
+        return self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+
+class ConvNeXtBlock(nn.Module):
+    """``block`` "convnext" (step 4's screen B; Liu et al. 2022, doi:10.48550/arXiv.2201.03545): a 1 x 1
+    convolution where the channels change, then a 7 x 7 depthwise convolution, LayerNorm, a 1 x 1
+    expansion to four times the channels, GELU and back, added to its input.  The activation the
+    network asks for is not used: the block's own is GELU."""
+
+    def __init__(self, c_in, c_out, act=None, expand: int = 4, kernel: int = 7):
+        super().__init__()
+        self.proj = nn.Conv2d(c_in, c_out, 1) if c_in != c_out else nn.Identity()
+        self.dw = nn.Conv2d(c_out, c_out, kernel, padding=kernel // 2, groups=c_out)
+        self.norm = LayerNorm2d(c_out)
+        self.mlp = nn.Sequential(nn.Conv2d(c_out, expand * c_out, 1), nn.GELU(), nn.Conv2d(expand * c_out, c_out, 1))
+
+    def forward(self, x):
+        x = self.proj(x)
+        return x + self.mlp(self.norm(self.dw(x)))
+
+
+def _dilated_block(c_in, c_out, act):
+    """``block`` "dilated": the plain block with its second convolution dilated 2 -- a receptive field
+    of 7 x 7 a block at the same weights (step 4's screen B, large kernels or dilations)."""
+    return nn.Sequential(nn.Conv2d(c_in, c_out, 3, padding=1), act(), nn.Conv2d(c_out, c_out, 3, padding=2, dilation=2), act())
+
+
+BLOCKS = {"plain": _block, "residual": ResBlock, "convnext": ConvNeXtBlock, "dilated": _dilated_block}
 
 
 class Blur(nn.Module):
