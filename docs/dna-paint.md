@@ -123,7 +123,7 @@ structure's many dim ones.  So:
 * *Fiducials* gains a *markers* choice, **beads** (as now) or **structures**:
   every localization of a region is a point of that marker, weighted by its
   precision (`xy_err_nm`), no photon cut;
-* *beads from* gains **an id column** beside *find them* and *ROI manager*:
+* *beads from* (now *markers from*) gains **an id column** beside *find them* and *ROI manager*:
   the binding sites of *Find clusters* (local maxima) as markers -- the
   second round; the ROI manager's ROIs, from *Segment regions*' *like
   examples*, are the first;
@@ -148,10 +148,27 @@ kinetics* per molecule and *qPAINT* -- the workflow as one step, and a batch.
   goes to Picasso and back keeps its history; `molecule_id` / `cluster_id`
   offered as Picasso's `group`.
 * **Binding-event cores** (Steen 2024, `postprocess.select_binding_event_cores`):
-  a tick when merging blinks that drops each event's first and last frame,
+  a region of *Remove Localizations*, *binding-event edges* (remove, or hide
+  as a flag), that drops each event's first and last frame,
   where the imager bound or left during the exposure.
 * **Temporal median background** for detection (`localize.TemporalMedianMovie`)
   -- under the uneven imager background of DNA-PAINT.
+
+## Status, 2026-11-14: all built
+
+| step | where | measured on simulations |
+| --- | --- | --- |
+| 1 | *Find clusters*: *local maxima*, *frame analysis*; *Simulate*'s origami preset | Picasso's clusters, independent of the table's order; 816 of 816 sites |
+| 2 | *Molecular mapping*, `smappy/molecules.py` | G5M splits an origami cluster into its 12 sites, each within 2 nm; two molecules resolved from 7 nm at 3 nm precision |
+| 3 | *SPINNA*, `smappy/spinna.py` | 30 % dimers fitted 30-40 % (bootstrap error 4 %); labelling efficiency to 0.01 |
+| 4 | *Fiducials*, *markers* = structures, *markers from* an id column | origami round 1.5 nm rms, binding-site round 0.2 nm |
+| 5 | `dna_paint.chain.yaml`, *Workflow/DNA-PAINT* | drifting origami to 818 of 823 molecules |
+| 6 | Picasso writer (`len`, `n`, the metadata list); *Remove Localizations*' *binding-event edges*; the fitters' *temporal median* | cores' photons within 0.5 %; under a patchy background 7290 of 7589 spots found where the filter alone found 4350 |
+
+Departures from Picasso are in each module's docstring and each page's *In
+detail*; the details of each step in its commit.  Not ported from SPINNA:
+the Bayesian search, the label-uncertainty fit, model comparison and the
+density masks.
 
 ## Not ported
 
