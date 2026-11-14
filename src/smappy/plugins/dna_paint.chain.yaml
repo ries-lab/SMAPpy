@@ -10,7 +10,7 @@ path: Analysis/Regions/Workflow/DNA-PAINT
 description: >-
   Corrects the drift on the binding sites, finds the sites, measures their
   binding kinetics and maps them to molecules, in one run.
-grouping: layer
+grouping: ungrouped                 # it changes the table: the localizations
 interface:
   sites.local_maxima.radius_nm: site radius
   sites.local_maxima.min_points: localizations per site
