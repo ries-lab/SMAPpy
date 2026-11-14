@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads, smappy.beads.bead_values, smappy.beads.with_bead_ids]
+covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads, smappy.beads.bead_values, smappy.beads.with_bead_ids, smappy.fiducials.structures_in_regions, smappy.fiducials.column_markers, smappy.fiducials.marker_weights, smappy.fiducials.marker_errors, smappy.beads.fit_offsets_and_spline, smappy.plugins.drift_fiducials.FiducialDrift.react, smappy.plugins.drift_fiducials.FiducialDrift.describe]
 ---
 
 ## What it does
@@ -25,7 +25,8 @@ every frame, so a handful of beads gives a curve that follows faster drift
 than [COMET](plugin:Analysis/Drift/COMET) or RCC, which infer the drift
 from the overlap of blinking molecules and need thousands of them per
 stretch of time.  Without beads, use one of those two.  It needs `x_nm`,
-`y_nm`, `frame` and `photons`; with `z_nm` it corrects z too.
+`y_nm`, `frame` and `photons` (structures, below, need no photons); with
+`z_nm` it corrects z too.
 
 The beads are looked for in the [selection](plugin:Panels/Glossary): the
 localizations that pass the layer's filter, inside the drawn
@@ -35,9 +36,32 @@ localizations, tells the plugin where to look.  The selection must hold one
 file.
 
 Where the beads were already picked by hand in the
-[ROI manager](plugin:Panels/ROI manager) -- an ROI round each -- *beads
+[ROI manager](plugin:Panels/ROI manager) -- an ROI round each -- *markers
 from* *ROI manager* takes each used ROI of the file as one bead instead of
-finding them.
+finding them; *id column* takes each id of an attribute, such as the
+`bead_id` a run before wrote.
+
+**DNA origami as markers.**  In [DNA-PAINT](plugin:Panels/Glossary) (an
+imager strand binding again and again to docking strands on the target)
+the sample often carries [DNA origami](plugin:Panels/Glossary) -- DNA
+folded into a known shape with a dozen binding sites -- and they sit as
+still as beads.  Picasso's *Undrift from picked*
+([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)) uses
+them as drift markers.  They show themselves differently from a bead,
+though: only while an imager is bound, a few frames every few hundred,
+dimly, and at a different site each time.  With *markers* set to
+*structures*, every localization of a marker counts -- no photon cut,
+several in a frame -- each weighted by how well it is localized.
+Structures are not found but named: each used ROI of the ROI manager
+(origami picked by hand, or by
+[Segment regions](plugin:Analysis/Regions/Segment regions)' *like
+examples*), or each id of an attribute (the binding sites
+[Find clusters](plugin:Analysis/Regions/Find clusters)' *local maxima*
+names in `cluster_id`).  Picasso's documentation recommends two rounds:
+whole origami first, then single binding sites, which the first round has
+made sharp enough to find (*How it works*, step 7).  A structure needs
+`xy_err_nm` for its weights (and `z_err_nm` for z); without them every
+localization weighs alike.
 
 ## How it works
 
@@ -148,6 +172,63 @@ axes[2].legend(frameon=False, fontsize=7, ncol=2)
 axes[-1].set_xlabel("frame")
 ```
 
+**7. Structures, in two rounds.**  With *markers* set to *structures*,
+each marker is all the localizations of its ROI or id, and the same curve
+is fitted through them.  A structure's localizations scatter about its
+offset by more than their precision -- by where on the origami each site
+sits -- which the weights take into account.  The first round, whole
+origami from the ROI manager, gives the drift to a nanometre or two.
+Corrected by it, the binding sites stand out as tight spots: *Find
+clusters* with *local maxima* names each one (`cluster_id`), and a second
+run with *markers from* *id column* on `cluster_id` measures what the
+first left.  Its markers are hundreds of sites, each as sharp as its
+localizations, and the two curves together are good to a fraction of a
+nanometre.  The second run corrects the table the first one corrected:
+the drift is the sum of the two curves.
+
+```figure DNA-PAINT of 12-site origami (the *Simulate* preset "DNA-PAINT origami (20 nm grid)", 20,000 frames) with a smooth drift added (grey).  Top two: the drift from the whole origami (blue) and from the binding sites after it (black).  Bottom: each less the drift simulated.  The origami give it to about 2 nm rms, the binding sites to 0.2 nm.  The whole curve may sit a nanometre or two off the truth -- its zero rests on the few localizations of the first frames, and this moves every localization alike -- and it bends away at the very ends, where it has the fewest localizations to rest on.
+from dataclasses import replace
+from smappy.locs import Localizations
+from smappy.plugins import settings_from
+from smappy.plugins.clusters import local_maxima
+from smappy.plugins.simulate import SimulateSettings, preset_values
+from smappy.simulate import ground_truth, localizations
+values = preset_values("DNA-PAINT origami (20 nm grid)")
+values.update(field_um=8.0, seed=1)
+dna = localizations(ground_truth(settings_from(SimulateSettings, values)))
+s = np.linspace(0.0, 1.0, 20000)
+moved = np.column_stack([120 * s + 25 * np.sin(5 * s), -80 * s ** 2 + 15 * np.sin(3 * s)])
+moved -= moved[0]
+f = np.asarray(dna["frame"])
+columns = {k: v for k, v in dna.columns.items() if not k.startswith("z_")}
+columns["x_nm"] = np.asarray(dna["x_nm"]) + moved[f, 0]
+columns["y_nm"] = np.asarray(dna["y_nm"]) + moved[f, 1]
+# each origami picked: here the simulation's own numbering of them
+columns["origami"] = np.asarray(dna["copy"]).astype(np.int64) + 1
+dna = Localizations(columns, dict(dna.metadata))
+markers = FiducialSettings(markers="structures", source="id column",
+                           id_column="origami", spline_knot_frames=500)
+first, _, _ = estimate_drift_fiducials(dna, markers)
+sharp = first.apply(dna)
+sites = local_maxima(np.column_stack([sharp["x_nm"], sharp["y_nm"]]), 10.0, 15)
+sharp = Localizations({**sharp.columns, "cluster_id": sites}, dict(sharp.metadata))
+second, _, _ = estimate_drift_fiducials(sharp, replace(markers, id_column="cluster_id"))
+both = first.drift[:, :2] + second.drift[:, :2]
+fig.set_size_inches(7, 5.4)
+axes = fig.subplots(3, 1, sharex=True)
+for axis, ax in enumerate(axes[:2]):
+    ax.plot(moved[:, axis], color="0.55", lw=3.5)
+    ax.plot(first.drift[:, axis], color="C0", lw=0.8)
+    ax.plot(both[:, axis], color="k", lw=0.8)
+    ax.set_ylabel(f"drift {'xy'[axis]} (nm)")
+axes[2].plot(first.drift[:, 0] - moved[:, 0], color="C0", lw=0.8, label="origami, x")
+axes[2].plot(both[:, 0] - moved[:, 0], color="k", lw=0.8, label="then sites, x")
+axes[2].axhline(0.0, color="0.55", lw=0.8)
+axes[2].set_ylabel("error (nm)")
+axes[2].legend(frameon=False, fontsize=7, ncol=2)
+axes[-1].set_xlabel("frame")
+```
+
 ## In detail
 
 **Which table.**  The localizations, whatever the layer shows.  The beads
@@ -234,22 +315,121 @@ of 0.6 nm per frame, it is most of the 2.5 nm that remain.  Faster drift
 wants a smaller *knot spacing* (50 frames brings it under 2 nm there); the
 *Output* says how to tell.
 
+**Structures.**  Each localization of a marker's region is a point of it
+(`structures_in_regions`); a localization in two ROIs is the later one's,
+and a region with fewer than two is no marker.  The fit is the one above
+with a weight per localization and axis,
+
+$$w_i = \frac{1}{\sigma_i^2 + s^2},$$
+
+$\sigma_i$ its precision (`xy_err_nm` for x and y, `z_err_nm` for z) and
+$s$ the markers' own extent.  A point of a whole origami is off the
+origami's centre by its precision *and* by where its site sits, up to
+30 nm, whatever its photons: weighting by precision alone would give a
+bright localization of an origami many times the say of a dim one with no
+more to tell about the drift.  $s^2$ is measured from a first fit,
+weighted by precision only: per marker, the mean squared residual less the
+mean $\sigma^2$, and then the median over the markers -- one value for x
+and y, one for z.  For whole origami that makes the weights nearly equal;
+for binding sites, $s$ is near zero and the weights are the precision's.
+One extent for all, rather than each marker its own: an origami's own
+extent is mostly how many of its sites were labelled and where a few stray
+localizations fell, and on six simulations of the preset's origami (85
+in 10 µm, knots every 500 frames) each its own gave 1.9 nm rms against the
+truth, one for
+all 1.7 -- the same as no weights at all, and better than precision alone
+(2.0).  On the binding sites of the second round the precision cuts the
+error of no weights by a third (0.2 nm against 0.3).  A precision below a third of
+the median is taken as that third, so one broken fit cannot carry the
+curve, and a missing one as the median.
+
+**What *min length* means for structures.**  Nothing, and it is not used:
+a binding site is seen in a few percent of the frames by design, and a
+marker that is seen briefly costs no more than its own offset -- its few
+points weigh what they are worth.  *min photons* is not used either.
+
+**Judging hundreds of markers.**  The structures are judged as beads are,
+each against the others by *noise*, *wander* and *jump*.  With more than 20
+markers each is judged against the curve of all rather than of the
+others: one marker of more than twenty moves the curve by about a
+twentieth of its error, and refitting without each costs a fit per marker
+and round -- twenty seconds for 85 origami, where judging against all
+takes under one.  Whole origami differ in *wander* by how many of their
+sites were labelled, and a few are left out.  Among binding sites the
+judging matters: of the 429 sites in the figure's second round, 115 were
+left out for a *jump* or a *wander*, and nine in ten of those were
+clusters that had taken localizations of the site next to them (less than
+95 % from one site, against a quarter of the sites kept), so that they
+move between the two as each binds.  With every site used, the second
+round gave 0.75 nm rms instead of 0.2.  A larger *robust sigmas* keeps
+more; a smaller *radius* in *Find clusters* makes fewer such mixtures.
+
+**The knot spacing for structures.**  The preset's origami, 85 in 10 µm,
+give some three localizations a frame between them, not one per bead and
+frame.  A value
+every 100 frames is then set by a few hundred localizations that scatter
+by the origami's size: 3.8 nm rms in the first round, against 1.5 at 500
+frames and 1.0 at 1000, for this smooth drift.  Choosing *structures* sets
+*knot spacing* to 500 where it was the beads' 100 (and back).
+
+**The first frame.**  The curve is zero at the first frame, and its value
+there rests on the few localizations of the first frames.  With sparse
+markers the whole curve can be off by a constant of a few nanometres --
+2 and 3 nm in the figure's first round, 1 after the second -- and the
+last few hundred frames bend away for the same reason.  For one
+file that is a shift of the whole image; for consecutive files joined
+with *reference*, it is how well they meet.
+
+**Which localizations, from an id column.**  Each id above 0 of *id
+attribute* among the localizations the selection keeps (the layer's
+filter and the drawn ROI, as when finding beads), named after it
+(`cluster_id 17`): the id is what the user sees of it, in its region
+table or as an ROI made from it, and binding sites 20 nm apart would
+share a name by position.
+
+**Where it departs from Picasso.**  Picasso's *Undrift from picked*
+(`postprocess.undrift_from_fiducials`, `_undrift_from_picked_coordinate`)
+takes, in each frame, each pick's localization less the pick's mean
+position (one a frame, the last where it has several), averages the picks
+with weights 1 / (each pick's mean squared deviation from that average),
+and interpolates linearly over the frames with none.  Here every marker's
+offset is fitted with one smooth curve through all of them, by least
+squares on every localization: a frame where nothing blinked is carried
+by its neighbours rather than filled in afterwards; a pick's mean position
+is not taken as its place (it includes the mean drift over its frames,
+which differs between a pick seen early and one seen late); and the
+weight is per localization, its precision and the extent.  The curve has a
+value every *knot spacing* frames rather than one per frame, so it follows
+slow drift better and fast drift worse.
+
 ## Parameters
 
+### markers
+*beads* for fluorescent beads or gold, seen in nearly every frame.
+*structures* for DNA origami and other still structures that blink:
+whole origami first, then their binding sites.
+
+### id_column
+`cluster_id` after *Find clusters* with *local maxima*, for the binding
+sites; `bead_id` to use the markers of a run before, after changing the
+rejection.  Any whole-number attribute of the table is offered.
+
 ### source
-*find them* suits nearly every file.  *ROI manager* is for the file whose
-beads the automatic search cannot tell from the structure -- dim beads
-among bright clusters -- and which were therefore marked by hand.
+*find them* suits nearly every file with beads.  *ROI manager* is for the
+file whose beads the automatic search cannot tell from the structure --
+dim beads among bright clusters -- and which were therefore marked by
+hand, and for whole DNA origami.  *id column* takes the markers an
+attribute names.  Structures need one of the last two.
 
 ### min_photons
-Set it between the brightest dye localizations and the beads: the
+Beads only.  Set it between the brightest dye localizations and the beads: the
 `photons` histogram of a file with beads usually has a second hump far to
 the right.  Too low lets bright dye blinks in, which seldom last long
 enough to be taken for beads but cost linking time; too high loses the
 frames where a bead was dim.
 
 ### min_fraction
-Lower it when beads come and go -- one that lands late, or one that
+Only for beads that are found.  Lower it when beads come and go -- one that lands late, or one that
 bleaches -- and the shorter tracks are still beads.  Too low, and a
 cluster of long-lived dye molecules could pass.
 
@@ -267,7 +447,9 @@ longer gap is not lost if both parts are long enough.
 ### spline_knot_frames
 100 frames suits beads seen in every frame: a few hundred points per
 coefficient.  Smaller follows faster drift and is noisier; larger is
-smoother and cuts the corners of a quick drift.
+smoother and cuts the corners of a quick drift.  For structures, which
+give a few localizations a frame between them, 500 to 1000 frames
+(*In detail*); more structures allow fewer.
 
 ### rejection.k
 Larger keeps more beads.  With a handful of beads the spread is uncertain,
@@ -281,7 +463,8 @@ median.  Set it about the beads' precision.
 At least two are needed to tell which one moved.
 
 ### beads
-Written by the bead selector; it can be typed too, as `x12.3y4.5 out`.
+Written by the bead selector; it can be typed too, as `x12.3y4.5 out`, or
+`ROI 5 in`, `cluster_id 17 out` for markers from ROIs and ids.
 
 ### use_z
 Off corrects x and y only, for a 3D table whose z drift is corrected
@@ -305,7 +488,9 @@ otherwise, or not wanted.
   many were left out) and of the localizations used, and the scatter of the beads about the curve, per
   axis.  That scatter should be close to the beads' own precision
   (`xy_err_nm`); clearly more means the curve is too stiff for the drift
-  (a smaller *knot spacing*) or a bead disagrees with the others.
+  (a smaller *knot spacing*) or a bead disagrees with the others.  For
+  whole origami it is their size, some 20-30 nm; for binding sites, their
+  localizations' precision again.
 
 * **The beads named**: each bead's localizations carry its number,
   `bead_id` (0 for every other localization, and for a bead's localizations
@@ -332,10 +517,18 @@ Based on SMAP's `Drift/driftcorrection_beads`
 * SMAP used every bead it found.  Here a bead that disagrees with the
   others is left out, and any bead can be chosen by hand.
 * The beads are those of the selection, or, as SMAP also offered, the
-  used ROIs of the ROI manager.  SMAP saved the corrected file itself; here the correction
+  used ROIs of the ROI manager; or the ids of an attribute.
+* SMAP's plugin took beads only; DNA origami and binding sites as markers
+  are Picasso's idea (*In detail*).  SMAP saved the corrected file itself; here the correction
   is saved with the file like any other.
 
 ## References
+
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198-1228
+  (2017). [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, whose *Undrift from picked* uses DNA origami as drift markers,
+  in two rounds.
 
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).

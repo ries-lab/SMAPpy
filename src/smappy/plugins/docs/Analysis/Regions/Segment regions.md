@@ -111,7 +111,7 @@ in nearly every frame, which makes them the reference for
 [drift](plugin:Panels/Glossary) and for the stability of the microscope.
 The beads method finds them as bright, long tracks, with the same linker as
 [Fiducials drift correction](plugin:Analysis/Drift/Fiducials), and puts an
-ROI on each.  [Fiducials](plugin:Analysis/Drift/Fiducials) with *beads from*
+ROI on each.  [Fiducials](plugin:Analysis/Drift/Fiducials) with *markers from*
 set to *ROI manager* then takes each used ROI as a bead, and
 [Stability](plugin:Analysis/Measure/Stability) runs once per ROI -- so the
 beads can be looked at, excluded or annotated before either.

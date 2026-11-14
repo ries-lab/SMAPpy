@@ -1,6 +1,8 @@
-"""Fiducial drift correction: the tracks of beads, one spline.
+"""Fiducial drift correction: the tracks of beads, or DNA origami, one spline.
 
-The work is in :mod:`smappy.fiducials` (its docstring has the decisions).
+The work is in :mod:`smappy.fiducials` (its docstring has the decisions,
+and where *markers* = structures departs from Picasso's *Undrift from
+picked*, `postprocess.undrift_from_fiducials`, MIT licensed).
 Ported from SMAP's ``driftcorrection_beads``, which took the beads from
 SMAP's grouping (``numberInGroup`` above a count), subtracted each bead's
 mean and averaged them in a running window of frames.  Here:
@@ -16,7 +18,10 @@ mean and averaged them in a running window of frames.  Here:
   "View/Roi" or the ROI manager's sites; one file at a time, as in SMAP;
 * a bead that disagrees with the others is left out (`beads.select_beads`,
   as MBM's), and any bead can be chosen by hand in the bead selector
-  (`gui.bead_window`), where SMAP took them all.
+  (`gui.bead_window`), where SMAP took them all;
+* DNA origami and their binding sites are markers too (*markers* =
+  structures, from the ROI manager or an id column), which SMAP's plugin
+  did not take -- Picasso's *Undrift from picked* does.
 """
 from __future__ import annotations
 
@@ -25,8 +30,8 @@ from typing import Dict, Optional
 import numpy as np
 
 from ..beads import BeadView, draw_bead_tracks, format_overrides, parse_overrides
-from ..fiducials import (SOURCES, FiducialSettings, describe, estimate_drift_fiducials,
-                         find_and_choose)
+from ..fiducials import (BEAD_KNOT, MARKERS, SOURCES, STRUCTURE_KNOT, FiducialSettings,
+                         describe, estimate_drift_fiducials, find_and_choose)
 from . import Context, FormState, Notice, Plot, Plugin, Result, register, settings_values
 from .drift_result import KeepsDrift
 
@@ -45,10 +50,10 @@ def roi_regions(ctx: Context, file: Optional[int] = None):
     ROI manager's rows index."""
     project = _rois(ctx)
     if project is None or not project.rois:
-        raise ValueError("beads from the ROI manager, and it has no ROIs: draw "
-                         "one round each bead there, or let the plugin find them")
+        raise ValueError("markers from the ROI manager, and it has no ROIs: draw "
+                         "one round each marker there, or let the plugin find beads")
     if ctx.session is None or len(ctx.session.locs) != len(ctx.locs):
-        raise ValueError("beads from the ROI manager need the session's table")
+        raise ValueError("markers from the ROI manager need the session's table")
     out = []
     for i in project.ordered_ids():
         roi = project.rois[i]
@@ -58,8 +63,8 @@ def roi_regions(ctx: Context, file: Optional[int] = None):
             continue
         out.append((f"ROI {roi.number}", np.asarray(project.session_rows(roi))))
     if not out:
-        raise ValueError("no used ROI in this file: tick the bead ROIs' use, or "
-                         "let the plugin find the beads")
+        raise ValueError("no used ROI in this file: tick the marker ROIs' use, or "
+                         "let the plugin find beads")
     return out
 
 
@@ -72,8 +77,9 @@ def _file(ctx: Context, mask) -> Optional[int]:
 
 @register("Analysis/Drift/Fiducials")
 class FiducialDrift(KeepsDrift, Plugin):
-    description = ("Estimate drift from the tracks of fiducial beads and "
-                   "subtract it from all localizations.")
+    description = ("Estimate drift from fiducial markers -- beads, or DNA origami "
+                   "and their binding sites -- and subtract it from all "
+                   "localizations.")
     changes_locs = True
     # beads are tracks of localizations, and the correction moves every one
     grouping = "ungrouped"
@@ -100,14 +106,19 @@ class FiducialDrift(KeepsDrift, Plugin):
         regions = None
         if settings.source == SOURCES[1]:
             regions = roi_regions(ctx, _file(ctx, mask))
-            ctx.report(f"beads in {len(regions)} ROIs")
+            ctx.report(f"markers in {len(regions)} ROIs")
+        elif settings.source == SOURCES[2]:
+            ctx.report(f"a marker per {settings.id_column} in {ctx.selection}")
         else:
             ctx.report(f"finding beads in {ctx.selection}")
         drift, beads, fit = estimate_drift_fiducials(locs, settings, select=mask,
                                                      regions=regions)
         if fit.empty:
-            ctx.warn(f"no bead in {', '.join(fit.empty)}: fewer than two "
-                     f"localizations brighter than {settings.min_photons:g} photons")
+            names = ", ".join(fit.empty[:5]) + (f" and {len(fit.empty) - 5} more"
+                                                if len(fit.empty) > 5 else "")
+            ctx.warn(f"no marker in {names}: fewer than two localizations"
+                     + ("" if settings.markers == MARKERS[1] else
+                        f" brighter than {settings.min_photons:g} photons"))
         chosen = fit.chosen
         axes = ("x", "y", "z")[:fit.residuals_nm.shape[1]]
         out = drift.apply(locs, rows=rows)
@@ -124,7 +135,7 @@ class FiducialDrift(KeepsDrift, Plugin):
                              values, step, layer=ctx.layer, session=ctx.session,
                              groups=groups)
         return Result(locs=out, id_regions={BEAD_ID: {self.name: table}},
-                      text=describe(drift, beads, fit)
+                      text=describe(drift, beads, fit, settings.markers)
                       + f"\nkept per bead as 'per {BEAD_ID}: {self.name}'",
                       plot=drift.plot, settings=settings,
                       plots={"beads": Plot(
@@ -135,28 +146,60 @@ class FiducialDrift(KeepsDrift, Plugin):
                       data={"drift": drift, "beads": len(beads),
                             "rms_nm": fit.rms_nm.tolist()})
 
+    def react(self, changed: str, settings: FiducialSettings):
+        """*markers* sets what suits them: a knot spacing for sparse markers
+        (`fiducials.STRUCTURE_KNOT`) where it was the beads' default and
+        back, and a source structures can come from -- they are named, never
+        found."""
+        if changed != "markers":
+            return None
+        out = {}
+        if settings.markers == MARKERS[1]:
+            if settings.spline_knot_frames == BEAD_KNOT:
+                out["spline_knot_frames"] = STRUCTURE_KNOT
+            if settings.source == SOURCES[0]:
+                out["source"] = SOURCES[1]
+        elif settings.spline_knot_frames == STRUCTURE_KNOT:
+            out["spline_knot_frames"] = BEAD_KNOT
+        return out or None
+
     def describe(self, ctx: Optional[Context], settings: FiducialSettings) -> FormState:
         """The button to the bead selector.  The beads are not counted here:
         finding them links every bright localization, too slow for each
         keystroke in the form."""
-        from_rois = settings.source == SOURCES[1]
-        # nothing is linked from ROIs: the linker's settings do not apply
-        active = {"min_fraction": not from_rois, "max_jump_nm": not from_rois,
-                  "memory": not from_rois}
+        structures = settings.markers == MARKERS[1]
+        linked = settings.source == SOURCES[0]
+        # nothing is linked from ROIs or ids: the linker's settings do not
+        # apply; a structure keeps every localization, whatever its photons
+        active = {"min_fraction": linked, "max_jump_nm": linked, "memory": linked,
+                  "min_photons": not structures}
+        shown = {"id_column": settings.source == SOURCES[2]}
+        if structures and linked:
+            return FormState(active=active, shown=shown, notice=Notice(
+                "structures are not found: take them from the ROI manager or an "
+                "id attribute (markers from)", kind="warning"))
         if ctx is None or ctx.locs is None or not len(ctx.locs):
-            return FormState(active=active)
+            return FormState(active=active, shown=shown)
+        from ..tracking.columns import integer_columns
+        choices = {"id_column": [(c, c) for c in integer_columns(ctx.locs)]}
         hand = parse_overrides(settings.beads) if settings.beads else {}
-        if from_rois:
+        noun = "structure" if structures else "bead"
+        if settings.source == SOURCES[1]:
             project = _rois(ctx)
             n = sum(1 for r in project.rois.values() if r.use) if project else 0
-            text = f"a bead in each of the {n} used ROIs" if n else \
+            text = f"a {noun} in each of the {n} used ROIs" if n else \
                 "the ROI manager has no used ROI"
+        elif settings.source == SOURCES[2]:
+            text = (f"a {noun} per id of {settings.id_column}"
+                    if settings.id_column in ctx.locs else
+                    f"the table has no {settings.id_column}")
         else:
             text = "the beads are found and judged when run"
         if hand:
             text += f"; {len(hand)} chosen by hand"
-        return FormState(active=active, notice=Notice(text, "Select beads...",
-                                                      "bead selector", kind="info"))
+        return FormState(active=active, shown=shown, choices=choices,
+                         notice=Notice(text, "Select beads...", "bead selector",
+                                       kind="info"))
 
     # -- the bead window's interface (`gui.bead_window`)
     def bead_view(self, ctx: Context, settings: FiducialSettings, source: int = 0):

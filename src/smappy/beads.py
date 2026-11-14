@@ -22,7 +22,13 @@ curve by the difference).  `fiducials.fit_drift` is this on frames.
 others: its residual from the curve the *other* used beads give, with its
 own offset.  Leaving it out matters with few beads -- with four, a bead in
 the fit pulls the curve a quarter of the way to itself and hides that much
-of its own error.  From that residual, per bead (`bead_metrics`):
+of its own error.  With many it does not, and costs a fit per bead per
+round: a caller with hundreds -- the DNA origami or binding sites of a
+fiducial fit on structures -- passes ``leave_one_out`` (`LEAVE_ONE_OUT`),
+and above that many each is judged about the curve of all, which one of
+twenty pulls by about a twentieth of its error (85 DNA origami: twenty
+seconds judged against the others, under one against all).  From that
+residual, per bead (`bead_metrics`):
 
 * *noise* -- the scatter from one point to the next, robustly (1.4826 times
   the median absolute deviation of the differences, over sqrt 2): its
@@ -57,6 +63,11 @@ from .params import param
 # stretch no bead covers and barely bends one the beads do cover
 PENALTY = 1e-3
 
+# what a caller with many markers passes as ``leave_one_out``: the most beads
+# judged against the curve of the *others*, a fit each; more are judged
+# against the curve of all (the module docstring)
+LEAVE_ONE_OUT = 20
+
 # the metrics `bead_metrics` gives, in the order a bead list shows them
 METRICS = ("noise_nm", "wander_nm", "jump_nm", "coverage", "n")
 
@@ -89,18 +100,44 @@ def fit_offsets_and_spline(t, positions, index, n_beads: int, lo: float, hi: flo
     """Every bead's offset and one spline through all of them, together.
 
     ``t`` (n,) the times, ``positions`` (n, n_axes) nm, ``index`` (n,) the
-    bead of each point (0 .. n_beads - 1), ``weights`` (n,) optional.  The
-    curve is zero at ``reference`` (default ``lo``): a constant can move
-    from every offset into the curve, and a Lagrange multiplier fixes it.
-    A bead with no points gets offset 0.
+    bead of each point (0 .. n_beads - 1), ``weights`` optional, (n,) for
+    every axis alike or (n, n_axes) -- a structure's z is weighted by its
+    ``z_err_nm``, its x and y by ``xy_err_nm`` (`fiducials.marker_weights`).
+    Axes with the same weights are solved together, the others each on its
+    own.  The curve is zero at ``reference`` (default ``lo``): a constant can
+    move from every offset into the curve, and a Lagrange multiplier fixes
+    it.  A bead with no points gets offset 0.
     """
-    from scipy import sparse
-    from .drift import _spline_basis
-
     t = np.asarray(t, float)
     p = np.asarray(positions, float)
     if p.ndim == 1:
         p = p[:, None]
+    if weights is not None and np.ndim(weights) == 2:
+        w = np.asarray(weights, float)
+        offsets = np.zeros((n_beads, p.shape[1]))
+        coefficients = np.zeros((n_coeffs, p.shape[1]))
+        done = np.zeros(p.shape[1], bool)
+        curve = None
+        for a in range(p.shape[1]):
+            if done[a]:
+                continue
+            same = np.array([not done[b] and np.array_equal(w[:, a], w[:, b])
+                             for b in range(p.shape[1])])
+            o, curve = fit_offsets_and_spline(t, p[:, same], index, n_beads, lo, hi,
+                                              n_coeffs, reference, w[:, a], penalty)
+            offsets[:, same], coefficients[:, same] = o, curve.coefficients
+            done |= same
+        return offsets, SplineCurve(coefficients, curve.lo, curve.hi)
+    return _fit_offsets_and_spline(t, p, index, n_beads, lo, hi, n_coeffs, reference,
+                                   weights, penalty)
+
+
+def _fit_offsets_and_spline(t, p, index, n_beads, lo, hi, n_coeffs, reference,
+                            weights, penalty):
+    """`fit_offsets_and_spline` with one weight per point, for every axis."""
+    from scipy import sparse
+    from .drift import _spline_basis
+
     index = np.asarray(index, np.int64)
     if not len(t):
         raise ValueError("no bead points to fit the drift to")
@@ -294,8 +331,15 @@ class BeadSet:
         return Drift(self.drift_nm(times), times_s=times, **kwargs)
 
 
-def _offset(p: np.ndarray, curve: np.ndarray) -> np.ndarray:
-    return np.mean(p - curve, axis=0) if len(p) else np.zeros(p.shape[1])
+def _offset(p: np.ndarray, curve: np.ndarray, w: Optional[np.ndarray] = None
+            ) -> np.ndarray:
+    """A bead's offset about a curve: the (weighted) mean of what is left."""
+    if not len(p):
+        return np.zeros(p.shape[1])
+    if w is None:
+        return np.mean(p - curve, axis=0)
+    w = np.broadcast_to(w if w.ndim == 2 else w[:, None], p.shape)
+    return np.sum(w * (p - curve), axis=0) / np.sum(w, axis=0)
 
 
 def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
@@ -303,7 +347,8 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
                  overrides: Optional[Dict[str, bool]] = None, min_beads: int = 2,
                  max_rounds: int = 10, candidates=None,
                  span: Optional[Tuple[float, float]] = None,
-                 n_coeffs: Optional[int] = None) -> BeadSet:
+                 n_coeffs: Optional[int] = None, weights=None,
+                 leave_one_out: Optional[int] = None) -> BeadSet:
     """Choose the beads and fit the drift they agree on.
 
     ``t`` (n,) times (s, or frames), ``positions`` (n, n_axes) nm, ``bead``
@@ -315,6 +360,11 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     ``span`` (lo, hi) is what the curve covers, zero at lo (default the
     points' own), and ``n_coeffs`` its coefficients (default one per
     ``knot`` and three): a caller with a fit of its own to stay equal to.
+    ``weights``, (n,) or (n, n_axes), weigh the points in every fit
+    (`fit_offsets_and_spline`); the metrics that judge a bead are not
+    weighted.  ``leave_one_out``: with more used beads than this, each is
+    judged about the curve of all rather than of the others (None: always
+    the others').
     """
     t = np.asarray(t, float)
     p = np.asarray(positions, float)
@@ -323,6 +373,7 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     bead = np.asarray(bead, np.int64)
     keep = bead > 0
     t, p, bead = t[keep], p[keep], bead[keep]
+    w = None if weights is None else np.asarray(weights, float)[keep]
     if not len(t):
         raise ValueError("no beads: no point has a bead id above 0")
     ids, index = np.unique(bead, return_inverse=True)
@@ -342,22 +393,24 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
         rows = use[index]
         if not rows.any():
             raise ValueError("no bead is used: tick at least one in")
-        offsets, curve = fit_offsets_and_spline(t[rows], p[rows], index[rows], n,
-                                                lo, hi, k)
+        offsets, curve = fit_offsets_and_spline(
+            t[rows], p[rows], index[rows], n, lo, hi, k,
+            weights=None if w is None else w[rows])
         return offsets, curve
 
     def judge(use, offsets, curve):
         """Residuals of every bead from the consensus of the other used beads."""
         r = np.zeros_like(p)
         full = curve(t)
+        alone = 1 < use.sum() <= (leave_one_out or n)
         for b in range(n):
             rows = index == b
-            if use[b] and use.sum() > 1:
+            if use[b] and alone:
                 _, other = fit(use & (np.arange(n) != b))
                 c = other(t[rows])
             else:
                 c = full[rows]
-            r[rows] = p[rows] - c - _offset(p[rows], c)
+            r[rows] = p[rows] - c - _offset(p[rows], c, None if w is None else w[rows])
         return bead_metrics(t, r, index, n)
 
     used = (allowed | forced_in) & ~forced_out
@@ -386,7 +439,7 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     # an unused bead gets its own offset about the curve, for its figure
     for b in np.flatnonzero(~used):
         rows = index == b
-        offsets[b] = _offset(p[rows], full[rows])
+        offsets[b] = _offset(p[rows], full[rows], None if w is None else w[rows])
     residuals = p - offsets[index] - full
     return BeadSet(ids, names, used, outlier, list(reasons), overrides, metrics, curve,
                    offsets, t, residuals, index, rounds)

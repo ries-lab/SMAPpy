@@ -60,7 +60,56 @@ rare table where the beads were picked by hand as ROIs, each used ROI is a
 bead -- its localizations brighter than *min photons*, the brightest where
 a frame has several -- named after it (``ROI 5``, a number the ROI manager
 never gives again).  Nothing is linked, so *maximum jump*, *memory* and
-*min length* do not apply: the ROI says where the bead is.
+*min length* do not apply: the ROI says where the bead is.  From an *id
+column* (`column_markers`) each id above 0 is a marker the same way --
+`bead_id` from a run before, `track_id` -- among the localizations the
+selection keeps, named ``"cluster_id 17"``.
+
+**Structures** (*markers* = structures; Picasso's *Undrift from picked*):
+a DNA origami, or one of its binding sites, is a fiducial too -- it sits
+still, and where it appears to move the sample moved -- but it shows itself
+only when an imager strand binds, a few frames every few hundred, dimly,
+and at a different site of the structure each time.  The brightest point a
+frame above *min photons* throws nearly all of that away, so a structure is
+every localization of its region (`structures_in_regions`): no photon cut,
+several a frame, each weighted by its precision and the structures' extent
+(`marker_weights`).  They are named, never found -- *find them* links
+bright, long tracks, which no DNA-PAINT site makes -- so they come from the
+ROI manager (whole origami, from *Segment regions*' *like examples*: the
+first round Picasso recommends) or an id column (the binding sites of *Find
+clusters*' *local maxima*, after the first round has sharpened them: the
+second).  The fit is the beads' unchanged, which is the better model for
+markers this sparse: a frame needs no localization, and a structure whose
+sites bind late lands where it belongs.
+
+*min length* means nothing here and is not used: a binding site is seen
+in a few percent of the frames by design, and what a short-lived marker
+costs is its own offset, nothing more -- the weighted fit gives it what
+its points are worth.  The judging (`beads.select_beads`) is the beads',
+each structure against the others' noise, wander and jump, with hundreds
+judged against the curve of all (`beads.LEAVE_ONE_OUT`).  It matters
+there: of the 429 binding sites *Find clusters*' local maxima named in the
+page's figure, 115 were left out, for a jump or a wander -- nine in ten
+of them clusters that took localizations of the site next to it (under 95 %
+from one site, against a quarter of those kept), so that they move between
+the two as each binds.  With every site used the second round was good to
+0.75 nm rms, with them left out to 0.2.
+
+**Where it departs from Picasso** (`postprocess.undrift_from_fiducials`,
+`_undrift_from_picked_coordinate`; Picasso is MIT licensed, Jungmann lab):
+Picasso takes, per frame, each pick's localization less the pick's mean
+position (one a frame: where it has several, the last), averages the
+picks with weights 1 / (each pick's mean squared deviation from that
+average) and interpolates linearly over the frames with none.  Here every
+marker's offset is fitted with one spline through all of them, by least
+squares on every localization: a frame where no marker blinked is carried
+by its neighbours rather than interpolated afterwards, a pick's mean
+position is not taken as its place (it holds the mean drift over the
+pick's own frames, which differs between a pick seen early and one seen
+late), and the weight is per localization, not per pick (`marker_weights`
+says why).  The curve is smoother than Picasso's frame by frame -- one value
+per *knot spacing* -- so a knot spacing of a few hundred frames suits
+sparse markers (`STRUCTURE_KNOT`).
 """
 from __future__ import annotations
 
@@ -70,7 +119,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .beads import BeadSet, MadRule, RejectionSettings, parse_overrides, select_beads
+from .beads import (LEAVE_ONE_OUT, BeadSet, MadRule, RejectionSettings, parse_overrides,
+                    select_beads)
 from .drift import REFERENCES, Drift
 from .locs import Localizations
 from .params import param
@@ -84,14 +134,36 @@ from .params import param
 _PENALTY = 1e-3
 
 
-SOURCES = ("find them", "ROI manager")
+SOURCES = ("find them", "ROI manager", "id column")
+# the knot spacing for beads, seen in every frame, and what *markers* =
+# structures sets in its place (`FiducialDrift.react`): 85 origami of the
+# Simulate preset (10 um, seed 0), about 3 localizations a frame between
+# them, gave 3.8 nm rms at 100 frames, 1.5 at 500, 1.0 at 1000 -- on a
+# smooth drift; a faster one wants the smallest spacing the markers allow
+BEAD_KNOT = 100
+STRUCTURE_KNOT = 500
+#: what a marker is: a bead, one bright point a frame, or a structure (a DNA
+#: origami, a binding site), every localization of its region
+MARKERS = ("beads", "structures")
+#: the id attributes offered before a table is open; `describe` offers the
+#: table's own integer attributes
+ID_COLUMNS = ("cluster_id", "bead_id", "track_id")
 
 
 @dataclass
 class FiducialSettings:
-    source: str = param(SOURCES[0], label="beads from", choices=SOURCES,
-                        help="find the beads as bright, long tracks, or take each "
-                             "used ROI of the ROI manager as a bead")
+    markers: str = param(MARKERS[0], label="markers", choices=MARKERS,
+                         help="beads: the brightest localization a frame, above min "
+                              "photons; structures (DNA origami, binding sites): "
+                              "every localization, weighted by its precision")
+    source: str = param(SOURCES[0], label="markers from", choices=SOURCES,
+                        help="find the beads as bright, long tracks; take each "
+                             "used ROI of the ROI manager as a marker; or each id "
+                             "of an attribute")
+    id_column: str = param(ID_COLUMNS[0], label="id attribute",
+                           choices=lambda: [(c, c) for c in ID_COLUMNS],
+                           help="each id above 0 is one marker: cluster_id from "
+                                "Find clusters, bead_id from a run before")
     min_photons: float = param(5000.0, label="min photons", min=0,
                                help="localizations dimmer than this are not "
                                     "beads")
@@ -105,15 +177,15 @@ class FiducialSettings:
     memory: int = param(50, label="memory", unit="frames", min=0,
                         help="frames a bead may be missing from its track",
                         advanced=True)
-    spline_knot_frames: int = param(100, label="knot spacing", unit="frames",
+    spline_knot_frames: int = param(BEAD_KNOT, label="knot spacing", unit="frames",
                                     min=5,
                                     help="frames between the spline's "
                                          "coefficients")
     rejection: RejectionSettings = param(default_factory=RejectionSettings,
                                          label="rejection")
     beads: str = param("", label="by hand",
-                       help="beads in or out whatever the rule says, by where they "
-                            "are: 'x12.3y4.5 out'; Select beads... writes it")
+                       help="markers in or out whatever the rule says, by name: "
+                            "'x12.3y4.5 out', 'ROI 5 in'; Select beads... writes it")
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
     # `Drift.referenced`; "as estimated" is the fit's own gauge, d(0) = 0
@@ -254,6 +326,129 @@ def beads_in_regions(frame, photons, regions: List[np.ndarray],
     return Beads(bead, first, last, count)
 
 
+def structures_in_regions(frame, regions: List[np.ndarray]) -> Beads:
+    """A marker per region: every one of its rows, several a frame, no
+    photon cut -- a DNA origami's binding sites blink one at a time and
+    dimly, and each localization is a point of the structure.  A row in two
+    regions is the later one's; a region with fewer than two rows is no
+    marker and keeps its number with none."""
+    frame = np.asarray(frame, np.int64)
+    marker = np.full(len(frame), -1, np.int64)
+    for k, rows in enumerate(regions):
+        rows = np.asarray(rows, np.int64)
+        if len(rows) >= 2:
+            marker[rows] = k
+    n = len(regions)
+    used = marker >= 0
+    count = np.bincount(marker[used], minlength=n)
+    first = np.full(n, np.iinfo(np.int64).max)
+    last = np.full(n, -1)
+    np.minimum.at(first, marker[used], frame[used])
+    np.maximum.at(last, marker[used], frame[used])
+    return Beads(marker, first, last, count)
+
+
+def column_markers(locs: Localizations, column: str, select=None
+                   ) -> "List[tuple]":
+    """Each id above 0 of ``column`` as a marker, ``[(name, rows)]``, its
+    rows those ``select`` (a mask) keeps.  Named ``"cluster_id 17"``: the id
+    is what the user sees of it -- in its region table, as an ROI made from
+    it -- and binding sites 20 nm apart would share a name by position
+    (`bead_names`, 0.1 um)."""
+    from .region_runs import split_ids
+    from .tracking.columns import integer_columns
+    if column not in locs:
+        have = integer_columns(locs)
+        raise ValueError(f"markers from an id column, and the table has no "
+                         f"{column!r}: choose one of "
+                         + (", ".join(have) if have else "(no integer attribute)")
+                         + "; Find clusters (local maxima) names binding sites")
+    ids = np.asarray(locs[column])
+    if select is not None:
+        ids = np.where(np.asarray(select, bool), ids, 0)
+    values, rows = split_ids(ids)
+    if not len(values):
+        raise ValueError(f"no markers: {column} is 0 on every localization of the "
+                         f"selection")
+    return [(f"{column} {int(v)}", r) for v, r in zip(values, rows)]
+
+
+def marker_errors(locs: Localizations, use_z: bool) -> Optional[np.ndarray]:
+    """Each localization's precision per axis, (n, 2 or 3) nm: `xy_err_nm`
+    for x and y, `z_err_nm` for z (NaN where the table has none); None when
+    there is no `xy_err_nm`, and then every point weighs the same."""
+    if "xy_err_nm" not in locs:
+        return None
+    xy = np.asarray(locs["xy_err_nm"], float)
+    columns = [xy, xy]
+    if use_z:
+        columns.append(np.asarray(locs["z_err_nm"], float) if "z_err_nm" in locs
+                       else np.full(len(xy), np.nan))
+    return np.column_stack(columns)
+
+
+def marker_weights(frame, positions, errors, marker, n_frames: int,
+                   knot_frames: int) -> np.ndarray:
+    """The weight of each point of a structure, per axis, (n, n_axes):
+
+        w_i = 1 / (sigma_i^2 + s^2),
+
+    ``sigma_i`` its precision (``errors``, NaN where unknown) and ``s`` the
+    markers' own extent.  A point of a structure scatters about its marker's
+    offset by its precision *and* by where on the structure it sits: a
+    binding site of an origami 60 nm wide is up to 30 nm from the centre
+    whatever its photons.  So the points of whole origami weigh nearly
+    alike, and those of single binding sites (``s`` near 0) by their
+    precision -- each of Picasso's two rounds gets the weights it deserves.
+    ``s^2`` is, over the markers, the median of the mean squared residual
+    of a first fit (weighted by precision) less the mean ``sigma^2``; one
+    value for x and y together, one for z.
+
+    One extent for every marker, not each its own (Picasso's 1 / MSD per
+    pick): on the Simulate preset's origami (six seeds, 85 origami in 10 um,
+    knots every 500 frames), each marker's own extent gave 1.9 nm rms against the
+    truth, the median 1.7 -- as good as no weights at all; precision alone,
+    2.0.  An origami's extent is mostly how many of its sites were labelled
+    and where a few stray localizations fell, and down-weighting a whole
+    origami for it threw its information away.  On the binding sites of the
+    second round, precision weights cut the error of none by a third (0.21 nm
+    against 0.33), and the common extent keeps that.
+
+    A precision below a third of the median is taken as that third, so a
+    broken fit's 0.01 nm cannot carry the curve; an unknown one (NaN, or no
+    such column, ``errors`` None) is the median, or 1 nm where nothing is
+    known, so an axis without precisions is weighed nearly alike.
+    """
+    from .beads import fit_offsets_and_spline
+    frame = np.asarray(frame, np.int64)
+    p = np.asarray(positions, float)
+    marker = np.asarray(marker, np.int64)
+    n, n_axes = p.shape
+    if errors is None:
+        errors = np.full((n, n_axes), np.nan)
+    sigma2 = np.empty((n, n_axes))
+    for a in range(n_axes):
+        e = np.asarray(errors[:, a], float)
+        good = np.isfinite(e) & (e > 0)
+        median = float(np.median(e[good])) if good.any() else 1.0
+        sigma2[:, a] = np.maximum(np.where(good, e, median), median / 3.0) ** 2
+    _, index = np.unique(marker, return_inverse=True)
+    n_markers = int(index.max()) + 1
+    hi = max(n_frames - 1.0, 1.0)
+    n_coeffs = max(4, int(round(n_frames / knot_frames)) + 3)
+    offsets, curve = fit_offsets_and_spline(frame, p, index, n_markers, 0.0, hi,
+                                            n_coeffs, reference=0.0,
+                                            weights=1.0 / sigma2)
+    excess = (p - offsets[index] - curve(frame)) ** 2 - sigma2
+    count = np.maximum(np.bincount(index, minlength=n_markers), 1)
+    per_marker = np.column_stack([np.bincount(index, excess[:, a], n_markers) / count
+                                  for a in range(n_axes)])
+    # x and y one extent: two estimates of one width average to a steadier one
+    per_marker[:, :2] = per_marker[:, :2].mean(axis=1, keepdims=True)
+    extent2 = np.maximum(np.median(per_marker, axis=0), 0.0)
+    return 1.0 / (sigma2 + extent2)
+
+
 # a bead's name, from its median position in um: x12.3y-4.5
 _NAME = re.compile(r"^x(-?\d+(?:\.\d+)?)y(-?\d+(?:\.\d+)?)$")
 MATCH_UM = 0.3
@@ -308,14 +503,25 @@ class FoundBeads:
 
 def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = None,
                     select=None, regions=None) -> FoundBeads:
-    """Find the beads (`find_beads`) and choose among them
-    (`beads.select_beads`, on frames, over the whole file).  ``regions``,
-    ``[(name, rows)]``: a bead per region instead (`beads_in_regions`)."""
+    """Find the markers and choose among them (`beads.select_beads`, on
+    frames, over the whole file).  Beads are found as tracks (`find_beads`);
+    ``regions``, ``[(name, rows)]``, are a marker each instead
+    (`beads_in_regions`, `structures_in_regions`), and with *markers from*
+    an id column they are its ids (`column_markers`, among ``select``)."""
     settings = settings or FiducialSettings()
-    missing = [c for c in ("x_nm", "y_nm", "frame", "photons") if c not in locs]
+    structures = settings.markers == MARKERS[1]
+    need = ("x_nm", "y_nm", "frame") + (() if structures else ("photons",))
+    missing = [c for c in need if c not in locs]
     if missing:
-        raise ValueError(f"finding beads needs {', '.join(missing)}: the table "
+        raise ValueError(f"finding markers needs {', '.join(missing)}: the table "
                          f"has {', '.join(sorted(locs.keys()))}")
+    if regions is None and settings.source == SOURCES[2]:
+        regions = column_markers(locs, settings.id_column, select)
+    if structures and regions is None:
+        raise ValueError(
+            "structures are not found, they are named: take them from the ROI "
+            "manager (Segment regions' like examples picks origami) or from an id "
+            "column (Find clusters' local maxima names binding sites) in markers from")
     use_z = settings.use_z
     if use_z is None:
         use_z = "z_nm" in locs
@@ -327,15 +533,20 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
     y = np.asarray(locs["y_nm"], float)
     z = np.asarray(locs["z_nm"], float) if use_z else None
     if regions is not None:
-        beads = beads_in_regions(frame, locs["photons"], [r for _, r in regions],
-                                 settings.min_photons)
+        rows_of = [r for _, r in regions]
+        if structures:
+            beads = structures_in_regions(frame, rows_of)
+            why = "two localizations"
+        else:
+            beads = beads_in_regions(frame, locs["photons"], rows_of,
+                                     settings.min_photons)
+            why = f"two localizations brighter than {settings.min_photons:g} photons"
         empty = [name for (name, _), n in zip(regions, beads.count) if n < 2]
         keep = [k for k in range(len(regions)) if beads.count[k] >= 2]
         if not keep:
-            raise ValueError(
-                f"no beads: none of the {len(regions)} ROIs holds two "
-                f"localizations brighter than {settings.min_photons:g} photons")
-        # renumbered over the ROIs that hold a bead
+            raise ValueError(f"no markers: none of the {len(regions)} regions "
+                             f"holds {why}")
+        # renumbered over the regions that hold a marker
         renumber = np.full(len(regions), -1, np.int64)
         renumber[keep] = np.arange(len(keep))
         b = np.where(beads.bead >= 0, renumber[np.maximum(beads.bead, 0)], -1)
@@ -356,9 +567,13 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
         names = None
     positions = np.column_stack([x, y] + ([z] if use_z else []))
     rows = beads.bead >= 0
-    where = np.array([[np.median(x[beads.bead == b]), np.median(y[beads.bead == b])]
-                      for b in range(len(beads))])
+    where = _medians(x, y, beads.bead, len(beads))
     names = names or bead_names(where)
+    weights = None
+    if structures:
+        weights = marker_weights(frame[rows], positions[rows],
+                                 _rows_of(marker_errors(locs, use_z), rows),
+                                 beads.bead[rows], n_frames, settings.spline_knot_frames)
     r = settings.rejection
     # the fiducial fit's own span and coefficients, so that with every bead
     # used the curve is `fit_drift`'s to the last bit
@@ -369,9 +584,26 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
                           min_beads=min(r.min_beads, len(beads)),
                           span=(0.0, max(n_frames - 1.0, 1.0)),
                           n_coeffs=max(4, int(round(n_frames / settings.spline_knot_frames))
-                                       + 3))
+                                       + 3),
+                          weights=weights,
+                          leave_one_out=LEAVE_ONE_OUT if structures else None)
     return FoundBeads(beads, chosen, where, frame, positions, n_frames,
                       ("x", "y", "z") if use_z else ("x", "y"), empty)
+
+
+def _rows_of(a: Optional[np.ndarray], rows) -> Optional[np.ndarray]:
+    return None if a is None else a[rows]
+
+
+def _medians(x, y, marker, n: int) -> np.ndarray:
+    """Each marker's median position, (n, 2) nm: one sort, not a pass over
+    the table per marker -- a thousand binding sites made that a second."""
+    rows = np.flatnonzero(marker >= 0)
+    order = rows[np.argsort(marker[rows], kind="stable")]
+    cuts = np.searchsorted(marker[order], np.arange(n + 1))
+    return np.array([[np.median(x[order[a:b]]), np.median(y[order[a:b]])]
+                     if b > a else [np.nan, np.nan]
+                     for a, b in zip(cuts[:-1], cuts[1:])]).reshape(n, 2)
 
 
 def estimate_drift_fiducials(locs: Localizations,
@@ -402,14 +634,17 @@ def estimate_drift_fiducials(locs: Localizations,
     return drift, found.beads, fit
 
 
-def describe(drift: Drift, beads: Beads, fit: FiducialFit) -> str:
-    """The text of a run: the curve, the beads, their scatter about it."""
+def describe(drift: Drift, beads: Beads, fit: FiducialFit,
+             markers: str = MARKERS[0]) -> str:
+    """The text of a run: the curve, the markers, their scatter about it --
+    for structures their extent and precision together, not a precision."""
     rms = ", ".join(f"{a} {v:.1f}" for a, v in zip("xyz", fit.rms_nm))
     left = ""
     if fit.chosen is not None and not fit.chosen.used.all():
         out = int((~fit.chosen.used).sum())
         left = f" ({out} left out)"
-    return (f"{drift}; {len(beads)} bead(s){left}, {len(fit.rows)} localizations, "
+    noun = "structure(s)" if markers == MARKERS[1] else "bead(s)"
+    return (f"{drift}; {len(beads)} {noun}{left}, {len(fit.rows)} localizations, "
             f"scatter about the curve {rms} nm")
 
 
