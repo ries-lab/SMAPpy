@@ -321,6 +321,43 @@ def single_bounds(spots: Spots, excess: float = 1.0) -> np.ndarray:
     return np.array([np.sqrt(variances(f, False)[0][:4]) for f in fisher])
 
 
+# ----------------------------------------------------------------------------- SMAPpy's spline
+def spline_spots(cal, frame, x_px, y_px, z_nm, photons, background, shape, ident=None, step: float = 0.01) -> Spots:
+    """`Spots` of spots drawn as `smappy.simulate.camera._draw_spline` draws them: each in a patch of
+    the spline's size less 3 around its pixel, x along columns and y along rows, ``background``
+    per frame; the derivatives by x, y (pixels), z (nm) and photons central differences of
+    `io.calibration.evaluate_spline` (``step`` in pixels and z planes, exact to about 1e-4, as
+    `calibrate.crlb`'s).  The bounds come back as (x px, y px, z nm, photons).  ``ident`` names the
+    molecules across frames; None: each row its own."""
+    from ..io.calibration import evaluate_spline
+    frame = np.asarray(frame, int)
+    x_px, y_px = np.asarray(x_px, float), np.asarray(y_px, float)
+    photons = np.asarray(photons, float)
+    _, _, ny, nx = cal.coeff.shape
+    size = max(min(nx, ny) - 3, 5)
+    half = size // 2
+    z_index = np.asarray(cal.z_nm_to_index(np.asarray(z_nm, float)), float)
+    n = len(frame)
+    model = np.empty((n, size, size))
+    grads = np.empty((n, 4, size, size))
+    corner = np.empty((n, 2), int)
+
+    def at(x, y, z):
+        return np.asarray(evaluate_spline(cal, x, y, z, size), np.float64)
+    for k in range(n):
+        ox, oy = int(np.rint(x_px[k])) - half, int(np.rint(y_px[k])) - half
+        cx, cy, cz = x_px[k] - ox, y_px[k] - oy, float(z_index[k])
+        p = at(cx, cy, cz)
+        model[k] = photons[k] * np.clip(p, 0, None)
+        grads[k, 0] = photons[k] * (at(cx + step, cy, cz) - at(cx - step, cy, cz)) / (2 * step)
+        grads[k, 1] = photons[k] * (at(cx, cy + step, cz) - at(cx, cy - step, cz)) / (2 * step)
+        grads[k, 2] = photons[k] * (at(cx, cy, cz + step) - at(cx, cy, cz - step)) / (2 * step * cal.dz)
+        grads[k, 3] = p
+        corner[k] = (oy, ox)
+    return Spots(frame=frame, ident=np.arange(n) if ident is None else np.asarray(ident), corner=corner,
+                 model=model, grads=grads, background=np.asarray(background, float), shape=tuple(shape))
+
+
 # ----------------------------------------------------------------------------- what a bound is split by
 def nearest_neighbour(frame, xy) -> np.ndarray:
     """Each spot's lateral distance to the nearest other spot of its frame (xy's units); inf for

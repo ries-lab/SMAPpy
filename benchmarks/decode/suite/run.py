@@ -162,6 +162,7 @@ def main():
     ap.add_argument("--sets", nargs="*", default=None)
     ap.add_argument("--refit", action="store_true")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--joint", action="store_true", help="score against the joint bound too (report.py --joint)")
     a = ap.parse_args()
     from smappy.io.hdf5 import load_localizations
     run = load_run(a.run)
@@ -190,7 +191,7 @@ def main():
                 with tifffile.TiffFile(S.movie(name)) as t:
                     frames = len(t.pages)
             entry = {"fit": how, "seconds": seconds, "frames": frames, "frames_per_s": frames / seconds}
-        entry["scores"] = R.score_set(name, load_localizations(out), run["keep"])
+        entry["scores"] = R.score_set(name, load_localizations(out), run["keep"], a.joint)
         report["sets"][name] = entry
         path.write_text(json.dumps(report, indent=1, default=str))
         sc = entry["scores"]

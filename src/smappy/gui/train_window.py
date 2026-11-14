@@ -175,6 +175,10 @@ class TrainSettings:
     device: str = param("auto", label="device", choices=(("auto", "auto"), ("cuda", "CUDA"), ("mps", "Apple GPU"),
                                                          ("cpu", "CPU")), advanced=True,
                         help="where the network trains; auto: the fastest there")
+    joint_bounds: bool = param(True, label="joint CRLB", advanced=True,
+                               help="error over CRLB also against each molecule's bound with its neighbours "
+                                    "and frames (Follow's dashed curves and bottom row); off: up to 20 s less "
+                                    "at each start")
 
 
 # ----------------------------------------------------------------------------- the work, without a window
@@ -436,6 +440,8 @@ def start_here(folder, train: TrainSettings, python: str = sys.executable) -> su
     command = [python, "-m", "decode_smlm.cli", "train", str(folder), "--epochs", str(train.epochs)]
     if train.device != "auto":
         command += ["--device", train.device]
+    if not train.joint_bounds:
+        command += ["--no-joint-bounds"]
     if not train.until_converged:
         command += ["--all-epochs"]
     else:
@@ -1318,7 +1324,7 @@ def start_on_host(folder, train: TrainSettings, report=lambda entry: None) -> st
         entry = remote.send(folder, h)
     report({"message": f"starting it on {h.name}"})
     remote.start(entry, train.epochs, train.device, all_epochs=not train.until_converged,
-                 stop_rule=stop_rule(train) if train.until_converged else None)
+                 stop_rule=stop_rule(train) if train.until_converged else None, joint_bounds=train.joint_bounds)
     return f"started on {h.name}: {entry.remote}; its output in train.log there"
 
 

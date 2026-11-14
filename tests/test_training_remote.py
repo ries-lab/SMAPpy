@@ -113,6 +113,8 @@ def test_the_start_line_detaches_the_training_and_quotes_the_folder():
     assert line.startswith("cd ~/'a job'") is False and "~/'smappy_training/a job'" in line
     assert "nohup smappy-decode train ~/'smappy_training/a job' --epochs 50 --device cuda:1" in line
     assert "< /dev/null &" in line and "rm -f STOP" in line
+    assert "--no-joint-bounds" not in line
+    assert "--no-joint-bounds" in remote.train_command(h, "job", 50, joint_bounds=False)
 
 
 def test_what_ssh_says_when_it_fails_reaches_the_window():

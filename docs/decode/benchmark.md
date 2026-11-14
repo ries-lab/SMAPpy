@@ -75,6 +75,7 @@ rules, unchanged.
 | against the bound | `rmse_over_crlb_lat` / `_ax` | RMSE over the matched emitters' root-mean-square CRLB |
 | | `crlb_width_lat` / `_ax`, `crlb_width_by_photons` | 1.4826 MAD of each error over its own emitter's CRLB: Follow's measure, blind to mismatches; 1 at the bound |
 | | `..._full` | the same against the whole spot's bound |
+| | `..._joint`, `crlb_width_by_neighbour` | with `--joint` (`report.py`, `run.py`): against each emitter's joint bound, its overlapping neighbours fitted with it (`sets.joint_bounds`, kept beside the set as `joint.npz`); and the three bounds' widths by the nearest other emitter's distance -- what crowding costs, which the single bounds leave in the fitter's account |
 | bias | `bias_x/y/z_nm`, `z_bias_nm` | mean offsets; z's in 100 nm bins of the true z |
 | pixelation | `ks_x`, `ks_y`, `ks_by_abs_z`, `subpixel_x/y` | KS distance from uniform of the matched positions within their pixel, in bins of |z| (the truth is uniform there) |
 | speed | `frames_per_s` | wall time of the fit, file and peak finding included, the device recorded |

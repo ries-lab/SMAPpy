@@ -22,6 +22,13 @@ fitter then gets the frames as a real movie's and mirrors its own calibration wh
 noise -- in 13 x 13 pixels (``crlb_*``, Spline 3D's own fit box) and in 25 x 25, the calibration's
 whole spot (``crlb_*_full``, which a network seeing the whole frame could reach; 19 % lower in z).
 
+**The joint bound**, on request (`joint_bounds`, ``report.py --joint``): each emitter's bound with
+every emitter whose spot overlaps its own in its frame (`smappy.training.joint_crlb`), on the spline
+as the frames were drawn (mirrored for the EM camera: the neighbours' places matter), in the
+spline's whole spot less 3 pixels as `_draw_spline` draws it, with a prior of a pixel laterally and
+the z range's spread axially; the sets are single frames, so no frames around it.  Computed once a
+set and kept beside it (``joint.npz``, stamped with the truth's hash); about 15 s a set of 20 000.
+
 **The SMLM Challenge 2016 3D-AS** training sets and **real data** -- a fixed range of frames of the
 example package's movie and of the DECODE paper's Fig. 4e raw movie -- are named here, not copied: the
 files are kept where they are, their size and first megabyte's hash recorded.
@@ -170,6 +177,41 @@ def crlb(cal, photons, background, z, roi, excess=EXCESS_NOISE, seed=0):
         found = psf.unpack(psf.fit(np.ascontiguousarray(image, np.float32)))
         out[s] = np.c_[found["x_err_pix"] * PIXEL_NM[0], found["y_err_pix"] * PIXEL_NM[1], found["z_err_nm"]]
     return out * np.sqrt(excess)
+
+
+#: the joint bounds' file beside a set's truth, and how many frames are drawn at once (their
+#: spots' derivatives held in memory)
+JOINT = "joint.npz"
+JOINT_CHUNK_FRAMES = 200
+
+
+def joint_bounds(name) -> dict:
+    """A simulated set's joint bounds, ``crlb_joint_{x,y,z}_nm`` and ``nn_nm`` (the nearest other
+    emitter of the frame) per emitter of its truth; computed the first time and kept (`JOINT`)."""
+    from smappy.io.calibration import load_spline_calibration, matched_to_em
+    from smappy.training import joint_crlb
+    folder = SETS_DIR / name
+    stamp = fingerprint(folder / "truth.npz")["sha256_first_mb"]
+    if (folder / JOINT).exists():
+        kept = dict(np.load(folder / JOINT))
+        if str(kept.pop("truth")) == stamp:
+            return kept
+    t = np.load(folder / "truth.npz")
+    cal = matched_to_em(load_spline_calibration(CONTEXTS[SETS[name]["context"]]["calibration"]), True)
+    frame, x, y = t["frame"], t["x_px"], t["y_px"]
+    prior = (1.0, 1.0, 2 * Z_NM / np.sqrt(12.0), None)
+    sd = np.full((len(frame), 3), np.nan)
+    with joint_crlb.one_blas_thread():
+        for lo in range(0, int(frame.max()) + 1, JOINT_CHUNK_FRAMES):
+            rows = np.flatnonzero((frame >= lo) & (frame < lo + JOINT_CHUNK_FRAMES))
+            spots = joint_crlb.spline_spots(cal, frame[rows], x[rows], y[rows], t["z_nm"][rows], t["photons"][rows],
+                                            t["frame_background"], (SIZE, SIZE))
+            sd[rows] = joint_crlb.bounds(spots, prior=prior, excess=EXCESS_NOISE, condition=False).sd[:, :3]
+    out = {"crlb_joint_x_nm": sd[:, 0] * PIXEL_NM[0], "crlb_joint_y_nm": sd[:, 1] * PIXEL_NM[1],
+           "crlb_joint_z_nm": sd[:, 2],
+           "nn_nm": joint_crlb.nearest_neighbour(frame, np.c_[x * PIXEL_NM[0], y * PIXEL_NM[1]])}
+    np.savez(folder / JOINT, truth=stamp, **out)
+    return out
 
 
 def fingerprint(path) -> dict:
