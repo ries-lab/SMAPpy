@@ -175,6 +175,7 @@ where = ["src"]
 # the user's plugin folder is given (`smappy.user_plugins`)
 "smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml",
             "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
+            "data/spinna_structures/*.yaml",
             "data/simulation_presets/*.yaml", "data/simulation_components/*.yaml",
             "data/icons/*.svg", "data/icons/*.png", "data/icons/*.ico", "data/user_plugins/*.in",
             "data/assistant/*.in",

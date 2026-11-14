@@ -1,0 +1,11 @@
+# Two proteins, A in the first visible layer and B in the second: each alone,
+# or the two in a complex 10 nm apart -- the question Masullo et al. 2025 ask
+# of CD80 and CD86.  Give each target its own labelling efficiency and label
+# uncertainty where they differ, as '0.5, 0.4'.
+structures:
+  - name: A alone
+    molecules: "A 0 0"
+  - name: B alone
+    molecules: "B 0 0"
+  - name: A-B
+    molecules: "A -5 0; B 5 0"

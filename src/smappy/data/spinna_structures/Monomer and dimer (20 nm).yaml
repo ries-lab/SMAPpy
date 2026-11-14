@@ -1,0 +1,10 @@
+# Monomers and dimers of one protein, the dimer's two molecules 20 nm apart --
+# SPINNA's first question about a receptor: does it pair up?  A model is any
+# of SPINNA's settings by name; this one names only the structures, so the
+# labelling efficiency and the label uncertainty stay as they are.  A lab adds
+# its own as a file like this one under the config folder's spinna_structures.
+structures:
+  - name: monomer
+    molecules: "A 0 0"
+  - name: dimer
+    molecules: "A -10 0; A 10 0"

@@ -339,6 +339,7 @@ def test_the_evaluation_window_offers_only_evaluators(app):
                                  "Analysis/Measure/Line Profile",
                                  "Analysis/Measure/Localization Statistics",
                                  "Analysis/Measure/NPC Corners",
+                                 "Analysis/Measure/SPINNA",
                                  "Analysis/Measure/Spatial statistics",
                                  "Analysis/Measure/Stability",
                                  "Analysis/Tracking/Tracking analysis"]
