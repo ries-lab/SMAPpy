@@ -827,6 +827,11 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         "description": spec.description or " -> ".join(s.title() for _, s, _ in steps),
         "version": "1",
     }
+    if spec.grouping == "ungrouped":
+        # a chain that reads the localizations says so as a plugin does: a
+        # table change from merged blinks is refused, and this is what the
+        # session (and `test_plugin_grouping`) read
+        attrs["grouping"] = "ungrouped"
     chain = type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
     # the answer for the chain's own values, as a plugin's class says it for
     # its defaults; `changes_locs_for` answers for the form's
