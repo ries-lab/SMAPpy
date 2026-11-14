@@ -2071,3 +2071,34 @@ against v1f's 3, both scored with the mixture peak): of bright molecules 100 - 2
 the same 2.6 times the CRLB; recall at P 0.97 0.533 against 0.541, and at low thresholds it finds
 fewer (recall 0.54 at 0.3, v1f 0.64).  Finer cells leave the network's ability to see two molecules
 where they are; what sets it is what the network has learnt from the training data.
+
+**Close bright pairs: what the network's map holds, and the ceiling** (2026-11-14, night).
+
+*Not learnt with time.*  The share of bright pairs 100 - 200 nm apart reported as one is 0.38 - 0.39 at
+every snapshot from 0.25 to 6 M samples (EMA + offsets 2 + `sigmix`), while isolated molecules' recall
+rises from 0.53 to 0.61: the loss does not ask for it.  `mixture_peak` is not the cause (lookahead's
+numbers are the same); nor is the matching (pairs are assigned without ambiguity from 100 nm on).
+
+*The map's count.*  Summed over the cells above p 0.05, the map holds about 1.3 molecules at a pair
+100 - 200 nm apart and 1.08 at an isolated bright molecule near focus (0.74 at 300 - 600 nm, 0.25
+beyond 600 nm); a further 0.3 - 0.4 lies spread over the 5 x 5's faint cells, around single molecules
+too.  A detection that gathers enough p for two can be split (`extract`'s ``split``): at a cut of 1.5 it
+costs nothing (isolated molecules split 0.62 % as before, on B and on d15) and when it splits, both
+molecules are within 100 nm of a find 78 % of the time -- but it rarely gets enough p: pairs found both
+within 100 nm 0.10 -> 0.13 at 100 - 200 nm (v1f, 3 seeds), none on the fine grid.
+
+*The ceiling* (`ceiling.py` in the session's scratch; 1500 pairs a bin, 1 frame): each pair fitted with
+the true spline, everything else in the frame known, as one emitter and as two; separable when 2 Delta
+log L passes the level that splits 1 % of 3000 isolated bright molecules and both fits lie within 100 nm
+of the truths.
+
+| pair's separation | ceiling, all z (|z| < 300 / 300 - 600 / > 600) | v1f finds both, all z (same bins) |
+|---|---|---|
+| 0 - 100 nm | 0.32 (0.21 / 0.42 / 0.27) | 0.04 (0.04 / 0.06 / 0.02) |
+| 100 - 200 nm | 0.35 (0.40 / 0.45 / 0.24) | 0.10 (0.20 / 0.15 / 0.02) |
+| 200 - 300 nm | 0.45 (0.71 / 0.54 / 0.26) | 0.19 (0.51 / 0.26 / 0.02) |
+
+A perfect estimator separates three to eight times as many close pairs: the gap is the network's, most
+of all away from focus and below 100 nm, where the two molecules' depths tell them apart.  The local
+count term (`loss`'s ``local_count``, the exact count of each 3 x 3 cells; seeds running) asks the map
+for it.
