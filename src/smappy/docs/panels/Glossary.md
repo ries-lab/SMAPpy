@@ -27,6 +27,10 @@ papers and in other software.
   fluorescent imager strand in solution binds to and unbinds from a docking
   strand on the target, so each binding site blinks again and again, without
   bleaching.
+* **DNA origami**: DNA folded into a chosen shape -- a flat rectangle of
+  about 100 × 70 nm, say -- with docking strands for DNA-PAINT where they
+  are wanted, so the sites' arrangement is known to a nanometre: the test
+  sample of DNA-PAINT.
 * **binding event** (in Picasso, a linked localization): the localizations
   of one binding of an imager to a site -- in a region, every localization
   joined across gaps of a few frames.

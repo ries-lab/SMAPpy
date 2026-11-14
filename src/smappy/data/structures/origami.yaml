@@ -1,0 +1,26 @@
+# A rectangular DNA origami with docking strands on a 20 nm grid, 4 x 3 =
+# 12 sites -- the classic DNA-PAINT test sample (Picasso's 20 nm grids;
+# Schnitzbauer et al., Nat. Protoc. 2017).  Flat on the coverslip, randomly
+# turned in the plane, at least 300 nm apart; the labelling efficiency is the
+# docking strands' incorporation (~0.8).
+name: DNA origami (20 nm grid)
+elements:
+  - points:
+      - [-30, -20, 0]
+      - [-10, -20, 0]
+      - [10, -20, 0]
+      - [30, -20, 0]
+      - [-30, 0, 0]
+      - [-10, 0, 0]
+      - [10, 0, 0]
+      - [30, 0, 0]
+      - [-30, 20, 0]
+      - [-10, 20, 0]
+      - [10, 20, 0]
+      - [30, 20, 0]
+copies:
+  density: 1                         # origami per um^2
+  field: [500, 500, 9500, 9500]
+  placement: random
+  rotation: random
+  min_distance: 300

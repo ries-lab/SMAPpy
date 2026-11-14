@@ -110,6 +110,14 @@ one is also an example of the syntax:
   two rings 50 nm apart in z, radius 53.7 nm
   ([Thevathasan et al. 2019](https://doi.org/10.1038/s41592-019-0574-9)),
   two pores per µm², each turned at random.
+* **origami** -- rectangular [DNA origami](plugin:Panels/Glossary) with
+  12 docking sites on a 20 nm grid, 4 × 3, one per µm², flat and turned at
+  random in the plane, at least 300 nm apart: the test sample of
+  [DNA-PAINT](plugin:Panels/Glossary)
+  ([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)).  The
+  preset *DNA-PAINT origami (20 nm grid)* images it as DNA-PAINT does:
+  binding events about 5 frames long, some 13 per site, bright, and no
+  bleaching -- the imager strands come back.
 * **filaments** -- 40 straight filaments, 3 µm long, placed and turned at
   random.
 * **pie** -- a resolution star after ThunderSTORM's

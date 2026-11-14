@@ -478,10 +478,10 @@ def test_the_plugin_runs_voronoi_and_names_the_clusters():
 
 def test_the_form_shows_only_the_chosen_algorithm():
     plugin = FindClusters()
-    for algorithm in ("dbscan", "voronoi", "hdbscan"):
+    names = ("dbscan", "voronoi", "hdbscan", "local_maxima")
+    for algorithm in names:
         shown = plugin.describe(None, FindClusters.Settings(algorithm=algorithm)).shown
-        assert shown == {"dbscan": algorithm == "dbscan", "voronoi": algorithm == "voronoi",
-                         "hdbscan": algorithm == "hdbscan"}
+        assert shown == {name: algorithm == name for name in names}
 
 
 def test_without_the_package_hdbscan_says_how_to_install_it(monkeypatch):
