@@ -1,0 +1,18 @@
+# DNA-PAINT of DNA origami with 12 docking sites on a 20 nm grid (the
+# `origami` structure): imager strands bind for about 5 frames and come back
+# after about 1500, so each site binds some 13 times in 20,000 frames and
+# never bleaches; bright binding events, as DNA-PAINT's are.  What Find
+# clusters' local maxima, Binding kinetics, qPAINT and Molecular mapping are
+# tried on (docs/dna-paint.md).
+n_frames: 20000
+key:
+  n_frames: frames
+  components.0.labelling.efficiency: labelling efficiency
+  components.0.blinking.on_time: bright time
+  components.0.blinking.blinks: binding events
+components:
+  - name: origami
+    structure: {kind: structure, preset: origami}
+    labelling: {efficiency: 0.8}
+    blinking: {on_time: 5, blinks: 13, bleaching: 0, activation: constant,
+               photons: 20000, photons_std: 6000}

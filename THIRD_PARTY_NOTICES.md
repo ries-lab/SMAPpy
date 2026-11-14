@@ -55,6 +55,31 @@ General Public License, version 3**: `src/decode_smlm/LICENSE.txt` is its licenc
 smappy, these files are GPL-3.0 until relicensed.  It needs PyTorch, the extra
 `smappy-smlm[decode]`.
 
+## Ported: Picasso (MIT)
+
+Parts of SMAPpy's DNA-PAINT analysis are ports of algorithms of
+[Picasso](https://github.com/jungmannlab/picasso) (Schnitzbauer et al.,
+*Nat. Protoc.* 2017, [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)),
+Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry, MIT licensed.  Nothing
+of Picasso is imported or vendored: each algorithm is written again in SMAPpy's
+modules, keeping Picasso's constants and decisions, and each module's docstring
+names the Picasso functions it follows and says where it departs from them.
+Picasso's licence is `src/smappy/data/licenses/picasso.txt`, which **ships
+inside every wheel and source distribution**.  The ports, as of this writing:
+
+* `smappy/binding_kinetics.py` -- pick kinetics, dark times, qPAINT and the
+  clusterer's frame analysis (`postprocess.pick_kinetics`, `pick_properties`,
+  `lib.fit_cum_exp`, `clusterer._frame_analysis`);
+* `smappy/segmentation.py` -- *pick similar* (`postprocess.pick_similar`), as
+  *Segment regions*' *like examples*;
+* `smappy/plugins/clusters.py` -- the SMLM clusterer's local maxima
+  (`clusterer._cluster`) and its frame analysis as a cluster filter;
+* `smappy/io/picasso.py` -- Picasso's HDF5 localization files, read and
+  written (a file format, not code).
+
+The plan for the rest -- G5M, SPINNA, drift from DNA origami -- is
+`docs/dna-paint.md`; each method's own paper is cited on its plugin's page.
+
 ## Dependencies
 
 Dependencies are separate works and remain subject to their own licenses. They

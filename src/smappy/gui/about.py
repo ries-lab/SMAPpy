@@ -18,6 +18,12 @@ LICENSE_URL = f"{GITHUB}/blob/main/LICENSE"
 CITATION = ("Ries J. SMAP: a modular super-resolution microscopy analysis "
             "platform for SMLM data. Nat Methods 17, 870-872 (2020).")
 CITATION_DOI = "https://doi.org/10.1038/s41592-020-0938-1"
+NOTICES_URL = f"{GITHUB}/blob/main/THIRD_PARTY_NOTICES.md"
+#: the work SMAPpy includes or ports, each under its own licence; the
+#: details, and which modules, are THIRD_PARTY_NOTICES.md
+INCLUDES = ("COMET (Reinkensmeier & Bates, MIT), uiPSF (Liu et al., BSD), "
+            "DECODE (Speiser et al., GPL-3.0) and algorithms of Picasso "
+            "(Jungmann lab, MIT)")
 
 
 def version() -> str:
@@ -36,6 +42,8 @@ def about_html() -> str:
             f'<p><a href="{GITHUB}">{GITHUB}</a></p>'
             f"<p>{html.escape(COPYRIGHT)}<br>"
             f'Distributed under the <a href="{LICENSE_URL}">{LICENSE}</a>.</p>'
+            f"<p>Includes {html.escape(INCLUDES)}: "
+            f'<a href="{NOTICES_URL}">third-party notices</a>.</p>'
             "<p><b>If you use SMAPpy, please cite:</b><br>"
             f'{html.escape(CITATION)} <a href="{CITATION_DOI}">'
             "doi:10.1038/s41592-020-0938-1</a></p>")
