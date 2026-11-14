@@ -59,3 +59,20 @@ def test_batches_drawn_ahead_in_a_thread_are_the_batches_the_loop_would_draw():
             assert torch.equal(a.frames, b.frames) and torch.equal(a.xyz, b.xyz)
     finally:
         feed.close()
+
+
+def test_the_speedups_are_on_with_cuda_and_off_without_by_default():
+    sch = Parts().schedule.settings
+    assert train.speedups(sch, "cpu") == (False, False, False)
+    assert train.speedups(sch, "mps") == (False, False, False)
+    bf16, _, channels_last = train.speedups(sch, "cuda")
+    assert bf16 and channels_last
+    assert train.speedups({**sch, "precision": "fp32", "compile": False, "channels_last": False}, "cuda") == (False, False, False)
+    with pytest.raises(ValueError):
+        train.speedups({**sch, "precision": "bf16"}, "cpu")
+
+
+def test_a_new_training_extracts_with_the_mixture_peak_and_stops_after_6_million_samples():
+    p = Parts()
+    assert p.extraction.name == "mixture_peak"
+    assert p.schedule.settings["max_samples"] == 6e6

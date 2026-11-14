@@ -1951,3 +1951,31 @@ from 100 photons, no gradient clipping.  Near focus is |z| < 300 nm.
   network's own defaults stay version 1's, so a model saved before is built as it was trained).
 - **Targets without the 100-photon limit** (v1d_B_p0, every molecule a target): Jaccard 0.449,
   50.5 / 87.6 nm, KS 0.020 / 0.018 -- inside the seeds' range.  The limit makes no difference.
+
+### netfit's settings decided (2026-11-14)
+
+54 netfit models and 5 of the port's, all scored on test set B (1 frame unless said, 6 M samples), each
+difference judged against the spread between seeds of the same settings -- for one model 0.003 in
+Jaccard, 0.007 / 0.011 in lateral / axial error over the CRLB, 0.2 / 0.5 nm in the brightest fifth's
+RMSE near focus, 0.010 in `pixel_mod` (`training.reference.pixel_modulation`, the amplitude of the
+in-pixel density's modulation; a min/max of 0.9 is 0.053) with the mixture peak, 0.021 without.
+
+| setting | Jaccard, error / CRLB | pixelation | time | decided |
+|---|---|---|---|---|
+| Kaiming init | +0.008, -0.016 / -0.030 | -0.016 | -- | on |
+| DECODE's other details (v1f against pk; 3 seeds each at bf16) | none | none (pk's two fp32 seeds' 0.047 was luck: a third, 0.069) | 9 % faster in fp32 | on (v1f) |
+| bf16, then torch.compile and channels-last | none | none | 11.4 -> 9.4 -> 7.4 s an epoch (H100) | on with CUDA ("auto") |
+| rate 1.2e-3 against 6e-4; decay every 5 or 10 epochs | none | none | -- | 6e-4, 10 |
+| decay every 20 epochs | error / CRLB +0.019 | none | -- | no |
+| batch 256, linear rate | -0.005 .. -0.008, axial +0.033; a seed blew up in its first epoch | none | 15 % faster (H100), none (4090) | no |
+| batch "auto" (256, square-root rate) | -0.017 | -- | -- | no |
+| output grid of two cells a pixel | -0.034 (fewer found) | none | twice the time | no |
+| mixture-peak extraction | 0, -0.020 / -0.046 on every model | -0.051 on every model | -- | default |
+| 6 M samples, not the early stop's 13 - 15 M | from 6 to 10 M Jaccard none, error / CRLB -0.003 .. -0.017 | -- | less than half | ``max_samples`` 6 M |
+
+The port, trained as DECODE trains, is netfit's equal in every column, the pixelation included (1
+frame `pixel_mod` 0.07 - 0.10, 3 frames 0.14 - 0.15 without the mixture peak); its trainings had
+measured none.  Equalising the sub-pixel histogram afterwards (`smappy/pixel_equalise.py`) flattens
+it but moves localizations at random, the RMSE 0.03 - 0.17 nm worse.  Pixelation is now set mostly
+by the seed (0.057 - 0.069 with the mixture peak at these settings): lowering it is the network's or
+the loss's to do.

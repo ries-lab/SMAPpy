@@ -18,6 +18,7 @@ import hashlib
 import json
 import math
 import queue
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -52,6 +53,25 @@ def stop_rule(samples_per_epoch: int) -> dict:
     f = REFERENCE_EPOCH / samples_per_epoch
     return {**STOP_RULE, "window": max(1, round(STOP_RULE["window"] * f)),
             "min_epochs": max(1, round(STOP_RULE["min_epochs"] * f))}
+
+
+def speedups(sch: dict, device) -> tuple:
+    """(bf16, compile, channels_last) for this device.  ``precision`` "auto" is bf16 on CUDA, fp32
+    elsewhere; ``compile`` and ``channels_last`` "auto" are on with CUDA -- compiling on Linux only,
+    where torch.compile's Triton is installed with torch.  None of the three moved a model's numbers
+    beyond the seeds' noise (2026-11-14); together they made an epoch 1.5 times faster on an H100."""
+    cuda = str(device).startswith("cuda")
+    precision = sch.get("precision", "fp32")
+    if precision == "auto":
+        precision = "bf16" if cuda else "fp32"
+    if precision == "bf16" and not cuda:
+        raise ValueError("precision bf16 needs a CUDA device")
+    use_compile = sch.get("compile", False)
+    if use_compile == "auto":
+        use_compile = cuda and sys.platform.startswith("linux")
+    channels_last = sch.get("channels_last", False)
+    channels_last = cuda if channels_last == "auto" else bool(channels_last) and cuda
+    return precision == "bf16", bool(use_compile), channels_last
 
 
 def auto_batch(device) -> int:
@@ -198,17 +218,14 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         epochs = min(epochs, math.ceil(sch["max_samples"] / per_epoch))
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=sch["weight_decay"])
     sched = schedule(opt, sch, batch_size)
-    bf16 = sch.get("precision", "fp32") == "bf16"
-    if bf16 and not str(device).startswith("cuda"):
-        raise ValueError("precision bf16 needs a CUDA device")
+    bf16, use_compile, channels_last = speedups(sch, device)
     snapshots = sorted(float(v) for v in sch.get("snapshots", SNAPSHOTS))
     # ``channels_last``: the convolutions' memory layout the GPU's tensor cores prefer; ``compile``:
     # the training's forward pass through torch.compile -- the module itself stays as it is, so the
     # checkpoint, the model file and the evaluation see plain parameter names (both opt-in)
-    channels_last = bool(sch.get("channels_last")) and str(device).startswith("cuda")
     if channels_last:
         model = model.to(memory_format=torch.channels_last)
-    forward = torch.compile(model) if sch.get("compile") else model
+    forward = torch.compile(model) if use_compile else model
     rule = stop_rule(sch["samples_per_epoch"])
     if settings.test_set:
         # the context's fixed test set: the same samples for every variant (`testset.py`)
@@ -241,7 +258,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         progress.append(folder, "start", start, resumed=True, device=device)
     else:
         progress.append(folder, "start", 0, device=device, method=METHOD, parameters=network.parameters(model),
-                        settings=settings.to_dict(), stop_rule=rule, epochs=epochs, batch=batch_size, lr=lr)
+                        settings=settings.to_dict(), stop_rule=rule, epochs=epochs, batch=batch_size, lr=lr,
+                        precision="bf16" if bf16 else "fp32", compile=use_compile, channels_last=channels_last)
     g = torch.Generator(device).manual_seed(settings.seed + 1000 + start)
     meta_base = {"method": METHOD, "settings": settings.to_dict(), "scaling": asdict(scaling), "window": sim.window,
                  "parameters": network.parameters(model), "calibration_sha256": _sha256(settings.calibration),

@@ -64,7 +64,10 @@ class Parts:
         "out_conv": True, "init": "kaiming", "p_clamp": 8.0}))
     time_model: Part = field(default_factory=lambda: Part("frame_stack"))
     output: Part = field(default_factory=lambda: Part("offsets"))
-    extraction: Part = field(default_factory=lambda: Part("lookahead"))
+    # mixture_peak, not DECODE's lookahead (2026-11-14): on all 54 models scored on test set B the same
+    # Jaccard, error / CRLB 0.020 lower laterally and 0.046 axially, the pixelation (pixel_mod) 0.051
+    # lower and half as different between seeds.
+    extraction: Part = field(default_factory=lambda: Part("mixture_peak"))
     loss: Part = field(default_factory=lambda: Part("mixture", {"terms": ["count", "mixture", "background"]}))
     # The port's decode_B's: AdamW, the rate times 0.9 every 10 epochs, no gradient clipping, an
     # epoch of 32 768 samples (its pseudo_ds_size).  The epoch's size sets how fast the rate falls
@@ -72,7 +75,12 @@ class Parts:
     # molecules; at 32 768 it matched it (2026-11-13, docs/decode/poc-plan.md).
     schedule: Part = field(default_factory=lambda: Part("adamw_step", {
         "lr": 6e-4, "weight_decay": 0.1, "step_epochs": 10, "gamma": 0.9, "clip_norm": None,
-        "batch": 64, "samples_per_epoch": 32768, "epochs": 1000, "test_samples": 512, "threshold": 0.5}))
+        "batch": 64, "samples_per_epoch": 32768, "epochs": 1000, "test_samples": 512, "threshold": 0.5,
+        # 6 M samples (2026-11-14): from 6 to 10 M the error / CRLB fell 0.003 - 0.017 and the Jaccard
+        # not at all, where the early stop ran to 13 - 15 M; the port's 32 M was no better than 6 M.
+        # bf16, compiled, channels-last on CUDA ("auto"): the same models within the seeds' noise, 11.4 ->
+        # 7.4 s an epoch on an H100.  Batch 64: 256 lost Jaccard and precision for 15 % (docs/decode/poc-plan.md).
+        "max_samples": 6e6, "precision": "auto", "compile": "auto", "channels_last": "auto"}))
 
 
 @dataclass
