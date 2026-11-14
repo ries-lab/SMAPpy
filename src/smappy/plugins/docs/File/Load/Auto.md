@@ -1,6 +1,6 @@
 ---
-version: "6"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+version: "7"
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._sml_entries_h5, smappy.io.formats._sml_file, smappy.io.formats._in_files, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -188,24 +188,36 @@ Each becomes an attribute, renamed to this program's name where there is one
 | `PSFxnm`, `PSFynm` | `sigma_nm`, `sigma_y_nm` | | `photerr` | `photons_err` |
 | `xpix`, `ypix` | `x_pix`, `y_pix` | | `PSFxpix` | `sigma_pix` |
 
-`filenumber` is left behind (it is given again when the file is added), and
-so are the attributes nothing here reads (`xnmf`, `ynmf`, `xpixf`, `ypixf`,
-`xpixerr`, `ypixerr`, `PSFypix`).  SMAP's `numberInGroup` comes across under
+Left behind are the attributes nothing here reads: `xnmf`, `ynmf`, `xpixf`
+and `ypixf`, where the peak finder put a spot before it was fitted, and
+`xpixerr`, `ypixerr` and `PSFypix`, which are attributes in nm given again
+in pixels.  SMAP's `numberInGroup` comes across under
 its own name: it is not this program's `n_in_group`, which merging blinks
 writes.  MATLAB counts from 1, so
 $\mathrm{frame} = \mathrm{frame}_{\mathrm{SMAP}} - 1$, as a 64-bit integer;
 `channel` and `iterations` become 32-bit integers and every other attribute
-single precision.  The pixel size (`cam_pixelsize_um`) is read from the
-first file's `info`, and from a `-v7.3` file also the frame count, the
-conversion, the offset and the EM gain, kept in the metadata under `smap`.
-A `.mat` without `saveloc` is refused; one that held several SMAP files is
-read as one table.
+single precision.  Each file's `info` gives its pixel size
+(`cam_pixelsize_um`), frame count, conversion, offset, EM gain, chip region,
+exposure and frame time, kept in its metadata under `smap` and, as this
+program keeps a camera, under `camera`.  A `.mat` without `saveloc` is
+refused.
+
+SMAP saves every file it has open in one `_sml.mat`: the positions of an
+experiment loaded together, and the image of averaged sites, which SMAP adds
+as a file of its own.  Each opens as a file of its own, as the files of a
+session saved together do, holding the localizations SMAP's `filenumber`
+gives it.  It is named by the last part of the path SMAP loaded it from,
+and keeps its own camera and frame time.  The positions of an experiment
+share the camera's coordinates, so read as one table they would lie on top
+of each other.  A localization whose `filenumber` names none of the files is
+left out: SMAP shows it nowhere, and those found were all zeros, the
+leftovers of a SMAP step.
 
 The sites of SMAP's ROI manager come along as the
 [ROI manager](plugin:Panels/ROI manager)'s ROIs, from a `-v7.3` file (SMAP's
 default) -- a `-v7` one keeps them where they are not read.  Each site is
-an ROI at its position, numbered by its SMAP ID, with its *use* and its
-comment.  Its lines become the ROI's named lines: the orientation line
+an ROI on its own file, at its position, numbered by its SMAP ID, with its
+*use* and its comment.  Its lines become the ROI's named lines: the orientation line
 (`rotationpos`, the one the site image is turned along) is `direction`,
 and `line1` and `line2` keep their names.  The shape drawn by hand inside a
 site (`line3`) becomes the ROI's own outline: a polygon or a free-hand
