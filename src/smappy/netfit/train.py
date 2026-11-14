@@ -226,6 +226,12 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     if channels_last:
         model = model.to(memory_format=torch.channels_last)
     forward = torch.compile(model) if use_compile else model
+    # ``ema``: an exponential average of the weights, decay a step, is what is scored and saved (step 4's
+    # screen A: pixelation is now mostly the seed's, and an average of the last weights is less so)
+    ema = None
+    if sch.get("ema"):
+        from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
+        ema = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(float(sch["ema"])))
     rule = stop_rule(sch["samples_per_epoch"])
     if settings.test_set:
         # the context's fixed test set: the same samples for every variant (`testset.py`)
@@ -254,6 +260,8 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
         opt.load_state_dict(state["optimizer"])
         sched.load_state_dict(state["scheduler"])
         start, seconds = state["epoch"] + 1, state["seconds"]
+        if ema is not None and "ema" in state:
+            ema.load_state_dict(state["ema"])
         torch.set_rng_state(state["rng"].cpu())       # map_location moved it with the rest
         progress.append(folder, "start", start, resumed=True, device=device)
     else:
@@ -270,7 +278,7 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
     try:
         _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
                      steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
-                     forward, channels_last)
+                     forward, channels_last, ema)
     finally:
         if feed is not None:
             feed.close()
@@ -278,10 +286,14 @@ def train(folder, settings: TrainingSettings, device: str = "cpu", epochs: int |
 
 def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, truth, scaling, start, epochs,
                  steps, batch_size, seconds, meta_base, device, bf16, snapshots, rule, early_stop, log,
-                 forward=None, channels_last=False):
+                 forward=None, channels_last=False, ema=None):
     forward = model if forward is None else forward
+    judged = model if ema is None else ema.module       # what is scored and saved
     sim, cam, parts = settings.simulation, settings.camera, settings.parts
     sch = parts.schedule.settings
+    # the loss part's ``reported`` (step 4, an honest sigma): {"head": "rep" | "mixture", "weight",
+    # "from_epoch"} -- the reported positions' likelihood (`loss.reported_term`), once there are detections
+    rep = (parts.loss.settings or {}).get("reported")
     ckpt = folder / "checkpoint.pt"
     per_epoch = steps * batch_size
     for epoch in range(start, epochs):
@@ -296,23 +308,31 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
                 out = forward(x)
             value, t = loss.loss(out.float(), batch, scaling, parts.loss)
+            if rep and epoch >= rep.get("from_epoch", 5):
+                r = loss.reported_term(out.float(), batch, scaling, cam.pixel_nm, sch["threshold"],
+                                       parts.extraction.name, getattr(model, "out_scale", 1), rep.get("head", "rep"))
+                value = value + float(rep.get("weight", 1.0)) * r
+                t = {**t, "reported": r.detach()}
             opt.zero_grad(set_to_none=True)
             value.backward()
             if sch.get("clip_norm"):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), sch["clip_norm"])
             opt.step()
             sched.step()
+            if ema is not None:
+                ema.update_parameters(model)
             total = total + value.detach()
             for k, v in t.items():
                 parts_sum[k] = parts_sum.get(k, 0.0) + v
         total = float(total)
         parts_sum = {k: float(v) for k, v in parts_sum.items()}
         model.eval()
+        judged.eval()
         with torch.no_grad():
             outs, test_loss = [], 0.0
             for a in range(0, len(test.frames), 128):
                 sub = _slice(test, a, a + 128)
-                out = model((sub.frames - scaling.input_offset) / scaling.input_scale)
+                out = judged((sub.frames - scaling.input_offset) / scaling.input_scale)
                 test_loss += float(loss.loss(out, sub, scaling, parts.loss)[0]) * len(sub.frames)
                 outs.append(out)
             out = torch.cat(outs)
@@ -328,8 +348,9 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
             f"lat {score.get('rmse_lat_nm', float('nan')):.1f}  ax {score.get('rmse_ax_nm', float('nan')):.1f}  "
             f"KS {score.get('pixel_ks') or float('nan'):.3f}  mod {score['pixel_mod'] if score.get('pixel_mod') is not None else float('nan'):.3f}  ({dt:.0f} s)")
         torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": opt.state_dict(),
-                    "scheduler": sched.state_dict(), "seconds": seconds, "rng": torch.get_rng_state()}, ckpt)
-        tensors = {k: v.detach().cpu().numpy() for k, v in model.state_dict().items()}
+                    "scheduler": sched.state_dict(), "seconds": seconds, "rng": torch.get_rng_state(),
+                    **({"ema": ema.state_dict()} if ema is not None else {})}, ckpt)
+        tensors = {k: v.detach().cpu().numpy() for k, v in judged.state_dict().items()}
         model_file.write(folder / "model.safetensors", tensors,
                          {**meta_base, "epoch": epoch, "epochs": epochs, "train_seconds": round(seconds, 1),
                           "device": device})

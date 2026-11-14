@@ -70,3 +70,51 @@ def loss(out, batch, scaling, part=None) -> tuple:
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
     # the terms as tensors: a float() here would wait for the GPU every step (`train`)
     return total, {k: v.detach().mean() for k, v in t.items()}
+
+
+def match_nearest(t_xyz, t_mask, f_frame, f_xyz, pixel_nm, lateral_nm: float, axial_nm: float):
+    """(detection, truth) index pairs, on the device: within the benchmark's gates (`metrics.match`),
+    each detection with its nearest truth in its frame where that truth's nearest detection is it --
+    mutual nearest neighbours, not the benchmark's assignment, which would wait on the CPU every step.
+    ``t_xyz`` (b, k, 3) columns, rows, nm; ``f_xyz`` (m, 3)."""
+    if not len(f_frame):
+        z = torch.zeros(0, dtype=torch.long, device=f_xyz.device)
+        return z, z
+    t = t_xyz[f_frame]                                                    # (m, k, 3)
+    lat = torch.hypot((t[..., 0] - f_xyz[:, None, 0]) * pixel_nm[0], (t[..., 1] - f_xyz[:, None, 1]) * pixel_nm[1])
+    ok = t_mask[f_frame] & (lat <= lateral_nm) & ((t[..., 2] - f_xyz[:, None, 2]).abs() <= axial_nm)
+    lat = torch.where(ok, lat, torch.full_like(lat, float("inf")))
+    best, k = lat.min(1)                                                  # each detection's nearest truth
+    have = torch.isfinite(best)
+    # the truth's nearest detection: a scatter of the minimum over detections sharing (frame, truth)
+    key = f_frame * t_xyz.shape[1] + k
+    nearest = torch.full((t_xyz.shape[0] * t_xyz.shape[1],), float("inf"), device=f_xyz.device)
+    nearest = nearest.scatter_reduce(0, key[have], best[have], reduce="amin")
+    mine = have & (best <= nearest[key])
+    d = torch.nonzero(mine).squeeze(1)
+    return d, k[d]
+
+
+def reported_term(out, batch, scaling, pixel_nm, threshold: float, how: str, scale: int = 1, head: str = "rep",
+                  lateral_nm: float = 250.0, axial_nm: float = 500.0):
+    """The Gaussian negative log-likelihood of what the extraction reports (step 4, an honest sigma):
+    each detection matched to its truth (`match_nearest`), per axis ``log sigma + (sg(mu) - x)^2 /
+    (2 sigma^2)`` at its pixel, the position ``mu`` detached so that the term trains the sigma to the
+    reported position's error and never the position.  ``head`` "rep" (channels 10 - 12, a head that
+    only reports) or "mixture" (the mixture's own sigma, channels 6 - 8).  Per frame, summed over its
+    matches; x and y in pixels, z in units of ``z_max``."""
+    from . import extract
+    with torch.no_grad():
+        e = extract.extract(out.detach(), scaling, threshold, how, scale)
+        f_xyz = torch.stack([e["x"], e["y"], e["z_nm"]], 1)
+        d, k = match_nearest(batch.xyz, batch.mask, e["frame"], f_xyz, pixel_nm, lateral_nm, axial_nm)
+    if not len(d):
+        return out.sum() * 0.0
+    b, i, j = e["frame"][d], e["row"][d], e["column"][d]
+    first = 10 if head == "rep" else 6
+    sig = out[b, first:first + 3, i, j]                                   # (n, 3) with gradient
+    truth = batch.xyz[b, k]
+    err = f_xyz[d] - truth
+    err = torch.stack([err[:, 0], err[:, 1], err[:, 2] / scaling.z_max], 1)
+    nll = torch.log(sig) + err ** 2 / (2 * sig ** 2)
+    return nll.sum() / out.shape[0]

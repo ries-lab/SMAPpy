@@ -17,6 +17,10 @@ nearest-neighbour upsampling and a 3 x 3 convolution up, the skip concatenated.
  9    background / bg_max                                          sigmoid
 ====  ==========================================================  ===========
 
+With ``sigma_rep`` (step 4, an honest sigma) three more: 10 - 12, the *reported* uncertainties of
+x, y, z (same units, sigmoid * 3 + 0.001), from a head of their own on the features with their
+gradient stopped -- the loss term that trains them (`loss.reported_term`) cannot move anything else.
+
 **A finer output grid** (``out_scale`` 2, 2026-11-14): the union U-Net's features upsampled once more
 and through one more block, so the maps have ``out_scale`` cells a pixel along each axis and every
 molecule is placed from a cell whose centre is at most a quarter pixel away -- the pixelation (the
@@ -61,26 +65,62 @@ def _block(c_in, c_out, act):
     return nn.Sequential(nn.Conv2d(c_in, c_out, 3, padding=1), act(), nn.Conv2d(c_out, c_out, 3, padding=1), act())
 
 
+class ResBlock(nn.Module):
+    """``block`` "residual" (step 4's screen B): the same two 3 x 3 convolutions, their sum with the
+    input (through a 1 x 1 convolution where the channels change) before the last activation."""
+
+    def __init__(self, c_in, c_out, act):
+        super().__init__()
+        self.body = nn.Sequential(nn.Conv2d(c_in, c_out, 3, padding=1), act(), nn.Conv2d(c_out, c_out, 3, padding=1))
+        self.skip = nn.Conv2d(c_in, c_out, 1) if c_in != c_out else nn.Identity()
+        self.act = act()
+
+    def forward(self, x):
+        return self.act(self.body(x) + self.skip(x))
+
+
+BLOCKS = {"plain": _block, "residual": ResBlock}
+
+
+class Blur(nn.Module):
+    """A fixed binomial low-pass, [1 2 1] x [1 2 1] / 16 per channel, before a stride-2 convolution
+    (``blur``, BlurPool -- Zhang 2019, doi:10.48550/arXiv.1904.11486): what is downsampled has no
+    frequencies above the coarser grid's, so the features move with the molecule rather than jump
+    with the pixel grid -- aimed at pixelation (step 4's screen A)."""
+
+    def __init__(self, channels):
+        super().__init__()
+        k = torch.tensor([1.0, 2.0, 1.0])
+        self.register_buffer("kernel", (k[:, None] * k[None, :] / 16).expand(channels, 1, 3, 3).clone(), persistent=False)
+        self.channels = channels
+
+    def forward(self, x):
+        x = nn.functional.pad(x, (1, 1, 1, 1), mode="reflect")
+        return nn.functional.conv2d(x, self.kernel.to(x.dtype), groups=self.channels)
+
+
 class UNet(nn.Module):
     """``upsample_kernel`` 3 (an activation after it) or 1 (DECODE's: linear); ``pool_act`` an activation
     after the stride-2 convolution (DECODE has none); ``out_conv`` a linear 1 x 1 convolution at the end,
     as DECODE's U-Nets end, so the features handed on are not cut at zero."""
 
     def __init__(self, c_in: int, features: int, depth: int, act, upsample_kernel: int = 3,
-                 pool_act: bool = True, out_conv: bool = False):
+                 pool_act: bool = True, out_conv: bool = False, blur: bool = False, block: str = "plain"):
         super().__init__()
         f = [features * 2 ** level for level in range(depth + 1)]
-        self.first = _block(c_in, f[0], act)
-        self.down = nn.ModuleList(nn.Sequential(nn.Conv2d(f[i], f[i], 2, stride=2), *([act()] if pool_act else []))
+        make = BLOCKS[block]
+        self.first = make(c_in, f[0], act)
+        self.down = nn.ModuleList(nn.Sequential(*([Blur(f[i])] if blur else []), nn.Conv2d(f[i], f[i], 2, stride=2),
+                                                *([act()] if pool_act else []))
                                   for i in range(depth))
-        self.enc = nn.ModuleList(_block(f[i], f[i + 1], act) for i in range(depth))
+        self.enc = nn.ModuleList(make(f[i], f[i + 1], act) for i in range(depth))
         if upsample_kernel == 3:
             up = lambda i: nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"),
                                          nn.Conv2d(f[i + 1], f[i], 3, padding=1), act())
         else:
             up = lambda i: nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"), nn.Conv2d(f[i + 1], f[i], 1))
         self.up = nn.ModuleList(up(i) for i in reversed(range(depth)))
-        self.dec = nn.ModuleList(_block(2 * f[i], f[i], act) for i in reversed(range(depth)))
+        self.dec = nn.ModuleList(make(2 * f[i], f[i], act) for i in reversed(range(depth)))
         self.out = nn.Conv2d(f[0], f[0], 1) if out_conv else nn.Identity()
         self.depth = depth
 
@@ -119,17 +159,21 @@ class TwoStageUNet(nn.Module):
 
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
-                 init: str = "default", p_clamp: float | None = None, out_scale: int = 1):
+                 init: str = "default", p_clamp: float | None = None, out_scale: int = 1,
+                 blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
-        grid's cells a pixel (the module's docstring).  The first five are there to find which of them
+        grid's cells a pixel (the module's docstring); ``blur`` (`Blur`), ``block`` (`BLOCKS`) and
+        ``offset_range`` (the offsets' reach, in cells: tanh times it) step 4's.  The first five are there to find which of them
         pixelation depends on (2026-11-12); the defaults here are version 1's, so that a model saved
         without them is built as it was trained -- a new training's are DECODE's (`settings.Parts`)."""
         super().__init__()
         act = _ACTIVATIONS[activation]
         self.window = window
-        style = {"upsample_kernel": upsample_kernel, "pool_act": pool_act, "out_conv": out_conv}
+        style = {"upsample_kernel": upsample_kernel, "pool_act": pool_act, "out_conv": out_conv, "blur": blur,
+                 "block": block}
+        self.offset_range = float(offset_range)
         self.frame = UNet(1, features, depth_frame, act, **style)
         self.union = UNet(window * features, features, depth_union, act, **style)
         self.p_clamp = p_clamp
@@ -142,6 +186,9 @@ class TwoStageUNet(nn.Module):
                        if self.out_scale == 2 else nn.Identity())
         self.heads = nn.ModuleDict({"p": Head(features, 1, act), "phot_xyz": Head(features, 4, act),
                                     "sigma": Head(features, 4, act), "bg": Head(features, 1, act)})
+        self.sigma_rep = bool(sigma_rep)
+        if self.sigma_rep:
+            self.heads["sigma_rep"] = Head(features, 3, act)
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
         if init == "kaiming":
             for m in self.modules():
@@ -181,11 +228,14 @@ class TwoStageUNet(nn.Module):
         if self.p_clamp is not None:
             logit = logit.clamp(-self.p_clamp, self.p_clamp)
         xyz = torch.tanh(values[:, 1:])
-        if self.out_scale != 1:                       # +-1 cell, in pixels
-            xyz = torch.cat([xyz[:, :2] / self.out_scale, xyz[:, 2:]], 1)
-        return torch.cat([torch.sigmoid(logit), torch.sigmoid(values[:, :1]), xyz,
-                          torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR,
-                          torch.sigmoid(self.heads["bg"](u))], 1)
+        reach = self.offset_range / self.out_scale    # +-offset_range cells, in pixels
+        if reach != 1:
+            xyz = torch.cat([xyz[:, :2] * reach, xyz[:, 2:]], 1)
+        maps = [torch.sigmoid(logit), torch.sigmoid(values[:, :1]), xyz,
+                torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR, torch.sigmoid(self.heads["bg"](u))]
+        if self.sigma_rep:
+            maps.append(torch.sigmoid(self.heads["sigma_rep"](u.detach())) * SIGMA_SCALE + SIGMA_FLOOR)
+        return torch.cat(maps, 1)
 
 
 BACKBONES = {"unet2": TwoStageUNet}

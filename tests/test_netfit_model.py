@@ -136,3 +136,49 @@ def test_the_pixel_modulation_reads_a_cosines_amplitude_and_uniform_positions_as
     u = rng.uniform(size=400_000)
     kept = u[rng.uniform(size=u.size) < (1 + 0.1 * np.cos(4 * np.pi * u)) / 1.1]
     assert pixel_modulation(kept) == pytest.approx(0.1, abs=0.006)
+
+
+def test_blur_keeps_a_constant_and_step_4s_backbones_give_the_same_maps():
+    x = torch.full((1, 4, 8, 8), 3.0)
+    assert torch.allclose(network.Blur(4)(x), x)
+    for style in ({"blur": True}, {"block": "residual"}, {"offset_range": 2.0}):
+        model = network.TwoStageUNet(features=8, **style)
+        assert model(torch.zeros(2, 3, 16, 24)).shape == (2, 10, 16, 24)
+
+
+def test_the_offsets_reach_as_many_cells_as_their_range():
+    model = network.TwoStageUNet(features=8, offset_range=2.0)
+    last = model.heads["phot_xyz"].net[-1]
+    torch.nn.init.constant_(last.bias, 50.0)              # tanh saturated
+    assert model(torch.zeros(1, 3, 8, 8))[0, 2].max().item() == pytest.approx(2.0)
+
+
+def test_detections_are_matched_to_their_mutually_nearest_truth_within_the_gates():
+    t = torch.tensor([[[5.0, 5.0, 0.0], [20.0, 20.0, 0.0], [30.0, 8.0, 0.0]]])
+    mask = torch.tensor([[True, True, False]])
+    # two detections near the first truth (the nearer wins), one near the second, one far, one on a masked truth
+    f = torch.tensor([[5.2, 5.0, 0.0], [5.5, 5.0, 0.0], [20.0, 20.5, 100.0], [40.0, 40.0, 0.0], [30.0, 8.0, 0.0]])
+    d, k = loss.match_nearest(t, mask, torch.zeros(5, dtype=torch.long), f, (100.0, 100.0), 250.0, 500.0)
+    assert d.tolist() == [0, 2] and k.tolist() == [0, 1]
+
+
+def test_the_reported_sigma_is_trained_by_the_reported_errors_and_moves_nothing_else():
+    torch.manual_seed(0)
+    model = network.TwoStageUNet(features=8, sigma_rep=True)
+    with torch.no_grad():
+        model.heads["p"].net[-1].bias.fill_(-8.0)
+    x = torch.zeros(1, 3, 16, 16)
+    out2 = model(x)
+    assert out2.shape == (1, 13, 16, 16)
+    p = torch.zeros_like(out2[:, :1])
+    p[0, 0, 7, 5] = 0.99                        # one detection, at row 7, column 5; its molecule at 5.3
+    out3 = torch.cat([p, out2[:, 1:]], 1)
+    batch = Batch(frames=x, xyz=torch.tensor([[[5.3, 7.0, 0.0]]]), photons=torch.tensor([[2000.0]]),
+                  mask=torch.tensor([[True]]), background=torch.tensor([0.0]))
+    r = loss.reported_term(out3, batch, SCALING, (100.0, 100.0), 0.5, "lookahead")
+    r.backward()
+    grads = {n: (q.grad is not None and q.grad.abs().sum().item() > 0) for n, q in model.named_parameters()}
+    assert any(g for n, g in grads.items() if n.startswith("heads.sigma_rep"))
+    assert not any(g for n, g in grads.items() if not n.startswith("heads.sigma_rep"))
+    e = extract.extract(out3.detach(), SCALING, 0.5)
+    assert torch.equal(e["x_err"], out3[0, 10, 7, 5].reshape(1)) and "x_err_mix" in e

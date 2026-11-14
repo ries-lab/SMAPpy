@@ -40,6 +40,8 @@ def physical(out, scaling, scale: int = 1):
     y[:, 5] *= scaling.phot_max
     y[:, 8] *= scaling.z_max
     y[:, 9] *= scaling.bg_max
+    if y.shape[1] > 10:                       # the reported sigmas (`network`, ``sigma_rep``)
+        y[:, 12] *= scaling.z_max
     return y
 
 
@@ -95,5 +97,10 @@ def extract(out, scaling, threshold: float, how: str = "lookahead", scale: int =
         xyz = mixture_peak(y, b, i, j)
     elif how not in ("lookahead", "mixture_peak"):
         raise ValueError(f"extraction {how!r}: lookahead or mixture_peak")
-    return {"frame": b, "x": xyz[:, 0], "y": xyz[:, 1], "z_nm": xyz[:, 2], "photons": v[:, 1], "prob": prob,
-            "photons_err": v[:, 5], "x_err": v[:, 6], "y_err": v[:, 7], "z_err_nm": v[:, 8], "background": v[:, 9]}
+    out = {"frame": b, "x": xyz[:, 0], "y": xyz[:, 1], "z_nm": xyz[:, 2], "photons": v[:, 1], "prob": prob,
+           "photons_err": v[:, 5], "x_err": v[:, 6], "y_err": v[:, 7], "z_err_nm": v[:, 8], "background": v[:, 9],
+           "row": i, "column": j}
+    if v.shape[1] > 10:                       # a head that only reports: its sigma is the one reported
+        out.update(x_err_mix=out["x_err"], y_err_mix=out["y_err"], z_err_mix_nm=out["z_err_nm"],
+                   x_err=v[:, 10], y_err=v[:, 11], z_err_nm=v[:, 12])
+    return out
