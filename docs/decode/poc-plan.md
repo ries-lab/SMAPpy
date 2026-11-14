@@ -2102,3 +2102,28 @@ A perfect estimator separates three to eight times as many close pairs: the gap 
 of all away from focus and below 100 nm, where the two molecules' depths tell them apart.  The local
 count term (`loss`'s ``local_count``, the exact count of each 3 x 3 cells; seeds running) asks the map
 for it.
+
+*The ceiling by depth difference and pixel layout* (`ceiling2.py`, the same 4500 pairs saved one by one;
+v1f s2 at 6 M; a pair counts as found when each molecule has a detection of its own within 100 nm, a
+stricter rule than the benchmark's matching, so v1f's numbers are lower than above).  Pairs below 100 nm:
+
+| |Delta z| | pairs | ceiling | v1f, `mixture_peak` (`lookahead`) |
+|---|---|---|---|
+| < 200 nm | 309 | 0.01 | 0.01 (0.01) |
+| 200 - 500 nm | 450 | 0.34 | 0.02 (0.02) |
+| > 500 nm | 741 | 0.44 | 0.03 (0.03) |
+| same pixel | 639 | 0.33 | 0.02 (0.01) |
+| neighbouring pixels | 861 | 0.32 | 0.03 (0.03) |
+
+* Below 100 nm the ceiling separates a pair only by its depths: none closer than 200 nm in z.
+* The pixel layout does not decide it: the ceiling is the same whether both molecules fall in one pixel
+  or in two neighbouring ones, and so is the network's failure -- neighbouring pixels could hold two
+  detections, and DECODE's lookahead keeps a second where its own p passes 0.6, yet 3 % come out.  It
+  is not learnt, not prevented by the output's one molecule per pixel.
+* The network separates worse the larger the depth difference, where the ceiling does better: at
+  100 - 200 nm v1f finds both in 0.03 / 0.13 / 0.05 of the three |Delta z| bins (ceiling 0.10 / 0.42 /
+  0.45), at 200 - 300 nm 0.19 / 0.19 / 0.09 (0.33 / 0.54 / 0.45).  A large |Delta z| usually puts one
+  molecule far from focus, where the network misses bright pairs outright: no detection within 250 nm
+  of the pair in 26 - 32 % of pairs with a molecule beyond 600 nm, none near focus.
+* The usual failure is one detection for the two: 64 - 75 % of pairs in every bin.
+* Near focus, 200 - 300 nm: v1f 0.42, ceiling 0.71.
