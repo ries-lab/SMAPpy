@@ -177,7 +177,11 @@ The shipped `Analysis/Regions/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, Segment regions'
 circle template with the NPC preset's ring and *keep*, NPC
 Corners, NPC labelling efficiency, which takes the counts by the plugin that
-made them and its cutoffs from their settings.
+made them and its cutoffs from their settings.  `Analysis/Regions/Workflow/DNA-PAINT`
+(`dna_paint.chain.yaml`) is another, over an id column rather than ROIs: RCC,
+Find clusters' local maxima, Fiducials on the sites, the sites again, a block
+of Binding kinetics over `cluster_id`, Molecular mapping; it names four
+settings in its `interface:`.
 
 An ROI analysis (`plugins.roi.SiteAnalysisPlugin`: `evaluator`, the path of
 what it reads, and a *results from* field) reads the evaluation the chain

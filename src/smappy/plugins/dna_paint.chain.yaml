@@ -1,0 +1,68 @@
+# DNA-PAINT from localizations to molecules, the Picasso way (docs/dna-paint.md):
+# RCC for the coarse drift; the binding sites by Find clusters' local maxima
+# with the frame analysis; the drift again from those sites (Fiducials with
+# structures, Picasso's "undrift from picked" on binding sites); the sites
+# found again on the corrected positions; each site's binding kinetics; and
+# the molecules, one per site at its centre (RESI's step), as a new file.
+# Shipped as a chain: every step is the shipped plugin with its settings.
+schema: smappy-chain-v1
+path: Analysis/Regions/Workflow/DNA-PAINT
+description: >-
+  Corrects the drift on the binding sites, finds the sites, measures their
+  binding kinetics and maps them to molecules, in one run.
+grouping: layer
+interface:
+  sites.local_maxima.radius_nm: site radius
+  sites.local_maxima.min_points: localizations per site
+  drift_from_the_sites.spline_knot_frames: drift knot spacing
+  molecules.method: molecules by
+steps:
+  - plugin: Analysis/Process/Layers
+    label: layers
+    version: "2"
+    values:
+      layers:
+        - grouped: false           # sites and molecules are made of localizations
+          start: keep              # the filter as the Render tab has it
+          bounds: []
+      remove: false
+  - plugin: Analysis/Drift/RCC
+    label: coarse drift
+    version: "2"
+    values: {}
+  - plugin: Analysis/Regions/Find clusters
+    label: sites
+    version: "2"
+    values:
+      algorithm: local_maxima
+      local_maxima.radius_nm: 8.0         # about twice the precision
+      local_maxima.min_points: 10
+      frame_analysis: true
+  - plugin: Analysis/Drift/Fiducials
+    label: drift from the sites
+    version: "3"
+    values:
+      markers: structures
+      source: id column
+      id_column: cluster_id
+      spline_knot_frames: 500
+  - plugin: Analysis/Regions/Find clusters
+    label: sites again
+    version: "2"
+    values:
+      algorithm: local_maxima
+      local_maxima.radius_nm: 8.0         # about twice the precision
+      local_maxima.min_points: 10
+      frame_analysis: true
+  - block: each site                # once in each site found
+    regions: cluster_id
+    steps:
+      - plugin: Analysis/Measure/Binding kinetics
+        version: "1"
+        values: {}
+  - plugin: Analysis/Regions/Molecular mapping
+    label: molecules
+    version: "1"
+    values:
+      method: centres
+      output: file

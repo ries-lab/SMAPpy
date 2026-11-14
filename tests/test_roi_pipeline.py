@@ -52,7 +52,8 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Summarize/qPAINT",
-                          "Analysis/Regions/Workflow/NPC Analysis"}
+                          "Analysis/Regions/Workflow/NPC Analysis",
+                          "Analysis/Regions/Workflow/DNA-PAINT"}
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
     assert found["Analysis/Measure/NPC Corners"].per_region
