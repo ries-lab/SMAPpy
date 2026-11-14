@@ -53,7 +53,9 @@ def progress_text(done: int, total: int, elapsed: float, what: str = "regions") 
         left = (total - done) / rate
         text += f", {rate:.3g} a second"
         if done < total:
-            text += f", about {_duration(left)} left"
+            # not "about under a second", as `BlockEstimate.text` has it too
+            left = _duration(left)
+            text += f", {'' if left.startswith('under') else 'about '}{left} left"
     return text
 
 
