@@ -182,3 +182,47 @@ def test_the_reported_sigma_is_trained_by_the_reported_errors_and_moves_nothing_
     assert not any(g for n, g in grads.items() if not n.startswith("heads.sigma_rep"))
     e = extract.extract(out3.detach(), SCALING, 0.5)
     assert torch.equal(e["x_err"], out3[0, 10, 7, 5].reshape(1)) and "x_err_mix" in e
+
+
+def test_the_local_count_is_the_exact_poisson_binomial_of_each_windows_true_count():
+    import itertools
+    g = torch.Generator().manual_seed(3)
+    p = torch.rand(1, 4, 5, generator=g) * 0.8
+    counts = torch.zeros(1, 4, 5)
+    counts[0, 1, 2], counts[0, 1, 3], counts[0, 3, 0] = 1, 1, 1
+    got = loss.window_counts(p, counts, 3).item()
+    want = 0.0
+    for r in range(4):
+        for c in range(5):
+            cells = [(i, j) for i in range(r - 1, r + 2) for j in range(c - 1, c + 2) if 0 <= i < 4 and 0 <= j < 5]
+            n = int(sum(counts[0, i, j] for i, j in cells))
+            q = [p[0, i, j].item() for i, j in cells]
+            prob = sum(math.prod(qi if on else 1 - qi for qi, on in zip(q, ons))
+                       for ons in itertools.product((0, 1), repeat=len(q)) if sum(ons) == n)
+            want -= math.log(prob)
+    assert got == pytest.approx(want / 9, rel=1e-4)
+
+
+def test_a_molecule_is_counted_in_the_cell_whose_centre_is_nearest_on_either_grid():
+    batch = Batch(frames=None, xyz=torch.tensor([[[2.4, 1.6, 0.0], [2.6, 1.4, 0.0], [-0.7, 0.0, 0.0]]]),
+                  photons=torch.ones(1, 3), mask=torch.tensor([[True, True, True]]), background=torch.zeros(1))
+    c = loss.cell_counts(batch, 4, 5)
+    assert c[0, 2, 2] == 1 and c[0, 1, 3] == 1 and c.sum() == 2           # the third is outside the frame
+    fine = loss.cell_counts(batch, 8, 10, scale=2)
+    assert fine[0, 4, 5] == 1 and fine[0, 3, 6] == 1                       # 2.4 -> cell 5 (centre 2.25)
+
+
+def test_the_local_count_asks_for_more_probability_where_two_molecules_are_close():
+    out = _maps()
+    out[0, 0, 3, 4], out[0, 0, 3, 5] = 0.5, 0.5             # the map's mass: one molecule's worth
+    out.requires_grad_(True)
+    batch = Batch(frames=None, xyz=torch.tensor([[[4.0, 3.0, 0.0], [5.0, 3.0, 0.0]]]), photons=torch.ones(1, 2),
+                  mask=torch.tensor([[True, True]]), background=torch.zeros(1))
+    t = loss.terms(out, batch, SCALING, names=("local_count",))
+    t["local_count"].sum().backward()
+    assert out.grad[0, 0, 3, 4] < 0 and out.grad[0, 0, 3, 5] < 0      # raising p there lowers the term
+    single = Batch(frames=None, xyz=torch.tensor([[[4.0, 3.0, 0.0]]]), photons=torch.ones(1, 1),
+                   mask=torch.tensor([[True]]), background=torch.zeros(1))
+    out.grad = None
+    loss.terms(out, single, SCALING, names=("local_count",))["local_count"].sum().backward()
+    assert out.grad[0, 0, 3, 5] > 0                                    # one molecule: the second half goes

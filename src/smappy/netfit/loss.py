@@ -10,7 +10,16 @@ For one frame with molecules ``m`` (photons, x, y, z) and the network's maps:
   ``sum p (1 - p)`` the variance of a sum of independent Bernoullis, approximated as a Gaussian;
   ``-n log N(n; sum p, sum p (1 - p))``, weighted by n as in DECODE so it keeps pace with the
   mixture term, which grows with n;
-* **background** -- the background map's squared error, summed over the pixels.
+* **background** -- the background map's squared error, summed over the pixels;
+* **local_count** (not DECODE's; step 4, close molecules, not on by default) -- the count again, but
+  in every ``window`` x ``window`` neighbourhood of cells rather than over the frame: ``-log P(n_w)``
+  of the window's true count under its cells' independent Bernoullis, the Poisson-binomial computed
+  exactly (`window_counts`), summed over the windows and divided by ``window^2``, the windows each cell
+  is in.  The frame's count term cannot tell one molecule too few in one place from one too many in
+  another, so nothing teaches the map to hold two where two are close together -- the network's
+  probability summed around a pair 100 - 200 nm apart came to 1.6, around a single molecule 1.04
+  (2026-11-14).  It is a proper scoring rule of the count, so on molecules placed at random it asks
+  for a calibrated count and adds no reason to split a single molecule.
 
 Each frame's loss is the sum; the batch's the mean over frames.  The part ``loss`` names the terms
 (``terms``) and their weights (``weights``), so that step 4 can change one.
@@ -30,8 +39,42 @@ def targets_scaled(batch, scaling):
     return torch.stack([batch.photons / scaling.phot_max, xyz[..., 0], xyz[..., 1], xyz[..., 2] / scaling.z_max], -1)
 
 
-def terms(out, batch, scaling, chunk: int = 64) -> dict:
-    """Each term per frame, (b,) tensors."""
+def cell_counts(batch, h: int, w: int, scale: int = 1):
+    """(b, h, w): the true molecules in each output cell -- the cell whose centre is nearest
+    (`network.centres`: ``(i + 0.5) / scale - 0.5``), molecules outside the frame left out."""
+    b = batch.xyz.shape[0]
+    col = torch.floor((batch.xyz[..., 0] + 0.5) * scale).long()
+    row = torch.floor((batch.xyz[..., 1] + 0.5) * scale).long()
+    ok = batch.mask & (col >= 0) & (col < w) & (row >= 0) & (row < h)
+    frame = torch.arange(b, device=batch.xyz.device)[:, None].expand_as(col)
+    counts = torch.zeros(b * h * w, device=batch.xyz.device)
+    counts.index_add_(0, ((frame * h + row) * w + col)[ok], torch.ones(int(ok.sum()), device=batch.xyz.device))
+    return counts.view(b, h, w)
+
+
+def window_counts(p, counts, window: int = 3):
+    """(b,): ``-sum_w log P(n_w)`` over the ``window`` x ``window`` neighbourhoods (stride 1, zero
+    padding) of ``p`` (b, h, w), ``n_w`` the true molecules in the window (``counts``, `cell_counts`),
+    ``P`` the Poisson-binomial of the window's cells: the distribution of a sum of independent
+    Bernoullis, built one cell at a time.  More molecules than cells is impossible under it; such a
+    window counts as full."""
+    import torch.nn.functional as F
+    b, h, w = p.shape
+    k = window * window
+    cells = F.unfold(p[:, None], window, padding=window // 2).clamp(1e-6, 1 - 1e-6)    # (b, k, hw)
+    n = F.unfold(counts[:, None], window, padding=window // 2).sum(1).round().long().clamp(max=k)  # (b, hw)
+    dist = torch.zeros(b, h * w, k + 1, device=p.device, dtype=p.dtype)
+    dist[..., 0] = 1.0
+    for c in range(k):
+        q = cells[:, c, :, None]
+        dist = torch.cat([dist[..., :1] * (1 - q), dist[..., 1:] * (1 - q) + dist[..., :-1] * q], -1)
+    pn = dist.gather(-1, n[..., None])[..., 0]
+    return -torch.log(pn.clamp_min(1e-30)).sum(1) / k
+
+
+def terms(out, batch, scaling, chunk: int = 64, names=(), window: int = 3) -> dict:
+    """Each term per frame, (b,) tensors: DECODE's three, and those of ``names`` that are not
+    computed unless asked for (``local_count``, its ``window`` in cells)."""
     from .network import grid
     b, _, h, w = out.shape
     p = out[:, 0].reshape(b, -1)                                                   # (b, hw)
@@ -58,7 +101,10 @@ def terms(out, batch, scaling, chunk: int = 64) -> dict:
     count = n * (0.5 * (n - mean) ** 2 / var + 0.5 * torch.log(2 * math.pi * var))
     # the background
     bg = ((out[:, 9] - (batch.background / scaling.bg_max)[:, None, None]) ** 2).sum((1, 2))
-    return {"mixture": mix, "count": count, "background": bg}
+    out_terms = {"mixture": mix, "count": count, "background": bg}
+    if "local_count" in names:
+        out_terms["local_count"] = window_counts(out[:, 0], cell_counts(batch, h, w, scale), window)
+    return out_terms
 
 
 def loss(out, batch, scaling, part=None) -> tuple:
@@ -66,7 +112,7 @@ def loss(out, batch, scaling, part=None) -> tuple:
     settings = part.settings if part is not None else {}
     names = settings.get("terms", ["count", "mixture", "background"])
     weights = settings.get("weights", {})
-    t = terms(out, batch, scaling)
+    t = terms(out, batch, scaling, names=names, window=settings.get("window", 3))
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
     # the terms as tensors: a float() here would wait for the GPU every step (`train`)
     return total, {k: v.detach().mean() for k, v in t.items()}
