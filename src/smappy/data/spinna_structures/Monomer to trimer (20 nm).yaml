@@ -1,0 +1,10 @@
+# Monomers, dimers and trimers of one protein, the molecules 20 nm apart: the
+# trimer an equilateral triangle of side 20 nm (each corner 11.55 nm from its
+# centre).  Two free structures, so the grid has a few hundred candidates.
+structures:
+  - name: monomer
+    molecules: "A 0 0"
+  - name: dimer
+    molecules: "A -10 0; A 10 0"
+  - name: trimer
+    molecules: "A 0 11.547; A -10 -5.774; A 10 -5.774"

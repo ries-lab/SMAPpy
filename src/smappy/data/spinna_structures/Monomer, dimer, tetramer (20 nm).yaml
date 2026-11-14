@@ -1,0 +1,11 @@
+# Monomers, dimers and tetramers of one protein: the tetramer a square of side
+# 20 nm, as some receptors and channels form.  The trimer is left out (add it
+# for the full ladder): every structure added is a dimension more of the
+# grid, and a run takes accordingly longer.
+structures:
+  - name: monomer
+    molecules: "A 0 0"
+  - name: dimer
+    molecules: "A -10 0; A 10 0"
+  - name: tetramer
+    molecules: "A -10 -10; A 10 -10; A 10 10; A -10 10"
