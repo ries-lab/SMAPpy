@@ -2041,3 +2041,26 @@ own sigma more honest and, on its one seed, the network better.
 
 Round 2, running: `sigmix` seeds 1 and 2; EMA + `sigmix`; EMA + offsets 2 + `sigmix` (3 seeds each);
 EMA's and offsets 2's seeds 1 and 2.
+
+**What the Jaccard measures, and a score for what we analyse** (2026-11-14, evening).  Taken apart,
+every model's misses are of two kinds: a molecule whose find went to a close neighbour (two reported
+as one; 12.7 - 13.1 % of molecules, in every model alike, 40 % of those within 100 nm of another) and
+one with nothing found near it (40 - 42 %, where the models differ).  Offsets reaching two cells
+miss more of the second kind in every photon and neighbour bin alike, and make fewer false finds: a
+more cautious probability, not a lost molecule.  Swept over the threshold, v1f, offsets 2 and EMA +
+offsets 2 reach the same best Jaccard (0.496 - 0.497 at 0.3, `sigmix` 0.499): at 0.5 the Jaccard
+mostly measures where a model's probability sits.
+
+So the screens are now judged by the **bright-overlap score**: only molecules with at least 1000
+photons in the frame count (a find on a dimmer one counts neither way), recall at a precision of 0.97
+read off the threshold curve, and that recall, the share taken by a neighbour, the error and the pull
+toward the neighbour, by the distance to the nearest other bright molecule.  On it every screen-A
+variant is v1f's equal (recall 0.540 - 0.546 at P 0.97, v1f 0.541 ± 0.003; best Jaccard 0.590 - 0.592);
+screen B's backbones are worse (residual 0.537, dilated 0.533, ConvNeXt 0.526), at large |z| most.
+What the variants change is the pixelation alone: EMA + offsets 2 + `sigmix` 0.022 (one seed), offsets
+2 0.036, `sigmix` 0.038 (two seeds), EMA + offsets 2 0.045, v1f 0.060.
+
+What no variant changes: of bright molecules within 100 - 200 nm of another bright one, 38 % are taken
+by the neighbour's find, those found are pulled 7 nm toward it and their lateral error is 2.6 times
+the CRLB (2.0 overall); and beyond |z| 600 nm only 9 % of bright molecules are found, 10 % of isolated
+ones (87 % below 300 nm).  Both are the network's and the training data's to change, not the loss's.
