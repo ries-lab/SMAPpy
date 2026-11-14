@@ -358,8 +358,12 @@ any id attribute it can be measured per region.  Everything else
 (`photons`, `frame`, `net_gradient`, `ellipticity`, a linked table's `len`
 and `n`, ...) keeps its name; frames count from 0 in both programs.  The
 metadata is read from the `/metadata` dataset recent Picasso versions
-embed, or else from the `.yaml` file beside the `.hdf5`.  Without a pixel
-size there, the default one is assumed and the table says so.
+embed, or else from the `.yaml` file beside the `.hdf5`.  It is a list, an
+entry per step that made the file; the pixel size is taken from the last
+entry that gives one, as Picasso reads it.  Without a pixel size there, the
+default one is assumed and the table says so.  The list is kept with the
+table, and [Save localizations](plugin:File/Export/Localizations) writes it
+back into a Picasso file with this program's steps appended.
 
 **DECODE.**  DECODE writes `/data`: `xyz`, `phot`, `bg`, `frame_ix`,
 `prob`, `id`, and where it predicted them the uncertainties `xyz_sig`,
