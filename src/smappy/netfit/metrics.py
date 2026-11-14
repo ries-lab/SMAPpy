@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..training.reference import ks_uniform, robust_width, subpixel_histogram
+from ..training.reference import (
+    ks_uniform,
+    pixel_modulation,
+    robust_width,
+    subpixel_histogram,
+)
 
 LATERAL_NM, AXIAL_NM = 250.0, 500.0
 CORE_Z_NM = 300.0
@@ -158,7 +163,7 @@ def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHO
     eff = lambda rmse, a: float((100 - np.sqrt((100 * (1 - jac)) ** 2 + (a * rmse) ** 2)) / 100)
     out.update(rmse_lat_nm=lat, rmse_ax_nm=ax, eff_lat=eff(lat, 1.0), eff_ax=eff(ax, 0.5),
                pixel_hist_cols=subpixel_histogram(f[:, 0]), pixel_hist_rows=subpixel_histogram(f[:, 1]),
-               pixel_ks=ks_uniform(np.r_[f[:, 0], f[:, 1]]))
+               pixel_ks=ks_uniform(np.r_[f[:, 0], f[:, 1]]), pixel_mod=pixel_modulation(np.r_[f[:, 0], f[:, 1]]))
     err = found["err"][fi]
     out["claim_width_lat"] = robust_width(np.r_[dx / err[:, 0], dy / err[:, 1]])
     out["claim_width_ax"] = robust_width(dz / err[:, 2])
@@ -178,6 +183,7 @@ def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHO
                "rmse_lat_nm": float(np.sqrt(np.mean(dx[sel] ** 2 + dy[sel] ** 2))),
                "rmse_ax_nm": float(np.sqrt(np.mean(dz[sel] ** 2))), "bias_z_nm": float(np.mean(dz[sel])),
                "pixel_ks": ks_uniform(np.r_[f[sel, 0], f[sel, 1]]),
+               "pixel_mod": pixel_modulation(np.r_[f[sel, 0], f[sel, 1]]),
                "claim_width_ax": robust_width((dz[sel] - np.median(dz[sel])) / err[sel, 2])}
         if truth.get("crlb") is not None:
             b = truth["crlb"][ti][sel]
@@ -211,6 +217,7 @@ def evaluate(truth: dict, found: dict, pixel_nm, photons_min: float | None = PHO
         out["core_rmse_lat_nm"] = float(np.sqrt(np.mean(dx[core] ** 2 + dy[core] ** 2)))
         out["core_rmse_ax_nm"] = float(np.sqrt(np.mean(dz[core] ** 2)))
         out["core_pixel_ks"] = ks_uniform(np.r_[f[core, 0], f[core, 1]])
+        out["core_pixel_mod"] = pixel_modulation(np.r_[f[core, 0], f[core, 1]])
         if truth.get("crlb") is not None:
             b = truth["crlb"][ti][core]
             out["core_crlb_width_lat"] = robust_width(np.r_[dx[core] / b[:, 0], dy[core] / b[:, 1]])

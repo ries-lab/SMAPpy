@@ -308,7 +308,7 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
                         lr=sched.get_last_lr()[0], seconds=round(dt, 3), metrics=score)
         log(f"epoch {epoch}: loss {total / steps:.2f} / {test_loss / len(test.frames):.2f}  J {score['jaccard']:.3f}  "
             f"lat {score.get('rmse_lat_nm', float('nan')):.1f}  ax {score.get('rmse_ax_nm', float('nan')):.1f}  "
-            f"KS {score.get('pixel_ks') or float('nan'):.3f}  ({dt:.0f} s)")
+            f"KS {score.get('pixel_ks') or float('nan'):.3f}  mod {score['pixel_mod'] if score.get('pixel_mod') is not None else float('nan'):.3f}  ({dt:.0f} s)")
         torch.save({"epoch": epoch, "model": model.state_dict(), "optimizer": opt.state_dict(),
                     "scheduler": sched.state_dict(), "seconds": seconds, "rng": torch.get_rng_state()}, ckpt)
         tensors = {k: v.detach().cpu().numpy() for k, v in model.state_dict().items()}
@@ -337,7 +337,7 @@ def _snapshot(folder, settings, epoch, at, seen, tensors, meta_base, seconds, de
     from . import testset
     r = testset.evaluate(path, settings.test_set, device)
     keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
-            "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
+            "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks", "pixel_mod", "core_pixel_mod")
     progress.append(folder, "snapshot", epoch, samples=seen, at=at, seconds=round(seconds, 1),
                     metrics={k: r[k] for k in keys if r.get(k) is not None})
     log(f"snapshot at {at / 1e6:g} M samples: J {r['jaccard']:.4f}  near focus {r.get('core_rmse_lat_nm', float('nan')):.1f} nm"
@@ -382,7 +382,7 @@ def main(argv=None):
         if a.out:
             Path(a.out).write_text(json.dumps(r, indent=1), encoding="utf-8")
         keys = ("jaccard", "recall", "precision", "rmse_lat_nm", "rmse_ax_nm", "pixel_ks", "crlb_width_lat",
-                "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks")
+                "crlb_width_ax", "core_rmse_lat_nm", "core_rmse_ax_nm", "core_pixel_ks", "pixel_mod", "core_pixel_mod")
         print({k: round(r[k], 4) for k in keys if r.get(k) is not None})
         for b in r.get("by_abs_z", []) + r.get("by_frames_on", []):
             print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()})

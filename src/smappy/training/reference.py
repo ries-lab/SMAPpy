@@ -107,6 +107,33 @@ def subpixel_histogram(positions_px, bins: int = PIXEL_BINS) -> list:
     return np.histogram(v, bins, (0.0, 1.0))[0].astype(int).tolist()
 
 
+#: harmonics of the pixel `pixel_modulation` sums: 1 is a pull to the pixel centre, 2 a finer
+#: output grid's two cells (2026-11-14), 3 and 4 sharper shapes
+PIXEL_HARMONICS = 4
+
+
+def pixel_modulation(positions_px, harmonics: int = PIXEL_HARMONICS) -> float | None:
+    """How much the density of the positions' place within their pixel varies, as the amplitude
+    ``a`` of a cosine ``1 + a cos(2 pi u)`` with the same variance: 0 for none, and ``(1 - a) /
+    (1 + a)`` the histogram's min/max, so a min/max of 0.9 is ``a`` = 0.053.
+
+    From the first ``harmonics`` Fourier coefficients ``c_k`` of the place ``u`` (the density is
+    ``1 + 2 sum_k |c_k| cos(...)``), each ``|c_k|^2`` estimated without the counting noise's bias
+    (``(|sum exp(2 pi i k u)|^2 - n) / (n (n - 1))``), ``a = 2 sqrt(sum_k |c_k|^2)``.  Unlike a
+    histogram's min/max it does not fall as the counts get noisier -- 40 bins of 400 000 positions
+    read a cosine of 0.05 as 0.88, not 0.905 -- and it scatters half as much between subsets of 5000
+    (2026-11-14).  KS (`ks_uniform`) is robust too, but has no such reading."""
+    u = np.asarray(positions_px, float)
+    u = u[np.isfinite(u)] % 1.0
+    n = len(u)
+    if n < 10:
+        return None
+    k = np.arange(1, harmonics + 1)
+    s = np.exp(2j * np.pi * k[:, None] * u[None]).sum(1)
+    c2 = (np.abs(s) ** 2 - n) / (n * (n - 1))
+    return float(2 * np.sqrt(max(float(c2.sum()), 0.0)))
+
+
 def ks_uniform(positions_px) -> float | None:
     """The Kolmogorov--Smirnov distance of the positions' place within their pixel from uniform:
     0 for none, a pixelation measure in one number."""

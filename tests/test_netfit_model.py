@@ -122,3 +122,17 @@ def test_a_new_training_gets_decodes_network_and_a_model_saved_without_its_detai
     v1 = network.build(old, 3)
     assert v1.p_clamp is None and isinstance(v1.frame.out, torch.nn.Identity)
     assert sum(p.numel() for p in new.parameters()) != sum(p.numel() for p in v1.parameters())
+
+
+def test_the_pixel_modulation_reads_a_cosines_amplitude_and_uniform_positions_as_none():
+    from smappy.training.reference import pixel_modulation
+    rng = np.random.default_rng(0)
+    assert pixel_modulation(rng.uniform(0, 50, 400_000)) < 0.01
+    for a in (0.05, 0.2):
+        u = rng.uniform(size=400_000)
+        kept = u[rng.uniform(size=u.size) < (1 + a * np.cos(2 * np.pi * u)) / (1 + a)]
+        assert pixel_modulation(kept + rng.integers(0, 50, kept.size)) == pytest.approx(a, abs=0.006)
+    # a finer grid's two cells: the second harmonic counts the same
+    u = rng.uniform(size=400_000)
+    kept = u[rng.uniform(size=u.size) < (1 + 0.1 * np.cos(4 * np.pi * u)) / 1.1]
+    assert pixel_modulation(kept) == pytest.approx(0.1, abs=0.006)
