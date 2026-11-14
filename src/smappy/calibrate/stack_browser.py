@@ -59,6 +59,8 @@ class StackBrowser(QWidget):
         self.box_px = 15                     # a ring's diameter: the bead box
         self.movie = False                   # movies (in situ): frames read one at a time, rings on their frame
         self._sources: dict = {}             # movie mode: the open acquisitions
+        self.sweeps = False                  # movie mode on z sweeps: each frame's stage z and sweep shown
+        self._z: dict = {}                   # z sweeps: path -> (stage z µm, sweep) per frame, or None
         self.on_pick = None                  # called with a bead when its ring is clicked
         self.figure = Figure(figsize=(8, 6), constrained_layout=True)
         self.canvas = canvas_class()(self.figure)
@@ -121,12 +123,18 @@ class StackBrowser(QWidget):
             self.file_slider.blockSignals(False)
         self.draw()
 
-    def set_movie(self, movie: bool) -> None:
+    def set_movie(self, movie: bool, sweeps: bool = False) -> None:
         """Movies rather than bead stacks: a frame is read when it is shown, never the whole file, and a
-        ring is drawn on its own frame, (stack, x, y, unit, frame) in `set_marks`."""
-        if movie != self.movie:
-            self.movie, self._cache, self._sources = movie, {}, {}
-            self.plane_caption.setText("frame" if movie else "plane")
+        ring is drawn on its own frame, (stack, x, y, unit, frame) in `set_marks`.  ``sweeps``: z sweeps of
+        molecules on the coverslip, each frame labelled with the stage's z and its sweep (`_frame_z`) --
+        read from the metadata only, and never for in situ's movies, whose hundreds of thousands of pages
+        would be walked for a z that does not change."""
+        sweeps = bool(movie and sweeps)
+        if movie != self.movie or sweeps != self.sweeps:
+            if movie != self.movie:
+                self.movie, self._cache, self._sources = movie, {}, {}
+                self.plane_caption.setText("frame" if movie else "plane")
+            self.sweeps = sweeps
             self.draw()
 
     def set_marks(self, positions, sources=(), states: Optional[dict] = None) -> None:
@@ -243,10 +251,27 @@ class StackBrowser(QWidget):
                            + (f" - {found} beads ringed" if self.positions else ""))
         self.canvas.draw_idle()
 
+    def _frame_z(self, path: str, frame: int, n_frames: int) -> str:
+        """", sweep 2, stage z 1.250 µm" for a frame of a z sweep (`molecule_stack.frame_z_um`, split as the
+        calibration splits it, `split_sweeps`); "" for a movie, or a file whose metadata records no z or not
+        one per frame (the z step typed under *more* is the calibration's, not shown here)."""
+        if not self.sweeps:
+            return ""
+        if path not in self._z:
+            from .molecule_stack import frame_z_um, split_sweeps
+            z = frame_z_um(path)
+            self._z[path] = (z, split_sweeps(z)) if z is not None and len(z) == n_frames else None
+        if self._z[path] is None:
+            return ""
+        z, sweep = self._z[path]
+        return f", sweep {int(sweep[frame]) + 1}, stage z {float(z[frame]):.3f} µm"
+
     def _draw_frame(self, a: int) -> None:
-        """Movie mode: only the frames molecules were found on, once they are, each read when shown; before
-        detection the first frame alone, to see that the movie is the right one.  A slider over every frame
-        of a movie of 300 000 was a slider nobody could aim, over frames mostly never read."""
+        """Movie mode: once molecules are found, only the frames they were found on, each read when shown --
+        a slider over every frame of a movie of 300 000 is one nobody can aim, over frames mostly never
+        read.  Before detection every frame, read as it is shown: the files are looked through before
+        anything is found in them, whichever sample was chosen (it once showed the first frame alone, so a
+        z sweep loaded and then called molecules could not be scrolled)."""
         from matplotlib.patches import Circle
 
         from ..io.tiff import open_stack
@@ -258,7 +283,7 @@ class StackBrowser(QWidget):
                     self._sources.pop(next(iter(self._sources)))
                 self._sources[path] = open_stack(path)
             src = self._sources[path]
-            shown = found or [0]
+            shown = found or range(int(src.n_frames))
             self.plane_slider.blockSignals(True)
             if self.plane_slider.maximum() != len(shown) - 1:
                 self.plane_slider.setRange(0, len(shown) - 1)
@@ -290,12 +315,12 @@ class StackBrowser(QWidget):
             ax.add_patch(ring)
         ax.set_xlabel("x (px)")
         ax.set_ylabel("y (px)")
-        self.plane_label.setText(f"{k + 1}/{len(found)}: frame {f + 1} of {src.n_frames}" if found
-                                 else f"frame 1 of {src.n_frames}")
+        self.plane_label.setText((f"{k + 1}/{len(found)}: frame {f + 1} of {src.n_frames}" if found
+                                  else f"frame {f + 1} of {src.n_frames}") + self._frame_z(path, f, src.n_frames))
         self.file_label.setText(f"file {a + 1}/{len(self.acquisitions)}")
         self.title.setText(f"{path} - {len(here)} molecules ringed on this frame; "
                            f"{len(found)} frames with molecules" if found
-                           else f"{path} - its first frame: Detect molecules shows the frames they are on")
+                           else f"{path} - every frame: Detect molecules shows the frames they are on")
         self.canvas.draw_idle()
 
     def _picked(self, event) -> None:

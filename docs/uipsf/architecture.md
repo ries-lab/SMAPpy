@@ -1500,8 +1500,8 @@ average and the pupil model; the window shows its section and knows nothing else
 
 - **Files are movies** (`insitu_run.movie_rois`): *frames per movie* (4000) read in blocks of 200 spread
   over each movie, through the camera as a fit resolves it; detection per block, the choice over all.  The
-  Stacks page reads one frame at a time in movie mode (`StackBrowser.set_movie`) and rings each unit on its
-  own frame, coloured by state.
+  Stacks page reads one frame at a time in movie mode (`StackBrowser.set_movie`): every frame before
+  detection, then only those with molecules, each unit ringed on its own frame, coloured by state.
 - **The section *in situ*** (`InSituModelSettings`): *focus* (a value, or *auto*: estimated from the
   molecules on the coverslip before learning, `focus_from_data`), *astigmatism* (the start's Noll 6 in nm,
   when there is no *start from*), *on the coverslip*, *rounds*, *spline z*; the detection's settings

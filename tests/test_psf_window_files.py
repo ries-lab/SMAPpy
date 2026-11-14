@@ -73,19 +73,64 @@ def test_a_bead_stack_added_for_a_bead_method_asks_nothing(app, tmp_path, monkey
     window.close()
 
 
-def test_the_movie_browser_steps_through_the_frames_with_molecules_only(app, tmp_path):
+def test_the_movie_browser_steps_through_every_frame_then_the_frames_with_molecules_only(app, tmp_path):
     from smappy.calibrate.stack_browser import StackBrowser
     movie = _tiff(tmp_path / "movie_MMStack_Pos0.ome.tif", 40)
     browser = StackBrowser()
     browser.set_movie(True)
     browser.set_paths([movie])
-    # before detection: its first frame, nothing to step through
-    assert not browser.plane_slider.isEnabled() and "first frame" in browser.title.text()
+    # before detection: every frame, to look through the file before anything is found in it
+    assert browser.plane_slider.isEnabled() and browser.plane_slider.maximum() == 39
+    browser.plane_slider.setValue(5)
+    assert browser.plane_label.text() == "frame 6 of 40"
     browser.set_marks([(0, 3.0, 3.0, 0, 7), (0, 4.0, 4.0, 1, 7), (0, 2.0, 5.0, 2, 31)])
     assert browser.plane_slider.isEnabled() and browser.plane_slider.maximum() == 1
     assert browser.plane_label.text() == "1/2: frame 8 of 40" and "2 molecules ringed" in browser.title.text()
     browser.plane_slider.setValue(1)
     assert browser.plane_label.text() == "2/2: frame 32 of 40"
+
+
+def test_a_stack_loaded_first_can_be_scrolled_after_choosing_molecules(app, tmp_path):
+    """Files first, then what they are: the Stacks page scrolls whichever sample is chosen."""
+    from smappy.calibrate.psf_window import PSFCalibrationWindow
+    from smappy.calibrate.psf_methods import SAMPLES
+    window = PSFCalibrationWindow()
+    window._ask = lambda box: None
+    window.add_paths([_tiff(tmp_path / "sweep_MMStack_Pos0.ome.tif", 21)])
+    molecules = next(s for s in SAMPLES if "molecule" in s)
+    window.sample_box.setCurrentText(molecules)
+    slider = window.stack_browser.plane_slider
+    assert slider.isEnabled() and slider.maximum() == 20
+    window.sample_box.setCurrentText(SAMPLES[0])
+    assert slider.isEnabled() and slider.maximum() == 20
+    window.close()
+
+
+def test_a_z_sweep_shows_each_frames_stage_z_and_sweep_from_its_metadata(app, tmp_path):
+    import json
+    from smappy.calibrate.molecule_stack import frame_z_um
+    from smappy.calibrate.stack_browser import StackBrowser
+    # two sweeps up of five 0.1 µm steps, as Micro-Manager tags each page
+    z = [1.0 + 0.1 * (i % 5) for i in range(10)]
+    mm = tmp_path / "sweeps_MMStack_Pos0.ome.tif"
+    with tifffile.TiffWriter(mm) as w:
+        for zi in z:
+            md = json.dumps({"ZPositionUm": zi})
+            w.write(np.full((8, 8), 100, np.uint16), contiguous=False,
+                    extratags=[(51123, "s", len(md) + 1, md, False)])
+    np.testing.assert_allclose(frame_z_um(str(mm)), z)
+    # and as an OME-TIFF's planes
+    ome = tmp_path / "sweeps.ome.tif"
+    tifffile.imwrite(ome, np.full((10, 1, 1, 8, 8), 100, np.uint16), ome=True,
+                     metadata={"axes": "TZCYX", "Plane": {"PositionZ": z, "PositionZUnit": ["µm"] * 10}})
+    np.testing.assert_allclose(frame_z_um(str(ome)), z)
+    browser = StackBrowser()
+    browser.set_movie(True, sweeps=True)
+    browser.set_paths([str(mm)])
+    browser.plane_slider.setValue(6)
+    assert browser.plane_label.text() == "frame 7 of 10, sweep 2, stage z 1.100 µm"
+    browser.set_movie(True)                       # in situ's movies: no z looked for
+    assert browser.plane_label.text() == "frame 7 of 10"
 
 
 def test_delete_removes_the_selected_file_and_selects_the_next_and_clear_empties_the_list(app):

@@ -434,7 +434,8 @@ class PSFCalibrationWindow(QMainWindow):
         self.files_section.button.setText(getattr(self.method, "files", "bead stacks"))
         self.detect_button.setText(f"Detect {getattr(self.method, 'finds', 'beads')}")
         # z sweeps are read as movies are, frame by frame, each molecule ringed on its own frame
-        self.stack_browser.set_movie(getattr(self.method, "files", "") in ("movies", "z sweeps"))
+        files = getattr(self.method, "files", "")
+        self.stack_browser.set_movie(files in ("movies", "z sweeps"), sweeps=files == "z sweeps")
         self.start_form.setVisible(reads["start from"])
         wanted = DualColorSettings if self.is_dual else CalibrationSettings
         shared = {f.name for f in fields(CalibrationSettings)}

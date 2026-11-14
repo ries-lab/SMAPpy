@@ -98,7 +98,11 @@ row in the table: cyan, or red for one *too dim* or a *double?*; after a
 calibration the ring's colour says whether it was used (blue), excluded
 (grey) or rejected (red).  A mark made in the table and not yet applied by
 *Calibrate* dashes the ring, in the colour it will take.  Clicking a ring
-selects the bead.
+selects the bead.  Molecules' z sweeps and in situ's movies are shown frame
+by frame instead: every frame until the molecules are detected, then only
+the frames they were found on, each ringed on its own frame.  A z sweep's
+frame also shows its sweep and the stage's z, read from the file's
+metadata.
 
 **Finding the beads** is the bead calibration's own: the same detection, the
 same settings under *beads*, the same verdict on each bead's brightness.  Of

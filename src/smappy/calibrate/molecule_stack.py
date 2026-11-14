@@ -202,6 +202,56 @@ def _ome_z_um(path) -> Optional[np.ndarray]:
     return np.concatenate(out) if out else None
 
 
+def frame_z_um(path) -> Optional[np.ndarray]:
+    """The stage's z of every frame of ``path`` (µm) from its metadata alone, no pixel read, or None: for the
+    Stacks page, which shows a z sweep frame by frame with its stage z and sweep before anything is detected.
+    The same tags as `stage_z_um` -- Micro-Manager's ``ZPositionUm`` per plane, from an NDTiff's index or an
+    MMStack's page tags, else an OME-TIFF's ``PositionZ`` -- read without `read_file`'s whole frames."""
+    import json
+    from pathlib import Path
+
+    import tifffile
+
+    from ..io.tiff import _first_of_series, _series_files
+
+    def z_of(md):
+        if isinstance(md, str):
+            try:
+                md = json.loads(md)
+            except ValueError:
+                return None
+        for key, value in (md or {}).items():
+            if key.endswith("ZPositionUm"):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    p = Path(path)
+    out = []
+    try:
+        if p.is_dir() and (p / "NDTiff.index").exists():
+            from ..io.ndtiff import open_ndtiff
+            index = open_ndtiff(p).index
+            for i in range(len(index.axes)):
+                with index.path(i).open("rb") as f:
+                    f.seek(int(index.md_offset[i]))
+                    out.append(z_of(f.read(int(index.md_length[i])).decode()))
+        else:
+            files = sorted(p.glob("*.tif*")) if p.is_dir() else [p]
+            for f in (_series_files(_first_of_series(files)) if files else []):
+                with tifffile.TiffFile(f) as tf:
+                    for page in tf.pages:
+                        tag = page.tags.get("MicroManagerMetadata")
+                        out.append(z_of(tag.value) if tag is not None else None)
+    except Exception:                            # unreadable metadata: the OME planes, or nothing
+        out = []
+    if out and all(z is not None for z in out):
+        return np.asarray(out, float)
+    return _ome_z_um(path)
+
+
 def split_sweeps(z_um) -> np.ndarray:
     """[T] each frame's sweep: a new one where the stage turns back or jumps by more than `JUMP_STEPS`
     median steps, so sweeps upwards, downwards and both in turn are each a sweep of their own."""
