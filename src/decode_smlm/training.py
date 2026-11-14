@@ -262,42 +262,103 @@ class _Capture:
 EXCESS_NOISE = 2.0
 
 
+def _psf(param):
+    from .utils.calibration_io import spline_psf
+    sim = param.Simulation
+    return spline_psf(param.InOut.calibration_file, xextent=sim.psf_extent[0], yextent=sim.psf_extent[1],
+                      img_shape=sim.img_size, device="cpu", roi_size=sim.roi_size,
+                      roi_auto_center=sim.roi_auto_center)
+
+
+def test_spots(em, psf, background, frames=None):
+    """The test set's emitters as `smappy.training.joint_crlb.Spots`, drawn by the training's own
+    spline: each spot's patch where `CubicSplinePSF.forward` puts it (``frame2roi_coord``), its
+    image without background and its derivatives by x, y (per pixel), z (per nm) and photons
+    (`CubicSplinePSF.derivative`).  ``frames`` (lo, hi) keeps those frames' emitters only."""
+    from smappy.training.joint_crlb import Spots
+    keep = torch.ones(len(em), dtype=torch.bool) if frames is None else \
+        (em.frame_ix >= frames[0]) & (em.frame_ix <= frames[1])
+    xyz, phot = em.xyz[keep].float(), em.phot[keep].float()
+    drv, rois = psf.derivative(xyz, phot, torch.zeros_like(phot), add_bg=False)
+    _, corner = psf.frame2roi_coord(xyz)
+    return Spots(frame=em.frame_ix[keep].numpy().astype(int), ident=em.id[keep].numpy().astype(int),
+                 corner=corner.numpy().astype(int), model=rois.numpy(), grads=drv[:, :4].numpy(),
+                 background=np.asarray(background, float), shape=tuple(int(v) for v in psf.img_shape))
+
+
+#: the prior's standard deviation in x and y, pixels: two spots on top of each other are put near
+#: their middle, an error of a pixel or so, which caps a bound that diverges there
+#: (`smappy.training.joint_crlb`)
+PRIOR_PX = 1.0
+#: the test set's frames a chunk of `test_crlbs`: its spots' derivatives held at once
+CHUNK_FRAMES = 64
+
+
 def test_crlbs(ds_test, param, psf=None):
-    """Each test-set molecule's single-emitter CRLB, ``{(frame, row, col): (rows_nm, cols_nm, z_nm)}``
-    -- the key a matched molecule is found by.  The bound is the training's own PSF's
-    (`CubicSplinePSF.crlb_sq`, the calibration's whole spot: 2 % below SMAPpy's spline fitter's
-    laterally, 19 % in z, whose 13 x 13 pixels leave the tails out), doubled in variance with EM
-    gain.  About a second for a test set's 25 000 molecules, so it is computed at every start.
-    None where it cannot be had: the metrics then go without it."""
+    """Each test-set molecule's bounds, ``{"index": {(frame, row, col): i}, "single", "joint",
+    "context": (n, 3) nm (rows, columns, z), "nn_nm": (n,), "frames_on": (n,)}`` -- the key a
+    matched molecule is found by.
+
+    *single* is the molecule alone on its patch; *joint* its frame's neighbours too; *context* the
+    frames the network reads around it as well (``channels_in``), its x, y and z one over them
+    (`smappy.training.joint_crlb`).  The two joint ones carry a prior of `PRIOR_PX` laterally and
+    the z range's spread axially, so that a pair on top of each other is bounded by about a pixel,
+    not infinitely.  All of the training's own PSF (the calibration's whole spot: 2 % below
+    SMAPpy's spline fitter's laterally, 19 % in z, whose 13 x 13 pixels leave the tails out),
+    doubled in variance with EM gain.  ``nn_nm`` is the distance to the frame's nearest other
+    molecule, ``frames_on`` in how many of the frames read it is on: what the curves split by.
+    6 s at every start at the HD density, 17 s at UHD (512 frames, four cores); None where it
+    cannot be had: the metrics then go without it."""
+    from smappy.training import joint_crlb
     em = ds_test._emitter
     if em is None or not len(em):
         return None
     try:
-        if psf is None:
-            from .utils.calibration_io import spline_psf
-            sim = param.Simulation
-            psf = spline_psf(param.InOut.calibration_file, xextent=sim.psf_extent[0], yextent=sim.psf_extent[1],
-                             img_shape=sim.img_size, device="cpu", roi_size=sim.roi_size,
-                             roi_auto_center=sim.roi_auto_center)
-        bg = ds_test._target[2].mean(dim=(1, 2)) * float(param.Scaling.bg_max)
-        frame = em.frame_ix.clamp(0, len(bg) - 1)
-        bound = []
-        for a in range(0, len(em), 5000):
-            cr, _ = psf.crlb_sq(em.xyz[a:a + 5000].float(), em.phot[a:a + 5000].float(), bg[frame[a:a + 5000]].float())
-            bound.append(cr[:, :3])
-        bound = torch.cat(bound).numpy().astype(np.float64)
+        psf = psf or _psf(param)
+        bg = (ds_test._target[2].mean(dim=(1, 2)) * float(param.Scaling.bg_max)).numpy()
+        excess = EXCESS_NOISE if param.Camera.em_gain else 1.0
+        context = (int(param.HyperParameter.channels_in) - 1) // 2
+        z_range = param.Simulation.emitter_extent[2]
+        prior = (PRIOR_PX, PRIOR_PX, (float(z_range[1]) - float(z_range[0])) / np.sqrt(12.0), None)
+        n = len(em)
+        out = {k: np.full((n, 3), np.nan) for k in ("single", "joint", "context")}
+        frame = em.frame_ix.numpy().astype(int)
+        last = int(frame.max())
+        bg = np.r_[bg, np.full(max(0, last + 1 - len(bg)), bg[-1])]   # an emitter on just past the end
+        for lo in range(0, last + 1, CHUNK_FRAMES):
+            hi = min(lo + CHUNK_FRAMES - 1, last)
+            spots = test_spots(em, psf, bg, (lo - context, hi + context))
+            mine = (spots.frame >= lo) & (spots.frame <= hi)
+            rows = np.flatnonzero((frame >= lo - context) & (frame <= hi + context))[mine]
+            out["single"][rows] = joint_crlb.single_bounds(spots, excess)[mine, :3]
+            with joint_crlb.one_blas_thread():
+                matrices = joint_crlb.frame_matrices(spots, excess)
+                for name, w in (("joint", 0), ("context", context)):
+                    out[name][rows] = joint_crlb.bounds(spots, context=w, prior=prior, excess=excess,
+                                                        matrices=matrices, condition=False).sd[mine, :3]
     except Exception:                           # a curve of the window's, never a reason to stop training
         return None
-    k = np.sqrt(EXCESS_NOISE if param.Camera.em_gain else 1.0)
     py, px = (float(v) for v in param.Camera.px_size)        # DECODE's order: rows, columns
+    scale = np.array([py, px, 1.0])
     xyz = em.xyz.numpy()
-    return {(int(f), round(float(r), 4), round(float(c), 4)): (k * b[0] * py, k * b[1] * px, k * b[2])
-            for f, r, c, b in zip(em.frame_ix.numpy(), xyz[:, 0], xyz[:, 1], bound)}
+    out = {k: v * scale for k, v in out.items()}
+    out["index"] = {(int(f), round(float(r), 4), round(float(c), 4)): i
+                    for i, (f, r, c) in enumerate(zip(frame, xyz[:, 0], xyz[:, 1]))}
+    out["nn_nm"] = joint_crlb.nearest_neighbour(frame, xyz[:, :2] * scale[:2])
+    out["frames_on"] = joint_crlb.frames_on(frame, em.id.numpy(), context)
+    return out
+
+
+#: the nearest neighbour's distance the curves split by, nm
+NEIGHBOUR_EDGES_NM = (0, 200, 400, 600, 800, 1200, 2000)
 
 
 def _crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size) -> dict:
     """SMAPpy's curves of an epoch (the Train window's Follow): the robust width of each matched
-    localization's error over its molecule's CRLB, laterally (rows and columns pooled) and axially,
+    localization's error over its molecule's bound, laterally (rows and columns pooled) and
+    axially, against each bound of `test_crlbs` (``crlb_width_lat`` the single-emitter one,
+    ``..._joint``, ``..._context``); the same split by the nearest neighbour's distance
+    (``crlb_by_neighbour``) and by the frames read the molecule is on in (``crlb_by_frames_on``);
     and where in their pixel this epoch's localizations fall."""
     from smappy.training.reference import ks_uniform, robust_width, subpixel_histogram
     out = {}
@@ -307,12 +368,43 @@ def _crlb_and_pixel_metrics(em_out, tp, tp_match, crlbs, px_size) -> dict:
                    pixel_ks=ks_uniform(np.r_[xyz[:, 0], xyz[:, 1]]))
     if crlbs and tp is not None and len(tp):
         fit, true, frame = tp.xyz.numpy(), tp_match.xyz.numpy(), tp_match.frame_ix.numpy()
-        bound = np.array([crlbs.get((int(f), round(float(r), 4), round(float(c), 4)), (np.nan,) * 3)
-                          for f, r, c in zip(frame, true[:, 0], true[:, 1])], float)
+        at = np.array([crlbs["index"].get((int(f), round(float(r), 4), round(float(c), 4)), -1)
+                       for f, r, c in zip(frame, true[:, 0], true[:, 1])])
+        found = at >= 0
+        if not found.any():
+            return out
+        at, fit, true = at[found], fit[found], true[found]
         py, px = (float(v) for v in px_size)
-        # each localization's error over its molecule's bound: 1 where the network reaches it
-        lateral = np.r_[(fit[:, 0] - true[:, 0]) * py / bound[:, 0], (fit[:, 1] - true[:, 1]) * px / bound[:, 1]]
-        out.update(crlb_width_lat=robust_width(lateral), crlb_width_ax=robust_width((fit[:, 2] - true[:, 2]) / bound[:, 2]))
+        err = np.c_[(fit[:, 0] - true[:, 0]) * py, (fit[:, 1] - true[:, 1]) * px, fit[:, 2] - true[:, 2]]
+
+        def widths(bound, sel=slice(None)):
+            # each localization's error over its molecule's bound: 1 where the network reaches it
+            r = err[sel] / bound[at][sel]
+            return robust_width(np.r_[r[:, 0], r[:, 1]]), robust_width(r[:, 2])
+        for name, suffix in (("single", ""), ("joint", "_joint"), ("context", "_context")):
+            out[f"crlb_width_lat{suffix}"], out[f"crlb_width_ax{suffix}"] = widths(crlbs[name])
+        nn = crlbs["nn_nm"][at]
+        edges = list(NEIGHBOUR_EDGES_NM) + [None]
+        split = {"edges_nm": list(NEIGHBOUR_EDGES_NM), "n": []}
+        for i, lo in enumerate(NEIGHBOUR_EDGES_NM):
+            sel = (nn >= lo) & ((nn < edges[i + 1]) if edges[i + 1] is not None else True)
+            split["n"].append(int(sel.sum()))
+            for name in ("single", "joint", "context"):
+                lat, ax = widths(crlbs[name], sel)
+                split.setdefault(f"{name}_lat", []).append(lat)
+                split.setdefault(f"{name}_ax", []).append(ax)
+        out["crlb_by_neighbour"] = split
+        on = crlbs["frames_on"][at]
+        split = {"frames": [], "n": []}
+        for k in range(1, int(crlbs["frames_on"].max()) + 1):
+            sel = on == k
+            split["frames"].append(k)
+            split["n"].append(int(sel.sum()))
+            for name in ("single", "joint", "context"):
+                lat, ax = widths(crlbs[name], sel)
+                split.setdefault(f"{name}_lat", []).append(lat)
+                split.setdefault(f"{name}_ax", []).append(ax)
+        out["crlb_by_frames_on"] = split
     return out
 
 
