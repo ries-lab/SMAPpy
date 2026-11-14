@@ -2064,3 +2064,10 @@ What no variant changes: of bright molecules within 100 - 200 nm of another brig
 by the neighbour's find, those found are pulled 7 nm toward it and their lateral error is 2.6 times
 the CRLB (2.0 overall); and beyond |z| 600 nm only 9 % of bright molecules are found, 10 % of isolated
 ones (87 % below 300 nm).  Both are the network's and the training data's to change, not the loss's.
+
+The output grid of two cells a pixel does not tell close molecules apart either (fg_v1f, 3 seeds,
+against v1f's 3, both scored with the mixture peak): of bright molecules 100 - 200 nm from another,
+0.439 found and 0.379 taken by the neighbour (v1f 0.444 / 0.383), the same pull of 7 nm toward it and
+the same 2.6 times the CRLB; recall at P 0.97 0.533 against 0.541, and at low thresholds it finds
+fewer (recall 0.54 at 0.3, v1f 0.64).  Finer cells leave the network's ability to see two molecules
+where they are; what sets it is what the network has learnt from the training data.
