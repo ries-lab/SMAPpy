@@ -59,6 +59,9 @@ def main(argv=None) -> int:
     t.add_argument("--stop-rule", default=None,
                    help="the rule for stopping, as JSON over SMAPpy's (training.progress.EARLY_STOP): "
                         "window, min_epochs, smooth, loss_tol, jaccard_tol, eff_tol, rmse_tol")
+    t.add_argument("--no-joint-bounds", action="store_true",
+                   help="leave the test set's joint bounds out (neighbours and frames): a faster start, "
+                        "error over CRLB against the single-emitter bound alone")
     for name, text in (("stop", "stop the training of FOLDER at its next checkpoint"),
                        ("status", "where the job in FOLDER stands")):
         sub.add_parser(name, help=text).add_argument("folder", type=Path)
@@ -77,7 +80,7 @@ def main(argv=None) -> int:
     try:
         result = train(a.folder, device=a.device, epochs=a.epochs, num_workers=a.workers,
                        allow_other_version=a.allow_other_version, all_epochs=a.all_epochs,
-                       stop_rule=_stop_rule(a.stop_rule))
+                       stop_rule=_stop_rule(a.stop_rule), joint_bounds=not a.no_joint_bounds)
     except JobError as e:
         print(f"smappy-decode: {e}", file=sys.stderr)
         return 2

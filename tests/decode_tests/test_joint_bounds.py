@@ -127,3 +127,14 @@ def test_localizations_scattered_by_the_context_bound_read_one_against_it(test_s
     assert by_frames["frames"] == [1, 2, 3] and sum(by_frames["n"]) == len(em)
     # against the single frame's bound, a molecule on in three frames looks better than the bound
     assert by_frames["joint_lat"][2] < 0.85
+
+
+def test_without_the_joint_bounds_only_the_single_one_is_computed_and_reported(test_set):
+    ds, param, psf, _ = test_set
+    b = T.test_crlbs(ds, param, psf, joint=False)
+    assert set(b) == {"index", "single", "nn_nm", "frames_on"}
+    assert b["single"] == pytest.approx(T.test_crlbs(ds, param, psf)["single"])
+    em = ds._emitter
+    m = T._crlb_and_pixel_metrics(None, em, em, b, param.Camera.px_size)
+    assert "crlb_width_lat" in m and not any(k.endswith(("_joint", "_context")) for k in m)
+    assert set(m["crlb_by_neighbour"]) == {"edges_nm", "n", "single_lat", "single_ax"}
