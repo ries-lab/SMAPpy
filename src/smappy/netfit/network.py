@@ -17,6 +17,13 @@ nearest-neighbour upsampling and a 3 x 3 convolution up, the skip concatenated.
  9    background / bg_max                                          sigmoid
 ====  ==========================================================  ===========
 
+**A finer output grid** (``out_scale`` 2, 2026-11-14): the union U-Net's features upsampled once more
+and through one more block, so the maps have ``out_scale`` cells a pixel along each axis and every
+molecule is placed from a cell whose centre is at most a quarter pixel away -- the pixelation (the
+positions pulled toward the centres of the cells they are placed from, min/max of their histogram
+0.73 - 0.83 in every variant of DECODE's details, 2026-11-14) is the grid's.  The offsets are then
++-1 cell, handed on in pixels; `centres` is where each cell's centre is, in pixels.
+
 x is along the columns, y along the rows, as everywhere in SMAPpy.
 """
 from __future__ import annotations
@@ -87,6 +94,17 @@ class UNet(nn.Module):
         return self.out(x)
 
 
+def centres(n: int, scale: int = 1, device=None, dtype=torch.float32):
+    """The centres of ``n`` output cells along an axis, in pixels (a pixel's centre at its index):
+    ``(i + 0.5) / scale - 0.5`` -- the pixels' own at ``scale`` 1."""
+    return (torch.arange(n, device=device, dtype=dtype) + 0.5) / scale - 0.5
+
+
+def grid(h: int, w: int, scale: int = 1, device=None, dtype=torch.float32):
+    """(rows, columns) of the cell centres of an (h, w) output, in pixels."""
+    return torch.meshgrid(centres(h, scale, device, dtype), centres(w, scale, device, dtype), indexing="ij")
+
+
 class Head(nn.Module):
     def __init__(self, features, c_out, act):
         super().__init__()
@@ -101,10 +119,11 @@ class TwoStageUNet(nn.Module):
 
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
-                 init: str = "default", p_clamp: float | None = None):
+                 init: str = "default", p_clamp: float | None = None, out_scale: int = 1):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
-        and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details, there to find which of them
+        and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
+        grid's cells a pixel (the module's docstring).  The first five are there to find which of them
         pixelation depends on (2026-11-12); the defaults here are version 1's, so that a model saved
         without them is built as it was trained -- a new training's are DECODE's (`settings.Parts`)."""
         super().__init__()
@@ -114,6 +133,13 @@ class TwoStageUNet(nn.Module):
         self.frame = UNet(1, features, depth_frame, act, **style)
         self.union = UNet(window * features, features, depth_union, act, **style)
         self.p_clamp = p_clamp
+        self.out_scale = int(out_scale)
+        if self.out_scale not in (1, 2):
+            raise ValueError(f"out_scale {out_scale}: 1 or 2")
+        # nearest, then two 3 x 3 convolutions: each cell learns where it is in its pixel from its
+        # neighbours, as the U-Net's own upsampling does
+        self.refine = (nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"), _block(features, features, act))
+                       if self.out_scale == 2 else nn.Identity())
         self.heads = nn.ModuleDict({"p": Head(features, 1, act), "phot_xyz": Head(features, 4, act),
                                     "sigma": Head(features, 4, act), "bg": Head(features, 1, act)})
         self.fold = 2 ** max(depth_frame, depth_union)        # frames must be a multiple of this
@@ -135,13 +161,15 @@ class TwoStageUNet(nn.Module):
             last = head.net[-1]
             nn.init.zeros_(last.weight)
             nn.init.zeros_(last.bias)
+        p0 = p0 / self.out_scale ** 2                 # the same molecules over more cells
         nn.init.constant_(self.heads["p"].net[-1].bias, math.log(p0 / (1 - p0)))
 
     def forward(self, x):
-        """``x`` (b, window, rows, columns) in network units -> (b, 10, rows, columns)."""
+        """``x`` (b, window, rows, columns) in network units -> (b, 10, rows * s, columns * s), ``s``
+        the ``out_scale``."""
         b, t, h, w = x.shape
         feats = self.frame(x.reshape(b * t, 1, h, w)).reshape(b, -1, h, w)
-        u = self.union(feats)
+        u = self.refine(self.union(feats))
         # the heads in full precision, whatever the backbone ran in: in bf16 an output of z over
         # +-1000 nm resolves only about 4 nm (`train`'s ``precision``)
         with torch.autocast(u.device.type, enabled=False):
@@ -152,7 +180,10 @@ class TwoStageUNet(nn.Module):
         logit = self.heads["p"](u)
         if self.p_clamp is not None:
             logit = logit.clamp(-self.p_clamp, self.p_clamp)
-        return torch.cat([torch.sigmoid(logit), torch.sigmoid(values[:, :1]), torch.tanh(values[:, 1:]),
+        xyz = torch.tanh(values[:, 1:])
+        if self.out_scale != 1:                       # +-1 cell, in pixels
+            xyz = torch.cat([xyz[:, :2] / self.out_scale, xyz[:, 2:]], 1)
+        return torch.cat([torch.sigmoid(logit), torch.sigmoid(values[:, :1]), xyz,
                           torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR,
                           torch.sigmoid(self.heads["bg"](u))], 1)
 

@@ -36,6 +36,7 @@ class Predictor:
         self.frames_mirrored = frames_mirrored
         self.batch = batch
         self.fold = self.model.fold
+        self.scale = getattr(self.model, "out_scale", 1)
 
     def crop(self, h, w):
         """The rows and columns kept: (row0, col0, rows, columns)."""
@@ -56,7 +57,7 @@ class Predictor:
             for a in range(0, n, self.batch):
                 b = min(a + self.batch, n)
                 stack = torch.stack([x[i:i + 2 * k + 1] for i in range(a, b)]).to(self.device)
-                e = extract.extract(self.model(stack), self.scaling, self.threshold, self.extraction)
+                e = extract.extract(self.model(stack), self.scaling, self.threshold, self.extraction, self.scale)
                 e = {name: v.detach().cpu().numpy() for name, v in e.items()}
                 e["frame"] = e["frame"] + a
                 parts.append(e)

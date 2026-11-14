@@ -32,10 +32,12 @@ def targets_scaled(batch, scaling):
 
 def terms(out, batch, scaling, chunk: int = 64) -> dict:
     """Each term per frame, (b,) tensors."""
+    from .network import grid
     b, _, h, w = out.shape
     p = out[:, 0].reshape(b, -1)                                                   # (b, hw)
-    rows, cols = torch.meshgrid(torch.arange(h, device=out.device, dtype=out.dtype),
-                                torch.arange(w, device=out.device, dtype=out.dtype), indexing="ij")
+    # a finer output grid's cells a pixel (`network.TwoStageUNet.out_scale`), from the frames it saw
+    scale = w // batch.frames.shape[-1] if batch.frames is not None else 1
+    rows, cols = grid(h, w, scale, out.device, out.dtype)
     mu = torch.stack([out[:, 1], out[:, 2] + cols, out[:, 3] + rows, out[:, 4]], -1).reshape(b, -1, 4)
     sig = out[:, 5:9].permute(0, 2, 3, 1).reshape(b, -1, 4)
     tgt = targets_scaled(batch, scaling)                                          # (b, k, 4)

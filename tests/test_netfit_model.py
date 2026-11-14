@@ -27,6 +27,29 @@ def test_the_network_gives_ten_maps_the_size_of_its_frames(style):
     assert model(torch.zeros(2, 3, 16, 24)).shape == (2, 10, 16, 24)
 
 
+def test_on_a_finer_grid_the_maps_have_two_cells_a_pixel_and_their_centres_a_quarter_pixel_off():
+    model = network.TwoStageUNet(features=8, out_scale=2)
+    assert model(torch.zeros(2, 3, 16, 24)).shape == (2, 10, 32, 48)
+    assert network.centres(4, 2).tolist() == [-0.25, 0.25, 0.75, 1.25]
+    # p starts at the same molecules a pixel, spread over four cells
+    p = model(torch.zeros(1, 3, 8, 8))[0, 0]
+    assert p.sum().item() == pytest.approx(network.P0 * 64, rel=1e-3)
+
+
+def test_on_a_finer_grid_a_detection_takes_its_cells_centre_and_the_p_of_its_square():
+    out = torch.zeros(1, 10, 16, 16)
+    out[:, 5:9] = 0.5
+    out[0, 0, 7, 10], out[0, 0, 8, 11] = 0.45, 0.4   # a molecule at a cell's corner: p on a diagonal
+    out[0, 2, 7, 10] = 0.1                          # 0.1 pixel right of the cell's centre
+    e = extract.extract(out, SCALING, 0.5, scale=2)
+    assert len(e["frame"]) == 1
+    assert e["x"].item() == pytest.approx(10 / 2 + 0.25 - 0.5 + 0.1)
+    assert e["y"].item() == pytest.approx(7 / 2 + 0.25 - 0.5)
+    assert e["prob"].item() == pytest.approx(0.85)
+    # DECODE's plus misses the diagonal: the same p is no detection
+    assert len(extract.extract(out, SCALING, 0.5, scale=2, summed_over="plus")["frame"]) == 0
+
+
 def test_the_mixture_term_is_the_molecules_likelihood_under_the_pixels_mixture():
     out = _maps()
     out[0, 0, 3, 5] = 0.9                       # one confident pixel: column 5, row 3

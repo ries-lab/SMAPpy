@@ -11,6 +11,10 @@ and rows (each pixel's centre plus its offset), z in nm, their uncertainties, th
 * ``mixture_peak`` -- the same detections, each position moved to the peak of the p-weighted
   mixture of its 3 x 3 pixels' components (the benchmark's finding: halves the pixelation far from
   focus, no change near it; `benchmarks/decode/suite/extraction.py`).
+
+On a finer output grid (``scale`` 2, `network.centres`) a molecule spreads its p over up to 2 x 2
+cells, the diagonal one included, so a detection's probability is summed over its 3 x 3 (``summed``
+"square"; "plus" is DECODE's) -- a cell is half a pixel, so the square spans 1.5 pixels.
 """
 from __future__ import annotations
 
@@ -22,11 +26,12 @@ RAW_P = 0.1                     # a pixel's own p a peak needs; the summed proba
 MEAN_SHIFT_ITERATIONS = 10
 
 
-def physical(out, scaling):
-    """(b, 10, h, w) network units -> the same in photons, columns / rows, nm."""
+def physical(out, scaling, scale: int = 1):
+    """(b, 10, h, w) network units -> the same in photons, columns / rows, nm; ``scale`` the output
+    grid's cells a pixel."""
+    from .network import grid
     _, _, h, w = out.shape
-    rows, cols = torch.meshgrid(torch.arange(h, device=out.device, dtype=out.dtype),
-                                torch.arange(w, device=out.device, dtype=out.dtype), indexing="ij")
+    rows, cols = grid(h, w, scale, out.device, out.dtype)
     y = out.clone()
     y[:, 1] *= scaling.phot_max
     y[:, 2] += cols
@@ -38,13 +43,16 @@ def physical(out, scaling):
     return y
 
 
-def detections(p, threshold, raw: float = RAW_P):
+_KERNELS = {"plus": [[0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]], "square": [[1.0] * 3] * 3}
+
+
+def detections(p, threshold, raw: float = RAW_P, summed_over: str = "plus"):
     """(frame, row, column) of the detections and their probability: a peak needs its own p above
     ``raw`` only, a detection its summed probability at ``threshold`` -- a molecule near a pixel's
     edge splits its p, each half below the threshold (DECODE: 0.1 and 0.5)."""
     peak = (p > raw) & (p == F.max_pool2d(p[:, None], 3, 1, padding=1)[:, 0])
-    plus = torch.tensor([[0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]], device=p.device, dtype=p.dtype)
-    summed = F.conv2d(p[:, None], plus[None, None], padding=1)[:, 0]
+    kernel = torch.tensor(_KERNELS[summed_over], device=p.device, dtype=p.dtype)
+    summed = F.conv2d(p[:, None], kernel[None, None], padding=1)[:, 0]
     second = (~peak) & (p > SPLIT_P)
     prob = ((peak | second).to(p.dtype) * summed).clamp(max=1.0)
     b, i, j = (prob >= threshold).nonzero(as_tuple=True)
@@ -73,11 +81,14 @@ def mixture_peak(y, b, i, j):
     return x
 
 
-def extract(out, scaling, threshold: float, how: str = "lookahead") -> dict:
+def extract(out, scaling, threshold: float, how: str = "lookahead", scale: int = 1,
+            summed_over: str | None = None) -> dict:
     """The molecules of every frame of ``out`` (b, 10, h, w), as tensors: frame (in the batch),
-    x, y (columns, rows), z_nm, photons, prob, their uncertainties, background."""
-    y = physical(out, scaling)
-    b, i, j, prob = detections(y[:, 0], threshold)
+    x, y (columns, rows), z_nm, photons, prob, their uncertainties, background.  ``scale``: the
+    output grid's cells a pixel (`network.TwoStageUNet.out_scale`); ``summed_over`` "plus" or
+    "square", by default plus at scale 1 and square on a finer grid."""
+    y = physical(out, scaling, scale)
+    b, i, j, prob = detections(y[:, 0], threshold, summed_over=summed_over or ("plus" if scale == 1 else "square"))
     v = y[b, :, i, j]                                                             # (m, 10)
     xyz = v[:, 2:5]
     if how == "mixture_peak" and len(b):

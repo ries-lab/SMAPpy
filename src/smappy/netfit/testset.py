@@ -104,7 +104,7 @@ def evaluate(model_path, path, device=None, threshold=None, extraction=None, shu
         for a in range(0, len(batch.frames), 128):
             x = (batch.frames[a:a + 128] - p.scaling.input_offset) / p.scaling.input_scale
             outs.append(p.model(x))
-    e = extract.extract(torch.cat(outs), p.scaling, p.threshold, p.extraction)
+    e = extract.extract(torch.cat(outs), p.scaling, p.threshold, p.extraction, p.scale)
     to = lambda v: v.detach().cpu().numpy().astype(np.float64)
     found = {"frame": to(e["frame"]).astype(np.int64), "xyz": np.c_[to(e["x"]), to(e["y"]), to(e["z_nm"])],
              "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}

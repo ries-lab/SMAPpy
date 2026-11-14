@@ -171,8 +171,8 @@ def _sha256(path) -> str:
     return h.hexdigest()
 
 
-def _found(out, scaling, threshold, how, pixel_nm):
-    e = extract.extract(out, scaling, threshold, how)
+def _found(out, scaling, threshold, how, pixel_nm, scale=1):
+    e = extract.extract(out, scaling, threshold, how, scale)
     to = lambda v: v.detach().cpu().numpy().astype(np.float64)
     return {"frame": to(e["frame"]).astype(np.int64), "xyz": np.c_[to(e["x"]), to(e["y"]), to(e["z_nm"])],
             "err": np.c_[to(e["x_err"]) * pixel_nm[0], to(e["y_err"]) * pixel_nm[1], to(e["z_err_nm"])]}
@@ -298,7 +298,8 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
                 test_loss += float(loss.loss(out, sub, scaling, parts.loss)[0]) * len(sub.frames)
                 outs.append(out)
             out = torch.cat(outs)
-        found = _found(out, scaling, sch["threshold"], parts.extraction.name, cam.pixel_nm)
+        found = _found(out, scaling, sch["threshold"], parts.extraction.name, cam.pixel_nm,
+                       getattr(model, "out_scale", 1))
         score = metrics.evaluate(truth, found, cam.pixel_nm)
         score.update({f"loss_{k}": v / steps for k, v in parts_sum.items()})
         dt = time.perf_counter() - t0
