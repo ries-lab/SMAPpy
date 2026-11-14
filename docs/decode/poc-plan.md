@@ -1991,3 +1991,53 @@ measured none.  Equalising the sub-pixel histogram afterwards (`smappy/pixel_equ
 it but moves localizations at random, the RMSE 0.03 - 0.17 nm worse.  Pixelation is now set mostly
 by the seed (0.057 - 0.069 with the mixture peak at these settings): lowering it is the network's or
 the loss's to do.
+
+### Step 4, first round: screens A and B (2026-11-14)
+
+v1f at the decided settings with one change each, 1 frame, scored on test set B at snapshots of
+0.25 - 6 M samples (`model_<n>M`), mean ± sd over seeds where there are several; v1f's three seeds
+are the baseline.  Error / CRLB lateral / axial.
+
+| variant | seeds | Jaccard | error / CRLB | `pixel_mod` | s / epoch (H100 or 4090) | verdict |
+|---|---|---|---|---|---|---|
+| v1f | 3 | 0.454 ± .004 | 2.026 / 1.913 | 0.059 | 7.4 / 7.9 | baseline |
+| EMA of the weights, 0.999 | 1 | 0.456 | 2.021 / 1.902 | 0.067 | 8.5 | learns twice as fast (below) |
+| BlurPool before the stride | 1 | 0.457 | 2.028 / 1.902 | 0.061 | 7.6 | no effect; dropped |
+| offsets reaching 2 cells | 1 | 0.448 | 2.017 / 1.902 | 0.035 (0.037 - 0.041 from 2 M) | 7.4 | less pixelation, Jaccard -0.006 |
+| EMA + offsets 2 | 3 | 0.445 ± .001 | 2.012 / 1.905 | 0.045 ± .003 | -- | both effects, Jaccard -0.009 |
+| a reporting sigma head (`sigma_rep`) | 1 | 0.454 | 2.029 / 1.917 | 0.083 | 9.8 | the network unchanged; the honest claim (below) |
+| the reported term on the mixture's sigma, weight 0.1 (`sigmix`) | 1 | **0.462** | 2.031 / 1.907 | **0.028** (0.037 - 0.043 from 1 M) | 9.4 | best of all; seeds running |
+| residual blocks (B) | 3 | 0.455 ± .003 | 2.025 / 1.914 | 0.055 ± .010 | 9.7 | v1f's equal, slower; dropped |
+| dilated (B) | 2 | 0.450 ± .003 | 2.037 / 1.932 | 0.064 | 7.8 | worse; dropped |
+| ConvNeXt (B) | 2 | 0.450 ± .003 | 2.036 / 1.939 | 0.048 | 11.1 | worse, slowest, slow to learn (J 0.38 at 1 M); dropped |
+
+**No backbone beats v1f** at its parameter count: screen B ends here.
+
+**EMA learns twice as fast.**  The averaged weights at 2 M samples are v1f's at 4.5 M in every
+column (EMA + offsets 2, 3 seeds: 2.037 / 1.927 at 2 M against v1f's 2.060 / 1.960), and the lead
+shrinks as the rate decays (6 M: 0.014 / 0.008), as it should: the average removes the steps' jitter,
+which the decay removes too, later.  It costs a copy of the weights.
+
+**Pixelation moves along a training**: one v1f run's `pixel_mod` reads 0.04 - 0.08 from snapshot to
+snapshot, so a variant's is judged over its snapshots from 2 M, not at 6 M alone.  Offsets reaching
+two cells and the reported term on the mixture's sigma are the two that stay low throughout.
+
+**The claimed sigma** (`smappy/netfit/sigma.py`; error over claim as a robust width, 1 when honest;
+on the odd frames where a recalibration is fitted on the even):
+
+| claim | lateral | axial | NLL lat / ax | lateral by |z| 0-200 / 600-800 | axial by nearest neighbour < 1.5 px / > 5 px | RMS error / RMS claim, per claim bin, axial |
+|---|---|---|---|---|---|---|
+| v1f, the mixture's | 1.17 | 1.50 | 5.01 / 6.75 | 1.12 / 1.34 | 1.83 / 1.36 | 1.6 - 2.3 |
+| v1f, recalibrated per |z|, photons, claim (variant 3) | 1.00 | 1.00 | 4.90 / 5.76 | 1.01 / 1.01 | 1.22 / 0.90 | 1.1 - 1.5 |
+| `sigmix`, the mixture's | 1.05 | 1.15 | 4.92 / 5.87 | 1.03 / 1.17 | 1.37 / 1.07 | 1.3 - 1.6 |
+| `sigma_rep`'s head | 0.91 | 0.85 | **4.84 / 5.60** | 0.91 / 0.98 | 0.98 / 0.82 | **1.0 - 1.1** |
+
+The mixture's sigma claims too little, axially by half, and most where a neighbour is close.  A
+recalibration from what the fit reports makes it right on average and per |z| but cannot see the
+neighbour, and the claim still does not rank the errors (RMS ratios 1.1 - 1.5).  The reporting head
+does: its RMS ratio is flat at 1.0 - 1.1 in every claim bin and its NLL the lowest -- its robust width
+of 0.9 is a claim that includes the tails, as an RMS-honest claim must.  `sigmix` makes the mixture's
+own sigma more honest and, on its one seed, the network better.
+
+Round 2, running: `sigmix` seeds 1 and 2; EMA + `sigmix`; EMA + offsets 2 + `sigmix` (3 seeds each);
+EMA's and offsets 2's seeds 1 and 2.
