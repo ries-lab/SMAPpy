@@ -226,3 +226,18 @@ def test_the_local_count_asks_for_more_probability_where_two_molecules_are_close
     out.grad = None
     loss.terms(out, single, SCALING, names=("local_count",))["local_count"].sum().backward()
     assert out.grad[0, 0, 3, 5] > 0                                    # one molecule: the second half goes
+
+
+def test_a_detection_gathering_two_molecules_worth_of_p_is_split_at_its_cells_two_places():
+    out = _maps(12, 12)
+    # two molecules 1.4 pixels apart: p spread over three cells, one peak, the next cell's p below SPLIT_P
+    for col, p, dx in ((5, 0.7, -0.2), (6, 0.55, 0.2), (7, 0.25, -0.8)):
+        out[0, 0, 6, col], out[0, 2, 6, col] = p, dx
+    out[0, 0, 2, 2] = 0.95                                             # and a single molecule elsewhere
+    plain = extract.extract(out, SCALING, 0.5, "mixture_peak")
+    assert len(plain["frame"]) == 2                                    # one for the pair
+    e = extract.extract(out, SCALING, 0.5, "mixture_peak", split=1.4)
+    assert len(e["frame"]) == 3 and sorted(e["split"].tolist()) == [0, 1, 2]
+    two = e["split"] > 0
+    assert sorted(e["x"][two].tolist()) == pytest.approx([4.8, 6.2], abs=0.05)     # each half at its cells
+    assert e["x"][~two].item() == pytest.approx(2.0)                               # the single one untouched
