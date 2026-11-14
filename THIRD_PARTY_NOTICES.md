@@ -79,6 +79,10 @@ inside every wheel and source distribution**.  The ports, as of this writing:
   Gaussian mixture, its Sparrow test, BIC search, p-value and post-filter;
   itself derived from scikit-learn's GaussianMixture, BSD-3-Clause), as
   *Molecular mapping*;
+* `smappy/spinna.py` -- SPINNA (`spinna.generate_N_structures`,
+  `StructureSimulator`, `get_NN_dist`, `NND_score`, `SPINNA.fit_stoichiometry`,
+  `fit_coarse_to_fine`, `_run_bootstrap`, `fit_le`, `get_le_from_props`), as
+  *SPINNA*;
 * `smappy/io/picasso.py` -- Picasso's HDF5 localization files, read and
   written (a file format, not code).
 

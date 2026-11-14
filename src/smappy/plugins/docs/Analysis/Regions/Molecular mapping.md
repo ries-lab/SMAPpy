@@ -34,7 +34,8 @@ the Jungmann lab's DNA-PAINT software.
 The molecules come out as **a new file**, a molecule per row, with its
 position, the precision of it (`xy_err_nm`), its localizations and binding
 events: they render, filter and measure like localizations, so
-[Spatial statistics](plugin:Analysis/Measure/Spatial statistics), SPINNA or
+[Spatial statistics](plugin:Analysis/Measure/Spatial statistics),
+[SPINNA](plugin:Analysis/Measure/SPINNA) or
 [Register layers](plugin:Analysis/Register/Register layers) (for RESI's
 imaging rounds) run on them.  Or, with *output* set to the localizations,
 each localization gets its molecule's number, `molecule_id`, so
