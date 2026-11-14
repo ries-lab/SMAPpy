@@ -292,8 +292,10 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
     sim, cam, parts = settings.simulation, settings.camera, settings.parts
     sch = parts.schedule.settings
     # the loss part's ``reported`` (step 4, an honest sigma): {"head": "rep" | "mixture", "weight",
-    # "from_epoch"} -- the reported positions' likelihood (`loss.reported_term`), once there are detections
+    # "from_epoch"}, or a list of them -- the reported positions' likelihood (`loss.reported_term`), once
+    # there are detections.  Both heads at once train the mixture's sigma and the reporting head together.
     rep = (parts.loss.settings or {}).get("reported")
+    reps = rep if isinstance(rep, list) else [rep] if rep else []
     ckpt = folder / "checkpoint.pt"
     per_epoch = steps * batch_size
     for epoch in range(start, epochs):
@@ -308,11 +310,13 @@ def _epochs_loop(folder, settings, model, opt, sched, feed, renderer, g, test, t
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16):
                 out = forward(x)
             value, t = loss.loss(out.float(), batch, scaling, parts.loss)
-            if rep and epoch >= rep.get("from_epoch", 5):
-                r = loss.reported_term(out.float(), batch, scaling, cam.pixel_nm, sch["threshold"],
-                                       parts.extraction.name, getattr(model, "out_scale", 1), rep.get("head", "rep"))
-                value = value + float(rep.get("weight", 1.0)) * r
-                t = {**t, "reported": r.detach()}
+            for rp in reps:
+                if epoch >= rp.get("from_epoch", 5):
+                    head = rp.get("head", "rep")
+                    r = loss.reported_term(out.float(), batch, scaling, cam.pixel_nm, sch["threshold"],
+                                           parts.extraction.name, getattr(model, "out_scale", 1), head)
+                    value = value + float(rp.get("weight", 1.0)) * r
+                    t = {**t, ("reported" if len(reps) == 1 else f"reported_{head}"): r.detach()}
             opt.zero_grad(set_to_none=True)
             value.backward()
             if sch.get("clip_norm"):
