@@ -716,6 +716,52 @@ the baselines on the benchmark, not reproduce their outputs.
    (per-pixel attention against a ConvGRU), the backbones of §3.3, the loss's
    weights, the training ranges and schedule.  This needs the cluster or many
    nights on a 4090 (§8).
+
+   **The order** (decided with Jonas, 2026-11-14), after step 3 left netfit equal to the port with
+   its settings fixed (`docs/decode/poc-plan.md`, "netfit's settings decided").  The parts act on
+   different things -- the backbone mostly on detection and precision at density, the output
+   representation and the loss on pixelation, z bias and an honest sigma, the time model on how
+   near a molecule on in several frames comes to the pooled bound -- so two screens run side by
+   side, one a GPU, and their winners are then tried together:
+
+   - **A. Loss and representation, on today's network (v1f)**, read against the seeds' spread it
+     already has: a reported sigma (below); the offsets' range and overlapping assignment (SHOT);
+     anti-aliased pooling (BlurPool) -- a backbone change, but the one aimed at pixelation, through
+     shift-equivariance; and weight averaging (EMA or SWA), since pixelation is now mostly the
+     seed's.
+   - **B. Backbones, with DECODE's loss**, at matched parameters and 6 M samples, judged on the
+     Jaccard at densities 15 -- 50, the error over the CRLB near the focus, and speed; pixelation
+     recorded, not judged.
+   - **C. A's winners on B's**, then the time model on top.
+
+   Three seeds a variant: pixelation moves as much between seeds (`pixel_mod` 0.057 -- 0.069) as
+   the variants are expected to move it.
+
+   **An honest sigma.**  The mixture loss scores each true molecule against the mixture over its
+   pixels, which can cover the truth with narrow components that disagree, while the extraction
+   reports one of them; so the claimed z sigma is too small away from the focus, below the CRLB
+   there (poc-plan, "DECODE's claimed z precision").  The variants, the mixture loss left as it is,
+   its sigma included:
+
+   1. **A second sigma head that only reports** (the main variant): three more output channels,
+      sigma_rep in x, y, z, trained only by the Gaussian negative log-likelihood of what the
+      extraction reports -- each batch extracted, its detections matched to the truth as the
+      benchmark matches them, and per axis ``log sigma_rep + (sg(mu) - x_true)^2 / (2 sigma_rep^2)``
+      with the position detached (``sg``), so that this term trains the reported sigma to the
+      reported position's error and cannot move the localization.  The mixture keeps its own
+      sigma for its components.  A small weight, switched on after the first epochs.  It gives
+      the mixture peak a sigma of its own to report.
+   2. **One sigma head trained by both terms**: the same term on the mixture's sigma.
+   3. **Recalibration after training** (the baseline): a scale of the claimed sigma as a function
+      of |z|, the photons and the claim, fitted on a validation set so that the error over the
+      claim is 1 in every bin.  No retraining; it corrects the calibration, not the ordering.
+
+   Scored on the benchmark's simulated sets, where each error is known: the error over the claim
+   by |z|, photons, local density and frames on; the error against the claim in bins of the claim
+   (reliability); the coverage at 1 and 2 sigma; and the mean negative log-likelihood of the truth
+   under each claim, the one number that rewards both accuracy and honesty.  No claim below the
+   single-emitter CRLB on sparse frames; the Jaccard and the near-focus RMSE no worse, over three
+   seeds.  On real data the pair check of frames that share no input.
 5. **C = 2.**  Biplane and colour.  At least DECODE-Plex's numbers on the
    benchmark.
 6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
