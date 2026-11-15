@@ -1836,6 +1836,20 @@ measurements, four beads each) and checked by
   with only columns the localizations have, so padding costs nothing; it is
   paired with its measurement by the `.msr`'s path and the measurements'
   `did`s (`msr.mbm_key`), never by file number or name.
+* **A file's trace ids are moved apart from the table's** (2026-11): a
+  region of an id column is its id alone, so two files' trace 7 in one
+  layer were one region of *Id statistics*.  Merging by `tid` keeps files
+  apart (by file and channel) and *Combine files* moves the ids, but
+  nothing did when files were only opened together.  Now a file added has
+  its overlapping ids moved past the table's (`file_ids.keep_apart`), as
+  *Combine files* does; `tid` stays the id everything reads, and the
+  file's own numbers -- Imspector's, the link from a trace back to the
+  instrument's record -- are `tid_file`, the shift `id_offsets` in the
+  file's metadata.  The bead file's `mbm_beads` name its own numbers, so
+  *MBM drift* reads them through `file_ids.own_ids`.  Open: a region table
+  skips id 0 (`split_ids`), while `tid` 0 is a trace (*Combine files*'
+  `ALL_VALUE_IDS`); whether Imspector numbers traces from 0 is to be
+  checked on a real file.
 
 ## Open questions
 

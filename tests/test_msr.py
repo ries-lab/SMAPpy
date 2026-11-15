@@ -301,6 +301,9 @@ def test_measurements_merge_one_after_another_in_time_with_their_own_traces(two)
     one = load(two, measurements=[2])[0]["time_s"]
     assert np.allclose(np.sort(locs["time_s"][second]), np.sort(one) + 60)
     assert not set(locs["tid"][first]) & set(locs["tid"][second])
+    # and Imspector's own numbers are kept beside the renumbered ones
+    assert np.array_equal(np.sort(locs["tid_file"][second]),
+                          np.sort(load(two, measurements=[2])[0]["tid"]))
     assert np.array_equal(locs["frame"], np.arange(2 * n))
     offsets = [m["time_offset_s"] for m in info.metadata["minflux"]["measurements"]]
     assert offsets == [0.0, 60.0]

@@ -116,7 +116,10 @@ def test_the_bead_file_is_corrected_with_its_measurement():
     ctx = Context(locs=ctx.locs, session=session, selection=ctx.selection.__class__(mask))
     result = MBMDrift().run(ctx, MBMSettings())
     out = result.locs
-    good = (np.asarray(out["filenumber"]) == 1) & (out["tid"] == 1)
+    # bead 1 by the bead file's own number: its tids were moved past the
+    # localizations' when it joined them (`file_ids`)
+    from smappy.file_ids import own_ids
+    good = (np.asarray(out["filenumber"]) == 1) & (own_ids(out, "tid") == 1)
     # a good bead, corrected, is still: what is left is its noise
     assert np.std(out["x_nm"][good]) < 1.5 < np.std(session.locs["x_nm"][good])
 

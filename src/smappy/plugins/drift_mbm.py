@@ -109,7 +109,10 @@ class MBMDrift(KeepsDrift, Plugin):
             from ..region_runs import column_table
             ids_all, values_all, groups = [], {}, {}
             for rows, chosen, axes in tables:
-                out, offset = with_bead_ids(out, rows, np.asarray(out["tid"])[rows])
+                # the bead file's own numbers, which its `mbm_beads` name,
+                # not the ones it was moved to beside other files
+                from ..file_ids import own_ids
+                out, offset = with_bead_ids(out, rows, own_ids(out, "tid")[rows])
                 for s in chosen:
                     values, groups = bead_values(s, axes)
                     ids_all.append(np.asarray(s.ids) + offset)

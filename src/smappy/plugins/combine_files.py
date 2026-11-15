@@ -42,6 +42,9 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+# which columns are ids, and which count 0 as one: `file_ids`, which keeps a
+# file's ids apart as it is added to the table, as this does for the files
+from ..file_ids import ALL_VALUE_IDS, REGION_NUMBER, apart, id_columns  # noqa: F401
 from ..group import GROUP_COLUMNS
 from ..locs import Localizations
 from ..metadata import file_frame_time
@@ -50,14 +53,6 @@ from . import Context, Plugin, Result, param, register
 # Time columns and what one of their units is in seconds.  `time_s` is the
 # one there is (MINFLUX's clock, a fit's frame times); `time_ms` in case.
 TIME_COLUMNS: Dict[str, float] = {"time_s": 1.0, "time_ms": 1e-3}
-
-# Integer ids whose every value is an id -- 0 included -- rather than 0
-# meaning "in none" as for the ``*_id`` columns.
-ALL_VALUE_IDS = ("tid",)
-
-# An ROI's own number: the same ROI whichever file its rows came from.
-REGION_NUMBER = "roi_id"
-
 
 @dataclass
 class CombineSettings:
@@ -73,20 +68,6 @@ def file_entries(locs: Localizations, n_files: int) -> List[dict]:
     return [dict(entries[k]) if k < len(entries) and isinstance(entries[k], dict)
             else {"name": f"file {k + 1}", "path": "", "format": ""}
             for k in range(n_files)]
-
-
-def id_columns(locs: Localizations) -> List[str]:
-    """The integer columns whose numbers are per file and must be kept apart."""
-    written = set(locs.metadata.get("region_columns") or {})
-    out = []
-    for name in locs.columns:
-        if name in GROUP_COLUMNS or name == REGION_NUMBER or name in written:
-            continue
-        if not (name.endswith("_id") or name in ALL_VALUE_IDS):
-            continue
-        if np.asarray(locs[name]).dtype.kind in "iu":
-            out.append(name)
-    return out
 
 
 def incompatibilities(entries: Sequence[dict], frame_times: Sequence[Optional[float]]
@@ -143,7 +124,11 @@ def combine(locs: Localizations, gap: int = 0) -> Tuple[Localizations, List[str]
     new_frame = frame.copy()
     times = {name: np.asarray(locs[name], np.float64).copy()
              for name in TIME_COLUMNS if name in locs}
-    ids = {name: np.asarray(locs[name]).copy() for name in id_columns(locs)}
+    # an id column whose files are apart already -- moved apart as each file
+    # joined the table (`file_ids`) -- stays as it is: moving it again would
+    # only renumber what the results kept per id name
+    ids = {name: np.asarray(locs[name]).copy() for name in id_columns(locs)
+           if not apart(np.asarray(locs[name]), files, name)}
     frames_before = 0
     seconds_before = 0.0
     ids_before = {name: 0 for name in ids}

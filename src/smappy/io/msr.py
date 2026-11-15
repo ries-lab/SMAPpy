@@ -247,8 +247,9 @@ def merge(tables: Sequence[Localizations], metas: Sequence[Dict[str, Any]]) -> L
     Each one's ``time_s`` is moved by when it started after the first one
     did (``acquisition_date``, to the second), and never back into the one
     before it; its traces are renumbered after the last one's, since a
-    trace id is only unique within its measurement, and a ``measurement``
-    column says which it was.  ``frame`` is the rank in the joined time.
+    trace id is only unique within its measurement, Imspector's own number
+    kept in ``tid_file`` (`file_ids`), and a ``measurement`` column says
+    which it was.  ``frame`` is the rank in the joined time.
     """
     parts, offset, tid_offset, end = [], 0.0, 0, None
     first = _start(metas[0].get("acquisition_date", "")) if metas else None
@@ -264,6 +265,8 @@ def merge(tables: Sequence[Localizations], metas: Sequence[Dict[str, Any]]) -> L
                 end = float(np.max(columns["time_s"]))
         meta["time_offset_s"] = offset
         if "tid" in columns:
+            if len(tables) > 1:          # Imspector's own number, `file_ids`
+                columns["tid_file"] = np.asarray(columns["tid"], np.int64)
             columns["tid"] = np.asarray(columns["tid"], np.int64) + tid_offset
             if len(locs):
                 tid_offset = int(np.max(columns["tid"])) + 1

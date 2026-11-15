@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.combine_files.combine, smappy.plugins.combine_files.id_columns, smappy.plugins.combine_files.incompatibilities, smappy.plugins.combine_files.CombineFiles.run, smappy.session.Session._follow_files]
+covers: [smappy.plugins.combine_files.combine, smappy.file_ids.id_columns, smappy.file_ids.apart, smappy.file_ids.keep_apart, smappy.plugins.combine_files.incompatibilities, smappy.plugins.combine_files.CombineFiles.run, smappy.session.Session._follow_files]
 ---
 
 ## What it does
@@ -42,7 +42,9 @@ how long the files before it lasted.
 **4. Ids stay apart.** Track 5 of the first file and track 5 of the second
 are different tracks. So an id attribute, such as `track_id` or `cluster_id`,
 is numbered on from the files before it. An id of 0 means "in none" and
-stays 0.
+stays 0. Ids that a file brings are usually apart already: a file added to
+the table has its ids moved past the table's as it is added, its own numbers
+kept in `tid_file` (or `<name>_file`). Those are left as they are.
 
 **5. Merged blinks are dropped.** The merged blinks (`group_id`,
 `n_in_group`) were found file by file. Across the old boundary there may now
@@ -77,7 +79,10 @@ before it. MINFLUX's trace id `tid` has no "none" value, so all its numbers
 move up, by the highest id + 1 of each earlier file. Some id attributes stay as
 they are: `roi_id`, and the attributes written from regions' results (*Regions
 to attribute*). They are an ROI's number, which is the same whichever file a
-localization came from.
+localization came from. An id attribute in which no two files share a number
+(`file_ids.apart`) is not moved at all: adding the files has already moved
+it (`file_ids.keep_apart`), with the same rule, and moving it again would
+only renumber what was measured per id.
 
 The table's metadata (its camera, its fit) is the first file's. The new file
 entry keeps each original file's entry (`combined_from`). Its pixel size is

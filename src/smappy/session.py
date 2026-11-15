@@ -665,7 +665,15 @@ class Session:
                 # a session of several files opens on the first (below)
                 self._on_files(range(1))
         else:
-            merged = concat([self.locs, locs])
+            # the ids the file brings (`tid`, a saved `track_id`) moved past
+            # the table's where they overlap, so a region of an id column
+            # is one file's; the file's own numbers stay in `tid_file`
+            from .file_ids import keep_apart
+            old, locs, offsets = keep_apart(self.locs, locs)
+            if offsets:
+                for each in infos:
+                    each.metadata = {**(each.metadata or {}), "id_offsets": offsets}
+            merged = concat([old, locs])
             merged.metadata = dict(self.locs.metadata)
             # the linking of the first file says nothing about the merged
             # table, so its group columns go rather than being carried over
