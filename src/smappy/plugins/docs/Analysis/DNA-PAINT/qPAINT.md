@@ -14,7 +14,7 @@ and the buffer, so it is calibrated on regions whose number of sites is
 known -- single docking strands, or DNA origami with a designed number.
 
 This reads what
-[Binding kinetics](plugin:Analysis/Measure/Binding kinetics) measured in
+[Binding kinetics](plugin:Analysis/DNA-PAINT/Binding kinetics) measured in
 every region, calibrates the influx on the regions marked as calibration,
 and gives every region its number of sites.  It also draws the bright and
 dark times of all regions' events together, which says whether the

@@ -38,7 +38,7 @@ Up and Down step through the ROIs; Space un-ticks a bad one.
 It is not *Time Course*, which follows the whole field (medians over a
 hundred windows) to check an acquisition, nor *Blinking*, which describes
 a dye's blinks.  The influx is calibrated, and the regions' kinetics pooled,
-by [qPAINT](plugin:Analysis/Regions/Summarize/qPAINT).
+by [qPAINT](plugin:Analysis/DNA-PAINT/qPAINT).
 
 ## How it works
 
@@ -171,7 +171,7 @@ Keep it the same for calibration and sample.
 *maximum likelihood* unless the numbers are to be compared with Picasso's.
 
 ### influx
-From [qPAINT](plugin:Analysis/Regions/Summarize/qPAINT) on regions of known
+From [qPAINT](plugin:Analysis/DNA-PAINT/qPAINT) on regions of known
 site number, with the same *link gap*; it depends on the imager's
 concentration and the buffer, so calibrate it on every sample.
 

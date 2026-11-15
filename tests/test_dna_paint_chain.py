@@ -8,7 +8,7 @@ from smappy import plugins
 from smappy.io.formats import FileInfo
 from smappy.session import Session
 
-PATH = "Analysis/Regions/Workflow/DNA-PAINT"
+PATH = "Analysis/DNA-PAINT/Workflow"
 
 
 def drifting_origami(field_um=5.0, seed=0):

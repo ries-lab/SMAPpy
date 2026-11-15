@@ -168,7 +168,7 @@ def _distances(text: str) -> List[float]:
     return out
 
 
-@register("Analysis/Measure/SPINNA")
+@register("Analysis/DNA-PAINT/SPINNA")
 class Spinna(Plugin):
     """The share of the molecules in each kind of complex (monomers, dimers,
     ...) from their nearest-neighbour distances, against simulations of

@@ -109,7 +109,7 @@ def cluster_column(locs, chosen: str = "") -> str:
                      + (", ".join(have) if have else "none"))
 
 
-@register("Analysis/Regions/Molecular mapping")
+@register("Analysis/DNA-PAINT/Molecular mapping")
 class MolecularMapping(Plugin):
     """Turns clusters into molecules: one per cluster at its centre (RESI),
     or the molecules a Gaussian mixture finds in each (G5M)."""

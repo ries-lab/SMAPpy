@@ -22,7 +22,7 @@ settings are shown at the top:
 * *localizations per site* -- their *minimum size*;
 * *drift knot spacing* -- how finely in time
   [Fiducials](plugin:Analysis/Drift/Fiducials) follows the drift;
-* *molecules by* -- [Molecular mapping](plugin:Analysis/Regions/Molecular mapping)'s
+* *molecules by* -- [Molecular mapping](plugin:Analysis/DNA-PAINT/Molecular mapping)'s
   *method*, centres or G5M.
 
 The pages of the plugins explain the methods; this one what running them
@@ -57,11 +57,11 @@ nanometre.
 where each is tighter.
 
 **6. Each site's kinetics.**  The *each site* block runs
-[Binding kinetics](plugin:Analysis/Measure/Binding kinetics) once in every
+[Binding kinetics](plugin:Analysis/DNA-PAINT/Binding kinetics) once in every
 site: its binding events, bright and dark times and qPAINT index, kept as a
 row per site (`cluster_id`) for
 [Filter regions](plugin:Analysis/Regions/Filter regions), the Regions tab
-or [qPAINT](plugin:Analysis/Regions/Summarize/qPAINT).
+or [qPAINT](plugin:Analysis/DNA-PAINT/qPAINT).
 
 **7. Molecules.**  Molecular mapping puts a molecule at the centre of each
 site and adds them as a file, *molecules of* the file's name: RESI's step
