@@ -1,0 +1,18 @@
+# One batch per calibration variant: this is the "auto" one (AB's model redrawn at the focus).  The others set
+# fit.model.focus: calibrated, or fit.model.calibration: OUTDIR/<in situ model>_3dcal.h5 with focus calibrated,
+# and export.path / output.folder to pores_<variant>.csv / out_<variant>.  OUTDIR, NPCDIR, M2_DATA: replace.
+schema: smappy-batch-v1
+name: npc rings, focus auto
+chain: npc_rings.chain.yaml
+overrides:
+  fit.model.focus: auto
+  export.path: NPCDIR/pores_auto.csv
+inputs:
+  - file: "M2_DATA/261112_MR_Intercalib2_BGAAF647_50ms_30i_nucleus_1/261112_MR_Intercalib2_BGAF647_50ms_30i_nucleus_1_MMStack_Pos0.ome.tif"
+output:
+  folder: NPCDIR/out_auto
+  locs: true
+  figures: png
+  fitted: output
+preflight: proceed
+rerun: skip_identical

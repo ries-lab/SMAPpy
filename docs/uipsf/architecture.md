@@ -2477,6 +2477,169 @@ data); γ the microscope's, never learnt by default.  **Open**: which γ M2's ob
 August beads' 0.16 (the same objective and colour, another camera: γ is not as fixed as decided) or what its
 January molecules ask for, 0.36; the dual channel's focus at 25 px.
 
+## In situ against molecule stacks on M2 (November 2026)
+
+The question: on one microscope on one day, does in situ learning from a blinking movie inside a cell give the
+same PSF as learning from molecules on the coverslip in z sweeps (M9, `molecule-stacks.md`)?  And which of the
+two should be used to fit the cell?  Scripts are in `benchmarks/uipsf/real/m2_pairs/` and results in
+`benchmarks/uipsf/results/m2_pairs_*.jsonl`.  The data are not in git; the scripts read them from `$M2_DATA`.
+
+**The paired data** were taken on M2 on 12 November 2026 with the Andor iXon (EM, pre-amp gain 1, chip ROI
+254-59-202-218, 127 × 116 nm pixels on the astigmatic path), 50 ms frames, 638 nm excitation, emission taken as
+690 nm, and the same objective (NA 1.43, oil 1.516).  All three sets share the camera ROI and laser settings
+and were taken within 3.5 hours:
+- `261112_MR_Intercalib2_Beads_1_700`: 5 bead stacks of 61 frames, ±1.5 µm in 50 nm steps (19:11).
+- `261112_MR_Intercalib2_BGAAF647_50ms_30i_nucleus_1`: the in situ movie, BG-AF647 on nuclear pores of a fixed,
+  permeabilised cell in a dSTORM GLOX buffer.  Two files, ~72 000 frames, the focus held by the focus lock
+  (20:16).
+- `261112_MR_Intercalib2_AB_50ms_coverslip`: AF647 molecules on the glass, 10 sweeps of 61 frames, ±1.5 µm in
+  50 nm steps (22:25); its buffer is not recorded.
+
+A second molecule set, `NBX4_50ms_coverslip`, gave too few molecules to learn from (2050; order 6 still
+fails).  The metadata do not record the cylindrical lens or the collar.  Every model's Noll 6 of 57-87 nm says
+the lens was in throughout.  The user confirmed that the movie was taken under the beads' conditions.
+
+**The runs** all use the minimal pupil (`model.MinimalPupil`), Zernike phase to order 8 and a round σ.  They are
+run by `m2_new.py` with environment variables, one line of `m2_pairs_runs.jsonl` each.
+- *Molecule stack* `ab_n1345`: n_med 1.345 (a GLOX buffer, below).  γ learnt.  σ round and learnt.  The height
+  above the glass learnt (h; since 58f38c76 the default holds it at 5 nm, so a rerun needs `HEIGHT=` unset to
+  *auto*).  A focus per sweep and the focal plane's slope learnt.  The region is 21 px (`REGION_NM` 2600 nm).
+  The selection is the soft one, now the default (525e9cb1), at significance 5.  4000 molecules were drawn of
+  4553 that passed and 3468 kept after two rounds.  8.5 min on Apple's GPU.
+- *In situ* (`run_insitu`, the region 25 px, `REGION_NM` 3000 nm), 1777 molecules used, 223 held out and 4105
+  not drawn, started from the stack model:
+  - `insitu_start_edge_n1345_ab_n1345` is the main comparison.  *hold* is the start's: γ 0.122 and the phase
+    above order 8 (none at order 8) held from the stack model.  The phase to order 8 and σ are learnt, and the
+    focus comes from the coverslip edge (`FOCUS_FIT=coverslip`).  n_med is 1.345.
+  - `insitu_ab` is the free variant: n_med 1.33, γ 0.068 held from an earlier AB model (n 1.33), and the focus
+    learnt.
+  - `insitu_start_edge_n1345_tilt_s315_ab_n1345` adds a learnt coverslip tilt with σ held at the stack's 31.5 nm.
+  - `insitu_all_n1345_ab_n1345` holds every aberration of the stack model and learns only the focus and σ.
+    `insitu_all_n1345_tilt_s315_ab_n1345` does the same with a tilt and σ held.
+- *Beads* (`beads`), for reference: 16 beads of 100 nm, linear drift, γ and σ learnt.
+
+**The index.**  The literature has 1.34-1.35 for a GLOX/MEA dSTORM buffer, and the user expects a fixed,
+permeabilised cell to be only slightly higher, so n_med is held at 1.345.  Learnt in situ with every aberration of the stack held, it went to 1.41 and gained only 650 nats over 1777
+molecules (`insitu_all_nmed_ab`).  The index presets in the PSF calibration and
+the fitters (a251380e) came from this.
+
+**The comparison.**  Phase in nm rms.  Noll 4 is not a learnt mode, since each geometry's focus takes the
+defocus, so the focus column stands in for it.  The two Δnats columns score each model on molecules that no
+model learnt from, using `cross_score.py`, and are given in nats per molecule against the stack model (negative:
+fits better):
+- *stack held-out*: the 553 AB molecules that passed but were not drawn.  Each model's pupil, γ and σ are
+  held, the stack geometry (sweep foci, plane, h) is learnt again on the same 600 drawn molecules, and then x,
+  y, photons and background are free.
+- *in situ held-out*: the movie's 223 *held out* molecules, drawn like the 1777 used (each z bin's share).
+  Apart from them, its 4105 *not drawn*: the bins' surplus, which over-represent the heights where molecules
+  are plentiful.  x, y, z, photons and background
+  are free from five heights, and the best start is kept.  An in situ model uses its own focus.  The stack
+  model enters as `insitu_all_n1345_ab_n1345`: every aberration held, the focus and σ learnt (420 nm,
+  39.5 nm).  The stack held with a tilt (`insitu_all_n1345_tilt_s315_ab_n1345`) scores −0.22 / +1.52.
+
+| model | Z5 | Z6 | Z7 | Z8 | Z11 | Z12 | Z16 | Z22 | Z37 | γ | σ (nm) | focus (nm) | h (nm) | Δ stack held-out | Δ in situ held out / not drawn |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| stack `ab_n1345` | −4.0 | 56.6 | −3.6 | 4.6 | 24.2 | 0.2 | 1.7 | 7.4 | −4.1 | 0.122 (learnt) | 31.5 | per sweep | 75 ± 4 (68 refit) | 0 | 0 / 0 (focus 420, σ 39.5) |
+| in situ, edge, n 1.345 | −2.2 | 71.9 | −3.5 | 41.3 | 55.1 | 17.4 | 30.6 | 34.4 | 17.5 | 0.122 (held) | 38.8 | 682 | (151 refit) | +4.51 | −1.75 / +0.36 |
+| in situ free, n 1.33 | −1.7 | 86.7 | −5.8 | 49.8 | 80.8 | 30.7 | 35.0 | 50.4 | 22.7 | 0.068 (held) | 36.3 | 1052 | (200 refit, the bound) | +8.43 | −2.75 / +0.50 |
+| in situ, edge + tilt, σ held | −4.7 | 57.8 | −22.9 | 9.9 | 37.7 | −0.1 | 0.5 | 12.6 | 3.3 | 0.122 (held) | 31.5 (held) | 1220 | – | – | −1.25 / +2.12 |
+| beads | −4.1 | 57.8 | −5.5 | −3.3 | 21.4 | −0.5 | −6.5 | 3.6 | – | 0.102 (learnt) | 50.8 | – | – | – | – |
+
+Things to read from the table:
+- *The stack and the beads agree*.  Astigmatism matches within 1.3 nm and spherical within 3 nm.  The x coma
+  (Z8, Z16) differs by 8 nm, and it is not the beads' sideways drift: without drift Z8 is −3.6.
+- *In situ does not agree with them.*  The free and edge-pinned runs put 15-30 nm more into astigmatism (Z6),
+  31-57 nm more into primary spherical (Z11), and 30-50 nm into x coma (Z8, Z16), secondary spherical (Z22,
+  Z37) and Z12.  These are the pupil's even and x-odd modes, the ones that depth, the index and a tilt about y
+  all produce.
+- *A tilt takes most of the excess.*  With a coverslip tilt learnt (−1.6° about y, σ held), Z6, Z8, Z16 and
+  Z12 return to the stack's within 6 nm.  Z11 keeps 13 nm extra and y coma (Z7, Z17) takes −20 nm instead.  A
+  1.6° tilt is larger than the user expects.  Held at every aberration of the stack, the movie asks for
+  −2.9°.
+- *On held-out molecules each model wins on its own data.*  On the stack set the in situ pupils lose 4.5 and
+  8.4 nats per molecule, and the refit then pushes the molecules' height to 151 and 200 nm (the bound), against
+  the stack's own 68-75 nm.  On the in situ set's own held-out molecules the in situ pupils win by
+  1.75 and 2.75 nats per molecule.  The surplus molecules (*not drawn*) go the other way by 0.36-0.50.  Which
+  heights the surplus crowds at, and so where in z the stack's pupil is the better one, is not yet checked.  On the
+  molecules they learnt from, the in situ pupils had led by ~3 nats per molecule (`fair_insitu`), so part of
+  that lead was fitting their own molecules.  The two samples still ask for different PSFs: no single pupil
+  with only the focus learnt serves both.
+
+**z linearity in the cell**, from the simulation in `zfit_vs_zgt.py`.  The truth is the stack model propagated
+into the sample (n 1.345, focus 607 nm, no tilt) at heights 0-1200 nm, with the movie's photons (4570) and
+background (98).  Each model localises the spots, and the table gives the slope of z_fit against z_gt and the
+rms about the line over 0-1000 nm:
+
+| model | slope | rms (nm) |
+|---|---|---|
+| stack held, tilt learnt (`insitu_all_n1345_tilt_s315`) | 0.99 | 6 |
+| in situ edge, n 1.345 | 1.03 | 12 |
+| in situ free, n 1.33 | 1.08 | 15 |
+| in situ edge + tilt, σ held | 1.13 | 13 |
+| the stack's spline on the glass, no depth (`coverslip_fit.py`) | 1.17 | 37, strongly bent |
+
+Every in situ model, and the stack model redrawn at depth, stays far straighter than a coverslip calibration
+used as it is.  For fitting a cell, the depth matters more than which pupil is used.
+
+**The control** (`insitu_control.py`) simulates a movie from the stack model at depth: molecules 0-1000 nm high,
+a tenth on the glass, the movie's photons and background, 160 × 160 px, 4000 frames.  It is learnt as the real
+movie was.  Every mode comes back within ~1 nm (Z6 55.4 for a truth of 56.6, Z11 23.6 for 24.2), the focus
+607 nm, σ 30.2 for 31.5.  So in situ on this geometry and these settings is sound.  The 15-60 nm differences in
+the table are in the data, not the method.
+
+**NPC ring separation against z** (`npc_rings.chain.yaml`, `rings.batch.yaml`, `rings_vs_z.py`;
+`m2_pairs_npc_rings.jsonl`).  The movie was fitted with Spline 3D under each calibration and drift-corrected
+with RCC.  The pores come from *Segment regions*' NPC preset, with a two-Gaussian Line Profile in z per pore.
+The table keeps pores whose separation error is below 10 nm, 20-120 nm apart, with at least 40 localisations:
+
+| calibration | pores | separation (nm, median) | slope against z (nm per µm) |
+|---|---|---|---|
+| stack spline as calibrated (no depth) | 177 | 62.1 | 2 |
+| stack redrawn at the focus (*auto*) | 153 | 55.0 | 24 |
+| in situ free, n 1.33 | 178 | 59.2 | 15 |
+| in situ from beads | 179 | 58.6 | 17 |
+| in situ edge, n 1.345 | 183 | 56.6 | 19 |
+| in situ edge + tilt, σ held | 160 | 59.6 | 37 |
+| stack held + tilt | 167 | 53.4 | 28 |
+
+The pores sit at two depths, near the coverslip and ~550 nm up.  The upper group reads 2-22 nm wider under
+every calibration, more than the z scale explains.  Those pores are likely tilted on the nuclear envelope, so
+this is not yet a clean test of linearity.
+
+**Ruled out**:
+- *A wrong index alone.*  At 1.345 the gap stays.  Learning n_med goes to 1.41 and recovers only 650 nats.
+- *The molecule selection.*  Soft and standard selections, significance 3.5 or 5, a wider off-centre limit and
+  the central field only (`ab_c50`, `ab_soft_c50`) move every mode by at most 3 nm.
+- *h, γ and the NA in the stack.*  With h held at 10 nm, γ 0 with the NA free (1.403-1.430), or a restart from
+  h = 10, the phase stays within ~2 nm.  Learnt h ranges from 34 to 98 nm across the variants.
+- *The method.*  The simulated control recovers the truth.
+- *The beads' drift for the coma.*  It changes Z8 by 0.3 nm.
+
+**Open hypotheses**:
+- *A sample tilt or curvature.*  The tilt explains most of the excess but needs 1.6-2.9°, and the pores' own
+  tilt on the nuclear envelope may be what the model reads as one.
+- *Focus drift over the 72 000 frames.*  A changing focus would blur the depth signal, and so the even modes.
+  It is not yet measured per time block.
+- *Refractive-index structure of the nucleus* above the buffer's, which a single n_med cannot hold.
+- *The stack's h of 75 nm*: AF647 on the glass should sit a few nm up.  Yet learnt h stays at 34-98 nm in every
+  variant, and the in situ pupils push it higher still.  The supercritical ring's brightness is how h is told,
+  and the magnitude and γ trade with it.
+- *The cross-check of item 9's next step*: in situ with γ and the phase above order 6 held from the stack model.
+  Running when this was written (`insitu_o6_edge_n1345_ab_n1345`).
+
+**The scripts** (`benchmarks/uipsf/real/m2_pairs/`; each says how it is called):
+- `m2_new.py`: every learning run, steered by environment variables (`ORDER`, `HOLD`, `START`, `NMED`,
+  `FOCUS_FIT`, `TILT`, `BLUR_NM`, `HEIGHT`, `SIG`, `SOFT`, ...).  It appends a row to `summary.jsonl`, which is
+  `m2_pairs_runs.jsonl` here.
+- `soft_select.py`: the soft selection as a patch, the prototype of 525e9cb1.
+- `fair_compare.py` and `fair_insitu.py`: models scored on one fixed set of the molecules they learnt from
+  (`m2_pairs_scores.jsonl`, `fair_*`).
+- `cross_score.py`: the held-out scores of the table (`m2_pairs_cross.jsonl`).
+- `insitu_control.py`: the simulated control.
+- `zfit_vs_zgt.py` and `coverslip_fit.py`: z linearity (`m2_pairs_scores.jsonl`, `zfit_vs_zgt`, copied from
+  their printout).
+- `npc_rings.chain.yaml`, `rings.batch.yaml` and `rings_vs_z.py`: the NPC rings (`m2_pairs_npc_rings.jsonl`).
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```

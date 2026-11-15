@@ -1,0 +1,48 @@
+# M2 nucleus movie: Spline 3D with AB's coverslip calibration, pores found, each pore's z profile fitted with two
+# Gaussians (the two rings), the region table written.  model.focus is overridden per job.
+schema: smappy-chain-v1
+description: Spline 3D with AB's calibration, NPC rings' separation in z per pore
+steps:
+  - plugin: Localize/Spline 3D
+    label: fit
+    values:
+      model.calibration: OUTDIR/ab_n1345_3dcal.h5
+      model.medium: buffer
+      model.focus: calibrated
+  - plugin: Analysis/Process/Layers
+    label: layers
+    values:
+      layers:
+        - grouped: true
+          start: empty
+          bounds:
+            - {field: xy_err_nm, hi: 25}
+            - {field: logl_rel, lo: -2}
+      remove: false
+  - plugin: Analysis/Drift/RCC
+    label: drift
+    values: {}
+  - plugin: Analysis/Regions/Segment regions
+    label: find the pores
+    values:
+      preset: NPC
+      method: circle
+      circle.shape: ring
+      circle.min_radius_nm: 55.0
+      circle.max_radius_nm: 55.0
+      circle.ring_width_nm: 15.0
+      keep: n_ring >= 4 and 40 <= radius_nm <= 70 and far_p >= 0.05
+      replace: true
+  - block: each pore
+    regions: rois
+    steps:
+      - plugin: Analysis/Measure/Line Profile
+        label: z profile
+        values:
+          axis: z
+          source: selection
+          model: two_gauss
+  - plugin: Analysis/Regions/Summarize/Export table
+    label: export
+    values:
+      path: pores.csv
