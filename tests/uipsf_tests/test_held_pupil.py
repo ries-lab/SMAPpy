@@ -4,6 +4,7 @@ import torch
 
 import uipsf
 from uipsf.export import build, describe, load_model, save_model
+from uipsf.model.pupil import MinimalPupil
 from uipsf.workflows import learn_beads
 from uipsf.workflows.insitu import twin, twin_model
 from uipsf_tests.conftest import small_beads
@@ -83,3 +84,20 @@ def test_a_model_file_keeps_the_held_modes(tmp_path):
     xyz = torch.tensor([[0.0, 0.0, 0.0], [30.0, -20.0, 300.0]])
     assert torch.allclose(m.psf(xyz), cal.psf(xyz), atol=1e-7)
     assert (22, 0.05, 0.0) in m.zernikes("phase") and (4, -0.1, 0.0) in m.zernikes("magnitude")
+
+
+def test_the_twin_of_a_minimal_pupil_holding_the_high_orders_is_the_twin_of_the_whole():
+    # in situ's default: the minimal pupil, γ and the phase above the order held from a bead model; the twin test
+    # must mirror the held phase too, or it compares a mirrored low order with unmirrored high ones
+    model, _, _ = small_beads(OPTICS, n=2, dtype=f64)
+    grid = model.psf.grid
+    whole = MinimalPupil(grid, n_max=6, held_gamma=0.3, saf_damping=False)
+    part = MinimalPupil(grid, n_max=6, held_gamma=0.3, saf_damping=False,
+                              held_phase={j: v for j, v in PHASE.items() if j > 10})
+    model.psf.pupil = part
+    mirrored = twin_model(model).psf.pupil(twin(model, values(part, PHASE, {})))
+    model.psf.pupil = whole
+    expected = whole(twin(model, values(whole, PHASE, {})))
+    assert torch.allclose(mirrored[0], expected[0]) and torch.allclose(mirrored[1], expected[1])
+    # and the twin is not the pupil itself: astigmatism and spherical flip
+    assert not torch.allclose(mirrored[1], whole(values(whole, PHASE, {}))[1])

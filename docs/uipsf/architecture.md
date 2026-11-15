@@ -1819,7 +1819,11 @@ molecule, motion within a 200 ms frame (a linker), Cy3B's emission against the 5
 
 **Known flaws of the scripts' variants**: the twin test mirrors the learnt modes but not a held map, so its
 verdict is not fair with a held magnitude or phase (a −200 nats "prefer twin" there is that); the z bins below
-the coverslip fill with poorly localised molecules (heights are not bounded at 0).
+the coverslip fill with poorly localised molecules (heights are not bounded at 0).  *Both fixed since*: the
+twin test mirrors held modes too (`insitu.twin_model`, for the Zernike and the minimal pupil, tested in
+`test_held_pupil.py`), and from the second round a molecule localised more than 3 errors below the coverslip
+is not chosen once the edge has set the focus (`insitu_rounds.below_coverslip`, `RoundSettings.below_coverslip_sd`;
+November 2026, not yet run again on the M2 pairs).
 
 **Open**: which focus is right (held and free magnitude differ by ~100 nm on January; needs a sample of
 known height); why σ in situ is below the beads' (bead size?); the residual 1.3 per pixel of clean DNA-PAINT

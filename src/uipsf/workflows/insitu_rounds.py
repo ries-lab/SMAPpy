@@ -32,7 +32,9 @@ the coverslip pins the common offset the fit alone cannot.  The factor, n_imm/n_
 off at high NA, so it is measured: the lowest molecules localised again with the focus moved
 (`_measured_ratio`), and from the second correction on a secant step on the rounds' (focus, edge)
 pairs (`_focus_per_height`).  This automates v1's ``backgroundROI``, a region the user marked as
-lying on the coverslip.
+lying on the coverslip.  Once the edge has set the focus, a molecule localised below the coverslip by more
+than ``below_coverslip_sd`` (3) of its errors is not chosen (`below_coverslip`): none is there, and those the
+model put there are the ones it fits worst.
 """
 from __future__ import annotations
 
@@ -78,6 +80,10 @@ class RoundSettings:
     # only units whose height above the coverslip lies in (low, high) nm are chosen from round 2 (None: all): to
     # learn from molecules near the coverslip or deep in the sample apart (M2, October 2026)
     height_range_nm: tuple | None = None
+    # a unit localised below the coverslip by more than this many of its errors is not chosen (None: all are),
+    # once the edge sets the focus: no molecule is there, and the z bins below 0 filled with molecules the model
+    # placed badly -- the October scripts' known flaw (architecture.md, "In situ on matched M2 pairs")
+    below_coverslip_sd: float | None = 3.0
     # off when nothing of the pupil is learnt (every aberration held from beads): the sign is the beads'
     twin_test: bool = True
 
@@ -88,6 +94,7 @@ class Edge:
     sd_nm: float
     spike: float                       # the fraction of the window's molecules on the coverslip
     n: int                             # heights in the window
+    kappa: float = 1.0                 # how many times its CRLB a height scatters, as the edge fitted it
 
 
 def coverslip_edge(h, sd, window: float = 0.3, max_blur: float | None = None) -> Edge | None:
@@ -142,8 +149,17 @@ def coverslip_edge(h, sd, window: float = 0.3, max_blur: float | None = None) ->
                key=lambda r: r.fun)
     spiked = flat.fun - both.fun > SPIKE_NATS
     best, f = (both, nll) if spiked else (flat, lambda p: nll(p, False))
-    w = unpack(best.x, spiked)[3]
-    return Edge(float(best.x[0]), _sd_of_first(f, best.x, float(np.median(s0_i))), float(w), len(x))
+    _, kappa, _, w = unpack(best.x, spiked)
+    return Edge(float(best.x[0]), _sd_of_first(f, best.x, float(np.median(s0_i))), float(w), len(x), float(kappa))
+
+
+def below_coverslip(h, sd, edge: Edge, k: float = 3.0) -> np.ndarray:
+    """Which heights above the coverslip ``h`` (the edge's shift taken off), with CRLBs ``sd``, lie below it by
+    more than ``k`` errors: each height's scatter, κ times its CRLB as the edge measured it, and the edge's own
+    error together.  A molecule on the coverslip scatters around 0 and stays; one placed far below by a model
+    that does not fit it (a pair, a neighbour, the background's haze) is out."""
+    h, sd = np.asarray(h, float), np.asarray(sd, float)
+    return h < -k * np.hypot(edge.kappa * sd, edge.sd_nm)
 
 
 def _sd_of_first(f, x, scale: float) -> float:
@@ -327,9 +343,14 @@ def calibrate_insitu(model, rois, start: dict | None = None, noise=None, setting
         # most of round 2's choice, and learning then rejected or lost them.
         rejected = [None] * U
         centre = in_focus_height(current, float(shared["geometry.focus"]))
+        # only once the edge has set the focus: before, 0 is not where the coverslip is
+        below = (below_coverslip(loc["h"] - shift, loc["sd_h"], edge, s.below_coverslip_sd)
+                 if prior is not None and s.below_coverslip_sd is not None else np.zeros(len(pool), bool))
         for k, u in enumerate(pool):
             if not loc["xy_offset_px"][k] <= s.max_xy_offset_px:
                 rejected[u] = "off centre"
+            elif below[k]:
+                rejected[u] = "below coverslip"
             elif s.height_range_nm is not None and not (
                     s.height_range_nm[0] <= loc["h"][k] - shift <= s.height_range_nm[1]):
                 rejected[u] = "height range"
