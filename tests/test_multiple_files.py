@@ -148,9 +148,9 @@ def test_several_files_drift_curves_are_kept_and_drawn_again():
 
 def test_combining_continues_frames_and_time_and_keeps_ids_apart():
     from smappy.plugins.combine_files import combine
-    a = _table(frames=50, track_id=np.r_[np.zeros(100), np.arange(1, 101)].astype(np.int32),
+    a = _table(frames=50, track_id=np.r_[np.full(100, -1), np.arange(1, 101)].astype(np.int32),
                time_s=np.linspace(0, 0.49, 200))
-    b = _table(frames=30, seed=1, track_id=np.r_[np.zeros(50), np.full(150, 3)].astype(np.int32),
+    b = _table(frames=30, seed=1, track_id=np.r_[np.full(50, -1), np.full(150, 3)].astype(np.int32),
                time_s=np.linspace(0, 0.29, 200))
     s = _session(a, b, frame_time_ms=10.0)
     files = np.asarray(s.locs["filenumber"])
@@ -164,8 +164,9 @@ def test_combining_continues_frames_and_time_and_keeps_ids_apart():
     t = np.asarray(combined["time_s"])
     assert np.allclose(t[files == 1], np.asarray(b["time_s"]) + (last_a + 1 + 5) * 0.01)
     ids = np.asarray(combined["track_id"])
-    assert (ids[files == 1][:50] == 0).all()                 # "in none" stays
-    assert (ids[files == 1][50:] == 100 + 3).all()            # numbered on from 100
+    assert (ids[files == 1][:50] == -1).all()                # "in none" stays
+    # numbered on past the first file's 100 (as the file joined the table)
+    assert (ids[files == 1][50:] == 101 + 3).all()
     assert (np.asarray(combined["filenumber"]) == 0).all()
     assert len(combined.metadata["files"]) == 1
     assert combined.metadata["files"][0]["name"] == "f0 + f1"
@@ -290,7 +291,7 @@ def test_a_layer_showing_one_file_links_that_file_alone():
     assert set(np.unique(np.asarray(blinks["filenumber"]))) == {1}
     files = np.asarray(s.locs["filenumber"])
     gid = np.asarray(s.locs["group_id"])
-    assert (gid[files != 1] == 0).all() and (gid[files == 1] > 0).all()
+    assert (gid[files != 1] == -1).all() and (gid[files == 1] > 0).all()
     # switching back and forth links nothing again
     s.layers[0].set_files([1])
     assert s.layers[0].locs is blinks
@@ -333,7 +334,7 @@ def test_new_merge_settings_forget_the_files_linked_before():
     s.layers[0].locs
     assert s.tables._linked == {0}
     gid = np.asarray(s.locs["group_id"])
-    assert (gid[np.asarray(s.locs["filenumber"]) != 0] == 0).all()
+    assert (gid[np.asarray(s.locs["filenumber"]) != 0] == -1).all()
 
 
 def test_a_worker_links_the_wanted_files_one_job_at_a_time():

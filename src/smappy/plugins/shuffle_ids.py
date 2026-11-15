@@ -12,9 +12,9 @@ of the same column, drawn without replacement: the values stay the ones the
 column had, so the colour range set for it fits the shuffled column too,
 and a filter on a range of ids still means about as many ids.  SMAP
 permuted 1 to the largest id instead, which hands a column with gaps (frames,
-ROI numbers after deletions) values it never had.  An id of 0 or below --
+ROI numbers after deletions) values it never had.  An id of -1 --
 DBSCAN's noise, a localization in no ROI -- is kept as it is: it is "in
-none", not an id (SMAP set a negative one to 0).
+none", not an id (`ids.NONE`).
 
 **A new column**, ``<column>_shuffled`` by default, rather than the column
 rewritten: an id is a name other things refer to -- the region results are
@@ -35,11 +35,11 @@ from ..locs import Localizations
 
 
 def shuffle_ids(ids: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
-    """``ids`` with every id above 0 replaced through one random permutation
-    of the distinct ids; 0 and below unchanged."""
+    """``ids`` with every id replaced through one random permutation of the
+    distinct ids; -1 (`ids.NONE`, in none) unchanged."""
     ids = np.asarray(ids)
     out = ids.copy()
-    positive = ids > 0
+    positive = ids >= 0
     distinct, where = np.unique(ids[positive], return_inverse=True)
     rng = np.random.default_rng(seed)
     out[positive] = rng.permutation(distinct)[where]
@@ -75,7 +75,7 @@ class ShuffleIds(Plugin):
     changes_locs = True
     # the ids are per localization; a merged blink takes the largest (`max`)
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: ShuffleSettings) -> FormState:
         state = FormState()

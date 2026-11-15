@@ -25,7 +25,7 @@ the variance of all the frames between; with two, the frames between are
 walked one by one, which is what a state that may switch every frame needs.
 No motion blur: a frame sees the position at that frame.  In the plane
 unless *in z* is ticked.  With motion the table also carries the truth the
-tracking tools read: ``track_id_true`` (the emitter, from 1; 0 for a label
+tracking tools read: ``track_id_true`` (the emitter, from 1; -1 for a label
 that does not move) and ``state_true`` (-1 for one that does not).
 """
 from __future__ import annotations

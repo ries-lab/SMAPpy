@@ -44,8 +44,8 @@ annotates and organises ROIs; it is not the only place they can be measured.
 * **An id column** (`region_runs.ColumnRegions`; `ROIRegions` is the same
   interface over the ROIs, and `regions_of` picks one): one sort splits the table
   (`split_ids`).  Any integer column serves -- `cluster_id`, `roi_id`,
-  `channel`.  An id of 0 or below (DBSCAN's noise), or NaN, is in no region
-  and is never measured.
+  `tid`.  Every value is an id, 0 included; -1 (DBSCAN's noise, `ids.NONE`)
+  or NaN is in no region and is never measured.
 
 **Membership is the region alone**; each layer's filter then applies inside
 it, and a region left with nothing is not measured.  ROIs may overlap, so an
@@ -250,7 +250,7 @@ not narrow a region's measurement.
 
 ## Clusters
 
-A clusterer writes **`cluster_id`** (1, 2, ... by size, 0 for none) and
+A clusterer writes **`cluster_id`** (1, 2, ... by size, -1 for none) and
 **`n_in_cluster`** onto every localization, as recipes with the rule `max`
 so a blink keeps its cluster (`plugins/clusters.py`, *Find clusters*: DBSCAN,
 Voronoi or HDBSCAN).  Filtering

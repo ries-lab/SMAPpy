@@ -98,7 +98,7 @@ class TrackingAnalysis(Plugin):
     per_region = True
     # tracks are of localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def changes_locs_for(self, settings: TrackingAnalysisSettings) -> bool:
         return bool(settings.msd and settings.msd_fit.write_columns)
@@ -140,7 +140,7 @@ class TrackingAnalysis(Plugin):
         ft = None if clock else (settings.frame_time_ms or table_frame_time(locs))
         if not clock and not ft:
             raise ValueError(NO_FRAME_TIME)
-        ids = np.where(use, np.asarray(locs[column], np.int64), 0)
+        ids = np.where(use, np.asarray(locs[column], np.int64), -1)   # -1: in none
         in_3d = settings.use_z and "z_nm" in locs
         t = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"],
                    locs["z_nm"] if in_3d else None,
@@ -151,7 +151,7 @@ class TrackingAnalysis(Plugin):
         if not t.n_tracks:
             if ctx.per_region:
                 return Result(values={"n_tracks": 0}, settings=settings)
-            raise ValueError(f"no tracks: no localization has {column} above 0")
+            raise ValueError(f"no tracks: no localization has a {column} (-1 is none)")
         if ctx.stopped:
             raise Stopped("tracking analysis stopped: nothing measured")
         if "xy_err_nm" not in locs and settings.msd_fit.offset == "precisions":

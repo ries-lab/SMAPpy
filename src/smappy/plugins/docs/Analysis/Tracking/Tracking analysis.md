@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
 ---
 
@@ -217,7 +217,7 @@ consecutive localizations of a track, each at the nearest step.
 *auto* takes the first of `track_id`, `tid` and `track_id_true` the table
 has, and the list says which.  Choose another integer attribute to compare
 two linkings (Link tracks' *output attribute*), or `group_id` to treat each
-merged blink as a track.  Id 0 and below is no track.
+merged blink as a track.  An id of -1 is no track.
 
 ### msd_fit.offset
 *from the precisions* when the fitter's precisions are trustworthy (the

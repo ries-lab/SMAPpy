@@ -86,13 +86,13 @@ def test_local_maxima_does_not_depend_on_the_order_of_the_table():
 
 
 def test_frame_analysis_rejects_a_cluster_bunched_in_time_and_renumbers():
-    labels = np.array([0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3])
+    labels = np.array([-1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3])
     frame = np.array([5, 10, 300, 600, 900,            # 1: spread out
                       500, 501, 502, 503,              # 2: one twentieth
                       10, 20, 30, 40])                  # 3: all at the start
     out, rejected = frame_analysis(labels, frame, None, {0: (0, 999)})
     assert rejected == 2
-    assert list(out) == [0, 1, 1, 1, 1] + [0] * 8
+    assert list(out) == [-1, 1, 1, 1, 1] + [-1] * 8
 
 
 def test_find_clusters_keeps_the_sites_and_drops_a_sticky_spot():

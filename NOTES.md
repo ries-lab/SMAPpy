@@ -1583,7 +1583,7 @@ a moving one.
   5.5 s.  **The default is simple**: the same tracks where SPT of single
   molecules is possible, faster, and easier to reason about.  Global stays
   as the option for the crowded case, and as SMAP's behaviour.
-* **Ids.**  0 for a localization in no track and for a track below the
+* **Ids.**  -1 for a localization in no track and for a track below the
   minimum length; 1, 2, ... in the order tracks start; files always and
   channels optionally linked apart; recipes with the rule `max`, so a merged
   blink keeps its track.  The plugin links localizations, never blinks:
@@ -1715,8 +1715,7 @@ over the others -- and kept as it is.  Each of those has a cheaper answer
 inside one table, and splitting would cost every reader:
 
 * **Columns of their own.**  A column one file lacks is NaN in its rows (0
-  in an integer column, which for an id is "in none", the convention of
-  `cluster_id` and `track_id`).  What was missing is knowing it is padding:
+  in an integer column, -1 in an id column, "in none" -- `ids.NONE`).  What was missing is knowing it is padding:
   `FileInfo.columns` is what each file had when it was read, and
   `Session.files_without` the files without a column.
 * **Size.**  On disk the padding is a constant column under LZF, close to
@@ -1846,10 +1845,20 @@ measurements, four beads each) and checked by
   file's own numbers -- Imspector's, the link from a trace back to the
   instrument's record -- are `tid_file`, the shift `id_offsets` in the
   file's metadata.  The bead file's `mbm_beads` name its own numbers, so
-  *MBM drift* reads them through `file_ids.own_ids`.  Open: a region table
-  skips id 0 (`split_ids`), while `tid` 0 is a trace (*Combine files*'
-  `ALL_VALUE_IDS`); whether Imspector numbers traces from 0 is to be
-  checked on a real file.
+  *MBM drift* reads them through `file_ids.own_ids`.
+* **-1 is "in none" in every id column, and 0 an id** (2026-11, `ids.py`).
+  0 used to mean none, and every reader skipped it -- right for the ids
+  SMAPpy numbers from 1, wrong for those from elsewhere: Imspector's `tid`
+  and Picasso's picks (`pick_id`) count from 0, so the first trace and the
+  first pick of every file were never a region, never measured or
+  summarised.  Now noise, a point in no track, a row left out of merging,
+  padding of a missing id column (`concat`) are -1, and a reader asks
+  `ids.assigned` (or `>= 0`).  Ids SMAPpy numbers still start at 1, so a
+  test `> 0` on them stayed true; what had to change was every writer of
+  0 for none, every generic reader of any id column, and every `bincount`
+  over one, which -1 breaks.  Files saved before keep their 0 for none and
+  are not converted (no backwards compatibility was asked for).  Not an id
+  column: `channel` keeps 0 for "no colour" (*Assign colours*).
 
 ## Open questions
 

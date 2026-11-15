@@ -253,7 +253,7 @@ class Simulate(Plugin):
     # 3: a split camera with a dual-colour calibration drawn as calibrated
     # 4: that camera's truth in the main half's own pixels, where the
     #    two-colour fitters report positions
-    version = "4"
+    version = "5"
 
     def _sample_form(self, settings, state, single: bool) -> None:
         """*in the sample* for a one-camera spline drawn from a pupil (Zernike) calibration only

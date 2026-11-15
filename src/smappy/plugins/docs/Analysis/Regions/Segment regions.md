@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.SegmentRegions.describe, smappy.plugins.segment.candidates, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.plugins.segment.place_positions, smappy.plugins.segment.draw_values, smappy.segmentation.find_circles, smappy.segmentation.ring_kernel, smappy.segmentation.disc_kernel, smappy.segmentation.radii, smappy.segmentation.density_image, smappy.segmentation.filter_radii, smappy.segmentation.peaks, smappy.segmentation.too_close, smappy.segmentation.measure_ring, smappy.segmentation.measure_disc, smappy.segmentation.measure_beads, smappy.segmentation.mark_touching, smappy.segmentation.judge, smappy.segmentation.keep_test, smappy.segmentation.clauses, smappy.segmentation.read_positions, smappy.segmentation.fit_circle, smappy.segmentation.roundness, smappy.fiducials.find_beads, smappy.roi_manager.order.condition, smappy.roi_manager.core.segment_columns, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find, smappy.plugins.segment.learn, smappy.plugins.segment.examples_of, smappy.plugins.segment.similar_shape, smappy.plugins.segment.is_example, smappy.segmentation.measure_rows, smappy.plugins.segment.compared, smappy.plugins.segment.joined_keep, smappy.segmentation.mean_shift, smappy.segmentation.measure_at, smappy.segmentation.similarity_window, smappy.segmentation.window_condition, smappy.segmentation.similar_candidates]
 ---
 
@@ -124,7 +124,7 @@ other than to the rest) a clusterer found (`cluster_id`, from
 [Find clusters](plugin:Analysis/Regions/Find clusters) or any other) -- so the
 clusters can be looked at one by one, reviewed, excluded and annotated.
 
-It works on any attribute of whole numbers: an id of 0 or below means "in no
+It works on any attribute of whole numbers: an id of -1 means "in no
 region" and gets no ROI, and so does an id with fewer than *at least*
 localizations.  Use it when the clusters need a person's eye or a note; to
 measure every cluster, a block of a [chain](plugin:Panels/Glossary) (plugins

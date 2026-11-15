@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.tracking.link.candidates, smappy.tracking.link.link_simple, smappy.tracking.link.link_global, smappy.tracking.link.track_ids, smappy.tracking.link.link_tracks, smappy.tracking.link.score, smappy.plugins.link_tracks.LinkTracks.run, smappy.simulate.tracks.simulate_tracks]
 ---
 
@@ -11,7 +11,7 @@ localized again in frame after frame as it moves, and its
 time order -- shows how it moves: freely, slowly, confined, or switching
 between the two.  This plugin decides which localizations belong to one
 particle and names each track, writing two attributes onto the table:
-`track_id` (1, 2, ... in the order the tracks start, 0 for a localization
+`track_id` (1, 2, ... in the order the tracks start, -1 for a localization
 in no track) and `track_length` (how many localizations the track has).
 
 Here the tracks are fitted from single molecules, so they are **sparse**:
@@ -66,10 +66,10 @@ frame, truth = np.asarray(locs["frame"]), np.asarray(locs["track_id_true"])
 
 def draw(ax, ids, title):
     order = np.lexsort((frame, ids))
-    for t in np.unique(ids[ids > 0]):
+    for t in np.unique(ids[ids >= 0]):
         rows = order[ids[order] == t]
         ax.plot(x[rows] / 1000, y[rows] / 1000, lw=0.8, color=f"C{t % 10}")
-    ax.scatter(x[ids == 0] / 1000, y[ids == 0] / 1000, s=4, c="0.5", zorder=3)
+    ax.scatter(x[ids < 0] / 1000, y[ids < 0] / 1000, s=4, c="0.5", zorder=3)
     ax.set_title(title, fontsize=9)
     ax.set_aspect("equal")
     ax.set_xlabel("x (µm)")
@@ -91,7 +91,7 @@ with the smallest sum of squared jumps.
 
 **3. Tracks.**  The chains of links are numbered 1, 2, ... in the order
 they start.  A chain of fewer than *minimum length* localizations -- a lone
-localization included -- gets 0.
+localization included -- gets -1.
 
 ```figure Simulated tracks over 60 frames, the fluorophores dark in 15% of the frames for 1.5 frames on average. Left, the truth; middle, linked without memory: every dark frame cuts a track in two (and lone localizations, grey, are in none); right, with memory 2 the dark frames are bridged and most tracks come out whole; where three particles cross (bottom left) some are still mixed up.
 fig.set_size_inches(9, 3.4)
@@ -270,7 +270,7 @@ Crocker and Grier's code (`mytrack.m`).  The main changes:
   invites wrong links.
 * Every file is linked on its own, and each channel with *per channel*;
   SMAP linked all, per layer, or per channel of one file.
-* A localization in a track shorter than the minimum gets `track_id` 0, and
+* A localization in a track shorter than the minimum gets `track_id` -1, and
   `track_length` is written with the ids in one run.
 
 ## References

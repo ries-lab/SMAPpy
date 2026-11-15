@@ -626,6 +626,6 @@ def test_rows_with_group_use_zero_are_in_no_group_and_the_rest_merge_without_the
     assert list(grouped["n_in_group"]) == [3, 2]
     assert "group_use" not in grouped
     assert list(group_index) == [0, 0, 1, 1, 1, 0, 0, 2, 2, 0, 0]
-    assert list(locs["group_id"]) == list(group_index)
+    assert list(locs["group_id"]) == [g if g else -1 for g in group_index]   # -1: none
     assert list(locs["n_in_group"]) == [0, 0, 3, 3, 3, 0, 0, 2, 2, 0, 0]
     assert len(locs) == 11

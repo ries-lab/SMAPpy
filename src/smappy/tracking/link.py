@@ -41,7 +41,7 @@ option of a cost scaled by the precisions was left out: at the jumps and
 densities where the choice matters at all the two linkers already agree.
 
 Both write the same ids through `track_ids`: tracks 1, 2, ... in the order
-they start, 0 for a localization in a track shorter than the minimum
+they start, -1 for a localization in a track shorter than the minimum
 (a lone one included), and the localizations in each track.
 """
 from __future__ import annotations
@@ -171,10 +171,10 @@ def link_global(c: Candidates, frame, n: int, max_jump_nm: float,
 
 
 def track_ids(nxt: np.ndarray, frame, min_length: int = 2) -> Tuple[np.ndarray, np.ndarray]:
-    """``track_id`` (1, 2, ... in the order the tracks start; 0 for a track
-    of fewer than ``min_length`` localizations) and ``track_length`` (the
-    localizations of the track, 0 where the id is 0), from each point's
-    successor."""
+    """``track_id`` (1, 2, ... in the order the tracks start; -1, in none,
+    for a track of fewer than ``min_length`` localizations) and
+    ``track_length`` (the localizations of the track, 0 where it is in none),
+    from each point's successor."""
     nxt = np.asarray(nxt, np.int64)
     frame = np.asarray(frame, np.int64)
     n = len(nxt)
@@ -191,10 +191,10 @@ def track_ids(nxt: np.ndarray, frame, min_length: int = 2) -> Tuple[np.ndarray, 
     sizes = np.bincount(head, minlength=n)
     heads = np.flatnonzero((pred < 0) & (sizes >= max(int(min_length), 1)))
     heads = heads[np.lexsort((heads, frame[heads]))]
-    rank = np.zeros(n, np.int64)
+    rank = np.full(n, -1, np.int64)            # -1: in no track (`ids.NONE`)
     rank[heads] = np.arange(1, len(heads) + 1)
     track = rank[head]
-    length = np.where(track > 0, sizes[head], 0)
+    length = np.where(track >= 0, sizes[head], 0)
     return track, length
 
 
@@ -219,7 +219,7 @@ def link_tracks(x, y, frame, z=None, *, max_jump_nm: float = 500.0, memory: int 
     ok = np.isfinite(x) & np.isfinite(y) & (groups >= 0)
     if zz is not None:
         ok &= np.isfinite(zz)
-    track = np.zeros(n, np.int64)
+    track = np.full(n, -1, np.int64)
     length = np.zeros(n, np.int64)
     found = np.unique(groups[ok])
     offset = 0
@@ -239,7 +239,7 @@ def link_tracks(x, y, frame, z=None, *, max_jump_nm: float = 500.0, memory: int 
         else:
             nxt = link_global(c, f, len(rows), max_jump_nm, part)
         t, ln = track_ids(nxt, f, min_length)
-        t[t > 0] += offset
+        t[t >= 0] += offset                    # ids from 1: the next group's above
         offset = max(offset, int(t.max(initial=0)))
         track[rows], length[rows] = t, ln
     if progress is not None:
@@ -249,11 +249,11 @@ def link_tracks(x, y, frame, z=None, *, max_jump_nm: float = 500.0, memory: int 
 
 def true_links(truth, frame) -> Tuple[np.ndarray, np.ndarray]:
     """The links of the true tracks among the points: each point to the next
-    one of its track (``truth`` > 0), however many frames apart."""
+    one of its track (``truth`` 0 or above), however many frames apart."""
     truth = np.asarray(truth, np.int64)
     frame = np.asarray(frame, np.int64)
     order = np.lexsort((frame, truth))
-    order = order[truth[order] > 0]
+    order = order[truth[order] >= 0]
     same = truth[order][1:] == truth[order][:-1]
     return order[:-1][same], order[1:][same]
 
@@ -277,9 +277,9 @@ def score(track_id, truth, frame) -> Dict[str, float]:
     true_keys, found_keys = key(ta, tb), key(fa, fb)
     hit = np.isin(found_keys, true_keys)
     # whole: every member of a true track in one found track of the same size
-    real = truth > 0
+    real = truth >= 0
     t_size = np.bincount(truth[real])
-    f_size = np.bincount(track_id[track_id > 0]) if (track_id > 0).any() else np.zeros(1, int)
+    f_size = np.bincount(track_id[track_id >= 0]) if (track_id >= 0).any() else np.zeros(1, int)
     rows = np.flatnonzero(real)
     t, f = truth[rows], track_id[rows]
     order = np.lexsort((f, t))
@@ -289,7 +289,7 @@ def score(track_id, truth, frame) -> Dict[str, float]:
     first_f = f[starts]
     last_f = f[starts + counts - 1]
     tracks = t[starts]
-    whole = ((first_f == last_f) & (first_f > 0)
+    whole = ((first_f == last_f) & (first_f >= 0)
              & (f_size[np.minimum(first_f, len(f_size) - 1)] == counts))
     eligible = t_size[tracks] >= 2
     return {"links_true": float(len(ta)), "links_made": float(len(fa)),

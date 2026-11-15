@@ -119,7 +119,7 @@ class RegionsToColumn(Plugin):
     grouping = "ungrouped"
     # 2: roi_id is the ROI's own number, kept when others go; 3: with nothing
     # named, the ROIs' keywords too (`keyword_columns`)
-    version = "3"
+    version = "4"
 
     def describe(self, ctx, settings) -> FormState:
         """*results from*: the evaluations the session has."""
@@ -156,7 +156,7 @@ class RegionsToColumn(Plugin):
                     values = rows_values(region_results.rows(ctx, ev), measured)
             elif not names:
                 # the numbers, and what the user said of the ROIs: which are
-                # used is `roi_id` above 0, the keywords a column a list
+                # used is a `roi_id` (-1: none), the keywords a column a list
                 own = own_rows(ctx.rois)
                 said = sorted({k for r in own for k in r if k.endswith(KEYWORD)})
                 if said:

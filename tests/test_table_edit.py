@@ -26,7 +26,7 @@ def table(n=600, seed=0):
         "frame": np.arange(n, dtype=np.int64),
         "photons": rng.uniform(500, 5000, n).astype(np.float32),
         "xy_err_nm": rng.uniform(5, 20, n).astype(np.float32),
-        "cluster_id": np.repeat(np.arange(0, 30), n // 30).astype(np.int64)})
+        "cluster_id": np.repeat(np.arange(-1, 29), n // 30).astype(np.int64)})
 
 
 def test_a_rename_in_an_expression_touches_the_column_only():
@@ -160,7 +160,7 @@ def test_one_row_per_id_per_file_weighted_by_precision_and_none_kept_or_removed(
         "xy_err_nm": np.concatenate([err, np.full(noise, 10.0)]).astype(np.float32),
         "photons": np.full(rows.size + noise, 100.0, np.float32),
         "frame": np.arange(rows.size + noise, dtype=np.int64),
-        "cluster_id": np.concatenate([rows, np.zeros(noise, int)]).astype(np.int64),
+        "cluster_id": np.concatenate([rows, np.full(noise, -1)]).astype(np.int64),
         # the second half of each cluster in another file
         "filenumber": np.concatenate([np.tile(np.repeat([0, 1], n_per // 2), len(ids)),
                                       np.zeros(noise, int)]).astype(np.int32)})
@@ -178,7 +178,7 @@ def test_one_row_per_id_per_file_weighted_by_precision_and_none_kept_or_removed(
         assert np.isclose(np.asarray(removed["x_nm"])[row][0], expected, rtol=1e-5)
     assert removed["cluster_id"].dtype.kind == "i"
     # the unassigned rows are themselves, one each
-    alone = np.asarray(kept["cluster_id"]) == 0
+    alone = np.asarray(kept["cluster_id"]) == -1
     assert alone.sum() == noise and np.all(np.asarray(kept[MERGED])[alone] == 1)
     assert np.allclose(np.sort(np.asarray(kept["x_nm"])[alone]),
                        np.sort(np.asarray(locs["x_nm"])[-noise:]))

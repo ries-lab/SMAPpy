@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.mbm.measurements_of, smappy.mbm.choose, smappy.mbm.drift_of, smappy.mbm.replace_correction, smappy.beads.select_beads, smappy.beads.fit_offsets_and_spline, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.io.msr.bead_table, smappy.drift.Drift.at, smappy.simulate.beads.simulate_bead_tracks, smappy.beads.bead_values]
 ---
 

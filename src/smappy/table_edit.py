@@ -205,7 +205,7 @@ def collapse_index(locs: Localizations, column: str, unassigned: str = "keep"
     One group per distinct ``(filenumber, channel, id)``: an id numbered
     per file meets the same number in the next file, and a cluster that
     spans both channels becomes one row per channel rather than a row whose
-    channel is 1.5.  A row whose id is 0 or below is in none: with
+    channel is 1.5.  A row whose id is -1 (`ids.NONE`) is in none: with
     ``unassigned`` ``"keep"`` it is a row of its own, with ``"remove"`` it
     is not in the result.
     """
@@ -217,7 +217,7 @@ def collapse_index(locs: Localizations, column: str, unassigned: str = "keep"
         raise ValueError(f"{column} is not an attribute of whole numbers: ids are")
     ids = ids.astype(np.int64)
     n = len(ids)
-    has = ids > 0
+    has = ids >= 0
     rows = np.arange(n) if unassigned == "keep" else np.flatnonzero(has)
     keys = [ids]
     for name in ("filenumber", "channel"):
@@ -225,7 +225,7 @@ def collapse_index(locs: Localizations, column: str, unassigned: str = "keep"
             keys.append(np.asarray(locs[name], np.int64))
     if unassigned == "keep":
         # each unassigned row its own key: a negative number no id has
-        alone = np.where(has, 0, -1 - np.arange(n, dtype=np.int64))
+        alone = np.where(has, 0, -2 - np.arange(n, dtype=np.int64))
         keys[0] = np.where(has, ids, alone)
     stacked = np.stack([k[rows] for k in keys], axis=1)
     _, inverse = np.unique(stacked, axis=0, return_inverse=True)
@@ -270,7 +270,7 @@ def collapse(locs: Localizations, column: str, unassigned: str = "keep",
     columns[MERGED] = columns.pop("n_in_group")
     columns.pop("group_id", None)
     columns.pop(USE, None)
-    # the id itself, exactly; an unassigned row keeps its own 0 or below
+    # the id itself, exactly; an unassigned row keeps its -1
     columns[column] = ids[first]
     metadata = dict(out.metadata)
     metadata.pop("grouped", None)

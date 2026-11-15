@@ -197,8 +197,8 @@ papers and in other software.
   cluster that an id attribute such as `cluster_id` names.
 * **id attribute** (also called an id column): an attribute of whole
   numbers that names regions, the
-  localizations sharing a value above 0 being one region -- `cluster_id`,
-  `tid`, `track_id`.
+  localizations sharing a value being one region -- `cluster_id`,
+  `tid`, `track_id`.  Every value is an id, 0 included; -1 is "in none".
 * **region table**: what was measured in a set of regions, a row per region
   and a column per number.
 * **per-region steps**: plugins run once in every region, what each measures

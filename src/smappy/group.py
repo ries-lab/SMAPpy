@@ -188,14 +188,15 @@ DROP_ON_GROUPING = ("logl",)
 
 # Columns grouping itself writes, on both tables.  `n_in_group` is the on-time
 # in frames and `group_id` says which group a localization went into -- 1-based,
-# as `connect` numbers them, and on the grouped table simply its own row.
+# as `connect` numbers them, and on the grouped table simply its own row; -1
+# for a row in none (`ids.NONE`).
 # Keeping the id on the *ungrouped* table is what makes a column computed later
 # combinable without linking again: the expensive part of grouping is the walk,
 # and it has already been done.  It costs 4 bytes a localization.
 GROUP_COLUMNS = ("group_id", "n_in_group")
 
 # Which localizations take part in grouping: where the table has the column,
-# a row with 0 there is in no group -- `group_id` 0, in no row of the grouped
+# a row with 0 there is in no group -- `group_id` -1, in no row of the grouped
 # table -- and stays in the localizations, for every layer that shows them.
 # Usually absent, and then every row is grouped.  Made by the user, as a
 # recipe (`group_use = trace_index > 20`: a MINFLUX trace merged without its
@@ -813,7 +814,8 @@ def attach(locs: Localizations, grouped: Localizations,
     would cost every layer its state.
     """
     gi = np.asarray(group_index, np.int64)
-    locs.columns["group_id"] = gi.astype(np.int32)
+    # the index is 1-based with 0 for "left out"; the column says -1 there
+    locs.columns["group_id"] = np.where(gi > 0, gi, -1).astype(np.int32)
     counts = np.asarray(grouped["n_in_group"])
     # a row left out of grouping (`USE`) is in no group, of no size
     locs.columns["n_in_group"] = np.where(gi > 0, counts[np.maximum(gi, 1) - 1]
@@ -840,7 +842,7 @@ def last_frames(locs: Localizations, ids) -> np.ndarray:
     frame = np.asarray(locs["frame"], np.int64)
     size = max(int(gid.max()) if gid.size else 0, int(ids.max()) if ids.size else 0) + 1
     last = np.full(size, -1, np.int64)
-    used = gid > 0                          # 0: in no blink (`USE`, not linked yet)
+    used = gid > 0                          # -1: in no blink (`USE`, not linked yet)
     np.maximum.at(last, gid[used], frame[used])
     out = np.full(len(ids), -1, np.int64)
     valid = ids > 0
@@ -930,7 +932,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     and its `frame` is only the rank in time, so linking by distance and
     consecutive frames would cut a trace wherever it wandered 50 nm.
 
-    Rows with 0 in `USE` are left out: group id 0, no row of the grouped
+    Rows with 0 in `USE` are left out: group id -1, no row of the grouped
     table (a trace or blink of none of them is not there at all).
     """
     settings = settings or GroupSettings()

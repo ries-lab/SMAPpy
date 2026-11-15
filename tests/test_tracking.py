@@ -82,19 +82,19 @@ def test_the_global_assignment_resolves_a_crossing_the_simple_linker_gets_wrong(
     y = np.zeros(4)
     simple, _ = link_tracks(x, y, frame, max_jump_nm=130.0, memory=0, algorithm="simple")
     best, _ = link_tracks(x, y, frame, max_jump_nm=130.0, memory=0, algorithm="global")
-    assert simple.tolist() == [0, 1, 1, 0]
+    assert simple.tolist() == [-1, 1, 1, -1]
     assert best[0] == best[2] > 0 and best[1] == best[3] > 0 and best[0] != best[1]
 
 
-def test_short_tracks_and_lone_localizations_get_track_id_0():
+def test_short_tracks_and_lone_localizations_are_in_no_track():
     # successors: 0->1->2 (three), 3->4 (two), 5 alone
     nxt = np.array([1, 2, -1, 4, -1, -1])
     frame = np.array([0, 1, 2, 5, 6, 0])
     track, length = track_ids(nxt, frame, min_length=3)
-    assert track.tolist() == [1, 1, 1, 0, 0, 0]
+    assert track.tolist() == [1, 1, 1, -1, -1, -1]
     assert length.tolist() == [3, 3, 3, 0, 0, 0]
     track, length = track_ids(nxt, frame, min_length=2)
-    assert track.tolist() == [1, 1, 1, 2, 2, 0]
+    assert track.tolist() == [1, 1, 1, 2, 2, -1]
     assert length.tolist() == [3, 3, 3, 2, 2, 0]
 
 
@@ -110,14 +110,14 @@ def test_groups_are_linked_apart():
     # a group below 0 is in no track
     track, _ = link_tracks(x, np.zeros(4), frame, max_jump_nm=50.0,
                            groups=np.array([0, 0, -1, -1]))
-    assert track.tolist() == [1, 1, 0, 0]
+    assert track.tolist() == [1, 1, -1, -1]
 
 
 def test_link_in_3d_uses_the_jump_in_z():
     x = np.zeros(2)
     frame = np.array([0, 1])
     z = np.array([0.0, 400.0])
-    assert link_tracks(x, x, frame, z, max_jump_nm=200.0)[0].tolist() == [0, 0]
+    assert link_tracks(x, x, frame, z, max_jump_nm=200.0)[0].tolist() == [-1, -1]
     assert link_tracks(x, x, frame, None, max_jump_nm=200.0)[0].tolist() == [1, 1]
 
 
@@ -130,10 +130,11 @@ def test_the_plugin_writes_track_id_and_track_length_for_the_selection():
     result = plugin.run(Context(locs=locs, selection=Selection(keep)), settings)
     out = result.locs
     track, length = np.asarray(out["track_id"]), np.asarray(out["track_length"])
-    assert (track[~keep] == 0).all()
+    assert (track[~keep] == -1).all()
     assert (track[keep] > 0).mean() > 0.9
     assert (length[track > 0] >= 3).all()
-    assert (np.bincount(track)[track[track > 0]] == length[track > 0]).all()
+    member = track >= 0
+    assert (np.bincount(track[member])[track[member]] == length[member]).all()
     assert {r["field"]: r["grouped"] for r in recipes(out)} == {
         "track_id": "max", "track_length": "max"}
     assert "tracks" in result.text
@@ -157,9 +158,10 @@ def test_linking_a_second_file_keeps_the_first_files_tracks():
     assert np.array_equal(track[files == 0], kept)
     assert track[files == 1][track[files == 1] > 0].min() == kept.max() + 1
     # the same tracks in both: the second file's are the first's, shifted
-    shifted = np.where(track[files == 1] > 0, track[files == 1] - kept.max(), 0)
+    shifted = np.where(track[files == 1] > 0, track[files == 1] - kept.max(), -1)
     assert np.array_equal(shifted, kept)
-    assert (np.bincount(track)[track[track > 0]] == length[track > 0]).all()
+    member = track >= 0
+    assert (np.bincount(track[member])[track[member]] == length[member]).all()
     assert "of other files or channels kept" in second.text
 
 

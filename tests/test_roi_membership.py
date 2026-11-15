@@ -339,6 +339,6 @@ def test_regions_to_column_writes_the_used_tracks_their_range_and_keywords():
     result = RegionsToColumn().run(session.context(), RegionColumnSettings())
     locs = result.locs
     roi_id = np.asarray(locs["roi_id"])
-    assert roi_id.tolist() == [0, 0] + [one.number] * 5 + [0] * 13
+    assert roi_id.tolist() == [-1, -1] + [one.number] * 5 + [-1] * 13
     keyword = np.asarray(locs["quality_keyword"])
     assert np.all(keyword[2:7] == 2) and np.isnan(keyword[[0, 1, 7, 12]]).all()

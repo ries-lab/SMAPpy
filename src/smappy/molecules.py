@@ -105,7 +105,7 @@ def events_in(frame: np.ndarray, gap: int = EVENT_GAP) -> np.ndarray:
 
 def centres(points: np.ndarray, frame: np.ndarray, labels: np.ndarray,
             gap: int = EVENT_GAP) -> Dict[str, np.ndarray]:
-    """One molecule per cluster (``labels`` > 0) at the mean of its
+    """One molecule per cluster (``labels`` 0 and up; -1 none) at the mean of its
     localizations: RESI's centres (Picasso's `find_cluster_centers`).
 
     ``points`` (n, 2) or (n, 3) nm.  Each value an array over the clusters
@@ -117,7 +117,7 @@ def centres(points: np.ndarray, frame: np.ndarray, labels: np.ndarray,
     points = np.asarray(points, float)
     frame = np.asarray(frame, np.int64)
     labels = np.asarray(labels, np.int64)
-    use = np.flatnonzero(labels > 0)
+    use = np.flatnonzero(labels >= 0)
     order = use[np.lexsort((frame[use], labels[use]))]
     lab = labels[order]
     ids, starts, n = np.unique(lab, return_index=True, return_counts=True)
@@ -427,10 +427,10 @@ def g5m_clusters(points: np.ndarray, lp: np.ndarray, frame: np.ndarray,
                  max_locs: Optional[int] = None,
                  progress: Optional[Callable[[float], None]] = None
                  ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
-    """G5M in every cluster (``labels`` > 0): the molecules' values,
-    concatenated over the clusters with ``label`` their cluster, and each
-    localization's molecule, 1, 2, ... over the whole table (0: none -- in
-    no cluster, or in one where nothing was fitted).
+    """G5M in every cluster (``labels`` 0 and up; -1 none): the molecules'
+    values, concatenated over the clusters with ``label`` their cluster, and
+    each localization's molecule, 1, 2, ... over the whole table (-1: none --
+    in no cluster, or in one where nothing was fitted).
 
     A cluster with more than ``max_locs`` localizations is passed over
     (Picasso's *max locs per cluster*: a fiducial)."""
@@ -440,12 +440,12 @@ def g5m_clusters(points: np.ndarray, lp: np.ndarray, frame: np.ndarray,
     lp = np.asarray(lp, float)
     if lp.ndim == 1:
         lp = np.repeat(lp[:, None], d, axis=1)
-    use = np.flatnonzero(labels > 0)
+    use = np.flatnonzero(labels >= 0)
     order = use[np.argsort(labels[use], kind="stable")]
     ids, starts = np.unique(labels[order], return_index=True)
     bounds_ = np.r_[starts, len(order)]
     parts = []
-    molecule = np.zeros(len(points), np.int64)
+    molecule = np.full(len(points), -1, np.int64)
     next_id = 1
     for c, cluster in enumerate(ids):
         rows = order[bounds_[c]:bounds_[c + 1]]
@@ -475,11 +475,11 @@ def g5m_clusters(points: np.ndarray, lp: np.ndarray, frame: np.ndarray,
 
 
 def renumber(molecule: np.ndarray, kept: np.ndarray) -> np.ndarray:
-    """Molecule numbers (1, 2, ...; 0 none) with those not ``kept`` (a mask
-    over 1..m) set to 0 and the rest numbered again in order."""
+    """Molecule numbers (1, 2, ...; -1 none) with those not ``kept`` (a mask
+    over 1..m) set to -1 and the rest numbered again in order."""
     molecule = np.asarray(molecule, np.int64)
     kept = np.r_[False, np.asarray(kept, bool)]
-    new = np.zeros(len(kept), np.int64)
+    new = np.full(len(kept), -1, np.int64)
     new[kept] = np.arange(1, int(kept.sum()) + 1)
-    return new[molecule]
+    return np.where(molecule >= 0, new[np.maximum(molecule, 0)], -1)
 

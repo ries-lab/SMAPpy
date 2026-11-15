@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.plugins.simulate.Simulate.run, smappy.plugins.simulate.Simulate.describe, smappy.plugins.simulate.preset_values, smappy.plugins.simulate.component_state, smappy.simulate.scene.scene_truth, smappy.simulate.scene.active, smappy.simulate.scene.photophysics, smappy.simulate.scene.component_labels, smappy.simulate.scene.motion, smappy.simulate.structure.Structure.sample, smappy.simulate.structure._placements, smappy.simulate.kinetics.label, smappy.simulate.kinetics.blink, smappy.simulate.kinetics.off_time_for, smappy.simulate.kinetics.expected_blinks, smappy.simulate.kinetics._spread, smappy.simulate.kinetics.emission, smappy.simulate.localizations.drift_trace, smappy.simulate.localizations.localizations, smappy.simulate.localizations.mortensen, smappy.simulate.localizations.close_groups, smappy.simulate.camera.render, smappy.simulate.camera.camera_truth, smappy.simulate.camera.astigmatic_sigmas, smappy.simulate.source.write_recipe, smappy.simulate.source.dual_of, smappy.simulate.camera.split_layout, smappy.simulate.camera.psf_problem, smappy.simulate.camera.fourpi_model, smappy.simulate.camera.closed_form_fourpi, smappy.simulate.camera.cavity_phases, smappy.simulate.source.fourpi_path, smappy.fourpi.add_frames, smappy.simulate.camera.spline_for]
 ---
 

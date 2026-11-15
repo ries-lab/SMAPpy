@@ -869,7 +869,8 @@ class Assistant:
 
     @tool("The localizations' values of some attributes, as numbers: for each "
           "column how many, how many distinct (n_unique: the clusters or tracks "
-          "an id column such as cluster_id names), min, max, mean, median, std "
+          "an id column such as cluster_id names; -1 is none, counted in "
+          "n_none), min, max, mean, median, std "
           "and a histogram.  Which rows: by default those the layer shows -- its "
           "filter, cut to the ROI drawn in the 2D view (session_state's 'roi') "
           "and the 3D box, exactly what a plugin run on the layer reads; "
@@ -919,7 +920,7 @@ class Assistant:
         drawn = []
         for column in columns:
             v = np.asarray(locs[column])[mask]
-            entry, hist = _column_values(v, bins, range)
+            entry, hist = _column_values(v, bins, range, column)
             if values:
                 entry["values"] = _plain(v.tolist())
             out["columns"][column] = entry
@@ -1573,11 +1574,13 @@ class Assistant:
         return [p.as_dict() for p in self.proposals]
 
 
-def _column_values(v: np.ndarray, bins: int, span=None):
+def _column_values(v: np.ndarray, bins: int, span=None, name: str = ""):
     """One column's statistics and histogram, for read_values: ``(entry,
     (counts, edges))``.  An integer column with few distinct values -- frames
     of a short movie, a channel -- gets a bin per value, so a count is a
-    count of that value and not of a bin straddling two."""
+    count of that value and not of a bin straddling two.  In an id column
+    (``name``, `ids.is_id`) ``n_unique`` counts the ids, not -1 ("in none"),
+    and ``n_none`` the rows in none."""
     entry: Dict[str, Any] = {"n": int(v.size)}
     numeric = np.issubdtype(v.dtype, np.number) or v.dtype == bool
     if not numeric:
@@ -1593,6 +1596,10 @@ def _column_values(v: np.ndarray, bins: int, span=None):
         return entry, None
     distinct = np.unique(finite)
     entry["n_unique"] = int(distinct.size)
+    from ..ids import is_id
+    if name and is_id(name):
+        entry["n_unique"] = int((distinct >= 0).sum())
+        entry["n_none"] = int((finite < 0).sum())
     entry.update({k: round(float(f(finite)), 6) for k, f in (
         ("min", np.min), ("max", np.max), ("mean", np.mean),
         ("median", np.median), ("std", np.std))})

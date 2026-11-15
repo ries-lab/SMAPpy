@@ -677,7 +677,7 @@ when it is done.
 
 **Leaving localizations out of the merge.**  Where the table has an attribute
 `group_use`, a localization with 0 there takes no part in merging: it is in
-no blink (`group_id` 0, `n_in_group` 0), a blink or trace of nothing but
+no blink (`group_id` -1, `n_in_group` 0), a blink or trace of nothing but
 such localizations is not in the merged table at all, and the rest are
 merged without it.  It stays in the localizations, for every layer that
 shows them and every plugin that reads them.  [Math Parser](plugin:Analysis/Process/Math Parser)

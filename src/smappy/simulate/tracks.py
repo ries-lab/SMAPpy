@@ -27,7 +27,7 @@ badly fitted: those are the frames a linker has to bridge.  So the model is:
   ``xy_err_nm`` (and ``z_err_nm``); optionally spurious localizations at
   ``noise_density_um2`` per frame, uniform over the field, in no track.
 
-The truth is ``track_id_true`` (1, 2, ...; 0 for a spurious localization)
+The truth is ``track_id_true`` (1, 2, ...; -1 for a spurious localization)
 and ``state_true`` (the state at that frame, -1 for spurious).  No motion
 blur and no two particles merged into one spot: what is simulated is what a
 linker is given, not the camera.
@@ -134,7 +134,7 @@ def simulate_tracks(settings: Optional[TrackSimulationSettings] = None,
                                 + ([rng.uniform(-s.z_range_nm / 2, s.z_range_nm / 2,
                                                 (n_noise, 1))] if s.use_z else []))
         xyz = np.concatenate([xyz, noise])
-        truth = np.concatenate([truth, np.zeros(n_noise, np.int64)])
+        truth = np.concatenate([truth, np.full(n_noise, -1, np.int64)])
         state = np.concatenate([state, np.full(n_noise, -1)])
 
     order = np.argsort(frame, kind="stable")

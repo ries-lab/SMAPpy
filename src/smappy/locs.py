@@ -340,9 +340,11 @@ def valid(locs: Localizations, max_fit_distance: Optional[float] = None
 def concat(tables: "Sequence[Localizations]") -> Localizations:
     """Stack tables that need not share columns; a missing one is NaN.
 
-    Integer columns missing from a table (``frame``, ids) become 0 there, so
-    they stay integer.  Metadata comes from the first table.
+    Integer columns missing from a table stay integer: an id (`ids.is_id`)
+    is -1 there, in none, and any other (``frame``, a flag) 0.  Metadata
+    comes from the first table.
     """
+    from .ids import NONE, is_id
     tables = [t for t in tables if len(t)]
     if not tables:
         return Localizations({}, {})
@@ -353,9 +355,11 @@ def concat(tables: "Sequence[Localizations]") -> Localizations:
     for name in names:
         parts = []
         dtype = np.result_type(*[np.asarray(t[name]).dtype for t in tables if name in t])
-        fill = 0 if dtype.kind in "iu" else np.nan
+        fill = (NONE if is_id(name) else 0) if dtype.kind in "iu" else np.nan
+        if fill == NONE and dtype.kind == "u":
+            dtype = np.result_type(dtype, np.int64) if dtype.itemsize >= 4 else np.int32
         if dtype.kind in "iu" and any(name not in t for t in tables):
-            pass                      # zeros keep the column integer
+            pass                      # keep the column integer
         elif fill is np.nan and dtype.kind not in "f":
             dtype = np.float32
         for t in tables:

@@ -386,6 +386,12 @@ What a plugin gets wrong without it:
   it, and name the columns the table *does* have when one is missing.
 * A column that needs a rule for grouping is a recipe (`metadata["derived"]`),
   not plain data: `math_parser.py`.
+* **An id column's "none" is -1, and 0 is an id** (`smappy/ids.py`: `NONE`,
+  `assigned`, `is_id`): DBSCAN's noise, a point in no track, a row left out
+  of merging are -1; MINFLUX's `tid` and Picasso's picks count from 0.  Ask
+  `assigned` (or `>= 0`), never `> 0`; mask with -1, never 0; and no
+  `bincount` over a column that may hold -1.  Ids SMAPpy numbers still
+  start at 1 (`group_id - 1` is the grouped row).
 
 ## Tests
 

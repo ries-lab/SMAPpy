@@ -246,7 +246,7 @@ class Tables:
     their `group_id` numbers run on from one file to the next, so the ids
     written onto the localizations stay those of the grouped table's rows as
     files are added.  The localizations of files not linked yet have
-    `group_id` 0.  A table of one file, one that still grows and one cut from
+    `group_id` -1, in none (`ids.NONE`).  A table of one file, one that still grows and one cut from
     another (``link``) are linked whole, as before.
     """
 
@@ -483,7 +483,7 @@ class Tables:
         # new arrays, never written into: a render thread may be reading the
         # ones there are (`ViewState.snapshot`)
         gid = (np.array(self.locs["group_id"], np.int32) if "group_id" in self.locs
-               else np.zeros(n, np.int32))
+               else np.full(n, -1, np.int32))
         tables = [] if self._grouped is None else [self._grouped.locs]
         on = None
         for number, rows, table, index in pieces:
@@ -492,7 +492,7 @@ class Tables:
                                          + base).astype(np.int32)
             index = np.asarray(index, np.int64)
             grouped_row = index > 0         # 0: left out of grouping (`group.USE`)
-            gid[rows] = np.where(grouped_row, index + base, 0)
+            gid[rows] = np.where(grouped_row, index + base, -1)
             counts = np.asarray(table["n_in_group"])
             if on is None:
                 on = (np.array(self.locs["n_in_group"], counts.dtype)

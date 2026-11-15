@@ -411,7 +411,7 @@ class SegmentRegions(SegmenterPlugin):
     grouping = "ungrouped"
     # 2: the circle template (ring or disc, over a range of radii) and keep
     # replace the ring template and density peaks; beads; positions
-    version = "2"
+    version = "3"
 
     def describe(self, ctx: Optional[Context], settings: SegmentSettings) -> FormState:
         """Only the chosen method's part; the presets there are; the values

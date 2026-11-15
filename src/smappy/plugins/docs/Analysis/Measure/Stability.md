@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.stability.grid_step, smappy.stability.resample, smappy.stability.bead_traces, smappy.stability.combine, smappy.stability.longest_run, smappy.stability.highpass, smappy.stability.smooth, smappy.stability.spectrum, smappy.stability.cumulative_rms, smappy.stability.peak_amplitude, smappy.stability.peak_frequency, smappy.stability.peaks, smappy.stability.vibration_rms, smappy.stability.analyse, smappy.stability.pooled, smappy.stability.averaging_points, smappy.stability.runs_of, smappy.stability.allan_sums, smappy.stability.Scatter, smappy.stability.scatter, smappy.stability.pooled_scatter, smappy.plugins.stability.Stability.run]
 ---
 
@@ -283,7 +283,7 @@ slow one.
 Any integer attribute whose value is the same on one bead's localizations:
 `track_id` from Link tracks (link with a generous *memory*, so a missed
 frame does not split a bead), `bead_true` of a simulation, or `tid` from a
-MINFLUX file.  Ids of 0 and below are not beads.
+MINFLUX file.  An id of -1 is no bead.
 
 ### traces
 *each bead* to see whether all beads agree; *the mean over beads* for the

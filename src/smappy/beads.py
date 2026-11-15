@@ -352,7 +352,7 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     """Choose the beads and fit the drift they agree on.
 
     ``t`` (n,) times (s, or frames), ``positions`` (n, n_axes) nm, ``bead``
-    (n,) an id per point (ids below 1 are no bead).  ``names`` per distinct
+    (n,) an id per point (-1, `ids.NONE`, is no bead).  ``names`` per distinct
     id in sorted order (default the ids); ``knot`` the spline's spacing in
     the units of ``t``; ``rule`` default `MadRule()`; ``overrides`` by name,
     True to use a bead whatever the rule says, False never to; ``candidates``
@@ -371,11 +371,11 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     if p.ndim == 1:
         p = p[:, None]
     bead = np.asarray(bead, np.int64)
-    keep = bead > 0
+    keep = bead >= 0                       # -1: no bead (`ids.NONE`)
     t, p, bead = t[keep], p[keep], bead[keep]
     w = None if weights is None else np.asarray(weights, float)[keep]
     if not len(t):
-        raise ValueError("no beads: no point has a bead id above 0")
+        raise ValueError("no beads: no point has a bead id (-1 is none)")
     ids, index = np.unique(bead, return_inverse=True)
     n = len(ids)
     names = [str(i) for i in ids] if names is None else [str(x) for x in names]
@@ -475,7 +475,7 @@ def bead_values(beads: BeadSet, axes: Sequence[str]) -> Tuple[Dict[str, np.ndarr
 
 
 def with_bead_ids(locs, rows: np.ndarray, ids: np.ndarray) -> Tuple[object, int]:
-    """``locs`` with `BEAD_ID`: ``ids`` (1, 2, ... per bead, 0 for none) on
+    """``locs`` with `BEAD_ID`: ``ids`` (1, 2, ... per bead, -1 for none) on
     ``rows`` (a mask), offset past the ids the other rows already carry so
     two files' beads never share one; the rest keep theirs.  A recipe with
     the rule ``max``, so a merged blink keeps its bead.  Returns the table and
@@ -484,12 +484,12 @@ def with_bead_ids(locs, rows: np.ndarray, ids: np.ndarray) -> Tuple[object, int]
     from .mathparse import remember
     rows = np.asarray(rows, bool)
     old = (np.asarray(locs[BEAD_ID], np.int64) if BEAD_ID in locs
-           else np.zeros(len(locs), np.int64))
+           else np.full(len(locs), -1, np.int64))
     others = old[~rows]
     offset = int(others.max()) if others.size and others.max() > 0 else 0
     column = old.copy()
     ids = np.asarray(ids, np.int64)
-    column[rows] = np.where(ids > 0, ids + offset, 0)
+    column[rows] = np.where(ids >= 0, ids + offset, -1)
     out = Localizations({**locs.columns, BEAD_ID: column}, dict(locs.metadata))
     remember(out, BEAD_ID, "", grouped="max")
     return out, offset

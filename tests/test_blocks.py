@@ -66,7 +66,7 @@ def clusters(sizes=(30, 50, 20), noise=10, seed=0):
         parts.append(rng.normal(k * 5000, 30, (n, 2)))
         ids.append(np.full(n, k))
     parts.append(rng.uniform(0, 20000, (noise, 2)))
-    ids.append(np.zeros(noise, int))
+    ids.append(np.full(noise, -1))                     # in no cluster
     xy = np.vstack(parts)
     m = len(xy)
     return Localizations({"x_nm": xy[:, 0], "y_nm": xy[:, 1],

@@ -134,7 +134,7 @@ def steps_of(ids: np.ndarray, time_s: np.ndarray) -> Tuple[np.ndarray, float]:
 
 def gather(ids, frame, x, y, z=None, err_xy=None, err_z=None,
            frame_time_s: float = 1.0, time_s=None) -> Tracks:
-    """The localizations with an id above 0 and finite positions, as
+    """The localizations with an id (-1, `ids.NONE`, is none) and finite positions, as
     `Tracks`.  ``err_xy`` is the lateral precision per axis (``xy_err_nm``),
     ``err_z`` the axial; missing ones count as 0.  With ``time_s`` the clock
     is that column's, on a grid (`steps_of`), not the frames."""
@@ -143,7 +143,7 @@ def gather(ids, frame, x, y, z=None, err_xy=None, err_z=None,
     if z is not None:
         coords.append(np.asarray(z, float))
     xyz = np.column_stack(coords)
-    keep = (ids > 0) & np.isfinite(xyz).all(axis=1)
+    keep = (ids >= 0) & np.isfinite(xyz).all(axis=1)
     rows = np.flatnonzero(keep)
     ids_k = ids[rows]
     if time_s is not None:

@@ -10,7 +10,7 @@ the same numbers; the plugin hands them back as a region table
 (`region_runs.column_table`), where the summaries and the region filter
 (`docs/region-filter.md`) find them.
 
-What is measured, per region (an id above 0 among the rows kept):
+What is measured, per region (an id, 0 or above, among the rows kept):
 
 * ``n_locs``, its localizations;
 * ``centre_x_nm`` ... and ``std_x_nm`` ...: the mean and the sample standard
@@ -78,16 +78,16 @@ def stat_name(column: str, stat: str) -> str:
 
 def dense_codes(ids: np.ndarray, keep: Optional[np.ndarray] = None
                 ) -> Tuple[np.ndarray, np.ndarray]:
-    """``(region ids, code per row)``: the distinct ids above 0 among the kept
+    """``(region ids, code per row)``: the distinct ids (0 and up) among the kept
     rows, ascending, and each row's index among them (-1 for a row in no
     region).  Ids that are small integers go through a lookup table, which is
     linear; others (large ids, floats) through `np.unique`."""
     ids = np.asarray(ids)
     if ids.dtype.kind == "f":
         good = np.isfinite(ids) & (ids == np.round(ids))
-        ids = np.where(good, ids, 0).astype(np.int64)
+        ids = np.where(good, ids, -1).astype(np.int64)
     ids = ids.astype(np.int64, copy=False)
-    member = ids > 0
+    member = ids >= 0                      # -1 is "in none" (`ids.NONE`)
     if keep is not None:
         member &= np.asarray(keep, dtype=bool)
     codes = np.full(len(ids), -1, np.int64)

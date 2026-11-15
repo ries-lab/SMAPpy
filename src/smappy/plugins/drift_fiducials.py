@@ -87,7 +87,7 @@ class FiducialDrift(KeepsDrift, Plugin):
     name = "Fiducials drift correction"
     # 2: the other files of the table keep their positions; 3: a bead that
     # disagrees with the others is left out, and beads can be chosen by hand
-    version = "3"
+    version = "4"
 
     def run(self, ctx: Context, settings: FiducialSettings) -> Result:
         locs = ctx.locs
@@ -127,7 +127,8 @@ class FiducialDrift(KeepsDrift, Plugin):
         from ..beads import BEAD_ID, bead_values, with_bead_ids
         from ..region_runs import column_table
         mine = np.ones(len(locs), bool) if rows is None else np.asarray(rows, bool)
-        out, offset = with_bead_ids(out, mine, beads.bead[mine] + 1)
+        from ..fiducials import _bead_ids
+        out, offset = with_bead_ids(out, mine, _bead_ids(beads.bead[mine]))
         values, groups = bead_values(chosen, axes)
         step = {"label": self.name, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}

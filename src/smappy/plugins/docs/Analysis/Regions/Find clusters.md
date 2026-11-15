@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.voronoi_clusters, smappy.plugins.clusters.hdbscan_clusters, smappy.plugins.clusters.by_size, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.FindClusters.run, smappy.plugins.clusters.FindClusters.preflight, smappy.plugins.clusters.local_maxima, smappy.plugins.clusters.frame_analysis]
 ---
 
@@ -103,7 +103,7 @@ the radius.  Its shape does not matter.
 **3. Edges and noise.**  A localization that is not a core point but lies
 within the radius of one is on a cluster's edge (a **border** point) and
 joins the cluster of the nearest core point.  The rest are **noise**:
-`cluster_id` 0.
+`cluster_id` -1, in no cluster.
 
 **4. Names.**  The clusters are numbered by size, the largest 1.
 `n_in_cluster` is written beside `cluster_id`; both are kept when blinks
@@ -115,7 +115,7 @@ the new ones are numbered after the largest kept number.  So two files, or
 two colours of one file, on two layers are clustered one after the other:
 run it on the first layer, then on the second, and both keep their
 clusters.  Inside a file and channel the layer shows, a localization its
-filter or ROI leaves out gets 0, never an old number: a field of view never
+filter or ROI leaves out gets -1, never an old number: a field of view never
 holds clusters of two runs.  A kept cluster keeps its number, so results
 measured per cluster and ROIs made from the clusters still point to it.
 
@@ -124,7 +124,7 @@ fig.set_size_inches(8, 4)
 left, right = fig.subplots(1, 2, sharex=True, sharey=True)
 left.scatter(xy[:, 0], xy[:, 1], s=0.5, c=copy % 20, cmap="tab20", linewidths=0)
 left.set_title(f"{len(np.unique(copy))} pores, the truth", fontsize=9)
-noise = labels == 0
+noise = labels < 0
 right.scatter(xy[noise, 0], xy[noise, 1], s=0.5, c="0.75", linewidths=0)
 right.scatter(xy[~noise, 0], xy[~noise, 1], s=0.5, c=labels[~noise] % 20,
               cmap="tab20", linewidths=0)
@@ -164,7 +164,7 @@ dots = left.scatter(xy[order, 0], xy[order, 1], s=0.5, linewidths=0,
                     c=np.log10(np.nan_to_num(density[order], nan=mean) / mean),
                     cmap="viridis", vmin=-1, vmax=2)
 fig.colorbar(dots, ax=left, shrink=0.7, label="log10 density / mean")
-noise = vlabels == 0
+noise = vlabels < 0
 right.scatter(xy[noise, 0], xy[noise, 1], s=0.5, c="0.75", linewidths=0)
 right.scatter(xy[~noise, 0], xy[~noise, 1], s=0.5, c=vlabels[~noise] % 20,
               cmap="tab20", linewidths=0)
@@ -226,7 +226,7 @@ axes[0].set_ylabel("y (nm)")
 With *frame analysis* ticked, each cluster is looked at in time, on its
 localizations even on a layer that merges blinks.  Each localization's
 place in the acquisition is a fraction from 0 (the first frame) to 1 (the
-last).  A cluster is dropped -- its localizations get `cluster_id` 0 -- when
+last).  A cluster is dropped -- its localizations get `cluster_id` -1 -- when
 
 * the mean of its localizations' places is below 0.2 or above 0.8: it
   shows up only at the start or only at the end; or
@@ -483,7 +483,7 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   order of the table.
 * **The radius** defaults to 50 nm; SMAP's default is the automatic one,
   which in a sparse field merges everything.  A radius of 0 still gives it.
-* **The output** is `cluster_id` 0 for noise (SMAP: `clusterindex` -1) and
+* **The output** is `cluster_id` -1 for noise, as SMAP's `clusterindex`, and
   `n_in_cluster`; SMAP writes `clustertype` (core, border, noise) instead.
   Clusters are numbered by size.  ROIs are made of them by a plugin of
   their own, for any clusterer's ids.

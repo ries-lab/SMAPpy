@@ -1,8 +1,8 @@
 """Ids that a file brings, kept apart when files share one table.
 
 A file's id columns -- MINFLUX's trace id `tid`, a `track_id` or
-`cluster_id` saved with it -- number its own traces, tracks or clusters from
-1 (`tid` from 0), so two files in one table share numbers.  Grouping keeps
+`cluster_id` saved with it -- number its own traces, tracks or clusters
+(-1 for none, `ids`), so two files in one table share numbers.  Grouping keeps
 them apart by file and channel (`group.by_trace`'s blocks), but a region of
 an id column is its id alone (`region_runs.ColumnRegions`, *Id statistics*):
 two files shown in one layer would merge their trace 7s into one region.
@@ -28,17 +28,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from .group import GROUP_COLUMNS
+from .ids import NONE, OWN, is_id
 from .locs import Localizations
-
-#: integer ids whose every value is an id -- 0 included -- rather than 0
-#: meaning "in none" as for the ``*_id`` columns
-ALL_VALUE_IDS = ("tid",)
 
 #: an ROI's own number: the same ROI whichever file its rows came from
 REGION_NUMBER = "roi_id"
-
-#: where a file's own numbers are kept once they are moved: ``tid_file``
-OWN = "_file"
 
 
 def id_columns(locs: Localizations) -> List[str]:
@@ -48,7 +42,7 @@ def id_columns(locs: Localizations) -> List[str]:
     for name in locs.columns:
         if name in GROUP_COLUMNS or name == REGION_NUMBER or name in written:
             continue
-        if not (name.endswith("_id") or name in ALL_VALUE_IDS):
+        if not is_id(name) or name.endswith(OWN):    # a file's own numbers stay
             continue
         if np.asarray(locs[name]).dtype.kind in "iu":
             out.append(name)
@@ -62,14 +56,14 @@ def own_ids(locs: Localizations, name: str) -> np.ndarray:
     return np.asarray(locs[own] if own in locs else locs[name])
 
 
-def _used(values: np.ndarray, name: str) -> np.ndarray:
-    return values if name in ALL_VALUE_IDS else values[values > 0]
+def _used(values: np.ndarray) -> np.ndarray:
+    return values[values >= 0]                   # -1 is "in none" (`ids.NONE`)
 
 
-def apart(values: np.ndarray, files: np.ndarray, name: str) -> bool:
-    """Whether no two files share a number of id column ``name``."""
+def apart(values: np.ndarray, files: np.ndarray) -> bool:
+    """Whether no two files share a number of an id column."""
     values, files = np.asarray(values, np.int64), np.asarray(files, np.int64)
-    used = values >= 0 if name in ALL_VALUE_IDS else values > 0
+    used = values >= 0
     pairs = np.unique(np.column_stack([values[used], files[used]]), axis=0)
     return len(np.unique(pairs[:, 0])) == len(pairs)
 
@@ -87,21 +81,19 @@ def keep_apart(old: Localizations, new: Localizations
         if name not in old:
             continue
         mine = np.asarray(new[name], np.int64)
-        theirs = _used(np.asarray(old[name], np.int64), name)
-        used = _used(mine, name)
+        theirs = _used(np.asarray(old[name], np.int64))
+        used = _used(mine)
         if not len(theirs) or not len(used) or used.min() > theirs.max():
             continue
-        # as *Combine files* numbers on: past the largest, 0 counted where it
-        # is an id, so a file's own number is the id less its offset
-        offset = int(theirs.max()) + (1 if name in ALL_VALUE_IDS else 0)
+        # as *Combine files* numbers on: past the largest, so a file's own
+        # number is the id less its offset
+        offset = int(theirs.max()) + 1
         own = name + OWN
         if own not in old_cols:
             old_cols[own] = np.asarray(old[name]).copy()
         if own not in new_cols:
             new_cols[own] = np.asarray(new[name]).copy()
-        moved = mine + offset
-        if name not in ALL_VALUE_IDS:            # 0 is "in none" and stays so
-            moved = np.where(mine > 0, moved, 0)
+        moved = np.where(mine >= 0, mine + offset, NONE)   # none stays none
         dtype = np.asarray(new[name]).dtype      # kept, where the ids still fit
         fits = moved.max(initial=0) <= np.iinfo(dtype).max
         new_cols[name] = moved.astype(dtype if fits else np.int64)

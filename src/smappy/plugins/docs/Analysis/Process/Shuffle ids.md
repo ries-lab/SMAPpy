@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.shuffle_ids.shuffle_ids, smappy.plugins.shuffle_ids.ShuffleIds.run]
 ---
 
@@ -29,11 +29,11 @@ locs = simulate(n_frames=3000, seed=2)
 xy = np.column_stack([np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"])])
 labels = dbscan(xy, 40.0, 10)
 shuffled = shuffle_ids(labels, seed=0)
-inside = labels > 0
+inside = labels >= 0
 ```
 
-**1. The ids.**  The distinct ids above 0 in the attribute.  An id of 0 or
-below means "in none" -- DBSCAN's noise, a localization in no ROI -- and is
+**1. The ids.**  The distinct ids in the attribute, 0 included.  An id of -1
+means "in none" -- DBSCAN's noise, a localization in no ROI -- and is
 kept.
 
 **2. A random order.**  The ids are permuted: each id is replaced by

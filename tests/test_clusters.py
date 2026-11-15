@@ -23,7 +23,7 @@ def blobs(sizes=SIZES, noise=30, seed=0, spread=15.0):
     parts.append(rng.uniform(0, 12000, (noise, 2)) + [0, 20000])   # well away
     xy = np.vstack(parts)
     truth = np.concatenate([np.full(n, k + 1) for k, n in enumerate(sizes)]
-                           + [np.zeros(noise, int)])
+                           + [np.full(noise, -1)])
     return xy, truth
 
 
@@ -52,8 +52,8 @@ def test_dbscan_finds_the_clusters_numbered_by_size_and_leaves_the_noise():
     labels = dbscan(xy, eps=40, k=5)
     for k in (1, 2, 3):
         assert set(labels[truth == k]) == {k}           # each blob one cluster
-    assert (labels[truth == 0] == 0).all()
-    assert sizes_of(labels)[truth == 1][0] == 60 and sizes_of(labels)[truth == 0][0] == 0
+    assert (labels[truth == -1] == -1).all()
+    assert sizes_of(labels)[truth == 1][0] == 60 and sizes_of(labels)[truth == -1][0] == 0
 
 
 def test_a_border_point_joins_its_nearest_core_point_and_a_lone_one_is_noise():
@@ -64,7 +64,7 @@ def test_a_border_point_joins_its_nearest_core_point_and_a_lone_one_is_noise():
     lone = [[100, 100]]
     labels = dbscan(np.vstack([left, right, border, lone]), eps=4, k=3)
     assert labels[12] == labels[6] != labels[0]          # nearer the right group
-    assert labels[13] == 0
+    assert labels[13] == -1
 
 
 def test_the_automatic_radius_is_smaps():
@@ -98,7 +98,7 @@ def test_only_the_selected_localizations_are_clustered_and_each_file_alone():
     session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=3))
     ids = np.asarray(session.locs["cluster_id"])
     dim = np.asarray(session.locs["photons"]) < 1500
-    assert (ids[dim] == 0).all()                        # filtered out: in none
+    assert (ids[dim] == -1).all()                       # filtered out: in none
     assert set(ids[(files == 1) & (ids > 0)]).isdisjoint(set(ids[(files == 0) & (ids > 0)]))
 
 
@@ -156,7 +156,7 @@ def test_a_filtered_run_again_leaves_no_old_ids_in_the_file_it_reads():
     session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=3))
     ids = np.asarray(session.locs["cluster_id"])
     dim = np.asarray(session.locs["photons"]) < 1500
-    assert (ids[dim] == 0).all()                        # not the first run's
+    assert (ids[dim] == -1).all()                       # not the first run's
     assert ids.max() <= 3
 
 
@@ -254,7 +254,7 @@ def test_region_values_go_onto_their_rows_by_the_overlap_rule():
 
 def test_regions_to_column_writes_the_later_roi_number_where_two_overlap():
     assert roi_numbers(6, [("a", np.array([0, 1, 2, 3])), ("b", np.array([2, 3, 4]))],
-                       {"a": 1, "b": 2}).tolist() == [1, 1, 2, 2, 2, 0]
+                       {"a": 1, "b": 2}).tolist() == [1, 1, 2, 2, 2, -1]
     xy, truth = blobs()
     session = Session(table(xy))
     session.show_grouped(0, False)
@@ -273,7 +273,7 @@ def test_regions_to_column_writes_the_later_roi_number_where_two_overlap():
     in_second = project.region(second).mask(xy[:, 0], xy[:, 1])
     assert (ids[in_second] == numbers[second.id]).all()
     assert (ids[(truth == 1) & ~in_second] == numbers[first.id]).all()
-    assert (ids[truth == 2] == 0).all()                 # its ROI is excluded
+    assert (ids[truth == 2] == -1).all()                # its ROI is excluded
     assert {r["field"]: r["grouped"] for r in recipes(session.locs)}["roi_id"] == "max"
 
 
@@ -458,7 +458,7 @@ def test_voronoi_drops_small_clusters_and_keeps_one_position_together():
     from smappy.plugins.clusters import voronoi_clusters
     xy, truth = clusters_in_background(per=12)
     few, _ = voronoi_clusters(xy, factor=2.0, min_size=20)
-    assert few.max() == 0                                  # all below 20
+    assert few.max() == -1                                 # all below 20
     twice = np.vstack([xy, xy[:5]])                        # five at one position
     labels, _ = voronoi_clusters(twice, factor=2.0, min_size=5)
     assert (labels[:5] == labels[-5:]).all()
@@ -471,7 +471,7 @@ def test_the_plugin_runs_voronoi_and_names_the_clusters():
     result = session.run(FindClusters(), FindClusters.Settings(algorithm="voronoi"))
     ids = np.asarray(session.locs["cluster_id"])
     assert ids.max() == 25 and "Voronoi" in result.text
-    sizes = np.bincount(ids)[1:]
+    sizes = np.bincount(ids[ids >= 0])[1:]
     assert (np.diff(sizes) <= 0).all()                     # numbered by size
     assert {r["field"]: r["grouped"] for r in recipes(session.locs)}["cluster_id"] == "max"
 

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.molecules.centres, smappy.molecules.events_in, smappy.molecules.g5m, smappy.molecules.fit_mixture, smappy.molecules.kmeans_pp, smappy.molecules.resolvable, smappy.molecules.molecule_values, smappy.molecules.keep, smappy.molecules.g5m_clusters, smappy.plugins.molecular_mapping.MolecularMapping.run, smappy.plugins.molecular_mapping.MolecularMapping.preflight, smappy.plugins.molecular_mapping.molecule_table]
 ---
 
@@ -285,7 +285,7 @@ Short acquisitions with few binding events per site need a lower value.
   position, `sigma_nm` the width of its cloud, `n_locs`, `n_events`,
   `frame` (the mean, rounded), `mean_frame`, `std_frame`, the cluster it
   came from and `molecule_id`; with G5M also `p_val` and `sigma_rel`.
-* **Or** `molecule_id` on the localizations, 0 for none.
+* **Or** `molecule_id` on the localizations, -1 for none.
 * **Text**: how many molecules in how many clusters, and how many the
   filter dropped.
 * **Figure**: the localizations coloured by molecule with the molecules as

@@ -16,12 +16,12 @@ a memory of dark frames, a minimum length, 2D or 3D.  Where it departs:
   gives, and a large one only invites wrong links;
 * each **file** is linked on its own, always, and each **channel** unless
   *per channel* is off (SMAP offered all, per layer or per channel);
-* ``track_id`` is **0** for a localization in no track and for a track
+* ``track_id`` is **-1** for a localization in no track and for a track
   shorter than the minimum, rather than such tracks being dropped from the
   numbering and their localizations keeping an old id; ids are 1, 2, ... in
   the order the tracks start;
 * the localizations linked are those the layer's filter and the ROI keep;
-  the rest of the files and channels the layer shows get 0, and the other
+  the rest of the files and channels the layer shows get -1, and the other
   files and channels keep their tracks, the new ones numbered above them
   (`region_runs.replaced_rows`, `merge_ids`) -- so two files on two layers
   are linked one after the other.  Always the localizations, never merged
@@ -68,7 +68,7 @@ class LinkTracksSettings:
                         help="dark frames a track survives")
     min_length: int = param(2, label="minimum length", min=1,
                             help="localizations in a track; shorter ones get "
-                                 "track_id 0")
+                                 "track_id -1, in none")
     use_z: bool = param(True, label="in 3D", help="jumps in x, y and z when the "
                                                   "table has z_nm")
     per_channel: bool = param(True, label="per channel",
@@ -109,7 +109,7 @@ class LinkTracks(Plugin):
     changes_locs = True
     # tracks are of localizations: a merged blink is a piece of a track
     grouping = "ungrouped"
-    version = "2"
+    version = "3"
 
     def describe(self, ctx: Optional[Context], settings: LinkTracksSettings
                  ) -> FormState:
@@ -152,16 +152,17 @@ class LinkTracks(Plugin):
             memory=settings.memory, min_length=settings.min_length,
             algorithm=settings.algorithm, groups=groups, progress=progress)
         n_tracks = int(track.max(initial=0))
-        tracked = int((track > 0).sum())
-        lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, np.int64)
+        tracked = int((track >= 0).sum())
+        lengths = np.bincount(track[track >= 0])[1:] if n_tracks else np.zeros(0, np.int64)
         mean = float(lengths.mean()) if n_tracks else 0.0
         # the files and channels the layer shows are linked afresh; the
         # others keep their tracks (`replaced_rows`)
         replaced = replaced_rows(locs, locs, use)
         track, n_kept = merge_ids(locs[column] if column in locs else None, track,
                                   replaced)
-        length = np.bincount(track)[track]
-        length[track == 0] = 0
+        member = track >= 0                     # -1: in no track (`ids.NONE`)
+        length = np.zeros(len(track), np.int64)
+        length[member] = np.bincount(track[member])[track[member]]
         metadata = dict(locs.metadata)
         metadata[WRITTEN] = sorted(set(metadata.get(WRITTEN, [])) | {column})
         out = Localizations({**locs.columns, column: track, lengths_to: length}, metadata)
@@ -189,7 +190,7 @@ def draw_tracks(figure, x, y, frame, track) -> None:
     from matplotlib.collections import LineCollection
     left, right = figure.subplots(1, 2, gridspec_kw={"width_ratios": [1.3, 1]})
     track = np.asarray(track, np.int64)
-    shown = np.unique(track[track > 0])     # kept ids need not be 1, 2, ...
+    shown = np.unique(track[track >= 0])    # kept ids need not be 1, 2, ...
     n_tracks = len(shown)
     if n_tracks > FIGURE_TRACKS:
         shown = np.sort(np.random.default_rng(0).choice(shown, FIGURE_TRACKS,
@@ -212,7 +213,7 @@ def draw_tracks(figure, x, y, frame, track) -> None:
     left.set_title(f"{n_tracks} tracks" + (f" ({FIGURE_TRACKS} drawn)"
                                            if n_tracks > FIGURE_TRACKS else ""),
                    fontsize=9)
-    lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, int)
+    lengths = np.bincount(track[track >= 0]) if n_tracks else np.zeros(0, int)
     lengths = lengths[lengths > 0]
     if len(lengths):
         right.hist(lengths, bins=np.arange(1, lengths.max() + 2) - 0.5

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.combine_files.combine, smappy.file_ids.id_columns, smappy.file_ids.apart, smappy.file_ids.keep_apart, smappy.plugins.combine_files.incompatibilities, smappy.plugins.combine_files.CombineFiles.run, smappy.session.Session._follow_files]
 ---
 
@@ -41,8 +41,8 @@ how long the files before it lasted.
 
 **4. Ids stay apart.** Track 5 of the first file and track 5 of the second
 are different tracks. So an id attribute, such as `track_id` or `cluster_id`,
-is numbered on from the files before it. An id of 0 means "in none" and
-stays 0. Ids that a file brings are usually apart already: a file added to
+is numbered on from the files before it. An id of -1 means "in none" and
+stays -1. Ids that a file brings are usually apart already: a file added to
 the table has its ids moved past the table's as it is added, its own numbers
 kept in `tid_file` (or `<name>_file`). Those are left as they are.
 
@@ -74,9 +74,8 @@ is used instead, so the next file never starts inside this one. The frame
 time is the file's own, as the session recorded it, else the camera's.
 
 Id attributes are the whole-number attributes whose name ends in `_id`. The
-numbers above 0 of file $k$ move up by the sum of the highest id of each file
-before it. MINFLUX's trace id `tid` has no "none" value, so all its numbers
-move up, by the highest id + 1 of each earlier file. Some id attributes stay as
+numbers of file $k$ (all but -1, "in none") move up by the sum of the
+highest id + 1 of each file before it. MINFLUX's trace id `tid` is one too. Some id attributes stay as
 they are: `roi_id`, and the attributes written from regions' results (*Regions
 to attribute*). They are an ROI's number, which is the same whichever file a
 localization came from. An id attribute in which no two files share a number

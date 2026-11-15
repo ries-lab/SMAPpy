@@ -22,7 +22,7 @@ first and the table replaced after them would lose their rows:
   that everything that reads localizations reads molecules: rendering,
   *Spatial statistics*, *SPINNA*, *Register layers* between imaging rounds
   (RESI), a filter on ``n_events`` or ``p_val``;
-* *molecule_id on the localizations*: each localization's molecule, 0 for
+* *molecule_id on the localizations*: each localization's molecule, -1 for
   none, for *Binding kinetics* or *Id statistics* per molecule.
 
 Both are seeded, so the two runs find the same molecules.
@@ -117,7 +117,7 @@ class MolecularMapping(Plugin):
     Settings = MolecularMappingSettings
     changes_locs = True
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: MolecularMappingSettings
                  ) -> FormState:
@@ -145,7 +145,7 @@ class MolecularMapping(Plugin):
         try:
             column = cluster_column(ctx.locs, settings.id_column)
             labels = np.asarray(ctx.locs[column], np.int64)
-            labels = labels[np.asarray(ctx.selection.mask, bool) & (labels > 0)]
+            labels = labels[np.asarray(ctx.selection.mask, bool) & (labels >= 0)]
             n = np.bincount(labels).astype(float)
         except Exception:                                  # noqa: BLE001
             return None             # the run says what is wrong
@@ -179,13 +179,13 @@ class MolecularMapping(Plugin):
         points = np.column_stack([np.asarray(locs[c], float) for c in axes])
         labels = np.asarray(locs[column], np.int64).copy()
         use = np.asarray(ctx.selection.mask, bool) & np.isfinite(points).all(1)
-        labels[~use] = 0
+        labels[~use] = -1                       # in none (`ids.NONE`)
         files = (np.asarray(locs["filenumber"], np.int64) if "filenumber" in locs
                  else np.zeros(len(locs), np.int64))
         frame = np.asarray(locs["frame"], np.int64)
-        if not (labels > 0).any():
+        if not (labels >= 0).any():
             raise ValueError(f"no clusters: no localization the layer shows has "
-                             f"{column} above 0")
+                             f"an id in {column} (-1 is none)")
         spans = _spans(ctx, locs)
 
         def progress(fraction):
@@ -209,7 +209,7 @@ class MolecularMapping(Plugin):
             if "channel" in locs else None
         values["channel"] = (np.array([channels[int(c)] for c in values["label"]],
                                       np.int64) if channels is not None else None)
-        n_clusters = int(len(np.unique(labels[labels > 0])))
+        n_clusters = int(len(np.unique(labels[labels >= 0])))
         text = (f"{n} molecules in {n_clusters} clusters of {column} "
                 f"({'G5M' if g5m else 'centres'})"
                 + (f"; {values.pop('filtered')} dropped by Picasso's filter"
@@ -242,8 +242,8 @@ class MolecularMapping(Plugin):
               if use_z else lp)
         # a localization without a precision cannot bound a width: left out
         finite = np.isfinite(lp).all(1) if lp.ndim == 2 else np.isfinite(lp)
-        labels = np.where(finite, labels, 0)
-        if not (labels > 0).any():
+        labels = np.where(finite, labels, -1)
+        if not (labels >= 0).any():
             raise ValueError("G5M holds a molecule's width to the localization "
                              "precision, and no localization of the clusters has "
                              "one (xy_err_nm" + (", z_err_nm" if use_z else "") + ")")
@@ -268,14 +268,14 @@ def _centres(points, frame, labels):
     values = {"centre": c["centre"], "sem": c["sem"], "sigma": c["std"],
               "n_locs": c["n_locs"], "n_events": c["n_events"], "frame": c["frame"],
               "std_frame": c["std_frame"], "label": c["label"]}
-    rank = np.zeros(int(labels.max(initial=0)) + 1, np.int64)
+    rank = np.full(int(labels.max(initial=0)) + 1, -1, np.int64)
     rank[c["label"]] = np.arange(1, len(c["label"]) + 1)
-    return values, np.where(labels > 0, rank[np.maximum(labels, 0)], 0)
+    return values, np.where(labels >= 0, rank[np.maximum(labels, 0)], -1)
 
 
 def _first_of(labels: np.ndarray, column: np.ndarray) -> Dict[int, int]:
     """Each cluster's value of ``column`` at its first localization."""
-    use = np.flatnonzero(labels > 0)
+    use = np.flatnonzero(labels >= 0)
     ids, first = np.unique(labels[use], return_index=True)
     return {int(i): int(column[use[f]]) for i, f in zip(ids, first)}
 

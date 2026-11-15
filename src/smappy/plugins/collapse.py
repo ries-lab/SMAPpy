@@ -50,7 +50,7 @@ class Collapse(Plugin):
     changes_locs = True
     # the localizations are what is combined; a merged layer's rows are blinks
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: CollapseSettings) -> FormState:
         state = FormState()

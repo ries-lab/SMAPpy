@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads, smappy.beads.bead_values, smappy.beads.with_bead_ids, smappy.fiducials.structures_in_regions, smappy.fiducials.column_markers, smappy.fiducials.marker_weights, smappy.fiducials.marker_errors, smappy.beads.fit_offsets_and_spline, smappy.plugins.drift_fiducials.FiducialDrift.react, smappy.plugins.drift_fiducials.FiducialDrift.describe]
 ---
 
@@ -380,7 +380,7 @@ last few hundred frames bend away for the same reason.  For one
 file that is a shift of the whole image; for consecutive files joined
 with *reference*, it is how well they meet.
 
-**Which localizations, from an id column.**  Each id above 0 of *id
+**Which localizations, from an id column.**  Each id (-1 is none) of *id
 attribute* among the localizations the selection keeps (the layer's
 filter and the drawn ROI, as when finding beads), named after it
 (`cluster_id 17`): the id is what the user sees of it, in its region
@@ -493,7 +493,7 @@ otherwise, or not wanted.
   localizations' precision again.
 
 * **The beads named**: each bead's localizations carry its number,
-  `bead_id` (0 for every other localization, and for a bead's localizations
+  `bead_id` (-1 for every other localization, and for a bead's localizations
   too dim to be linked into its track), and what the bead selector shows of
   each is kept as a [region table](plugin:Panels/Glossary) ("per bead_id:
   Fiducials drift correction"): its name, `noise_nm`, `wander_nm`,

@@ -187,7 +187,7 @@ def test_with_its_bead_file_open_each_bead_is_a_row_of_a_region_table():
     out = session.locs
     bead_rows = np.asarray(out["filenumber"]) == 1
     assert (np.asarray(out["bead_id"])[bead_rows] > 0).all()
-    assert (np.asarray(out["bead_id"])[~bead_rows] == 0).all()
+    assert (np.asarray(out["bead_id"])[~bead_rows] == -1).all()
     ev = Evaluation("bead_id", "MBM drift correction")
     found = {r["name"]: r for r in rows(session.context(), ev)}
     assert is_current(session.context(), ev)

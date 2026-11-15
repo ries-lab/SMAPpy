@@ -87,7 +87,7 @@ batch can reproduce it.
   on `cluster_id`, a localization must be in a passing ROI and in a passing
   cluster.  One source is the usual case.
 * **A localization in no region of a filtered source is out**: DBSCAN's
-  noise (`cluster_id` 0) once clusters are filtered, a localization outside
+  noise (`cluster_id` -1) once clusters are filtered, a localization outside
   every ROI once the ROIs are.
 * **The layers' own filters still apply**: the flag is one more condition,
   AND-ed with each layer's ranges.  A localization a layer's `cfr` bound

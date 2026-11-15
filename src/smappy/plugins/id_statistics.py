@@ -106,7 +106,7 @@ class IdStatistics(Plugin):
     changes_locs = False
     # a trace's localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: IdStatisticsSettings
                  ) -> FormState:
@@ -148,7 +148,7 @@ class IdStatistics(Plugin):
             columns={n: locs[n] for n in names}, stats=stats)
         if not len(found):
             raise ValueError(f"no regions: no localization the layer keeps has "
-                             f"{column} above 0")
+                             f"an id in {column} (-1 is none)")
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, found.ids, found.values, step,

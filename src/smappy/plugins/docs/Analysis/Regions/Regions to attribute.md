@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.plugins.region_column.keyword_columns, smappy.plugins.region_column.own_rows, smappy.region_runs.write_values, smappy.region_runs.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
 ---
 
@@ -31,11 +31,12 @@ same number, so ROI 5 in the list, in the attribute and in the results is the
 same ROI.
 
 What you said of the ROIs reaches the table the same way.  Only ROIs ticked
-*use* are written, so `roi_id` above 0 is "in a used ROI": a filter on it
+*use* are written, so a `roi_id` of 0 or above is "in a used ROI" (-1 is
+none): a filter on it
 keeps the tracks or sites you kept and drops the rest, for any plugin that
 runs on the view afterwards.  An ROI's frame range and z range (set under
 *frames and z* in the ROI manager's *annotate*) are part of what it holds,
-so a localization outside them gets 0 too.  And each list of keywords
+so a localization outside them gets -1 too.  And each list of keywords
 becomes an attribute, `<list>_keyword`, holding the keyword's place in its list
 -- with the lists *quality: good, bad*, `quality_keyword` is 1 on the
 localizations of the ROIs called *good* and 2 on the *bad* ones.  With

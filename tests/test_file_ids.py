@@ -37,14 +37,14 @@ def test_ids_that_do_not_overlap_are_left_alone():
     assert offsets == {} and new2 is new and "tid_file" not in new2
 
 
-def test_an_id_of_zero_meaning_none_stays_none():
+def test_an_id_of_minus_one_meaning_none_stays_none():
     def table(ids):
         return Localizations({"x_nm": np.zeros(len(ids)),
                               "cluster_id": np.asarray(ids, np.int64)}, {})
-    _, new, offsets = keep_apart(table([0, 1, 2]), table([0, 1, 1, 3]))
-    assert offsets == {"cluster_id": 2}
-    assert list(new["cluster_id"]) == [0, 3, 3, 5]
-    assert list(new["cluster_id_file"]) == [0, 1, 1, 3]
+    _, new, offsets = keep_apart(table([-1, 0, 2]), table([-1, 0, 1, 3]))
+    assert offsets == {"cluster_id": 3}
+    assert list(new["cluster_id"]) == [-1, 3, 4, 6]
+    assert list(new["cluster_id_file"]) == [-1, 0, 1, 3]
 
 
 def test_two_files_in_one_layer_give_one_region_per_trace_of_each():

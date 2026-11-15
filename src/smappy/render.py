@@ -984,8 +984,8 @@ def _select_mask(select, n: int) -> np.ndarray:
 # ------------------------------------------------------------------- tracks
 #
 # The fifth mode: each track drawn as the line through its localizations in
-# time order -- a track is the localizations sharing an id column's value
-# above 0 (`track_id` from Link tracks, MINFLUX's `tid`).  A raster like the
+# time order -- a track is the localizations sharing an id column's value,
+# -1 being none (`track_id` from Link tracks, MINFLUX's `tid`).  A raster like the
 # others, so the export, the overlays and the sum of layers need nothing new;
 # a vector layer was rejected because the exports would miss it.  The view
 # draws each track whole within the rows the layer's filter keeps; its
@@ -1004,7 +1004,7 @@ def track_segments(locs: Localizations, settings: "RenderSettings", select=None
             else np.asarray(select) if np.asarray(select).dtype != bool
             else np.flatnonzero(select))
     ids = np.asarray(locs[column])[rows]
-    keep = ids > 0
+    keep = ids >= 0                         # -1: in no track (`ids.NONE`)
     rows, ids = rows[keep], ids[keep]
     time = np.asarray(locs["time_s"] if "time_s" in locs else locs["frame"])[rows]
     order = np.lexsort((time, ids))

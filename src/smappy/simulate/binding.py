@@ -23,7 +23,7 @@ time:
   the step in a trace that curation removes.
 
 The truth is ``spot_true`` (1, 2, ...) and ``site_true`` (1, 2, ...,
-across the spots; 0 for a sticky event's localizations); the metadata
+across the spots; -1 for a sticky event's localizations); the metadata
 keeps each spot's number of sites (``sites_true``), the rates and a frame
 time, so seconds can be read.
 """
@@ -118,7 +118,7 @@ def simulate_binding_sites(sites: Sequence[int], n_frames: int = 20000, *,
         frame = np.append(frame, f)
         spot = np.append(spot, np.full(len(f), int(which)))
         xy = np.vstack([xy, np.repeat(centre[[int(which)]], len(f), axis=0)])
-        site_id = np.append(site_id, np.zeros(len(f), np.int64))
+        site_id = np.append(site_id, np.full(len(f), -1, np.int64))   # in no site
     order = np.argsort(frame, kind="stable")
     frame, spot, xy, site_id = frame[order], spot[order], xy[order], site_id[order]
     n = len(frame)

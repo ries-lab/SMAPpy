@@ -142,7 +142,7 @@ def resample(t_s, values, dt_s: float, start_s: Optional[float] = None,
 
 def bead_traces(ids, t_s, xyz, dt_s: float, err=None,
                 regular: bool = True) -> List[Trace]:
-    """One trace per id above 0, all on one grid from the first sample of any
+    """One trace per id (-1, `ids.NONE`, is none), all on one grid from the first sample of any
     to the last, centred on its own mean.  ``err`` (rows, axes) gives each
     trace's RMS precision.  ``regular``: the times are frames times a step
     and the grid is the frames; else the grid step is ``dt_s`` as given."""
@@ -151,7 +151,7 @@ def bead_traces(ids, t_s, xyz, dt_s: float, err=None,
     xyz = np.asarray(xyz, float)
     if xyz.ndim == 1:
         xyz = xyz[:, None]
-    keep = ids > 0
+    keep = ids >= 0
     if not keep.any():
         return []
     start = float(t_s[keep].min())

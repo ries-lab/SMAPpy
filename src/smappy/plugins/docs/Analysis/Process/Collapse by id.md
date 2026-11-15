@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.table_edit.collapse, smappy.table_edit.collapse_index, smappy.table_edit.id_candidates, smappy.group.combine, smappy.plugins.collapse.Collapse.run]
 ---
 
@@ -43,7 +43,7 @@ an id numbered per file meets the same number in the next file, and a
 cluster that spans both channels of a two-colour table becomes a row per
 channel rather than one whose channel is 1.5.
 
-**2. The rows without an id.**  An id of 0 or below means "in none" --
+**2. The rows without an id.**  An id of -1 means "in none" --
 DBSCAN's noise, a localization in no track.  With *rows without an id* on
 *keep* each is a row of its own, its values as they were; on *remove* they
 are not in the new table.
@@ -113,7 +113,7 @@ Based on SMAP's `GroupAny` and the compact form of `Connect2Unconnect`
 changes:
 
 * A row with no id is kept or removed by choice; GroupAny puts all of a
-  file's rows with id 0 into one group.  Both group per file and channel.
+  file's rows without an id into one group.  Both group per file and channel.
 * Connect2Unconnect replaces one channel's localizations with its merged
   blinks; collapsed by `group_id` this does it for every channel at once.
   Its other direction (*unconnect->connect*) was never written in SMAP.

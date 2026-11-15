@@ -60,7 +60,7 @@ class MBMDrift(KeepsDrift, Plugin):
     # the correction moves every localization of the file
     grouping = "ungrouped"
     Settings = MBMSettings
-    version = "1"
+    version = "2"
 
     def _sources(self, ctx) -> List[Tuple[str, Measurement]]:
         out = []

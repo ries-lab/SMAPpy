@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.id_statistics.id_statistics, smappy.id_statistics.dense_codes, smappy.id_statistics.stat_name, smappy.plugins.id_statistics.IdStatistics.run, smappy.plugins.id_statistics.summarised_columns, smappy.region_runs.column_table]
 ---
 
@@ -61,8 +61,8 @@ two = enough & (v["emitter_min"] != v["emitter_max"])
 ratio = v["std_xy_nm"] / np.sqrt(v["err2_mean"])
 ```
 
-**1. The regions.**  Every distinct value above 0 of the id attribute is one
-region; a localization with 0 (DBSCAN's noise, say) is in none.  Only the
+**1. The regions.**  Every distinct value of the id attribute, 0 included, is
+one region; a localization with -1 (DBSCAN's noise, say) is in none.  Only the
 localizations the layer's filter keeps count, and a region with none kept
 is left out.
 

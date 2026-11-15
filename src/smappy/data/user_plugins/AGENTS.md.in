@@ -123,7 +123,9 @@ Columns are `<quantity>_<unit>`, uncertainties `<quantity>_err_<unit>`.  The
 common ones: `x_nm`, `y_nm`, `z_nm` (3D only), `frame`, `photons`,
 `background`, `xy_err_nm`, `z_err_nm`, `sigma_nm`, `logl_rel`, `channel`;
 after merging blinks `group_id` and `n_in_group`; after other plugins
-`cluster_id`, `n_in_cluster`, `track_id`.  Not every table has every column:
+`cluster_id`, `n_in_cluster`, `track_id`.  In an id column (`*_id`, and
+MINFLUX's trace `tid`) every value is an id, 0 included, and -1 means "in
+none" (noise, no track): select members with `ids >= 0`.  Not every table has every column:
 check, and when one is missing raise a `ValueError` that names the columns
 the table does have.  A `ValueError` is shown to the user as the reason the
 run failed.

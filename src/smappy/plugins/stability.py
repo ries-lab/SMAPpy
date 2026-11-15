@@ -138,7 +138,7 @@ class Stability(Plugin):
     per_region = True
     # a bead is localized once per frame: its localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "2"
+    version = "3"
 
     def describe(self, ctx: Optional[Context], settings: StabilitySettings) -> FormState:
         v = settings.vibration
@@ -179,7 +179,7 @@ class Stability(Plugin):
                 raise ValueError(f"stability needs {c}: the table has "
                                  + ", ".join(sorted(locs.keys())))
         use = np.asarray(ctx.selection.mask, dtype=bool)
-        ids = np.where(use, np.asarray(locs[column], np.int64), 0)
+        ids = np.where(use, np.asarray(locs[column], np.int64), -1)   # -1: in none
         clock = "time_s" in locs
         axes = ["x", "y"] + (["z"] if settings.use_z and "z_nm" in locs else [])
         xyz = np.column_stack([np.asarray(locs[f"{a}_nm"], float) for a in axes])
@@ -189,7 +189,7 @@ class Stability(Plugin):
                                for a in axes])
         if clock:
             t_s = np.asarray(locs["time_s"], float)
-            dt_s = st.grid_step(t_s[ids > 0])
+            dt_s = st.grid_step(t_s[ids >= 0])
         else:
             ft = settings.frame_time_ms or table_frame_time(locs)
             if not ft:
@@ -201,7 +201,7 @@ class Stability(Plugin):
         if not beads:
             if ctx.per_region:
                 return Result(values={"n_traces": 0}, settings=settings)
-            raise ValueError(f"no beads: no localization has {column} above 0")
+            raise ValueError(f"no beads: no localization has a {column} (-1 is none)")
         traces = st.combine(beads, settings.traces)
         values: Dict[str, Any] = {}
         lines = [f"{len(beads)} bead{'s' if len(beads) != 1 else ''} ({column}), "

@@ -61,7 +61,7 @@ bead -- its localizations brighter than *min photons*, the brightest where
 a frame has several -- named after it (``ROI 5``, a number the ROI manager
 never gives again).  Nothing is linked, so *maximum jump*, *memory* and
 *min length* do not apply: the ROI says where the bead is.  From an *id
-column* (`column_markers`) each id above 0 is a marker the same way --
+column* (`column_markers`) each id (-1 is none) is a marker the same way --
 `bead_id` from a run before, `track_id` -- among the localizations the
 selection keeps, named ``"cluster_id 17"``.
 
@@ -142,6 +142,13 @@ SOURCES = ("find them", "ROI manager", "id column")
 # smooth drift; a faster one wants the smallest spacing the markers allow
 BEAD_KNOT = 100
 STRUCTURE_KNOT = 500
+
+def _bead_ids(bead: np.ndarray) -> np.ndarray:
+    """Beads numbered from 0 (-1 for none) as the bead ids written to the
+    table, from 1 (-1 still none)."""
+    bead = np.asarray(bead, np.int64)
+    return np.where(bead >= 0, bead + 1, -1)
+
 #: what a marker is: a bead, one bright point a frame, or a structure (a DNA
 #: origami, a binding site), every localization of its region
 MARKERS = ("beads", "structures")
@@ -162,8 +169,8 @@ class FiducialSettings:
                              "of an attribute")
     id_column: str = param(ID_COLUMNS[0], label="id attribute",
                            choices=lambda: [(c, c) for c in ID_COLUMNS],
-                           help="each id above 0 is one marker: cluster_id from "
-                                "Find clusters, bead_id from a run before")
+                           help="each id (-1 is none) is one marker: cluster_id "
+                                "from Find clusters, bead_id from a run before")
     min_photons: float = param(5000.0, label="min photons", min=0,
                                help="localizations dimmer than this are not "
                                     "beads")
@@ -350,7 +357,7 @@ def structures_in_regions(frame, regions: List[np.ndarray]) -> Beads:
 
 def column_markers(locs: Localizations, column: str, select=None
                    ) -> "List[tuple]":
-    """Each id above 0 of ``column`` as a marker, ``[(name, rows)]``, its
+    """Each id of ``column`` (-1, `ids.NONE`, is none) as a marker, ``[(name, rows)]``, its
     rows those ``select`` (a mask) keeps.  Named ``"cluster_id 17"``: the id
     is what the user sees of it -- in its region table, as an ROI made from
     it -- and binding sites 20 nm apart would share a name by position
@@ -365,11 +372,11 @@ def column_markers(locs: Localizations, column: str, select=None
                          + "; Find clusters (local maxima) names binding sites")
     ids = np.asarray(locs[column])
     if select is not None:
-        ids = np.where(np.asarray(select, bool), ids, 0)
+        ids = np.where(np.asarray(select, bool), ids, -1)    # -1: in none
     values, rows = split_ids(ids)
     if not len(values):
-        raise ValueError(f"no markers: {column} is 0 on every localization of the "
-                         f"selection")
+        raise ValueError(f"no markers: {column} is -1 (none) on every localization "
+                         f"of the selection")
     return [(f"{column} {int(v)}", r) for v, r in zip(values, rows)]
 
 
@@ -577,7 +584,7 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
     r = settings.rejection
     # the fiducial fit's own span and coefficients, so that with every bead
     # used the curve is `fit_drift`'s to the last bit
-    chosen = select_beads(frame[rows], positions[rows], beads.bead[rows] + 1, names,
+    chosen = select_beads(frame[rows], positions[rows], _bead_ids(beads.bead[rows]), names,
                           knot=settings.spline_knot_frames,
                           rule=MadRule(k=r.k, margin_nm=r.margin_nm),
                           overrides=_match(parse_overrides(settings.beads), names, where),

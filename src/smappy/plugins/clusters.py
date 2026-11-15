@@ -2,7 +2,7 @@
 local maxima.
 
 `docs/regions.md` ("Clusters") has the decisions.  A clusterer writes
-``cluster_id`` -- 1, 2, ... by size, 0 for a localization in no cluster -- and
+``cluster_id`` -- 1, 2, ... by size, -1 for a localization in no cluster -- and
 ``n_in_cluster``, the localizations of its cluster, onto every row; the table
 then names its regions, and a block repeats over them (`blocks.py`), a filter
 on ``n_in_cluster`` keeps the large ones, and *Segment regions* (`segment.py`,
@@ -124,7 +124,7 @@ COUNT_CHUNK = 200_000
 
 def dbscan(points: np.ndarray, eps: float, k: int,
            progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
-    """A cluster label per point, 1, 2, ... largest first, 0 for noise.
+    """A cluster label per point, 1, 2, ... largest first, -1 for noise.
 
     ``points`` is (n, 2) or (n, 3); a point is core when at least ``k``
     others are within ``eps``; a border point joins its nearest core point's
@@ -148,7 +148,7 @@ def dbscan(points: np.ndarray, eps: float, k: int,
     points = np.asarray(points, dtype=float)
     n = len(points)
     if n == 0:
-        return np.zeros(0, dtype=np.int64)
+        return np.full(0, -1, dtype=np.int64)
     if not eps > 0:
         raise ValueError("the radius must be positive")
     use_z = points.shape[1] > 2
@@ -174,10 +174,10 @@ def dbscan(points: np.ndarray, eps: float, k: int,
 
 def by_size(found: np.ndarray) -> np.ndarray:
     """Labels 1, 2, ... numbered by size, the largest 1, from any cluster
-    numbers (0 and up; below 0 for none), which become 0.  Ties keep the
-    order of the numbers given (a stable sort)."""
+    numbers (0 and up; below 0 for none, which become -1, `ids.NONE`).  Ties
+    keep the order of the numbers given (a stable sort)."""
     found = np.asarray(found, dtype=np.int64)
-    labels = np.zeros(len(found), dtype=np.int64)
+    labels = np.full(len(found), -1, dtype=np.int64)
     member = found >= 0
     if not member.any():
         return labels
@@ -190,11 +190,12 @@ def by_size(found: np.ndarray) -> np.ndarray:
 
 
 def sizes_of(labels: np.ndarray) -> np.ndarray:
-    """Each row's cluster size, 0 for noise."""
+    """Each row's cluster size, 0 for noise (-1)."""
     labels = np.asarray(labels, dtype=np.int64)
-    counts = np.bincount(labels)
-    out = counts[labels]
-    out[labels == 0] = 0
+    member = labels >= 0
+    out = np.zeros(len(labels), dtype=np.int64)
+    if member.any():
+        out[member] = np.bincount(labels[member])[labels[member]]
     return out
 
 
@@ -215,7 +216,7 @@ def voronoi_clusters(points: np.ndarray, factor: float = 2.0, min_size: int = 10
                      progress: Optional[Callable[[float], None]] = None
                      ) -> Tuple[np.ndarray, float]:
     """Voronoi clustering (SR-Tesseler's, Levet et al. 2015): a cluster label
-    per point, 1, 2, ... largest first, 0 for none; and the field's mean
+    per point, 1, 2, ... largest first, -1 for none; and the field's mean
     density, per square micrometre.
 
     A point is dense when the density of its Voronoi cell (one over its area,
@@ -231,7 +232,7 @@ def voronoi_clusters(points: np.ndarray, factor: float = 2.0, min_size: int = 10
     from .neighbourhood import voronoi_cells
     points = np.asarray(points, dtype=float)[:, :2]
     n = len(points)
-    labels = np.zeros(n, dtype=np.int64)
+    labels = np.full(n, -1, dtype=np.int64)
     if n < 4:
         return labels, float("nan")
     try:
@@ -269,7 +270,7 @@ def hdbscan_available() -> bool:
 def hdbscan_clusters(points: np.ndarray, min_cluster_size: int = 10,
                      min_samples: Optional[int] = None) -> np.ndarray:
     """HDBSCAN (Campello et al. 2013, as the hdbscan package implements it): a
-    cluster label per point, 1, 2, ... largest first, 0 for noise.
+    cluster label per point, 1, 2, ... largest first, -1 for noise.
     ``min_samples`` None is ``min_cluster_size``, the package's default; it
     counts the neighbours without the point itself (scikit-learn's counts it,
     one more for the same clusters)."""
@@ -278,7 +279,7 @@ def hdbscan_clusters(points: np.ndarray, min_cluster_size: int = 10,
     from hdbscan import HDBSCAN
     points = np.asarray(points, dtype=float)
     if len(points) < max(2, min_cluster_size):
-        return np.zeros(len(points), dtype=np.int64)
+        return np.full(len(points), -1, dtype=np.int64)
     found = HDBSCAN(min_cluster_size=int(min_cluster_size),
                     min_samples=None if min_samples is None else int(min_samples),
                     approx_min_span_tree=False).fit_predict(points)
@@ -288,7 +289,7 @@ def hdbscan_clusters(points: np.ndarray, min_cluster_size: int = 10,
 def local_maxima(points: np.ndarray, radius: float, min_points: int,
                  progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """Picasso's SMLM clusterer (`clusterer._cluster`): a cluster label per
-    point, 1, 2, ... largest first, 0 for none.
+    point, 1, 2, ... largest first, -1 for none.
 
     Each point's neighbours within ``radius`` are counted, itself included.
     A **local maximum** has more than ``min_points`` and no neighbour with
@@ -310,7 +311,7 @@ def local_maxima(points: np.ndarray, radius: float, min_points: int,
     points = np.asarray(points, dtype=float)
     n = len(points)
     if n == 0:
-        return np.zeros(0, dtype=np.int64)
+        return np.full(0, -1, dtype=np.int64)
     if not radius > 0:
         raise ValueError("the radius must be positive")
     use_z = points.shape[1] > 2
@@ -388,7 +389,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray, file: Optional[np.ndar
     frame = np.asarray(frame, dtype=float)
     file = (np.zeros(len(frame), np.int64) if file is None
             else np.asarray(file, np.int64))
-    member = np.flatnonzero(labels > 0)
+    member = np.flatnonzero(labels >= 0)          # -1: in no cluster
     if not len(member):
         return labels, 0
     rel = np.full(len(member), np.nan)
@@ -408,13 +409,12 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray, file: Optional[np.ndar
                        minlength=m * FRAME_BINS).reshape(m, FRAME_BINS).max(axis=1)
     lo, hi = FRAME_MEAN_BOUNDS
     fails = (mean < lo) | (mean > hi) | (peak > FRAME_PEAK_MAX * n)
-    fails[0] = False
-    rejected = int(fails[1:][n[1:] > 0].sum())
-    labels[fails[labels]] = 0
-    kept = np.unique(labels[labels > 0])
-    renumber = np.zeros(m, dtype=np.int64)
+    rejected = int(fails[n > 0].sum())
+    labels[member[fails[lab]]] = -1
+    kept = np.unique(labels[labels >= 0])
+    renumber = np.full(m, -1, dtype=np.int64)
     renumber[kept] = np.arange(1, len(kept) + 1)
-    return renumber[labels], rejected
+    return np.where(labels >= 0, renumber[np.maximum(labels, 0)], -1), rejected
 
 
 # above this many seconds a run asks first (`FindClusters.preflight`)
@@ -506,7 +506,7 @@ class FindClusters(Plugin):
 
     Settings = FindClustersSettings
     changes_locs = True
-    version = "2"
+    version = "3"
     # tried on one ROI before the field: Picasso's "test clustering"
     follow_roi = True
 
@@ -579,7 +579,7 @@ class FindClusters(Plugin):
         use &= np.isfinite(points).all(axis=1)
         files = (np.asarray(table["filenumber"]) if "filenumber" in table
                  else np.zeros(len(table), dtype=np.int64))
-        labels = np.zeros(len(table), dtype=np.int64)
+        labels = np.full(len(table), -1, dtype=np.int64)
         used = []                     # per file: DBSCAN's radius, Voronoi's mean
         offset = 0
         files_used = np.unique(files[use])
@@ -610,7 +610,7 @@ class FindClusters(Plugin):
                 progress(0.0)
                 found = hdbscan_clusters(points[rows], s.min_cluster_size, s.min_samples)
             progress(1.0)
-            found[found > 0] += offset
+            found[found >= 0] += offset         # labels from 1: above the last file's
             offset = max(offset, int(found.max(initial=0)))
             labels[rows] = found
         if grouped:
@@ -625,7 +625,7 @@ class FindClusters(Plugin):
         # the files and channels the layer shows are clustered afresh; the
         # others keep their clusters, numbered above them (`replaced_rows`)
         replaced = replaced_rows(whole, table, use)
-        clustered = int((labels > 0).sum())
+        clustered = int((labels >= 0).sum())
         labels, n_kept = merge_ids(whole["cluster_id"] if "cluster_id" in whole
                                    else None, labels, replaced)
         text = (f"{n_clusters} clusters of {clustered} localizations, "
@@ -644,7 +644,7 @@ class FindClusters(Plugin):
             data["radius_nm"] = used
         elif algorithm == "voronoi":
             data["mean_density_um2"] = used
-        sizes = np.bincount(labels)[1:]
+        sizes = np.bincount(labels[labels >= 0])
         sizes = sizes[sizes > 0]
         xy = np.column_stack([np.asarray(whole["x_nm"], float),
                               np.asarray(whole["y_nm"], float)])
@@ -698,7 +698,7 @@ def _per_localization(locs: Localizations, grouped: Localizations,
     wanted = np.asarray(locs["group_id"])
     at = np.clip(np.searchsorted(gid[order], wanted), 0, len(gid) - 1)
     hit = gid[order][at] == wanted
-    out = np.zeros(len(locs), dtype=np.int64)
+    out = np.full(len(locs), -1, dtype=np.int64)
     out[hit] = labels[order[at[hit]]]
     return out
 
@@ -709,8 +709,8 @@ def draw_clusters(figure, xy: np.ndarray, labels: np.ndarray, sizes: np.ndarray)
     n = len(xy)
     pick = (np.random.default_rng(0).choice(n, FIGURE_POINTS, replace=False)
             if n > FIGURE_POINTS else np.arange(n))
-    noise = pick[labels[pick] == 0]
-    member = pick[labels[pick] > 0]
+    noise = pick[labels[pick] < 0]
+    member = pick[labels[pick] >= 0]
     left.scatter(xy[noise, 0], xy[noise, 1], s=1, c="0.8", linewidths=0)
     left.scatter(xy[member, 0], xy[member, 1], s=2, c=labels[member] % 20,
                  cmap="tab20", linewidths=0)

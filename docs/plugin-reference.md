@@ -193,7 +193,10 @@ another choice.
 
 `Localizations` is a dataclass of `columns: Dict[str, np.ndarray]` plus
 `metadata`.  `locs["photons"]`, `"photons" in locs`, `locs.keys()`, `len(locs)`,
-`locs[mask]` (a new table).  The column vocabulary:
+`locs[mask]` (a new table).  An id column (`*_id`, `tid`; `ids.is_id`) names
+what a localization belongs to: every value is an id, 0 included, and -1 is
+"in none" (`ids.NONE`, `ids.assigned`) -- noise, no track, left out of
+merging.  The column vocabulary:
 
 | column | meaning |
 | --- | --- |
@@ -204,12 +207,12 @@ another choice.
 | `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm` |
 | `z_err_nm` | axial precision, when the fit produced one (or `Analysis/After fit/Astigmatic z`, from the widths) |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
-| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row; 0 for a localization left out by `group_use` |
+| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row; -1 for a localization left out by `group_use` |
 | `group_use` | made by the user (usually by Math Parser), rarely there: where it is, a localization with 0 takes no part in grouping -- in no group, not in the grouped table, kept in the localizations (`group.USE`); e.g. `trace_index > 20` merges MINFLUX traces without their creeping start |
-| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
+| `cluster_id`, `n_in_cluster` | which cluster, 1-based, -1 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
 | `region_filter` | 1 for a localization in a region the region filter keeps, 0 for one it drops -- written by `Session.refresh_region_filter` from the conditions in the table's metadata; never read by a region's measurement (`region_runs.unmeasured`) |
 | `tid`, `trace_index` | MINFLUX: the trace a localization belongs to, and its number in it, 1, 2, 3, ... by time (`io.minflux.trace_index`) -- a filter `trace_index > 20` leaves out the start of each trace, where a still emitter creeps into place (NOTES.md); on merged traces the smallest.  A file added to a table whose `tid`s overlap its own has them moved past the table's (`file_ids.keep_apart`, as *Combine files* numbers on); its own numbers -- Imspector's, to find a trace again -- are `tid_file`, and the shift is the file's `id_offsets`.  Any other id a file brings (`track_id`, `cluster_id`) likewise, into `<name>_file` |
-| `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`, or into its *output column*); a simulation's truth is `track_id_true`, MINFLUX's traces `tid`.  Nothing that reads tracks names one: each has a *track id*, on *auto* the first of `track_id`, `tid`, `track_id_true` the table has (`tracking.columns.track_column`).  Whole numbers when blinks merge -- a blink's largest id and length (`group.id_columns`), whether linked here or read from a file |
+| `track_id`, `track_length` | which track, 1-based, -1 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`, or into its *output column*); a simulation's truth is `track_id_true`, MINFLUX's traces `tid`.  Nothing that reads tracks names one: each has a *track id*, on *auto* the first of `track_id`, `tid`, `track_id_true` the table has (`tracking.columns.track_column`).  Whole numbers when blinks merge -- a blink's largest id and length (`group.id_columns`), whether linked here or read from a file |
 | `track_D_um2_per_s`, `track_alpha` | a track's diffusion coefficient and anomalous exponent from its MSD, NaN for none -- written by `Analysis/Tracking/Tracking analysis` with *write per track* |
 | `phase_rad`, `z_env_nm`, `fringe_probability`, `cavity_phase_rad` | 4Pi: the interference phase, wrapped to (-pi, pi], and the envelope's z (`psf.Global4PiPSF`, which also writes them as `z_nm`); `Analysis/After fit/4Pi z` replaces `z_nm` with z from the phase and writes the probability that its fringe is right and the cavity's phase in the frame.  `phase_rad` must not be averaged linearly (grouping does, for now) |
 | `sigma_nm`, `logl_rel` | PSF width and fit quality; the elliptical Gaussian fit writes `sigma_x_nm`, `sigma_y_nm` and their errors `sigma_x_err_nm`, `sigma_y_err_nm` instead of `sigma_nm` |
@@ -255,7 +258,7 @@ the undo.  A plugin that reads a file's acquisition reads it there, not from
 the table's metadata.
 
 A column one file lacks is padding in its rows: NaN, or 0 in an integer
-column (for an id, "in none").  `FileInfo.columns` is what each file had
+column, -1 for an id ("in none", `ids.NONE`).  `FileInfo.columns` is what each file had
 when it was read, and `Session.files_without(column)` the files read
 without one -- for a plugin that would rather say "file 2 has no `z_nm`"
 than compute on the padding.

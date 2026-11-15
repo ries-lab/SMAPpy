@@ -237,7 +237,7 @@ def localizations(truth: GroundTruth) -> Localizations:
     if truth.state is not None:
         # the tracks' truth, as the tracking tools read it (`tracking.columns`)
         state = truth.state[rows]
-        columns["track_id_true"] = np.where(state >= 0, owner + 1, 0).astype(np.int64)
+        columns["track_id_true"] = np.where(state >= 0, owner + 1, -1).astype(np.int64)
         columns["state_true"] = state.astype(np.int32)
     metadata = _metadata(truth, "smappy blinking structure")
     metadata.update({"n_localizations": n, "close_emitters": out.close,

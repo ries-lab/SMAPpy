@@ -21,7 +21,7 @@ def clusters(sizes=(30, 50, 20), noise=15, seed=0):
         parts.append(rng.normal(k * 5000, 30, (n, 2)))
         ids.append(np.full(n, k))
     parts.append(rng.uniform(0, 20000, (noise, 2)))
-    ids.append(np.zeros(noise, int))
+    ids.append(np.full(noise, -1))                     # in no cluster
     xy = np.vstack(parts)
     m = len(xy)
     return Localizations({"x_nm": xy[:, 0].astype(np.float32),
@@ -50,11 +50,11 @@ def count_step(label="count"):
     return Step(label=label, path=Count.path, plugin=Count(), settings=None)
 
 
-def test_an_id_column_names_its_regions_and_zero_is_none():
+def test_an_id_column_names_its_regions_and_minus_one_is_none():
     ids, rows = split_ids(np.array([2, 0, 1, 2, -1, 1, 2]))
-    assert ids.tolist() == [1, 2]
-    assert [r.tolist() for r in rows] == [[2, 5], [0, 3, 6]]
-    ids, rows = split_ids(np.array([0.0, np.nan, 3.0]))
+    assert ids.tolist() == [0, 1, 2]
+    assert [r.tolist() for r in rows] == [[1], [2, 5], [0, 3, 6]]
+    ids, rows = split_ids(np.array([-1.0, np.nan, 3.0]))
     assert ids.tolist() == [3.0] and rows[0].tolist() == [2]
 
 

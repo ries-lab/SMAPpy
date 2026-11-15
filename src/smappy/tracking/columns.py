@@ -1,6 +1,6 @@
 """Which column names the tracks: one rule for everything that reads them.
 
-A track is the localizations sharing a value above 0 of an id column, and
+A track is the localizations sharing a value of an id column (-1 is none), and
 which column that is depends on where the table came from: `track_id` from
 Link tracks, `tid` from a MINFLUX file, `track_id_true` from a simulation.
 So no plugin names one: each has a *track id* field whose default, *auto*

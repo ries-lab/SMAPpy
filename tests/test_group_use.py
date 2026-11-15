@@ -45,7 +45,7 @@ def test_files_linked_one_by_one_leave_the_same_rows_out():
     assert np.allclose(np.sort(grouped["x_nm"]), [1000.0, 2000.0, 11000.0, 12000.0])
     gid = np.asarray(session.locs["group_id"])
     start = np.asarray(session.locs["trace_index"]) <= 2
-    assert (gid[start] == 0).all() and (gid[~start] > 0).all()
+    assert (gid[start] == -1).all() and (gid[~start] > 0).all()
     # each localization's blink is the grouped row with its id
     rows = {int(g): k for k, g in enumerate(grouped["group_id"])}
     x = np.asarray(grouped["x_nm"])

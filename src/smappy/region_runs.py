@@ -8,8 +8,9 @@ plugin wrote -- and what both share: the status line of a long run and the
 way it is stopped.
 
 **Membership is the id alone.**  A region's rows are the rows with its id;
-each layer's own filter applies inside them, as for an ROI.  Id 0 and below
-is "in no region" (DBSCAN's noise) and is never evaluated, and a region left
+each layer's own filter applies inside them, as for an ROI.  Id -1 is "in
+no region" (DBSCAN's noise, `ids.NONE`) and is never evaluated, 0 is a region
+like any other (a MINFLUX trace, a Picasso pick), and a region left
 with no row is not either.
 
 **Freshness is one signature per step, not per region.**  An ROI can be moved
@@ -31,6 +32,8 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from .ids import NONE, is_id
 
 from .locs import Localizations
 from .region_table import RegionTable
@@ -103,14 +106,15 @@ def stopped(stop) -> bool:
 
 def split_ids(ids) -> Tuple[np.ndarray, List[np.ndarray]]:
     """The regions an id column names: ``(ids, rows)`` with the rows of each,
-    sorted, ids above 0 only -- one sort, whatever the number of regions."""
+    sorted, every id from 0 (`ids.assigned`) -- one sort, whatever the
+    number of regions."""
     ids = np.asarray(ids)
     if ids.dtype.kind == "f":
         good = np.isfinite(ids)
-        ids = np.where(good, ids, 0)
+        ids = np.where(good, ids, NONE)
     order = np.argsort(ids, kind="stable")
     ordered = ids[order]
-    start = np.searchsorted(ordered, 0, side="right")     # skip 0 and below
+    start = np.searchsorted(ordered, 0, side="left")      # skip "in none"
     order, ordered = order[start:], ordered[start:]
     if not len(order):
         return np.zeros(0, ids.dtype), []
@@ -470,12 +474,15 @@ def merge_ids(old, new: np.ndarray, replaced: np.ndarray) -> Tuple[np.ndarray, i
     per region (`Session.id_regions`) and ROIs made from the column name
     them."""
     new = np.asarray(new, dtype=np.int64)
-    kept = (np.zeros(len(new), dtype=np.int64) if old is None
-            else np.where(replaced, 0, np.asarray(old)).astype(np.int64))
-    kept[kept < 0] = 0
-    offset = int(kept.max(initial=0))
-    shifted = np.where(new > 0, new + offset, 0)
-    n_kept = len(np.unique(kept[kept > 0]))
+    kept = (np.full(len(new), NONE, dtype=np.int64) if old is None
+            else np.where(replaced, NONE, np.asarray(old)).astype(np.int64))
+    kept[kept < 0] = NONE
+    # the new ids start just above the kept ones, whether they count from 0
+    # or 1; with none kept they are as they came
+    first = int(new[new >= 0].min()) if (new >= 0).any() else 0
+    offset = max(0, int(kept.max(initial=NONE)) + 1 - first)
+    shifted = np.where(new >= 0, new + offset, NONE)
+    n_kept = len(np.unique(kept[kept >= 0]))
     return np.where(replaced, shifted, kept), n_kept
 
 
@@ -687,7 +694,7 @@ class WriteBack:
     """The columns a block writes back into the real table, and how.
 
     ``columns`` are merged by `ROW` after every region has run: a row in no
-    region keeps its value (NaN, or 0 for an id or a flag, in a new column);
+    region keeps its value (NaN, -1 for an id, 0 for a flag, in a new column);
     a row in several overlapping regions takes the value the ``rule`` says
     -- ``last`` (the default) or ``first`` region's, the ``mean``, or
     ``any`` for a flag.  ``use`` among them also flags the rows a region's
@@ -735,7 +742,8 @@ class WriteBack:
             if not pieces:
                 continue
             columns[c] = merge_pieces(n, pieces, self.rule, existing=columns.get(c),
-                                      fill=True if c == "use" else None)
+                                      fill=True if c == "use" else
+                                      (NONE if is_id(c) else None))
         return Localizations(columns, dict(locs.metadata))
 
 
@@ -747,7 +755,8 @@ def merge_pieces(n: int, pieces: Sequence[Tuple[np.ndarray, np.ndarray]],
     ``pieces`` are ``(rows, values)`` in the order the regions ran; a row in
     several takes the ``rule``'s value (`WriteBack.RULES`).  A row in none
     keeps ``existing`` where the column was there before, else ``fill`` --
-    by default NaN for numbers with a fraction and 0 for an id or a flag.
+    by default NaN for numbers with a fraction and 0 for whole numbers (an id
+    passes `ids.NONE`).
     """
     dtype = np.result_type(*[np.asarray(v).dtype for _, v in pieces])
     if existing is not None:
@@ -871,11 +880,12 @@ def write_values(ctx, locs: Localizations, regions: str,
 def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") -> np.ndarray:
     """``n`` rows, each the number (``numbers`` of its id in ``members``) of
     the last ROI in ``members`` -- in the order they were made -- that holds
-    it (the first, with ``rule``), 0 in none."""
+    it (the first, with ``rule``), -1 in none."""
     numbers = {str(k): v for k, v in numbers.items()}
     pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))
               for r, rows in members if len(rows)]
-    return merge_pieces(n, pieces, rule) if pieces else np.zeros(n, dtype=np.int64)
+    return (merge_pieces(n, pieces, rule, fill=NONE) if pieces
+            else np.full(n, NONE, dtype=np.int64))
 
 
 def table_values(table: RegionTable, names: Sequence[str] = ()) -> Dict[str, Dict[str, float]]:

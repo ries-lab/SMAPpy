@@ -62,7 +62,7 @@ def test_the_spread_count_and_duration_of_each_trace_come_back():
 
 def test_column_statistics_skip_unmeasured_values_and_match_numpy():
     rng = np.random.default_rng(3)
-    ids = rng.integers(0, 300, 20000)
+    ids = rng.integers(-1, 300, 20000)
     value = rng.normal(size=20000)
     value[rng.random(20000) < 0.3] = np.nan
     value[ids == 7] = np.nan                    # a region with nothing measured
@@ -76,7 +76,7 @@ def test_column_statistics_skip_unmeasured_values_and_match_numpy():
             enough = np.isfinite(a).sum() > (1 if stat == "std" else 0)
             expect.append(ref(a) if enough else np.nan)
         assert np.allclose(found.values[f"v_{stat}"], expect, equal_nan=True), stat
-    assert 0 not in found.ids                   # 0 is no region
+    assert -1 not in found.ids and 0 in found.ids   # -1 is no region, 0 is one
     assert np.isnan(found.values["v_mean"][list(found.ids).index(7)])
 
 
@@ -91,7 +91,7 @@ def test_the_kept_rows_alone_are_measured_and_a_region_with_none_is_left_out():
 
 
 def test_large_and_float_ids_name_the_same_regions():
-    ids = np.array([5, 10 ** 12, 5, 10 ** 12, 0])
+    ids = np.array([5, 10 ** 12, 5, 10 ** 12, -1])
     found, codes = dense_codes(ids)
     assert list(found) == [5, 10 ** 12] and list(codes) == [0, 1, 0, 1, -1]
     found, codes = dense_codes(np.array([2.0, np.nan, 2.0, 3.0]))
@@ -167,5 +167,5 @@ def test_a_table_of_a_million_regions_is_small_and_quick_to_write_and_read(tmp_p
 
 def test_each_regions_rows_stay_in_table_order():
     ids, rows_ = split_ids(np.array([2, 0, 1, 2, -1, 1, 2, 1]))
-    assert list(ids) == [1, 2]
-    assert [list(r) for r in rows_] == [[2, 5, 7], [0, 3, 6]]
+    assert list(ids) == [0, 1, 2]                   # 0 is a region, -1 none
+    assert [list(r) for r in rows_] == [[1], [2, 5, 7], [0, 3, 6]]

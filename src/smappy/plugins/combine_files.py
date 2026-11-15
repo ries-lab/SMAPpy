@@ -15,9 +15,10 @@ time line.  This plugin turns the second case into one file:
   duration of the files before it -- their frames times their frame time,
   or their last time stamp when that is later or the frame time unknown;
 * **ids stay apart**: an id column (``*_id``: `track_id`, `cluster_id`) is
-  numbered on from the files before it, 0 staying 0 ("in none"), so track 5
-  of one file and track 5 of the next do not become one track.  MINFLUX's
-  trace id `tid` likewise, all of it, since its 0 is a trace.  `roi_id` and
+  numbered on from the files before it, -1 staying -1 ("in none"), so track
+  5 of one file and track 5 of the next do not become one track; MINFLUX's
+  trace id `tid` likewise.  Ids already apart -- moved apart as each file
+  joined the table (`file_ids`) -- are left as they are.  `roi_id` and
   the columns written from regions' results are an ROI's number, the same
   in every file, and stay;
 * **linking goes**: `group_id` / `n_in_group` said which localizations of
@@ -44,7 +45,7 @@ import numpy as np
 
 # which columns are ids, and which count 0 as one: `file_ids`, which keeps a
 # file's ids apart as it is added to the table, as this does for the files
-from ..file_ids import ALL_VALUE_IDS, REGION_NUMBER, apart, id_columns  # noqa: F401
+from ..file_ids import REGION_NUMBER, apart, id_columns  # noqa: F401
 from ..group import GROUP_COLUMNS
 from ..locs import Localizations
 from ..metadata import file_frame_time
@@ -128,7 +129,7 @@ def combine(locs: Localizations, gap: int = 0) -> Tuple[Localizations, List[str]
     # joined the table (`file_ids`) -- stays as it is: moving it again would
     # only renumber what the results kept per id name
     ids = {name: np.asarray(locs[name]).copy() for name in id_columns(locs)
-           if not apart(np.asarray(locs[name]), files, name)}
+           if not apart(np.asarray(locs[name]), files)}
     frames_before = 0
     seconds_before = 0.0
     ids_before = {name: 0 for name in ids}
@@ -149,14 +150,9 @@ def combine(locs: Localizations, gap: int = 0) -> Tuple[Localizations, List[str]
             values[rows] += seconds_before / TIME_COLUMNS[name]
         for name, values in ids.items():
             own = values[rows]
-            if name in ALL_VALUE_IDS:
-                shifted = own + ids_before[name]
-                top = int(own.max()) + 1 if len(own) else 0
-            else:                       # 0 is "in none" and stays so
-                shifted = np.where(own != 0, own + ids_before[name], 0)
-                top = int(own.max()) if len(own) else 0
-            values[rows] = shifted
-            ids_before[name] += max(top, 0)
+            # -1 is "in none" (`ids.NONE`) and stays so; every other id moves
+            values[rows] = np.where(own >= 0, own + ids_before[name], own)
+            ids_before[name] += int(own.max()) + 1 if len(own) and own.max() >= 0 else 0
         frames_before += frames
         seconds_before += duration
 
@@ -202,7 +198,7 @@ class CombineFiles(Plugin):
     changes_locs = True
     # the frames of every localization move, whatever the layer shows
     grouping = "ungrouped"
-    version = "1"
+    version = "2"
 
     def run(self, ctx: Context, settings: CombineSettings) -> Result:
         combined, warnings = combine(ctx.locs, gap=settings.gap)
