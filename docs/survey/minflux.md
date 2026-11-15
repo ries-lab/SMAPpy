@@ -8,6 +8,9 @@
 > pattern's Cramér-Rao bound.  "What SMAPpy has today" below describes the
 > state before that.
 
+> The overview of what is done and asked, with work packages, is
+> [minflux-overview.md](minflux-overview.md) (2026-11-15).
+
 A survey written in 2026-10 as the starting point for MINFLUX support in
 SMAPpy: a reader for Abberior's `.msr` files, MBM (reference bead)
 handling, and MINFLUX-specific analysis.  The repositories were cloned and
@@ -69,7 +72,7 @@ closed):
 | [jonatanalvelid/etMINFLUX](https://github.com/jonatanalvelid/etMINFLUX) | event-triggered acquisition control through specpy (m2205 and m2410 branches) | Python | GPL-3.0 | acquisition, not analysis |
 | [jonatanalvelid/etMINFLUX-analysis-public](https://github.com/jonatanalvelid/etMINFLUX-analysis-public) | analysis of the etMINFLUX paper; vendors `obf_support.py` (MIT); 29 real `.msr` + 58 `.npy` example files | Python | **none** (all rights reserved) | read only; data not redistributable |
 | [Zatyrus/parameter-optimization-for-iterative-minflux-microscopy](https://github.com/Zatyrus/parameter-optimization-for-iterative-minflux-microscopy) | data release with small export helpers | Python | GPL-3.0 | – |
-| [Nuka-Kola/MFX_data_analysis](https://github.com/Nuka-Kola/MFX_data_analysis) (private) | N. Sergeev, T. Engelhardt: single-molecule *tracking* workflow -- `.msr` through specpy from PyPI (`data_analysis_utils/io.py` `msr_to_df`), the sequence's per-iteration parameters joined onto every row, `sta` abort reasons per trace, trace metrics, track rotation, tail labelling, CFR post-hoc trace cutting, step finding with bnp-step, MBM bead traces (`MBM_analysis.py`), building sequences | Python | **none** | read only; ask the authors |
+| [Nuka-Kola/MFX_data_analysis](https://github.com/Nuka-Kola/MFX_data_analysis) (private) | N. Sergeev, T. Engelhardt: single-molecule *tracking* workflow -- `.msr` through specpy from PyPI (`data_analysis_utils/io.py` `msr_to_df`), the sequence's per-iteration parameters joined onto every row, `sta` abort reasons per trace, trace metrics, track rotation, tail labelling, CFR post-hoc trace cutting, step finding with bnp-step, MBM bead traces (`MBM_analysis.py`), building sequences | Python | **none** | the lab's own group: ideas and definitions may be used |
 | [FReina/MFX_data_analysis](https://github.com/FReina/MFX_data_analysis) (private; read from a zip of `master`, 2026-10-15) | a fork of an *older* Nuka-Kola state (Python 3.9; no `fit_steps`, no parallel bnp-step) that adds a **specpy-free `.msr` importer**: `data_analysis_utils/msr_utils.py` `MsrImporter` (datasets, images, `to_df`/`to_npy`/`to_mat`/`to_tiff`) on pyMINFLUX's OBF parser vendored as `_msr_reader.py` (Apache-2.0, unchanged but for blank lines), and a beginner's guide to the format, `MSR_file_structure.md` | Python | **none** (the vendored reader Apache-2.0) | read only; ask the authors |
 | [lumasullo/p-minflux](https://github.com/lumasullo/p-minflux) | p-MINFLUX (pulsed, TCSPC) analysis and simulation -- a different instrument | Python | GPL-3.0 | – |
 | [ries-lab/SimuFLUX](https://github.com/ries-lab/SimuFLUX) | MINFLUX simulator ([bioRxiv 2025](https://doi.org/10.1101/2025.04.08.647786)) | MATLAB/Python | – | simulated data for tests and pages |

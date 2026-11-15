@@ -13,6 +13,7 @@ in a survey of their own, [minflux.md](minflux.md).
 | [tracking.md](tracking.md) | tracking and track analysis | TrackMate, trackpy, laptrack, u-track, Spot-On, saSPT, vbSPT, ExTrack, AutoStepFinder, BNP-Step, andi_datasets |
 | [clustering.md](clustering.md) | clusters, spatial statistics, counting, colocalisation | Locan, PoCA / SR-Tesseler, ClusterViSu, Clus-DoC, RSMLM, BaClAva, FOCAL3D, SMoLR, pointpats, the Nieves 2023 benchmark |
 | [platforms.md](platforms.md) | large platforms and user experience | PYME, GDSC SMLM, locan / napari-locan, viewers, commercial tools (documentation only) |
+| [minflux-overview.md](minflux-overview.md) | MINFLUX: what is done, what the lab's SMAP plugins and the MFX scripts ask for, work packages (2026-11-15) | SMAP's MINFLUX plugins, Nuka-Kola/MFX_data_analysis |
 | [minflux.md](minflux.md) | MINFLUX: readers, MBM, trace analysis (written earlier, 2026-10) | PYME-extra, MBM-inspector, pyMINFLUX, minflux-viewer, minflux-analysis, napari-storm, Pyflux, matFLUX, MFX_data_analysis, ... |
 | [drift_averaging_fitting.md](drift_averaging_fitting.md) | drift, registration, resolution, averaging, model fitting, fitting | DME / photonpy, NanoJ, ImDecorr, smlm_datafusion2d/3d, smlm_classification2d, LocMoFit, fit3Dcspline, storm-analysis, ZOLA-3D, Gpufit, PERPL |
 

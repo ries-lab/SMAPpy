@@ -211,7 +211,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | `SimpleTracking` | link locs into tracks | ✗ | **P2**, S–M – reuse `group.py`'s linking (it is the same nearest-neighbour link with larger radius/gap); write `track_id`. |
 | `AnalyzeSPT`, `DisplaySingleTrack`, `Single_tracking_analysis` | MSD, diffusion coefficients, jump distances, track viewer | ✗ | **P2**, M – MSD and jump-distance fit per track and pooled; track overlay in the render view. |
 | `uTrack` | external uTrack | ✗ | skip |
-| `Dual_tracking_analysis(_old)`, `Tracks_to_movie`, MINFLUX `Segment_*tracks`, `MotorPAINT`, `StepsMINFLUX*` | co-tracking, MINFLUX steps | ✗ | skip (project code) – revisit if MINFLUX tracking is a focus. |
+| `Dual_tracking_analysis(_old)`, `Tracks_to_movie`, MINFLUX `Segment_*tracks`, `MotorPAINT`, `StepsMINFLUX*` | co-tracking, MINFLUX steps | ✗ | requested 2026-11: packages E and F of `docs/survey/minflux-overview.md`. |
 
 ## 12. ROI manager
 
