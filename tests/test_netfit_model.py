@@ -241,3 +241,73 @@ def test_a_detection_gathering_two_molecules_worth_of_p_is_split_at_its_cells_tw
     two = e["split"] > 0
     assert sorted(e["x"][two].tolist()) == pytest.approx([4.8, 6.2], abs=0.05)     # each half at its cells
     assert e["x"][~two].item() == pytest.approx(2.0)                               # the single one untouched
+
+
+def _slot_maps(k=2, h=8, w=8):
+    """K slots' maps, nine channels each and the background (`network`'s layout), p 1e-4 everywhere."""
+    out = torch.zeros(1, 9 * k + 1, h, w)
+    for s in range(k):
+        out[:, 9 * s] = 1e-4
+        out[:, 9 * s + 5:9 * s + 9] = 0.5
+    return out
+
+
+def _two_in_a_cell():
+    """Two molecules 0.3 pixels apart in cell (row 3, column 5) and the batch that holds them."""
+    batch = Batch(frames=None, xyz=torch.tensor([[[4.9, 3.0, -300.0], [5.2, 3.0, 300.0]]]),
+                  photons=torch.tensor([[2000.0, 2000.0]]), mask=torch.tensor([[True, True]]), background=torch.tensor([0.0]))
+    return batch
+
+
+def test_a_network_with_two_slots_gives_nine_maps_a_slot_and_the_background_and_one_slot_is_unchanged():
+    model = network.TwoStageUNet(features=8, slots=2)
+    out = model(torch.zeros(2, 3, 16, 24))
+    assert out.shape == (2, 19, 16, 24) and network.slots_of(out) == 2
+    # p starts at the same molecules a pixel, shared by the slots
+    assert out[0, [0, 9]].sum().item() == pytest.approx(network.P0 * 16 * 24, rel=1e-3)
+    assert network.slots_of(network.TwoStageUNet(features=8)(torch.zeros(1, 3, 8, 8))) == 1
+    with pytest.raises(ValueError):
+        network.TwoStageUNet(features=8, slots=2, sigma_rep=True)
+
+
+def test_the_matched_loss_gives_two_molecules_in_one_cell_a_slot_each_and_charges_every_other_slot():
+    batch = _two_in_a_cell()
+    out = _slot_maps()
+    for s, (dx, z) in enumerate(((-0.1, -0.3), (0.2, 0.3))):           # slot 0 the left one, slot 1 the right
+        out[0, 9 * s, 3, 5], out[0, 9 * s + 1, 3, 5] = 0.9, 0.2
+        out[0, 9 * s + 2, 3, 5], out[0, 9 * s + 4, 3, 5] = dx, z
+    t = loss.terms(out, batch, SCALING, names=("matched",))
+    # each molecule exactly at its slot: -log N = sum log sigma + 2 log 2 pi, then -log p; the rest -log (1 - p)
+    nll = 4 * math.log(0.5) + 2 * math.log(2 * math.pi)
+    others = (2 * 64 - 2) * -math.log(1 - 1e-4)
+    assert t["matched"].item() == pytest.approx(others + 2 * (nll - math.log(0.9)), rel=1e-4)
+    assert t["unmatched"].item() == 0
+
+
+def test_the_matched_loss_charges_a_duplicate_and_a_merge_where_the_mixture_does_not():
+    batch = _two_in_a_cell()
+    one = Batch(frames=None, xyz=batch.xyz[:, :1], photons=batch.photons[:, :1], mask=batch.mask[:, :1], background=batch.background)
+    good = _slot_maps()
+    good[0, 0, 3, 5], good[0, 1, 3, 5], good[0, 2, 3, 5], good[0, 4, 3, 5] = 0.9, 0.2, -0.1, -0.3
+    dup = good.clone()                                            # a second slot on the same molecule
+    dup[0, 9:13, 3, 5] = good[0, 0:4, 3, 5]
+    dup[0, 13, 3, 5] = good[0, 4, 3, 5]
+    m = lambda o, b: loss.terms(o, b, SCALING, names=("matched", "mixture"))
+    assert m(dup, one)["matched"].item() > m(good, one)["matched"].item() + 2.0
+    # the mixture barely notices: the faint cells' share of the weights moves a little
+    assert m(dup, one)["mixture"].item() == pytest.approx(m(good, one)["mixture"].item(), abs=0.02)
+    # two molecules, one slot: the second must take a slot with p 1e-4
+    assert m(good, batch)["matched"].item() > m(dup, batch)["matched"].item()
+
+
+def test_the_threshold_extraction_reports_each_slot_whose_own_p_passes_at_its_own_place():
+    out = _slot_maps()
+    out[0, 0, 3, 5], out[0, 2, 3, 5] = 0.8, -0.1
+    out[0, 9, 3, 5], out[0, 11, 3, 5], out[0, 13, 3, 5] = 0.7, 0.2, 0.3
+    out[0, 9, 6, 1] = 0.4                                         # below the threshold
+    e = extract.extract(out, SCALING, 0.5, "threshold")
+    order = torch.argsort(e["slot"])
+    assert e["x"][order].tolist() == pytest.approx([4.9, 5.2])
+    assert e["y"][order].tolist() == pytest.approx([3.0, 3.0])
+    assert e["z_nm"][order].tolist() == pytest.approx([0.0, 300.0])
+    assert e["prob"][order].tolist() == pytest.approx([0.8, 0.7])

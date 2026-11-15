@@ -21,6 +21,13 @@ With ``sigma_rep`` (step 4, an honest sigma) three more: 10 - 12, the *reported*
 x, y, z (same units, sigmoid * 3 + 0.001), from a head of their own on the features with their
 gradient stopped -- the loss term that trains them (`loss.reported_term`) cannot move anything else.
 
+**Slots** (``slots`` K > 1; step 4, close molecules): each cell holds K molecules, not one -- channels
+``9 k`` to ``9 k + 8`` are slot k's p, photons, offsets, z and their four uncertainties, channel ``9 K``
+the background (one slot is the table above).  Trained by the matched loss (`loss.matched_terms`),
+which gives each true molecule one slot of its own, so that a cell can say "two" where DECODE's map
+cannot (two molecules 0 - 100 nm apart share a pixel 40 % of the time, 2026-11-15).  Not with
+``sigma_rep``: the matched loss trains each slot's sigma on its own molecule's error already.
+
 **A finer output grid** (``out_scale`` 2, 2026-11-14): the union U-Net's features upsampled once more
 and through one more block, so the maps have ``out_scale`` cells a pixel along each axis and every
 molecule is placed from a cell whose centre is at most a quarter pixel away -- the pixelation (the
@@ -195,7 +202,8 @@ class TwoStageUNet(nn.Module):
     def __init__(self, window: int = 3, features: int = 48, depth_frame: int = 2, depth_union: int = 2,
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
                  init: str = "default", p_clamp: float | None = None, out_scale: int = 1,
-                 blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False):
+                 blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False,
+                 slots: int = 1):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
@@ -219,8 +227,12 @@ class TwoStageUNet(nn.Module):
         # neighbours, as the U-Net's own upsampling does
         self.refine = (nn.Sequential(nn.Upsample(scale_factor=2, mode="nearest"), _block(features, features, act))
                        if self.out_scale == 2 else nn.Identity())
-        self.heads = nn.ModuleDict({"p": Head(features, 1, act), "phot_xyz": Head(features, 4, act),
-                                    "sigma": Head(features, 4, act), "bg": Head(features, 1, act)})
+        self.slots = int(slots)
+        if self.slots < 1 or (self.slots > 1 and sigma_rep):
+            raise ValueError(f"slots {slots}: at least 1, and 1 with sigma_rep")
+        k = self.slots
+        self.heads = nn.ModuleDict({"p": Head(features, k, act), "phot_xyz": Head(features, 4 * k, act),
+                                    "sigma": Head(features, 4 * k, act), "bg": Head(features, 1, act)})
         self.sigma_rep = bool(sigma_rep)
         if self.sigma_rep:
             self.heads["sigma_rep"] = Head(features, 3, act)
@@ -243,12 +255,12 @@ class TwoStageUNet(nn.Module):
             last = head.net[-1]
             nn.init.zeros_(last.weight)
             nn.init.zeros_(last.bias)
-        p0 = p0 / self.out_scale ** 2                 # the same molecules over more cells
+        p0 = p0 / self.out_scale ** 2 / self.slots    # the same molecules over more cells and slots
         nn.init.constant_(self.heads["p"].net[-1].bias, math.log(p0 / (1 - p0)))
 
     def forward(self, x):
-        """``x`` (b, window, rows, columns) in network units -> (b, 10, rows * s, columns * s), ``s``
-        the ``out_scale``."""
+        """``x`` (b, window, rows, columns) in network units -> (b, 9 K + 1, rows * s, columns * s), ``s``
+        the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``)."""
         b, t, h, w = x.shape
         feats = self.frame(x.reshape(b * t, 1, h, w)).reshape(b, -1, h, w)
         u = self.refine(self.union(feats))
@@ -262,15 +274,26 @@ class TwoStageUNet(nn.Module):
         logit = self.heads["p"](u)
         if self.p_clamp is not None:
             logit = logit.clamp(-self.p_clamp, self.p_clamp)
-        xyz = torch.tanh(values[:, 1:])
         reach = self.offset_range / self.out_scale    # +-offset_range cells, in pixels
-        if reach != 1:
-            xyz = torch.cat([xyz[:, :2] * reach, xyz[:, 2:]], 1)
-        maps = [torch.sigmoid(logit), torch.sigmoid(values[:, :1]), xyz,
-                torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR, torch.sigmoid(self.heads["bg"](u))]
+        sigma = torch.sigmoid(self.heads["sigma"](u)) * SIGMA_SCALE + SIGMA_FLOOR
+        maps = []
+        for k in range(self.slots):
+            v = values[:, 4 * k:4 * k + 4]
+            xyz = torch.tanh(v[:, 1:])
+            if reach != 1:
+                xyz = torch.cat([xyz[:, :2] * reach, xyz[:, 2:]], 1)
+            maps += [torch.sigmoid(logit[:, k:k + 1]), torch.sigmoid(v[:, :1]), xyz, sigma[:, 4 * k:4 * k + 4]]
+        maps.append(torch.sigmoid(self.heads["bg"](u)))
         if self.sigma_rep:
             maps.append(torch.sigmoid(self.heads["sigma_rep"](u.detach())) * SIGMA_SCALE + SIGMA_FLOOR)
         return torch.cat(maps, 1)
+
+
+def slots_of(out) -> int:
+    """The slots a network's output holds (`TwoStageUNet`'s layout): 9 channels each and the background,
+    13 channels one slot with ``sigma_rep``'s three."""
+    c = out.shape[1]
+    return 1 if c == 13 else (c - 1) // 9
 
 
 BACKBONES = {"unet2": TwoStageUNet}

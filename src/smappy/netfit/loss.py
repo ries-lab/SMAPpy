@@ -19,7 +19,19 @@ For one frame with molecules ``m`` (photons, x, y, z) and the network's maps:
   another, so nothing teaches the map to hold two where two are close together -- the network's
   probability summed around a pair 100 - 200 nm apart came to 1.6, around a single molecule 1.04
   (2026-11-14).  It is a proper scoring rule of the count, so on molecules placed at random it asks
-  for a calibrated count and adds no reason to split a single molecule.
+  for a calibrated count and adds no reason to split a single molecule.  It separated no close pairs
+  and pixelated (pixel_mod 0.19 against 0.05, 2026-11-15): not used.
+* **matched** (not DECODE's; step 4, close molecules; the loss part ``matched``) -- each true molecule
+  given one slot of its own (`network`'s ``slots``) by a one-to-one assignment, as SHOT does (Seailles,
+  Masson, Ponce, Mairal 2025, arXiv:2512.10683, implemented here from the paper): a slot matched to
+  molecule m costs ``-log N(m; mu, sigma) - log p``, every other slot ``-log (1 - p)``; the assignment
+  minimises the frame's total (`matched_terms`).  A molecule may take only a slot whose cell's centre
+  is within ``gate_px`` of it on each axis.  Unlike the mixture, two slots on one molecule cost (one is
+  unmatched with p high) and one slot on two molecules costs (one molecule takes a slot with p low or
+  far away), so p becomes "this slot is a molecule" and the extraction a threshold (`extract.by_threshold`).
+  SHOT solves the assignment with Sinkhorn on the GPU; here it is exact (Hungarian, scipy) on the CPU,
+  on the few slots within reach of each molecule -- SHOT found the exact assignment no better, Jaccard
+  0.873 against 0.883.  The mixture, count and background terms still apply, over all slots, if named.
 
 Each frame's loss is the sum; the batch's the mean over frames.  The part ``loss`` names the terms
 (``terms``) and their weights (``weights``), so that step 4 can change one.
@@ -72,47 +84,131 @@ def window_counts(p, counts, window: int = 3):
     return -torch.log(pn.clamp_min(1e-30)).sum(1) / k
 
 
-def terms(out, batch, scaling, chunk: int = 64, names=(), window: int = 3) -> dict:
-    """Each term per frame, (b,) tensors: DECODE's three, and those of ``names`` that are not
-    computed unless asked for (``local_count``, its ``window`` in cells)."""
-    from .network import grid
+def _slot_maps(out, h, w, scale):
+    """p (b, K h w), mu and sig (b, K h w, 4) over every slot of every cell (`network`'s layout)."""
+    from .network import grid, slots_of
+    b = out.shape[0]
+    k = slots_of(out)
+    v = out[:, :9 * k].reshape(b, k, 9, h, w)
+    rows, cols = grid(h, w, scale, out.device, out.dtype)
+    mu = torch.stack([v[:, :, 1], v[:, :, 2] + cols, v[:, :, 3] + rows, v[:, :, 4]], -1)       # (b, K, h, w, 4)
+    sig = v[:, :, 5:9].permute(0, 1, 3, 4, 2)
+    return v[:, :, 0], mu, sig, k
+
+
+def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "background"), window: int = 3,
+          gate_px: float = 1.5) -> dict:
+    """Each term of ``names`` per frame, (b,) tensors: DECODE's three by default, ``local_count`` (its
+    ``window`` in cells) and ``matched`` (its ``gate_px``)."""
     b, _, h, w = out.shape
-    p = out[:, 0].reshape(b, -1)                                                   # (b, hw)
     # a finer output grid's cells a pixel (`network.TwoStageUNet.out_scale`), from the frames it saw
     scale = w // batch.frames.shape[-1] if batch.frames is not None else 1
-    rows, cols = grid(h, w, scale, out.device, out.dtype)
-    mu = torch.stack([out[:, 1], out[:, 2] + cols, out[:, 3] + rows, out[:, 4]], -1).reshape(b, -1, 4)
-    sig = out[:, 5:9].permute(0, 2, 3, 1).reshape(b, -1, 4)
-    tgt = targets_scaled(batch, scaling)                                          # (b, k, 4)
+    pk, mu5, sig5, k = _slot_maps(out, h, w, scale)
+    p = pk.reshape(b, -1)                                                         # (b, K hw)
+    mu, sig = mu5.reshape(b, -1, 4), sig5.reshape(b, -1, 4)
+    tgt = targets_scaled(batch, scaling)                                          # (b, n, 4)
     mask = batch.mask
     n = mask.sum(1).to(out.dtype)
-    # the mixture: log sum_k w_k N(t; mu_k, sig_k), chunked over the molecules for memory
-    log_w = torch.log(p.clamp_min(1e-8)) - torch.log(p.sum(1, keepdim=True).clamp_min(1e-8))
-    norm = -0.5 * 4 * LOG_2PI - torch.log(sig).sum(-1)                           # (b, hw)
-    mix = torch.zeros(b, device=out.device, dtype=out.dtype)
-    for s in range(0, tgt.shape[1], chunk):
-        t = tgt[:, s:s + chunk]                                                   # (b, c, 4)
-        z = (t[:, :, None] - mu[:, None]) / sig[:, None]                         # (b, c, hw, 4)
-        lp = torch.logsumexp(log_w[:, None] + norm[:, None] - 0.5 * (z ** 2).sum(-1), -1)   # (b, c)
-        mix = mix - (lp * mask[:, s:s + chunk]).sum(1)
-    # the count
-    mean = p.sum(1)
-    var = (p * (1 - p)).sum(1).clamp_min(1e-6)
-    count = n * (0.5 * (n - mean) ** 2 / var + 0.5 * torch.log(2 * math.pi * var))
-    # the background
-    bg = ((out[:, 9] - (batch.background / scaling.bg_max)[:, None, None]) ** 2).sum((1, 2))
-    out_terms = {"mixture": mix, "count": count, "background": bg}
+    out_terms = {}
+    if "mixture" in names:
+        # the mixture: log sum_k w_k N(t; mu_k, sig_k), chunked over the molecules for memory
+        log_w = torch.log(p.clamp_min(1e-8)) - torch.log(p.sum(1, keepdim=True).clamp_min(1e-8))
+        norm = -0.5 * 4 * LOG_2PI - torch.log(sig).sum(-1)                       # (b, Khw)
+        mix = torch.zeros(b, device=out.device, dtype=out.dtype)
+        for s in range(0, tgt.shape[1], chunk):
+            t = tgt[:, s:s + chunk]                                               # (b, c, 4)
+            z = (t[:, :, None] - mu[:, None]) / sig[:, None]                     # (b, c, Khw, 4)
+            lp = torch.logsumexp(log_w[:, None] + norm[:, None] - 0.5 * (z ** 2).sum(-1), -1)   # (b, c)
+            mix = mix - (lp * mask[:, s:s + chunk]).sum(1)
+        out_terms["mixture"] = mix
+    if "count" in names:
+        mean = p.sum(1)
+        var = (p * (1 - p)).sum(1).clamp_min(1e-6)
+        out_terms["count"] = n * (0.5 * (n - mean) ** 2 / var + 0.5 * torch.log(2 * math.pi * var))
+    if "background" in names:
+        out_terms["background"] = ((out[:, 9 * k] - (batch.background / scaling.bg_max)[:, None, None]) ** 2).sum((1, 2))
     if "local_count" in names:
-        out_terms["local_count"] = window_counts(out[:, 0], cell_counts(batch, h, w, scale), window)
+        out_terms["local_count"] = window_counts(pk.sum(1).clamp(max=1 - 1e-6), cell_counts(batch, h, w, scale), window)
+    if "matched" in names:
+        out_terms.update(matched_terms(pk, mu5, sig5, tgt, mask, batch.xyz, scale, gate_px))
     return out_terms
 
 
+def matched_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5) -> dict:
+    """The matched loss (the module's docstring), per frame: "matched" its total, and for the log
+    "unmatched" the molecules left without a slot.  ``p`` (b, K, h, w), ``mu``, ``sig`` (b, K, h, w, 4)
+    and ``tgt`` (b, n, 4) in network units, ``xyz`` the molecules' columns and rows."""
+    import numpy as np
+    from scipy.optimize import linear_sum_assignment
+    b, k, h, w = p.shape
+    pc = p.clamp(1e-6, 1 - 1e-6)
+    neg = -torch.log1p(-pc)                                                       # (b, K, h, w)
+    # each molecule's candidate cells: a square of cells around its own, those within the gate
+    r = math.ceil(gate_px * scale + 0.5)       # a cell's centre within the gate is at most this many cells off
+    d = torch.arange(-r, r + 1, device=p.device)
+    col0 = torch.floor((xyz[..., 0] + 0.5) * scale).long()
+    row0 = torch.floor((xyz[..., 1] + 0.5) * scale).long()
+    cc = col0[..., None, None] + d[None, None, None, :]                          # (b, n, 1, W)
+    rr = row0[..., None, None] + d[None, None, :, None]                          # (b, n, W, 1)
+    cc, rr = torch.broadcast_tensors(cc, rr)
+    cc, rr = cc.reshape(*col0.shape, -1), rr.reshape(*col0.shape, -1)           # (b, n, W2)
+    centre_c, centre_r = (cc + 0.5) / scale - 0.5, (rr + 0.5) / scale - 0.5
+    ok = ((cc >= 0) & (cc < w) & (rr >= 0) & (rr < h) & mask[..., None]
+          & ((centre_c - xyz[..., 0:1]).abs() <= gate_px) & ((centre_r - xyz[..., 1:2]).abs() <= gate_px))
+    cc, rr = cc.clamp(0, w - 1), rr.clamp(0, h - 1)
+    frame = torch.arange(b, device=p.device)[:, None, None].expand_as(cc)
+    # (b, n, W2, K): matching molecule m to slot s of cell c costs -log N - log p + log (1 - p), over all
+    # slots' -log (1 - p)
+    m_mu = mu[frame, :, rr, cc]                                                   # (b, n, W2, K, 4)
+    m_sig = sig[frame, :, rr, cc]
+    m_p = pc[frame, :, rr, cc]                                                    # (b, n, W2, K)
+    zz = (tgt[:, :, None, None] - m_mu) / m_sig
+    nll = (torch.log(m_sig) + 0.5 * zz ** 2).sum(-1) + 2 * LOG_2PI
+    cost = nll - torch.log(m_p) + torch.log1p(-m_p)
+    big = torch.finfo(cost.dtype).max / 4
+    cost_cpu = torch.where(ok[..., None], cost, torch.full_like(cost, big)).detach().cpu().numpy()
+    ids = (((torch.arange(k, device=p.device) * h)[None, None, None, :] + rr[..., None]) * w + cc[..., None]).cpu().numpy()
+    okn = ok.cpu().numpy()
+    fi, mi, ci, si = [], [], [], []
+    unmatched = np.zeros(b)
+    for f in range(b):
+        ms = np.flatnonzero(okn[f].any(1))
+        if not len(ms):
+            continue
+        # only the cells within the gate and the frame: clamped ones would repeat a cell
+        sel = np.repeat(okn[f, ms][..., None], k, -1).reshape(len(ms), -1)
+        rows = np.repeat(np.arange(len(ms))[:, None], sel.shape[1], 1)[sel]
+        places = np.repeat(np.arange(sel.shape[1])[None, :], len(ms), 0)[sel]
+        uniq, cols = np.unique(ids[f, ms].reshape(len(ms), -1)[sel], return_inverse=True)
+        mat = np.full((len(ms), len(uniq)), big, dtype=np.float64)
+        mat[rows, cols] = cost_cpu[f, ms].reshape(len(ms), -1)[sel]
+        where = np.zeros((len(ms), len(uniq)), dtype=np.int64)  # the column's place in its molecule's list
+        where[rows, cols] = places
+        a, c = linear_sum_assignment(mat)
+        good = mat[a, c] < big / 2
+        a, c = a[good], c[good]
+        pos = where[a, c]
+        fi.append(np.full(len(a), f)); mi.append(ms[a]); ci.append(pos // k); si.append(pos % k)
+        unmatched[f] = len(ms) - len(a)
+    total = neg.sum((1, 2, 3))
+    if fi:
+        fi, mi, ci, si = (torch.as_tensor(np.concatenate(v), device=p.device) for v in (fi, mi, ci, si))
+        gain = cost[fi, mi, ci, si]                                               # with gradient
+        total = total.index_add(0, fi, gain)
+    return {"matched": total, "unmatched": torch.as_tensor(unmatched, device=p.device, dtype=p.dtype)}
+
+
+DEFAULT_TERMS = {"mixture": ["count", "mixture", "background"], "matched": ["matched", "background"]}
+
+
 def loss(out, batch, scaling, part=None) -> tuple:
-    """The batch's loss and its terms' means (0-d tensors), for the part ``part`` (`settings.Part`)."""
+    """The batch's loss and its terms' means (0-d tensors), for the part ``part`` (`settings.Part`):
+    ``mixture`` (DECODE's) or ``matched``, each with its default terms unless ``terms`` names others."""
+    name = part.name if part is not None else "mixture"
     settings = part.settings if part is not None else {}
-    names = settings.get("terms", ["count", "mixture", "background"])
+    names = settings.get("terms", DEFAULT_TERMS[name])
     weights = settings.get("weights", {})
-    t = terms(out, batch, scaling, names=names, window=settings.get("window", 3))
+    t = terms(out, batch, scaling, names=names, window=settings.get("window", 3), gate_px=settings.get("gate_px", 1.5))
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
     # the terms as tensors: a float() here would wait for the GPU every step (`train`)
     return total, {k: v.detach().mean() for k, v in t.items()}

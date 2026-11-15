@@ -8,7 +8,9 @@ and rows (each pixel's centre plus its offset), z in nm, their uncertainties, th
   adjacent pixels (a molecule near a pixel's edge splits its p); a pixel next to a detection whose
   own p exceeds ``SPLIT_P`` is a second detection, two molecules in adjacent pixels.  The summed
   probability is capped at 1 and thresholded; each detection takes its pixel's values.
-* ``mixture_peak`` -- the same detections, each position moved to the peak of the p-weighted
+* ``threshold`` -- every slot whose own p reaches the threshold, at its own values (`by_threshold`):
+  for a network trained with the matched loss, which teaches one slot per molecule.
+* ``mixture_peak`` -- the same detections as ``lookahead``, each position moved to the peak of the p-weighted
   mixture of its 3 x 3 pixels' components (the benchmark's finding: halves the pixelation far from
   focus, no change near it; `benchmarks/decode/suite/extraction.py`).
 
@@ -40,22 +42,41 @@ KMEANS_ITERATIONS = 10
 
 
 def physical(out, scaling, scale: int = 1):
-    """(b, 10, h, w) network units -> the same in photons, columns / rows, nm; ``scale`` the output
-    grid's cells a pixel."""
-    from .network import grid
+    """(b, C, h, w) network units -> the same in photons, columns / rows, nm; ``scale`` the output
+    grid's cells a pixel.  Every slot's (`network.slots_of`)."""
+    from .network import grid, slots_of
     _, _, h, w = out.shape
     rows, cols = grid(h, w, scale, out.device, out.dtype)
     y = out.clone()
-    y[:, 1] *= scaling.phot_max
-    y[:, 2] += cols
-    y[:, 3] += rows
-    y[:, 4] *= scaling.z_max
-    y[:, 5] *= scaling.phot_max
-    y[:, 8] *= scaling.z_max
-    y[:, 9] *= scaling.bg_max
-    if y.shape[1] > 10:                       # the reported sigmas (`network`, ``sigma_rep``)
+    k = slots_of(out)
+    for s in range(k):
+        o = 9 * s
+        y[:, o + 1] *= scaling.phot_max
+        y[:, o + 2] += cols
+        y[:, o + 3] += rows
+        y[:, o + 4] *= scaling.z_max
+        y[:, o + 5] *= scaling.phot_max
+        y[:, o + 8] *= scaling.z_max
+    y[:, 9 * k] *= scaling.bg_max
+    if y.shape[1] == 13:                      # the reported sigmas (`network`, ``sigma_rep``)
         y[:, 12] *= scaling.z_max
     return y
+
+
+def by_threshold(y, threshold: float) -> dict:
+    """``threshold`` (step 4, the matched loss): every slot of every cell whose own p reaches the
+    threshold is a molecule, at its own values -- no peaks, no sums, no merging, the matched loss having
+    taught one slot per molecule (`loss.matched_terms`).  ``y`` physical (`physical`)."""
+    from .network import slots_of
+    k = slots_of(y)
+    b, h, w = y.shape[0], y.shape[2], y.shape[3]
+    v = y[:, :9 * k].reshape(b, k, 9, h, w)
+    f, s, i, j = (v[:, :, 0] >= threshold).nonzero(as_tuple=True)
+    u = v[f, s, :, i, j]                                                     # (m, 9)
+    return {"frame": f, "x": u[:, 2], "y": u[:, 3], "z_nm": u[:, 4], "photons": u[:, 1], "prob": u[:, 0],
+            "photons_err": u[:, 5], "x_err": u[:, 6], "y_err": u[:, 7], "z_err_nm": u[:, 8],
+            "background": y[f, 9 * k, i, j], "row": i, "column": j, "slot": s,
+            "split": torch.zeros_like(i)}
 
 
 _KERNELS = {"plus": [[0.0, 1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]], "square": [[1.0] * 3] * 3}
@@ -172,13 +193,15 @@ def extract(out, scaling, threshold: float, how: str = "lookahead", scale: int =
     gathered p above which a detection is two molecules (`gathered`, `split_two`; a "split" 0 / 1 /
     2 column says which: 1 and 2 the two halves, the values but the position the detection's)."""
     y = physical(out, scaling, scale)
+    if how == "threshold":
+        return by_threshold(y, threshold)
     b, i, j, prob = detections(y[:, 0], threshold, summed_over=summed_over or ("plus" if scale == 1 else "square"))
     v = y[b, :, i, j]                                                             # (m, 10)
     xyz = v[:, 2:5]
     if how == "mixture_peak" and len(b):
         xyz = mixture_peak(y, b, i, j)
     elif how not in ("lookahead", "mixture_peak"):
-        raise ValueError(f"extraction {how!r}: lookahead or mixture_peak")
+        raise ValueError(f"extraction {how!r}: lookahead, mixture_peak or threshold")
     half = torch.zeros(len(b), dtype=torch.long, device=out.device)
     if split is not None and len(b):
         mass, flat, mine = gathered(y, b, xyz, scale)
