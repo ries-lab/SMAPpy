@@ -275,3 +275,49 @@ def erlang_shape(dwells) -> float:
     if len(d) < 3:
         return float("nan")
     return float(d.mean() ** 2 / d.var(ddof=1))
+
+
+def dwell_models(dwells) -> Dict[str, Dict[str, float]]:
+    """The dwell times fitted by maximum likelihood with the models
+    MINFLUXStepsAnalyze compared: one rate (``exponential``, rate k), a
+    gamma of free shape (``gamma``: shape n -- its integer value the Erlang
+    count of hidden sub-steps -- and rate k), and two sequential rates
+    (``hypoexponential``: k1 <= k2, the pdf k1 k2 / (k2 - k1)
+    (e^(-k1 t) - e^(-k2 t))).  Each with its log-likelihood and AIC (2 x
+    parameters - 2 log L): the lowest AIC is the model the dwells support.
+    MINFLUXStepsAnalyze fitted histograms and cumulative distributions;
+    the likelihood of the dwells themselves needs no binning."""
+    from scipy import optimize, stats
+    d = np.asarray(dwells, np.float64)
+    d = d[np.isfinite(d) & (d > 0)]
+    out: Dict[str, Dict[str, float]] = {}
+    if len(d) < 5:
+        return out
+    m = d.mean()
+    k = 1.0 / m
+    ll = float(np.sum(np.log(k) - k * d))
+    out["exponential"] = {"rate": k, "logL": ll, "AIC": 2 - 2 * ll}
+    shape, _, scale = stats.gamma.fit(d, floc=0)
+    ll = float(np.sum(stats.gamma.logpdf(d, shape, scale=scale)))
+    out["gamma"] = {"shape": float(shape), "rate": float(1 / scale), "logL": ll,
+                    "AIC": 4 - 2 * ll}
+
+    def nll(p):
+        k1, k2 = np.exp(p)
+        if abs(k2 - k1) < 1e-9 * k2:
+            k2 = k1 * (1 + 1e-6)
+        pdf = k1 * k2 / (k2 - k1) * (np.exp(-k1 * d) - np.exp(-k2 * d))
+        return -np.sum(np.log(np.maximum(pdf, 1e-300)))
+
+    best = None
+    for ratio in (1.5, 3.0, 10.0):
+        # two rates whose means add up to the mean dwell, one `ratio` times the other
+        k1 = (1 + 1 / ratio) / m
+        res = optimize.minimize(nll, np.log([k1, ratio * k1]), method="Nelder-Mead",
+                                options={"xatol": 1e-6, "fatol": 1e-6, "maxiter": 2000})
+        if best is None or res.fun < best.fun:
+            best = res
+    k1, k2 = sorted(np.exp(best.x))
+    out["hypoexponential"] = {"rate1": float(k1), "rate2": float(k2), "logL": float(-best.fun),
+                              "AIC": float(4 + 2 * best.fun)}
+    return out

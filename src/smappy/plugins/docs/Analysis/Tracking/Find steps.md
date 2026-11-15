@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
+version: "3"
+covers: [smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
 ---
 
 ## What it does
@@ -97,6 +97,14 @@ fraction of forward steps), the mean dwell, and the dwell distribution's
 (exponential dwells), n when n events in a row do.  The velocity is the
 mean step times its net direction over the mean dwell.
 
+**Dwell models.**  The dwells are fitted by maximum likelihood with three
+models, as MINFLUXStepsAnalyze compared them: one rate (an exponential:
+one event sets the pace), a gamma of free shape (n equal events in a row;
+its shape is n), and two different rates in a row (a hypoexponential).
+They are compared by the Akaike information criterion, AIC = 2 x parameters
+- 2 log-likelihood: the lowest is the model the dwells support, and a
+difference of a few units is no evidence either way.
+
 **7. Two colours.**  With *pairs* ticked, on a two-thread MINFLUX
 measurement whose traces *Pair colours* paired (`pair_id`): each pair is
 turned onto the long axis of its first thread's trace, so both colours lie
@@ -168,9 +176,10 @@ with its level, dwell and size -- MotorPAINT's map of steps.
 
 A region table of the id attribute, "per tid: Find steps": `n_steps`,
 `step_median_nm`, `step_mean_nm`, `dwell_mean_s`, `velocity_nm_per_s`,
-`erlang_shape`.  Four panels: the longest traces with their steps, the
-step sizes, the dwell times with the exponential and the gamma of the
-measured shape, and the velocity.  Steps clustered at the expected size,
+`erlang_shape`.  The text adds the dwell models, the best first with each
+one's parameters and its AIC above the best.  Four panels: the longest
+traces with their steps, the step sizes, the dwell times with the three
+models (the best drawn thicker), and the velocity.  Steps clustered at the expected size,
 mostly forward, and an Erlang shape near the number of events per step
 (about 2 for kinesin's alternating heads) look like a motor; a broad size
 distribution with many backward steps, like steps fitted to noise.
@@ -183,10 +192,10 @@ Ported from SMAP's StepsMINFLUX and MINFLUXStepsAnalyze (Ries 2020).
   results are a region table, the pooled analysis part of the same run.
 * **The split criterion** is the squared error removed, not SMAP's (level
   difference)² × width.
-* **The dwell analysis** gives the Erlang shape by the moments of the
-  dwells and draws an exponential and a gamma; MINFLUXStepsAnalyze fitted
-  hypoexponential and Erlang models to histograms and cumulative
-  distributions.
+* **The dwell analysis** fits an exponential, a gamma and a two-rate
+  hypoexponential by maximum likelihood on the dwells and compares them by
+  AIC; MINFLUXStepsAnalyze fitted hypoexponential and Erlang models of
+  fixed order to histograms and cumulative distributions.
 * SMAP's smoothing modes disagreed between finding the boundaries and
   measuring the levels; here both use the same positions.
 

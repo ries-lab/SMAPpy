@@ -63,7 +63,8 @@ class FindSteps(Plugin):
     changes_locs = True
     grouping = "ungrouped"
     # 2: pairs -- both threads of a pair in the first one's frame
-    version = "2"
+    # 3: the dwell models fitted by likelihood, compared by AIC
+    version = "3"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -192,6 +193,7 @@ class FindSteps(Plugin):
                  f"(mean ± sd of |size|); dwell {pooled['dwell_mean']:.4g} {unit}, "
                  f"Erlang shape {pooled['erlang_shape']:.2f}"
                  if len(sizes) else "no steps found",
+                 *([model_line(pooled, unit)] if pooled.get("models") else []),
                  f"kept as 'per {column}: {LABEL}'"]
         out_locs, files = None, []
         if settings.output == "columns":
@@ -221,7 +223,7 @@ def pooled_steps(sizes, dwells) -> dict:
     sd of |size|, and the forward fraction), the dwell time (mean; the
     exponential's rate is its inverse), the Erlang shape (mean^2 / var of the
     dwells: the hidden sub-steps), and the velocity step / dwell."""
-    from ..steps import erlang_shape
+    from ..steps import dwell_models, erlang_shape
     a = np.abs(np.asarray(sizes, np.float64))
     d = np.asarray(dwells, np.float64)
     d = d[np.isfinite(d) & (d > 0)]
@@ -233,7 +235,26 @@ def pooled_steps(sizes, dwells) -> dict:
            "erlang_shape": erlang_shape(d)}
     out["velocity"] = (out["step_mean_nm"] * (2 * out["forward"] - 1) / out["dwell_mean"]
                        if len(a) and len(d) else np.nan)
+    out["models"] = dwell_models(d)
+    out["best_model"] = (min(out["models"], key=lambda k: out["models"][k]["AIC"])
+                         if out["models"] else "")
     return out
+
+
+def model_line(pooled, unit: str) -> str:
+    """The dwell models, the one the AIC prefers first."""
+    m = pooled["models"]
+    parts = []
+    for name in sorted(m, key=lambda k: m[k]["AIC"]):
+        v = m[name]
+        if name == "exponential":
+            what = f"rate {v['rate']:.4g}/{unit[0]}"
+        elif name == "gamma":
+            what = f"shape {v['shape']:.2f}, rate {v['rate']:.4g}/{unit[0]}"
+        else:
+            what = f"rates {v['rate1']:.4g} and {v['rate2']:.4g}/{unit[0]}"
+        parts.append(f"{name} ({what}, AIC {v['AIC'] - m[pooled['best_model']]['AIC']:+.1f})")
+    return "dwell models, best first: " + "; ".join(parts)
 
 
 def steps_file(rows, clock: bool, ctx: Context):
@@ -277,14 +298,24 @@ def draw_steps(figure, examples, sizes, dwells, pooled, unit) -> None:
     if len(dwells):
         hi = np.quantile(dwells, 0.98)
         c.hist(dwells[dwells <= hi], bins=40, color="0.35", density=True)
-        tt = np.linspace(0, hi, 200)
-        m = pooled["dwell_mean"]
-        c.plot(tt, np.exp(-tt / m) / m, color="tab:blue", lw=1, label="exponential")
-        k = pooled["erlang_shape"]
-        if np.isfinite(k) and k > 0:
-            from scipy.stats import gamma
-            c.plot(tt, gamma.pdf(tt, k, scale=m / k), color="tab:red", lw=1,
-                   label=f"gamma, shape {k:.1f}")
+        tt = np.linspace(1e-9, hi, 200)
+        models = pooled.get("models") or {}
+        best = pooled.get("best_model")
+        for name, colour in (("exponential", "tab:blue"), ("gamma", "tab:red"),
+                             ("hypoexponential", "tab:green")):
+            v = models.get(name)
+            if v is None:
+                continue
+            if name == "exponential":
+                pdf = v["rate"] * np.exp(-v["rate"] * tt)
+            elif name == "gamma":
+                from scipy.stats import gamma
+                pdf = gamma.pdf(tt, v["shape"], scale=1 / v["rate"])
+            else:
+                k1, k2 = v["rate1"], v["rate2"]
+                pdf = k1 * k2 / max(k2 - k1, 1e-12) * (np.exp(-k1 * tt) - np.exp(-k2 * tt))
+            c.plot(tt, pdf, color=colour, lw=1.6 if name == best else 0.8,
+                   label=name + (" (best)" if name == best else ""))
         c.legend(fontsize=6, frameon=False)
     c.set_xlabel(f"dwell ({unit})")
     c.set_ylabel("density")

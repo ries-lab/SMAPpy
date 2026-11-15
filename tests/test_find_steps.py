@@ -124,3 +124,18 @@ def test_both_threads_of_a_pair_step_in_the_first_ones_frame():
     assert values["step_median_thi0_nm"] == pytest.approx(8.0, abs=1.5)
     assert values["step_median_thi1_nm"] == pytest.approx(8.0, abs=1.5)
     assert result.data["pooled"]["forward"] > 0.8
+
+
+def test_the_dwell_models_pick_the_one_the_dwells_come_from():
+    rng = np.random.default_rng(6)
+    for dwells, best in ((rng.exponential(20, 800) + rng.exponential(40, 800), "hypoexponential"),
+                         (rng.gamma(3, 10, 800), "gamma")):
+        m = S.dwell_models(dwells)
+        assert min(m, key=lambda k: m[k]["AIC"]) == best
+    # one rate: the gamma holds it (shape 1), so the exponential is within
+    # chance of the best, and the gamma's shape near 1
+    m = S.dwell_models(rng.exponential(30, 800))
+    assert m["exponential"]["AIC"] - min(v["AIC"] for v in m.values()) < 2
+    assert m["gamma"]["shape"] == pytest.approx(1, abs=0.12)
+    m = S.dwell_models(rng.gamma(3, 10, 2000))
+    assert m["gamma"]["shape"] == pytest.approx(3, rel=0.1)
