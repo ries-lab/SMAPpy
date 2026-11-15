@@ -48,6 +48,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Average ROIs",
                           "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/Curves",
+                          "Analysis/Regions/Summarize/Compare groups",
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}
@@ -345,6 +346,7 @@ def test_the_evaluation_window_offers_only_evaluators(app):
                                  "Analysis/Measure/NPC Corners",
                                  "Analysis/Measure/Spatial statistics",
                                  "Analysis/Measure/Stability",
+                                 "Analysis/Tracking/Trace inspector",
                                  "Analysis/Tracking/Tracking analysis"]
     assert set(tree.refs) < set(PluginTree().refs)
 
