@@ -66,6 +66,27 @@ def torch_missing():
             f"into this Python; or, in a terminal:\n{shell_line(torch_install.command())}")
 
 
+def torch_slow():
+    """What the window says when torch works but leaves the NVIDIA card unused (`torch_install.replacement`),
+    with the command that brings the card's build; None otherwise."""
+    from .. import torch_install
+    reason = torch_install.replacement()
+    if reason is None:
+        return None
+    return (f"{reason}.  Install PyTorch replaces it with the build for the card; or, in a terminal:\n"
+            f"{shell_line(torch_install.command(replace=True))}")
+
+
+def learning_device() -> str:
+    """"on the graphics card (…)", "on Apple's GPU" or "on the CPU" (`uipsf.device.describe`); empty where torch
+    cannot be loaded, which the notice says already."""
+    try:
+        from uipsf.device import describe
+        return describe()
+    except Exception:
+        return ""
+
+
 def shell_line(parts, windows: Optional[bool] = None) -> str:
     """``parts`` as a line to paste into a terminal.
 
@@ -351,6 +372,7 @@ class PSFCalibrationWindow(QMainWindow):
         self.install_button.clicked.connect(self.install_torch)
         layout.addWidget(self.install_button)
         self._installer = None
+        self._device = None                 # where the pupil model learns, found once (`learning_device`)
 
         self.detect_button = QPushButton("Detect beads")
         self.detect_button.setToolTip("find the beads, ring them on the Stacks page and say how long "
@@ -443,10 +465,12 @@ class PSFCalibrationWindow(QMainWindow):
             form.set_shown({name: reads["averaging"] for name in AVERAGE_ONLY if name in shared})
         pupil = self.method.key in ("pupil", "insitu", "molecules") or getattr(self.method, "needs_torch", False)
         missing = torch_missing()
-        self.notice.setText(missing or "")
-        self.notice.setVisible(pupil and missing is not None)
-        # shown only while torch is missing or too old: nothing to press once it is right
-        self.install_button.setVisible(pupil and (missing is not None or self._installer is not None))
+        # a CPU build on a machine with an NVIDIA card works, slowly: said and offered, never blocking
+        note = missing or torch_slow()
+        self.notice.setText(note or "")
+        self.notice.setVisible(pupil and note is not None)
+        # shown only while torch is missing, too old or the CPU's beside a card: nothing to press once it is right
+        self.install_button.setVisible(pupil and (note is not None or self._installer is not None))
         self.stop_button.setVisible(pupil)
         self.browse_button.setVisible(self.method.has_stack)
         self.toggle_button.setVisible(getattr(self.method, "marks", True))
@@ -1073,7 +1097,13 @@ class PSFCalibrationWindow(QMainWindow):
         """The detection's line, with the time calibrating the beads as marked takes where the method knows
         it (`detected_text`): excluding beads shortens it."""
         text_of = getattr(self.method, "detected_text", None)
-        self.found_label.setText(text_of(self.detected, self.marks) if text_of else self.detected.text)
+        text = text_of(self.detected, self.marks) if text_of else self.detected.text
+        if self.method.key in ("pupil", "insitu", "molecules") or getattr(self.method, "needs_torch", False):
+            if self._device is None:
+                self._device = learning_device()
+            if self._device:
+                text += f"; learnt {self._device}"
+        self.found_label.setText(text)
 
     def detect(self) -> None:
         """Find the beads and say how many and how long calibrating them will take; nothing is learnt."""
@@ -1456,7 +1486,8 @@ class PSFCalibrationWindow(QMainWindow):
             self._installer.kill()
             return
         from .. import torch_install
-        program, *arguments = torch_install.command()
+        self._replacing = torch_install.cpu_build_on_nvidia()
+        program, *arguments = torch_install.command(replace=self._replacing)
         process = QProcess(self)
         process.setProcessChannelMode(QProcess.MergedChannels)
         process.readyReadStandardOutput.connect(self._installer_output)
@@ -1478,8 +1509,13 @@ class PSFCalibrationWindow(QMainWindow):
         self._installer = None
         self.install_button.setText("Install PyTorch")
         missing = torch_missing()
-        self.status_bar.showMessage("PyTorch is installed: the pupil model is ready" if missing is None
-                                    else f"the install stopped (exit code {code}); {missing.splitlines()[0]}")
+        if missing is not None:
+            self.status_bar.showMessage(f"the install stopped (exit code {code}); {missing.splitlines()[0]}")
+        elif getattr(self, "_replacing", False) and "torch" in sys.modules:
+            # the CPU build is loaded in this process already: the card's is used from the next start
+            self.status_bar.showMessage("PyTorch for the card is installed: restart SMAPpy to learn on it")
+        else:
+            self.status_bar.showMessage("PyTorch is installed: the pupil model is ready")
         self._show_method()
 
     # ------------------------------------------------------------- saving

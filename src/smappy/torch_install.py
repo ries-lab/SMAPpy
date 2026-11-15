@@ -20,6 +20,12 @@ program started from a desktop icon may not see the PATH a terminal does.
 
 Nothing here imports torch: what is installed is read from its package metadata, so asking costs nothing
 and an old torch is not loaded into the process before it is replaced.
+
+**A build for the CPU on a machine with an NVIDIA card** (`cpu_build_on_nvidia`) works, and learns several
+times slower without saying so: uipsf takes the card only when torch was built for it (`uipsf.device`).  It
+happens when torch came from elsewhere than the window -- a plain ``pip install torch`` on Windows, whose PyPI
+wheel is CPU only.  The window then warns and offers the button again (`replacement`); its command replaces
+the build rather than finding the installed version good enough.
 """
 from __future__ import annotations
 
@@ -56,6 +62,38 @@ def problem() -> Optional[str]:
     return None
 
 
+def _installed() -> Optional[str]:
+    from importlib import metadata
+    try:
+        return metadata.version("torch")
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def cpu_build_on_nvidia(version: Optional[str] = None, system: Optional[str] = None,
+                        nvidia: Optional[bool] = None) -> bool:
+    """Whether the installed torch is built for the CPU only on a machine with an NVIDIA card (module docstring),
+    read from its version's local label: PyTorch's CPU index marks its wheels ``+cpu``; on Windows a CUDA build
+    is always ``+cu…`` (PyPI's wheel, without a label, is CPU only), on Linux PyPI's unlabelled wheel is CUDA's."""
+    version = _installed() if version is None else version
+    system = system or platform.system()
+    nvidia = has_nvidia() if nvidia is None else nvidia
+    if not version or not nvidia or system == "Darwin":
+        return False
+    label = version.partition("+")[2].lower()
+    if label == "cpu":
+        return True
+    return system == "Windows" and not label.startswith("cu")
+
+
+def replacement() -> Optional[str]:
+    """What the window says when torch works but leaves the NVIDIA card unused; None when it does not."""
+    if problem() is not None or not cpu_build_on_nvidia():
+        return None
+    return (f"PyTorch {_installed()} is built for the CPU only, though this computer has an NVIDIA card: the pupil "
+            f"model learns on the CPU, several times slower")
+
+
 def has_nvidia() -> bool:
     return shutil.which("nvidia-smi") is not None
 
@@ -84,11 +122,20 @@ def installer(has_pip: Optional[bool] = None, uv: Optional[str] = None) -> List[
 
 
 def command(system: Optional[str] = None, nvidia: Optional[bool] = None,
-            start: Optional[List[str]] = None) -> List[str]:
-    """The install command, as a list for a process, that installs the right torch here."""
+            start: Optional[List[str]] = None, replace: bool = False) -> List[str]:
+    """The install command, as a list for a process, that installs the right torch here.
+
+    ``replace``: a CPU build is there and the card's is wanted (`cpu_build_on_nvidia`).  ``--upgrade`` alone
+    can keep it -- PyPI's unlabelled 2.x sorts below a 2.x+cpu, and an installed version newer than the CUDA
+    index's is "satisfied" -- so the build is reinstalled from the CUDA index.  On Windows without its
+    dependencies, which a CUDA wheel there shares with the CPU one (it carries CUDA inside); on Linux the CUDA
+    wheel needs NVIDIA's packages, so only the higher local label (+cu126 above +cpu) moves it."""
     system = system or platform.system()
     nvidia = has_nvidia() if nvidia is None else nvidia
     pip = (start or installer()) + ["--upgrade", f"torch>={'.'.join(map(str, MINIMUM))}"]
+    if replace and nvidia and system in ("Windows", "Linux"):
+        extra = ["--force-reinstall", "--no-deps"] if system == "Windows" else []
+        return pip + extra + ["--index-url", CUDA_INDEX]
     if system == "Linux" and not nvidia:
         return pip + ["--index-url", CPU_INDEX]
     if system == "Windows" and nvidia:

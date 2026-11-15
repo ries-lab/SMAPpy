@@ -32,6 +32,21 @@ def default_device() -> torch.device:
     return torch.device("cpu")
 
 
+def describe(device=None) -> str:
+    """Where the learning runs, for a person: "on the graphics card (NVIDIA GeForce RTX 3070 Ti)", "on Apple's
+    GPU" or "on the CPU".  The PSF calibration window says it after *Detect*: a CPU build of torch on a
+    machine with a card learnt on the CPU, several times slower, and nothing said so."""
+    d = default_device() if device is None else torch.device(device)
+    if d.type == "cuda":
+        try:
+            return f"on the graphics card ({torch.cuda.get_device_name(d)})"
+        except Exception:                  # a name is a courtesy, never a reason to fail
+            return "on the graphics card"
+    if d.type == "mps":
+        return "on Apple's GPU"
+    return "on the CPU"
+
+
 def resolve(device=None, dtype: torch.dtype = torch.float32) -> tuple[torch.device, torch.dtype]:
     """The device to use, refusing float64 where the hardware has none (MPS)."""
     device = default_device() if device is None else torch.device(device)
