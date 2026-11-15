@@ -285,6 +285,16 @@ def _median_per(r: Runs, v: np.ndarray, use: np.ndarray) -> np.ndarray:
     return out
 
 
+def nan_means(r: Runs, v: np.ndarray) -> np.ndarray:
+    """Each run's mean of ``v`` (sorted as ``r.order``), NaN left out --
+    what merging the trace gives; NaN where the run has none."""
+    v = np.asarray(v, np.float64)
+    finite = np.isfinite(v)
+    count = r.sums(finite.astype(float))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return r.sums(np.where(finite, v, 0.0)) / count
+
+
 def cfr_cut(r: Runs, cfr: np.ndarray, limit: float) -> np.ndarray:
     """Each sorted row after its trace's first ``cfr`` above ``limit`` (the
     row itself included): True.  NaN cfr (not measured) never cuts."""

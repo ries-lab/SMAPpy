@@ -48,10 +48,24 @@ def test_the_bounds_are_set_on_the_layers_and_a_second_run_finds_the_same():
     assert again["efo"][1] == pytest.approx(first["efo"][1])
 
 
-def test_a_cfr_measured_once_a_trace_is_reported_not_set():
-    session = Session(mixture(cfr_measured=0.05))
+def test_a_cfr_measured_once_a_trace_cuts_whole_traces():
+    rng = np.random.default_rng(3)
+    n_traces, per = 200, 20
+    tid = np.repeat(np.arange(n_traces), per)
+    good = rng.uniform(0.25, 0.35, n_traces)            # all well inside the bound
+    good[:20] = rng.uniform(0.8, 1.0, 20)             # 20 traces with two molecules on
+    cfr = np.full(len(tid), np.nan, np.float32)
+    cfr[::per] = good                                  # measured once, before the rest
+    locs = Localizations({"x_nm": rng.uniform(0, 1e4, len(tid)).astype(np.float32),
+                          "y_nm": rng.uniform(0, 1e4, len(tid)).astype(np.float32),
+                          "frame": np.arange(len(tid)), "tid": tid, "cfr": cfr}, {})
+    session = Session(locs)
     session.show_grouped(0, False)
     cls = plugins.get(PLUGIN)
     result = session.run(cls(), cls.Settings(efo=False))
-    assert "cfr" not in result.data["bounds"] and "not set as a bound" in result.text
-    assert int(np.asarray(session.context().selection.mask).sum()) == 10000
+    assert "trace_cfr" in result.data["bounds"] and "cfr" not in result.data["bounds"]
+    kept = np.asarray(session.context().selection.mask)
+    ids = np.asarray(session.locs["tid"])
+    # whole traces kept or dropped: the 180 good ones, none of the 20 bad
+    assert set(np.unique(ids[kept])) == set(range(20, n_traces))
+    assert kept.sum() == 180 * per

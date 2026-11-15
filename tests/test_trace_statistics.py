@@ -98,3 +98,12 @@ def test_the_plugin_keeps_a_region_table_and_writes_the_rotated_track_and_the_ta
 def test_only_the_region_table_when_nothing_is_written():
     cls = plugins.get(PLUGIN)
     assert not cls().changes_locs_for(cls.Settings())
+
+
+def test_the_region_table_holds_each_traces_cfr_with_missing_values_left_out():
+    from smappy import traces as T
+    tid = np.array([0, 0, 0, 1, 1, 2])
+    r = T.runs(tid, np.arange(6.0))
+    cfr = np.array([0.2, np.nan, 0.4, np.nan, 0.9, np.nan])[r.order]
+    means = T.nan_means(r, cfr)
+    assert np.allclose(means[:2], [0.3, 0.9]) and np.isnan(means[2])

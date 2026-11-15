@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.quality.robust_upper, smappy.quality.efo_valley, smappy.plugins.quality_filter.QualityFilter.run]
+version: "2"
+covers: [smappy.plugins.quality_filter.trace_cfr, smappy.quality.robust_upper, smappy.quality.efo_valley, smappy.plugins.quality_filter.QualityFilter.run]
 ---
 
 ## What it does
@@ -63,12 +63,17 @@ b.set_xlabel("efo (kHz)")
 b.set_title(f"efo ≤ {valley.bound / 1e3:.0f} kHz", fontsize=8)
 ```
 
-**4. cfr measured once a trace.**  A filter leaves out a localization
-without a value, and a 2D sequence measures the cfr once a trace, so most
-localizations have none: a bound would drop them all.  Where fewer than half
-the localizations have a cfr, the plugin reports the threshold and sets no
-bound.  The cut then belongs to the trace: *Trace statistics*' *cut after
-cfr above* ends each trace at its first cfr above the threshold.
+**4. cfr measured once a trace.**  A 2D sequence measures the cfr once a
+trace, in an iteration before the localizations it vouches for, so most
+localizations have none -- and a filter leaves out a localization without
+a value.  Where fewer than half the localizations have a cfr, the cut is
+the trace's: each trace's cfr is the mean of the values measured in it,
+missing ones left out (what merging the trace gives too), written onto all
+its localizations as `trace_cfr`.  The threshold is found over the traces,
+one value each, so a long trace does not count more, and the bound is set
+on `trace_cfr`.  A trace is then kept or dropped whole, the same on the
+localizations and on the merged traces; one whose cfr was never measured
+has no `trace_cfr` and is dropped.
 
 ## In detail
 
@@ -86,7 +91,7 @@ where the cfr's own scatter is wide (few photons), 1.5 stricter.
 
 ## Output
 
-The bounds set (also in the text, with the share of localizations each
+The bounds set, on `cfr` or on `trace_cfr` (also in the text, with the share of localizations each
 keeps) and two panels: the cfr histogram and the smoothed efo histogram,
 each with its bound.
 

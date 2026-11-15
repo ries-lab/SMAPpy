@@ -71,7 +71,7 @@ class TraceStatistics(Plugin):
     changes_locs = True
     grouping = "ungrouped"
     # 2: the rotated track also writes track_angle_deg and track_length_nm
-    version = "2"
+    version = "3"
 
     def changes_locs_for(self, settings: TraceStatisticsSettings) -> bool:
         return bool(settings.write_rotated or settings.write_tail)
@@ -140,6 +140,10 @@ class TraceStatistics(Plugin):
                            f"tail_duration_{unit}": tail.duration})
         if settings.cfr_limit > 0 and "cfr" in locs:
             values["cut_n"] = r.sums(cut.astype(float))
+        if "cfr" in locs:
+            # over the whole trace, tail and cut included: a 2D sequence
+            # measures cfr once, at the trace's start, for what follows
+            values["cfr_mean"] = T.nan_means(r, np.asarray(locs["cfr"], np.float64)[r.order])
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, r.ids, values, step,

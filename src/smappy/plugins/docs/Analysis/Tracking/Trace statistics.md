@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.traces.runs, smappy.traces.axes, smappy.traces.rotate, smappy.traces.consecutive_precision, smappy.traces.steps, smappy.traces.rolling_std, smappy.traces.tails, smappy.traces.cfr_cut, smappy.traces.statistics, smappy.traces.convergence, smappy.plugins.trace_statistics.TraceStatistics.run]
+version: "3"
+covers: [smappy.traces.runs, smappy.traces.axes, smappy.traces.rotate, smappy.traces.consecutive_precision, smappy.traces.steps, smappy.traces.rolling_std, smappy.traces.tails, smappy.traces.cfr_cut, smappy.traces.nan_means, smappy.traces.statistics, smappy.traces.convergence, smappy.plugins.trace_statistics.TraceStatistics.run]
 ---
 
 ## What it does
@@ -217,7 +217,11 @@ A region table of the id attribute with, per trace: `n_locs`,
 `std_short_nm`, `eccentricity`, `angle_deg`, `precision_x_nm`,
 `precision_y_nm`, `precision_long_nm`, `precision_short_nm`, `trend_nm`,
 `dt_median_s`, `photons_sum`, and with a tail rule `tail_n`,
-`tail_reach_nm`, `tail_duration_s`; with a cfr cut `cut_n`.  Four panels:
+`tail_reach_nm`, `tail_duration_s`; with a cfr cut `cut_n`; where the
+table has a cfr, `cfr_mean`, the mean of the trace's measured cfr values
+over the whole trace, tail and cut included, missing ones left out -- a 2D
+sequence measures cfr once, at the trace's start, for what follows, so
+*Filter regions* on `cfr_mean` keeps or drops whole traces.  Four panels:
 the velocity, the precision across the track and the eccentricity over the
 traces, and the pooled distance of each trace's n-th localization from its
 settled position, beside 120 nm/√N for the photons collected by then.
