@@ -2140,3 +2140,19 @@ Round 2, the same scores (3 seeds each): every combination equals v1f and EMA on
 scores (recall at P 0.97 0.540 - 0.549); they differ in pixelation -- EMA + offsets 2 + `sigmix` 0.019 -
 0.022, the lowest, with EMA + `sigmix` 0.022 - 0.035, EMA + `sigmix` + reporting head 0.027 - 0.034,
 offsets 2 alone 0.024 - 0.035, EMA alone 0.045 - 0.067.
+
+**The reporting head goes into the base** (2026-11-15; `sigma_eval.py`, B, 6 M, 3 seeds each).  Mean
+negative log-likelihood of the truth under the claim, lateral / axial:
+
+| claim | EMA + `sigmix` + head | EMA + offsets 2 + `sigmix` |
+|---|---|---|
+| the head's | 4.83 - 4.84 / 5.58 - 5.59 | -- |
+| the mixture's | 4.91 - 4.93 / 5.82 - 5.83 | 4.85 - 4.89 / 5.67 - 5.83 |
+| the mixture's, recalibrated (variant 3) | 4.87 - 4.89 / 5.68 - 5.69 | 4.86 - 4.88 / 5.67 |
+
+The head beats the recalibrated claim in every seed, by 0.04 laterally and 0.10 axially, at no cost to
+the detection or the positions (round 2).  Its robust width is 0.90 / 0.83 and its coverage at 2
+sigma 0.95: honest in the root mean square, so a little generous in the robust width, the errors'
+tails being heavier than a Gaussian's.  The base becomes EMA + offsets 2 + `sigmix` + the head,
+trained now at 1 frame (gpuvm) and at 3 frames (decodebox, against v1f's 3-frame `nt_t3_pk`) before it
+is made the default, to be sure it does not break the temporal context.
