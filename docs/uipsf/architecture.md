@@ -2545,6 +2545,7 @@ fits better):
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | stack `ab_n1345` | −4.0 | 56.6 | −3.6 | 4.6 | 24.2 | 0.2 | 1.7 | 7.4 | −4.1 | 0.122 (learnt) | 31.5 | per sweep | 75 ± 4 (68 refit) | 0 | 0 / 0 (focus 420, σ 39.5) |
 | in situ, edge, n 1.345 | −2.2 | 71.9 | −3.5 | 41.3 | 55.1 | 17.4 | 30.6 | 34.4 | 17.5 | 0.122 (held) | 38.8 | 682 | (151 refit) | +4.51 | −1.75 / +0.36 |
+| in situ, edge, order 6, n 1.345 | −6.0 | 61.3 | 0.7 | 24.7 | 29.5 | 6.2 | 14.4 | 10.0 | −4.1 (held) | 0.122 (held) | 36.1 | 537 | (200 refit, the bound) | +2.32 | −1.61 / +1.09 |
 | in situ free, n 1.33 | −1.7 | 86.7 | −5.8 | 49.8 | 80.8 | 30.7 | 35.0 | 50.4 | 22.7 | 0.068 (held) | 36.3 | 1052 | (200 refit, the bound) | +8.43 | −2.75 / +0.50 |
 | in situ, edge + tilt, σ held | −4.7 | 57.8 | −22.9 | 9.9 | 37.7 | −0.1 | 0.5 | 12.6 | 3.3 | 0.122 (held) | 31.5 (held) | 1220 | – | – | −1.25 / +2.12 |
 | beads | −4.1 | 57.8 | −5.5 | −3.3 | 21.4 | −0.5 | −6.5 | 3.6 | – | 0.102 (learnt) | 50.8 | – | – | – | – |
@@ -2628,8 +2629,30 @@ this is not yet a clean test of linearity.
 - *The stack's h of 75 nm*: AF647 on the glass should sit a few nm up.  Yet learnt h stays at 34-98 nm in every
   variant, and the in situ pupils push it higher still.  The supercritical ring's brightness is how h is told,
   and the magnitude and γ trade with it.
-- *The cross-check of item 9's next step*: in situ with γ and the phase above order 6 held from the stack model.
-  Running when this was written (`insitu_o6_edge_n1345_ab_n1345`).
+- *The cross-check*: in situ with γ and the phase above order 6 held from the stack model.
+  The order-6 cross-check is `insitu_start_o6_edge_n1345_ab_n1345`.  It holds the stack model's γ and
+  every phase mode above order 6, takes the focus from the edge, uses n 1.345, and took 70 min.  It closes
+  most of the low-order gap:
+
+  | Noll | order 6, held | order 8 | stack |
+  |---|---|---|---|
+  | Z6, astigmatism | 61.3 | 71.9 | 56.6 |
+  | Z11, primary spherical | 29.5 | 55.1 | 24.2 |
+  | Z12 | 6.2 | 17.4 | 0.2 |
+  | Z8, x coma | 24.7 | 41.3 | 4.6 |
+  | Z16, x coma | 14.4 | 30.6 | 1.7 |
+
+  - Of the low orders, x coma closes the least.  Z22, though it sits within order 6, is 10.0 against the
+    stack's 7.4.
+  - The focus is 537 nm, between the order-8 run's 682 and the stack-held 420.  σ is 36.1 nm.
+  - On the held-out sets it costs +2.32 nats per molecule on the stack's, half the order-8 run's +4.51.  On the
+    movie's held out it gains −1.61, nearly the order-8 run's −1.75.  On the movie's surplus it costs +1.09,
+    against +0.36.
+  - The stack refit still pushes h to the 200 nm bound.
+  - The twin test prefers the mirrored pupil by 1467 nats, as the order-8 runs did (867-1258).
+  - So the modes above order 6 carry most of in situ's excess in the low orders: by order 8 a large part of
+    what it puts into Z11, Z6 and coma pays for the molecules it learnt from.  It does not close the gap: x
+    coma and the stack's preference remain.
 
 **The scripts** (`benchmarks/uipsf/real/m2_pairs/`; each says how it is called):
 - `m2_new.py`: every learning run, steered by environment variables (`ORDER`, `HOLD`, `START`, `NMED`,
@@ -2644,8 +2667,8 @@ this is not yet a clean test of linearity.
   their printout).
 - `npc_rings.chain.yaml`, `rings.batch.yaml` and `rings_vs_z.py`: the NPC rings (`m2_pairs_npc_rings.jsonl`).
 
-**Next, scripts written, not yet run** (the open hypotheses above, tested from the molecules' heights alone; each
-script's docstring says how to read it):
+**The follow-up's scripts** (the open hypotheses above, tested from the molecules' heights alone; each script's
+docstring says how to read it; run below):
 - `heights.py`: every molecule of the movie (*used*, *held out*, *not drawn*) localised once per model, saved as
   `heights_<model>.npz` -- height, CRLB, ½ Σ deviance, chip position, frame.  The three below read these files.
 - `tilt_from_edge.py`: the coverslip's edge per tile of the field and a plane through it.  A real tilt of 1.6° is
@@ -2655,6 +2678,94 @@ script's docstring says how to read it):
   and the in situ pupils each fit better.
 - The stack again with h held at 5 nm (`HEIGHT=5`), and in situ started from it, to see whether the stack's
   h of 75 nm is part of the gap.
+- `stack_flatness.py` (added in the follow-up): the AB stack's spots, each with its own δz free, mapped over the
+  field: how level and how flat a glass slide sits on M2.
+
+### Follow-up (November 2026)
+
+The follow-up's scripts were run on M2's data on 15 November 2026, with yesterday's models.  The results are in
+`benchmarks/uipsf/results/m2_pairs_followup.jsonl` (heights, tilt, drift, score per height, flatness), and
+`m2_pairs_cross.jsonl` and `m2_pairs_runs.jsonl` hold the h = 5 nm runs.  The stack held, focus learnt, is
+`insitu_all_n1345_ab_n1345`, with the focus learnt (not from the edge).  `heights.py` took ~6 min per model on
+the CPU.
+
+**The tilt** (`tilt_from_edge.py`, 3 × 3 and 4 × 4 tiles; `stack_flatness.py`):
+- *Most tiles have no molecules on the glass.*  Their spike fraction is 0, so they lie under the nucleus,
+  and their "edge" is the nucleus' floor at 160-650 nm, not the coverslip.  The plane through every tile
+  (0.5-1.0°, χ²/dof 40-80) measures that floor, not the glass.
+- *Through the three tiles that do have molecules on the glass* (4 × 4, spike 0.7-0.9), the edge falls by
+  23-29 nm per µm, 1.3-1.7°.  That is the size the pupil learnt, but along the chip's y, while x changes by
+  only 2-5 nm per µm.  The pupil's tilt is along x: in `optics.layers` the normal is (t_x, t_y, 1), and the
+  runs learnt t_x = −1.6° and t_y = −0.8° (edge, σ held), or t_x = −2.9° and t_y = 0.0° (the stack held).  The
+  3 × 3 tiling, with two glass tiles at spike 0.3-0.4, gives −8 to −15 nm per µm along y.  Three tiles are
+  little, and a tile's glass can be a flat patch of the cell's underside.
+- *A glass slide on M2 is level and flat* (`stack_flatness.py` on the AB sweeps, 2669 spots within 400 nm of
+  focus).  The learnt focal plane slopes +0.64 and +0.23 nm per µm (0.04°).  What it leaves per tile is a plane
+  of −0.01 / −0.26 ± 0.18 nm per µm (4 × 4) and 4-5 nm rms about it (tiles' range 19-23 nm), with χ²/dof 1.0-1.5:
+  noise.  The 10 sweeps' foci moved 31 nm (55 nm in the first sweep, 72-86 nm after).  The movie's 23-29 nm per
+  µm, and the pupil's 1.6-2.9°, are 30-70 times what this slide shows.  If the tilt is real it is the cell
+  sample's (another coverslip in another holder), not M2's stage.
+
+**The drift** (`edge_vs_time.py`, 10 and 20 blocks of the ~68 000 frames counted):
+- *Molecules on the glass appear only at the start.*  At frames 92-2215 the spike fraction is 0.32 and the edge
+  +8 nm.  After frame ~2200 the spike fraction is 0 in every block, and the "edge" is the nucleus' floor again.
+  The fitted line (+34 ± 4 and +48 ± 7 nm per 10 000 frames, the range −46 to +1499 nm with ill-determined
+  blocks) compares the glass at the start with the floor later.  It is not a drift.
+- *What the data bound*: from frame ~18 000 to the end, the floor is at 162-237 nm in the well-determined
+  blocks (errors ≤ 35 nm), within about ±20 nm of 200.  The blocks' median height stays at 300-400 nm
+  throughout.  A focus drift of more than a few tens of nm over the last 50 000 frames would show, and does not.
+  Between frame ~2200 and ~18 000, where the glass vanishes, it is not determined.
+
+**The score per height** (`score_by_height.py`; bins by the stack-held model's height; the movie's 223 *held
+out* and 4105 *not drawn*; nats per molecule, the in situ pupil less the stack's, negative where in situ fits
+better):
+
+| height (nm) | molecules | in situ edge, n 1.345 | in situ free, n 1.33 |
+|---|---|---|---|
+| 0-200 | 282 | +8.4 ± 4.7 | +3.6 ± 2.0 |
+| 200-400 | 2734 | +1.1 ± 0.7 | +1.7 ± 0.7 |
+| 400-600 | 819 | −1.1 ± 0.5 | −0.9 ± 0.5 |
+| 600-800 | 402 | −2.6 ± 1.5 | −2.7 ± 1.5 |
+| 800-1000 | 45 | −6.4 ± 1.8 | −5.8 ± 2.0 |
+
+- The stack's pupil fits better below ~400 nm, and the in situ pupils fit better above it, by more the deeper
+  the molecule.
+- The surplus crowds at 200-400 nm (2710 of the 4105), which is why it favoured the stack.  The *held out*,
+  drawn evenly in height, reach deeper, which is why they favoured in situ.
+- That is a depth-dependent difference, as the index or the nucleus would make, not a pupil error that is the
+  same at every height.
+
+**h held at 5 nm** (`ab_n1345_h5`: `HEIGHT=5`, otherwise as `ab_n1345`, 3368 molecules kept):
+- *The phase is unchanged*: 0.4 nm rms over Z5-Z45, the largest change in Z11 (24.2 → 22.9) and Z37 (−4.1 → −3.1).
+- *γ doubles to compensate* (0.122 ± 0.008 → 0.254 ± 0.004), σ 31.5 → 30.8 nm.  The z bend is a little larger
+  (rms 9.1 against 7.7 nm within 600 nm).
+- *On the stack's 553 held-out molecules the two score alike*: 229.39 against 229.43 nats per molecule.  h and
+  γ trade, and the stack cannot tell 5 nm from 75 nm.
+- *In situ started from it* (`insitu_start_edge_n1345_ab_n1345_h5`, γ 0.254 held) lands where it did from h =
+  75 nm: Z6 76.1 (71.9), Z11 56.6 (55.1), Z12 20.9 (17.4), Z8 42.3 (41.3), focus 697 nm (682), σ 39.1 nm.
+- Against the h5 stack, `cross_score.py` gives +5.20 nats per molecule on the stack's held-out molecules
+  (+4.51 from h = 75), and −1.73 / +0.85 on the movie's held out and surplus (−1.75 / +0.36).  The movie's
+  stack score is the h = 75 stack held, `insitu_all_n1345_ab_n1345`, since no h5 one was learnt.
+- The twin test again prefers the mirrored pupil (805 nats).  The stack's h is not part of the gap.
+
+**The order-6 cross-check** (above) is in these files too, as `insitu_start_o6_edge_n1345_ab_n1345`.
+
+**The hypotheses now**:
+- *Ruled out*:
+  - The stack's h as part of the gap: held at 5 nm, the stack's phase and in situ's are unchanged, and only γ
+    moves.
+  - A tilted glass on M2's stage: a slide sits level to 0.04°.
+  - A focus drift over the last ~50 000 frames, beyond ±20 nm.
+- *Supported*: a depth-dependent cause.  The in situ pupils win by more the deeper the molecule and lose near
+  the glass.  The candidates are the nucleus' refractive index above the buffer's, or a sample tilt.
+- *Undecided*:
+  - A tilt of the cell's coverslip: the glass tiles slope by the right amount, but along y, not along the
+    pupil's x, and on three tiles.
+  - A focus drift in the first ~18 000 frames, which nothing here measures.
+- *Next*:
+  - A focus per block of time in the learning, the first 18 000 frames against the rest.
+  - A tilt held at the edge's value (along y) in situ, to see what the pupil does with it.
+  - Learning the index per height range, or an index gradient.
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

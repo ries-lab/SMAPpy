@@ -144,7 +144,12 @@ when a milestone lands or an item moves.
    channel prefers its beads' γ by 2 nats per molecule) -- which γ M2's objective has; the dual channel's focus.
    **In situ against molecule stacks on M2** (12 November 2026, architecture.md, "In situ against molecule stacks
    on M2"): the stack and the beads agree, in situ in the nucleus puts 15–57 nm more into astigmatism, spherical
-   and x coma, each model wins on its own held-out molecules; a sample tilt takes most of it; open.
+   and x coma, each model wins on its own held-out molecules; a sample tilt takes most of it.  **Follow-up**
+   (15 November, "Follow-up (November 2026)" there): the difference depends on depth -- the stack's pupil fits
+   better below ~400 nm, in situ's above, more the deeper; the stack's h (5 or 75 nm) is not part of it; M2
+   holds a slide level to 0.04°, while the movie's few glass tiles slope 1.3–1.7° along y (the pupil's tilt is
+   along x); no focus drift beyond ±20 nm over the last 50 000 frames, the first 18 000 undetermined.  Next: a
+   focus per time block, a tilt held at the edge's, the index by depth.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 
