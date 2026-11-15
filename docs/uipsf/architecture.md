@@ -2541,6 +2541,7 @@ fits better):
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | stack `ab_n1345` | −4.0 | 56.6 | −3.6 | 4.6 | 24.2 | 0.2 | 1.7 | 7.4 | −4.1 | 0.122 (learnt) | 31.5 | per sweep | 75 ± 4 (68 refit) | 0 | 0 / 0 (focus 420, σ 39.5) |
 | in situ, edge, n 1.345 | −2.2 | 71.9 | −3.5 | 41.3 | 55.1 | 17.4 | 30.6 | 34.4 | 17.5 | 0.122 (held) | 38.8 | 682 | (151 refit) | +4.51 | −1.75 / +0.36 |
+| in situ, edge, order 6, n 1.345 | −6.0 | 61.3 | 0.7 | 24.7 | 29.5 | 6.2 | 14.4 | 10.0 | −4.1 (held) | 0.122 (held) | 36.1 | 537 | (200 refit, the bound) | +2.32 | −1.61 / +1.09 |
 | in situ free, n 1.33 | −1.7 | 86.7 | −5.8 | 49.8 | 80.8 | 30.7 | 35.0 | 50.4 | 22.7 | 0.068 (held) | 36.3 | 1052 | (200 refit, the bound) | +8.43 | −2.75 / +0.50 |
 | in situ, edge + tilt, σ held | −4.7 | 57.8 | −22.9 | 9.9 | 37.7 | −0.1 | 0.5 | 12.6 | 3.3 | 0.122 (held) | 31.5 (held) | 1220 | – | – | −1.25 / +2.12 |
 | beads | −4.1 | 57.8 | −5.5 | −3.3 | 21.4 | −0.5 | −6.5 | 3.6 | – | 0.102 (learnt) | 50.8 | – | – | – | – |
@@ -2624,8 +2625,30 @@ this is not yet a clean test of linearity.
 - *The stack's h of 75 nm*: AF647 on the glass should sit a few nm up.  Yet learnt h stays at 34-98 nm in every
   variant, and the in situ pupils push it higher still.  The supercritical ring's brightness is how h is told,
   and the magnitude and γ trade with it.
-- *The cross-check of item 9's next step*: in situ with γ and the phase above order 6 held from the stack model.
-  Running when this was written (`insitu_o6_edge_n1345_ab_n1345`).
+- *The cross-check*: in situ with γ and the phase above order 6 held from the stack model.
+  The order-6 cross-check is `insitu_start_o6_edge_n1345_ab_n1345`.  It holds the stack model's γ and
+  every phase mode above order 6, takes the focus from the edge, uses n 1.345, and took 70 min.  It closes
+  most of the low-order gap:
+
+  | Noll | order 6, held | order 8 | stack |
+  |---|---|---|---|
+  | Z6, astigmatism | 61.3 | 71.9 | 56.6 |
+  | Z11, primary spherical | 29.5 | 55.1 | 24.2 |
+  | Z12 | 6.2 | 17.4 | 0.2 |
+  | Z8, x coma | 24.7 | 41.3 | 4.6 |
+  | Z16, x coma | 14.4 | 30.6 | 1.7 |
+
+  - Of the low orders, x coma closes the least.  Z22, though it sits within order 6, is 10.0 against the
+    stack's 7.4.
+  - The focus is 537 nm, between the order-8 run's 682 and the stack-held 420.  σ is 36.1 nm.
+  - On the held-out sets it costs +2.32 nats per molecule on the stack's, half the order-8 run's +4.51.  On the
+    movie's held out it gains −1.61, nearly the order-8 run's −1.75.  On the movie's surplus it costs +1.09,
+    against +0.36.
+  - The stack refit still pushes h to the 200 nm bound.
+  - The twin test prefers the mirrored pupil by 1467 nats, as the order-8 runs did (867-1258).
+  - So the modes above order 6 carry most of in situ's excess in the low orders: by order 8 a large part of
+    what it puts into Z11, Z6 and coma pays for the molecules it learnt from.  It does not close the gap: x
+    coma and the stack's preference remain.
 
 **The scripts** (`benchmarks/uipsf/real/m2_pairs/`; each says how it is called):
 - `m2_new.py`: every learning run, steered by environment variables (`ORDER`, `HOLD`, `START`, `NMED`,
