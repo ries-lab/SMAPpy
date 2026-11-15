@@ -7,9 +7,7 @@ candidate.  Both stages work on a block of frames ``(n, y, x)`` at once.
 Differences to SMAP's ``ImageFilter`` / ``PeakFinder``:
 
 * no Anscombe transform (it belongs with a background estimate, which is not
-  part of this pipeline yet) and no sCMOS variance weighting; the one
-  background removed before the filter, on request, is a temporal median
-  (`TemporalMedian`, Picasso's), which SMAP does not have
+  part of this pipeline yet) and no sCMOS variance weighting
 * no background offset subtracted before filtering.  In SMAP that value only
   compensated the zero padding of the convolution at the image borders; we pad
   by edge replication instead, which removes the artifact at its source
@@ -21,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Protocol, Tuple
+from typing import Optional, Protocol
 
 import numpy as np
 from scipy import ndimage
@@ -372,108 +370,6 @@ def _cutoffs(frames, values, side, n_frames, cutoff, n_halves,
     return out
 
 
-# ----------------------------------------------------------- temporal median
-def median_bounds(frame: int, window: int, stride: int, first: int, end: int
-                  ) -> Tuple[int, int]:
-    """The frames ``[start, stop)`` whose median is frame ``frame``'s
-    background: Picasso's tiling (``localize.TemporalMedianMovie._bounds``).
-
-    Frames are tiled ``stride`` at a time, each tile sharing one median over
-    ``window`` frames grown evenly about it; at the edges of the frames
-    there are, ``[first, end)``, the window is shifted inwards rather than
-    cut, so it keeps its length while the movie has it.  With ``stride`` =
-    ``window`` (the default) a tile's window is the tile itself.
-    """
-    start = (frame // stride) * stride - (window - stride) // 2
-    stop = start + window
-    if start < first:
-        stop += first - start
-        start = first
-    if stop > end:
-        start -= stop - end
-        stop = end
-    return max(start, first), stop
-
-
-@dataclass
-class TemporalMedian:
-    """Each frame less the per-pixel median of the frames about it, held at
-    0: ``max(frame - median, 0)``, a detection image under a background that
-    changes slowly from frame to frame but is uneven within one -- an
-    imager's haze in DNA-PAINT, out-of-focus fluorescence -- which a
-    difference of Gaussians, removing only what is smoother than its wide
-    Gaussian, leaves.  A molecule on for a few frames of the window is not
-    in the median; one on for more than half of it is, and goes.
-
-    Martens, Turkowyd and Endesfelder (2022), as Picasso has it
-    (jungmannlab/picasso, MIT; ``localize.TemporalMedianMovie``): a window of
-    51 frames, the median taken once per ``stride`` frames (`median_bounds`).
-    Picasso reads the movie wherever it likes; the fit here reads it in
-    order, a block at a time, live too, so this keeps the frames it has seen
-    (a ``window`` of them before the block) and has none after the block:
-    the last tile of a block takes the ``window`` frames up to the block's
-    end, and the next block, which has its frames, takes the tile's own
-    window again.  With 200 frames a block that is one tile in four.
-
-    One per engine (and per channel of a split chip): it is the frames'
-    state.  Asked for frames it holds -- a Preview's frame after the window
-    about it -- it answers from them; a block that does not follow on starts
-    it again.  For detection only: a fit of the subtracted frames would
-    have lost the photons of the background, and of every molecule on long.
-    """
-
-    window: int = 51
-    stride: Optional[int] = None
-
-    def __post_init__(self):
-        self.window = max(1, int(self.window))
-        self.step = max(1, min(int(self.stride or self.window), self.window))
-        self._frames: Optional[np.ndarray] = None   # held, from frame `_first`
-        self._first = 0
-        self._medians: dict = {}                    # (start, stop) -> median
-
-    def __call__(self, photons: np.ndarray, first_frame: int = 0) -> np.ndarray:
-        photons = np.asarray(photons, np.float32)
-        n = len(photons)
-        self._take(photons, int(first_frame))
-        end = self._first + len(self._frames)
-        out = np.empty_like(photons)
-        t = int(first_frame)
-        while t < first_frame + n:
-            tile_end = min((t // self.step + 1) * self.step, first_frame + n)
-            median = self._median(*median_bounds(t, self.window, self.step,
-                                                 self._first, end))
-            rows = slice(t - first_frame, tile_end - first_frame)
-            np.maximum(photons[rows] - median, 0.0, out=out[rows])
-            t = tile_end
-        return out
-
-    def _take(self, photons: np.ndarray, first: int) -> None:
-        """Hold ``photons`` as frames ``first, ...``, with up to ``window``
-        frames before them; nothing new for frames already held."""
-        held = self._frames
-        n = len(photons)
-        if held is not None and self._first <= first and first + n <= self._first + len(held):
-            return
-        if held is not None and first == self._first + len(held):
-            keep = max(0, len(held) - self.window)
-            self._frames = np.concatenate([held[keep:], photons])
-            self._first += keep
-        else:
-            self._frames, self._first = photons, first
-        self._medians = {k: v for k, v in self._medians.items() if k[0] >= self._first}
-
-    def _median(self, start: int, stop: int) -> np.ndarray:
-        key = (start, stop)
-        if key not in self._medians:
-            frames = self._frames[start - self._first:stop - self._first]
-            self._medians[key] = np.median(frames, axis=0).astype(np.float32)
-        return self._medians[key]
-
-    def __str__(self) -> str:
-        return f"temporal median of {self.window} frames, every {self.step}"
-
-
 @dataclass
 class PeakFinder:
     """Filter a block of frames and return the candidates above the cutoff."""
@@ -484,16 +380,6 @@ class PeakFinder:
     # (axis, position) in frame coordinates: threshold each half of a split
     # frame on its own, so a dim channel is not judged against a bright one
     split: Optional[tuple] = None
-    # frames in a temporal median subtracted before the filter, 0 for none;
-    # the state is the engine's (`background`), the finder stays a function
-    median_window: int = 0
-    median_stride: Optional[int] = None
-
-    def background(self) -> Optional[TemporalMedian]:
-        """A new temporal median for an engine to detect on, None when off."""
-        if self.median_window <= 0:
-            return None
-        return TemporalMedian(self.median_window, self.median_stride)
 
     def __call__(self, photons: np.ndarray, first_frame: int = 0,
                  n_threads: Optional[int] = None):
@@ -507,9 +393,7 @@ class PeakFinder:
 
     def __str__(self) -> str:
         halves = "" if self.split is None else ", each half on its own"
-        median = self.background()
-        median = "" if median is None else f", on frames less their {median}"
-        return f"PeakFinder({self.filter}, {self.cutoff}{halves}{median})"
+        return f"PeakFinder({self.filter}, {self.cutoff}{halves})"
 
     def cutoffs(self, filtered: np.ndarray,
                 n_threads: Optional[int] = None) -> np.ndarray:

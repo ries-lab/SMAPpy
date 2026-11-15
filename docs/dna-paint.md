@@ -151,8 +151,11 @@ kinetics* per molecule and *qPAINT* -- the workflow as one step, and a batch.
   a region of *Remove Localizations*, *binding-event edges* (remove, or hide
   as a flag), that drops each event's first and last frame,
   where the imager bound or left during the exposure.
-* **Temporal median background** for detection (`localize.TemporalMedianMovie`)
-  -- under the uneven imager background of DNA-PAINT.
+* **Temporal median background** for detection (`localize.TemporalMedianMovie`):
+  built and removed again (2026-11-15, commit 9471059f reverted).  The
+  difference of Gaussians already removes background smoother than a few
+  spots, which free imager is; what it leaves -- static structures the size
+  of a spot, hot pixels -- is filtered after the fit.
 
 ## Status, 2026-11-14: all built
 
@@ -163,7 +166,7 @@ kinetics* per molecule and *qPAINT* -- the workflow as one step, and a batch.
 | 3 | *SPINNA*, `smappy/spinna.py` | 30 % dimers fitted 30-40 % (bootstrap error 4 %); labelling efficiency to 0.01 |
 | 4 | *Fiducials*, *markers* = structures, *markers from* an id column | origami round 1.5 nm rms, binding-site round 0.2 nm |
 | 5 | `dna_paint.chain.yaml`, *Workflow/DNA-PAINT* | drifting origami to 818 of 823 molecules |
-| 6 | Picasso writer (`len`, `n`, the metadata list); *Remove Localizations*' *binding-event edges*; the fitters' *temporal median* | cores' photons within 0.5 %; under a patchy background 7290 of 7589 spots found where the filter alone found 4350 |
+| 6 | Picasso writer (`len`, `n`, the metadata list); *Remove Localizations*' *binding-event edges* (the fitters' *temporal median* was built and removed, above) | cores' photons within 0.5 % |
 
 Departures from Picasso are in each module's docstring and each page's *In
 detail*; the details of each step in its commit.  Not ported from SPINNA:
