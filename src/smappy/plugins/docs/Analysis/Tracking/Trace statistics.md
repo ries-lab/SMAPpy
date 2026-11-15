@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.traces.runs, smappy.traces.axes, smappy.traces.rotate, smappy.traces.consecutive_precision, smappy.traces.steps, smappy.traces.rolling_std, smappy.traces.tails, smappy.traces.cfr_cut, smappy.traces.statistics, smappy.traces.convergence, smappy.plugins.trace_statistics.TraceStatistics.run]
 ---
 
@@ -19,8 +19,10 @@ The numbers are kept as a [region table](plugin:Panels/Glossary) of the
 *Filter regions*, the summaries and *Regions to attribute*.  On request it
 also writes onto the localizations each track turned onto its own axes
 (`x_rot_nm`, `y_rot_nm`: the long axis along x, pointing the way the
-molecule moved) and which localizations are its tail (`in_tail`), to
-filter or colour by.
+molecule moved) with the track's angle and length (`track_angle_deg`,
+`track_length_nm`: coloured by the angle, the tracks of a motor-PAINT
+measurement map the directions of the filaments they ran on), and which
+localizations are its tail (`in_tail`), to filter or colour by.
 
 Use *Id statistics* for a quick count, centre, spread and the statistics of
 other attributes per trace; use this for the trace's path.  It reads the
@@ -205,7 +207,8 @@ stricter.  Localizations whose cfr was not measured (NaN) never cut.
 
 ### write_rotated
 For step finding by eye, kymographs along the track and motor-PAINT maps of
-track directions.
+track directions: render coloured by `track_angle_deg` with a cyclic
+colour map.
 
 ## Output
 

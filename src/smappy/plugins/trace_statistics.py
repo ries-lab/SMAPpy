@@ -53,8 +53,8 @@ class TraceStatisticsSettings:
                              help="0: off; else a trace ends at its first cfr above this "
                                   "(MINFLUX)")
     write_rotated: bool = param(False, label="write the rotated track",
-                                help="x_rot_nm, y_rot_nm on the localizations: the long axis "
-                                     "on x, forward in time")
+                                help="x_rot_nm, y_rot_nm on the localizations (the long axis "
+                                     "on x, forward in time), and the track's angle and length")
     write_tail: bool = param(False, label="write the tail",
                              help="in_tail (and after_cfr) on the localizations, to filter "
                                   "or colour by")
@@ -70,7 +70,8 @@ class TraceStatistics(Plugin):
     Settings = TraceStatisticsSettings
     changes_locs = True
     grouping = "ungrouped"
-    version = "1"
+    # 2: the rotated track also writes track_angle_deg and track_length_nm
+    version = "2"
 
     def changes_locs_for(self, settings: TraceStatisticsSettings) -> bool:
         return bool(settings.write_rotated or settings.write_tail)
@@ -186,7 +187,10 @@ class TraceStatistics(Plugin):
         if settings.write_rotated:
             a = {k: st[k] for k in ("centre_x_nm", "centre_y_nm", "angle_deg")}
             xr, yr = T.rotate(r, x, y, a)
-            for name, v in (("x_rot_nm", xr), ("y_rot_nm", yr)):
+            per_row = (("x_rot_nm", xr), ("y_rot_nm", yr),
+                       ("track_angle_deg", r.spread(st["angle_deg"])),
+                       ("track_length_nm", r.spread(st["displacement_nm"])))
+            for name, v in per_row:
                 full = np.full(n, np.nan, np.float32)
                 full[r.order] = v
                 columns[name] = full

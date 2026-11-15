@@ -45,6 +45,9 @@ class FindStepsSettings:
     step_nm: float = param(0.0, label="split/merge to", unit="nm", min=0.0,
                            help="0: off; else merge steps smaller and split steps larger "
                                 "than this expected size")
+    pairs: bool = param(False, label="pairs", advanced=True,
+                        help="pair_id from Pair colours: both threads of a pair turned into "
+                             "the thread-0 trace's frame, each with its own steps")
     output: str = param("table", label="output", choices=OUTPUTS,
                         help="a region table only; plateau and step_level on the "
                              "localizations; or a file of one localization per plateau")
@@ -59,7 +62,8 @@ class FindSteps(Plugin):
     Settings = FindStepsSettings
     changes_locs = True
     grouping = "ungrouped"
-    version = "1"
+    # 2: pairs -- both threads of a pair in the first one's frame
+    version = "2"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -79,7 +83,12 @@ class FindSteps(Plugin):
         from .. import traces as T
         from ..region_runs import column_table, layer_mask
         locs = ctx.locs
-        column = id_column(locs, settings.id_column)
+        pairs = bool(settings.pairs)
+        if pairs and ("thi" not in locs or "pair_id" not in locs):
+            raise ValueError("pairs need pair_id and thi: run Pair colours on a two-thread "
+                             "MINFLUX measurement first")
+        column = "pair_id" if pairs and not settings.id_column else \
+            id_column(locs, settings.id_column)
         clock = "time_s" in locs
         time = np.asarray(locs["time_s"] if clock else locs["frame"], np.float64)
         r = T.runs(locs[column], time, layer_mask(ctx))
@@ -90,8 +99,14 @@ class FindSteps(Plugin):
         x = np.asarray(locs["x_nm"], np.float64)[r.order]
         y = np.asarray(locs["y_nm"], np.float64)[r.order]
         t = time[r.order]
+        thread = (np.asarray(locs["thi"], np.int64)[r.order] if pairs
+                  else np.zeros(len(x), np.int64))
         if settings.along == "track":
             a = T.axes(r, x, y)
+            if pairs:
+                # a pair in its first thread's frame, so both colours' steps line up
+                a0 = T.axes(r, x, y, thread == 0)
+                a = {k: np.where(np.isfinite(a0[k]), a0[k], a[k]) for k in a}
             coord, _ = T.rotate(r, x, y, a)
         else:
             coord = x if settings.along == "x" else y
@@ -103,48 +118,60 @@ class FindSteps(Plugin):
         level = np.full(len(x), np.nan)
         rows_file = []
         next_plateau = 1
+        by_thread = {}                      # pairs: per thread, the median |step| per pair
         for i in np.flatnonzero(long_enough):
             if ctx.stopped:
                 break
             sl = slice(r.start[i], r.start[i] + r.n[i])
-            xi, ti = coord[sl], t[sl]
-            ok = np.isfinite(xi)
-            xi, ti = xi[ok], ti[ok]
-            found = S.autostepfinder(xi, settings.threshold, settings.overshoot,
-                                     stat=settings.stat)
-            b = found.boundaries
-            if settings.step_nm > 0 and len(b):
-                b = S.split_merge(xi, b, settings.step_nm, settings.stat)
-            elif len(b):
-                b = S.refine(xi, b, settings.stat)
-            tab = S.step_table(xi, ti, b, settings.stat)
-            per["n_steps"][i] = len(tab["size"])
-            if len(tab["size"]):
-                per["step_median_nm"][i] = float(np.median(np.abs(tab["size"])))
-                per["step_mean_nm"][i] = float(np.mean(tab["size"]))
-                inner = tab["dwell"][1:-1] if len(tab["dwell"]) > 2 else np.zeros(0)
-                if len(inner):
-                    per["dwell_mean"][i] = float(inner.mean())
-                    per["erlang_shape"][i] = S.erlang_shape(inner)
-                duration = ti[-1] - ti[0]
-                if duration > 0:
-                    per["velocity_steps"][i] = float(np.sum(tab["size"]) / duration)
-                sizes.append(tab["size"])
-                dwells.append(tab["dwell"][1:-1])
-            if len(examples) < 4 or r.n[i] > min(e[3] for e in examples):
-                examples.append((ti, xi, S.fit_from(xi, b, settings.stat), r.n[i], r.ids[i]))
-                examples = sorted(examples, key=lambda e: -e[3])[:4]
-            rows = np.arange(r.start[i], r.start[i] + r.n[i])[ok]
-            edges = np.r_[0, b, len(xi)]
-            for k, (s0, e0) in enumerate(zip(edges[:-1], edges[1:])):
-                plateau[rows[s0:e0]] = next_plateau + k
-                level[rows[s0:e0]] = tab["level"][k]
-                if settings.output == "file":
-                    sel = rows[s0:e0]
-                    rows_file.append((float(x[sel].mean()), float(y[sel].mean()),
-                                      float(t[sel][0]), int(r.ids[i]), tab["level"][k],
-                                      float(tab["dwell"][k]), int(e0 - s0)))
-            next_plateau += len(edges) - 1
+            threads = np.unique(thread[sl]) if pairs else np.zeros(1, np.int64)
+            shown = []
+            for th in threads:
+                sub = (thread[sl] == th) & np.isfinite(coord[sl])
+                if sub.sum() < settings.min_locs // (2 if pairs else 1):
+                    continue
+                xi, ti = coord[sl][sub], t[sl][sub]
+                found = S.autostepfinder(xi, settings.threshold, settings.overshoot,
+                                         stat=settings.stat)
+                b = found.boundaries
+                if settings.step_nm > 0 and len(b):
+                    b = S.split_merge(xi, b, settings.step_nm, settings.stat)
+                elif len(b):
+                    b = S.refine(xi, b, settings.stat)
+                tab = S.step_table(xi, ti, b, settings.stat)
+                first = th == threads[0]
+                if first:
+                    per["n_steps"][i] = len(tab["size"])
+                if len(tab["size"]):
+                    med = float(np.median(np.abs(tab["size"])))
+                    if pairs:
+                        by_thread.setdefault(int(th), np.full(len(r.ids), np.nan))[i] = med
+                    if first:
+                        per["step_median_nm"][i] = med
+                        per["step_mean_nm"][i] = float(np.mean(tab["size"]))
+                        inner = tab["dwell"][1:-1] if len(tab["dwell"]) > 2 else np.zeros(0)
+                        if len(inner):
+                            per["dwell_mean"][i] = float(inner.mean())
+                            per["erlang_shape"][i] = S.erlang_shape(inner)
+                        duration = ti[-1] - ti[0]
+                        if duration > 0:
+                            per["velocity_steps"][i] = float(np.sum(tab["size"]) / duration)
+                    sizes.append(tab["size"])
+                    dwells.append(tab["dwell"][1:-1])
+                shown.append((ti, xi, S.fit_from(xi, b, settings.stat), int(th)))
+                rows = np.arange(r.start[i], r.start[i] + r.n[i])[sub]
+                edges = np.r_[0, b, len(xi)]
+                for k, (s0, e0) in enumerate(zip(edges[:-1], edges[1:])):
+                    plateau[rows[s0:e0]] = next_plateau + k
+                    level[rows[s0:e0]] = tab["level"][k]
+                    if settings.output == "file":
+                        sel = rows[s0:e0]
+                        rows_file.append((float(x[sel].mean()), float(y[sel].mean()),
+                                          float(t[sel][0]), int(r.ids[i]), tab["level"][k],
+                                          float(tab["dwell"][k]), int(e0 - s0)))
+                next_plateau += len(edges) - 1
+            if shown and (len(examples) < 4 or r.n[i] > min(e[1] for e in examples)):
+                examples.append((shown, r.n[i], r.ids[i]))
+                examples = sorted(examples, key=lambda e: -e[1])[:4]
         sizes = np.concatenate(sizes) if sizes else np.zeros(0)
         dwells = np.concatenate(dwells) if dwells else np.zeros(0)
         unit = "s" if clock else "frames"
@@ -152,6 +179,8 @@ class FindSteps(Plugin):
                   "step_mean_nm": per["step_mean_nm"], f"dwell_mean_{unit}": per["dwell_mean"],
                   ("velocity_nm_per_s" if clock else "velocity_nm_per_frame"): per["velocity_steps"],
                   "erlang_shape": per["erlang_shape"]}
+        for th, med in sorted(by_thread.items()):
+            values[f"step_median_thi{th}_nm"] = med
         step = {"label": LABEL, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(settings)}
         table = column_table(locs, column, LABEL, r.ids, values, step,
@@ -227,10 +256,14 @@ def steps_file(rows, clock: bool, ctx: Context):
 
 def draw_steps(figure, examples, sizes, dwells, pooled, unit) -> None:
     a, b, c, d = figure.subplots(1, 4)
-    for k, (t, x, fit, n, tid) in enumerate(examples[:3]):
+    for k, (shown, n, tid) in enumerate(examples[:3]):
         off = 30.0 * k
-        a.plot(t - t[0], x - x[0] + off, ".", ms=1.5, color="0.6")
-        a.step(t - t[0], fit - x[0] + off, where="post", color="tab:red", lw=1)
+        t0 = min(s[0][0] for s in shown)
+        x0 = shown[0][1][0]
+        for t, x, fit, th in shown:
+            dots, line = ("0.6", "tab:red") if th == 0 else ("#9ec5e8", "tab:blue")
+            a.plot(t - t0, x - x0 + off, ".", ms=1.5, color=dots)
+            a.step(t - t0, fit - x0 + off, where="post", color=line, lw=1)
     a.set_xlabel(f"time ({unit})")
     a.set_ylabel("position (nm, offset per trace)")
     a.set_title("the longest traces and their steps", fontsize=8)

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
 ---
 
@@ -97,6 +97,15 @@ fraction of forward steps), the mean dwell, and the dwell distribution's
 (exponential dwells), n when n events in a row do.  The velocity is the
 mean step times its net direction over the mean dwell.
 
+**7. Two colours.**  With *pairs* ticked, on a two-thread MINFLUX
+measurement whose traces *Pair colours* paired (`pair_id`): each pair is
+turned onto the long axis of its first thread's trace, so both colours lie
+along the same line, and each thread's localizations get their own steps.
+A motor and its cargo, or the two heads of one motor in two colours, then
+step side by side in one plot (SMAP's StepsMINFLUX_dc), and the region
+table holds the median step of each thread (`step_median_thi0_nm`,
+`step_median_thi1_nm`).
+
 ## In detail
 
 **The split.**  For a plateau [a, e) the best split k maximises the squared
@@ -143,6 +152,11 @@ AutoStepFinder's own.
 ### step_nm
 8 for kinesin and dynein along microtubules, 36 for myosin V.  Leave it at
 0 to see what the data find without a prior.
+
+### pairs
+Needs `pair_id` and `thi`.  Each thread of a pair has only its own
+localizations, about half of the pair's: dwells shorter than a few
+localizations per thread merge.
 
 ### output
 *plateaus on the localizations* writes `plateau` (an id per plateau, -1 for

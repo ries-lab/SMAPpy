@@ -90,6 +90,8 @@ def test_the_plugin_keeps_a_region_table_and_writes_the_rotated_track_and_the_ta
     assert set(table.ids) == {"1", "2", "3"}
     out = session.locs
     assert "x_rot_nm" in out and int(np.asarray(out["in_tail"]).sum()) == int(result.data["tails"].n.sum())
+    angle = np.asarray(out["track_angle_deg"])[np.asarray(out["tid"]) == 1]
+    assert np.allclose(angle, angle[0]) and angle[0] == pytest.approx(30, abs=3)
     assert "velocity" in result.text
 
 

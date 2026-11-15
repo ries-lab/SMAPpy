@@ -98,3 +98,29 @@ def test_the_plateaus_go_on_the_localizations_or_into_a_file():
     session.run(cls(), cls.Settings(output="file"))
     steps = session.locs[np.asarray(session.locs["filenumber"]) == len(session.files) - 1]
     assert len(steps) == len(np.unique(plateau)) and "step_level_nm" in steps
+
+
+def test_both_threads_of_a_pair_step_in_the_first_ones_frame():
+    from smappy import pairing as P
+    rng = np.random.default_rng(5)
+    # dwells of 60 points, so each thread, seeing every other one, has 30; the
+    # noise across the track projects onto it, so each is 2 nm (3 nm along in all)
+    x, _ = staircase(n=1600, dwell=60.0, noise=2.0, seed=5)
+    a = np.radians(40)
+    th = np.arange(1600) % 2                     # the threads alternate
+    shift = np.where(th == 1, 15.0, 0.0)         # the second colour 15 nm further on
+    along = x + shift
+    cols = {"x_nm": (along * np.cos(a)).astype(np.float32),
+            "y_nm": (along * np.sin(a) + rng.normal(0, 2, 1600)).astype(np.float32),
+            "time_s": np.arange(1600) * 1e-3, "frame": np.arange(1600),
+            "tid": np.where(th == 0, 1, 2), "thi": th}
+    cols["pair_id"] = P.pair_traces(cols["tid"], cols["thi"], cols["time_s"])
+    session = Session(Localizations(cols, {}))
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    result = session.run(cls(), cls.Settings(pairs=True, min_locs=20))
+    table = session.id_regions["pair_id"]["Find steps"]
+    values = dict(zip(table.columns().keys(), [v[0] for v in table.columns().values()]))
+    assert values["step_median_thi0_nm"] == pytest.approx(8.0, abs=1.5)
+    assert values["step_median_thi1_nm"] == pytest.approx(8.0, abs=1.5)
+    assert result.data["pooled"]["forward"] > 0.8
