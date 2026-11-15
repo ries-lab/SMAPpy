@@ -2644,6 +2644,18 @@ this is not yet a clean test of linearity.
   their printout).
 - `npc_rings.chain.yaml`, `rings.batch.yaml` and `rings_vs_z.py`: the NPC rings (`m2_pairs_npc_rings.jsonl`).
 
+**Next, scripts written, not yet run** (the open hypotheses above, tested from the molecules' heights alone; each
+script's docstring says how to read it):
+- `heights.py`: every molecule of the movie (*used*, *held out*, *not drawn*) localised once per model, saved as
+  `heights_<model>.npz` -- height, CRLB, ½ Σ deviance, chip position, frame.  The three below read these files.
+- `tilt_from_edge.py`: the coverslip's edge per tile of the field and a plane through it.  A real tilt of 1.6° is
+  ~28 nm per µm, ~700 nm across the field; with `--stack` the molecule stack's own focal-plane slope beside it.
+- `edge_vs_time.py`: the edge per block of the 72 000 frames, with one model held: focus drift.
+- `score_by_height.py`: two models' scores on the same unseen molecules per height bin: where the stack's pupil
+  and the in situ pupils each fit better.
+- The stack again with h held at 5 nm (`HEIGHT=5`), and in situ started from it, to see whether the stack's
+  h of 75 nm is part of the gap.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```
