@@ -2127,3 +2127,16 @@ stricter rule than the benchmark's matching, so v1f's numbers are lower than abo
   of the pair in 26 - 32 % of pairs with a molecule beyond 600 nm, none near focus.
 * The usual failure is one detection for the two: 64 - 75 % of pairs in every bin.
 * Near focus, 200 - 300 nm: v1f 0.42, ceiling 0.71.
+
+**The local count term, three seeds** (EMA + `local_count`, weight 1, 3 x 3 windows; 6 M samples, B).
+It does not separate close pairs: bright molecules with a bright neighbour within 100 nm are reported
+merged ("taken") 0.45 of the time against EMA's 0.43, and their recall at precision 0.97 is 0.43
+against 0.42.  Bright recall at precision 0.97 rises a little, 0.552 in all three seeds against EMA's
+0.542 - 0.546, the best Jaccard over thresholds stays 0.591.  It costs pixelation, pixel_mod 0.19 -
+0.20 against 0.05 - 0.07, and lateral RMSE 70 nm against 67: a count per window of cells rewards p in
+the cell that holds the molecule, which ties the position to its cell.  Dropped as it is.
+
+Round 2, the same scores (3 seeds each): every combination equals v1f and EMA on the bright and close-pair
+scores (recall at P 0.97 0.540 - 0.549); they differ in pixelation -- EMA + offsets 2 + `sigmix` 0.019 -
+0.022, the lowest, with EMA + `sigmix` 0.022 - 0.035, EMA + `sigmix` + reporting head 0.027 - 0.034,
+offsets 2 alone 0.024 - 0.035, EMA alone 0.045 - 0.067.
