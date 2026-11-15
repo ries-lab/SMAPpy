@@ -53,7 +53,7 @@ ParaFlux (Abberior), pyMINFLUX, minflux-viewer and PYME.
 | Sequence as a table, files side by side | – | PDF table | – | ◐ text in the import dialog | H |
 | Sequence maker, creator, condenser | – | from reference sequences ("Toolkit") | ParaFlux calculator | ✗ | H? |
 | **All iterations**: per iteration plots, abort reasons (`sta`), iteration efficiency, scouting times | MINFLUX_timings_scouting | `param_by_iteration`, abort reason | ParaFlux, PYME Paraflux | ✗ (the reader keeps final rows) | G |
-| Theoretical precision | – | L/(2√(2N)), L scaled by λ/640 | minflux-viewer CRLB | ✅ with background; no λ scaling (check) | A |
+| Theoretical precision | – | L/(2√(2N)), L scaled by λ/640 | minflux-viewer CRLB | ✅ with background, L scaled by λ/642 | A |
 | **Per-trace metrics**: n, centre, spread, duration, medians of efo / cfr | ClusterStatistics_MINFLUX, Cluster_MINFLUX | `compute_trace_metrics` | PYME, pyMINFLUX | ✅ *Id statistics* | – |
 | Trace end-to-end displacement, velocity, photon budget (sum) | StepsMINFLUX stats | ✓ | – | ✗ | B |
 | Trace precision std(diff)/√2, robust std, dt | Cluster_MINFLUX_Roi | `trace_precision_x/y` | PYME (tracking) | ✗ (*Stability* has the Allan deviation) | B |
@@ -89,10 +89,10 @@ ParaFlux (Abberior), pyMINFLUX, minflux-viewer and PYME.
   *Done 2026-11-15*: a file added has its overlapping ids moved past the
   table's (`file_ids.keep_apart`), its own numbers kept in `tid_file`.
   Open: region tables skip id 0, and whether Imspector's `tid` can be 0.
-* The pattern size L, *to discuss*.  At a constant `patGeoFactor` L
-  probably depends on the wavelength, which is why MFX takes
-  `patGeoFactor × 360 × λ/640`; SMAPpy has no λ.  At 560 nm the two differ
-  by 14 %.
+* The pattern size L.  *Done 2026-11-15*: abberior's wiki defines it as
+  `patGeoFactor × 360 × λ/642` (MFX took 640); `minflux.pattern_sizes`
+  takes λ from the iteration's excitation, else the thread's MINFLUX laser,
+  else 642 nm.  At 561 nm L, and with it `xy_err_nm`, is 13 % smaller.
 
 **B. Trace metrics in *Id statistics* (S–M).**  All are vectorised and come
 out as region-table columns:

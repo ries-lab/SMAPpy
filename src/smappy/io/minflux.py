@@ -65,9 +65,14 @@ it is localized worse, by 1 + (2r/L)^2 along a line, and the records do not
 say where it was.
 
 L is the pattern size of the sequence's last lateral iteration,
-``patGeoFactor`` x 360 nm (`pattern_sizes`; Abberior's guide pairs 0.21,
-0.28 and 0.42 with 75, 100 and 150 nm), and of its last axial (``zline``)
-one for z.  A 3D sequence alternates the two, so the lateral photons are the
+``patGeoFactor`` x 360 nm x lambda / 642 nm (`pattern_sizes`), and of its last
+axial (``zline``) one for z.  The pattern scales with the wavelength it is
+made with, 642 nm being the reference (abberior's wiki, "MINFLUX Sequence":
+"patGeoFactor * 360 * (wavelength/642)"; the sequence's own ``wavelength``
+"should always refer to the 642 laser"): at 642 nm 0.21, 0.28 and 0.42 give
+abberior's 75, 100 and 150 nm, at 561 nm 13 % less.  lambda is the
+iteration's excitation (``_excitation.wavelength``), else the thread's
+excitation laser (`excitation_nm`), else 642 nm -- no scaling, as before.  A 3D sequence alternates the two, so the lateral photons are the
 last lateral iteration's of the same localization, joined as the cfr is.
 The photons ``eco`` are split into Ns and Nb by ``fbg``/``efo`` (`photon_split`),
 Imspector's background rate over its photon rate -- *assuming* ``efo``
@@ -90,7 +95,8 @@ import numpy as np
 from ..locs import Localizations
 
 MINFLUX_PSF_NM = 150.0      # sigma_nm, SMAP's number
-PATTERN_UNIT_NM = 360.0     # L for a patGeoFactor of 1
+PATTERN_UNIT_NM = 360.0     # L for a patGeoFactor of 1, at the reference wavelength
+REFERENCE_WAVELENGTH_NM = 642.0  # the laser L is defined at (abberior's wiki)
 DEFAULT_PATTERN_NM = 100.0  # L when the sequence is not known: Abberior's 2D final
 MAX_BACKGROUND_FRACTION = 0.9  # beyond it the photons are background, not a bound
 
@@ -132,19 +138,40 @@ def photon_split(eco, efo, fbg) -> Tuple[np.ndarray, np.ndarray]:
     return eco * (1.0 - b), eco * b
 
 
+def wavelength_nm(value) -> Optional[float]:
+    """A wavelength as Imspector writes it -- in metres (the lasers'
+    ``wavelength``, 6.4e-07) or in nm -- in nm; None if it is neither."""
+    try:
+        v = float(value[0] if isinstance(value, (list, tuple)) else value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if 1e-7 < v < 2e-6:
+        return v * 1e9
+    return v if 100.0 < v < 2000.0 else None
+
+
 def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]:
     """The last lateral and the last axial iteration of a `sequence`, each
     with its pattern size L in nm: ``{"xy": (k, L), "z": (k, L)}``, a key
-    left out where the sequence has no such iteration."""
+    left out where the sequence has no such iteration.
+
+    L = patGeoFactor x 360 nm x lambda / 642 nm, lambda the iteration's
+    excitation (``_excitation.wavelength``), else the sequence's
+    ``excitation_nm`` (the thread's laser, `excitation_nm`), else the
+    reference itself: a sequence that names no wavelength is taken at 642."""
+    seq = seq or {}
+    laser = wavelength_nm(seq.get("excitation_nm")) or REFERENCE_WAVELENGTH_NM
     out: Dict[str, Tuple[int, float]] = {}
-    for k, it in enumerate((seq or {}).get("iterations") or []):
+    for k, it in enumerate(seq.get("iterations") or []):
         geo = it.get("patGeoFactor")
         if isinstance(geo, (list, tuple)):      # a coarse zline's two: never the last
             geo = geo[0] if geo else None
         if geo is None or "Mode.pattern" not in it:
             continue
         axial = str(it["Mode.pattern"]).lower().startswith("z")
-        out["z" if axial else "xy"] = (k, float(geo) * PATTERN_UNIT_NM)
+        lam = wavelength_nm(it.get("_excitation.wavelength")) or laser
+        out["z" if axial else "xy"] = (k, float(geo) * PATTERN_UNIT_NM
+                                       * lam / REFERENCE_WAVELENGTH_NM)
     return out
 
 
@@ -448,11 +475,35 @@ def _sequence_node(attrs: dict) -> Optional[dict]:
 
 def sequence(attrs: dict) -> Dict[str, Any]:
     """The MINFLUX sequence: a row of parameters per iteration and the
-    sequence's global ones, flattened (``Mode.pattern``, ``_excitation.power``)."""
+    sequence's global ones, flattened (``Mode.pattern``, ``_excitation.power``);
+    and the thread's excitation wavelength, ``excitation_nm``, where the
+    metadata names its lasers (`excitation_nm`), for the pattern size."""
     node = _sequence_node(attrs) or {}
     iterations = [_flat(it) for it in node.get("Itr", [])]
     globals_ = _flat({k: v for k, v in node.items() if k != "Itr"})
-    return {"iterations": iterations, "globals": globals_}
+    out = {"iterations": iterations, "globals": globals_}
+    laser = excitation_nm(attrs)
+    if laser is not None:
+        out["excitation_nm"] = laser
+    return out
+
+
+def excitation_nm(attrs: dict) -> Optional[float]:
+    """The wavelength (nm) of the first thread's MINFLUX excitation laser
+    (m2410's ``measurement.threads[0].lasers``): the laser whose ``purpose``
+    or ``id`` says excitation or MINFLUX, else the first with a wavelength;
+    None when the metadata names none (m2205, an export)."""
+    try:
+        lasers = attrs["measurement"]["threads"][0].get("lasers") or []
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+    with_nm = [(l, wavelength_nm(l.get("wavelength"))) for l in lasers if isinstance(l, dict)]
+    with_nm = [(l, nm) for l, nm in with_nm if nm is not None]
+    for l, nm in with_nm:
+        said = f"{l.get('purpose', '')} {l.get('id', '')}".lower()
+        if "excit" in said or "minflux" in said:
+            return nm
+    return with_nm[0][1] if with_nm else None
 
 
 def instrument(attrs: dict) -> Dict[str, Any]:

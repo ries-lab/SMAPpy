@@ -1846,6 +1846,17 @@ measurements, four beads each) and checked by
   instrument's record -- are `tid_file`, the shift `id_offsets` in the
   file's metadata.  The bead file's `mbm_beads` name its own numbers, so
   *MBM drift* reads them through `file_ids.own_ids`.
+* **The pattern size scales with the excitation wavelength** (2026-11):
+  abberior's wiki ("MINFLUX Sequence", read 2026-11-15) defines
+  L = patGeoFactor x 360 nm x lambda / 642 nm, the sequence's own
+  `wavelength` being that reference and "always" 642.  `pattern_sizes`
+  takes lambda from the iteration's `_excitation.wavelength`, else the
+  first thread's MINFLUX laser (`excitation_nm`, `lasers[].wavelength` in
+  metres), else 642 nm -- so a file that names no laser keeps the L it had.
+  `xy_err_nm` of a 561 nm measurement is 13 % smaller than before, of a
+  488 nm one 24 %.  The MFX scripts divide by 640, their own convention.
+  Still open: a second thread's rows (`thi` 1) take the first thread's
+  sequence and laser (the overview's #5).
 * **-1 is "in none" in every id column, and 0 an id** (2026-11, `ids.py`).
   0 used to mean none, and every reader skipped it -- right for the ids
   SMAPpy numbers from 1, wrong for those from elsewhere: Imspector's `tid`

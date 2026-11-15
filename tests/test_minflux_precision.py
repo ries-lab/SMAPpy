@@ -123,6 +123,23 @@ def test_the_pattern_sizes_are_the_last_lateral_and_axial_iterations():
     assert minflux.pattern_sizes(None) == {}
 
 
+def test_the_pattern_scales_with_the_excitation_wavelength_from_642_nm():
+    # abberior's wiki: L = patGeoFactor * 360 * (wavelength / 642)
+    at = lambda nm, **more: {"iterations": [{"Mode.pattern": "hexagon", "patGeoFactor": 0.28,
+                                             **more}], **({"excitation_nm": nm} if nm else {})}
+    assert minflux.pattern_sizes(at(None))["xy"][1] == pytest.approx(100.8)   # no wavelength
+    assert minflux.pattern_sizes(at(642.0))["xy"][1] == pytest.approx(100.8)
+    assert minflux.pattern_sizes(at(561.0))["xy"][1] == pytest.approx(100.8 * 561 / 642)
+    # the iteration's own excitation wins over the thread's laser, metres or nm
+    assert minflux.pattern_sizes(at(642.0, **{"_excitation.wavelength": 4.88e-7}))["xy"][1] \
+        == pytest.approx(100.8 * 488 / 642)
+    attrs = {"measurement": {"threads": [{"lasers": [
+        {"id": "Activation405", "purpose": "activation", "wavelength": 4.05e-7},
+        {"id": "MINFLUX561", "purpose": "excitation", "wavelength": 5.61e-7}]}]}}
+    assert minflux.excitation_nm(attrs) == pytest.approx(561.0)
+    assert minflux.excitation_nm({}) is None
+
+
 def _records_3d():
     """Two localizations of one trace, each a lateral iteration 2 (its own
     photons) then the final axial iteration 3."""

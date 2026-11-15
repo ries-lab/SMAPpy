@@ -1,6 +1,6 @@
 ---
-version: "6"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+version: "7"
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux.wavelength_nm, smappy.io.minflux.excitation_nm, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -258,8 +258,8 @@ the Cramér-Rao lower bound: the best precision any estimator can reach with
 these photons), so `xy_err_nm` is that bound worked out from the photons,
 as a camera fitter's is.  It is not the scatter of the localizations, which
 the precision plugins measure.  MINFLUX probes a molecule with the zero of a
-doughnut placed at K points on a circle of diameter L (the pattern size,
-`patGeoFactor` × 360 nm in the sequence) and counts the photons there:
+doughnut placed at K points on a circle of diameter L (the pattern size)
+and counts the photons there:
 $N_s$ from the molecule and $N_b$ from background.  Near the zero the
 intensity grows as the square of the distance, and for a molecule at the
 centre of the pattern the bound per axis is
@@ -272,8 +272,13 @@ equation for out-of-focus background.  It does not depend on K -- a
 triangle, a square or a hexagon -- nor on an exposure at the centre, which
 adds no information there.  A molecule away from the centre is localized
 worse than this, and the records do not say where it was.  L is the
-sequence's last lateral iteration's: 101 nm for the common 2D sequence
-(`patGeoFactor` 0.28), where 25 photons without background give 7 nm.
+sequence's last lateral iteration's, `patGeoFactor` × 360 nm × λ / 642 nm:
+the pattern scales with the excitation wavelength λ, 642 nm being the
+reference (abberior's definition).  λ is the iteration's excitation laser,
+else the measurement's MINFLUX laser, else 642 nm when the file names none
+(an `.npy` or `.json` export).  For the common 2D sequence (`patGeoFactor`
+0.28) L is 101 nm at 642 nm and 88 nm at 561 nm; 25 photons without
+background give 7 nm at 642 nm.
 
 The background is Imspector's: `eco` is split into $N_s$ and $N_b$ in the
 ratio `fbg`/`efo`, its background rate over its photon rate.  This assumes
