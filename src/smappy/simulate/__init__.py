@@ -39,6 +39,7 @@ from .camera import (ASTIGMATISM, ISOLATED_NM, astigmatic_sigmas, bead_stacks,
                      dual_camera_frames, dual_transformation, render, scmos_frames,
                      scmos_maps)
 from .kinetics import blink, emission, expected_blinks, label, off_time_for
+from .minflux import simulate_attempts
 from .localizations import (GroundTruth, ground_truth, localizations, mortensen,
                             simulate, unresolvable)
 from .scene import as_scene, scene_truth, settings_of, two_colour_scene
@@ -50,6 +51,7 @@ from .structure import Labels, Structure, load_structure, presets
 from .tracks import TrackSimulationSettings, jump_nm, simulate_tracks, spacing_nm
 
 __all__ = [
+    "simulate_attempts",
     "ASTIGMATISM", "ISOLATED_NM", "astigmatic_sigmas", "bead_stacks", "camera_frames",
     "camera_truth", "dual_bead_stacks", "dual_camera_frames", "dual_transformation",
     "render", "scmos_maps", "scmos_frames", "dark_frames", "blink", "emission", "expected_blinks", "label", "off_time_for",
