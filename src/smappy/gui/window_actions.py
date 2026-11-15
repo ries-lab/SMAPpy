@@ -1,4 +1,4 @@
-"""The assistant's actions inside SMAPpy's own windows: the bead and the PSF calibration.
+"""The assistant's actions inside SMAPpy's own windows: the PSF calibration.
 
 `open_window` opened these and nothing more, so "calibrate these beads" ended at an empty
 window the assistant could neither fill nor press (a user's report, 2026-11-12).  Each action
@@ -11,7 +11,7 @@ What a click would ask in a dialog is an argument; what a dialog would tell is t
 window's *State*.  A job runs in the window's worker as a click's does, so an action that starts
 one returns at once: *State* says when it is done, and a job the assistant started fails into
 the window's status and ``last_error``, never a modal box, which would hold the assistant's queue
-(`CalibrationWindow.quiet_job`).  The calculations are the windows' Qt-free methods
+(`PSFCalibrationWindow.quiet_job`).  The calculations are the window's Qt-free methods
 (`calibrate.core`, `calibrate.dual`, `calibrate.psf_methods`), which a script calls without a
 window.
 
@@ -168,174 +168,6 @@ def _started(window, start: Callable[[], None], what: str) -> Dict[str, Any]:
 def _idle(window) -> None:
     if window.busy:
         raise ToolError("the window is busy with a job: State says when it is done")
-
-
-# ---------------------------------------------------------- bead calibration
-def bead_calibration_actions(control) -> List[Action]:
-    """The bead calibration window's controls (`calibrate/qt_gui.CalibrationWindow`)."""
-    name = "Bead calibration"
-
-    def win():
-        control.open_calibration()
-        return control.calibration_window
-
-    def state():
-        w = win()
-        result = w.result
-        out: Dict[str, Any] = {
-            "files": list(w.paths), "mode": w.mode, "modes": ["Single channel", "Dual colour"],
-            "settings": _values(w.form), "busy": w.busy, "status": _status(w),
-            "page": w.tabs.tabText(w.tabs.currentIndex()),
-            "pages": [t for i, t in enumerate(_pages(w.tabs)) if w.tabs.isTabEnabled(i)]}
-        if w.last_error:
-            out["error"] = w.last_error
-        if result is not None:
-            import numpy as np
-            out["result"] = {"beads": len(result.beads.records),
-                             "used": int(np.sum(result.accepted)),
-                             "excluded by hand": sorted(int(b) for b in w.excluded),
-                             "fit quality": w.diagnostics is not None,
-                             "saved": getattr(w, "saved_path", None)}
-            out["beads"] = _table(w.bead_table)
-        return out
-
-    def add(path, subdirectories=True):
-        w = win()
-        _idle(w)
-        w.add_paths(_found(_paths(path), bool(subdirectories)))
-        return {"files": list(w.paths)}
-
-    def remove(path=None):
-        w = win()
-        _idle(w)
-        if path is None:
-            w.paths.clear()
-        else:
-            gone = {str(Path(p).expanduser()) for p in ([path] if isinstance(path, str) else path)}
-            unknown = sorted(gone - set(w.paths))
-            if unknown:
-                raise ToolError(f"{unknown[0]} is not in the list; it has {', '.join(w.paths) or 'none'}")
-            w.paths[:] = [p for p in w.paths if p not in gone]
-        w._refresh_files()
-        return {"files": list(w.paths)}
-
-    def mode(mode):
-        w = win()
-        _idle(w)
-        chosen = {"single channel": "Single channel", "single": "Single channel",
-                  "dual colour": "Dual colour", "dual color": "Dual colour",
-                  "dual": "Dual colour"}.get(str(mode).strip().lower())
-        if chosen is None:
-            raise ToolError(f"mode: no {mode!r}; it is 'Single channel' or 'Dual colour'")
-        w.mode_box.setCurrentText(chosen)
-        return {"mode": w.mode, "settings": _values(w.form)}
-
-    def settings(values):
-        w = win()
-        _idle(w)
-        return {"settings": _set_form(w.form, values, "settings")}
-
-    def calibrate():
-        w = win()
-        _idle(w)
-        if not w.paths:
-            raise ToolError(f"no bead stacks: {name}/Add files first")
-        try:
-            w.settings()
-        except ValueError as error:
-            raise ToolError(f"a setting does not read: {error}") from None
-        return _started(w, w.run, "detecting and calibrating")
-
-    def exclude(beads, exclude=True):
-        w = win()
-        _idle(w)
-        if w.result is None:
-            raise ToolError(f"no calibration yet: {name}/Detect and calibrate first")
-        rows = _select(w.bead_table, beads)
-        w.excluded = (w.excluded | set(rows)) if exclude else (w.excluded - set(rows))
-        w.refresh_table()
-        w.redraw()
-        return {"excluded": sorted(w.excluded),
-                "then": f"{name}/Recalculate builds the calibration without them"}
-
-    def recalculate():
-        w = win()
-        _idle(w)
-        if w.result is None:
-            raise ToolError(f"no calibration yet: {name}/Detect and calibrate first")
-        return _started(w, w.rebuild, f"recalculating without {len(w.excluded)} bead(s)")
-
-    def quality():
-        w = win()
-        _idle(w)
-        if w.result is None:
-            raise ToolError(f"no calibration yet: {name}/Detect and calibrate first")
-        return _started(w, w.fit_quality, "fitting the beads back")
-
-    def page(page):
-        w = win()
-        return {"page": _show_page(w.tabs, page)}
-
-    def save(path=None):
-        from ..calibrate.core import calibration_save_defaults
-        w = win()
-        _idle(w)
-        if w.result is None:
-            raise ToolError(f"no calibration yet: {name}/Detect and calibrate first")
-        folder, stem = calibration_save_defaults(w.paths, dual=w.is_dual)
-        output = control._assistant().server.assistant.output
-        target = _save_target(path, Path(folder) / (stem + ".h5"), output, w.paths)
-        try:
-            saved = w.save_to(target)
-        except Exception as error:
-            raise ToolError(f"not saved: {type(error).__name__}: {error}") from None
-        fitter = "Spline 3D 2C" if w.is_dual else "Spline 3D"
-        return {"saved": saved, "fitter": f"the {fitter} fitter now uses it"}
-
-    def use():
-        w = win()
-        if not getattr(w, "saved_path", None):
-            raise ToolError(f"nothing saved yet: {name}/Save first")
-        w._use_in_fitter()
-        return {"fitter": _status(w)}
-
-    return [
-        Action(f"{name}/State", "The bead calibration window as it stands: its stacks, mode, "
-               "settings (by the dotted names Settings takes), whether a job runs, the status line "
-               "or the last error, and after a calibration how many beads it used and the bead "
-               "table.  Opens the window.", state, shows=True),
-        Action(f"{name}/Add files", "Bead z-stacks into the window's list: each file or folder "
-               "searched for acquisitions, into subfolders unless subdirectories is false.",
-               add, {"path": PATHS, "subdirectories": {"type": "boolean"}}, ("path",), shows=True),
-        Action(f"{name}/Remove files", "Stacks out of the list, by path; without a path, all.",
-               remove, {"path": PATHS}, shows=True),
-        Action(f"{name}/Mode", "Single channel or Dual colour (a split chip, registered): the "
-               "files and the shared settings are kept, a result dropped.", mode,
-               {"mode": {"type": "string", "enum": ["Single channel", "Dual colour"]}},
-               ("mode",), shows=True),
-        Action(f"{name}/Settings", "Set some of the mode's settings, by the dotted names State "
-               "lists; the rest stay.  read_doc('Panels/Bead calibration') explains them.",
-               settings, {"values": VALUES}, ("values",), shows=True),
-        Action(f"{name}/Detect and calibrate", "Detect + calibrate: find the beads, average them "
-               "into a spline PSF; the beads marked doubles start excluded.  Runs in the window; "
-               "returns at once.  Nothing is saved.", calibrate, shows=True),
-        Action(f"{name}/Exclude beads", "Leave beads out (exclude=false lets them in again), by "
-               "their row in State's bead table, then Recalculate.", exclude,
-               {"beads": BEADS, "exclude": {"type": "boolean"}}, ("beads",), shows=True),
-        Action(f"{name}/Recalculate", "Build the calibration again from the same beads without "
-               "the excluded ones; returns at once.", recalculate, shows=True),
-        Action(f"{name}/Calculate fit quality", "Fit the beads back with the fitter the data will "
-               "meet, for the Fit quality page; returns at once.", quality, shows=True),
-        Action(f"{name}/Show page", "Bring a page of plots to the front: Overview, "
-               "Transformation, Fit quality, Field diagnostics, Bead diagnostics, CRLB.", page,
-               {"page": {"type": "string"}}, ("page",), shows=True),
-        Action(f"{name}/Save", "Save the calibration (.h5) -- by default beside the stacks, as "
-               "the window's dialog offers; a path given is under the output folder or the "
-               "stacks' folder -- and put it into the Spline 3D (or 2C) fitter.", save,
-               {"path": {"type": "string", "description": "the .h5 to write; default beside the stacks"}}),
-        Action(f"{name}/Use in fitter", "Put the saved calibration into the Spline 3D fitter "
-               "(dual colour: Spline 3D 2C) again.", use),
-    ]
 
 
 # ----------------------------------------------------------- PSF calibration
@@ -655,7 +487,7 @@ def psf_calibration_actions(control) -> List[Action]:
 def window_actions(control) -> Dict[str, Action]:
     """Every window's actions, by name, for `assistant_actions.actions_of`."""
     out: Dict[str, Action] = {}
-    for make in (bead_calibration_actions, psf_calibration_actions):
+    for make in (psf_calibration_actions,):
         out.update({a.name: a for a in make(control)})
     return out
 
@@ -674,5 +506,4 @@ WINDOWS_WITHOUT_ACTIONS = {
 }
 
 #: The windows that have actions, by the name `open_window` gives them and the prefix of theirs.
-WINDOWS_WITH_ACTIONS = {"bead calibration": "Bead calibration",
-                        "PSF calibration": "PSF calibration"}
+WINDOWS_WITH_ACTIONS = {"PSF calibration": "PSF calibration"}

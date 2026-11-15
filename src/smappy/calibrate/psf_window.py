@@ -44,7 +44,7 @@ from ..gui import folders
 from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from .core import CalibrationSettings
-from .dual import DualColorSettings
+from .dual import DualColorSettings, bead_specs
 from .elliptical import EllipticalCalibrationSettings
 from .input import acquisition_kind, discover_acquisitions, is_fourpi_scan
 from .psf_methods import (AVERAGE_ONLY, METHODS, SAMPLES, LearningProgress, duration, for_mode, methods_of, modes_of,
@@ -54,7 +54,6 @@ from .insitu_run import InSituModelSettings
 from .molecule_stack import MoleculeStackSettings
 from .pupil import BeadSettings, OpticsSettings, RunSettings, SplineSettings
 from .medium import FIELDS as MEDIUM_FIELDS
-from .qt_gui import _bead_specs
 
 
 def torch_missing():
@@ -308,7 +307,7 @@ class PSFCalibrationWindow(QMainWindow):
         hlayout.setContentsMargins(0, 0, 0, 0)
         self.detection_forms = {}
         for cls in (CalibrationSettings, DualColorSettings):
-            form = SettingsForm(cls, _bead_specs(cls))
+            form = SettingsForm(cls, bead_specs(cls))
             hlayout.addWidget(form)
             self.detection_forms[cls] = form
         # in situ: its own choices (the focus, the start, the coverslip, the rounds) and, under more, how the
@@ -1517,14 +1516,16 @@ class PSFCalibrationWindow(QMainWindow):
         self.status_bar.showMessage(f"the {fitter} now uses {Path(self.run_result.saved).name}")
 
 
-def show_psf_calibration(paths=()):
-    """Open the window, making a QApplication if there is none."""
+def show_psf_calibration(paths=(), dual: bool = False):
+    """Open the window, making a QApplication if there is none (`smappy-calibrate` without --out)."""
     from PySide6.QtWidgets import QApplication
 
     from ..gui import make_app
     standalone = QApplication.instance() is None
     app = make_app()
     window = PSFCalibrationWindow(paths)
+    if dual:
+        window.mode_box.setCurrentText("Dual colour")
     window.show()
     if standalone:
         app.exec()

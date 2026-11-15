@@ -16,13 +16,13 @@ import pytest
 from smappy import docs
 
 PANELS = {"Panels/Render tab", "Panels/Regions tab", "Panels/ROI manager",
-          "Panels/3D view", "Panels/Bead calibration", "Panels/PSF calibration",
+          "Panels/3D view", "Panels/PSF calibration", "Panels/Bead average",
           "Panels/Batch window",
           "Panels/Camera editor", "Panels/Glossary", "Panels/Your own plugins",
           "Panels/Bead selector", "Panels/Microscope manager", "Panels/Assistant",
           "Panels/DECODE training", "Panels/Training hosts"}
 # pages beside the panels that belong to no widget, so name no controls
-WIDGETLESS = {"Panels/Glossary", "Panels/Your own plugins"}
+WIDGETLESS = {"Panels/Glossary", "Panels/Your own plugins", "Panels/Bead average"}
 
 
 def controls(page_text: str):

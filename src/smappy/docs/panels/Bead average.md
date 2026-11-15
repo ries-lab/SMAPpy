@@ -1,8 +1,7 @@
 ---
-title: Bead calibration
-summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
-widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.merged_neighbours, smappy.calibrate.core.judge_shapes, smappy.calibrate.core.shape_scores, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+title: Bead average
+summary: The PSF calibration window's bead average -- turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
+covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.merged_neighbours, smappy.calibrate.core.judge_shapes, smappy.calibrate.core.shape_scores, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.resolved_geometry, smappy.calibrate.dual.resolve_arrangement, smappy.calibrate.dual.bead_registration, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics]
 ---
 
 ## What it does
@@ -13,9 +12,9 @@ textbook Gaussian: a cylindrical lens stretches it, the objective adds its
 own aberrations, and both differ from one microscope to the next.  The
 reliable way to know it is to measure it.
 
-This window measures it from **beads**: sub-diffraction fluorescent beads
+This method measures it from **beads**: sub-diffraction fluorescent beads
 stuck to a coverslip, imaged while the objective is stepped through focus.
-Each bead gives a small 3D image of the PSF (a *bead stack*).  The window
+Each bead gives a small 3D image of the PSF (a *bead stack*).  It
 finds the beads, cuts them out, aligns them onto one another, averages
 them, smooths the average and turns it into a cubic-spline model -- a
 [spline calibration](plugin:Panels/Glossary) (also called a bead calibration,
@@ -25,12 +24,12 @@ The model is saved as an `.h5` file, which the
 [Spline 3D](plugin:Localize/Spline 3D) fitter reads; how the fit uses it is
 explained on that page.
 
-It has two modes (*mode*):
+It has two modes (the window's *mode*):
 
 * **Single channel**: one camera image, one PSF model.
 * **Dual colour**: a camera whose chip is split into two halves, each seeing
   the sample through a different filter (two colours) or at a different focus
-  (biplane).  The window then makes **two** PSF models, one per half,
+  (biplane).  It then makes **two** PSF models, one per half,
   normalised together so that they keep the beads' split of the light, and
   measures the **transformation** that says where a point in one half
   appears in the other -- the [registration](plugin:Panels/Glossary) (also
@@ -59,8 +58,12 @@ What it needs:
   the calibration is *ROI-local* and only applies to data of exactly the same
   image size (a warning says so).
 
-It opens from the *Bead calibration* section of the Localize tab, or on its
-own as `smappy-calibrate`.
+It is the *bead average* of the [PSF calibration](plugin:Panels/PSF calibration)
+window -- sample *beads in a z stack*, method *bead average* -- whose other
+methods learn a model of the optics instead; that page explains the window
+itself: adding stacks, *Detect beads*, *Calibrate*, marking beads, saving.
+`smappy-calibrate --out FILE` runs the same calibration without a window.
+(Until 2026-11 it had a window of its own, *Bead calibration*.)
 
 ## How it works
 
@@ -193,9 +196,9 @@ axes[3].set_yticklabels([]); axes[3].tick_params(labelsize=7)
 
 **6. The spline.**  The model is interpolated with cubic polynomials between
 the grid points, so that the fitter can evaluate it, and its slopes, at any
-sub-pixel position and height.  This is what *Save calibration...* writes.
+sub-pixel position and height.  This is what the window saves.
 
-**7. Check it.**  *Calculate fit quality* fits the calibration's own beads,
+**7. Check it.**  The *Fit quality* page fits the calibration's own beads,
 plane by plane, with the same fitter the data will meet, and compares the
 fitted z with the objective's position.  A good calibration gives a straight
 line of slope 1.  The check is on the beads that made the model, so it shows
@@ -482,36 +485,11 @@ listed under *Differences from SMAP*: a Gaussian smoothing in place of a
 smoothing B-spline, a linear correlation, a leave-one-out shape rejection,
 and the joint normalisation of the two halves.
 
-## Controls
+## Settings
 
-### bead stacks
-The files or folders of bead z-stacks (TIFF or OME-TIFF).  All stacks are
-pooled into one calibration, so they must share the z step.
-
-### Add...
-Adds stacks.  On a Mac it takes files and folders together, several at
-once; elsewhere files only.  Files and folders can also be dropped on the
-window.
-
-### Select several folders...
-In the arrow beside *Add...*: adds folders, several at once.
-
-### Remove
-Removes the selected entries from the list.
-
-### search subdirectories
-Whether an added folder is searched for acquisitions in its subfolders
-too, or only at its top.
-
-### mode
-*Single channel* or *Dual colour*.  Switching keeps the files and the
-settings the two modes share, clears the result, and shows or hides the
-split-camera settings; the *Transformation* and *Field diagnostics* pages
-exist only in dual colour.
-
-### settings
-The calibration's settings.  The common ones are shown; *more* has the
-rest, whose defaults rarely need changing.
+The settings of the window's *beads* part (and, in dual colour, its *channels*
+and *registration*), as the bead average reads them.  The common ones are shown;
+*more* has the rest, whose defaults rarely need changing.
 
 ### bead box
 The model's width, in camera pixels; odd, at least 7.  It must hold the
@@ -643,29 +621,10 @@ The second round's tolerance on each axis, in pixels.  Good bead data sits
 well below 0.1 pixel; if too few pairs pass, look at the *Transformation*
 page before raising it.
 
-### Detect + calibrate
-Runs everything: detection, extraction, alignment, rejection, the model (and
-in dual colour the pairs and the transformation).  It runs in the
-background; the status bar says how many beads were used.
+## Output
 
-### Calculate fit quality
-Refits the beads with the model just built and draws the *Fit quality*
-page.
-
-### Save calibration...
-Writes the calibration as `.h5`, by default named after the bead data's
-folder and saved beside it.  Opened from the main window, saving also puts
-it into the fitter's *calibration* field -- Spline 3D for a single-channel
-calibration, Spline 3D 2C for a dual-colour one.
-
-### Use in the Spline 3D fitter
-Puts the calibration last saved into the fitter again, for when the field
-was changed since.  In dual-colour mode the button says *Spline 3D 2C*.
-
-### Browse average stack...
-Opens the averaged bead stack -- the raw average, before smoothing, so that
-a bad bead or a misalignment still shows -- slice by slice in its own
-window; in dual colour both halves side by side.
+The pages the window shows after a bead average.  Select a bead in the table
+to see its own stack.
 
 ### Overview
 The stack's projection with its beads (green used, red rejected), the
@@ -683,7 +642,7 @@ limit* box.  A tight, round cloud centred on zero is good; a cloud with a
 tail or two clusters means wrong pairs or the wrong layout.
 
 ### Fit quality
-After *Calculate fit quality*: fitted against expected z for every bead and
+Fitted against expected z for every bead and
 for the average, the centred error, and the lateral and axial profiles of the
 beads against the model.  Good: a straight line of slope 1 over the
 useful range and a centred error of a few nanometres; the ends of the range,
@@ -723,14 +682,6 @@ split; dashed and dotted are the main and the secondary half alone, each
 with its share of them, and the axis is scaled to the solid lines.  Where
 one half's bound climbs and the other's does not, that half carries the
 measurement there.
-
-### Exclude / include
-Marks the selected beads in the table as excluded (or includes them again);
-space does the same.  Takes effect on *Recalculate*.
-
-### Recalculate
-Builds the calibration again from the beads already found, without the
-excluded ones.  In dual colour it refits the transformation too.
 
 ## Differences from SMAP
 

@@ -201,7 +201,7 @@ def test_the_window_opens_the_shipped_tabs(window):
     localize = tab_named(window, "Localize")
     titles = {s.title for s in localize.sections}
     assert {"PSF calibration", "Gaussian 2D", "Spline 3D"} <= titles
-    # the old Bead calibration is a plugin still, no longer pinned: the PSF calibration does what it did
+    # the old Bead calibration was retired (2026-11): the PSF calibration does what it did
     assert "Bead calibration" not in titles
 
 
@@ -223,7 +223,7 @@ def test_the_psf_calibration_section_opens_the_window_as_it_was_left(window):
 
 
 def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
-    """The bead calibration is the Localize tab's, the per-region steps the
+    """The PSF calibration is the Localize tab's, the per-region steps the
     Regions tab's.  The ROI manager is a window to look at, as the 3D view
     is, and is in View, once, with Ctrl+R.  The Plugins menu is the whole
     plugin tree, every plugin in it, and not counted."""

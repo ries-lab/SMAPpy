@@ -226,7 +226,7 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   microscope manager and the camera editor so far -- and
   `tests/test_window_actions.py` fails on one that has neither.
   Without a window the same calibrations are `run_plugin`'s:
-  *Localize/Bead calibration* and *Localize/PSF calibration* run from
+  *Localize/PSF calibration* (the old *Bead calibration* was retired in 2026-11) runs from
   their settings (`Plugin.form_in_window`: the window's settings, which the
   panel does not show), detect, calibrate and save as the window does with
   nothing marked by hand, through the same code (`calibrate/psf_run.py`),

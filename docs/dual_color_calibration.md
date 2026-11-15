@@ -11,8 +11,8 @@ frame in one global fit, pages under Help > Plugin documentation.
 
 ## Use
 
-Open the *Bead calibration* section of the Localize tab,
-or run `smappy-calibrate`. Set **mode → Dual colour**. The *channels*
+Open the *PSF calibration* section of the Localize tab (sample *beads in a z stack*,
+method *bead average*), or run `smappy-calibrate`. Set **mode → Dual colour**. The *channels*
 section says where the two channels lie (`ArrangementSettings`, the same
 part the two-colour fitters, *Calibrate transform* and the dual molecule
 stacks ask it in): on *the microscope's*, the microscope's entry -- its arms'

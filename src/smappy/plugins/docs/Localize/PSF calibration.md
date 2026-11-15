@@ -8,8 +8,8 @@ covers: [smappy.calibrate.pupil.run_calibration, smappy.calibrate.insitu_run.run
 
 A 3D fit needs to know what one molecule looks like at every height: the
 **point spread function** (PSF).  The PSF calibration makes it from bead
-z-stacks by the **bead average** of the
-[bead calibration](plugin:Localize/Bead calibration), or a **model of the
+z-stacks by the **bead average**
+([its page](plugin:Panels/Bead average)), or a **model of the
 microscope's optics** learnt from the same stacks: the objective's pupil, with its
 aberrations written as Zernike modes, from which the PSF at any height follows.
 This is uiPSF (Liu et al. 2024, [doi:10.1038/s41592-024-02282-x](https://doi.org/10.1038/s41592-024-02282-x)),
@@ -22,15 +22,14 @@ the spherical aberration that grows with depth above all.
 A model is smooth without smoothing, says which aberrations the microscope
 has and how sure it is of each, and shows where it does not fit the data.
 Saved, it is turned into the same kind of
-[spline calibration](plugin:Panels/Glossary) the bead calibration writes, so
+[spline calibration](plugin:Panels/Glossary) the bead average writes, so
 [Spline 3D](plugin:Localize/Spline 3D) and
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C) read either alike, and the
 model is kept inside the same file.
 
 By hand, this section only opens the [PSF calibration window](plugin:Panels/PSF calibration),
 with the *Open* button in its title bar; the window's page explains the
-methods, their settings and what they show.  It replaces the *Bead calibration* section in the shipped GUI; *Bead calibration*
-is still in the plugin tree (Plugins > Localize) for now.
+methods, their settings and what they show.  It replaces the *Bead calibration* plugin and window, retired in 2026-11.
 The pupil model, from beads or in situ, needs PyTorch, an optional part of
 SMAPpy; without it the window says what to type to install it.
 

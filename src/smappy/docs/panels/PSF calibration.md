@@ -14,8 +14,8 @@ three samples (*sample*), each offering the methods that fit it (*method*):
 * **beads in a z stack**: fluorescent beads on the coverslip, imaged while the
   objective steps through focus.  Methods: the **bead average** -- the beads
   aligned onto one another, averaged and smoothed, the
-  [bead calibration](plugin:Panels/Bead calibration)'s method, explained on
-  its page -- the **pupil model (uiPSF)**, the PSF learnt as a **model of
+  the old bead calibration's method, explained on
+  [its page](plugin:Panels/Bead average) -- the **pupil model (uiPSF)**, the PSF learnt as a **model of
   the optics**, explained here, and the elliptical Gaussian;
 * **molecules on the coverslip in a z stack**: single dye molecules stuck to
   the coverslip in blinking buffer, imaged through repeated z sweeps.  The
@@ -88,8 +88,8 @@ GPU where PyTorch finds one (NVIDIA, or Apple's).
 ## How it works
 
 This section and the next describe the pupil model from beads; in situ
-learning has its own section after them, and the bead average's are on the
-[bead calibration's page](plugin:Panels/Bead calibration).
+learning has its own section after them, and the bead average's are on
+[its own page](plugin:Panels/Bead average).
 
 **Looking at the stacks.**  The *Stacks* page shows each added file as it was
 recorded, one plane at a time, with a slider for the file and one for the
@@ -1013,8 +1013,8 @@ grid, so the run takes less memory and time.
 
 ### beads
 How beads are found, and for the bead average how they are aligned and
-averaged: the bead calibration's settings, which its
-[page](plugin:Panels/Bead calibration) explains.  The pupil model reads only
+averaged: the bead average's settings, which its
+[page](plugin:Panels/Bead average) explains.  The pupil model reads only
 the finding; *bead box* is also the size of the boxes it learns from and of
 its spline.
 
@@ -1220,7 +1220,7 @@ calibration or a registration from a movie.  Empty, it is measured from the
 molecules' own detections, on the channels *channels* cuts the chip into;
 the learning refines it either way.  Dual-colour beads have a *registration*
 too, folded: how they are paired and their map fitted, always from the beads
-themselves (the [Bead calibration](plugin:Panels/Bead calibration)'s
+themselves (the [bead average](plugin:Panels/Bead average)'s
 *registration*).
 
 ### z proxy
@@ -1409,8 +1409,8 @@ diagnostics*, *CRLB*), explained on its page.  The pupil model's:
   in one table.  A held value has no CRLB.  *Copy* puts the table on the
   clipboard, tab-separated, for a spreadsheet.
 - **CRLB**: how precisely a fit with the saved spline could localize a
-  molecule at each height, x, y and z in nm, as on the bead calibration's
-  page ([Bead calibration](plugin:Panels/Bead calibration), *CRLB*).  The
+  molecule at each height, x, y and z in nm, as on the bead average's
+  page ([Bead average](plugin:Panels/Bead average), *CRLB*).  The
   pupil model's, in situ's and the molecules' too: before the calibration is
   saved, the spline is sampled for the page as saving would, with the
   default *spline* settings.

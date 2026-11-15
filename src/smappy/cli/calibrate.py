@@ -1,9 +1,15 @@
-"""Create a single-channel or split-frame dual-color spline PSF calibration."""
+"""Create a single-channel or split-frame dual-color spline PSF calibration.
+
+With --out it runs headless: the bead average of `calibrate.core` / `calibrate.dual`, from the
+options below.  Without, it opens the PSF calibration window on the paths (in dual colour with
+--layout); the window's own settings then apply, not these options -- the old bead calibration
+window that took them was retired in 2026-11.
+"""
 import argparse
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     p.add_argument('paths', nargs='*', help='acquisitions or directories to pool')
     p.add_argument('--out', help='headless run: save a native calibration HDF5')
     p.add_argument('--dz', type=float, help='override objective z spacing in nm')
@@ -45,8 +51,8 @@ def main():
         result.save(args.out)
         print(f'Saved {args.out}: {result.accepted.sum()} accepted beads')
     else:
-        from ..calibrate.qt_gui import show_calibration_qt
-        show_calibration_qt(args.paths, settings)
+        from ..calibrate.psf_window import show_psf_calibration
+        show_psf_calibration(args.paths, dual=bool(args.layout))
 
 
 if __name__ == '__main__':

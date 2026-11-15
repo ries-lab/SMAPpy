@@ -14,7 +14,7 @@ that is neither fails there rather than being out of the assistant's reach
 without anyone deciding it.  The Plugins menu is `open_plugin`'s and
 `run_plugin`'s, and the windows are `open_window`'s too; what is inside a
 window -- its fields and buttons -- is `window_actions.py`'s, by the window's
-name ("Bead calibration/Detect and calibrate"), or a reason it has none.
+name ("PSF calibration/Detect"), or a reason it has none.
 """
 from __future__ import annotations
 
@@ -60,8 +60,7 @@ LEFT_OUT = {
 WINDOW_BUTTONS = {
     "open files": "File/Open",
     "add files": "File/Add",
-    "bead calibration": "Bead calibration/State",       # and the window's other actions
-    "psf calibration": "PSF calibration/State",
+    "psf calibration": "PSF calibration/State",       # and the window's other actions
     "decode training": "open_window",
     "training hosts": "File/Preferences",
     "decode model": "describe_plugin",          # its notice: the model in a line, or how it differs
