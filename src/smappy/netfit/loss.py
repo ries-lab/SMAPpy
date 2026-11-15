@@ -32,6 +32,10 @@ For one frame with molecules ``m`` (photons, x, y, z) and the network's maps:
   SHOT solves the assignment with Sinkhorn on the GPU; here it is exact (Hungarian, scipy) on the CPU,
   on the few slots within reach of each molecule -- SHOT found the exact assignment no better, Jaccard
   0.873 against 0.883.  The mixture, count and background terms still apply, over all slots, if named.
+  With ``assign`` "sinkhorn" the assignment is SHOT's instead (`sinkhorn_terms`): an entropic optimal
+  transport, soft, differentiated through, whose coupling spreads the gradient over the slots that
+  could take a molecule early in training rather than handing all of it to one -- tried for whether
+  it learns faster than the exact assignment (2026-11-15).
 
 Each frame's loss is the sum; the batch's the mean over frames.  The part ``loss`` names the terms
 (``terms``) and their weights (``weights``), so that step 4 can change one.
@@ -97,9 +101,10 @@ def _slot_maps(out, h, w, scale):
 
 
 def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "background"), window: int = 3,
-          gate_px: float = 1.5) -> dict:
+          gate_px: float = 1.5, assign: dict | None = None) -> dict:
     """Each term of ``names`` per frame, (b,) tensors: DECODE's three by default, ``local_count`` (its
-    ``window`` in cells) and ``matched`` (its ``gate_px``)."""
+    ``window`` in cells) and ``matched`` (its ``gate_px``, and ``assign``: {"how": "hungarian" or
+    "sinkhorn", "eps", "iterations"})."""
     b, _, h, w = out.shape
     # a finer output grid's cells a pixel (`network.TwoStageUNet.out_scale`), from the frames it saw
     scale = w // batch.frames.shape[-1] if batch.frames is not None else 1
@@ -130,8 +135,62 @@ def terms(out, batch, scaling, chunk: int = 64, names=("count", "mixture", "back
     if "local_count" in names:
         out_terms["local_count"] = window_counts(pk.sum(1).clamp(max=1 - 1e-6), cell_counts(batch, h, w, scale), window)
     if "matched" in names:
-        out_terms.update(matched_terms(pk, mu5, sig5, tgt, mask, batch.xyz, scale, gate_px))
+        if (assign or {}).get("how", "hungarian") == "sinkhorn":
+            out_terms.update(sinkhorn_terms(pk, mu5, sig5, tgt, mask, batch.xyz, scale, gate_px,
+                                            assign.get("eps", 1e-2), assign.get("iterations", 100)))
+        else:
+            out_terms.update(matched_terms(pk, mu5, sig5, tgt, mask, batch.xyz, scale, gate_px))
     return out_terms
+
+
+def sinkhorn_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5, eps: float = 1e-2,
+                   iterations: int = 100) -> dict:
+    """The matched loss with SHOT's assignment (Seailles et al. 2025, arXiv:2512.10683, from the paper):
+    per frame a transport from the molecules (mass 1 each) and one "nothing" row (the rest of the slots'
+    mass, at no cost) to the slots (mass 1 each), the cost of molecule m in slot s the exact
+    assignment's, ``-log N(m; mu, sigma) - log p + log (1 - p)``, a pair outside the gate barred.
+    Entropic, regularised by ``eps`` times the median of the allowed costs' magnitudes (SHOT: 1e-4),
+    solved by ``iterations`` log-domain Sinkhorn steps (SHOT: 20 -- see below why more); the loss is
+    ``sum -log (1 - p) + <coupling, cost>``.  Dense on the device: every molecule against every slot.
+    The last step normalises the molecules' rows, so each molecule is placed whole."""
+    b, k, h, w = p.shape
+    pc = p.clamp(1e-6, 1 - 1e-6).reshape(b, -1)                                 # (b, S), S = K h w
+    neg = -torch.log1p(-pc)
+    mu, sig = mu.reshape(b, -1, 4), sig.reshape(b, -1, 4)
+    rows, cols = torch.meshgrid(torch.arange(h, device=p.device), torch.arange(w, device=p.device), indexing="ij")
+    cx = ((cols.reshape(-1) + 0.5) / scale - 0.5).repeat(k)                       # (S,) slot cells' centres
+    cy = ((rows.reshape(-1) + 0.5) / scale - 0.5).repeat(k)
+    gate = (((cx[None, None] - xyz[..., 0:1]).abs() <= gate_px) & ((cy[None, None] - xyz[..., 1:2]).abs() <= gate_px)
+            & mask[..., None])                                                    # (b, n, S)
+    z = (tgt[:, :, None] - mu[:, None]) / sig[:, None]                           # (b, n, S, 4)
+    nll = (torch.log(sig)[:, None] + 0.5 * z ** 2).sum(-1) + 2 * LOG_2PI
+    cost = nll - torch.log(pc)[:, None] + torch.log1p(-pc)[:, None]               # (b, n, S)
+    have = gate.any(-1)                                                           # molecules with a slot in reach
+    scale_c = cost.detach()[gate].abs().median().clamp_min(1e-3) if gate.any() else cost.new_tensor(1.0)
+    e = eps * scale_c
+    # a barred pair's kernel finite (-1e30), not -inf: a row of -inf has a NaN gradient through logsumexp
+    kern_c = torch.where(gate, -cost.detach(), torch.full_like(cost, -1e30))
+    kern_c = torch.cat([kern_c, torch.zeros_like(kern_c[:, :1])], 1)             # the "nothing" row, cost 0
+    s_n = pc.shape[1]
+    mass = torch.cat([have.to(cost.dtype), (s_n - have.sum(1, keepdim=True)).to(cost.dtype)], 1)   # (b, n + 1)
+    log_a = torch.where(mass > 0, torch.log(mass.clamp_min(1e-30)), torch.full_like(mass, -math.inf))
+    f = torch.zeros_like(mass)
+    g = torch.zeros(b, s_n, device=p.device, dtype=cost.dtype)                    # log b = 0: each slot mass 1
+    # Without a gradient, and the regularisation lowered from the costs' scale to ``eps`` over the first
+    # half of the steps: at eps 1e-4, 20 steps from cold left two molecules sharing one slot (a toy
+    # frame's total 7.3 against the exact 10.7; 2000 steps to reach it).  The coupling is then a
+    # constant in the loss, which at the optimum is the transport cost's own gradient (the envelope
+    # theorem) -- SHOT differentiates through the steps instead.
+    with torch.no_grad():
+        for i in range(iterations):
+            ei = e * eps ** -max(0.0, 1 - i / max(1, iterations // 2)) if eps < 1 else e
+            kern = kern_c / ei
+            f = torch.where(mass > 0, log_a - torch.logsumexp(kern + g[:, None], 2), torch.full_like(f, -math.inf))
+            g = -torch.logsumexp(kern + f[:, :, None], 1)
+        f = torch.where(mass > 0, log_a - torch.logsumexp(kern + g[:, None], 2), torch.full_like(f, -math.inf))
+    coupling = torch.exp(kern + f[:, :, None] + g[:, None])[:, :-1]               # (b, n, S), the molecules' rows
+    total = neg.sum(1) + (coupling * torch.where(gate, cost, torch.zeros_like(cost))).sum((1, 2))
+    return {"matched": total, "unmatched": (mask & ~have).sum(1).to(p.dtype)}
 
 
 def matched_terms(p, mu, sig, tgt, mask, xyz, scale: int, gate_px: float = 1.5) -> dict:
@@ -208,7 +267,8 @@ def loss(out, batch, scaling, part=None) -> tuple:
     settings = part.settings if part is not None else {}
     names = settings.get("terms", DEFAULT_TERMS[name])
     weights = settings.get("weights", {})
-    t = terms(out, batch, scaling, names=names, window=settings.get("window", 3), gate_px=settings.get("gate_px", 1.5))
+    t = terms(out, batch, scaling, names=names, window=settings.get("window", 3), gate_px=settings.get("gate_px", 1.5),
+              assign=settings.get("assign"))
     total = sum(weights.get(k, 1.0) * t[k] for k in names).mean()
     # the terms as tensors: a float() here would wait for the GPU every step (`train`)
     return total, {k: v.detach().mean() for k, v in t.items()}

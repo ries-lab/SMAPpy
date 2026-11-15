@@ -311,3 +311,46 @@ def test_the_threshold_extraction_reports_each_slot_whose_own_p_passes_at_its_ow
     assert e["y"][order].tolist() == pytest.approx([3.0, 3.0])
     assert e["z_nm"][order].tolist() == pytest.approx([0.0, 300.0])
     assert e["prob"][order].tolist() == pytest.approx([0.8, 0.7])
+
+
+def test_shots_sinkhorn_assignment_reaches_the_exact_one_and_gives_two_molecules_in_a_cell_a_slot_each():
+    batch = _two_in_a_cell()
+    out = _slot_maps()
+    for s, (dx, z) in enumerate(((-0.1, -0.3), (0.2, 0.3))):
+        out[0, 9 * s, 3, 5], out[0, 9 * s + 1, 3, 5] = 0.9, 0.2
+        out[0, 9 * s + 2, 3, 5], out[0, 9 * s + 4, 3, 5] = dx, z
+    exact = loss.terms(out, batch, SCALING, names=("matched",))["matched"].item()
+    near = loss.terms(out, batch, SCALING, names=("matched",), assign={"how": "sinkhorn", "eps": 1e-2})["matched"].item()
+    assert near == pytest.approx(exact, rel=1e-3)
+    # softer, the coupling spreads each molecule over the slots in reach: never below the exact optimum
+    soft = loss.terms(out, batch, SCALING, names=("matched",), assign={"how": "sinkhorn", "eps": 0.3})["matched"].item()
+    assert soft > exact
+
+
+@pytest.mark.parametrize("time_model", ["attention", "convgru"])
+def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time_model):
+    from smappy.netfit.settings import Part, Parts
+    torch.manual_seed(0)
+    parts = Parts(time_model=Part(time_model, {"frames": 5}))
+    parts.backbone.settings["features"] = 8
+    model = network.build(parts, 5).eval()
+    for head in model.heads.values():                            # the heads start at a constant output
+        torch.nn.init.normal_(head.net[-1].weight, std=0.1)
+    x = torch.randn(1, 5, 16, 16)
+    out = model(x)
+    assert out.shape == (1, 13, 16, 16)
+    y = x.clone()
+    y[:, 0] += 1.0                                               # the first frame changes the middle's maps
+    assert not torch.allclose(model(y), out)
+
+
+def test_the_attentions_temporal_dropout_acts_only_in_training_and_never_hides_the_middle_frame():
+    att = network.TimeAttention(8, 5, heads=2, drop=1.0)
+    f = torch.randn(2, 5, 8, 4, 4)
+    att.train()
+    alone = att(f)                                               # every neighbour hidden: the middle frame alone
+    g = f.clone()
+    g[:, [0, 1, 3, 4]] = torch.randn(2, 4, 8, 4, 4)
+    assert torch.allclose(att(g), alone, atol=1e-5)
+    att.eval()
+    assert not torch.allclose(att(g), att(f))

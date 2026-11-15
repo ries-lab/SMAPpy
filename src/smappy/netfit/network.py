@@ -35,6 +35,16 @@ positions pulled toward the centres of the cells they are placed from, min/max o
 0.73 - 0.83 in every variant of DECODE's details, 2026-11-14) is the grid's.  The offsets are then
 +-1 cell, handed on in pixels; `centres` is where each cell's centre is, in pixels.
 
+**Time models** (the ``time_model`` part; step 4, 2026-11-15) join the frames' features before the union
+U-Net.  ``frame_stack`` (DECODE's) concatenates them, so the union's first convolution weighs each
+frame by a fixed weight whatever it holds.  ``attention`` (as LUNAR's, Fu et al. 2026, along time per
+pixel): the frames' features at a pixel are tokens, with a learned embedding of each frame's place in
+the window, through a transformer layer (`TimeAttention`); the middle frame's token goes on -- so a
+neighbouring frame counts as much as it shows the same molecule, which a fixed weight cannot say.
+``convgru``: a convolutional GRU (`TimeGRU`) run forward to the middle frame and backward to it, the
+two states going on -- the recurrent form, which suits live fitting.  "Time is not a shift"
+(`docs/decode.md` §3.3): molecules do not move, so convolutions stay in space and time gets its own.
+
 x is along the columns, y along the rows, as everywhere in SMAPpy.
 """
 from __future__ import annotations
@@ -196,6 +206,72 @@ class Head(nn.Module):
         return self.net(x)
 
 
+class TimeAttention(nn.Module):
+    """``attention``: per pixel, the window's ``t`` feature vectors as tokens (plus a learned embedding of
+    each one's place), one pre-norm transformer layer -- multi-head self-attention, then an MLP of
+    twice the width, each added to its input -- and the middle frame's token out.  ``drop`` (training
+    only, LUNAR's temporal dropout): each frame but the middle one hidden from the attention with this
+    probability, so that the network does not lean on a neighbour being there."""
+
+    def __init__(self, features: int, window: int, heads: int = 4, drop: float = 0.0):
+        super().__init__()
+        self.place = nn.Parameter(torch.zeros(window, features))
+        self.norm1, self.norm2 = nn.LayerNorm(features), nn.LayerNorm(features)
+        self.attn = nn.MultiheadAttention(features, heads, batch_first=True)
+        self.mlp = nn.Sequential(nn.Linear(features, 2 * features), nn.GELU(), nn.Linear(2 * features, features))
+        self.drop = float(drop)
+        self.out_channels = features
+
+    def forward(self, f):
+        """``f`` (b, t, F, h, w) -> (b, F, h, w)."""
+        b, t, c, h, w = f.shape
+        x = f.permute(0, 3, 4, 1, 2).reshape(b * h * w, t, c) + self.place
+        hide = None
+        if self.training and self.drop > 0:
+            hide = torch.rand(b, 1, 1, t, device=f.device) < self.drop
+            hide[..., t // 2] = False
+            hide = hide.expand(b, h, w, t).reshape(b * h * w, t)
+        y = self.norm1(x)
+        x = x + self.attn(y, y, y, key_padding_mask=hide, need_weights=False)[0]
+        x = x + self.mlp(self.norm2(x))
+        return x[:, t // 2].reshape(b, h, w, c).permute(0, 3, 1, 2)
+
+
+class ConvGRUCell(nn.Module):
+    """A GRU whose gates are 3 x 3 convolutions (Ballas et al. 2016, doi:10.48550/arXiv.1511.06432)."""
+
+    def __init__(self, features: int):
+        super().__init__()
+        self.gates = nn.Conv2d(2 * features, 2 * features, 3, padding=1)
+        self.cand = nn.Conv2d(2 * features, features, 3, padding=1)
+
+    def forward(self, x, h):
+        z, r = torch.sigmoid(self.gates(torch.cat([x, h], 1))).chunk(2, 1)
+        return (1 - z) * h + z * torch.tanh(self.cand(torch.cat([x, r * h], 1)))
+
+
+class TimeGRU(nn.Module):
+    """``convgru``: one cell run from the first frame to the middle one and another from the last frame
+    back to it; the two states, (b, 2 F, h, w), go on.  The middle frame is the last either reads, so
+    both end on it."""
+
+    def __init__(self, features: int, window: int):
+        super().__init__()
+        self.fwd, self.bwd = ConvGRUCell(features), ConvGRUCell(features)
+        self.out_channels = 2 * features
+
+    def forward(self, f):
+        b, t, c, h, w = f.shape
+        mid = t // 2
+        hf = f.new_zeros(b, c, h, w)
+        for i in range(mid + 1):
+            hf = self.fwd(f[:, i], hf)
+        hb = f.new_zeros(b, c, h, w)
+        for i in range(t - 1, mid - 1, -1):
+            hb = self.bwd(f[:, i], hb)
+        return torch.cat([hf, hb], 1)
+
+
 class TwoStageUNet(nn.Module):
     """``unet2``: a U-Net per frame, shared, then one over their concatenated features, then heads."""
 
@@ -203,7 +279,7 @@ class TwoStageUNet(nn.Module):
                  activation: str = "relu", upsample_kernel: int = 3, pool_act: bool = True, out_conv: bool = False,
                  init: str = "default", p_clamp: float | None = None, out_scale: int = 1,
                  blur: bool = False, block: str = "plain", offset_range: float = 1.0, sigma_rep: bool = False,
-                 slots: int = 1):
+                 slots: int = 1, time_model: str = "frame_stack", time_settings: dict | None = None):
         """``upsample_kernel``, ``pool_act``, ``out_conv`` (`UNet`), ``init`` "kaiming" (every convolution
         Kaiming-normal, fan in, as DECODE's ``init_custom``; "default" PyTorch's, about 2.4 times smaller)
         and ``p_clamp`` (p's logit clamped, DECODE: 8) are DECODE's details; ``out_scale`` the output
@@ -218,7 +294,15 @@ class TwoStageUNet(nn.Module):
                  "block": block}
         self.offset_range = float(offset_range)
         self.frame = UNet(1, features, depth_frame, act, **style)
-        self.union = UNet(window * features, features, depth_union, act, **style)
+        self.time_model = time_model
+        if time_model == "frame_stack":
+            self.time, joined = None, window * features
+        elif time_model in TIME_MODELS:
+            self.time = TIME_MODELS[time_model](features, window, **(time_settings or {}))
+            joined = self.time.out_channels
+        else:
+            raise ValueError(f"time model {time_model!r}: frame_stack, {', '.join(TIME_MODELS)}")
+        self.union = UNet(joined, features, depth_union, act, **style)
         self.p_clamp = p_clamp
         self.out_scale = int(out_scale)
         if self.out_scale not in (1, 2):
@@ -262,7 +346,9 @@ class TwoStageUNet(nn.Module):
         """``x`` (b, window, rows, columns) in network units -> (b, 9 K + 1, rows * s, columns * s), ``s``
         the ``out_scale``, K the ``slots`` (13 channels with ``sigma_rep``)."""
         b, t, h, w = x.shape
-        feats = self.frame(x.reshape(b * t, 1, h, w)).reshape(b, -1, h, w)
+        feats = self.frame(x.reshape(b * t, 1, h, w))
+        feats = (feats.reshape(b, -1, h, w) if self.time is None
+                 else self.time(feats.reshape(b, t, -1, h, w)))
         u = self.refine(self.union(feats))
         # the heads in full precision, whatever the backbone ran in: in bf16 an output of z over
         # +-1000 nm resolves only about 4 nm (`train`'s ``precision``)
@@ -297,13 +383,17 @@ def slots_of(out) -> int:
 
 
 BACKBONES = {"unet2": TwoStageUNet}
+TIME_MODELS = {"attention": TimeAttention, "convgru": TimeGRU}
 
 
 def build(parts, window: int) -> nn.Module:
-    """The network the parts name (version 1: ``unet2`` with the ``frame_stack`` time model)."""
-    if parts.time_model.name != "frame_stack":
-        raise ValueError(f"time model {parts.time_model.name!r}: only frame_stack so far")
-    return BACKBONES[parts.backbone.name](window=window, **parts.backbone.settings)
+    """The network the parts name: a backbone (``unet2``) with a time model (``frame_stack``, DECODE's,
+    or one of `TIME_MODELS`).  The time model's ``frames`` setting is a record only: the window is the
+    simulation's."""
+    tm = parts.time_model
+    extra = {k: v for k, v in (tm.settings or {}).items() if k != "frames"}
+    return BACKBONES[parts.backbone.name](window=window, time_model=tm.name, time_settings=extra or None,
+                                          **parts.backbone.settings)
 
 
 def parameters(model: nn.Module) -> int:
