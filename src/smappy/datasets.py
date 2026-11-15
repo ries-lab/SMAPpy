@@ -1,7 +1,7 @@
 """What a file or a folder holds: the data sets in it, of one kind.
 
 One engine for every place that is handed files and folders -- the batch
-(its folder rules, run and watched), the PSF and bead calibration windows --
+(its folder rules, run and watched), the PSF calibration window --
 so they agree on what one data set is.  The batch had a plain
 ``rglob("*.tif")`` of its own, and fitted a Micro-Manager series that had
 grown into ``x.ome.tif`` and ``x_1.ome.tif`` as two acquisitions, an NDTiff

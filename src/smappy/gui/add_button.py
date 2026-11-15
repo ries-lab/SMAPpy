@@ -1,7 +1,7 @@
 """*Add...*: files and folders, the one button every list of inputs has.
 
-The batch window, the PSF calibration window and the bead calibration each
-had their own pair, *Add files...* and *Add folder...*, which read as if
+The batch window, the PSF calibration window and the old bead calibration
+each had their own pair, *Add files...* and *Add folder...*, which read as if
 only the second took folders and differed in what a folder gave.  Here it is
 one button.  Its click opens the system's dialog, which on a Mac takes files
 and folders together, several at once (`mac_panel`); its menu holds *Select

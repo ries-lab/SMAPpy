@@ -1,5 +1,10 @@
 # Bead spline calibration
 
+> **2026-11:** the *Bead calibration* window this page describes was retired.  Its method is the
+> *bead average* of the *PSF calibration* window (`calibrate/psf_window.py`), explained for users on the
+> help page *Bead average*; `smappy-calibrate --out` still runs it headless, and `smappy-calibrate` alone
+> opens the PSF calibration window.  The window's controls below are history.
+
 Build one single-channel PSF (point spread function: the image one emitter
 makes on the camera, at every height) from all selected bead stacks, as a
 spline calibration (also called a bead calibration, cspline or experimental

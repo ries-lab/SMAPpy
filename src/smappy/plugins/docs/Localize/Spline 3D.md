@@ -244,8 +244,8 @@ point from the box's corner, in x, y and z,
 $$\mathrm{PSF}(x, y, z) = \sum_{p=0}^{3} \sum_{q=0}^{3} \sum_{r=0}^{3} a_{pqr}\, w^{p}\, v^{q}\, u^{r} ,$$
 
 so 64 coefficients per box, stored as an array of shape
-$(64, n_z, n_y, n_x)$ in the order $16p + 4q + r$.  The Bead calibration
-tool computes them by not-a-knot cubic interpolation of the averaged bead
+$(64, n_z, n_y, n_x)$ in the order $16p + 4q + r$.  The bead average
+computes them by not-a-knot cubic interpolation of the averaged bead
 stack along each axis in turn, after normalising it so that the brightest
 plane sums to 1 over the calibration ROI; $N$ is then the photons in that
 plane.  A SMAP file brings its own coefficients.
@@ -272,7 +272,7 @@ does with z -- which is what makes the z precision curve of the figure above
 come out of the fit rather than from a formula.  A calibration made from few,
 noisy beads has bumps of its own that the fitter takes for information, and
 then reports a z precision that is too good; smoothing the calibration along
-z (the Bead calibration's setting) is what prevents it.
+z (the bead average's *smoothing z*) is what prevents it.
 
 **z.**  The spline's z index $k$ is converted with the calibration's plane
 spacing $dz$ and its focal plane $k_0$ (`z0` in the file),
@@ -315,11 +315,11 @@ the rounding of single precision (checked on simulated splines).  Whether
 SMAP flipped the beads is read from its own record of it, `EMon`, not from
 its setting `emmirror`, whose "no mirror" (2) was once taken here for a flip;
 a file with no `EMon` is taken as flipped if `emmirror` is 1 or 3.
-Calibrations from the Bead calibration tool are never mirrored.
+Calibrations from the bead average are never mirrored.
 
 **EM gain.**  A calibration records whether the beads were taken with
 [EM gain](plugin:Panels/Glossary) -- the electron multiplication of an EMCCD
-camera -- the Bead calibration tool reads it from the bead files' metadata, a
+camera -- the PSF calibration reads it from the bead files' metadata, a
 SMAP calibration carries it -- and if the data's camera says otherwise, the
 spline is mirrored in x to match: the EM register of many EMCCDs reads out
 mirrored, so a model from beads on the other port (the conventional
@@ -401,7 +401,7 @@ is in the repository's `docs/uipsf/field-dependence.md`.
 
 **Compared with the paper.**  The method is that of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661); what the code does
-differently (the first two concern the Bead calibration tool; a SMAP
+differently (the first two concern the bead average; a SMAP
 calibration brings its own coefficients):
 
 * **The beads' background and scale.**  The paper subtracts each bead stack's
@@ -624,7 +624,7 @@ main changes:
   accepts several starts, keeping the fit with the best likelihood.
 * **No refractive-index correction.**  SMAP's fitter has an optional factor
   (0.8 by default when switched on); here z stays in objective nanometres.
-* **Calibrations of its own.**  The Bead calibration tool follows SMAP's
+* **Calibrations of its own.**  The bead average follows SMAP's
   `calibrate3D_g`, but uses a linear rather than circular correlation to
   align beads, and crops z to where all accepted beads overlap, which can
   make its z range narrower than SMAP's.

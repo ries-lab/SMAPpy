@@ -56,8 +56,9 @@ when a milestone lands or an item moves.
    *PSF calibration*'s optics on *auto*, a calibration's microscope state and the fit's warning);
    next, the found-settings line where files are opened, manual elements (the splitting dichroic),
    then the manager from the menu.
-3. **Retire *Bead calibration*:** the default GUI and the tutorials (`fitting_3d`, `two_colour_3d`) use *PSF
-   calibration* (October 2026); the plugin and its window stay in the tree for now, to be removed (M6).
+3. **Done: *Bead calibration* retired** (November 2026): the plugin, its window (`calibrate/qt_gui.py`) and
+   its pages are gone; the bead average is *PSF calibration*'s, its method explained on the help page
+   *Bead average*, and `smappy-calibrate` opens the PSF calibration window.
 4. **Done: the 2ch stall** (architecture.md, "Why Zenodo 2ch stalled").  Not the indices: the start put
    50 of 88 dim channel-0 backgrounds at softplus' 10⁻³ floor, the saturation guard then shortened every
    parameter's step for three of them (α = 2·10⁻⁴) until the step test stopped stage 1, and `torch.polar`'s

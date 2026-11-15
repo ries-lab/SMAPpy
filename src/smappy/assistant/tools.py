@@ -1403,12 +1403,12 @@ class Assistant:
 
     @tool("Open one of SMAPpy's own windows that is not a plugin: the ROI "
           "manager (on an ROI, given its number), the 3D view, the batch "
-          "window, the bead or PSF calibration, the microscope manager, the "
+          "window, the PSF calibration, the microscope manager, the "
           "camera editor, the help window.  session_state lists them under "
           "'windows'.  Changes nothing, so it works in suggest mode too.  "
-          "What is inside the bead and PSF calibration windows -- files, "
+          "What is inside the PSF calibration window -- files, "
           "settings, Detect, Calibrate, Save -- is list_actions' "
-          "('Bead calibration', 'PSF calibration'); open_window is not needed first.",
+          "('PSF calibration'); open_window is not needed first.",
           needs="windows",
           name={"type": "string", "description": "e.g. 'ROI manager', '3D view'"},
           roi={"type": "integer",

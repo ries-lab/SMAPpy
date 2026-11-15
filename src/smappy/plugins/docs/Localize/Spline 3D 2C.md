@@ -44,7 +44,7 @@ What it needs:
 
 * **A dual-colour [bead calibration](plugin:Panels/Glossary)** (also called a
   spline calibration or experimental PSF model) of this microscope, made with
-  the bead calibration window in its *Dual colour* mode (the *Bead
+  the [PSF calibration](plugin:Panels/PSF calibration) window in its *Dual colour* mode (the *PSF
   calibration* section of the Localize tab opens it): z-stacks of beads that are seen in both halves.  It
   holds everything the fit needs about the two halves -- which half is which,
   the transformation between them (the [registration](plugin:Panels/Glossary),

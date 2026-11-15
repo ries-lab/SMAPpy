@@ -1,4 +1,4 @@
-"""The bead and PSF calibration plugins run without their windows: from settings, as the assistant's
+"""The PSF calibration plugin runs without its window: from settings, as the assistant's
 `run_plugin`, a chain or a script runs them (before 2026-11 both only refused)."""
 import importlib.util
 
@@ -35,27 +35,9 @@ def _drawn(result):
         assert figure.axes, f"{name} drew nothing"
 
 
-def test_the_bead_calibration_runs_without_its_window_and_saves_beside_the_stacks(beads):
-    from smappy import calibration_list
-    result = run("Localize/Bead calibration", {"stacks": str(beads), "beads.dz_nm": 20})
-    assert result.data["beads"] >= 4 and 0 < result.data["used"] <= result.data["beads"]
-    saved = result.data["saved"]
-    assert saved.endswith(".h5") and str(beads.parent) in saved
-    assert calibration_list.describe(saved) is not None      # a calibration the fitters read
-    assert result.data["fitter"] == "Localize/Spline 3D"
-    assert list(result.plots) == ["Overview", "Bead diagnostics", "CRLB"]
-    _drawn(result)
-
-
-def test_save_as_puts_the_bead_calibration_where_it_is_asked(beads, tmp_path):
-    result = run("Localize/Bead calibration", {"stacks": str(beads), "beads.dz_nm": 20,
-                                                "save_as": str(tmp_path / "mine")})
-    assert result.data["saved"] == str(tmp_path / "mine.h5") and (tmp_path / "mine.h5").exists()
-
-
 def test_a_calibration_without_stacks_says_what_to_give(tmp_path):
     with pytest.raises(ValueError, match="give the stacks"):
-        run("Localize/Bead calibration", {})
+        run("Localize/PSF calibration", {})
     with pytest.raises(ValueError, match="no file or folder"):
         run("Localize/PSF calibration", {"stacks": str(tmp_path / "nowhere")})
 
@@ -93,7 +75,7 @@ def test_a_typed_pixel_reaches_the_camera_the_beads_are_cut_with():
 
 def test_the_panels_show_the_launcher_alone_and_the_assistant_lists_the_settings():
     from smappy.assistant.tools import Assistant
-    for path in ("Localize/Bead calibration", "Localize/PSF calibration"):
+    for path in ("Localize/PSF calibration",):
         cls = get(path)
         assert cls.form_in_window and cls.window
         described = Assistant().call("describe_plugin", {"path": path})

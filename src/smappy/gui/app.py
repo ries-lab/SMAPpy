@@ -395,7 +395,6 @@ class ControlWindow(QMainWindow):
         QApplication.instance().focusWindowChanged.connect(self._on_focus_window)
         view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
-        self.calibration_window = None
         self.psf_calibration_window = None
         self.decode_training_window = None
         # the render window, brought to the front; Ctrl+2 beside the 3D
@@ -413,7 +412,7 @@ class ControlWindow(QMainWindow):
         self.batch_window = None
         self._fill_plugins_menu()
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
-        # The per-region steps and the bead calibration are not in this menu:
+        # The per-region steps and the PSF calibration are not in this menu:
         # each has one way in where it is used (the Regions tab; the Localize
         # tab's section).  The ROI manager is a window one looks at, as the 3D
         # view is, so it is in View beside it; Ctrl+R from this window and
@@ -428,10 +427,6 @@ class ControlWindow(QMainWindow):
         # offers to run in a new instance instead (`PluginPanel._ask_live`)
         session.window_openers["new window"] = \
             lambda run=None: self.open_in_new_window(run=run)
-        # the Localize tab's Bead calibration section (`Plugin.window`): the
-        # window asks single or dual itself, and opens as it was left
-        session.window_openers["bead calibration"] = \
-            lambda settings=None: self.open_calibration()
         # *PSF calibration*: uipsf's pupil model, a window of its own (`calibrate.psf_window`)
         session.window_openers["psf calibration"] = \
             lambda settings=None: self.open_psf_calibration()
@@ -629,7 +624,6 @@ class ControlWindow(QMainWindow):
         return {"ROI manager": roi_manager,
                 "3D view": lambda roi_id=None: self.show_3d(),
                 "batch window": lambda roi_id=None: self.open_batch(),
-                "bead calibration": lambda roi_id=None: self.open_calibration(),
                 "PSF calibration": lambda roi_id=None: self.open_psf_calibration(),
                 "DECODE training": lambda roi_id=None: self.open_decode_training(),
                 "microscope manager": lambda roi_id=None: self.open_microscope_manager(),
@@ -1854,26 +1848,9 @@ class ControlWindow(QMainWindow):
         window.show()
         window.raise_()
 
-    def open_calibration(self, dual: Optional[bool] = None) -> None:
-        """The calibration window: bead stacks in, a spline calibration out.
-
-        A window of its own, like the 3D viewer, but in this process, so a
-        saved calibration can go straight into the Spline 3D fitter.  ``dual``
-        sets the mode; None leaves it as it was.
-        """
-        from ..calibrate.qt_gui import CalibrationWindow
-        if self.calibration_window is None:
-            self.calibration_window = CalibrationWindow(parent=self)
-            self.calibration_window.calibrated.connect(self.use_calibration)
-        if dual is not None:
-            self.calibration_window.mode_box.setCurrentText(
-                "Dual colour" if dual else "Single channel")
-        self.calibration_window.show()
-        self.calibration_window.raise_()
-
     def open_psf_calibration(self) -> None:
         """The PSF calibration window, made once and opened as it was left; what it saves goes to the
-        fitter it belongs to, as the bead calibration's does."""
+        fitter it belongs to."""
         from ..calibrate.psf_window import PSFCalibrationWindow
         if self.psf_calibration_window is None:
             self.psf_calibration_window = PSFCalibrationWindow(parent=self)
