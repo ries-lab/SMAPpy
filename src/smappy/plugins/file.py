@@ -80,6 +80,10 @@ class MsrSettings:
     keep_invalid: bool = param(False, label="keep invalid",
                                help="every final iteration, with vld and sta, "
                                     "not only the valid ones")
+    every_iteration: bool = param(False, label="every iteration",
+                                  help="a row per iteration, valid or not, for the "
+                                       "sequence's quality; the layers start on the "
+                                       "localizations (final = 1)")
     z_scale: float = param(1.0, label="z scale", min=0.01, max=10.0,
                            help="multiplies z: the refractive index correction; "
                                 "1 keeps Imspector's numbers")
@@ -175,7 +179,8 @@ class LoadAuto(Plugin):
     # `.msr` files, m2410 MINFLUX exports, and a MINFLUX localization's cfr
     # from the iteration that measures it; 6: a MINFLUX localization's
     # precision is the Cramér-Rao bound of its pattern, not 150 nm / sqrt(N);
-    # 7: the pattern size scales with the excitation wavelength, from 642 nm
+    # 7: the pattern size scales with the excitation wavelength, from 642 nm;
+    # every iteration on request, and each thread's own sequence
     version = "7"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
@@ -190,8 +195,15 @@ class LoadAuto(Plugin):
                          active={"csv.pixelsize_nm": settings.csv.units == "px"})
 
     def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
-        """Anything the reader needs beyond the path: a csv's columns."""
-        return csv_args(settings.csv) if reader.name == "csv" else {}
+        """Anything the reader needs beyond the path: a csv's columns, a
+        MINFLUX export's rows (the *Abberior MSR* part's, which is MINFLUX's)."""
+        if reader.name == "csv":
+            return csv_args(settings.csv)
+        if reader.name == "MINFLUX":
+            m = settings.msr
+            return {"valid_only": not m.keep_invalid, "z_scale": m.z_scale,
+                    "every": m.every_iteration}
+        return {}
 
     def run(self, ctx: Context, settings: LoadSettings) -> Result:
         from ..session import read_localizations
@@ -219,7 +231,7 @@ class LoadAuto(Plugin):
         found = msr.contents(path)
         files = msr.read_files(path, m.measurements or None, m.merge,
                                not m.keep_invalid, m.z_scale, ctx.report, found,
-                               beads=m.mbm_beads)
+                               beads=m.mbm_beads, every=m.every_iteration)
         images = [msr.image(path, im) for im in found.images
                   if not im.render] if m.images else []
         beads = [info for _, info in files if "mbm_of" in info.metadata]

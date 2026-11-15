@@ -82,6 +82,11 @@ class MsrImportDialog(QDialog):
         self.keep_invalid = QCheckBox("keep invalid")
         self.keep_invalid.setToolTip("every final iteration, with vld and sta, "
                                      "not only the valid ones")
+        self.every = QCheckBox("every iteration")
+        self.every.setObjectName("msr every iteration")
+        self.every.setToolTip("a row per iteration, valid or not, for the sequence's "
+                              "quality (Sequence QC); the layers start on the "
+                              "localizations (final = 1)")
         self.beads = QCheckBox("MBM beads as a file")
         self.beads.setObjectName("msr mbm beads")
         self.beads.setToolTip("each measurement's beam-monitoring bead tracks as a "
@@ -90,6 +95,7 @@ class MsrImportDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(self.merge)
         row.addWidget(self.keep_invalid)
+        row.addWidget(self.every)
         row.addWidget(self.beads)
         row.addStretch(1)
         # shown for a file with beads, greyed while no ticked measurement has any
@@ -178,6 +184,7 @@ class MsrImportDialog(QDialog):
         """What to open: the loader's arguments per file, and the images."""
         chosen = self._ticked(msr.Measurement)
         args = {"valid_only": not self.keep_invalid.isChecked(),
+                "every": self.every.isChecked(),
                 "z_scale": self.z_scale.value() if self._any_3d else 1.0}
         if self.merge.isChecked() and len(chosen) > 1:
             groups = [chosen]

@@ -546,15 +546,16 @@ def _has_saveloc(path: Path) -> bool:
 # the records and both of Imspector's layouts: `io.minflux`; the `.msr`
 # container with its images and beads: `io.msr`
 
-def _load_minflux(path: Path, valid_only: bool = True, z_scale: float = 1.0):
+def _load_minflux(path: Path, valid_only: bool = True, z_scale: float = 1.0,
+                  every: bool = False):
     from .minflux import load as load_minflux
-    return load_minflux(path, valid_only, z_scale)
+    return load_minflux(path, valid_only, z_scale, every)
 
 
 def _load_msr(path: Path, measurements=None, valid_only: bool = True,
-              z_scale: float = 1.0, beads: bool = False):
+              z_scale: float = 1.0, beads: bool = False, every: bool = False):
     from .msr import load as load_msr
-    return load_msr(path, measurements, valid_only, z_scale, beads=beads)
+    return load_msr(path, measurements, valid_only, z_scale, beads=beads, every=every)
 
 
 register(Reader("MINFLUX", (".npy", ".zip", ".json"), _load_minflux))

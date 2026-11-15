@@ -44,6 +44,24 @@ Imspector's ``tim``), the trace is ``tid``, and merging blinks merges a trace
 3, ... (`trace_index`), so a filter can leave out the start of a trace,
 where a still emitter creeps into place.  The photons are the final iteration's ``eco``.
 
+**Every iteration**, on request (``every=True``, the loaders' *every
+iteration*): a row per iteration of every attempt, valid or not -- what the
+iteration efficiency, the abort reasons and the parameters per iteration
+are read from (*Sequence QC*), and what SMAP's loader offered.  ``iteration``
+says which, ``final`` (1 for a localization: a valid final iteration),
+``vld`` and ``sta`` how it ended; an attempt that failed has no position
+(NaN).  ``trace_index`` is the number of the localization a row is or leads
+to, so ``trace_index > 20`` means what it means on the localizations.  The
+table carries a bound ``final`` = 1 (`locs.KEPT_BOUNDS`), so the layers
+start on the localizations, and ``group_use`` = final, so merging a trace
+merges its localizations only.  It holds 2-10 times the rows.  An m2205
+record is unnested into its iterations.
+
+**Threads**: a measurement may run several sequences, interleaved, one per
+thread (two colours, usually); each row says which in ``thi``.  Every
+thread's sequence is kept (`sequences`), and each row's precision takes its
+own thread's pattern size and laser.
+
 The records give no precision, so ``xy_err_nm`` is the Cramér-Rao bound at
 the centre of the beam pattern -- a number from the photons, as a camera
 fitter's CRLB is, and not the spread that is measured, which is the
@@ -150,10 +168,9 @@ def wavelength_nm(value) -> Optional[float]:
     return v if 100.0 < v < 2000.0 else None
 
 
-def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]:
-    """The last lateral and the last axial iteration of a `sequence`, each
-    with its pattern size L in nm: ``{"xy": (k, L), "z": (k, L)}``, a key
-    left out where the sequence has no such iteration.
+def iteration_patterns(seq: Optional[Dict[str, Any]]) -> Dict[int, Tuple[float, bool]]:
+    """Each iteration of a `sequence` that has a pattern: ``{k: (L, axial)}``,
+    L its pattern size in nm and ``axial`` whether it is a ``zline``.
 
     L = patGeoFactor x 360 nm x lambda / 642 nm, lambda the iteration's
     excitation (``_excitation.wavelength``), else the sequence's
@@ -161,7 +178,7 @@ def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]
     reference itself: a sequence that names no wavelength is taken at 642."""
     seq = seq or {}
     laser = wavelength_nm(seq.get("excitation_nm")) or REFERENCE_WAVELENGTH_NM
-    out: Dict[str, Tuple[int, float]] = {}
+    out: Dict[int, Tuple[float, bool]] = {}
     for k, it in enumerate(seq.get("iterations") or []):
         geo = it.get("patGeoFactor")
         if isinstance(geo, (list, tuple)):      # a coarse zline's two: never the last
@@ -170,8 +187,18 @@ def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]
             continue
         axial = str(it["Mode.pattern"]).lower().startswith("z")
         lam = wavelength_nm(it.get("_excitation.wavelength")) or laser
-        out["z" if axial else "xy"] = (k, float(geo) * PATTERN_UNIT_NM
-                                       * lam / REFERENCE_WAVELENGTH_NM)
+        out[k] = (float(geo) * PATTERN_UNIT_NM * lam / REFERENCE_WAVELENGTH_NM, axial)
+    return out
+
+
+def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]:
+    """The last lateral and the last axial iteration of a `sequence`, each
+    with its pattern size L in nm (`iteration_patterns`):
+    ``{"xy": (k, L), "z": (k, L)}``, a key left out where the sequence has
+    no such iteration."""
+    out: Dict[str, Tuple[int, float]] = {}
+    for k, (size, axial) in iteration_patterns(seq).items():
+        out["z" if axial else "xy"] = (k, size)
     return out
 
 
@@ -201,6 +228,9 @@ def records(path: Path) -> np.ndarray:
 def from_json(records: list) -> np.ndarray:
     """The json export: a list of dicts, nested as the m2205 npy, or flat
     (m2410), whose fields become the record's."""
+    if not isinstance(records, list) or (records and not isinstance(records[0], dict)):
+        raise ValueError("not a MINFLUX export: a json export is a list of "
+                         "localization records (a sequence file is not one)")
     if records and not isinstance(records[0].get("itr"), (list, dict)):
         return _flat_from_json(records)
     n = len(records)
@@ -279,36 +309,50 @@ def _joined(rec: np.ndarray, rows: np.ndarray, source: np.ndarray,
 PER_ITERATION = ("eco", "efo", "fbg")   # what the precision reads, of its iteration
 
 
-def _fields(rec: np.ndarray, valid_only: bool, iterations: Tuple[int, ...] = ()
-            ) -> Tuple[Dict[str, np.ndarray], int]:
+def _fields(rec: np.ndarray, valid_only: bool, iterations: Tuple[int, ...] = (),
+            every: bool = False) -> Tuple[Dict[str, np.ndarray], int]:
     """The final iteration of every localization, as plain arrays, from
     either layout; and how many attempts there were.  For each of
     ``iterations``, also ``PER_ITERATION`` of that iteration of the same
-    localization, as ``"eco@k"``: NaN where it has none."""
+    localization, as ``"eco@k"``: NaN where it has none.
+
+    ``every``: every iteration row instead, valid or not, an m2205 record
+    unnested into its iterations; ``"_final"`` marks the localizations (a
+    valid final iteration), on which the joined columns (``cfr`` from its
+    iteration, ``"eco@k"``) are what they are without ``every``, the other
+    rows keeping their own."""
     names = rec.dtype.names or ()
     if is_flat(rec):
+        valid = rec["vld"].astype(bool) if "vld" in names else np.ones(len(rec), bool)
         final = rec["fnl"].astype(bool) if "fnl" in names else np.ones(len(rec), bool)
-        if valid_only and "vld" in names:
-            final &= rec["vld"].astype(bool)
-        rows = np.flatnonzero(final)
+        if valid_only or every:
+            final &= valid
+        rows = np.arange(len(rec)) if every else np.flatnonzero(final)
+        fin = np.flatnonzero(final)                       # the localizations
+        at = np.searchsorted(rows, fin)                  # their places among rows
         out = {k: rec[k][rows] for k in names if k not in ("fnl", "bot", "eot")}
         if "cfr" in names:
             cfr = np.asarray(rec["cfr"], np.float32)
-            valid = rec["vld"].astype(bool) if "vld" in names else np.ones(len(rec), bool)
             k = _cfr_iteration(rec["itr"][valid], cfr[valid])
-            last = int(rec["itr"][rows].max()) if len(rows) else None
+            last = int(rec["itr"][fin].max()) if len(fin) else None
             if k is not None and k != last:
-                out["cfr"] = _joined(rec, rows, rec["itr"] == k, cfr)
+                column = cfr[rows].copy()
+                column[at] = _joined(rec, fin, rec["itr"] == k, cfr)
+                out["cfr"] = column
         for k in iterations:
             for name in PER_ITERATION:
                 if name in names:
-                    out[f"{name}@{k}"] = _joined(rec, rows, rec["itr"] == k,
-                                                 np.asarray(rec[name], np.float32))
+                    column = np.full(len(rows), np.nan, np.float32)
+                    column[at] = _joined(rec, fin, rec["itr"] == k,
+                                         np.asarray(rec[name], np.float32))
+                    out[f"{name}@{k}"] = column
+        if every:
+            out["_final"] = final[rows]
         return out, int(rec["fnl"].sum()) if "fnl" in names else len(rec)
     itr = rec["itr"]
     last = itr[:, -1] if itr.ndim == 2 else itr
     keep = np.ones(len(rec), bool)
-    if valid_only and "vld" in names:
+    if valid_only and "vld" in names and not every:
         keep &= rec["vld"].astype(bool)
     out = {k: last[k][keep] for k in last.dtype.names}
     for k in names:
@@ -325,23 +369,86 @@ def _fields(rec: np.ndarray, valid_only: bool, iterations: Tuple[int, ...] = ()
             for name in PER_ITERATION:
                 if name in itr.dtype.names and k < itr.shape[1]:
                     out[f"{name}@{k}"] = np.asarray(itr[name][keep, k], np.float32)
+    if every and itr.ndim == 2:
+        out = _unnested(rec, out)
+    elif every:
+        out["_final"] = (rec["vld"].astype(bool) if "vld" in names
+                         else np.ones(len(rec), bool))
     return out, len(rec)
 
 
-def _at_iteration(f: Dict[str, np.ndarray], name: str, k: Optional[int]) -> np.ndarray:
-    """``name`` of iteration ``k`` of each localization; the final
-    iteration's where there is no k, or the localization has none."""
+def _unnested(rec: np.ndarray, finals: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """An m2205 table of attempts as one row per iteration: the record's own
+    fields (``tim``, ``tid``, ``vld``, ...) on each of its iterations, the
+    iteration's fields from its sub-record, ``itr`` its number; the final
+    iteration's row carrying what ``finals`` (the localizations, as `_fields`
+    makes them) joined onto it."""
+    itr = rec["itr"]
+    n, k = itr.shape
+    out: Dict[str, np.ndarray] = {}
+    for name in itr.dtype.names:
+        value = np.asarray(itr[name])
+        out[name] = value.reshape((n * k,) + value.shape[2:])
+    out["itr"] = np.tile(np.arange(k, dtype=np.int32), n)
+    for name in rec.dtype.names:
+        if name != "itr":
+            out[name] = np.repeat(np.asarray(rec[name]), k, axis=0)
+    valid = (rec["vld"].astype(bool) if "vld" in rec.dtype.names else np.ones(n, bool))
+    final = np.zeros((n, k), bool)
+    final[:, -1] = valid
+    final = final.reshape(-1)
+    for name, value in finals.items():
+        if "@" in name or name == "cfr":
+            column = np.full(n * k, np.nan, np.float32)
+            if name == "cfr":
+                column = np.asarray(out.get("cfr", column), np.float32).copy()
+            column[k - 1::k] = value
+            out[name] = column
+    out["_final"] = final
+    return out
+
+
+def _at_iteration(f: Dict[str, np.ndarray], name: str, k: Optional[int],
+                  rows: Optional[np.ndarray] = None) -> np.ndarray:
+    """``name`` of iteration ``k`` of each localization (of ``rows``, a
+    mask); the final iteration's where there is no k, or the localization
+    has none."""
     n = len(f["loc"])
-    final = np.asarray(f[name], np.float64) if name in f else np.full(n, np.nan)
+    rows = np.ones(n, bool) if rows is None else rows
+    final = (np.asarray(f[name], np.float64)[rows] if name in f
+             else np.full(int(rows.sum()), np.nan))
     if k is None or f"{name}@{k}" not in f:
         return final
-    value = np.asarray(f[f"{name}@{k}"], np.float64)
+    value = np.asarray(f[f"{name}@{k}"], np.float64)[rows]
     return np.where(np.isfinite(value), value, final)
 
 
-def _bound(f: Dict[str, np.ndarray], k: Optional[int], pattern_nm: float, crlb) -> np.ndarray:
-    signal, background = photon_split(*(_at_iteration(f, name, k) for name in PER_ITERATION))
+def _bound(f: Dict[str, np.ndarray], k: Optional[int], pattern_nm: float, crlb,
+           rows: Optional[np.ndarray] = None) -> np.ndarray:
+    signal, background = photon_split(*(_at_iteration(f, name, k, rows)
+                                        for name in PER_ITERATION))
     return crlb(pattern_nm, signal, background).astype(np.float32)
+
+
+def leading_index(tid: np.ndarray, final: np.ndarray) -> np.ndarray:
+    """With every iteration read: each row's localization number in its
+    trace, the localization it is (``final``) or leads to -- 1, 2, ... by
+    the rows' order (time) -- so `trace_index` means the same on every row.
+    Rows after a trace's last localization lead to none and get one more
+    than it had; a trace with no localization is 1 throughout."""
+    tid = np.asarray(tid)
+    final = np.asarray(final, bool)
+    if not len(tid):
+        return np.zeros(0, np.int32)
+    order = np.argsort(tid, kind="stable")
+    t, f = tid[order], final[order].astype(np.int64)
+    start = np.r_[0, np.flatnonzero(t[1:] != t[:-1]) + 1]
+    done = np.cumsum(f)                               # finals so far, this row included
+    before = done - f                                  # finals before this row
+    base = np.repeat(done[start] - f[start], np.diff(np.r_[start, len(t)]))
+    out = np.empty(len(tid), np.int32)
+    out[order] = (before - base) + 1
+    return out
 
 
 def trace_index(tid: np.ndarray) -> np.ndarray:
@@ -368,19 +475,26 @@ def trace_index(tid: np.ndarray) -> np.ndarray:
 
 def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
           dimensionality: Optional[int] = None, source: str = "",
-          sequence: Optional[Dict[str, Any]] = None
+          sequence: Optional[Dict[str, Any]] = None, every: bool = False,
+          threads: Optional[List[Dict[str, Any]]] = None
           ) -> Tuple[Localizations, Dict[str, int]]:
     """The localizations of a MINFLUX record array, either layout, sorted by
     time; and the counts (attempts, localizations).
 
     ``dimensionality`` (2 or 3, from the measurement's metadata) decides
     whether there is a z; without it, a z that is not zero everywhere.
-    ``sequence`` (`sequence`) gives the pattern sizes of the precision.
+    ``sequence`` (`sequence`) gives the pattern sizes of the precision;
+    ``threads`` one sequence per thread (`sequences`), each row taking its
+    own by ``thi``.  ``every``: every iteration row, valid or not (see the
+    module docstring).
     """
-    sizes = pattern_sizes(sequence)
-    f, attempts = _fields(rec, valid_only, tuple(k for k, _ in sizes.values()))
+    seqs = list(threads) if threads else [sequence]
+    sizes_by = [pattern_sizes(q) for q in seqs]
+    ks = tuple(sorted({k for sizes in sizes_by for k, _ in sizes.values()}))
+    f, attempts = _fields(rec, valid_only, ks, every=every)
     loc = np.asarray(f["loc"], np.float64) * 1e9
-    keep = np.isfinite(loc[:, 0]) & np.isfinite(loc[:, 1])
+    keep = (np.ones(len(loc), bool) if every
+            else np.isfinite(loc[:, 0]) & np.isfinite(loc[:, 1]))
     if "tim" in f:
         order = np.flatnonzero(keep)[np.argsort(np.asarray(f["tim"])[keep], kind="stable")]
     else:
@@ -388,7 +502,9 @@ def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
     f = {k: np.asarray(v)[order] for k, v in f.items()}
     loc = loc[order]
     n = len(loc)
-    with_z = dimensionality == 3 if dimensionality else bool(np.any(np.abs(loc[:, 2]) > 0))
+    final = f.pop("_final", np.ones(n, bool)).astype(bool)
+    with_z = (dimensionality == 3 if dimensionality
+              else bool(np.any(np.abs(np.nan_to_num(loc[:, 2])) > 0)))
     columns: Dict[str, np.ndarray] = {
         "x_nm": loc[:, 0].astype(np.float32), "y_nm": loc[:, 1].astype(np.float32),
         "frame": np.arange(n, dtype=np.int64)}
@@ -404,11 +520,36 @@ def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
     photons = (np.asarray(f["eco"], np.float32) if "eco" in f
                else np.full(n, np.nan, np.float32))
     columns["photons"] = photons
-    k_xy, pattern_xy = sizes.get("xy", (None, DEFAULT_PATTERN_NM))
-    columns["xy_err_nm"] = _bound(f, k_xy, pattern_xy, crlb_xy)
-    if with_z and "z" in sizes:
-        k_z, pattern_z = sizes["z"]
-        columns["z_err_nm"] = _bound(f, k_z, pattern_z * z_scale, crlb_z)
+    xy_err = np.full(n, np.nan, np.float32)
+    z_err = np.full(n, np.nan, np.float32)
+    thi = np.asarray(f["thi"], np.int64) if "thi" in f else np.zeros(n, np.int64)
+    itr = np.asarray(f["itr"], np.int64) if "itr" in f else np.zeros(n, np.int64)
+    for i, (seq, sizes) in enumerate(zip(seqs, sizes_by)):
+        mine = (thi == i) if len(seqs) > 1 else np.ones(n, bool)
+        if len(seqs) > 1 and i == len(seqs) - 1:
+            mine |= thi >= len(seqs)                  # a thread with no sequence of its own
+        rows = mine & final
+        k_xy, pattern_xy = sizes.get("xy", (None, DEFAULT_PATTERN_NM))
+        xy_err[rows] = _bound(f, k_xy, pattern_xy, crlb_xy, rows)
+        if with_z and "z" in sizes:
+            k_z, pattern_z = sizes["z"]
+            z_err[rows] = _bound(f, k_z, pattern_z * z_scale, crlb_z, rows)
+        if every:                                     # the other rows: their own iteration's
+            for k, (size, axial) in iteration_patterns(seq).items():
+                there = mine & ~final & (itr == k)
+                if not there.any():
+                    continue
+                signal, background = photon_split(*(np.asarray(f[name], np.float64)[there]
+                                                    if name in f else np.full(there.sum(), np.nan)
+                                                    for name in PER_ITERATION))
+                if axial:
+                    if with_z:
+                        z_err[there] = crlb_z(size * z_scale, signal, background)
+                else:
+                    xy_err[there] = crlb_xy(size, signal, background)
+    columns["xy_err_nm"] = xy_err
+    if with_z and any("z" in sizes for sizes in sizes_by):
+        columns["z_err_nm"] = z_err
     columns["sigma_nm"] = np.full(n, MINFLUX_PSF_NM, np.float32)
     for name in ("efo", "cfr", "efc", "ecc", "fbg"):
         if name in f:
@@ -424,21 +565,30 @@ def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
         columns["time_s"] = np.asarray(f["tim"], np.float64)
     if "tid" in f:
         columns["tid"] = np.asarray(f["tid"], np.int64)
-        columns["trace_index"] = trace_index(columns["tid"])
+        columns["trace_index"] = (leading_index(columns["tid"], final) if every
+                                  else trace_index(columns["tid"]))
     for name in ("sta", "gri", "thi", "sqi"):
         if name in f:
             columns[name] = np.asarray(f[name], np.int32)
-    if not valid_only and "vld" in f:
+    if (not valid_only or every) and "vld" in f:
         columns["vld"] = np.asarray(f["vld"], np.int8)
-    locs = Localizations(columns, {"units": "nm", "source": source, "minflux": True})
-    return locs, {"attempts": attempts, "localizations": n}
+    metadata: Dict[str, Any] = {"units": "nm", "source": source, "minflux": True}
+    if every:
+        from ..group import USE
+        from ..locs import KEPT_BOUNDS
+        columns["final"] = final.astype(np.int8)
+        columns[USE] = final.astype(np.int8)          # a trace merges its localizations
+        metadata[KEPT_BOUNDS] = {"final": [1, 1]}      # the layers start on them
+    locs = Localizations(columns, metadata)
+    return locs, {"attempts": attempts, "localizations": int(final.sum()), "rows": n}
 
 
-def load(path: Path, valid_only: bool = True, z_scale: float = 1.0):
-    """An export (`.npy`, `.json`, `.zip`) as a table and a `FileInfo`."""
+def load(path: Path, valid_only: bool = True, z_scale: float = 1.0, every: bool = False):
+    """An export (`.npy`, `.json`, `.zip`) as a table and a `FileInfo`;
+    ``every``: every iteration row (`table`)."""
     from .formats import FileInfo
     path = Path(path)
-    locs, counts = table(records(path), valid_only, z_scale, source=str(path))
+    locs, counts = table(records(path), valid_only, z_scale, source=str(path), every=every)
     return locs, FileInfo(path.name, str(path), "MINFLUX", pixelsize_nm=100.0,
                           metadata={"n_raw": counts["attempts"],
                                     "n_valid": counts["localizations"]})
@@ -460,12 +610,15 @@ def _flat(d: Any, prefix: str = "", out: Optional[dict] = None) -> dict:
     return out
 
 
-def _sequence_node(attrs: dict) -> Optional[dict]:
+def _sequence_node(attrs: dict, thread: int = 0) -> Optional[dict]:
     """The sequence in either version's attributes: m2410
-    ``measurement.threads[0].sequences[0]``, m2205 ``seq`` (or its own top)."""
+    ``measurement.threads[thread].sequences[0]``, m2205 ``seq`` (or its own
+    top)."""
     try:
-        return attrs["measurement"]["threads"][0]["sequences"][0]
+        return attrs["measurement"]["threads"][thread]["sequences"][0]
     except (KeyError, IndexError, TypeError):
+        if thread:
+            return None
         pass
     for key in ("seq", "sequence"):
         if isinstance(attrs.get(key), dict):
@@ -473,28 +626,41 @@ def _sequence_node(attrs: dict) -> Optional[dict]:
     return attrs if "Itr" in attrs else None
 
 
-def sequence(attrs: dict) -> Dict[str, Any]:
-    """The MINFLUX sequence: a row of parameters per iteration and the
-    sequence's global ones, flattened (``Mode.pattern``, ``_excitation.power``);
-    and the thread's excitation wavelength, ``excitation_nm``, where the
-    metadata names its lasers (`excitation_nm`), for the pattern size."""
-    node = _sequence_node(attrs) or {}
+def sequence(attrs: dict, thread: int = 0) -> Dict[str, Any]:
+    """The MINFLUX sequence of a thread: a row of parameters per iteration
+    and the sequence's global ones, flattened (``Mode.pattern``,
+    ``_excitation.power``); and the thread's excitation wavelength,
+    ``excitation_nm``, where the metadata names its lasers
+    (`excitation_nm`), for the pattern size."""
+    node = _sequence_node(attrs, thread) or {}
     iterations = [_flat(it) for it in node.get("Itr", [])]
     globals_ = _flat({k: v for k, v in node.items() if k != "Itr"})
     out = {"iterations": iterations, "globals": globals_}
-    laser = excitation_nm(attrs)
+    laser = excitation_nm(attrs, thread)
     if laser is not None:
         out["excitation_nm"] = laser
     return out
 
 
-def excitation_nm(attrs: dict) -> Optional[float]:
-    """The wavelength (nm) of the first thread's MINFLUX excitation laser
-    (m2410's ``measurement.threads[0].lasers``): the laser whose ``purpose``
-    or ``id`` says excitation or MINFLUX, else the first with a wavelength;
-    None when the metadata names none (m2205, an export)."""
+def sequences(attrs: dict) -> List[Dict[str, Any]]:
+    """Every thread's `sequence`, in the order of ``thi``; one for a
+    measurement of one thread (or m2205)."""
     try:
-        lasers = attrs["measurement"]["threads"][0].get("lasers") or []
+        n = len(attrs["measurement"]["threads"])
+    except (KeyError, TypeError):
+        n = 1
+    return [sequence(attrs, i) for i in range(max(n, 1))]
+
+
+def excitation_nm(attrs: dict, thread: int = 0) -> Optional[float]:
+    """The wavelength (nm) of a thread's MINFLUX excitation laser (m2410's
+    ``measurement.threads[i].lasers``): the laser whose ``purpose`` or
+    ``id`` says excitation or MINFLUX, else the first with a wavelength;
+    None when the metadata names none (m2205, an export).  In the files
+    looked at ``purpose`` is a number (1 the MINFLUX laser, 0 activation)
+    and ``id`` names it, ``MINFLUX640``."""
+    try:
+        lasers = attrs["measurement"]["threads"][thread].get("lasers") or []
     except (KeyError, IndexError, TypeError, AttributeError):
         return None
     with_nm = [(l, wavelength_nm(l.get("wavelength"))) for l in lasers if isinstance(l, dict)]
@@ -506,10 +672,10 @@ def excitation_nm(attrs: dict) -> Optional[float]:
     return with_nm[0][1] if with_nm else None
 
 
-def instrument(attrs: dict) -> Dict[str, Any]:
-    """Lasers and detectors of the first thread (m2410), as names and settings."""
+def instrument(attrs: dict, thread: int = 0) -> Dict[str, Any]:
+    """Lasers and detectors of a thread (m2410), as names and settings."""
     try:
-        thread = attrs["measurement"]["threads"][0]
+        thread = attrs["measurement"]["threads"][thread]
     except (KeyError, IndexError, TypeError):
         return {}
     lasers = [{k: l.get(k) for k in ("id", "calibration", "wavelength", "purpose")}

@@ -1846,6 +1846,20 @@ measurements, four beads each) and checked by
   instrument's record -- are `tid_file`, the shift `id_offsets` in the
   file's metadata.  The bead file's `mbm_beads` name its own numbers, so
   *MBM drift* reads them through `file_ids.own_ids`.
+* **Every iteration, in the one table** (2026-11): an option of the loader,
+  as SMAP's was -- a row per iteration of every attempt, valid or not,
+  `final` marking the localizations, the layers starting on `final` = 1
+  (`KEPT_BOUNDS`) and `group_use` = final so a merged trace is its
+  localizations.  Decided over a second, raw table beside the
+  localizations: one table is what every plugin and filter already reads.
+  An attempt that failed has no position (NaN), which the session takes
+  (index, render, filters); a plugin run on the layer sees the final rows
+  until the filter is changed.  On a real 2D file (2026-06, 10
+  measurements) 7369 rows held 3817 localizations: 3173 scouting rows, of
+  which 157 found a molecule, 143 and 79 passing the two catching
+  iterations.  `trace_index` on a non-final row is the localization it
+  leads to (`leading_index`).  Each thread's sequence (`sequences`) gives
+  its rows' pattern size; the files looked at had one thread.
 * **The pattern size scales with the excitation wavelength** (2026-11):
   abberior's wiki ("MINFLUX Sequence", read 2026-11-15) defines
   L = patGeoFactor x 360 nm x lambda / 642 nm, the sequence's own

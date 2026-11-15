@@ -1,6 +1,6 @@
 ---
 version: "7"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux.wavelength_nm, smappy.io.minflux.excitation_nm, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats.sml_sites_project, smappy.io.formats._sml_shape, smappy.io.mcos.Store, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux.iteration_patterns, smappy.io.minflux.leading_index, smappy.io.minflux._unnested, smappy.io.minflux.sequences, smappy.io.minflux.wavelength_nm, smappy.io.minflux.excitation_nm, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -232,6 +232,29 @@ the localizations are sorted by their time (`tim`, kept as `time_s`) and
 `frame` is the rank in that order; the trace -- the localizations of one
 molecule while it was on -- is `tid`.
 
+**Every iteration.**  With *every iteration* ticked (under *Abberior MSR*,
+which also serves the exports, or in File > Open's dialog), every
+iteration of every attempt is read instead, valid or not: the scouting
+iteration that found a molecule or not, the catching iterations that
+closed in on it, the final ones, and the iterations that ended an attempt.
+That is what the sequence's quality is read from (*Sequence QC*).  A row
+says which iteration it was (`iteration`), whether it is a localization
+(`final`: a valid final iteration), whether it was valid (`vld`) and why it
+ended (`sta`); an attempt that failed has no position.  `trace_index` is
+the number of the localization a row is or leads to, so a filter
+`trace_index > 20` means the same as without it.  The localizations
+themselves are exactly those read without the tick.  The layers start with
+a filter `final` = 1, so the picture and every plugin see the
+localizations until the filter is changed, and merging a trace merges its
+localizations only (`group_use`).  A real 2D measurement had 7369 rows for
+3817 localizations; a scouting-heavy one can have ten times as many rows.
+An m2205 record is unnested into its iterations.
+
+**Threads.**  A measurement can run several sequences at once, one per
+*thread* -- two colours, each with its own laser and sequence -- and every
+row says which (`thi`).  Every thread's sequence is kept, and each row's
+precision is computed with its own thread's pattern size and laser.
+
 The final iteration's `efo`, `efc`, `ecc`, `fbg`, the iteration number
 (`iteration`), why the iteration ended (`sta`), the grid point, thread and
 sequence (`gri`, `thi`, `sqi`) come across where the records have them.
@@ -449,6 +472,12 @@ each, say -- to analyse them as one, keeping `measurement` to tell them
 apart.  Leave it off to compare measurements, or when they were taken with
 different sequences.
 
+### msr.every_iteration
+Tick it to look at the sequence's quality -- how many attempts each
+iteration passed, why the rest failed, the photons and background per
+iteration -- with *Sequence QC*.  Leave it off otherwise: the table holds
+two to ten times the rows, most without a position.
+
 ### msr.z_scale
 The positions in z are those Imspector computed, which do not correct for
 the refractive index mismatch between the immersion oil and the sample: an
@@ -506,7 +535,8 @@ changes:
   rather than chosen from a list each time.
 * A MINFLUX `.npy` or `.zip` export is read, and Imspector's `.msr` with
   its images; the MATLAB `.mat` export is not.  Only the last iteration
-  is read and, unless *keep invalid* is ticked, only valid localizations;
+  is read, unless *every iteration* is ticked, and, unless *keep invalid*
+  is, only valid localizations;
   `cfr` is taken from the iteration that measures it, and
   the positions are not moved to start at zero.  The precision is the
   Cramér-Rao bound from the photons, the pattern size of the sequence and

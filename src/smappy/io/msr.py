@@ -215,21 +215,29 @@ def _roi(files: Dict[str, bytes]) -> List[Dict[str, Any]]:
 
 
 def read_measurement(path, m: Measurement, valid_only: bool = True,
-                     z_scale: float = 1.0) -> Tuple[Localizations, Dict[str, Any]]:
-    """One measurement's table, and what is known about it."""
+                     z_scale: float = 1.0, every: bool = False
+                     ) -> Tuple[Localizations, Dict[str, Any]]:
+    """One measurement's table, and what is known about it.  ``every``:
+    every iteration row (`minflux.table`)."""
     files = _archive(path, m.stack)
     rec = zarr_lite.read_array(files, "zarr/mfx")
-    seq = minflux.sequence(m.attrs)
+    threads = minflux.sequences(m.attrs)
+    seq = threads[0]
     locs, counts = minflux.table(rec, valid_only, z_scale, m.dimensionality,
-                                 source=str(path), sequence=seq)
+                                 source=str(path), sequence=seq, every=every,
+                                 threads=threads if len(threads) > 1 else None)
     meta = {"label": m.label, "did": m.did, "file": Path(path).name,
             "acquisition_date": m.date, "layout": m.layout,
             "dimensionality": m.dimensionality, "zarr_version": m.attrs.get("version"),
-            "z_scale": z_scale, "valid_only": valid_only, "records": m.rows,
+            "z_scale": z_scale, "valid_only": valid_only, "every_iteration": every,
+            "records": m.rows,
             **counts,
             "duration_s": (float(np.ptp(locs["time_s"])) if len(locs) and "time_s" in locs
                            else 0.0),
             "sequence": seq, "instrument": minflux.instrument(m.attrs),
+            **({"sequences": threads,
+                "instruments": [minflux.instrument(m.attrs, i) for i in range(len(threads))]}
+               if len(threads) > 1 else {}),
             "roi": _roi(files), "mbm": _beads(files)}
     return locs, meta
 
@@ -383,13 +391,13 @@ _METAS: "OrderedDict[tuple, List[Dict[str, Any]]]" = OrderedDict()
 
 
 def _metas_key(path: Path, chosen: Sequence[Measurement], valid_only: bool,
-               z_scale: float) -> tuple:
+               z_scale: float, every: bool = False) -> tuple:
     try:
         stamp = path.stat().st_mtime_ns
     except OSError:
         stamp = None
     return (str(path), stamp, tuple(m.did or m.number for m in chosen), valid_only,
-            float(z_scale))
+            float(z_scale), bool(every))
 
 
 def select(found: Contents, measurements=None) -> List[Measurement]:
@@ -419,13 +427,13 @@ def select(found: Contents, measurements=None) -> List[Measurement]:
 
 
 def _read(path: Path, found: Contents, chosen: Sequence[Measurement], valid_only: bool,
-          z_scale: float, progress=None, beads: bool = False):
+          z_scale: float, progress=None, beads: bool = False, every: bool = False):
     from .formats import FileInfo
     if not chosen:
         raise ValueError(f"{path.name} holds no MINFLUX measurement"
                          + (f" (it has {len(found.images)} images: File > Open image)"
                             if found.images else ""))
-    key = _metas_key(path, chosen, valid_only, z_scale)
+    key = _metas_key(path, chosen, valid_only, z_scale, every)
     if len(chosen) == 1:
         name = f"{path.stem}: {chosen[0].label}" if len(found.measurements) > 1 else path.name
     elif len(chosen) == len(found.measurements):
@@ -438,7 +446,7 @@ def _read(path: Path, found: Contents, chosen: Sequence[Measurement], valid_only
     for m in chosen:
         if progress:
             progress(f"reading {m.label}")
-        locs, meta = read_measurement(path, m, valid_only, z_scale)
+        locs, meta = read_measurement(path, m, valid_only, z_scale, every)
         tables.append(locs)
         metas.append(meta)
     locs = merge(tables, metas) if len(tables) > 1 else tables[0]
@@ -466,19 +474,19 @@ def _bead_file(path: Path, name: str, metas: Sequence[Dict[str, Any]]):
 
 
 def load(path, measurements=None, valid_only: bool = True, z_scale: float = 1.0,
-         progress=None, beads: bool = False):
+         progress=None, beads: bool = False, every: bool = False):
     """The measurements chosen (`select`; all by default) as one table, and
     its `FileInfo`.  Several are joined by `merge`.  ``beads``: their MBM
     beads instead (`bead_table`), as the file paired with that table."""
     path = Path(path)
     found = contents(path)
     return _read(path, found, select(found, measurements), valid_only, z_scale, progress,
-                 beads)
+                 beads, every)
 
 
 def read_files(path, measurements=None, merged: bool = False, valid_only: bool = True,
                z_scale: float = 1.0, progress=None, found: Optional[Contents] = None,
-               beads: bool = False):
+               beads: bool = False, every: bool = False):
     """The measurements chosen as ``(locs, info)`` pairs: one per measurement,
     or one for all of them when ``merged``.  ``beads``: each followed by its
     MBM beads, where it recorded any."""
@@ -488,10 +496,11 @@ def read_files(path, measurements=None, merged: bool = False, valid_only: bool =
     groups = [chosen] if merged or len(chosen) <= 1 else [[m] for m in chosen]
     out = []
     for group in groups:
-        out.append(_read(path, found, group, valid_only, z_scale, progress))
+        out.append(_read(path, found, group, valid_only, z_scale, progress, every=every))
         if beads and any(m.n_beads for m in group):
             try:
-                out.append(_read(path, found, group, valid_only, z_scale, progress, True))
+                out.append(_read(path, found, group, valid_only, z_scale, progress, True,
+                                 every))
             except ValueError:                # the beads were named but never recorded
                 pass
     return out
