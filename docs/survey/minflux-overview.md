@@ -38,6 +38,40 @@ reads `dcr`, though it has not been tried on real two-colour data.
 *Stability* (vibrations, Allan deviation) works on beads or traces, and
 *Tracking analysis* (MSD, jump distances) on `tid`.
 
+## What was built on 2026-11-15/16
+
+The plan was regrouped by plugin with the user's decisions in the live
+table ([MINFLUX Plan](https://claude.ai/artifact/PMD2ex78Sj8puWDYPZivpV));
+built since, each with tests, a page and a `--slow` run:
+
+* **Reader**: *every iteration* on request (`final` marks the
+  localizations, the layers start on them, `group_use` = final), each
+  thread's own sequence and pattern size, L scaled by the excitation
+  wavelength (L = patGeoFactor x 360 nm x lambda/642, abberior's wiki).
+* *Analysis/MINFLUX/Sequence QC* -- ParaFlux's plots from every iteration.
+* *Analysis/MINFLUX/Sequence table* -- the sequences side by side.
+* *Analysis/MINFLUX/Pair colours* -- `pair_id` for two threads, the offset
+  between the colours (per pair, time, field; a transformation).
+* *Analysis/MINFLUX/Quality filter* -- cfr and efo cuts from the data.
+* *Analysis/Tracking/Trace statistics* -- displacement, velocity, axes,
+  consecutive-difference precision, trend, tails, the rotated track.
+* *Analysis/Tracking/Find steps* -- AutoStepFinder, split/merge, pooled
+  steps and dwells, steps as a file, two-colour pairs.
+* *Analysis/Tracking/Trace inspector* -- one trace, or a gallery.
+* *Analysis/Regions/Summarize/Compare groups* and *Analysis/Process/File
+  conditions* -- region tables compared between files and conditions.
+* *Stability*'s random scatter split into eta x precision and a floor.
+* Id columns: -1 is "in none" everywhere, so trace 0 is a region; a file's
+  ids kept apart from the table's (`tid_file`).
+
+Open for the user: a filter range drops NaN, so a cfr bound cannot be set
+where cfr is measured once a trace -- should a bound be able to let NaN
+through?  bnp-step's licence.  Real two-thread data to test the pairing
+and the per-thread precision on.  Not done: the pooled consecutive-pair
+mode in *Localization precision*, MINFLUXStepsAnalyze's hypoexponential
+fits, manual step editing, a MINFLUX tutorial, MINFLUX plugins in the
+shipped GUI's tabs.
+
 ## The functionality, side by side
 
 In the table, ✅ means SMAPpy has it, ◐ means partly, and ✗ means not yet.
