@@ -2203,3 +2203,34 @@ It keeps the temporal context and lowers v1f's pixelation at 3 frames as at 1, s
 default (`settings.Parts`: the backbone's ``offset_range`` 2 and ``sigma_rep``, the loss's
 ``reported``, the schedule's ``ema``).  The network's own defaults stay version 1's, so a model saved
 before is built as it was trained.
+
+### The matched loss: dropped (2026-11-15)
+
+SHOT's idea (Seailles et al. 2025, arXiv:2512.10683, from the paper): each true molecule assigned one
+slot by a one-to-one match (Hungarian), every slot whose own p passes the threshold a molecule.  1 slot
+(`M_s1`), 2 slots per cell (`M_s2`), 2 slots with DECODE's mixture and count as helpers (`M_s2x`); on
+the base without the reporting head (`A_eos`), 1 frame, 6 M samples, 3 seeds each.  Scored on `B`
+(density 50) at each model's threshold for precision 0.97 on bright molecules (>= 1000 photons); a
+close pair is two mutual nearest bright neighbours, found both when each has its own detection within
+100 nm; an isolated molecule (nothing >= 100 photons within 500 nm) is split by two detections within
+250 nm.  Mean (min-max) over seeds:
+
+| | bright recall % | pairs found both <100 nm | 100-200 nm | 200-300 nm | isolated split % | pixel_mod |
+|---|---|---|---|---|---|---|
+| A_eos (base, no head) | 53.8 (53.5-54.1) | 3.2 | 6.6 | 13.3 | 0.37 | 0.020 |
+| A_eosr (the default) | 53.6 (53.2-53.8) | 3.3 | 7.0 | 13.6 | 0.52 | 0.027 |
+| M_s1 | 52.7 (52.1-53.3) | 2.4 | 5.6 | 12.4 | 0.18 | 0.119 |
+| M_s2 | 51.6 (51.1-52.1) | 1.8 | 5.0 | 11.8 | 0.18 | 0.124 |
+| M_s2x | 47.6 (46.5-48.6) | 0.9 | 3.4 | 9.3 | 0.33 | 0.150 |
+
+At density 15 (`B_d15`) the order is the same (100-200 nm pairs: 18.8, 17.2 / 15.1, 12.4, 8.4 %).
+On the molecules all of them find (76,635 of 196,669 bright), lateral RMSE is equal (44.4-44.9 nm) and
+z is 1 nm better near focus (|z| < 300: 61-62 vs 63-64 nm) but 1-3 nm worse beyond 300 nm.
+
+So the second slot does not find the second molecule of a close pair -- it finds fewer than one slot,
+and the helpers fewer still -- and the threshold extraction pixelates four to six times more than
+mixture_peak (0.12-0.15 against 0.020; the target is 0.053), since a molecule near a cell's edge is
+one slot's or the other's.  Only isolated splits are fewer (0.18 against 0.37 %), and they were rare
+already.  By the rule set before the runs (kept only for clearly more pairs below 200 nm), the
+matched loss is dropped; the code stays (`loss.matched_terms`, `extract.by_threshold`) for the
+Sinkhorn runs, which ask only whether a soft assignment learns faster or pixelates less.
