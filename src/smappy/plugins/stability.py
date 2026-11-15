@@ -138,7 +138,8 @@ class Stability(Plugin):
     per_region = True
     # a bead is localized once per frame: its localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "3"
+    # 4: random scatter fits the averaging: eta x precision / sqrt(n) and a floor
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: StabilitySettings) -> FormState:
         v = settings.vibration
@@ -341,10 +342,15 @@ class Stability(Plugin):
             values[f"{p.axis}_scatter_nm"] = p.scatter_nm
             values[f"{p.axis}_scatter_robust_nm"] = p.robust_nm
             values[f"{p.axis}_scatter_ratio"] = float(ratio)
+            eta, floor = st.noise_floor(p)
+            values[f"{p.axis}_scatter_eta"] = eta
+            values[f"{p.axis}_noise_floor_nm"] = floor
             values.setdefault(f"{p.axis}_precision_nm", p.precision_nm)
             text = (f"{p.axis}: random scatter {p.scatter_nm:.3g} nm (robust "
                     f"{p.robust_nm:.3g}), precision {p.precision_nm:.3g} nm, "
-                    f"{ratio:.3g} x")
+                    f"{ratio:.3g} x"
+                    + (f"; averaging: {eta:.3g} x the precision / sqrt(n) and a floor "
+                       f"of {floor:.3g} nm" if np.isfinite(eta) else ""))
             if also:
                 at = p.at(also[0])
                 values[f"{p.axis}_scatter_at_nm"] = at
@@ -521,6 +527,12 @@ def draw_allan(ax, traces, pooled, mark: Optional[int] = None, more: str = "") -
     if np.isfinite(pooled.precision_nm) and ok.any():
         ax.loglog(pooled.tau_s[ok], pooled.precision_nm / np.sqrt(pooled.m[ok]), "--",
                   color="0.4", lw=0.9, label="precision / \u221an")
+        from ..stability import noise_floor
+        eta, floor = noise_floor(pooled)
+        if np.isfinite(eta):
+            model = np.sqrt((eta * pooled.precision_nm) ** 2 / pooled.m[ok] + floor ** 2)
+            ax.loglog(pooled.tau_s[ok], model, "-.", color="tab:red", lw=0.9,
+                      label=f"{eta:.2g} x precision / \u221an, floor {floor:.2g} nm")
     if mark is not None:
         ax.axvline(mark * pooled.step_s, color="0.6", lw=0.8, ls=":")
     ax.set_xlabel("time averaged (s)")

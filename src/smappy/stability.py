@@ -563,6 +563,31 @@ def scatter(trace: Trace, axes: Sequence[str] = AXES, m: Optional[np.ndarray] = 
     return out
 
 
+def noise_floor(s: Scatter, min_count: int = 10) -> Tuple[float, float]:
+    """``(eta, floor_nm)``: the Allan deviation's falling part fitted as
+    sigma_A(m)^2 = (eta x precision)^2 / m + floor^2 -- the noise that
+    averages away, as a multiple of the precision the fit claims, and a
+    floor in quadrature that does not (the MFX scripts' sigma^2 = eta^2
+    CRB^2 + floor^2, here along the averaging rather than across powers).
+    Fitted from one point to the curve's minimum, where it would start to
+    rise with drift; weighted by the differences behind each value.  NaN
+    where fewer than three values or no precision."""
+    ok = (s.count >= min_count) & np.isfinite(s.allan_nm)
+    if ok.sum() < 3 or not np.isfinite(s.precision_nm) or s.precision_nm <= 0:
+        return float("nan"), float("nan")
+    idx = np.flatnonzero(ok)
+    last = idx[int(np.argmin(s.allan_nm[idx]))]
+    idx = idx[idx <= last]
+    if len(idx) < 3:
+        idx = np.flatnonzero(ok)[:3]
+    y = s.allan_nm[idx] ** 2
+    a = np.column_stack([1.0 / s.m[idx], np.ones(len(idx))])
+    w = np.sqrt(s.count[idx].astype(float))
+    coef, *_ = np.linalg.lstsq(a * w[:, None], y * w, rcond=None)
+    white, floor2 = max(coef[0], 0.0), max(coef[1], 0.0)
+    return float(np.sqrt(white) / s.precision_nm), float(np.sqrt(floor2))
+
+
 def pooled_scatter(per_trace: Sequence[Scatter]) -> Scatter:
     """One axis over traces: the sums added (so a long trace counts as much
     as it has differences), the steps joined, the precision the root of the

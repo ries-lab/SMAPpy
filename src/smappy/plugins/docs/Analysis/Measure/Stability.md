@@ -1,6 +1,6 @@
 ---
-version: "3"
-covers: [smappy.stability.grid_step, smappy.stability.resample, smappy.stability.bead_traces, smappy.stability.combine, smappy.stability.longest_run, smappy.stability.highpass, smappy.stability.smooth, smappy.stability.spectrum, smappy.stability.cumulative_rms, smappy.stability.peak_amplitude, smappy.stability.peak_frequency, smappy.stability.peaks, smappy.stability.vibration_rms, smappy.stability.analyse, smappy.stability.pooled, smappy.stability.averaging_points, smappy.stability.runs_of, smappy.stability.allan_sums, smappy.stability.Scatter, smappy.stability.scatter, smappy.stability.pooled_scatter, smappy.plugins.stability.Stability.run]
+version: "4"
+covers: [smappy.stability.grid_step, smappy.stability.noise_floor, smappy.stability.resample, smappy.stability.bead_traces, smappy.stability.combine, smappy.stability.longest_run, smappy.stability.highpass, smappy.stability.smooth, smappy.stability.spectrum, smappy.stability.cumulative_rms, smappy.stability.peak_amplitude, smappy.stability.peak_frequency, smappy.stability.peaks, smappy.stability.vibration_rms, smappy.stability.analyse, smappy.stability.pooled, smappy.stability.averaging_points, smappy.stability.runs_of, smappy.stability.allan_sums, smappy.stability.Scatter, smappy.stability.scatter, smappy.stability.pooled_scatter, smappy.plugins.stability.Stability.run]
 ---
 
 ## What it does
@@ -172,7 +172,11 @@ further apart than *gap* typical steps, so a difference never spans a long
 pause.  Nothing is high-passed: drift moves two neighbouring points by
 the same amount and cancels in their difference.  The scatter is given as
 the RMS of the steps, robustly from their median absolute deviation, and
-as a ratio to the precision.
+as a ratio to the precision.  Along the averaging it is split in two: the
+part that falls as 1/√n -- noise that averaging removes, as a multiple of
+the precision the fit claims -- and a floor that does not fall, the noise
+correlated over longer times.  A multiple near 1 and no floor is a bead
+measured as well as its photons allow.
 
 ```figure One bead (simulated, a frame per ms, 3 nm precision) with drift and the 6 nm vibration at 37 Hz on x. Left: the Allan deviation of x and y against the time averaged, with the precision over √n (dashed) -- y follows the line of pure noise; x stands above it -- a bump at half the vibration's period, dips where the mean is over whole periods -- and rises with the drift. Right: the steps of y, diff(y)/√2, whose spread is the precision.
 from smappy.plugins.stability import draw_steps
@@ -267,7 +271,18 @@ measured points.  The curve takes about 24 values of $m$ evenly spaced in
 log from 1 to *longest*, and the one that is *time scale* when it is set.
 The robust value is $1.4826\,\mathrm{MAD}$ of the steps
 $(x_{k+1} - x_k)/\sqrt{2}$, the factor making a median absolute deviation
-a Gaussian's SD.  A run ends where a step is longer than *gap* times
+a Gaussian's SD.
+
+**The floor.**  The Allan variance from $m = 1$ up to its minimum -- past
+it, drift makes it rise -- is fitted by weighted least squares as
+$\sigma_A^2(m) = (\eta\,\sigma_\mathrm{fit})^2 / m + F^2$, each value weighted
+by the square root of the differences behind it, both terms held at zero
+or above: $\eta$ is how much of the claimed precision $\sigma_\mathrm{fit}$ the
+averaged noise is, $F$ the floor in quadrature.  The MFX scripts fit the
+same form, $\sigma^2 = \eta^2\,\mathrm{CRB}^2 + F^2$, across laser powers;
+here the photons grow with the points averaged instead.
+
+A run ends where a step is longer than *gap* times
 $\Delta t$; a point filled over a missed frame is not measured and ends
 one too.  This differs from NeNA's estimate in the
 [Localization Precision](plugin:Analysis/Measure/Localization Precision) plugin in two ways: the
@@ -354,10 +369,12 @@ its robust value, the precision and their ratio, and the deviation at
 what was achieved; above 1, there is noise the fit does not know about --
 vibration faster than a frame, a PSF model that is off, or the emitter
 moving.  The figures: the Allan deviation against the time averaged with
-the precision over √n dashed, and the histogram of the steps with the
+the precision over √n dashed and the fit of the floor dash-dotted, and the
+histogram of the steps with the
 Gaussians of the precision and of the scatter (heavy tails are jumps,
 which the robust value ignores).  The values are `x_scatter_nm`,
-`x_scatter_robust_nm`, `x_scatter_ratio` and `x_scatter_at_nm`, with
+`x_scatter_robust_nm`, `x_scatter_ratio`, `x_scatter_eta`,
+`x_noise_floor_nm` and `x_scatter_at_nm`, with
 `x_precision_nm`; the arrays `allan_tau_s` and `x_allan_nm`.  With *each
 bead* the per-bead table gains `x_scatter_nm` and `x_scatter_ratio`.
 
