@@ -142,6 +142,9 @@ when a milestone lands or an item moves.
    pupil; Spline 3D's *focus in situ* is stable to 12 nm from three starts.  Open: γ decides January's astigmatism
    (its beads' 0.08 gives theirs, the 0.36 its molecules learn gives 0.25 rad more and fits them better, the dual
    channel prefers its beads' γ by 2 nats per molecule) -- which γ M2's objective has; the dual channel's focus.
+   **In situ against molecule stacks on M2** (12 November 2026, architecture.md, "In situ against molecule stacks
+   on M2"): the stack and the beads agree, in situ in the nucleus puts 15–57 nm more into astigmatism, spherical
+   and x coma, each model wins on its own held-out molecules; a sample tilt takes most of it; open.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 
