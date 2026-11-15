@@ -29,8 +29,7 @@ import numpy as np
 
 from ..channels import FourPiChannelsSettings
 from . import Context, FormState, Notice, Plot, Result, param, register
-from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata, channel_photons,
-                  fitted_frame, median_frames)
+from .fit import (_FitPlugin, _Finishing, _Reading, _Writing, CameraMetadata, channel_photons)
 
 MODEL_FILTER = "4Pi models (*.h5)"
 REGISTRATION_FILTER = "Channel registrations (*.json)"
@@ -333,14 +332,8 @@ class FourPiFit(_FitPlugin):
         camera.require("conversion", "offset")
         raw = source.frame(index)
         channels = channel_photons(raw[None], camera, settings, source)
+        summed = detection_image(channels, layout)
         finder = self.region_finder(settings, camera)
-        # with a temporal median, the sum is of the channels less theirs
-        window = median_frames(source, finder, index)
-        detect = channels
-        if window is not None:
-            around = channel_photons(window[1], camera, settings, source)
-            detect = finder.background()(around, window[0])[[index - window[0]]]
-        summed = detection_image(detect, layout)
         candidates, _ = finder(summed, first_frame=index)
         text = (f"frame {index}: {len(candidates)} molecules found on the sum of "
                 f"{layout.n_channels} channels")
@@ -352,11 +345,8 @@ class FourPiFit(_FitPlugin):
         else:
             engine = MultiChannelEngine(camera, finder, model, layout, settings.fit,
                                         frame_shape=source.base.shape[-2:])
-            if window is None:
-                engine.push(raw[None], index)
-                fitted = engine.flush()
-            else:
-                fitted = fitted_frame(engine, window, index)
+            engine.push(raw[None], index)
+            fitted = engine.flush()
             text += f", {0 if fitted is None else len(fitted)} fitted"
         (px, py), _ = camera.pixelsize_nm_or_default
         roi = np.array(camera.roi_offset, float)

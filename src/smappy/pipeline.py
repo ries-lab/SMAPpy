@@ -89,11 +89,6 @@ class LocalizationEngine:
         self.stats = {"frames": 0, "candidates": 0, "rois": 0, "localizations": 0,
                       "dropped_at_border": 0, "rejected": 0,
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
-        # the finder's temporal median, if it has one: the frames seen are
-        # this engine's, so each engine -- each channel of a split chip --
-        # keeps its own
-        background = getattr(self.finder, "background", None)
-        self._background = background() if callable(background) else None
 
     # --------------------------------------------------------------- driving it
     def push(self, frames: np.ndarray, first_frame: int = 0
@@ -105,11 +100,7 @@ class LocalizationEngine:
             photons = to_photons(frames, self.camera) / self.camera.excess_noise
         else:
             photons = noise.to_photons(frames, self.camera.adu_to_photons)
-        # detected on the frames less their temporal median, when asked;
-        # cut and fitted from the photons always
-        detect = (photons if self._background is None
-                  else self._background(photons, first_frame))
-        candidates, _ = self.finder(detect, first_frame=first_frame,
+        candidates, _ = self.finder(photons, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         rois = cut_rois(photons, candidates, self.settings.roisize,
                         first_frame=first_frame)
@@ -363,8 +354,7 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
     info = {
         "source": str(source) if source is not None else None,
         "camera": camera.to_dict(),
-        "detection": {"filter": str(finder.filter), "cutoff": str(finder.cutoff),
-                      **_background_record(finder)},
+        "detection": {"filter": str(finder.filter), "cutoff": str(finder.cutoff)},
         "psf_model": str(model),
         "fit": {"roisize": settings.roisize, "iterations": settings.iterations,
                 "rois_per_block": settings.block_rois(),
@@ -386,14 +376,6 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
         if conversion:  # a SMAP spline of x-mirrored beads, flipped on load
             info["calibration"]["conversion"] = conversion
     return info
-
-
-def _background_record(finder) -> dict:
-    """What detection subtracted first, for the record; nothing when it
-    subtracted nothing, so a file fitted without says what it always did."""
-    background = getattr(finder, "background", None)
-    median = background() if callable(background) else None
-    return {} if median is None else {"background": str(median)}
 
 
 def _version() -> str:

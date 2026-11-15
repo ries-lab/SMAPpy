@@ -17,7 +17,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -171,20 +171,6 @@ class DetectionSettings:
                                   "filtered image; absolute: a fixed value")
     cutoff: float = param(1.7, label="cutoff value", min=0,
                           help="lower finds dimmer molecules, and more noise")
-    # off by default, so a fit is what it was before; on, detection runs on
-    # each frame less its temporal median, the fit on the photons
-    # (`detect.TemporalMedian`, kept by each engine)
-    temporal_median: bool = param(False, label="temporal median",
-                                  help="detect on each frame less the median of "
-                                       "the frames about it, pixel by pixel: for "
-                                       "an uneven background that changes slowly")
-    median_window: int = param(51, label="median of", unit="frames", min=3,
-                               advanced=True,
-                               help="the frames each median is taken over")
-    median_stride: Optional[int] = param(None, label="median every", unit="frames",
-                                         min=1, advanced=True,
-                                         help="how often the median is taken again; "
-                                              "auto: once per window")
 
     # what *cutoff value* becomes when *cutoff* is switched (`_FitPlugin.react`):
     # the two read the number on different scales, so 1.7 noise widths kept
@@ -196,36 +182,7 @@ class DetectionSettings:
                         else GaussFilter(self.sigma))
         cutoff = (DynamicCutoff(self.cutoff) if self.cutoff_mode == "dynamic"
                   else AbsoluteCutoff(self.cutoff))
-        window = self.median_window if self.temporal_median else 0
-        return PeakFinder(image_filter, cutoff, n_threads=n_threads,
-                          median_window=window, median_stride=self.median_stride)
-
-
-def median_frames(source, finder, index: int) -> Optional[Tuple[int, np.ndarray]]:
-    """The raw frames a run takes frame ``index``'s temporal median over,
-    as ``(first, frames)`` -- for a Preview, which reads one frame and must
-    detect on it as the run does; None when the finder has none."""
-    from ..detect import median_bounds
-    median = finder.background() if hasattr(finder, "background") else None
-    if median is None:
-        return None
-    start, stop = median_bounds(index, median.window, median.step, 0, source.n_frames)
-    frames = np.concatenate([b for _, b in source.frames(chunk=stop - start, start=start,
-                                                          stop=stop)])
-    return start, frames
-
-
-def fitted_frame(engine, window: Tuple[int, np.ndarray], index: int):
-    """A Preview's fit of frame ``index`` with a temporal median: the frames
-    of its median (`median_frames`) pushed through ``engine``, which keeps
-    the median as a run does, and frame ``index``'s localizations kept."""
-    from ..locs import concat
-    parts = [engine.push(window[1], first_frame=window[0]), engine.flush()]
-    parts = [p for p in parts if p is not None and len(p)]
-    if not parts:
-        return None
-    locs = concat(parts) if len(parts) > 1 else parts[0]
-    return locs[np.asarray(locs["frame"]) == index]
+        return PeakFinder(image_filter, cutoff, n_threads=n_threads)
 
 
 def in_region(x, y, shapes) -> np.ndarray:
@@ -1025,10 +982,6 @@ class _FitPlugin(Plugin):
                     problem = None
                 if problem:
                     state.notice = Notice(problem)
-        detection = getattr(settings, "detection", None)
-        if isinstance(detection, DetectionSettings):
-            for name in ("median_window", "median_stride"):
-                state.active[f"detection.{name}"] = detection.temporal_median
         finish = getattr(settings, "finish", None)
         if finish is not None:
             # a step only where this fitter's table can take it: colours after
@@ -1375,35 +1328,24 @@ class _FitPlugin(Plugin):
         finder = self.region_finder(settings, camera)
 
         raw = source.frame(index)
-
-        def in_photons(raw):
-            if getattr(fit, "per_pixel_noise", False):
-                # as the run reads them: each pixel's own offset off (the frame whole, cut after)
-                from ..scmos import for_frames
-                return for_frames(camera, raw.shape[-2:]).to_photons(raw, camera.adu_to_photons)
-            return to_photons(raw, camera)/camera.excess_noise
-
-        photons = in_photons(raw)
-        # with a temporal median, detection on the frame less the median of
-        # the frames the run takes it over -- pixel by pixel, so the same
-        # whether the channels are cut before or after
-        window = median_frames(source, finder, index)
-        detect = photons[None]
-        if window is not None:
-            start, around = window
-            detect = finder.background()(in_photons(around), start)[[index - start]]
+        if getattr(fit, "per_pixel_noise", False):
+            # as the run reads them: each pixel's own offset off (the frame whole, cut after)
+            from ..scmos import for_frames
+            photons = for_frames(camera, raw.shape).to_photons(raw, camera.adu_to_photons)
+        else:
+            photons = to_photons(raw, camera)/camera.excess_noise
         channels = getattr(settings, "channels", None)
         layer = None
         if self.channel_part == "choice" and channels.two:
             # each channel on its own, drawn back on the frame
             split = self.engine(settings, camera, finder, None, source)
             layer = split.layout
-            xy, filtered, cutoffs = split.detect(detect, first_frame=index)
+            xy, filtered, cutoffs = split.detect(photons[None], first_frame=index)
             candidates = _Points(xy)
             cutoff = max(cutoffs)
             said = " and ".join(f"{k:.3g}" for k in cutoffs) + " (each channel)"
         else:
-            candidates, filtered = finder(detect, first_frame=index)
+            candidates, filtered = finder(photons[None], first_frame=index)
             # what detection applied to this frame, from the finder's own code
             cutoff = float(finder.cutoffs(filtered)[0][0])
             said = f"{cutoff:.3g}"
@@ -1422,11 +1364,8 @@ class _FitPlugin(Plugin):
         try:
             model = self._model_telling(ctx, fitting, camera)
             engine = self.engine(fitting, camera, finder, model, source)
-            if window is None:
-                engine.push(raw[None], first_frame=index)
-                locs = engine.flush()
-            else:                       # the median's frames fitted, this one kept
-                locs = fitted_frame(engine, window, index)
+            engine.push(raw[None], first_frame=index)
+            locs = engine.flush()
         except Exception as error:
             trouble = "; ".join(filter(None, [trouble, f"{type(error).__name__}: {error}"]))
 
@@ -2304,9 +2243,7 @@ def sample_rois(source, camera, finder, roisize: int, src) -> np.ndarray:
         frames = np.concatenate([b for _, b in source.frames(chunk=block, start=int(first),
                                                               stop=int(first) + block)])
         photons = to_photons(frames, camera) / camera.excess_noise
-        median = finder.background() if hasattr(finder, "background") else None
-        detect = photons if median is None else median(photons, int(first))
-        candidates, _ = finder(detect, first_frame=int(first))
+        candidates, _ = finder(photons, first_frame=int(first))
         parts.append(cut_rois(photons, candidates, roisize, first_frame=int(first)).images)
     images = np.concatenate(parts) if parts else np.zeros((0, roisize, roisize), np.float32)
     return with_readout(images, camera.readout_variance)
@@ -2727,14 +2664,9 @@ class _TwoChannelFit(_FitPlugin):
         raw = source.frame(index)
         channels = channel_photons(raw[None], camera, settings, source)
         finder = self.finder(settings, camera)
-        window = median_frames(source, finder, index)       # as `_FitPlugin.preview`
-        detect = channels
-        if window is not None:
-            around = channel_photons(window[1], camera, settings, source)
-            detect = finder.background()(around, window[0])[[index - window[0]]]
         found, cutoffs = [], []
         for c, (w, h) in enumerate(layout.sizes):
-            candidates, filtered = finder(np.ascontiguousarray(detect[:, c, :h, :w]), first_frame=index)
+            candidates, filtered = finder(np.ascontiguousarray(channels[:, c, :h, :w]), first_frame=index)
             found.append(candidates)
             cutoffs.append(float(np.max(finder.cutoffs(filtered)[0])))
         # the main panel draws channel 1 where it lies on the frame, as the fit region is drawn
@@ -2749,13 +2681,9 @@ class _TwoChannelFit(_FitPlugin):
         try:
             model = self.model(settings, camera)
             engine = self.engine(settings, camera, finder, model, source)
-            if window is None:
-                engine.push(raw[None], index)
-                fitted = engine.flush()
-                text += f"; {engine.stats['matched']} paired"
-            else:                   # its pairs would count the median's frames too
-                fitted = fitted_frame(engine, window, index)
-            text += f", {0 if fitted is None else len(fitted)} fitted"
+            engine.push(raw[None], index)
+            fitted = engine.flush()
+            text += f"; {engine.stats['matched']} paired, {0 if fitted is None else len(fitted)} fitted"
         except Exception as error:
             trouble = str(error)
             text += f"; not fitted -- {error}"

@@ -89,9 +89,6 @@ inside every wheel and source distribution**.  The ports, as of this writing:
   offset per marker rather than averaged frame by frame;
 * `smappy/group.py` -- binding-event cores (`postprocess.select_binding_event_cores`,
   Steen et al. 2024), as *Remove Localizations*' region *binding-event edges*;
-* `smappy/detect.py` -- the temporal median before detection
-  (`localize.TemporalMedianMovie`, Martens et al. 2022), the fitters'
-  *temporal median*;
 * `smappy/io/picasso.py` -- Picasso's HDF5 localization files, read and
   written, a linked table's `len` and `n` and the metadata list kept (a
   file format, not code).
