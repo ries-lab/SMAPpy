@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from uipsf.workflows.insitu_rounds import _focus_per_height, _moved, coverslip_edge
+from uipsf.workflows.insitu_rounds import _focus_per_height, _moved, below_coverslip, coverslip_edge
 
 
 def heights(n=1500, on_coverslip=0.2, shift=120.0, sd=30.0, scatter=1.2, outliers=0.01, seed=0):
@@ -35,6 +35,24 @@ def test_without_molecules_on_the_coverslip_the_flat_edge_is_found_and_a_spike_r
     found = [coverslip_edge(*heights(on_coverslip=0.0, seed=k)) for k in range(5)]
     assert sum(e.spike > 0 for e in found) <= 1
     assert abs(np.mean([e.shift_nm for e in found]) - 120.0) < 10
+
+
+def test_molecules_on_the_coverslip_stay_and_those_placed_far_below_it_are_out():
+    rng = np.random.default_rng(3)
+    n = 1500
+    t = rng.uniform(0, 1400, n)
+    on = rng.random(n) < 0.2
+    t[on] = 0.0
+    sd = 30.0 * (0.6 + 0.8 * rng.random(n))
+    h = t + 120.0 + rng.normal(0, 1.2 * sd)
+    bad = rng.random(n) < 0.03                 # misplaced by a model that does not fit them
+    h[bad] -= rng.uniform(250, 500, bad.sum())
+    edge = coverslip_edge(h, sd)
+    assert edge.kappa >= 1.0
+    out = below_coverslip(h - edge.shift_nm, sd, edge)
+    assert out[on & ~bad].mean() < 0.01
+    assert out[bad & (t < 100)].mean() > 0.9
+    assert not below_coverslip(np.array([-10.0]), np.array([30.0]), edge)[0]
 
 
 def test_too_few_heights_give_no_edge():

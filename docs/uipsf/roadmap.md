@@ -126,8 +126,11 @@ when a milestone lands or an item moves.
    (architecture.md, "The region size, the blur and the background"): 15 px put January on a second, nearly
    equal solution with 0.3 rad more astigmatism and a round blur; 25 px (3 µm, now *auto*) with σ free finds the
    beads' astigmatism and an anisotropic blur from both starts; a large region needs care on high, uneven
-   backgrounds (haze rejection or a planar background).  Next: a sloped background,
-   the symmetric bead magnitude and the order choice in the PSF calibration window.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
+   backgrounds (haze rejection or a planar background).  In the window since: the start's magnitude held
+   (*hold*) and order 6 on *auto* (*Zernike order*, which includes secondary spherical, Noll 22); the twin test
+   fair with held modes and heights below the coverslip not chosen (November 2026).  A sloped background
+   (`background.Planar`) and a stricter shape test after round 1 only after a benchmark on real data: each adds
+   freedom to an already noisy fit.  Later: summed blinks against frames; a sparse pile-up on the coverslip, where the
    edge is weak; speed (a round ~2 min).  Zenodo `1ch_smlm_tubulin`
    and simulations.  **On the minimal model** (November 2026, architecture.md, "In situ on the minimal model"):
    γ held from the microscope (`microscope_db.gamma_of`; a nominal 0.36 only as a warned last resort), no SAF
