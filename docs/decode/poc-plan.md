@@ -2176,3 +2176,30 @@ threshold grid gives 0.970 - 0.983).  B, the base model:
   less (0.46 -> 0.09 % on B, 0.55 -> 0.17 % on d15), bright recall up 0.9 - 1.4 points, and on v1f
   pixel_mod 0.059 -> 0.022.  Narrow radii break one molecule's cells into groups too weak to pass.
   Worth keeping as an extraction option, decided once the output and loss are.
+
+### The base made the default (2026-11-15)
+
+EMA 0.999 + offsets 2 + `sigmix` + the reporting head, trained at 1 frame (`A_eosr`, gpuvm) and at 3
+(`T3_eosr`, decodebox), 3 seeds each, 6 M, test set B.  At 3 frames against v1f's `nt_t3_pk` (2 seeds):
+
+| | bright recall at P 0.97 | best Jaccard | pixel_mod | recall, \|z\| < 300 nm |
+|---|---|---|---|---|
+| base, 3 frames | 0.612 - 0.618 | 0.656 - 0.658 | 0.019 - 0.043 | 0.904 - 0.916 |
+| v1f, 3 frames | 0.595 - 0.609 | 0.652 - 0.654 | 0.093 - 0.096 | 0.910 - 0.917 |
+
+The RMSE each model gives over its own detections differs with what it detects (a seed that finds
+3 500 more bright molecules, harder ones, reads 2 nm worse), so it is compared on the bright molecules
+every model of a group found, each at its own threshold for precision 0.97 (`fair_eval.py`,
+`fair_table.py`), lateral / axial nm:
+
+| | common set | \|z\| < 300 | 300 - 600 | > 600 | error / CRLB (robust) |
+|---|---|---|---|---|---|
+| base, 3 frames | 43.3 - 43.4 / 51.9 - 52.0 | 31.0 / 52.3 - 52.4 | 55.3 - 55.6 / 50.7 - 51.0 | 70.3 - 70.8 / 56.0 - 56.2 | 1.38 / 1.26 - 1.27 |
+| v1f, 3 frames | 43.5 / 52.5 - 52.8 | 31.0 - 31.2 / 52.0 - 53.3 | 55.7 - 55.8 / 51.4 - 52.4 | 70.5 / 56.0 - 60.2 | 1.38 - 1.39 / 1.29 - 1.30 |
+| base, 1 frame | 46.0 - 46.2 / 64.4 - 64.5 | 36.8 - 37.0 / 64.6 - 64.8 | 61.2 - 61.4 / 63.6 - 64.3 | 79.5 - 80.1 / 65.0 - 65.6 | 1.88 - 1.89 / 1.81 - 1.82 |
+| without the head, 1 frame | 46.0 - 46.2 / 64.3 - 64.8 | 36.7 - 37.0 / 64.5 - 65.3 | 61.3 - 61.4 / 63.3 - 63.6 | 79.9 - 80.1 / 65.9 - 66.5 | 1.88 - 1.89 / 1.81 - 1.82 |
+
+It keeps the temporal context and lowers v1f's pixelation at 3 frames as at 1, so it is netfit's
+default (`settings.Parts`: the backbone's ``offset_range`` 2 and ``sigma_rep``, the loss's
+``reported``, the schedule's ``ema``).  The network's own defaults stay version 1's, so a model saved
+before is built as it was trained.

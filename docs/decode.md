@@ -767,6 +767,11 @@ the baselines on the benchmark, not reproduce their outputs.
    under each claim, the one number that rewards both accuracy and honesty.  No claim below the
    single-emitter CRLB on sparse frames; the Jaccard and the near-focus RMSE no worse, over three
    seeds.  On real data the pair check of frames that share no input.
+
+   **A's result, netfit's default since 2026-11-15** (`settings.Parts`; poc-plan, "The base made the
+   default"): EMA of the weights (0.999), offsets reaching 2 cells, variant 2's term on the mixture's
+   sigma (weight 0.1) and variant 1's reporting head.  At 3 frames it detects as v1f does, with a third
+   of its pixelation and the same RMSE on the molecules both find.
 5. **C = 2.**  Biplane and colour.  At least DECODE-Plex's numbers on the
    benchmark.
 6. **C = 4 with phase.**  No working baseline: against Spline 4Pi and its
