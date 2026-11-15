@@ -2156,3 +2156,23 @@ sigma 0.95: honest in the root mean square, so a little generous in the robust w
 tails being heavier than a Gaussian's.  The base becomes EMA + offsets 2 + `sigmix` + the head,
 trained now at 1 frame (gpuvm) and at 3 frames (decodebox, against v1f's 3-frame `nt_t3_pk`) before it
 is made the default, to be sure it does not break the temporal context.
+
+**A position-consistency merge** (Jonas, 2026-11-15; `merge_eval.py`, one model each, v1f and EMA +
+offsets 2 + `sigmix`, B and B_d15).  Every cell above p 0.05 a candidate at its own x, y, z; candidates
+within 2 cells joined when their positions agree (lateral r, |dz| < r_z), a group's p summed, its position
+the p-weighted mean; scored at the threshold where precision on bright molecules reaches 0.97 (the
+threshold grid gives 0.970 - 0.983).  B, the base model:
+
+| extraction | bright recall | pairs found both, 0-100 / 100-200 / 200-300 nm | isolated split | pixel_mod |
+|---|---|---|---|---|
+| `mixture_peak` | 0.537 | 0.032 / 0.065 / 0.133 | 0.46 % | 0.022 |
+| merge, 25 nm / 75 nm | 0.484 | 0.022 / 0.040 / 0.098 | 0.67 % | 0.043 |
+| merge, 50 nm / 150 nm | 0.524 | 0.027 / 0.060 / 0.124 | 0.17 % | 0.025 |
+| merge, 80 nm / 150 nm | 0.546 | 0.031 / 0.064 / 0.139 | 0.09 % | 0.021 |
+
+* It finds no more close pairs, at any radius, on either model or density: the map does not hold the
+  second molecule at a position of its own, so it must be trained in (the matched loss next).
+* With wide radii it is the better extraction otherwise: isolated bright molecules split five times
+  less (0.46 -> 0.09 % on B, 0.55 -> 0.17 % on d15), bright recall up 0.9 - 1.4 points, and on v1f
+  pixel_mod 0.059 -> 0.022.  Narrow radii break one molecule's cells into groups too weak to pass.
+  Worth keeping as an extraction option, decided once the output and loss are.
