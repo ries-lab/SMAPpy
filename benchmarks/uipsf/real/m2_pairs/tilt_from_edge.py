@@ -93,7 +93,7 @@ def main():
         import torch
         from smappy.calibrate.pupil import load_start
         m = load_start(os.path.join(a.out, f"{a.stack}_3dcal.h5"))
-        p = torch.as_tensor(m.shared["geometry.plane"]).double().reshape(-1).tolist()
+        p = torch.as_tensor(m.shared["geometry.plane"]).detach().cpu().double().reshape(-1).tolist()   # MPS: no float64
         print(f"stack {a.stack}: focal plane's slope {p[0]:+.1f}, {p[1]:+.1f} nm per µm (x, y), "
               f"{angle_deg(*p):.2f}°")
     for name in a.names:
