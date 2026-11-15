@@ -78,7 +78,7 @@ Ranked by value for the effort; sizes S ≤ a day, M a few days, L a week+.
 | # | what | from | size | route | fits in SMAPpy as |
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Counting fit (B4)**: oligomer fractions by ML on bursts per region, blinking from monomers or the NPC fit | papers; `smappy/npc.py` already has the pgf | M | own | a Summarize plugin over *Blinking* |
-| 2 | **qPAINT**: sites = 1/(influx · τ_dark), influx calibrated on known picks; an ML dark-time fit. ✅ *Binding kinetics* and *Summarize/qPAINT* (2026-10-28) | Picasso | S | MIT | a per-region plugin of its own, calibration in Summarize |
+| 2 | **qPAINT**: sites = 1/(influx · τ_dark), influx calibrated on known picks; an ML dark-time fit. ✅ *Binding kinetics* and *DNA-PAINT/qPAINT* (2026-10-28) | Picasso | S | MIT | a per-region plugin of its own, calibration in Summarize |
 | 3 | fixes 1–3 above (fix 4, COMET's weights, done 2026-10-28) | | S–M each | | |
 | 4 | **Colocalisation per localization** (CBC / DoC; Coloc-Tesseler) | Locan; PoCA paper | S | BSD | a *Neighbourhood* quantity (Locan's weighting looks wrong: follow the paper) |
 | 5 | **Single-molecule test per cluster** (hull area against its expectation; *decided: skip*) and a temporal accumulation check | Locan (Ebert 2022) | S | BSD | values of *Cluster shape*, so *Filter ROIs* drops them |

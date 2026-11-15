@@ -234,7 +234,7 @@ last).  A cluster is dropped -- its localizations get `cluster_id` 0 -- when
   acquisition: it was there only for a short while.
 
 The remaining clusters are numbered again, without gaps.  These are the
-numbers that [Binding kinetics](plugin:Analysis/Measure/Binding kinetics)
+numbers that [Binding kinetics](plugin:Analysis/DNA-PAINT/Binding kinetics)
 gives each region (`mean_frame_rel`, `peak_window_fraction`), so a cluster
 dropped here would fail there too.
 

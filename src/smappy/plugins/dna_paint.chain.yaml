@@ -6,7 +6,7 @@
 # the molecules, one per site at its centre (RESI's step), as a new file.
 # Shipped as a chain: every step is the shipped plugin with its settings.
 schema: smappy-chain-v1
-path: Analysis/Regions/Workflow/DNA-PAINT
+path: Analysis/DNA-PAINT/Workflow
 description: >-
   Corrects the drift on the binding sites, finds the sites, measures their
   binding kinetics and maps them to molecules, in one run.
@@ -57,10 +57,10 @@ steps:
   - block: each site                # once in each site found
     regions: cluster_id
     steps:
-      - plugin: Analysis/Measure/Binding kinetics
+      - plugin: Analysis/DNA-PAINT/Binding kinetics
         version: "1"
         values: {}
-  - plugin: Analysis/Regions/Molecular mapping
+  - plugin: Analysis/DNA-PAINT/Molecular mapping
     label: molecules
     version: "1"
     values:

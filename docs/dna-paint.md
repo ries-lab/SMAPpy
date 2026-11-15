@@ -17,7 +17,7 @@ analysis sits in Render's *Postprocess* menu, mostly as
 | Picasso | in SMAPpy |
 | --- | --- |
 | link, dark times (0.11.3's convention) | `group.py`, *Blinking* -- the same convention |
-| pick kinetics, qPAINT, influx calibration | *Binding kinetics*, *Summarize/qPAINT* (ML dark time, censored) |
+| pick kinetics, qPAINT, influx calibration | *Binding kinetics*, *DNA-PAINT/qPAINT* (ML dark time, censored) |
 | frame analysis (sticky sites) | values of *Binding kinetics* for *Filter ROIs*; not yet a cluster filter |
 | pick similar | *Segment regions*' *like examples* |
 | show trace, select picks by trace | *Binding kinetics*' trace in the ROI manager |
@@ -165,8 +165,15 @@ kinetics* per molecule and *qPAINT* -- the workflow as one step, and a batch.
 | 2 | *Molecular mapping*, `smappy/molecules.py` | G5M splits an origami cluster into its 12 sites, each within 2 nm; two molecules resolved from 7 nm at 3 nm precision |
 | 3 | *SPINNA*, `smappy/spinna.py` | 30 % dimers fitted 30-40 % (bootstrap error 4 %); labelling efficiency to 0.01 |
 | 4 | *Fiducials*, *markers* = structures, *markers from* an id column | origami round 1.5 nm rms, binding-site round 0.2 nm |
-| 5 | `dna_paint.chain.yaml`, *Workflow/DNA-PAINT* | drifting origami to 818 of 823 molecules |
+| 5 | `dna_paint.chain.yaml`, *DNA-PAINT/Workflow* | drifting origami to 818 of 823 molecules |
 | 6 | Picasso writer (`len`, `n`, the metadata list); *Remove Localizations*' *binding-event edges* (the fitters' *temporal median* was built and removed, above) | cores' photons within 0.5 % |
+
+**Where they are** (2026-11-15): the DNA-PAINT-specific plugins have a group
+of their own, *Analysis/DNA-PAINT* -- *Binding kinetics*, *qPAINT*,
+*Molecular mapping*, *SPINNA* and the *Workflow* chain.  The general tools
+with a DNA-PAINT option stay where they are: *Find clusters* (local maxima,
+frame analysis), *Fiducials* (structures as markers), *Remove Localizations*
+(binding-event edges).
 
 Departures from Picasso are in each module's docstring and each page's *In
 detail*; the details of each step in its commit.  Not ported from SPINNA:

@@ -16,7 +16,7 @@ constant rate -- what the ROI manager shows while Up and Down step through
 the ROIs and Space un-ticks the bad ones.  A row keeps the events (a few
 hundred numbers) so that figure comes back without measuring again.
 
-*qPAINT* (`Analysis/Regions/Summarize/qPAINT`) reads the regions' results:
+*qPAINT* (`Analysis/DNA-PAINT/qPAINT`) reads the regions' results:
 the bright and dark times pooled over them, the qPAINT index per region,
 and the influx calibrated on regions of known site number (an ROI keyword),
 which turns every index into sites.
@@ -34,7 +34,7 @@ from .. import binding_kinetics as bk
 from .blinking import _localizations
 from .roi import EVALUATION_HELP, SiteAnalysisPlugin, auto_only
 
-PATH = "Analysis/Measure/Binding kinetics"
+PATH = "Analysis/DNA-PAINT/Binding kinetics"
 TIME_AXES = (("frames", "frames"), ("seconds", "seconds"))
 
 
@@ -169,7 +169,7 @@ def _seconds(settings: BindingKineticsSettings, locs) -> Optional[float]:
     return settings.frame_time_ms or table_frame_time(locs)
 
 
-@register("Analysis/Measure/Binding kinetics")
+@register("Analysis/DNA-PAINT/Binding kinetics")
 class BindingKinetics(Plugin):
     """A site's time trace and binding events: bright and dark times, the
     qPAINT index and, with an influx, its binding sites; values to curate
@@ -341,7 +341,7 @@ class QpaintSettings:
                                     help="auto: calibrated here; set to use a known one")
 
 
-@register("Analysis/Regions/Summarize/qPAINT")
+@register("Analysis/DNA-PAINT/qPAINT")
 class Qpaint(SiteAnalysisPlugin):
     """qPAINT over the regions: their bright and dark times pooled, the
     influx calibrated on regions of known site number, and the sites of

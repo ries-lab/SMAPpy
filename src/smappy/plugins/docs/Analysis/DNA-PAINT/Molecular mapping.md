@@ -35,11 +35,11 @@ The molecules come out as **a new file**, a molecule per row, with its
 position, the precision of it (`xy_err_nm`), its localizations and binding
 events: they render, filter and measure like localizations, so
 [Spatial statistics](plugin:Analysis/Measure/Spatial statistics),
-[SPINNA](plugin:Analysis/Measure/SPINNA) or
+[SPINNA](plugin:Analysis/DNA-PAINT/SPINNA) or
 [Register layers](plugin:Analysis/Register/Register layers) (for RESI's
 imaging rounds) run on them.  Or, with *output* set to the localizations,
 each localization gets its molecule's number, `molecule_id`, so
-[Binding kinetics](plugin:Analysis/Measure/Binding kinetics) or
+[Binding kinetics](plugin:Analysis/DNA-PAINT/Binding kinetics) or
 [Id statistics](plugin:Analysis/Measure/Id statistics) can measure each
 molecule.
 

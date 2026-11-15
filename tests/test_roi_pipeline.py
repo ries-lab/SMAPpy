@@ -46,14 +46,16 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Remove double ROIs",
                           "Analysis/Regions/Centre ROIs",
                           "Analysis/Regions/Average ROIs",
-                          "Analysis/Regions/Molecular mapping",
                           "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/Curves",
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
-                          "Analysis/Regions/Summarize/qPAINT",
-                          "Analysis/Regions/Workflow/NPC Analysis",
-                          "Analysis/Regions/Workflow/DNA-PAINT"}
+                          "Analysis/Regions/Workflow/NPC Analysis"}
+    # the DNA-PAINT plugins have a group of their own
+    assert set(plugins.refs("Analysis/DNA-PAINT/")) == {
+        "Analysis/DNA-PAINT/Binding kinetics", "Analysis/DNA-PAINT/qPAINT",
+        "Analysis/DNA-PAINT/Molecular mapping", "Analysis/DNA-PAINT/SPINNA",
+        "Analysis/DNA-PAINT/Workflow"}
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
     assert found["Analysis/Measure/NPC Corners"].per_region
@@ -332,7 +334,8 @@ def app():
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(per_region=True)
-    assert sorted(tree.refs) == ["Analysis/Measure/Binding kinetics",
+    assert sorted(tree.refs) == ["Analysis/DNA-PAINT/Binding kinetics",
+                                 "Analysis/DNA-PAINT/SPINNA",
                                  "Analysis/Measure/Blinking",
                                  "Analysis/Measure/Circle fit",
                                  "Analysis/Measure/Cluster shape",
@@ -340,7 +343,6 @@ def test_the_evaluation_window_offers_only_evaluators(app):
                                  "Analysis/Measure/Line Profile",
                                  "Analysis/Measure/Localization Statistics",
                                  "Analysis/Measure/NPC Corners",
-                                 "Analysis/Measure/SPINNA",
                                  "Analysis/Measure/Spatial statistics",
                                  "Analysis/Measure/Stability",
                                  "Analysis/Tracking/Tracking analysis"]
