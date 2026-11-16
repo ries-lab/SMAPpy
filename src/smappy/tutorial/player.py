@@ -88,10 +88,18 @@ STANDALONE = ('<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n'
               '<meta name="viewport" content="width=device-width, initial-scale=1">\n')
 
 
+#: what a tutorial's pictures show, unless its module says otherwise
+#: (``DATA``): every storyboard runs on simulated data, so anyone can rebuild
+#: it, and a picture that looks like a measurement must not pass for one
+SIMULATED = "simulated data"
+
+
 def write(out: Path, steps: List[dict], title: str, description: str = "",
-          size=(1600, 900)) -> Path:
+          size=(1600, 900), data_note: str = SIMULATED) -> Path:
     """The page, ``index.html``, beside the screenshots in ``out``, and
-    ``tutorial.json`` saying what it is, for the index (`write_index`)."""
+    ``tutorial.json`` saying what it is, for the index (`write_index`).
+    ``data_note`` is written in a corner of every frame, the video's too;
+    empty for none."""
     out = Path(out)
     steps = timing(steps)
     data = json.dumps({"title": title, "description": description,
@@ -99,6 +107,8 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
     page = STANDALONE + (_PAGE.replace("__TITLE__", html.escape(title))
                  .replace("__VOICE_LEAD__", str(VOICE_LEAD))
                  .replace("__DESCRIPTION__", html.escape(description))
+                 .replace("__DATA_NOTE__", html.escape(data_note))
+                 .replace("__DATA_HIDDEN__", "" if data_note else " hidden")
                  .replace("__DATA__", data.replace("</", "<\\/")))
     (out / "index.html").write_text(page, encoding="utf-8")
     (out / "subtitles.vtt").write_text(vtt(steps), encoding="utf-8")
@@ -417,6 +427,12 @@ header a.kicker:hover { color: var(--accent-ink); }
 .figure .faint-text { fill: var(--muted); }
 .figure .roi-text { fill: var(--roi); font-weight: 600; }
 
+/* what the pictures are, in a corner of every frame: above the zoom, so it
+   never moves, and above the cards */
+.data-note { position: absolute; top: 14px; right: 18px; z-index: 5;
+             font-family: var(--mono); font-size: 17px; letter-spacing: .06em;
+             text-transform: uppercase; color: #fff; background: rgba(160,60,0,.82);
+             border-radius: 6px; padding: 5px 12px; pointer-events: none; }
 .caption { position: absolute; left: 0; right: 0; bottom: 0; display: none;
            padding: 18px 120px 26px; text-align: center; font-size: 30px; line-height: 1.35;
            color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.78) 30%); }
@@ -486,6 +502,7 @@ body.recording .card .panel-box { max-height: 690px; }
         <div class="body" id="cardBody"></div>
         <div class="figure" id="cardFigure"></div>
       </div></div>
+      <div class="data-note" id="dataNote"__DATA_HIDDEN__>__DATA_NOTE__</div>
       <div class="caption" id="caption"></div>
     </div>
   </div>

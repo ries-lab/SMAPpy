@@ -40,7 +40,10 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 * Aimed at lab members who know SMLM; a short reminder of a concept
   (merging blinks, the selection) is welcome, a lecture is not.
-* Simulated data, so anyone can follow along.
+* Simulated data, so anyone can follow along -- and said to be: every
+  frame carries "simulated data" in a corner (`player.SIMULATED`, a
+  module's `DATA` to say more), and a tutorial whose data looks like a
+  measurement says so in its words too.  (Jonas Ries, 2026-11-16)
 * Menus and shortcuts are mentioned as the alternative to the tabs.
   (Jonas Ries, 2026-09-24)
 * Only what is true of the program now: the storyboard drives the real GUI,

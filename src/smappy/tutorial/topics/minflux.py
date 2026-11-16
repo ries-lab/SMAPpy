@@ -23,6 +23,8 @@ DESCRIPTION = ("Where SMAPpy's MINFLUX tools are, the words abberior uses, and a
                "first analysis: the sequence, its quality, traces, steps, and two "
                "measurements compared.")
 
+# a .msr that looks like one from the instrument: say on every frame that it is not
+DATA = "simulated data, not a measurement"
 _FILE = "kinesin.msr"
 _PATTERN = r"(?P<ATP_uM>\d+)uM"
 
@@ -142,10 +144,13 @@ def make(d) -> None:
            "<p><b>Analysis, Tracking</b>: traces, from any method: their "
            "statistics, their steps, one trace up close.</p>"
            "<p><b>Regions</b>: the numbers per trace, compared between "
-           "measurements.</p>",
+           "measurements.</p>"
+           "<p>The file here is <b>simulated</b>: motors stepping 8 nm, so the "
+           "answers are known.</p>",
            say="MINFLUX files open from the File menu. The tools are in three "
                "places: MINFLUX for what only MINFLUX has, Tracking for traces, "
-               "and Regions to compare.")
+               "and Regions to compare. The data is simulated, so the answers "
+               "are known.")
     d.card("Words abberior uses", _words(),
            say="A few of abberior's words, which the plugins use too: "
                "iteration, sequence, trace, efo, cfr, thread and MBM.")
@@ -158,8 +163,8 @@ def make(d) -> None:
     d.settle()
     d.place(dialog, 80, 90)
     d.settle()
-    d.shot("Opening an .msr asks which parts to read. Here two measurements of "
-           "motors, one at high and one at low ATP.",
+    d.shot("Opening an .msr asks which parts to read. This simulated file holds "
+           "two measurements of motors, one at high and one at low ATP.",
            spot=[dialog.tree], zoom=d.around(dialog, 1000))
     d.shot("Beside it, the selected measurement's sequence: what the instrument "
            "did in each iteration.",

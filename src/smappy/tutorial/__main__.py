@@ -26,7 +26,8 @@ def build(topic: str, out: Path, video: bool = False,
         from .voice import narrate
         narrate(target, steps, voice)
     page = player.write(target, steps, module.TITLE,
-                        getattr(module, "DESCRIPTION", ""), director.size)
+                        getattr(module, "DESCRIPTION", ""), director.size,
+                        getattr(module, "DATA", player.SIMULATED))
     if video:
         player.record(target, director.size)
     return page

@@ -156,3 +156,10 @@ def test_the_script_numbers_the_steps_as_the_page_does():
     text = player.script(steps, "The tour")
     assert "## Start" in text and "**1.** *card:* **Hello**" in text
     assert "> One" in text and "> - a" in text and "**2.** Click Run." in text
+
+
+def test_every_frame_says_the_data_is_simulated_unless_a_tutorial_says_otherwise(tmp_path):
+    page = player.write(tmp_path, [_step("one")], "Title").read_text()
+    assert '<div class="data-note" id="dataNote">simulated data</div>' in page
+    page = player.write(tmp_path, [_step("one")], "Title", data_note="").read_text()
+    assert 'id="dataNote" hidden>' in page
