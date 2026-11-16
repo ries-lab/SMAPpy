@@ -2851,6 +2851,15 @@ so the twin of the learnt pupil may lie outside it.  Both stacks were learnt bot
 
 Both stacks agree with the images: the stage z runs as the code assumes.
 
+**What the twin test's preference is** (`twin_check.py`, written after the stage's direction, not yet run).  The test
+starts from the twin with the focus kept and then learns everything again -- the pupil, σ, the focus and every
+height, with no bound at the coverslip -- so "prefer twin" can be a deeper optimum any restart would find, the twin
+absorbing a wrong depth model with heights below the glass, or a better twin.  The script refits each saved in situ
+model four ways on the used molecules (from the learnt pupil and from its twin, the focus free and held), reports
+each fit's optimum, low orders, focus, heights below 0 and edge, and scores every fit on the unseen molecules,
+saved for `score_by_height.py`.  On a simulated movie with the true pupil the twin start loses by 130 nats and its
+heights' edge sits 143 nm above the glass.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```
