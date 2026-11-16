@@ -139,6 +139,43 @@ def test_figures_and_the_picture_come_back_as_png(tmp_path):
         a.call("figure", {"result": "r999"})
 
 
+def test_held_bytes_counts_an_array_once_through_views_and_closures_not_the_shared():
+    from smappy.assistant.tools import held_bytes
+    big = np.zeros(1_000_000)                  # 8 MB
+    view = big[::2]
+
+    def draw():
+        return big.sum() + view.sum()
+    result = {"plot": draw, "parts": [view, big[10:]], "small": np.zeros(10)}
+    assert held_bytes(result) == big.nbytes + 80
+    assert held_bytes(result, shared={id(big)}) == 80
+
+
+def test_heavy_results_are_let_go_past_the_memory_limit_and_can_be_forgotten(
+        tmp_path, monkeypatch):
+    """Issue #172: fifty kept PSF calibrations, gigabytes each, took a GUI to
+    71 GB.  Results are held to MAX_RESULT_BYTES, the newest always kept."""
+    from smappy.assistant import tools
+    a = simulated(tmp_path)
+    monkeypatch.setattr(tools, "held_bytes", lambda result, shared=(): 2 ** 30)
+    ids = [a.call("run_plugin", {"path": STATISTICS})["result"] for _ in range(4)]
+    assert [k.id for k in a.results] == ids[-2:]          # 2 GB: two of 1 GB
+    with pytest.raises(ToolError, match="let go.*run it again"):
+        a.call("figure", {"result": ids[0]})
+    state = a.call("session_state", {})
+    assert state["results_kept"]["n"] == 2
+    assert state["results_kept"]["memory_mb"] == 2048
+    with pytest.raises(ToolError, match="no kept result r999"):
+        a.call("forget_results", {"results": ["r999"]})
+    gone = a.call("forget_results", {"results": [ids[-2]]})
+    assert gone["forgotten"] == [ids[-2]] and gone["freed_mb"] == 1024
+    assert a.call("forget_results", {})["kept_n"] == 0
+    monkeypatch.setattr(tools, "held_bytes", lambda result, shared=(): 5 * 2 ** 30)
+    one = a.call("run_plugin", {"path": STATISTICS})["result"]
+    assert [k.id for k in a.results] == [one]            # over the limit, still kept
+    assert a.call("figure", {"result": one}).png.startswith(b"\x89PNG")
+
+
 def test_a_chain_is_validated_tried_and_saved_where_the_tree_finds_it(tmp_path,
                                                                     monkeypatch):
     a = simulated(tmp_path)
