@@ -2851,7 +2851,7 @@ so the twin of the learnt pupil may lie outside it.  Both stacks were learnt bot
 
 Both stacks agree with the images: the stage z runs as the code assumes.
 
-**What the twin test's preference is** (`twin_check.py`, written after the stage's direction, not yet run).  The test
+**What the twin test's preference is** (`twin_check.py`, written after the stage's direction).  The test
 starts from the twin with the focus kept and then learns everything again -- the pupil, σ, the focus and every
 height, with no bound at the coverslip -- so "prefer twin" can be a deeper optimum any restart would find, the twin
 absorbing a wrong depth model with heights below the glass, or a better twin.  The script refits each saved in situ
@@ -2859,6 +2859,72 @@ model four ways on the used molecules (from the learnt pupil and from its twin, 
 each fit's optimum, low orders, focus, heights below 0 and edge, and scores every fit on the unseen molecules,
 saved for `score_by_height.py`.  On a simulated movie with the true pupil the twin start loses by 130 nats and its
 heights' edge sits 143 nm above the glass.
+
+*It is not the runs' own test.*  Inside `calibrate_insitu`, `twin_fit` is different in three ways.  It compares
+on the units the last round chose and rejection kept: 1558 of the first model's 1777, with an optimum of
+411 190.  It localises the twin from each unit's widths (`width_starts`).  And it keeps the round model's
+Gaussian prior on the focus from the edge.  The saved model keeps none of this.  The bead table lists units by
+position alone, and positions repeat (1134 distinct among 1777).  The `start_edge` models hold their focus
+fixed instead of keeping the prior.  So the refits below are the same test on the movie's 1777 *used* units,
+from fixed heights.  The run's own optimum cannot be set beside A, and "had the run converged" stays open.
+For the two `start_edge` models the focus is held, so C and D would repeat B and A and were not run.  Results
+are in `m2_pairs_followup.jsonl`, ``kind`` ``twin_check`` and ``score_by_height``.
+
+| model (the run's twin verdict) | fit | optimum | focus | below 0 | edge (nm) | Z6 | Z11 | Z22 | unseen, per molecule |
+|---|---|---|---|---|---|---|---|---|---|
+| `insitu_start_edge_n1345_ab_n1345` (prefer twin, 867) | A | 520 417 | 682 | 1.1 % | +22 | +74.7 | +54.6 | +33.6 | 288.779 |
+| | B | 521 519 | 682 | 28.4 % | −113 | −56.5 | +13.2 | +10.5 | 288.822 |
+| `insitu_start_o6_edge_n1345_ab_n1345` (prefer twin, 1467) | A | 520 044 | 537 | 2.5 % | +348 | +61.4 | +31.7 | +12.5 | 290.442 |
+| | B | 520 583 | 537 | 41.4 % | −191 | −53.7 | +9.9 | +8.7 | 288.980 |
+| `insitu_ab` (prefer twin, 1258) | A | 520 541 | 1062 | 1.1 % | +614 | +83.6 | +82.2 | +52.7 | 289.073 |
+| | B | 517 692 | 1029 | 0.4 % | +66 | −63.6 | +18.0 | +6.6 | 289.576 |
+| | D | 520 544 | 1052 held | 1.1 % | +175 | +83.4 | +81.8 | +52.5 | 289.008 |
+| | C | 517 702 | 1052 held | 0.3 % | +78 | −64.1 | +18.8 | +6.9 | 290.006 |
+
+- *B − A* is **+1102** and **+539 nats** for the two n = 1.345 models: on these units the twin loses.  For
+  `insitu_ab` (n 1.33, the focus free) it is **−2849**, and C − D is **−2841**: holding the focus takes nothing
+  from the twin's lead.
+- *Below the glass.*  The n = 1.345 twins put 28 % and 41 % of their heights below 0, with the edge 113 and
+  191 nm under the glass.  Even with that freedom they lose.  `insitu_ab`'s twin keeps its heights physical
+  (edge +66 nm).  It is its *learnt* geometry that is not: the heights' lower edge is 614 nm above the glass
+  (175 nm with the focus held), and the 5th percentile is 245 nm.
+- *Unseen molecules* (223 held out, 4105 not drawn).  B − A is +0.04 nats per molecule for the first model, a
+  tie.  It is −1.46 for the order-6 model, which wins on the units it did not learn from.  It is +0.50 for
+  `insitu_ab` (C − D +1.00): its 2.8 k win does not carry over.
+- *Per height* (`score_by_height.py`, B against A, by A's height, unseen molecules).  The twin wins deep in
+  every model: −4.1 ± 0.6, −4.9 ± 0.8 and −3.7 ± 0.6 nats per molecule at 800-1000 nm (the first two) and
+  1000-1200 nm (`insitu_ab`).  Where most molecules lie it is close: −0.8 ± 0.2 at 200-400 nm for the first,
+  −1.6 and −1.1 at 200-600 nm for the order-6 model, −1.2 ± 0.1 at 400-600 nm for `insitu_ab`.  Near the glass
+  it does not win: at 0-200 nm it is +1.6 ± 4.8 and +7.2 ± 4.5 (`insitu_ab` has 3 molecules there).  At
+  600-800 nm the bin is noisy: −0.6 ± 0.4, +0.9 ± 1.6, and +3.4 ± 3.3 (+4.8 held), the last driven by a few
+  outliers.  Holding the focus changes no bin by more than its error.
+- *B is not a twin of A.*  Astigmatism changes sign (Z6 +74.7 → −56.5, +61.4 → −53.7, +83.6 → −63.6), but the
+  radially symmetric modes do not follow.  Z11 goes +54.6 → +13.2, +31.7 → +9.9 and +82.2 → +18.0, where a twin
+  would be −54.6, −31.7 and −82.2, and Z22 drops to 7-11 nm in all three.  Coma stays, but smaller in the first
+  two (Z8 48.9 → 25.4, 25.4 → 17.8).  Every B lands in the same place: Z6 −54 to −64, Z11 +10 to +18, σ 40-42 nm.
+  That is a pupil of its own, with small spherical aberration and the opposite astigmatism, not the mirror of
+  each run.
+
+*Verdict.*  None of the three explanations fits cleanly, and the runs' "prefer twin" does not survive this
+refit.  With the run's index of 1.345, the twin does not win on the units it learnt from.  It comes close only
+by moving a third of the molecules below the glass, so it is the twin cheating on depth, made to look like a
+preference by the run's own procedure (its kept units, the width starts, the focus prior).  With n 1.33
+(`insitu_ab`) the twin wins on the learnt units with physical heights.  But it loses on unseen molecules, and
+the model it beats has its heights 600 nm off the glass: the learnt geometry is what is wrong.  In every model
+the twin's advantage on unseen molecules lies deep, above 800 nm, as the in situ pupils' own advantage over the
+stack's does (the follow-up's score per height).  The twin is one more pupil that absorbs depth, not a better
+pupil.  The low orders all runs learn (Z6 > 0, Z11 > 0) stand.
+
+*The test needs the coverslip bound.*  A twin that may put molecules below the glass is not the same model as
+the one it is compared with, which the rounds keep above it (`below_coverslip`, the edge's prior).  Proposed for
+`twin_fit`, not made here (a library change, with tests):
+1. Give the twin's heights the rounds' bound: no height below the edge by more than `below_coverslip_sd`
+   standard deviations, the edge taken from the learnt run's.  Or, simpler, a lower bound at
+   0 − `edge_max_sd_nm` on ``emitter.xyz``'s z in the twin's specs.
+2. Keep the learnt run's focus prior in the twin's model, rather than whatever the saved model holds.
+3. Record the units and starts the test used with the calibration, so that a saved model can be tested again.
+
+The 867-1467 nats the runs report would then be measured between two models with the same geometry.
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

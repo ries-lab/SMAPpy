@@ -25,6 +25,14 @@ molecules localised on its start pupil from `start_heights`, then everything the
 * ``A``: from the learnt pupil;      ``B``: from its twin (`twin`, `twin_model`), as `twin_fit` does;
 * ``D``: A with the focus held;      ``C``: B with the focus held at the learnt one.
 
+A model that holds its focus (taken from the coverslip's edge: the ``start_edge`` runs) learns it in none of
+these, so C and D would repeat B and A and are left out.
+
+**Not the run's own test.**  `twin_fit` inside `calibrate_insitu` compares on the units the last round chose
+and rejection kept (1558 of the first model's 1777; its optimum 411 190 against A's 520 417 here), localises the
+twin from each unit's widths (`width_starts`), and keeps the round model's prior on the focus.  None of that is
+in the saved model: these fits are the same test on the movie's *used* units, from fixed heights.
+
 Reported per fit: the optimum (½ deviance + priors) and B − A, C − D; the low orders in nm (Z5-Z22) with the
 astigmatism's sign; the focus; the heights' 5/50/95 % and the share below 0 and below −100 nm; the heights'
 lower edge (`coverslip_edge`) and its spike.  Then each fit's pupil scores the *held out* and *not drawn*
@@ -105,6 +113,7 @@ def main():
     from smappy.calibrate.insitu_run import movie_rois
     from smappy.calibrate.pupil import load_start
 
+    from uipsf.device import on_model_device
     from uipsf.workflows.insitu import twin, twin_model
 
     rois = movie_rois(sorted(glob.glob(os.path.join(ROOT, MOVIE))))
@@ -118,12 +127,16 @@ def main():
         model = m.model
         dtype = model.channels[0].psf.grid.rho.dtype
         batch, noise = rois.batch(ids=used)
-        batch = batch.to(dtype=dtype)
+        batch = on_model_device(batch.to(dtype=dtype), model)       # the model loads on the fastest device
         learnt = {k: torch.as_tensor(v) for k, v in m.shared.items()}
         mirrored_model, mirrored = twin_model(model), twin(model, learnt)
+        # a model whose focus is held (from the coverslip's edge) learns it in no fit: C would be B and D A
+        focus_free = bool(getattr(model.geometry, "fit_focus", True))
+        plan = {"A": (model, learnt, False), "B": (mirrored_model, mirrored, False)}
+        if focus_free:
+            plan.update(D=(model, learnt, True), C=(mirrored_model, mirrored, True))
         fits = {}
-        for label, (mdl, start, hold) in {"A": (model, learnt, False), "B": (mirrored_model, mirrored, False),
-                                          "D": (model, learnt, True), "C": (mirrored_model, mirrored, True)}.items():
+        for label, (mdl, start, hold) in plan.items():
             print(f"{name}: fit {label} ...", flush=True)
             fit = refit(mdl, start, batch, noise, hold_focus=hold)
             fits[label] = (mdl, fit, summary(mdl, fit, a.wavelength))
@@ -131,8 +144,11 @@ def main():
         print(f"\n{name}  (learnt focus {float(learnt['geometry.focus']):.0f} nm)")
         print(f"  B - A (twin, all free):    {rows['B']['objective'] - rows['A']['objective']:+10.1f} nats "
               f"(negative: the twin wins)")
-        print(f"  C - D (twin, focus held):  {rows['C']['objective'] - rows['D']['objective']:+10.1f} nats")
-        for label in "ABDC":
+        if focus_free:
+            print(f"  C - D (twin, focus held):  {rows['C']['objective'] - rows['D']['objective']:+10.1f} nats")
+        else:
+            print("  C, D: the model holds its focus, so C = B and D = A")
+        for label in rows:
             r = rows[label]
             print(f"  {label}: objective {r['objective']:.1f}  focus {r['focus_nm']:.0f}  σ {r['sigma_nm']}  "
                   f"heights {r['heights_p5_50_95']}  below 0 {r['below_0']:.1%}, below -100 {r['below_minus100']:.1%}"
@@ -140,7 +156,7 @@ def main():
             print(f"     {r['phase_nm']}")
         # each fit's pupil on the molecules none learnt from, saved for score_by_height.py
         unseen_batch, unseen_noise = rois.batch(ids=unseen)
-        unseen_batch = unseen_batch.to(dtype=dtype)
+        unseen_batch = on_model_device(unseen_batch.to(dtype=dtype), model)
         table = unit_table(rois, unseen)
         for label, (mdl, fit, r) in fits.items():
             shared = shared_of(fit)
@@ -150,12 +166,12 @@ def main():
             r["unseen_half_deviance_mean"] = float(np.mean(found["half_deviance"]))
             print(f"  {label}: unseen molecules ½Σdeviance {r['unseen_half_deviance_mean']:.3f} per molecule -> "
                   f"{path(a.out, tag)}", flush=True)
-        print(f"  unseen, B - A: {rows['B']['unseen_half_deviance_mean'] - rows['A']['unseen_half_deviance_mean']:+.3f}"
-              f", C - D: {rows['C']['unseen_half_deviance_mean'] - rows['D']['unseen_half_deviance_mean']:+.3f} "
-              "nats per molecule")
+        delta = {k: rows[k]["unseen_half_deviance_mean"] for k in rows}
+        print(f"  unseen, B - A: {delta['B'] - delta['A']:+.3f}" + (f", C - D: {delta['C'] - delta['D']:+.3f}"
+                                                                 if focus_free else "") + " nats per molecule")
         if a.json:
             with open(a.json, "a") as f:
-                f.write(json.dumps(dict(kind="twin_check", model=name, molecules=int(len(used)),
+                f.write(json.dumps(dict(kind="twin_check", model=name, molecules=int(len(used)), focus_free=focus_free,
                                         learnt_focus_nm=float(learnt["geometry.focus"]), fits=rows)) + "\n")
 
 
