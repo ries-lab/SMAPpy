@@ -263,7 +263,9 @@ Ported from SMAP's StepsMINFLUX and MINFLUXStepsAnalyze (Ries 2020).
 * Rojewski A, Schweiger M, Sgouralis I, Comstock M, Pressé S (2024).  An
   accurate probabilistic step finder for time-series analysis.  *Biophys
   J*.  [doi:10.1016/j.bpj.2024.01.008](https://doi.org/10.1016/j.bpj.2024.01.008)
-  -- BNP-Step.
+  -- BNP-Step; preprint
+  [doi:10.1101/2023.09.19.558535](https://doi.org/10.1101/2023.09.19.558535),
+  code [LabPresse/bnp-step](https://github.com/LabPresse/bnp-step).
 * Kerssemakers JWJ et al. (2006).  Assembly dynamics of microtubules at
   molecular resolution.  *Nature* 442, 709-712.
   [doi:10.1038/nature04928](https://doi.org/10.1038/nature04928)

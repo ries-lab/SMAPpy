@@ -67,9 +67,8 @@ built since, each with tests, a page and a `--slow` run:
 * Id columns: -1 is "in none" everywhere, so trace 0 is a region; a file's
   ids kept apart from the table's (`tid_file`).
 
-Open for the user: a filter range drops NaN, so a cfr bound cannot be set
-where cfr is measured once a trace -- should a bound be able to let NaN
-through?  bnp-step's licence.  Real two-thread data to test the pairing
+Open for the user: bnp-step's MIT licence file in the authors' repository
+(the port, `smappy/bnp_steps.py`, is merged; *Find steps*' *method*).  Real two-thread data to test the pairing
 and the per-thread precision on.  Not done: the pooled consecutive-pair
 mode in *Localization precision*, MINFLUXStepsAnalyze's hypoexponential
 fits, manual step editing, MINFLUX plugins in the
