@@ -96,18 +96,6 @@ inside every wheel and source distribution**.  The ports, as of this writing:
 The plan is `docs/dna-paint.md`; each method's own paper is cited on its
 plugin's page.
 
-## Ported: BNP-Step (MIT, pending)
-
-`smappy/bnp_steps.py` is a port of the Gibbs sampler of
-[BNP-Step](https://github.com/LabPresse/bnp-step) (Rojewski et al.,
-*Biophys. J.* 2024, [doi:10.1016/j.bpj.2024.01.008](https://doi.org/10.1016/j.bpj.2024.01.008)),
-by Alex Rojewski and the Pressé lab: the same model and conditional draws,
-written again over prefix sums and batched over traces (the module's
-docstring says where it departs).  The authors have said it will be MIT
-licensed; their repository carries no licence yet (checked at c8c6621).
-Until it does this port is not released; once it does, its licence goes in
-`src/smappy/data/licenses/bnp-step.txt` beside Picasso's.
-
 ## Dependencies
 
 Dependencies are separate works and remain subject to their own licenses. They

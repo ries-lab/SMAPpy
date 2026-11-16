@@ -4,9 +4,8 @@ pooled step sizes and dwell times, and MotorPAINT's steps as a file.
 
 Per trace (an id column: MINFLUX's ``tid``, a linked ``track_id``) the
 position along the track (the trace turned onto its long axis, forward in
-time, `traces.rotate`) or along x or y is fitted with AutoStepFinder
-(`smappy.steps`) or BNP-Step (`smappy.bnp_steps`, every trace in one
-batched sampler), optionally split and merged to an expected step size.
+time, `traces.rotate`) or along x or y is fitted with AutoStepFinder,
+optionally split and merged to an expected step size (`smappy.steps`).
 The per-trace numbers are a region table; the pooled step sizes and dwell
 times are drawn and summarised.
 """
@@ -22,9 +21,6 @@ from .id_statistics import _id_choices, id_column
 
 LABEL = "Find steps"
 ALONG = (("track", "along the track"), ("x", "x"), ("y", "y"))
-METHODS = (("autostepfinder", "AutoStepFinder"), ("bnp", "BNP-Step (Bayesian)"))
-#: traces sampled together by BNP-Step: memory is (traces, steps, steps)
-BNP_BATCH = 128
 OUTPUTS = (("table", "region table"), ("columns", "plateaus on the localizations"),
            ("file", "steps as a file"))
 
@@ -37,14 +33,6 @@ class FindStepsSettings:
                        help="the track's long axis (turned forward in time), or x or y")
     min_locs: int = param(20, label="at least", unit="localizations", min=4,
                           help="shorter traces are passed over")
-    method: str = param("autostepfinder", label="method", choices=METHODS,
-                        help="AutoStepFinder: greedy fit and S-score, fast; BNP-Step: the "
-                             "number of steps learned by Bayesian sampling, slower")
-    sweeps: int = param(400, label="sweeps", min=20, max=100000, advanced=True,
-                        help="BNP-Step's Gibbs sweeps, from AutoStepFinder's steps")
-    height_nm: float = param(0.0, label="step prior", unit="nm", min=0.0, advanced=True,
-                             help="BNP-Step's prior width of a step; 0: three times each "
-                                  "trace's noise")
     threshold: float = param(0.15, label="threshold", min=0.0, max=10.0, advanced=True,
                              help="AutoStepFinder accepts a round whose S-score peaks above "
                                   "this")
@@ -67,7 +55,7 @@ class FindStepsSettings:
 
 @register("Analysis/Tracking/Find steps")
 class FindSteps(Plugin):
-    """The steps of every trace (AutoStepFinder or BNP-Step, split and merge): step
+    """The steps of every trace (AutoStepFinder, split and merge): step
     sizes and dwell times per trace and pooled, as a region table, on the
     localizations, or as a file of the plateaus."""
 
@@ -76,8 +64,7 @@ class FindSteps(Plugin):
     grouping = "ungrouped"
     # 2: pairs -- both threads of a pair in the first one's frame
     # 3: the dwell models fitted by likelihood, compared by AIC
-    # 4: BNP-Step as a second method
-    version = "4"
+    version = "3"
 
     def changes_locs_for(self, settings: FindStepsSettings) -> bool:
         return settings.output != "table"
@@ -90,11 +77,6 @@ class FindSteps(Plugin):
             found = next((c for c in AUTO_IDS if c in ctx.locs), "")
             state.choices["id_column"] = ([("", f"auto ({found})" if found else "auto")]
                                           + [(c, c) for c in integer_columns(ctx.locs)])
-        bnp = settings.method == "bnp"
-        for name in ("threshold", "overshoot"):
-            state.active[name] = not bnp
-        for name in ("sweeps", "height_nm"):
-            state.active[name] = bnp
         return state
 
     def run(self, ctx: Context, settings: FindStepsSettings) -> Result:
@@ -138,30 +120,6 @@ class FindSteps(Plugin):
         rows_file = []
         next_plateau = 1
         by_thread = {}                      # pairs: per thread, the median |step| per pair
-
-        def pieces():
-            """Each trace's (and, for pairs, thread's) points: (i, thread, mask)."""
-            for i in np.flatnonzero(long_enough):
-                sl = slice(r.start[i], r.start[i] + r.n[i])
-                for th in (np.unique(thread[sl]) if pairs else np.zeros(1, np.int64)):
-                    sub = (thread[sl] == th) & np.isfinite(coord[sl])
-                    if sub.sum() >= settings.min_locs // (2 if pairs else 1):
-                        yield i, int(th), coord[sl][sub]
-
-        sampled = {}
-        if settings.method == "bnp":
-            from ..bnp_steps import bnp_steps
-            todo = sorted(pieces(), key=lambda p: len(p[2]))   # alike lengths batched: less padding
-            for start in range(0, len(todo), BNP_BATCH):
-                if ctx.stopped:
-                    break
-                ctx.report(f"BNP-Step: traces {start + 1}-"
-                           f"{min(start + BNP_BATCH, len(todo))} of {len(todo)}")
-                chunk = todo[start:start + BNP_BATCH]
-                res = bnp_steps([p[2] for p in chunk], sweeps=settings.sweeps,
-                                height_sd=settings.height_nm or None, seed=start)
-                for (i, th, _), bound in zip(chunk, res.boundaries):
-                    sampled[(i, th)] = bound
         for i in np.flatnonzero(long_enough):
             if ctx.stopped:
                 break
@@ -173,15 +131,12 @@ class FindSteps(Plugin):
                 if sub.sum() < settings.min_locs // (2 if pairs else 1):
                     continue
                 xi, ti = coord[sl][sub], t[sl][sub]
-                if settings.method == "bnp":
-                    b = sampled.get((i, int(th)), np.zeros(0, np.int64))
-                else:
-                    b = S.autostepfinder(xi, settings.threshold, settings.overshoot,
-                                         stat=settings.stat).boundaries
+                found = S.autostepfinder(xi, settings.threshold, settings.overshoot,
+                                         stat=settings.stat)
+                b = found.boundaries
                 if settings.step_nm > 0 and len(b):
                     b = S.split_merge(xi, b, settings.step_nm, settings.stat)
-                elif len(b) and settings.method != "bnp":
-                    # the sampler's times are already where the data put them
+                elif len(b):
                     b = S.refine(xi, b, settings.stat)
                 tab = S.step_table(xi, ti, b, settings.stat)
                 first = th == threads[0]
