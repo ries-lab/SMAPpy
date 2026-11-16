@@ -2767,6 +2767,15 @@ better):
   - A tilt held at the edge's value (along y) in situ, to see what the pupil does with it.
   - Learning the index per height range, or an index gradient.
 
+**The stage's direction** (`z_direction.py`, written after the follow-up, not yet run).  The twin test prefers the
+mirrored pupil by 800-1500 nats in every M2 in situ run.  That is what a stage z running opposite to the code's
+convention would give: every path takes a larger ``ZPositionUm`` as the objective raised (beads order their planes
+by it, sweeps take z = −(stage z − focus), in situ's focus is the objective's rise above the coverslip), and beads
+and molecules on the glass see no depth, so they would learn the twin without noticing.  The script prints the
+files' z tags and their direction, the sweeps' and bead stacks' spot elongation at the smallest and largest stage
+z, and the elongation of the movie's glass molecules (below the focus, in its first ~2200 frames).  If the
+convention holds, the glass molecules are elongated the opposite way to the spots at the smallest stage z.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```
