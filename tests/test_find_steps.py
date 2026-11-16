@@ -139,3 +139,14 @@ def test_the_dwell_models_pick_the_one_the_dwells_come_from():
     assert m["gamma"]["shape"] == pytest.approx(1, abs=0.12)
     m = S.dwell_models(rng.gamma(3, 10, 2000))
     assert m["gamma"]["shape"] == pytest.approx(3, rel=0.1)
+
+
+def test_bnp_step_finds_the_step_size_without_being_told_it():
+    session = Session(motors())
+    session.show_grouped(0, False)
+    cls = plugins.get(PLUGIN)
+    greedy = session.run(cls(), cls.Settings()).data["pooled"]
+    pooled = session.run(cls(), cls.Settings(method="bnp", sweeps=150)).data["pooled"]
+    assert pooled["step_mean_nm"] == pytest.approx(8.0, abs=1.0)
+    # fewer steps fitted to noise: a narrower spread of sizes than AutoStepFinder's
+    assert pooled["step_sd_nm"] < greedy["step_sd_nm"]
