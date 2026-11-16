@@ -67,9 +67,10 @@ built since, each with tests, a page and a `--slow` run:
 * Id columns: -1 is "in none" everywhere, so trace 0 is a region; a file's
   ids kept apart from the table's (`tid_file`).
 
-Open for the user: a filter range drops NaN, so a cfr bound cannot be set
-where cfr is measured once a trace -- should a bound be able to let NaN
-through?  bnp-step's licence.  Real two-thread data to test the pairing
+* *Find steps*' *method* BNP-Step: bnp-step's sampler ported over prefix
+  sums and batched (`smappy/bnp_steps.py`, MIT, Pressé Lab).
+
+Open for the user: real two-thread data to test the pairing
 and the per-thread precision on.  Not done: the pooled consecutive-pair
 mode in *Localization precision*, MINFLUXStepsAnalyze's hypoexponential
 fits, manual step editing, MINFLUX plugins in the
@@ -100,7 +101,7 @@ ParaFlux (Abberior), pyMINFLUX, minflux-viewer and PYME.
 | **Per-localization steps**: displacement, rolling std, robust z | – | `loc_displacement_*`, `rolling_disp_std` | – | ✗ | D |
 | **Tails** (a trace's start converging) | Tails_analyze: d(n), length, duration, d against photons | adaptive labels (rolling std ≤ 7 nm; static: 3 σ about the centroid of locs 50–75) | ParaFlux maps | ◐ fixed cut by `trace_index` | D |
 | CFR cut after the first violation | – | `cfr_posthoc_filter` (unused) | – | ✗ | D |
-| **Step finding**: steps, dwells, step sizes | StepsMINFLUX (AutoStepFinder, split/merge, refine, manual editing, movie) | bnp-step | – | ✗ | E |
+| **Step finding**: steps, dwells, step sizes | StepsMINFLUX (AutoStepFinder, split/merge, refine, manual editing, movie) | bnp-step | – | ◐ | E |
 | Pooled step analysis: step-size fit, dwell times (Erlang, hypoexponential), velocity | MINFLUXStepsAnalyze | – | – | ✗ | E |
 | Steps as a file, track angle and length as columns | MotorPAINT | – | – | ✗ | E |
 | An ROI per long trace | Segment_singletracks | – | – | ◐ *Segment regions* from an id column; no start-to-end criterion | E |
@@ -165,8 +166,7 @@ This replaces the fixed `trace_index` cut where a fixed cut is wrong.
 (2026-10); it is now asked for.
 * *Find steps*, `per_region` over traces (as ROIs, or a block over `tid`):
   rotation from C, AutoStepFinder re-implemented from the paper (no
-  licence), SMAP's split/merge and refine, and optionally bnp-step if its
-  licence allows.  The per-step tables (level, time, size, dwell, std) are
+  licence), SMAP's split/merge and refine, and BNP-Step (ported, MIT).  The per-step tables (level, time, size, dwell, std) are
   `Result.arrays`; the per-track values go in the region table.
 * A Summarize plugin that is *MINFLUXStepsAnalyze*: a fit of the step
   sizes, dwell-time models (exponential, Erlang n, hypoexponential), and
@@ -223,7 +223,7 @@ This replaces the fixed `trace_index` cut where a fixed cut is wrong.
 * **The sequence maker and creator**, with SimuFLUX: to discuss.
 * **The pattern size's wavelength scaling**: to discuss (A).
 * **Step finders**: both, AutoStepFinder (SMAP's, re-implemented from the
-  paper) and bnp-step (licence to check).
+  paper) and BNP-Step (ported; MIT since 2026-11).
 * **Test data** (asked for, 2026-11-15): a two-colour `.msr` (`thi` and
   DCR), a kinesin stepping measurement, and an m2410 file with every
   iteration.

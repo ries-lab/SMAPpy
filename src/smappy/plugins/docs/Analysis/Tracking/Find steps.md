@@ -1,6 +1,6 @@
 ---
-version: "3"
-covers: [smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
+version: "4"
+covers: [smappy.bnp_steps.bnp_steps, smappy.bnp_steps.noise_sd, smappy.steps.greedy, smappy.steps.s_peak, smappy.steps.fit_from, smappy.steps.autostepfinder, smappy.steps.refine, smappy.steps.split_merge, smappy.steps.step_table, smappy.steps.erlang_shape, smappy.steps.dwell_models, smappy.plugins.find_steps.model_line, smappy.plugins.find_steps.FindSteps.run, smappy.plugins.find_steps.pooled_steps, smappy.plugins.find_steps.steps_file]
 ---
 
 ## What it does
@@ -16,8 +16,11 @@ Each trace's positions are turned onto its own long axis, forward in time
 (as *Trace statistics* does), and the steps are found along it with
 AutoStepFinder (Loeff, Kerssemakers et al. 2021,
 [doi:10.1016/j.patter.2021.100256](https://doi.org/10.1016/j.patter.2021.100256)),
-SMAP's StepsMINFLUX's method; where the expected step size is known, steps
-smaller than it are merged and larger ones split.  The per-trace numbers are
+SMAP's StepsMINFLUX's method, or with BNP-Step (Rojewski et al. 2024,
+[doi:10.1016/j.bpj.2024.01.008](https://doi.org/10.1016/j.bpj.2024.01.008)),
+which learns the number of steps by Bayesian sampling -- slower, and
+better where the steps are small against the noise.  Where the expected
+step size is known, steps smaller than it are merged and larger ones split.  The per-trace numbers are
 a [region table](plugin:Panels/Glossary) of the
 [id attribute](plugin:Panels/Glossary); the pooled step sizes and dwell
 times are drawn and fitted.  On request the plateaus go onto the
@@ -41,6 +44,8 @@ order, Scurve = S.greedy(x, 150)
 best, s3 = S.s_peak(Scurve)
 found = S.autostepfinder(x)
 b = S.split_merge(x, found.boundaries, 8.0)
+from smappy.bnp_steps import bnp_steps
+bnp = bnp_steps([x], sweeps=200).boundaries[0]
 ```
 
 **1. One coordinate per trace.**  The localizations of each trace (at least
@@ -79,6 +84,25 @@ c.set_ylabel("position (nm)")
 is left of the trace after it, the residual.  A round counts only where its
 S-score peaks above *threshold*.  The steps of both rounds, *overshoot*
 times as many, make the fit.
+
+**Or BNP-Step.**  With *method* on *BNP-Step*, a trace is a level plus up
+to M possible steps, each switched on or off, with a height and a time of
+its own, and Gaussian noise.  A sampler draws, again and again, each switch
+given the rest, the heights, the times and the noise, starting from
+AutoStepFinder's steps; a step is kept where it explains the data better
+than its cost in the prior, so the number of steps is learned rather than
+chosen by a threshold.  The answer is the sample the data make most
+probable.  Every trace of the table is sampled at once.
+
+```figure BNP-Step on the same track, without the expected step size: the steps it keeps (red) against the true number (title).
+fig.set_size_inches(7.0, 2.6)
+a = fig.subplots()
+a.plot(t, x, ".", ms=1.5, color="0.6")
+a.step(t, S.fit_from(x, bnp), where="post", color="tab:red", lw=1)
+a.set_xlabel("time (s)")
+a.set_ylabel("position (nm)")
+a.set_title(f"{len(bnp)} steps found; {len([s for s in starts if 0 < s < 600])} there", fontsize=8)
+```
 
 **5. Split and merge.**  With *split/merge to* set to the expected step
 size s: two steps in a row that add up to less than 1.4 s, the first under
@@ -131,6 +155,23 @@ plateaus running between all current plateaus' next best splits.  Up to
 lists in their order (the first round's, then the second's new ones), as
 SMAP's *coarseness* did.
 
+**BNP-Step's model** (Rojewski et al. 2024): x_n = F + Σ_m b_m h_m [n ≤ k_m]
++ noise of precision η, with b_m ~ Bernoulli(γ/M) (γ = 1), h_m ~ N(0,
+*step prior*²), k_m uniform over the points, F normal about the trace's end
+and η Gamma about the noise estimated from consecutive differences
+(1.4826 MAD / √2).  M is twice the most steps AutoStepFinder finds in the
+batch, at least 20.  Each sweep draws every b_m (a logistic draw on the
+change of the squared error), every k_m (Metropolis, proposed uniformly),
+F and the heights jointly (their Gaussian conditional) and η (its Gamma
+conditional); the kept sample is the one of highest posterior.  The code
+departs from the authors' in computing every squared error from prefix
+sums of the trace instead of points × steps matrices, in sampling all
+traces as one batch, in starting from AutoStepFinder (they start from the
+prior and run 50 000 sweeps) and in priors scaled to the data; on simulated
+staircases it finds the same number of steps as their sampler.  The
+boundaries are not refined afterwards: the sampler's times already are
+where the data put them.
+
 **Not done** from AutoStepFinder: its merging of steps by their error and
 its bootstrap errors; from StepsMINFLUX: the running-window smoothing, the
 "bad step" flag near gaps in time, manual editing and the movie.
@@ -145,6 +186,20 @@ little.
 ### min_locs
 A trace must hold several steps for the S-score to peak: 20 localizations
 at least, more for small steps in large noise.
+
+### method
+AutoStepFinder takes a second for a hundred traces; BNP-Step tens of
+seconds, and is the better choice for small steps in noisy traces, or when
+the number of steps should not hang on a threshold.
+
+### sweeps
+A few hundred from AutoStepFinder's start is usually enough; more where the
+traces are long and the steps many.  The run time grows with it linearly.
+
+### height_nm
+Steps much smaller than it cost more prior than they gain in fit, so they
+are dropped; on *auto* three times the noise.  Set it near the expected
+step (8 nm for kinesin) when the noise is small.
 
 ### threshold
 0.15 is AutoStepFinder's.  Lower finds steps in noisier traces and
@@ -205,6 +260,12 @@ Ported from SMAP's StepsMINFLUX and MINFLUXStepsAnalyze (Ries 2020).
   fast and automated step detection method for single-molecule analysis.
   *Patterns* 2, 100256.
   [doi:10.1016/j.patter.2021.100256](https://doi.org/10.1016/j.patter.2021.100256)
+* Rojewski A, Schweiger M, Sgouralis I, Comstock M, Pressé S (2024).  An
+  accurate probabilistic step finder for time-series analysis.  *Biophys
+  J*.  [doi:10.1016/j.bpj.2024.01.008](https://doi.org/10.1016/j.bpj.2024.01.008)
+  -- BNP-Step; preprint
+  [doi:10.1101/2023.09.19.558535](https://doi.org/10.1101/2023.09.19.558535),
+  code [LabPresse/bnp-step](https://github.com/LabPresse/bnp-step).
 * Kerssemakers JWJ et al. (2006).  Assembly dynamics of microtubules at
   molecular resolution.  *Nature* 442, 709-712.
   [doi:10.1038/nature04928](https://doi.org/10.1038/nature04928)
