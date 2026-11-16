@@ -327,11 +327,11 @@ def test_shots_sinkhorn_assignment_reaches_the_exact_one_and_gives_two_molecules
     assert soft > exact
 
 
-@pytest.mark.parametrize("time_model", ["attention", "convgru"])
-def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time_model):
+@pytest.mark.parametrize("time_model, extra", [("attention", {}), ("convgru", {}), ("convgru", {"skip": True})])
+def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time_model, extra):
     from smappy.netfit.settings import Part, Parts
     torch.manual_seed(0)
-    parts = Parts(time_model=Part(time_model, {"frames": 5}))
+    parts = Parts(time_model=Part(time_model, {"frames": 5, **extra}))
     parts.backbone.settings["features"] = 8
     model = network.build(parts, 5).eval()
     for head in model.heads.values():                            # the heads start at a constant output
@@ -342,6 +342,15 @@ def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time
     y = x.clone()
     y[:, 0] += 1.0                                               # the first frame changes the middle's maps
     assert not torch.allclose(model(y), out)
+
+
+def test_the_convgrus_skip_hands_on_the_middle_frames_features_beside_the_two_states():
+    gru = network.TimeGRU(8, 5, skip=True)
+    f = torch.randn(2, 5, 8, 4, 4)
+    out = gru(f)
+    assert gru.out_channels == 24 and out.shape == (2, 24, 4, 4)
+    assert torch.equal(out[:, :8], f[:, 2])
+    assert network.TimeGRU(8, 5).out_channels == 16                 # a model saved before is built as before
 
 
 def test_the_attentions_temporal_dropout_acts_only_in_training_and_never_hides_the_middle_frame():

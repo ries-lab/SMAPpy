@@ -260,12 +260,19 @@ class ConvGRUCell(nn.Module):
 class TimeGRU(nn.Module):
     """``convgru``: one cell run from the first frame to the middle one and another from the last frame
     back to it; the two states, (b, 2 F, h, w), go on.  The middle frame is the last either reads, so
-    both end on it."""
+    both end on it.
 
-    def __init__(self, features: int, window: int):
+    ``skip``: the middle frame's own features go on beside the states, (b, 3 F, h, w).  Without it, two
+    runs of four (G7_s1, G7L_s0, 2026-11-16) sat at Jaccard 0 for 60-130 epochs before they learned,
+    and never caught up: everything the union U-Net saw had passed through gates that start near
+    their middle.  With it, the network has the frame stack's direct path from the first step.  Off by
+    default so a model saved without it is built as it was trained."""
+
+    def __init__(self, features: int, window: int, skip: bool = False):
         super().__init__()
         self.fwd, self.bwd = ConvGRUCell(features), ConvGRUCell(features)
-        self.out_channels = 2 * features
+        self.skip = skip
+        self.out_channels = (3 if skip else 2) * features
 
     def forward(self, f):
         b, t, c, h, w = f.shape
@@ -276,7 +283,7 @@ class TimeGRU(nn.Module):
         hb = f.new_zeros(b, c, h, w)
         for i in range(t - 1, mid - 1, -1):
             hb = self.bwd(f[:, i], hb)
-        return torch.cat([hf, hb], 1)
+        return torch.cat([f[:, mid], hf, hb] if self.skip else [hf, hb], 1)
 
 
 class TwoStageUNet(nn.Module):
