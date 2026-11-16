@@ -203,8 +203,9 @@ uv tool upgrade smappy-smlm
 ```
 
 uv remembers the list of versions for ten minutes, so if a version released
-only just now is not found, add `--refresh-package smappy-smlm` before the
-last word. *Help > Check for updates...* in SMAPpy does this for you.
+only just now is not found, add `--reinstall-package smappy-smlm` before
+the last word (or `--no-cache`, if your uv does not know that option).
+*Help > Check for updates...* in SMAPpy does this for you.
 
 To remove SMAPpy from your computer:
 

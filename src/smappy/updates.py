@@ -236,7 +236,9 @@ def update_command(kind: Optional[str] = None, windows: Optional[bool] = None,
         import shutil
         from .updater import refresh_args
         uv = shutil.which("uv")
-        refresh = refresh_args(uv) if uv else ["--refresh-package", DISTRIBUTION]
+        # no uv found: the option uv 0.12 and later have (--refresh-package
+        # is refused by their tool upgrade)
+        refresh = refresh_args(uv) if uv else ["--reinstall-package", DISTRIBUTION]
         return f"uv tool upgrade {' '.join(refresh)} {DISTRIBUTION}"
     if kind == "uvx":
         return f"uvx --from {DISTRIBUTION}@latest smappy-gui"
@@ -352,7 +354,11 @@ UV_UPDATE = ("uv self update (if uv came from its installer; otherwise as it was
              "installed: pip install -U uv, winget upgrade astral-sh.uv, brew upgrade uv)")
 _ADVICE = (
     (lambda log: "uv" in log and "unexpected argument" in log,
-     "The uv on this computer is too old for this update. Update uv with\n"
+     # SMAPpy's own choice of options can be what uv refuses -- an option it
+     # took for there from uv's help (`updater.refresh_args`) -- so the advice
+     # is the command by hand first, and uv's age only if that fails too
+     "uv refused an option of the update's command (the error below names it). "
+     "Run the command below by hand; if uv refuses that too, update uv with\n"
      f"{UV_UPDATE}\nand then use Update and restart again."),
     (lambda log: any(text in log for text in (
         "os error 32", "being used by another process", "access is denied",
