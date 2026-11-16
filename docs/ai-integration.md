@@ -159,7 +159,12 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   generated index), `describe_plugin` (fields, grouping, what the form says
   about them now), `read_doc` (a plugin's or a panel's page), `read_source`
   (a plugin's module or any `smappy` module), `figure` (a result's figure as
-  PNG), `picture` (the view as PNG).
+  PNG), `picture` (the view as PNG).  The results `figure` draws are kept
+  whole, so they are held to `MAX_RESULT_BYTES` (2 GB) of arrays as well as
+  `MAX_RESULTS` of them, the newest always kept -- a PSF calibration's holds
+  its bead stacks and model, and fifty of those had taken a GUI to 71 GB
+  (issue #172); `session_state` says what they hold and `forget_results`
+  lets them go.
 * **trying** -- `run_plugin` with `apply=false` runs on a copy of the
   session (`Session.scratch`) and hands back its text, numbers and figures,
   changing nothing; `scan` does it over a list of values of one field.

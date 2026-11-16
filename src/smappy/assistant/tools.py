@@ -58,6 +58,10 @@ FIGURE_DPI = 90
 MAX_SOURCE = 60_000          # characters of source in one answer
 MAX_VALUES = 5000           # values read_values hands back at most
 MAX_RESULTS = 50             # results kept for `figure`; the oldest go
+# ... and no more than this held by them in all, the newest always kept: a
+# PSF calibration's result holds its bead stacks, aligned beads and model,
+# gigabytes each, and fifty of them took a GUI to 71 GB (issue #172)
+MAX_RESULT_BYTES = 2 * 1024 ** 3
 
 
 @dataclass
@@ -181,11 +185,106 @@ class Proposal:
 
 @dataclass
 class Kept:
-    """A run's result, kept so its figures can be asked for afterwards."""
+    """A run's result, kept so its figures can be asked for afterwards;
+    ``nbytes`` the arrays it holds that the session does not (`held_bytes`)."""
     id: str
     path: str
     applied: bool
     result: Any
+    nbytes: int = 0
+
+
+# what the walk in `held_bytes` never enters: what it reaches through them is
+# not the result's (a module's globals, a class, the Qt side)
+_LEAVES = (str, bytes, bytearray, int, float, complex, bool, type(None), type,
+           type(np), memoryview, range)
+
+
+def held_bytes(obj, shared=frozenset(), limit: int = 200_000) -> int:
+    """The bytes of the arrays ``obj`` keeps alive -- numpy's, torch's,
+    pandas' -- found by walking its attributes, containers and closures,
+    each array's memory counted once however many views share it.
+
+    An estimate meant to bound what kept results cost, not an accounting:
+    a function's globals, modules, classes, sessions and Qt objects are not
+    entered (they are not the result's), and the walk stops after ``limit``
+    objects.  ``shared`` holds the ids of arrays to leave out -- the
+    session's own table, which a result applied to it holds too, and which
+    letting the result go would not free (`Assistant._shared_arrays`)."""
+    from ..session import Session
+    seen = set()
+    counted = set(shared)
+    total = 0
+    stack = [obj]
+    while stack and len(seen) < limit:
+        o = stack.pop()
+        if id(o) in seen or isinstance(o, _LEAVES):
+            continue
+        seen.add(id(o))
+        if isinstance(o, np.ndarray):
+            root = o
+            while isinstance(root.base, np.ndarray):
+                root = root.base
+            if id(root) not in counted:
+                counted.add(id(root))
+                total += root.nbytes
+            continue
+        module = type(o).__module__ or ""
+        if module.startswith(("PySide", "shiboken")) or isinstance(o, Session):
+            continue
+        if module.startswith("torch") and hasattr(o, "untyped_storage"):
+            try:
+                storage = o.untyped_storage()
+                key = ("torch", storage.data_ptr())
+                if key not in counted:
+                    counted.add(key)
+                    total += storage.nbytes()
+            except Exception:                  # a meta or sparse tensor
+                pass
+            continue
+        if module.startswith("pandas") and hasattr(o, "memory_usage"):
+            try:
+                total += int(np.sum(o.memory_usage(index=True)))
+            except Exception:
+                pass
+            continue
+        if isinstance(o, dict):
+            stack.extend(o.keys())
+            stack.extend(o.values())
+        elif isinstance(o, (list, tuple, set, frozenset)):
+            stack.extend(o)
+        elif inspect.isfunction(o):            # its closure, never its globals
+            stack.extend(c.cell_contents for c in (o.__closure__ or ())
+                         if _filled(c))
+            stack.extend(o.__defaults__ or ())
+            stack.extend((o.__kwdefaults__ or {}).values())
+        elif inspect.ismethod(o):
+            stack.extend((o.__func__, o.__self__))
+        else:
+            if callable(getattr(o, "func", None)):     # a partial
+                stack.extend((o.func, getattr(o, "args", ()),
+                              getattr(o, "keywords", None) or {}))
+            stack.extend(_attributes(o))
+    return total
+
+
+def _filled(cell) -> bool:
+    try:
+        cell.cell_contents
+    except ValueError:                         # a cell not yet assigned
+        return False
+    return True
+
+
+def _attributes(o) -> list:
+    out = list(getattr(o, "__dict__", {}).values()) if hasattr(o, "__dict__") else []
+    for klass in type(o).__mro__:
+        for name in getattr(klass, "__slots__", ()) or ():
+            if isinstance(name, str) and name not in ("__dict__", "__weakref__"):
+                value = getattr(o, name, None)
+                if value is not None:
+                    out.append(value)
+    return out
 
 
 def _plain(value):
@@ -326,6 +425,7 @@ class Assistant:
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
+        self._let_go: Dict[str, str] = {}     # id -> why, for `figure`
         self._ids = itertools.count(1)
 
     # ------------------------------------------------------------- the registry
@@ -541,10 +641,47 @@ class Assistant:
         return out
 
     def _keep(self, path: str, applied: bool, result) -> Kept:
-        kept = Kept(f"r{next(self._ids)}", path, applied, result)
+        """Keep ``result`` for `figure`, letting the oldest go past
+        `MAX_RESULTS` of them or `MAX_RESULT_BYTES` held by them; the one
+        just made always stays, whatever it holds."""
+        try:
+            nbytes = held_bytes(result, self._shared_arrays())
+        except Exception:                      # an estimate must never fail a run
+            nbytes = 0
+        kept = Kept(f"r{next(self._ids)}", path, applied, result, nbytes)
         self.results.append(kept)
-        del self.results[:-MAX_RESULTS]
+        while len(self.results) > MAX_RESULTS:
+            self._drop(self.results[0], "only the newest "
+                       f"{MAX_RESULTS} results are kept")
+        while (len(self.results) > 1
+               and sum(k.nbytes for k in self.results) > MAX_RESULT_BYTES):
+            self._drop(self.results[0], "kept results are held to "
+                       f"{MAX_RESULT_BYTES / 2 ** 30:g} GB of memory")
         return kept
+
+    def _drop(self, kept: Kept, why: str) -> None:
+        self.results.remove(kept)
+        self._let_go[kept.id] = f"{kept.path}, let go: {why}"
+
+    def _shared_arrays(self) -> set:
+        """The ids of the arrays the session's table holds, which a result
+        applied to it holds too and letting it go would not free."""
+        out: set = set()
+        try:
+            for value in vars(self.session.locs).values():
+                for array in (value.values() if isinstance(value, dict) else (value,)):
+                    if isinstance(array, np.ndarray):
+                        while isinstance(array.base, np.ndarray):
+                            array = array.base
+                        out.add(id(array))
+        except Exception:
+            pass
+        return out
+
+    def _kept_summary(self) -> Dict[str, Any]:
+        return {"n": len(self.results),
+                "memory_mb": round(sum(k.nbytes for k in self.results) / 2 ** 20, 1),
+                "limit_mb": round(MAX_RESULT_BYTES / 2 ** 20)}
 
     def _answer(self, kept: Kept, seconds: float) -> Dict[str, Any]:
         result = kept.result
@@ -668,7 +805,7 @@ class Assistant:
           "filter and grouping and how many localizations it shows, the ROI "
           "drawn in the 2D view ('roi': its shape and how many each layer shows "
           "inside it) and how many ROIs the ROI manager holds, "
-          "what can be undone, the results kept, the mode and the output "
+          "what can be undone, the results kept (and the memory they hold), the mode and the output "
           "folder, and which SMAPpy window you are connected to ('window').  Call it "
           "first, after anything that changes the session, and after a note that "
           "you were moved to another window.")
@@ -714,8 +851,10 @@ class Assistant:
             "roi_manager_rois": (len(rois.rois) if rois is not None
                                  and hasattr(rois, "rois") else 0),
             "undo": s.undo_labels()[-5:],
-            "results": [{"result": k.id, "plugin": k.path, "applied": k.applied}
+            "results": [{"result": k.id, "plugin": k.path, "applied": k.applied,
+                         "memory_mb": round(k.nbytes / 2 ** 20, 1)}
                         for k in self.results[-10:]],
+            "results_kept": self._kept_summary(),
             "proposals": len(self.proposals),
             **({"windows": list(self.windows)} if self.windows is not None else {}),
             **({"window": self.window()} if self.window is not None else {}),
@@ -831,6 +970,9 @@ class Assistant:
           index={"type": "integer", "description": "which figure, 0 the main one"})
     def figure(self, result: str, index: int = 0) -> Image:
         kept = next((k for k in self.results if k.id == result), None)
+        if kept is None and result in self._let_go:
+            raise ToolError(f"{result} ({self._let_go[result]}); run it again "
+                            "for its figures")
         if kept is None:
             raise ToolError(f"no result {result!r}; the kept ones are "
                             f"{', '.join(k.id for k in self.results) or 'none'}")
@@ -846,6 +988,29 @@ class Assistant:
         finally:
             plt.close(made)
         return Image(buffer.getvalue(), f"{kept.path}: {plots[index].name or 'main'}")
+
+    @tool("Let go of kept results, freeing the memory they hold (session_state's "
+          "'results_kept'): the ones named, or all.  Their figures can no longer "
+          "be asked for; nothing in the session changes.  Results are let go "
+          "on their own past a limit, the newest always kept; call this when "
+          "the user is short of memory, or after heavy runs (PSF calibrations, "
+          "fits) whose figures you no longer need.",
+          results={"type": "array", "items": {"type": "string"},
+                   "description": "ids, e.g. ['r3', 'r4']; all if left out"})
+    def forget_results(self, results: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+        if results is None:
+            gone = list(self.results)
+        else:
+            unknown = [r for r in results if r not in {k.id for k in self.results}]
+            if unknown:
+                raise ToolError(f"no kept result {', '.join(unknown)}; the kept ones "
+                                f"are {', '.join(k.id for k in self.results) or 'none'}")
+            gone = [k for k in self.results if k.id in set(results)]
+        for k in gone:
+            self._drop(k, "forget_results")
+        return {"forgotten": [k.id for k in gone],
+                "freed_mb": round(sum(k.nbytes for k in gone) / 2 ** 20, 1),
+                **{"kept_" + key: value for key, value in self._kept_summary().items()}}
 
     @tool("A picture of the localizations as the view would render them: "
           "the visible layers with their filters, a scale bar.",
