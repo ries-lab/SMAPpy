@@ -61,6 +61,9 @@ built since, each with tests, a page and a `--slow` run:
 * *Analysis/Regions/Summarize/Compare groups* and *Analysis/Process/File
   conditions* -- region tables compared between files and conditions.
 * *Stability*'s random scatter split into eta x precision and a floor.
+* A MINFLUX tutorial (`tutorial/topics/minflux.py`) on a simulated `.msr`
+  (`simulate.minflux.motor_msr`, written by `io/msr_write.py`): kinesin at
+  two ATP concentrations, from opening the file to comparing them.
 * Id columns: -1 is "in none" everywhere, so trace 0 is a region; a file's
   ids kept apart from the table's (`tid_file`).
 
@@ -69,7 +72,7 @@ where cfr is measured once a trace -- should a bound be able to let NaN
 through?  bnp-step's licence.  Real two-thread data to test the pairing
 and the per-thread precision on.  Not done: the pooled consecutive-pair
 mode in *Localization precision*, MINFLUXStepsAnalyze's hypoexponential
-fits, manual step editing, a MINFLUX tutorial, MINFLUX plugins in the
+fits, manual step editing, MINFLUX plugins in the
 shipped GUI's tabs.
 
 ## The functionality, side by side

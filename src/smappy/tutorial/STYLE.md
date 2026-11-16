@@ -106,3 +106,9 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### assistant -- An AI assistant: asking SMAPpy in plain words
 
 * (none yet)
+
+### minflux -- MINFLUX: opening, checking and analysing traces
+
+* For a reader who knows MINFLUX but not abberior's words: explain each
+  (iteration, sequence, trace, efo, cfr, thread, MBM) once, on a card,
+  and say where the tools are before using them.  (Jonas Ries, 2026-11-16)
