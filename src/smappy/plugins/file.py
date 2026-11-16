@@ -180,8 +180,10 @@ class LoadAuto(Plugin):
     # from the iteration that measures it; 6: a MINFLUX localization's
     # precision is the Cramér-Rao bound of its pattern, not 150 nm / sqrt(N);
     # 7: the pattern size scales with the excitation wavelength, from 642 nm;
-    # every iteration on request, and each thread's own sequence
-    version = "7"
+    # every iteration on request, and each thread's own sequence; 8: a SMAP
+    # file of several files opens as those files, its sites on theirs,
+    # without the rows of none
+    version = "8"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
         """The csv part is shown for a csv only, the MSR part for an `.msr`."""
