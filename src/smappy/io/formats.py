@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -261,10 +262,63 @@ def _h5_scalar(group, name):
     """A number or a MATLAB char array stored by ``save -v7.3``."""
     if name not in group:
         return None
-    v = np.array(group[name])
+    return _h5_value(group[name])
+
+
+def _h5_value(dataset):
+    v = np.array(dataset)
     if v.dtype.kind == "u" and v.dtype.itemsize == 2:      # a char array
         return bytes(v.ravel().astype("uint8")).decode("latin-1").strip("\x00")
     return v.ravel()
+
+
+def _sml_entries_h5(f) -> List[Tuple[str, Dict]]:
+    """``saveloc.file`` of a v7.3 file: each file's name and `_sml_info`.
+
+    SMAP saves every file it had open, and a file of several is common: the
+    positions of one experiment loaded together, and the image of averaged
+    sites, which SMAP adds as a file of its own.  MATLAB writes one file as
+    a struct, its fields the values, and several as a struct array, each
+    field a column of references, one per file -- where reading the fields
+    as values found nothing, and such a file came in without its pixel size
+    and camera.
+    """
+    import h5py
+    file = f["saveloc"].get("file")
+    if not isinstance(file, h5py.Group):
+        return []
+    infos, names = file.get("info"), file.get("name")
+    if isinstance(infos, h5py.Dataset) and h5py.check_ref_dtype(infos.dtype):
+        infos = [f[r] for r in np.ravel(infos[()])]
+        names = ([f[r] for r in np.ravel(names[()])] if isinstance(names, h5py.Dataset)
+                 and h5py.check_ref_dtype(names.dtype) else [None] * len(infos))
+    elif isinstance(infos, h5py.Group):
+        infos, names = [infos], [names]
+    else:
+        return []
+    entries = []
+    for inf, name in zip(infos, names):
+        name = _h5_value(name) if isinstance(name, h5py.Dataset) else None
+        info = (_sml_info(lambda k, inf=inf: _h5_scalar(inf, k))
+                if isinstance(inf, h5py.Group) else {})
+        entries.append((name if isinstance(name, str) else "", info))
+    return entries
+
+
+def _sml_entries_v5(saveloc) -> List[Tuple[str, Dict]]:
+    """The same of a v5-v7 file, read by scipy: ``file`` is one struct or an
+    array of them."""
+    files = getattr(saveloc, "file", None)
+    if files is None:
+        return []
+    entries = []
+    for each in np.ravel(np.asarray(files, dtype=object)):
+        inf = getattr(each, "info", None)
+        info = (_sml_info(lambda k: np.atleast_1d(getattr(inf, k))
+                          if hasattr(inf, k) else None) if inf is not None else {})
+        name = getattr(each, "name", "")
+        entries.append((name if isinstance(name, str) else "", info))
+    return entries
 
 
 def _superseded(name: str, names) -> bool:
@@ -280,7 +334,7 @@ def _superseded(name: str, names) -> bool:
 
 def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     import h5py
-    columns, info, sites = {}, {}, None
+    columns, entries, sites, filenumber = {}, [], None, None
     try:
         f = h5py.File(path, "r")
     except OSError:
@@ -292,12 +346,11 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 if name in SML_DROP or _superseded(name, loc):
                     continue
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
-            sites = _sml_sites(f)
-            file = f["saveloc"].get("file")
-            if file is not None and "info" in file:
-                # `file` may be a struct array: the first file's info then
-                inf = file["info"]
-                info = _sml_info(lambda k: _h5_scalar(inf, k))
+            if "filenumber" in loc:
+                filenumber = np.array(loc["filenumber"]).ravel()
+            entries = _sml_entries_h5(f)
+            # the sites on their files where the localizations are on theirs
+            sites = _sml_sites(f, len(entries) if filenumber is not None else 1)
     else:                                                    # MATLAB v5-v7
         import scipy.io as sio
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
@@ -306,13 +359,15 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
             if name in SML_DROP or _superseded(name, loc._fieldnames):
                 continue
             columns[SML_COLUMNS.get(name, name)] = np.atleast_1d(getattr(loc, name))
+        if "filenumber" in loc._fieldnames:
+            filenumber = np.atleast_1d(loc.filenumber)
         try:
-            files = m["saveloc"].file
-            first = files[0] if isinstance(files, np.ndarray) else files
-            info = _sml_info(lambda k: np.atleast_1d(getattr(first.info, k))
-                             if hasattr(first.info, k) else None)
+            entries = _sml_entries_v5(m["saveloc"])
         except (AttributeError, TypeError, ValueError):
             pass
+    numbers = None
+    if filenumber is not None and entries:
+        columns, numbers = _in_files(columns, filenumber, len(entries))
     if "frame" in columns:
         columns["frame"] = (np.asarray(columns["frame"]) - 1).astype(np.int64)  # MATLAB is 1-based
     for name in ("channel", "iterations"):
@@ -321,17 +376,68 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
     for name, values in columns.items():
         if values.dtype == np.float64:
             columns[name] = values.astype(np.float32)
-    px = pixel_sizes(info.get("pixelsize_um"))
-    px = px and px[0]                   # the file's one number: its x pixel
-    metadata = {"units": "nm", "source": str(path), "smap": info}
-    camera = _sml_camera(info)
-    if camera:
-        metadata["camera"] = camera
+    # the table's metadata is the first file's, as a session's is
+    info = entries[0][1] if entries else {}
+    metadata = _sml_metadata(path, info)
+    if numbers is not None and len(entries) > 1:
+        # several files stay several, each with its own name, camera and
+        # frame time, as a saved session's do (`session._saved_files`): the
+        # positions of an experiment share the camera's coordinates, and as
+        # one file each one's sites held the others' localizations
+        columns["filenumber"] = numbers.astype(np.int32)
+        counts = np.bincount(numbers, minlength=len(entries))
+        metadata["files"] = [_sml_file(path, k, name, own, int(counts[k]), columns).to_dict()
+                             for k, (name, own) in enumerate(entries)]
     if sites:
         metadata["roi_project"] = sites
     locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "SMAP",
-                          pixelsize_nm=px * 1000 if px else None, metadata=info)
+                          pixelsize_nm=_sml_pixel_nm(info), metadata=info)
+
+
+def _sml_metadata(path: Path, info: Dict) -> Dict:
+    """One SMAP file's metadata: its `_sml_info` and its camera."""
+    metadata = {"units": "nm", "source": str(path), "smap": info}
+    camera = _sml_camera(info)
+    if camera:
+        metadata["camera"] = camera
+    return metadata
+
+
+def _sml_pixel_nm(info: Dict) -> Optional[float]:
+    px = pixel_sizes(info.get("pixelsize_um"))
+    return px[0] * 1000 if px else None     # the file's one number: its x pixel
+
+
+def _sml_file(path: Path, number: int, name: str, info: Dict, n: int,
+              columns: Dict) -> FileInfo:
+    """File ``number`` (from 0) of a SMAP file of several.  SMAP names it by
+    the path it was loaded from, on whichever computer that was: the name
+    here is its last part, the path the whole."""
+    label = re.split(r"[\\/]", name)[-1] if name else ""
+    return FileInfo(label or f"{path.name} [{number + 1}]", name or str(path), "SMAP", n=n,
+                    pixelsize_nm=_sml_pixel_nm(info), metadata=_sml_metadata(path, info),
+                    columns=[c for c in columns if c != "filenumber"])
+
+
+def _in_files(columns: Dict[str, np.ndarray], filenumber: np.ndarray,
+              n_files: int) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    """The rows of SMAP's files, numbered from 1, without those of none, and
+    their files numbered from 0.
+
+    A row whose ``filenumber`` names none of the file's files is shown by
+    SMAP nowhere.  In the files where they were found (two experiments,
+    November 2026: 1,493 of 2.9 M rows and 57,246 of 22.4 M, all with
+    ``filenumber`` 0) they were all zeros but for ``class``,
+    ``origin`` and ``groupindex`` -- leftovers of a SMAP step -- and read
+    as localizations they sat at (0, 0) in frame -1.
+    """
+    number = np.asarray(filenumber).ravel().astype(np.int64)
+    keep = (number >= 1) & (number <= n_files)
+    if keep.all():
+        return columns, number - 1
+    return ({name: np.asarray(values)[keep] for name, values in columns.items()},
+            number[keep] - 1)
 
 
 def _sml_info(get: Callable) -> Dict:
@@ -406,18 +512,18 @@ SML_LISTS = ("list1", "list2", "list3", "list4")
 DIRECTION_LINE = "direction"            # `roi_manager.core.DIRECTION`
 
 
-def _sml_sites(f) -> Optional[dict]:
+def _sml_sites(f, n_files: int = 1) -> Optional[dict]:
     """The ROI manager's sites of a v7.3 `_sml.mat`, as an ROI project
     (`ROIProject.from_dict`), or None.  SMAP keeps them as objects, which
     `io.mcos` reads; a v5-v7 file keeps them in a store that is not read."""
     from .mcos import read_objects
     sites = read_objects(f, "saveloc/siteexplorer/sites")
-    return sml_sites_project(sites) if sites else None
+    return sml_sites_project(sites, n_files) if sites else None
 
 
-def sml_sites_project(sites: List[dict]) -> Optional[dict]:
+def sml_sites_project(sites: List[dict], n_files: int = 1) -> Optional[dict]:
     """SMAP's sites -- each a dict of an ``SEsites`` object's properties --
-    as an ROI project of one file.
+    as an ROI project.
 
     A site is an ROI at its ``pos`` (nm), numbered by its SMAP ID, with
     *use* and the comment.  Its lines (µm in SMAP) become named lines in nm:
@@ -431,9 +537,11 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
     orientation line when *rotate* is on (a setting the file does not keep),
     so for such a site the polygon is turned by that angle.  The keyword
     lists ``list1``-``list4`` become annotations with the keywords SMAP
-    offered; a list of nothing but ``empty`` is not one.  All sites go to
-    the first file, as the localizations do.  The ROI size is not in the
-    file (SMAP keeps it in its GUI's settings), so the project's stays.
+    offered; a list of nothing but ``empty`` is not one.  A site is on its
+    file, SMAP's ``info.filenumber`` counted from 1, where the localizations
+    are read as ``n_files`` files; on the first where they are one.  The
+    ROI size is not in the file (SMAP keeps it in its GUI's settings), so
+    the project's stays.
     """
     rois, lists, numbers = [], {}, []
     for site in sites:
@@ -458,12 +566,16 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
             value = _numbers(entry.get("value"))
             if value is not None and value.size and 1 <= int(value[0]) <= len(words):
                 annotations[name] = words[int(value[0]) - 1]
+        file = _numbers((site.get("info") or {}).get("filenumber")
+                        if isinstance(site.get("info"), dict) else None)
+        file = int(file[0]) - 1 if file is not None and file.size \
+            and 1 <= file[0] <= n_files else 0
         ident = _numbers(site.get("ID"))
         number = int(ident[0]) if ident is not None and ident.size else len(rois) + 1
         numbers.append(number)
         use = _numbers(note.get("use"))
         comment = note.get("comments")
-        rois.append({"file_id": "file0", "center": [float(pos[0]), float(pos[1])],
+        rois.append({"file_id": f"file{file}", "center": [float(pos[0]), float(pos[1])],
                      "number": number, "polygon": _sml_shape(note.get("line3")),
                      "lines": lines, "use": bool(use[0]) if use is not None and use.size else True,
                      "comment": comment if isinstance(comment, str) else "",
@@ -473,7 +585,8 @@ def sml_sites_project(sites: List[dict]) -> Optional[dict]:
         return None
     names = [DIRECTION_LINE] + [n for _, n in SML_LINES[1:]
                                 if any(n in r["lines"] for r in rois)]
-    project = {"format_version": 1, "sources": [{"id": "file0", "number": 0, "name": ""}],
+    sources = [{"id": f"file{k}", "number": k, "name": ""} for k in range(max(n_files, 1))]
+    project = {"format_version": 1, "sources": sources,
                "rois": rois, "next_number": max(numbers) + 1, "line_names": names}
     if lists:
         project["annotation_lists"] = lists

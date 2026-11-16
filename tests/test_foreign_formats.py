@@ -270,6 +270,26 @@ def test_an_id_on_merged_blinks_is_written_as_picassos_whole_numbered_group(tmp_
     assert sorted(rows["group"]) == list(range(1, 21))
 
 
+@pytest.mark.parametrize("chunks", [None, (1000,)])
+def test_a_picasso_table_made_and_never_written_is_refused_not_read_as_zeros(tmp_path, chunks):
+    # 1.5 kB declaring 16.6 million rows, all of them HDF5's fill value
+    fields = [("frame", "f8"), ("x", "f8"), ("y", "f8"), ("lpx", "f8"), ("lpy", "f8")]
+    path = tmp_path / "converted.hdf5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("locs", shape=(16_599_295,), dtype=fields, chunks=chunks)
+    assert path.stat().st_size < 10_000
+    assert formats.reader_for(path).name == "Picasso"
+    with pytest.raises(ValueError, match="declares 16,599,295 localizations but holds none"):
+        formats.load(path)
+    # written, even with zeros, and empty: read as they are
+    with h5py.File(path, "w") as f:
+        f.create_dataset("locs", data=np.zeros(3, dtype=fields), chunks=chunks and (1,))
+    assert len(formats.load(path)[0]) == 3
+    with h5py.File(path, "w") as f:
+        f.create_dataset("locs", shape=(0,), dtype=fields)
+    assert len(formats.load(path)[0]) == 0
+
+
 def test_this_programs_own_hdf5_is_not_taken_for_picassos(tmp_path):
     path = formats.save(table(), tmp_path / "mine.hdf5")
     assert formats.reader_for(path).name == "smappy HDF5"

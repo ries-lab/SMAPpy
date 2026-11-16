@@ -40,14 +40,15 @@ running SMAPpy. Then, in the same environment you installed it into:
 
 `pip show smappy-smlm` tells you which version you have; the newest is on
 [PyPI](https://pypi.org/project/smappy-smlm/). If you installed it with uv,
-run `uv tool upgrade smappy-smlm` instead. In a checkout, run `git pull`, then
+run `uv tool upgrade smappy-smlm` instead; in a [pixi](https://pixi.sh)
+project, `pixi upgrade smappy-smlm`. In a checkout, run `git pull`, then
 `.venv/bin/python -m pip install -e .` again, which rebuilds the C++
-extensions.
+extensions (in a pixi environment, `pixi reinstall smappy-smlm`).
 
 SMAPpy itself looks for a newer version once a day when it starts and, if
 there is one, says so at the bottom right of the control window. *Help → Check
 for updates...* asks at any time. Its *Update and restart* closes SMAPpy,
-installs the new version with pip (or uv) and starts SMAPpy again; *Copy
+installs the new version with pip (or uv, or pixi) and starts SMAPpy again; *Copy
 command* gives the command for your installation instead, and a checkout is
 always updated by hand. The daily check is turned off in the *General* tab of
 *Preferences...*.
