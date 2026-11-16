@@ -82,7 +82,7 @@ def stack_check(name, pattern):
     from smappy.calibrate.molecule_stack import first_spots, stage_z_um
     files = sorted(glob.glob(os.path.join(ROOT, pattern)))
     print(f"\n== {name}: {len(files)} files")
-    lows, highs = [], []
+    lows, highs, curve_z, curve_e = [], [], [], []
     for path in files:
         frames, source = read_with_tags(path)
         z = stage_z_um(source, path)
@@ -104,11 +104,33 @@ def stack_check(name, pattern):
         highs.append(e_hi)
         print(f"     log2(sx/sy), bright spots: at the lowest 10% of stage z {np.nanmedian(e_lo):+.2f} (n {len(e_lo)}),"
               f" at the highest 10% {np.nanmedian(e_hi):+.2f} (n {len(e_hi)})")
-    if lows:
-        lo, hi = np.concatenate(lows), np.concatenate(highs)
-        print(f"  all {name}: smallest stage z {np.nanmedian(lo):+.2f}, largest {np.nanmedian(hi):+.2f}")
-        return float(np.nanmedian(lo)), float(np.nanmedian(hi))
-    return None
+        curve_z.append(zs - z.min())
+        curve_e.append(e)
+    if not curve_z:
+        return None
+    lo, hi = np.concatenate(lows), np.concatenate(highs)
+    print(f"  all {name}: smallest stage z {np.nanmedian(lo):+.2f}, largest {np.nanmedian(hi):+.2f}")
+    return curve(name, np.concatenate(curve_z), np.concatenate(curve_e))
+
+
+def curve(name, dz, e, step=0.25, min_count=20):
+    """The elongation through the sweep, every spot, in bins of stage z above each file's first plane.
+
+    The 10 % extremes above miss it: there the spots are so defocused that the elliptical Gaussian falls back
+    towards round (beads), or nothing is detected at all (the AB sweep starts out of focus), and a median of
+    nothing was read as "−".  The verdict takes the populated bins' lower half against their upper half."""
+    bins = np.round(dz / step).astype(int)
+    rows = [(b * step, int((bins == b).sum()), float(np.nanmedian(e[bins == b]))) for b in np.unique(bins)]
+    rows = [r for r in rows if r[1] >= min_count]
+    for z0, n, m in rows:
+        print(f"     stage z − first plane {z0:4.2f} µm: n {n:5d}, median log2(sx/sy) {m:+.2f}")
+    if not rows:
+        return None
+    mid = 0.5 * (rows[0][0] + rows[-1][0])
+    low = float(np.nanmedian(e[(dz < mid) & (dz >= rows[0][0] - step / 2)]))
+    high = float(np.nanmedian(e[(dz >= mid) & (dz <= rows[-1][0] + step / 2)]))
+    print(f"  {name}, populated range split at {mid:.2f} µm: lower half {low:+.2f}, upper half {high:+.2f}")
+    return low, high
 
 
 def movie_check(early_frames: int, late_start: int):
@@ -142,11 +164,12 @@ def main():
     glass = movie_check(a.movie_early, a.movie_late)
     print("\n== verdict")
     for name, r in stacks.items():
-        if r is None:
+        if r is None or not np.isfinite(r[0]):
+            print(f"  {name}: no elongation at the low side of the sweep")
             continue
         low_side = "+" if r[0] > 0 else "-"
         agree = low_side != glass
-        print(f"  {name}: spots at the smallest stage z elongated {low_side}, the movie's glass molecules {glass}: "
+        print(f"  {name}: spots at the lower stage z elongated {low_side}, the movie's glass molecules {glass}: "
               + ("opposite, as the convention says (smallest z = focus below the glass)" if agree else
                  "THE SAME: the stage z runs opposite to the code's convention for these files"))
 

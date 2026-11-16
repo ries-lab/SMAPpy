@@ -2767,7 +2767,7 @@ better):
   - A tilt held at the edge's value (along y) in situ, to see what the pupil does with it.
   - Learning the index per height range, or an index gradient.
 
-**The stage's direction** (`z_direction.py`, written after the follow-up, not yet run).  The twin test prefers the
+**The stage's direction** (`z_direction.py`, written after the follow-up).  The twin test prefers the
 mirrored pupil by 800-1500 nats in every M2 in situ run.  That is what a stage z running opposite to the code's
 convention would give: every path takes a larger ``ZPositionUm`` as the objective raised (beads order their planes
 by it, sweeps take z = −(stage z − focus), in situ's focus is the objective's rise above the coverslip), and beads
@@ -2775,6 +2775,34 @@ and molecules on the glass see no depth, so they would learn the twin without no
 files' z tags and their direction, the sweeps' and bead stacks' spot elongation at the smallest and largest stage
 z, and the elongation of the movie's glass molecules (below the focus, in its first ~2200 frames).  If the
 convention holds, the glass molecules are elongated the opposite way to the spots at the smallest stage z.
+
+*Run on 2026-11-16: the convention holds.*  M2's stage z runs the way the code assumes, so the bead and sweep
+models are not the twin, and the twin preference must have another cause.
+- *The tags.*  Two frame tags name a z in every bead stack and in the AB sweep: ``ZPositionUm`` and
+  ``PIZStage-Position``.  They agree to 3 nm on every plane (beads 63.407 → 66.407 µm against 63.408 → 66.409; AB
+  46.505 → 49.505 against 46.504 → 49.505), so ``ZPositionUm`` is the PI Z piezo, Micro-Manager's focus device,
+  and no second device counts the other way.  Stage z rises along the frames in 100 % of the bead stacks' steps
+  and 99 % of the sweep's.  The tags alone cannot say whether the piezo moves the objective or the sample, and
+  that is what the images settle.
+- *The elongation through the sweep*, median log₂(σx/σy) of every spot per 0.25 µm of stage z.  Beads go from
+  −0.98 (σy > σx, long along y) at 1.0 µm above the first plane, through round at 1.5 µm, to +0.87 at 1.75 µm.
+  The AB sweep goes from −1.09 at 1.25 µm through −0.24 at 1.75 µm to +0.92 at 2.25 µm.  Lower half of the
+  populated range against upper half: beads −0.44 / +0.33, AB −0.81 / +0.70.  The script's first version took
+  the 10 % extremes of stage z.  There the beads are so defocused that the elliptical Gaussian falls back
+  towards round (−0.11 / +0.01), and the AB sweep has no spot at all at the low end, so its verdict read a median
+  of nothing as "−".  The script now prints the curve and judges by it.
+- *The movie's glass molecules.*  The bright spots of frames 0-2200 are 30.7 % long along x (log₂(σx/σy) >
+  +0.4) and 37.6 % long along y.  For frames 30 000-32 200 it is 3.5 % and 59.9 %.  The excess of the early frames is
+  on one side only: +27.2 % along x, against −22.3 % along y, which is the dilution by the extra spots.  It holds
+  for every window tried: +26.7 % (early 2200, late from 50 000), +22.9 % and +23.1 % (early 1500, late from
+  30 000 and 50 000), +14.9 % (early 500).  By eye, in frames 2-11 the spots that stay in place, the glass, are
+  round to slightly long along x (0 to +0.5).  The diffuse spots of the nucleus are long along y.
+- *Verdict*, both stacks: spots at the lower stage z are long along y, the glass molecules along x, the
+  opposite way, as the convention says.  The movie alone adds one thing.  The nucleus' molecules (−0.56 median
+  late) and the glass below them (+) are elongated opposite ways, so they lie on opposite sides of the focus,
+  which must sit between the glass and most of the nucleus.  Read with the stacks, the glass is below the focus
+  and the nucleus above it, as it must be.  With an inverted stage z it would be the other way round, the glass
+  above the focus and the nucleus below it, which the sample's geometry rules out.
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
