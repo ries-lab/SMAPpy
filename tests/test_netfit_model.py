@@ -327,7 +327,8 @@ def test_shots_sinkhorn_assignment_reaches_the_exact_one_and_gives_two_molecules
     assert soft > exact
 
 
-@pytest.mark.parametrize("time_model, extra", [("attention", {}), ("convgru", {}), ("convgru", {"skip": True})])
+@pytest.mark.parametrize("time_model, extra", [("attention", {}), ("convgru", {}), ("convgru", {"skip": True}),
+                                              ("convgru", {"norm": True})])
 def test_a_time_model_gives_the_same_maps_and_reads_the_neighbouring_frames(time_model, extra):
     from smappy.netfit.settings import Part, Parts
     torch.manual_seed(0)

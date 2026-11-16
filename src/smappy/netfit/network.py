@@ -266,17 +266,27 @@ class TimeGRU(nn.Module):
     runs of four (G7_s1, G7L_s0, 2026-11-16) sat at Jaccard 0 for 60-130 epochs before they learned,
     and never caught up: everything the union U-Net saw had passed through gates that start near
     their middle.  With it, the network has the frame stack's direct path from the first step.  Off by
-    default so a model saved without it is built as it was trained."""
+    default so a model saved without it is built as it was trained.
 
-    def __init__(self, features: int, window: int, skip: bool = False):
+    ``norm``: each frame's features normalised (a group norm, learnt scale and offset) before the cells
+    read them -- the other way out of the stall, without the skip, whose models pixelated 2.5 times as
+    much (0.043 against 0.016, 3 seeds and 2; 2026-11-16).  Under the Kaiming initialisation the frame
+    features' spread depends on the seed (1.7 to 2.7 at seeds 0-3), and the seed that stalled, 1, had
+    the largest: 15 % of its gates' inputs beyond 4, 23 % of its candidate's tanh saturated, where the
+    seeds that learnt had 3-4 % and 13 %.  Normalised, every seed's gates start alike."""
+
+    def __init__(self, features: int, window: int, skip: bool = False, norm: bool = False):
         super().__init__()
         self.fwd, self.bwd = ConvGRUCell(features), ConvGRUCell(features)
         self.skip = skip
+        self.norm = nn.GroupNorm(min(8, features), features) if norm else None
         self.out_channels = (3 if skip else 2) * features
 
     def forward(self, f):
         b, t, c, h, w = f.shape
         mid = t // 2
+        if self.norm is not None:
+            f = self.norm(f.reshape(b * t, c, h, w)).reshape(b, t, c, h, w)
         hf = f.new_zeros(b, c, h, w)
         for i in range(mid + 1):
             hf = self.fwd(f[:, i], hf)

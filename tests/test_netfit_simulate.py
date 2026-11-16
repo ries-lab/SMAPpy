@@ -73,3 +73,52 @@ def test_a_batch_is_the_frames_the_settings_ask_for_and_its_targets_are_in_the_m
     assert torch.all((xyz[:, :2] >= -0.5) & (xyz[:, :2] < 23.5))
     assert torch.all(b.photons[b.mask] > 0) and torch.all(b.photons[b.mask] <= 2000.0 + 1e-3)
     assert torch.all((b.background >= 20.0) & (b.background <= 200.0))
+
+
+def test_a_range_of_on_times_gives_each_sample_its_own_mean_and_keeps_the_molecules_per_frame():
+    # a sample's molecules are on for an exponential time of its own mean, log-uniform in 1-3 frames
+    sim = SimulationSettings(density_per_40px=20.0, lifetime_frames=1.0, lifetime_max_frames=3.0, window=7)
+    g = torch.Generator().manual_seed(1)
+    *_, per_frame = simulate.emitters(sim, 400, g, "cpu")
+    assert (per_frame[:, 3] > 0).sum().item() / 400 == pytest.approx(20.0, rel=0.04)
+
+    def means(s):
+        # 300 frames, so few on-times are cut by the ends: each sample's mean on-time, in frames
+        sample, *_, flux, pf = simulate.emitters(s, 200, torch.Generator().manual_seed(2), "cpu", frames=300)
+        on = pf.sum(1) / flux
+        whole = (pf[:, 0] == 0) & (pf[:, -1] == 0) & (on > 0)
+        return torch.zeros(200).index_add_(0, sample[whole], on[whole]) / torch.bincount(sample[whole], minlength=200)
+
+    m = means(sim)
+    assert torch.quantile(m, 0.1) < 1.3 and torch.quantile(m, 0.9) > 2.4      # 3^0.1 = 1.12, 3^0.9 = 2.69
+    assert m.min() > 0.85 and m.max() < 3.3
+    # without a maximum, every sample at the one mean
+    assert torch.all((means(SimulationSettings(density_per_40px=20.0, lifetime_frames=2.0)) - 2.0).abs() < 0.2)
+
+
+def test_windows_cut_from_one_movie_share_its_frames_shifted_by_one_and_target_their_own_middle_frame():
+    cal = _calibration()
+    sim = SimulationSettings(frame_px=24, window=5, density_per_40px=8.0, photons_sd=0.0, movie_windows=4)
+    torch.manual_seed(0)
+    b = simulate.draw_batch(SplineRenderer(cal), sim, CameraModel(), 10, torch.Generator().manual_seed(2))
+    assert b.frames.shape == (10, 5, 24, 24)            # 3 movies of 8 frames, the last window cut
+    for m in range(2):
+        for w in range(3):
+            i = 4 * m + w
+            assert torch.equal(b.frames[i, 1:], b.frames[i + 1, :-1])
+            assert torch.equal(b.background_window[i, 1:], b.background_window[i + 1, :-1])
+    assert not torch.equal(b.frames[3, 1:], b.frames[4, :-1])     # another movie
+    # a window's targets are the molecules in its middle frame: a molecule in frames 2-3 of window 0
+    # is in frames 1-2 of window 1, and its target photons are its middle frame's
+    for i in range(10):
+        on = b.mask[i]
+        assert torch.allclose(b.photons[i, on], b.photons_window[i, on, 2])
+        assert torch.all(b.photons_window[i, on, 2] > 0)
+    w0 = {tuple(v) for v in b.xyz[0, b.mask[0]].tolist()}
+    w1 = {tuple(v) for v in b.xyz[1, b.mask[1]].tolist()}
+    both = w0 & w1                                       # molecules on in frame 2 and 3 of the movie
+    assert both, "some molecules span two middle frames at this density"
+    for v in both:
+        a = next(j for j in range(b.mask.shape[1]) if b.mask[0, j] and tuple(b.xyz[0, j].tolist()) == v)
+        c = next(j for j in range(b.mask.shape[1]) if b.mask[1, j] and tuple(b.xyz[1, j].tolist()) == v)
+        assert torch.equal(b.photons_window[0, a, 1:], b.photons_window[1, c, :-1])

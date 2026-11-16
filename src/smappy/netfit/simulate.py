@@ -43,18 +43,26 @@ def _uniform(lo, hi, n, g, device):
     return lo + (hi - lo) * torch.rand(n, generator=g, device=device)
 
 
-def emitters(sim: SimulationSettings, batch: int, g: torch.Generator, device):
-    """Each sample's molecules: sample index, x, y, z, flux, and the photons each frame of the window
-    gets, ``(n, window)``."""
-    life, T = sim.lifetime_frames, sim.window
-    lo, hi = -3 * life, T + 3 * life
+def emitters(sim: SimulationSettings, batch: int, g: torch.Generator, device, frames: int | None = None):
+    """Each sample's molecules: sample index, x, y, z, flux, and the photons each of its ``frames``
+    frames (the window, unless given) gets, ``(n, frames)``.  With ``lifetime_max_frames`` above
+    ``lifetime_frames`` each sample has its own mean on-time, log-uniform between them, and the
+    molecules per frame stay ``density_per_40px`` whatever it is."""
+    T = sim.window if frames is None else frames
+    life = lo_life = sim.lifetime_frames
+    hi_life = max(sim.lifetime_max_frames, lo_life)
+    if hi_life > lo_life:      # drawn only then, so a fixed on-time draws exactly as before
+        life = lo_life * (hi_life / lo_life) ** torch.rand(batch, generator=g, device=device)
+    lo, hi = -3 * hi_life, T + 3 * hi_life
     area = ((sim.frame_px + 2 * sim.margin_px) / 40.0) ** 2           # the drawn area, in 40 x 40 pixels
     rate = sim.density_per_40px * area / (life + 1)
-    counts = torch.poisson(torch.full((batch,), rate * (hi - lo), device=device), generator=g).long()
+    rate = torch.full((batch,), rate, device=device) if not torch.is_tensor(rate) else rate
+    counts = torch.poisson(rate * (hi - lo), generator=g).long()
     sample = torch.repeat_interleave(torch.arange(batch, device=device), counts)
     n = len(sample)
     start = _uniform(lo, hi, n, g, device)
-    on = -life * torch.log1p(-torch.rand(n, generator=g, device=device))      # exponential, mean life
+    mean_on = life[sample] if torch.is_tensor(life) else life
+    on = -mean_on * torch.log1p(-torch.rand(n, generator=g, device=device))      # exponential, mean life
     end = start + on
     k = torch.arange(T, device=device, dtype=start.dtype)
     overlap = (torch.minimum(end[:, None], k + 1) - torch.maximum(start[:, None], k)).clamp_min(0)
@@ -81,22 +89,34 @@ def camera(photons: torch.Tensor, cam: CameraModel, g: torch.Generator) -> torch
 
 def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraModel, batch: int,
                g: torch.Generator) -> Batch:
-    """One batch of fresh samples on the renderer's device."""
+    """One batch of fresh samples on the renderer's device: movies of ``window + movie_windows - 1``
+    frames, each cut into ``movie_windows`` windows shifted by a frame (one window a movie by default,
+    every sample its own)."""
     device = renderer.device
     T, s = sim.window, sim.frame_px
-    sample, x, y, z, _, per_frame = emitters(sim, batch, g, device)
-    bg = _uniform(*sim.background, batch * T, g, device).view(batch, T)
-    image = bg[:, :, None, None].expand(batch, T, s, s).contiguous()
+    W = max(1, int(sim.movie_windows))
+    n, L = -(-batch // W), T + W - 1
+    sample, x, y, z, _, per_frame = emitters(sim, n, g, device, frames=L)
+    bg = _uniform(*sim.background, n * L, g, device).view(n, L)
+    image = bg[:, :, None, None].expand(n, L, s, s).contiguous()
     on = per_frame > 0
     m, f = on.nonzero(as_tuple=True)
-    renderer.draw(image.view(batch * T, s, s), sample[m] * T + f, x[m], y[m], z[m], per_frame[m, f])
-    frames = camera(image, cam, g)
-    # the middle frame's molecules
+    renderer.draw(image.view(n * L, s, s), sample[m] * L + f, x[m], y[m], z[m], per_frame[m, f])
+    movie = camera(image, cam, g)
+    idx = torch.arange(W, device=device)[:, None] + torch.arange(T, device=device)[None]     # (W, T)
+    frames = movie[:, idx].reshape(n * W, T, s, s)[:batch]
+    bgw = bg[:, idx].reshape(n * W, T)[:batch]
+    # each window's middle frame's molecules
     mid = T // 2
-    keep = per_frame[:, mid] > max(sim.target_photons_min, 0.0)
     inside = (x >= -0.5) & (x < s - 0.5) & (y >= -0.5) & (y < s - 0.5)   # a target is in the frame
-    keep &= inside
-    ks, kx, ky, kz, kp = sample[keep], x[keep], y[keep], z[keep], per_frame[keep, mid]
+    keep = (per_frame[:, mid:mid + W] > max(sim.target_photons_min, 0.0)) & inside[:, None]     # (molecules, W)
+    i, w = keep.nonzero(as_tuple=True)
+    ks = sample[i] * W + w
+    order = torch.argsort(ks, stable=True)          # grouped by sample; one window a movie: already so
+    i, w, ks = i[order], w[order], ks[order]
+    use = ks < batch
+    i, w, ks = i[use], w[use], ks[use]
+    kx, ky, kz, kp = x[i], y[i], z[i], per_frame[i, w + mid]
     counts = torch.bincount(ks, minlength=batch)
     k = int(counts.max()) if len(ks) else 1
     rank = torch.arange(len(ks), device=device) - torch.repeat_interleave(torch.cumsum(counts, 0) - counts, counts)
@@ -106,6 +126,6 @@ def draw_batch(renderer: SplineRenderer, sim: SimulationSettings, cam: CameraMod
     xyz[ks, rank] = torch.stack([kx, ky, kz], 1)
     photons[ks, rank] = kp
     window = torch.zeros((batch, max(k, 1), T), device=device)
-    window[ks, rank] = per_frame[keep]
+    window[ks, rank] = per_frame[i[:, None], idx[w]]
     mask[ks, rank] = True
-    return Batch(frames, xyz, photons, mask, bg[:, mid], window, bg)
+    return Batch(frames, xyz, photons, mask, bgw[:, mid], window, bgw)
