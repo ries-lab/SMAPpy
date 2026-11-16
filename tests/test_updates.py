@@ -84,7 +84,7 @@ def test_a_pixi_environment_names_its_workspace_wherever_it_is(tmp_path):
     assert updates.pixi_environment(tmp_path / "venv") is None
 
 
-def test_the_command_runs_pip_through_this_python_in_each_shell():
+def test_the_command_runs_pip_through_this_python_in_each_shell(monkeypatch):
     posix = updates.update_command("pip", windows=False, python="/opt/my env/bin/python",
                                    dist=Dist(), pip=True)
     assert posix == "'/opt/my env/bin/python' -m pip install --upgrade smappy-smlm"
@@ -95,8 +95,12 @@ def test_the_command_runs_pip_through_this_python_in_each_shell():
     plain = updates.update_command("pip", windows=True, python=r"C:\py\python.exe",
                                    dist=Dist(), pip=True)
     assert plain == r"C:\py\python.exe -m pip install --upgrade smappy-smlm"
+    # the options are this uv's (`updater.refresh_args`), not the PATH's of the test
+    from smappy import updater
+    monkeypatch.setattr(updater, "refresh_args",
+                        lambda uv: ["--reinstall-package", "smappy-smlm"])
     assert updates.update_command("uv tool", dist=Dist()) == (
-        "uv tool upgrade --refresh-package smappy-smlm smappy-smlm")
+        "uv tool upgrade --reinstall-package smappy-smlm smappy-smlm")
 
 
 def _editable(url="file:///home/me/SMAPpy", installer=None):
@@ -316,20 +320,39 @@ def test_update_and_restart_is_offered_where_pip_or_uv_can_do_it():
     assert updater.commands("uvx", py) is None
 
 
+# `uv tool upgrade --help` of uv 0.12.4, cut: --refresh-package is only named in
+# --reinstall-package's description, and uv refuses it
+UV_012_HELP = """\
+      --reinstall
+          Reinstall all packages, regardless of whether they're already installed. Implies
+          `--refresh`
+      --reinstall-package <REINSTALL_PACKAGE>
+          Reinstall a specific package, regardless of whether it's already installed. Implies
+          `--refresh-package`
+  -n, --no-cache               Avoid reading from or writing to the cache, instead using a temporary
+"""
+
+
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="the stand-in uv is a shell script")
-def test_a_uv_whose_tool_upgrade_has_no_refresh_package_gets_no_cache_instead(tmp_path):
+def test_a_uv_tool_upgrade_asks_pypi_afresh_with_an_option_its_help_lists(tmp_path):
     from smappy import updater
-    new, old = tmp_path / "new" / "uv", tmp_path / "old" / "uv"
-    for uv, help in ((new, "--refresh-package <PKG>  Refresh cached data"),
-                     (old, "--prerelease-package <PKG>")):
-        uv.parent.mkdir()
-        uv.write_text(f"#!/bin/sh\necho '{help}'\n")
-        uv.chmod(0o755)
-    assert updater.commands("uv tool", "py", uv=str(new)) == [
-        [str(new), "tool", "upgrade", "--refresh-package", "smappy-smlm", "smappy-smlm"]]
+    helps = {"new": "      --refresh-package <PKG>  Refresh cached data\n" + UV_012_HELP,
+             "now": UV_012_HELP,
+             "old": "      --prerelease-package <PKG>\n  -n, --no-cache   Avoid the cache\n"}
+    uv = {}
+    for name, text in helps.items():
+        uv[name] = tmp_path / name / "uv"
+        uv[name].parent.mkdir()
+        (tmp_path / name / "help.txt").write_text(text)
+        uv[name].write_text(f"#!/bin/sh\ncat '{tmp_path / name / 'help.txt'}'\n")
+        uv[name].chmod(0o755)
+    command = lambda name: updater.commands("uv tool", "py", uv=str(uv[name]))[0][3:]
+    assert command("new") == ["--refresh-package", "smappy-smlm", "smappy-smlm"]
+    # uv 0.12 and 0.13 name --refresh-package only in another option's description and
+    # refuse it: the update failed, and was blamed on the uv's age (November 2026)
+    assert command("now") == ["--reinstall-package", "smappy-smlm", "smappy-smlm"]
     # an older uv refused --refresh-package and the update failed before it began
-    assert updater.commands("uv tool", "py", uv=str(old)) == [
-        [str(old), "tool", "upgrade", "--no-cache", "smappy-smlm"]]
+    assert command("old") == ["--no-cache", "smappy-smlm"]
     assert updater.refresh_args(str(tmp_path / "missing")) == ["--no-cache"]
 
 

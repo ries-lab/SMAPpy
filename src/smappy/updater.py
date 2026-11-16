@@ -21,6 +21,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -82,19 +83,32 @@ def find_pixi() -> Optional[str]:
 @functools.lru_cache(maxsize=None)
 def refresh_args(uv: str) -> List[str]:
     """How this uv's ``tool upgrade`` asks PyPI afresh: ``--refresh-package``
-    where it knows it, else the global ``--no-cache``, which every uv has.
+    where it has it, else ``--reinstall-package``, which implies it for the
+    one package, else the global ``--no-cache``, which every uv has but which
+    downloads every dependency again -- torch too, with the uipsf extra.
     An older uv's ``tool upgrade`` refuses ``--refresh-package`` outright,
     so the update failed before it began (a user's uv, October 2026); asked
-    once per uv, from its own help."""
+    once per uv, from its own help (`_options`)."""
     try:
         text = subprocess.run([uv, "tool", "upgrade", "--help"], capture_output=True,
                               text=True, errors="replace", stdin=subprocess.DEVNULL,
                               timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         text = ""
-    if "--refresh-package" in text:
-        return ["--refresh-package", DISTRIBUTION]
+    options = _options(text)
+    for option in ("--refresh-package", "--reinstall-package"):
+        if option in options:
+            return [option, DISTRIBUTION]
     return ["--no-cache"]
+
+
+def _options(help_text: str) -> set:
+    """The options a ``--help`` lists: those that start a line.  An option
+    named in another's description is not one -- uv 0.12's and 0.13's
+    ``tool upgrade`` says ``--reinstall-package`` "Implies
+    `--refresh-package`" and refuses ``--refresh-package`` itself, which a
+    search of the whole text took for there (a user's update, November 2026)."""
+    return set(re.findall(r"^\s*(?:-\w,\s+)?(--[\w-]+)", help_text, re.MULTILINE))
 
 
 def relaunch_command(python: str) -> List[str]:
