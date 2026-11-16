@@ -148,8 +148,13 @@ when a milestone lands or an item moves.
    (15 November, "Follow-up (November 2026)" there): the difference depends on depth -- the stack's pupil fits
    better below ~400 nm, in situ's above, more the deeper; the stack's h (5 or 75 nm) is not part of it; M2
    holds a slide level to 0.04°, while the movie's few glass tiles slope 1.3–1.7° along y (the pupil's tilt is
-   along x); no focus drift beyond ±20 nm over the last 50 000 frames, the first 18 000 undetermined.  Next: a
-   focus per time block, a tilt held at the edge's, the index by depth.
+   along x); no focus drift beyond ±20 nm over the last 50 000 frames, the first 18 000 undetermined.  The
+   stage's direction is as the code reads it (16 November, "The stage's direction").  **The twin test's
+   preference** (16 November, "What the twin test's preference is"): it does not survive a refit of the saved
+   models.  At n 1.345 the twin loses (+539 to +1102 nats) even with 28-41 % of its heights below the glass; at
+   n 1.33 it wins on the learnt units but not on unseen ones, and wins only deep in every model.  It is not a
+   better pupil.  `twin_fit` needs the coverslip bound and the run's focus prior (proposed there).  Next: a
+   focus per time block, a tilt held at the edge's, the index by depth, the twin test's bound.
 10. **Release (M6):** the real benchmark against tuned v1 with no per-dataset settings, CUDA and Windows GPU
     runs, uipsf documentation, 2.0.
 
