@@ -21,12 +21,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QFontDatabase, QTextCursor
+from PySide6.QtGui import QAction, QTextCursor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPlainTextEdit, QTabWidget,
                                QVBoxLayout, QWidget)
 
 from ..figures import summary_plot as _summary_page
 from ..plugins import Plot
+from .widgets import fixed_font
 
 # the summary page's key.  A tab character cannot be in a plot's name as
 # anyone would write one, so nothing a plugin calls its figure collides here
@@ -429,7 +430,7 @@ class TextWindow(QMainWindow):
         self.setWindowTitle(title)
         self.view = QPlainTextEdit(readOnly=True)
         self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self.view.setFont(fixed_font())
         self.setCentralWidget(self.view)
         self.resize(760, 520)
 

@@ -61,3 +61,13 @@ def test_file_conditions_from_the_names_group_the_traces():
                                              fields="std_xy_nm"))
     assert set(result.data["groups"]) == {"MEA", "GLOX"}
     assert result.data["table"]["median"]["std_xy_nm"]["MEA"] == pytest.approx(3.0, rel=0.2)
+
+
+def test_the_forms_line_about_the_conditions_is_a_notice_the_panel_can_draw():
+    from smappy.plugins import Notice
+    session = Session()
+    session.add_file(traces(3.0), FileInfo("cell1_10uW", "/a", "test"))
+    cls = plugins.get("Analysis/Process/File conditions")
+    for pattern in (r"(?P<power>\d+)uW", r"(?P<bad"):
+        state = cls().describe(session.context(), cls.Settings(pattern=pattern))
+        assert isinstance(state.notice, Notice), state.notice

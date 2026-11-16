@@ -5,7 +5,7 @@ import math
 from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QFont, QFontDatabase, QFontInfo, QIcon, QPixmap
 from PySide6.QtWidgets import (QDoubleSpinBox, QFrame, QHBoxLayout, QLayout,
                                QPushButton, QScrollArea, QToolButton, QVBoxLayout,
                                QWidget)
@@ -565,3 +565,25 @@ def apply_style(app) -> None:
     existing = app.styleSheet() or ""
     if EDITABLE_STYLE not in existing:
         app.setStyleSheet(existing + EDITABLE_STYLE)
+
+
+#: monospaced families, tried in order where the platform's fixed font is not
+_MONOSPACED = ("Menlo", "Consolas", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
+
+
+def fixed_font() -> QFont:
+    """The platform's fixed-width font, for text laid out in columns -- or,
+    where the platform has none (Qt's offscreen platform, which draws the
+    tutorials, answers with a proportional one), the first monospaced family
+    installed."""
+    font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    if QFontInfo(font).fixedPitch():
+        return font
+    installed = set(QFontDatabase.families())
+    for family in _MONOSPACED:
+        if family in installed:
+            mono = QFont(family)
+            if font.pointSizeF() > 0:
+                mono.setPointSizeF(font.pointSizeF())
+            return mono
+    return font

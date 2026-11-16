@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import Context, FormState, Plugin, Result, param, register
+from . import Context, FormState, Notice, Plugin, Result, param, register
 
 #: where the words behind a coded condition are kept
 CONDITIONS = "conditions"
@@ -102,11 +102,11 @@ class FileConditions(Plugin):
             try:
                 found = conditions_of(names, settings.pattern, settings.assign)
             except (re.error, ValueError) as e:
-                state.notice = f"not understood: {e}"
+                state.notice = Notice(f"not understood: {e}")
                 return state
             if found:
-                state.notice = "; ".join(f"{k}: " + ", ".join(str(v) for v in vals)
-                                         for k, vals in found.items())
+                state.notice = Notice("; ".join(f"{k}: " + ", ".join(str(v) for v in vals)
+                                                for k, vals in found.items()), kind="info")
         return state
 
     def run(self, ctx: Context, settings: FileConditionsSettings) -> Result:

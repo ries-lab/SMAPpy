@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 
-from . import Context, FormState, Plot, Plugin, Result, param, register, settings_values
+from . import Context, FormState, Notice, Plot, Plugin, Result, param, register, settings_values
 
 #: what a table needs to be read with every iteration
 NEEDS = ("iteration", "final", "sta", "tid")
@@ -52,8 +52,8 @@ class SequenceQC(Plugin):
             return state
         missing = [c for c in NEEDS if c not in ctx.locs]
         if missing:
-            state.notice = ("Sequence QC needs every iteration: open the MINFLUX file "
-                            "again with 'every iteration' ticked")
+            state.notice = Notice("Sequence QC needs every iteration: open the MINFLUX "
+                                  "file again with 'every iteration' ticked")
         return state
 
     def run(self, ctx: Context, settings: SequenceQCSettings) -> Result:

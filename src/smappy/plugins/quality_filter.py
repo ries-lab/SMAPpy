@@ -99,7 +99,8 @@ class QualityFilter(Plugin):
                                              dict(locs.metadata))
                     bounds["trace_cfr"] = (None, upper)
                     kept = int((values <= upper).sum())
-                    lines.append(f"cfr is measured for {100 * share:.0f} % of the "
+                    measured = (f"{100 * share:.0f} %" if share >= 0.01 else "under 1 %")
+                    lines.append(f"cfr is measured for {measured} of the "
                                  f"localizations (once a trace): cut per trace, trace_cfr ≤ "
                                  f"{upper:.3f} (median + {settings.k:g} robust sigmas over "
                                  f"{len(values)} traces): {kept} traces kept")
@@ -127,13 +128,15 @@ class QualityFilter(Plugin):
                     ax.hist(v, bins=80, range=(min(0.0, v.min()), max(1.2, upper * 1.2)),
                             color="0.35")
                     ax.axvline(upper, color="tab:red")
-                    ax.set_xlabel("cfr" if "cfr" in bounds else "cfr per trace")
+                    per_trace = "cfr" not in bounds
+                    ax.set_xlabel("cfr per trace" if per_trace else "cfr")
+                    ax.set_ylabel("traces" if per_trace else "localizations")
                 else:
                     ax.plot(what.centres / 1e3, what.counts, color="0.2")
                     ax.axvline(what.bound / 1e3, color="tab:red")
                     ax.axvline(what.peak / 1e3, color="0.6", ls=":")
                     ax.set_xlabel("efo (kHz)")
-                ax.set_ylabel("localizations")
+                    ax.set_ylabel("localizations")
 
         return Result(locs=out_locs, text="\n".join(lines), bounds=bounds,
                       plot=Plot(draw, panels=len(found), size=(4.0 * len(found), 3.0)),

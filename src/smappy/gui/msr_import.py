@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QHBoxLayout, QLabel, QPlainTextEdit,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 from ..io import minflux, msr
+from .widgets import fixed_font
 
 ROLE = Qt.UserRole
 
@@ -69,7 +69,7 @@ class MsrImportDialog(QDialog):
         self.details.setLineWrapMode(QPlainTextEdit.NoWrap)
         # the sequence is a table in text: its columns line up only in a
         # fixed-width font
-        self.details.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self.details.setFont(fixed_font())
         split.addWidget(self.details)
         split.setSizes([620, 340])
         layout.addWidget(split, 1)

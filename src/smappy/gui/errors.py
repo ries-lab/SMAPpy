@@ -62,7 +62,6 @@ def details_window(parent, title: str, message: str, details: str, session=None)
     it.  Returns the window, shown.
     """
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit,
                                    QPushButton, QVBoxLayout)
     window = QDialog(parent)
@@ -74,7 +73,8 @@ def details_window(parent, title: str, message: str, details: str, session=None)
     said.setTextInteractionFlags(Qt.TextSelectableByMouse)
     layout.addWidget(said)
     text = QPlainTextEdit(readOnly=True)
-    text.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+    from .widgets import fixed_font
+    text.setFont(fixed_font())
     text.setPlainText(details)
     text.setLineWrapMode(QPlainTextEdit.NoWrap)
     layout.addWidget(text, 1)

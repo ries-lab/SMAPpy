@@ -10,14 +10,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QSizePolicy,
                                QHBoxLayout, QLabel, QLineEdit, QSpinBox,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..plugins import ParamSpec, param_specs
 from . import folders
-from .widgets import CollapsibleSection, note_style
+from .widgets import CollapsibleSection, fixed_font, note_style
 
 
 class _Field(QWidget):
@@ -66,7 +65,7 @@ class _Field(QWidget):
             # something read back character by character -- an expression --
             # where the 80 px a number gets would show a fifth of it
             self.widget = QLineEdit()
-            self.widget.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+            self.widget.setFont(fixed_font())
             self.widget.editingFinished.connect(self.changed)
             row.addWidget(self.widget, 1)
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)

@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 
-from . import Context, FormState, Plot, Plugin, Result, param, register, settings_values
+from . import Context, FormState, Notice, Plot, Plugin, Result, param, register, settings_values
 
 LABEL = "Pair colours"
 
@@ -45,7 +45,7 @@ class PairColours(Plugin):
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             thi = np.asarray(ctx.locs["thi"]) if "thi" in ctx.locs else None
             if thi is None or len(np.unique(thi)) < 2:
-                state.notice = "needs two threads (thi 0 and 1): this table has one"
+                state.notice = Notice("needs two threads (thi 0 and 1): this table has one")
         return state
 
     def run(self, ctx: Context, settings: PairColoursSettings) -> Result:
