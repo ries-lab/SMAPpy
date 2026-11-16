@@ -6,7 +6,7 @@ torch = pytest.importorskip("torch")
 
 from test_netfit_simulate import _calibration
 
-from smappy.netfit import train
+from smappy.netfit import network, train
 from smappy.netfit.render import SplineRenderer
 from smappy.netfit.settings import CameraModel, Parts, SimulationSettings
 from smappy.netfit.simulate import draw_batch
@@ -76,3 +76,12 @@ def test_a_new_training_extracts_with_the_mixture_peak_and_stops_after_6_million
     p = Parts()
     assert p.extraction.name == "mixture_peak"
     assert p.schedule.settings["max_samples"] == 6e6
+
+
+def test_a_new_training_is_step_4s_base_ema_offsets_reaching_two_cells_and_a_head_that_reports_sigmas():
+    p = Parts()
+    assert p.schedule.settings["ema"] == 0.999
+    assert p.backbone.settings["offset_range"] == 2.0 and p.backbone.settings["sigma_rep"]
+    assert {r["head"]: r["weight"] for r in p.loss.settings["reported"]} == {"mixture": 0.1, "rep": 1.0}
+    model = network.build(p, 3)
+    assert model(torch.zeros(1, 3, 16, 16)).shape[1] == 13     # one slot's 9 maps, the background, 3 reported sigmas

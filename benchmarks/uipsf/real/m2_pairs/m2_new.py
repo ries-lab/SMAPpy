@@ -75,6 +75,26 @@ def main():
                   flush=True)
             return _learn(model, batch, defocus_nm, noise, settings, start=start, **kw)
         ms.learn_molecule_stack = learn
+    if os.environ.get("FLIP_Z"):
+        # every stage z read as −z (z_direction.py, the stage's direction): the bead planes in reverse order,
+        # the sweeps' z = +(stage z − focus); the stack learns what it would if ZPositionUm ran the other way
+        import smappy.calibrate.input as cal_input
+        import smappy.calibrate.molecule_stack as ms_mod
+        _assemble, _stage_z = cal_input._assemble, ms_mod.stage_z_um
+
+        def assemble(records, summary, source, dz_nm):
+            flipped = []
+            for image, axes, md in records:
+                if md.get("ZPositionUm") is not None:
+                    md = dict(md, ZPositionUm=-float(md["ZPositionUm"]))
+                flipped.append((image, axes, md))
+            return _assemble(flipped, summary, source, dz_nm)
+
+        def stage_z_um(source, path):
+            z = _stage_z(source, path)
+            return None if z is None else -z
+        cal_input._assemble = assemble
+        ms_mod.stage_z_um = stage_z_um
     files = sorted(glob.glob(os.path.join(ROOT, SETS[which])))
     if "--files" in sys.argv:
         keep = [int(i) for i in sys.argv[sys.argv.index("--files") + 1].split(",")]
@@ -91,6 +111,8 @@ def main():
                            learn_n_med=bool(env("LEARN_NMED")), blur="fixed" if env("BLUR_NM") else "round",
                            blur_nm=float(env("BLUR_NM", 20.0)))
     model = BeadSettings(psf=psf, fit_tilt=bool(env("TILT")))
+    if env("REJECT_K"):
+        model.rejection_k = float(env("REJECT_K"))        # large: every bead kept, the same set both ways
     save_to = os.path.join(out, f"{tag}_3dcal.h5")
     t0 = time.perf_counter()
     row = dict(set=tag, files=len(files), wavelength_nm=WAVELENGTH, pixel_nm=PIXEL)
@@ -163,6 +185,9 @@ def main():
             row[k] = np.round(p[k].detach().cpu().double().numpy().reshape(-1), 4).tolist()
             if k in std:
                 row[k + "_crlb"] = np.round(std[k].detach().cpu().double().numpy().reshape(-1), 4).tolist()
+    row["objective"] = float(cal.result.objective)          # ½ deviance + priors: FLIP_Z against not
+    row["n_emitters"] = int(cal.result.params.n_emitters)
+    row["flip_z"] = bool(os.environ.get("FLIP_Z"))
     row["params"] = sorted(p.keys())
     row["minutes"] = round((time.perf_counter() - t0) / 60, 2)
     row["saved"] = save_to

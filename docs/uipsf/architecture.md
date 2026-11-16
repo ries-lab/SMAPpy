@@ -2767,7 +2767,7 @@ better):
   - A tilt held at the edge's value (along y) in situ, to see what the pupil does with it.
   - Learning the index per height range, or an index gradient.
 
-**The stage's direction** (`z_direction.py`, written after the follow-up, not yet run).  The twin test prefers the
+**The stage's direction** (`z_direction.py`, written after the follow-up).  The twin test prefers the
 mirrored pupil by 800-1500 nats in every M2 in situ run.  That is what a stage z running opposite to the code's
 convention would give: every path takes a larger ``ZPositionUm`` as the objective raised (beads order their planes
 by it, sweeps take z = −(stage z − focus), in situ's focus is the objective's rise above the coverslip), and beads
@@ -2775,6 +2775,81 @@ and molecules on the glass see no depth, so they would learn the twin without no
 files' z tags and their direction, the sweeps' and bead stacks' spot elongation at the smallest and largest stage
 z, and the elongation of the movie's glass molecules (below the focus, in its first ~2200 frames).  If the
 convention holds, the glass molecules are elongated the opposite way to the spots at the smallest stage z.
+
+*Run on 2026-11-16: the convention holds.*  M2's stage z runs the way the code assumes, so the bead and sweep
+models are not the twin, and the twin preference must have another cause.
+- *The tags.*  Two frame tags name a z in every bead stack and in the AB sweep: ``ZPositionUm`` and
+  ``PIZStage-Position``.  They agree to 3 nm on every plane (beads 63.407 → 66.407 µm against 63.408 → 66.409; AB
+  46.505 → 49.505 against 46.504 → 49.505), so ``ZPositionUm`` is the PI Z piezo, Micro-Manager's focus device,
+  and no second device counts the other way.  Stage z rises along the frames in 100 % of the bead stacks' steps
+  and 99 % of the sweep's.  The tags alone cannot say whether the piezo moves the objective or the sample, and
+  that is what the images settle.
+- *The elongation through the sweep*, median log₂(σx/σy) of every spot per 0.25 µm of stage z.  Beads go from
+  −0.98 (σy > σx, long along y) at 1.0 µm above the first plane, through round at 1.5 µm, to +0.87 at 1.75 µm.
+  The AB sweep goes from −1.09 at 1.25 µm through −0.24 at 1.75 µm to +0.92 at 2.25 µm.  Lower half of the
+  populated range against upper half: beads −0.44 / +0.33, AB −0.81 / +0.70.  The script's first version took
+  the 10 % extremes of stage z.  There the beads are so defocused that the elliptical Gaussian falls back
+  towards round (−0.11 / +0.01), and the AB sweep has no spot at all at the low end, so its verdict read a median
+  of nothing as "−".  The script now prints the curve and judges by it.
+- *The movie's glass molecules.*  The bright spots of frames 0-2200 are 30.7 % long along x (log₂(σx/σy) >
+  +0.4) and 37.6 % long along y.  For frames 30 000-32 200 it is 3.5 % and 59.9 %.  The excess of the early frames is
+  on one side only: +27.2 % along x, against −22.3 % along y, which is the dilution by the extra spots.  It holds
+  for every window tried: +26.7 % (early 2200, late from 50 000), +22.9 % and +23.1 % (early 1500, late from
+  30 000 and 50 000), +14.9 % (early 500).  By eye, in frames 2-11 the spots that stay in place, the glass, are
+  round to slightly long along x (0 to +0.5).  The diffuse spots of the nucleus are long along y.
+- *Verdict*, both stacks: spots at the lower stage z are long along y, the glass molecules along x, the
+  opposite way, as the convention says.  The movie alone adds one thing.  The nucleus' molecules (−0.56 median
+  late) and the glass below them (+) are elongated opposite ways, so they lie on opposite sides of the focus,
+  which must sit between the glass and most of the nucleus.  Read with the stacks, the glass is below the focus
+  and the nucleus above it, as it must be.  With an inverted stage z it would be the other way round, the glass
+  above the focus and the nucleus below it, which the sample's geometry rules out.
+
+*The stacks learnt with stage z turned round* (`m2_new.py` with ``FLIP_Z``, which reads every ``ZPositionUm`` as
+−z; `flip_same.py`).  A pupil learnt from data on the glass is not quite free to become its twin.  The twin is
+exact only for a real, centrosymmetric pupil amplitude and a z that enters only as the stage's defocus.  A free
+pupil phase absorbs most of what departs from that.  It absorbs the height term e^{i k_z,med h}, a fixed phase
+for one h, and the scalar Fresnel phase.  It cannot absorb two things.  One is the phase between s and p above
+the critical angle, which differs and is summed incoherently.  The other is the evanescent weighting
+e^{−2κh} of a spread of heights.  Beyond those, an order-8 basis cannot follow the kink at the critical radius,
+so the twin of the learnt pupil may lie outside it.  Both stacks were learnt both ways on the same emitters:
+- *Beads*, ``REJECT_K=1000`` (all 19 found, kept both ways): ½ deviance 491 346 as read, 518 590 flipped.  As
+  read wins by **27 244 nats**.  With rejection on, the flipped run kept 15 beads and the other 16, and its lower
+  total (399 581 against 410 584) is that bead.
+- *AB sweep* (`flip_same.py`: the 4000 molecules found once, z negated for the second learning, one round,
+  rejection off): 869 480 as read, 889 806 and 893 469 flipped in two runs.  As read wins by **20 326 and
+  23 989 nats** (5-6 nats a molecule).  The as-read learning came back the same to the last digit, while the
+  flipped one, from the same start, stopped in a different place.
+  Rejection on gave the reverse at first.  The flipped model lost more molecules: 3253 against 3469 with
+  `m2_new.py`'s three rounds, and 3669 against 3954 with k = 1000, through the 2 px offset limit.  Its total over
+  fewer molecules came out 32-55 k lower, but per molecule it was worse each time (202.9 against 202.3, 219.1
+  against 217.3 nats).
+- *The flipped pupils are not twins in the radially symmetric modes.*  Astigmatism changes sign (beads Z6
+  +57.8 → −57.4 nm, AB +56.7 → −55.5), and the coma stays, as a twin's would.  Spherical does not follow: beads Z11
+  +21.4 → −2.1, Z22 +3.6 → +13.5, Z37 −5.5 → +13.3; AB Z11 +24.5 → −12.5 and −15.5, Z22 +7.8 → +1.0 and −2.2, Z37 −3.8 → +7.9 and +6.1.  Those are the
+  modes the interface's terms live in.  The AB's learnt height moves too (74.5 → 49.5 and 49.2 nm).
+- *The beads simulated with the direction known* (`flip_sim.py`).  Each learnt bead model drew the 19 beads
+  again: the same slices, photons, background, drift and bleaching, with the camera's excess and read noise.
+  Each draw was learnt in both layouts, two noise draws per model.  The flipped layout is the as-read one in
+  reverse.  The reading's flip lands one slice further on, which each bead's learnt z takes up.
+
+  | drawn from | learnt as read | learnt flipped | flipped − as read |
+  | --- | --- | --- | --- |
+  | as-read model | 422 109, 421 983 | 437 903, 437 765 | **+15 794, +15 782** |
+  | flipped model | 437 196, 436 268 | 422 595, 422 022 | **−14 601, −14 246** |
+  | the real beads | 491 346 | 518 590 | **+27 244** |
+
+  The fit picks whichever direction drew the data, by 14-16 k nats either way.  It has no lean towards the
+  as-read order: the gap barely changes with the noise draw (±0.2 k) and is almost the same size from either
+  side.  The wrong direction is learnt into nearly the same pupil as on the real data.  From the as-read
+  truth, the flipped learning finds Z11 −2.4 and Z22 +12.6 nm, γ 0.13; the real flipped learning found −1.7,
+  +13.8 and 0.14.  So the model can tell the direction within its own basis, and the real gap points as the
+  data were read.
+
+  The real fits sit about 69 k (as read) and 81 k (flipped) nats above their matched draws.  That misfit adds
+  another 12 k to the as-read side's lead, but the simulation cannot say where it comes from.  A model drawn
+  in the order-8 basis cannot show what lies outside it.  A higher order is what would test the basis.
+
+Both stacks agree with the images: the stage z runs as the code assumes.
 
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 

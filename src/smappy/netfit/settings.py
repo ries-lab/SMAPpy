@@ -2,8 +2,10 @@
 
 A model file records all of it, so that a benchmark report says exactly what was trained
 (`docs/decode/benchmark.md`, "A run"); the benchmark's run files name the same parts.  The defaults
-are version 1: DECODE's method as published, on the frames DECODE trains on (40 x 40, 3 frames),
-with the example package's ranges -- what the port's `decode_B` was trained with.
+began as version 1: DECODE's method as published, on the frames DECODE trains on (40 x 40, 3 frames),
+with the example package's ranges -- what the port's `decode_B` was trained with.  Since then they
+are step 4's base (`docs/decode.md` §10): DECODE's network details, the mixture's peak, and EMA,
+offsets reaching 2 cells and a reported sigma (`docs/decode/poc-plan.md`).
 """
 from __future__ import annotations
 
@@ -61,14 +63,25 @@ class Parts:
     # is built as it was trained.
     backbone: Part = field(default_factory=lambda: Part("unet2", {
         "features": 48, "depth_frame": 2, "depth_union": 2, "upsample_kernel": 1, "pool_act": False,
-        "out_conv": True, "init": "kaiming", "p_clamp": 8.0}))
+        "out_conv": True, "init": "kaiming", "p_clamp": 8.0,
+        # step 4's base (2026-11-15): offsets reaching 2 cells and a head that reports the sigmas, with the
+        # loss's ``reported`` and the schedule's ``ema`` below.  Pixelation a third of v1f's (pixel_mod
+        # 0.019 - 0.043 against 0.093 - 0.096 at 3 frames), the same detection, RMSE on the molecules both
+        # found 43.3 / 52.0 nm against 43.5 / 52.7, and a claimed sigma whose likelihood beats the
+        # mixture's recalibrated one (docs/decode/poc-plan.md).
+        "offset_range": 2.0, "sigma_rep": True}))
     time_model: Part = field(default_factory=lambda: Part("frame_stack"))
     output: Part = field(default_factory=lambda: Part("offsets"))
     # mixture_peak, not DECODE's lookahead (2026-11-14): on all 54 models scored on test set B the same
     # Jaccard, error / CRLB 0.020 lower laterally and 0.046 axially, the pixelation (pixel_mod) 0.051
     # lower and half as different between seeds.
     extraction: Part = field(default_factory=lambda: Part("mixture_peak"))
-    loss: Part = field(default_factory=lambda: Part("mixture", {"terms": ["count", "mixture", "background"]}))
+    # ``reported`` (step 4's base): from epoch 5 the reported positions' likelihood under the mixture's
+    # sigma (weight 0.1, `sigmix`) and under the reporting head's (weight 1; `loss.reported_term`).
+    loss: Part = field(default_factory=lambda: Part("mixture", {
+        "terms": ["count", "mixture", "background"],
+        "reported": [{"head": "mixture", "weight": 0.1, "from_epoch": 5},
+                     {"head": "rep", "weight": 1.0, "from_epoch": 5}]}))
     # The port's decode_B's: AdamW, the rate times 0.9 every 10 epochs, no gradient clipping, an
     # epoch of 32 768 samples (its pseudo_ds_size).  The epoch's size sets how fast the rate falls
     # per sample: at 10 000 netfit pixelated half as much again as the port and found fewer
@@ -80,7 +93,9 @@ class Parts:
         # not at all, where the early stop ran to 13 - 15 M; the port's 32 M was no better than 6 M.
         # bf16, compiled, channels-last on CUDA ("auto"): the same models within the seeds' noise, 11.4 ->
         # 7.4 s an epoch on an H100.  Batch 64: 256 lost Jaccard and precision for 15 % (docs/decode/poc-plan.md).
-        "max_samples": 6e6, "precision": "auto", "compile": "auto", "channels_last": "auto"}))
+        "max_samples": 6e6, "precision": "auto", "compile": "auto", "channels_last": "auto",
+        # the weights' exponential average, decay 0.999 a step, is what is scored and saved (step 4's base)
+        "ema": 0.999}))
 
 
 @dataclass

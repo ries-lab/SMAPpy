@@ -1991,3 +1991,246 @@ measured none.  Equalising the sub-pixel histogram afterwards (`smappy/pixel_equ
 it but moves localizations at random, the RMSE 0.03 - 0.17 nm worse.  Pixelation is now set mostly
 by the seed (0.057 - 0.069 with the mixture peak at these settings): lowering it is the network's or
 the loss's to do.
+
+### Step 4, first round: screens A and B (2026-11-14)
+
+v1f at the decided settings with one change each, 1 frame, scored on test set B at snapshots of
+0.25 - 6 M samples (`model_<n>M`), mean ± sd over seeds where there are several; v1f's three seeds
+are the baseline.  Error / CRLB lateral / axial.
+
+| variant | seeds | Jaccard | error / CRLB | `pixel_mod` | s / epoch (H100 or 4090) | verdict |
+|---|---|---|---|---|---|---|
+| v1f | 3 | 0.454 ± .004 | 2.026 / 1.913 | 0.059 | 7.4 / 7.9 | baseline |
+| EMA of the weights, 0.999 | 1 | 0.456 | 2.021 / 1.902 | 0.067 | 8.5 | learns twice as fast (below) |
+| BlurPool before the stride | 1 | 0.457 | 2.028 / 1.902 | 0.061 | 7.6 | no effect; dropped |
+| offsets reaching 2 cells | 1 | 0.448 | 2.017 / 1.902 | 0.035 (0.037 - 0.041 from 2 M) | 7.4 | less pixelation, Jaccard -0.006 |
+| EMA + offsets 2 | 3 | 0.445 ± .001 | 2.012 / 1.905 | 0.045 ± .003 | -- | both effects, Jaccard -0.009 |
+| a reporting sigma head (`sigma_rep`) | 1 | 0.454 | 2.029 / 1.917 | 0.083 | 9.8 | the network unchanged; the honest claim (below) |
+| the reported term on the mixture's sigma, weight 0.1 (`sigmix`) | 1 | **0.462** | 2.031 / 1.907 | **0.028** (0.037 - 0.043 from 1 M) | 9.4 | best of all; seeds running |
+| residual blocks (B) | 3 | 0.455 ± .003 | 2.025 / 1.914 | 0.055 ± .010 | 9.7 | v1f's equal, slower; dropped |
+| dilated (B) | 2 | 0.450 ± .003 | 2.037 / 1.932 | 0.064 | 7.8 | worse; dropped |
+| ConvNeXt (B) | 2 | 0.450 ± .003 | 2.036 / 1.939 | 0.048 | 11.1 | worse, slowest, slow to learn (J 0.38 at 1 M); dropped |
+
+**No backbone beats v1f** at its parameter count: screen B ends here.
+
+**EMA learns twice as fast.**  The averaged weights at 2 M samples are v1f's at 4.5 M in every
+column (EMA + offsets 2, 3 seeds: 2.037 / 1.927 at 2 M against v1f's 2.060 / 1.960), and the lead
+shrinks as the rate decays (6 M: 0.014 / 0.008), as it should: the average removes the steps' jitter,
+which the decay removes too, later.  It costs a copy of the weights.
+
+**Pixelation moves along a training**: one v1f run's `pixel_mod` reads 0.04 - 0.08 from snapshot to
+snapshot, so a variant's is judged over its snapshots from 2 M, not at 6 M alone.  Offsets reaching
+two cells and the reported term on the mixture's sigma are the two that stay low throughout.
+
+**The claimed sigma** (`smappy/netfit/sigma.py`; error over claim as a robust width, 1 when honest;
+on the odd frames where a recalibration is fitted on the even):
+
+| claim | lateral | axial | NLL lat / ax | lateral by |z| 0-200 / 600-800 | axial by nearest neighbour < 1.5 px / > 5 px | RMS error / RMS claim, per claim bin, axial |
+|---|---|---|---|---|---|---|
+| v1f, the mixture's | 1.17 | 1.50 | 5.01 / 6.75 | 1.12 / 1.34 | 1.83 / 1.36 | 1.6 - 2.3 |
+| v1f, recalibrated per |z|, photons, claim (variant 3) | 1.00 | 1.00 | 4.90 / 5.76 | 1.01 / 1.01 | 1.22 / 0.90 | 1.1 - 1.5 |
+| `sigmix`, the mixture's | 1.05 | 1.15 | 4.92 / 5.87 | 1.03 / 1.17 | 1.37 / 1.07 | 1.3 - 1.6 |
+| `sigma_rep`'s head | 0.91 | 0.85 | **4.84 / 5.60** | 0.91 / 0.98 | 0.98 / 0.82 | **1.0 - 1.1** |
+
+The mixture's sigma claims too little, axially by half, and most where a neighbour is close.  A
+recalibration from what the fit reports makes it right on average and per |z| but cannot see the
+neighbour, and the claim still does not rank the errors (RMS ratios 1.1 - 1.5).  The reporting head
+does: its RMS ratio is flat at 1.0 - 1.1 in every claim bin and its NLL the lowest -- its robust width
+of 0.9 is a claim that includes the tails, as an RMS-honest claim must.  `sigmix` makes the mixture's
+own sigma more honest and, on its one seed, the network better.
+
+Round 2, running: `sigmix` seeds 1 and 2; EMA + `sigmix`; EMA + offsets 2 + `sigmix` (3 seeds each);
+EMA's and offsets 2's seeds 1 and 2.
+
+**What the Jaccard measures, and a score for what we analyse** (2026-11-14, evening).  Taken apart,
+every model's misses are of two kinds: a molecule whose find went to a close neighbour (two reported
+as one; 12.7 - 13.1 % of molecules, in every model alike, 40 % of those within 100 nm of another) and
+one with nothing found near it (40 - 42 %, where the models differ).  Offsets reaching two cells
+miss more of the second kind in every photon and neighbour bin alike, and make fewer false finds: a
+more cautious probability, not a lost molecule.  Swept over the threshold, v1f, offsets 2 and EMA +
+offsets 2 reach the same best Jaccard (0.496 - 0.497 at 0.3, `sigmix` 0.499): at 0.5 the Jaccard
+mostly measures where a model's probability sits.
+
+So the screens are now judged by the **bright-overlap score**: only molecules with at least 1000
+photons in the frame count (a find on a dimmer one counts neither way), recall at a precision of 0.97
+read off the threshold curve, and that recall, the share taken by a neighbour, the error and the pull
+toward the neighbour, by the distance to the nearest other bright molecule.  On it every screen-A
+variant is v1f's equal (recall 0.540 - 0.546 at P 0.97, v1f 0.541 ± 0.003; best Jaccard 0.590 - 0.592);
+screen B's backbones are worse (residual 0.537, dilated 0.533, ConvNeXt 0.526), at large |z| most.
+What the variants change is the pixelation alone: EMA + offsets 2 + `sigmix` 0.022 (one seed), offsets
+2 0.036, `sigmix` 0.038 (two seeds), EMA + offsets 2 0.045, v1f 0.060.
+
+What no variant changes: of bright molecules within 100 - 200 nm of another bright one, 38 % are taken
+by the neighbour's find, those found are pulled 7 nm toward it and their lateral error is 2.6 times
+the CRLB (2.0 overall); and beyond |z| 600 nm only 9 % of bright molecules are found, 10 % of isolated
+ones (87 % below 300 nm).  Both are the network's and the training data's to change, not the loss's.
+
+The output grid of two cells a pixel does not tell close molecules apart either (fg_v1f, 3 seeds,
+against v1f's 3, both scored with the mixture peak): of bright molecules 100 - 200 nm from another,
+0.439 found and 0.379 taken by the neighbour (v1f 0.444 / 0.383), the same pull of 7 nm toward it and
+the same 2.6 times the CRLB; recall at P 0.97 0.533 against 0.541, and at low thresholds it finds
+fewer (recall 0.54 at 0.3, v1f 0.64).  Finer cells leave the network's ability to see two molecules
+where they are; what sets it is what the network has learnt from the training data.
+
+**Close bright pairs: what the network's map holds, and the ceiling** (2026-11-14, night).
+
+*Not learnt with time.*  The share of bright pairs 100 - 200 nm apart reported as one is 0.38 - 0.39 at
+every snapshot from 0.25 to 6 M samples (EMA + offsets 2 + `sigmix`), while isolated molecules' recall
+rises from 0.53 to 0.61: the loss does not ask for it.  `mixture_peak` is not the cause (lookahead's
+numbers are the same); nor is the matching (pairs are assigned without ambiguity from 100 nm on).
+
+*The map's count.*  Summed over the cells above p 0.05, the map holds about 1.3 molecules at a pair
+100 - 200 nm apart and 1.08 at an isolated bright molecule near focus (0.74 at 300 - 600 nm, 0.25
+beyond 600 nm); a further 0.3 - 0.4 lies spread over the 5 x 5's faint cells, around single molecules
+too.  A detection that gathers enough p for two can be split (`extract`'s ``split``): at a cut of 1.5 it
+costs nothing (isolated molecules split 0.62 % as before, on B and on d15) and when it splits, both
+molecules are within 100 nm of a find 78 % of the time -- but it rarely gets enough p: pairs found both
+within 100 nm 0.10 -> 0.13 at 100 - 200 nm (v1f, 3 seeds), none on the fine grid.
+
+*The ceiling* (`ceiling.py` in the session's scratch; 1500 pairs a bin, 1 frame): each pair fitted with
+the true spline, everything else in the frame known, as one emitter and as two; separable when 2 Delta
+log L passes the level that splits 1 % of 3000 isolated bright molecules and both fits lie within 100 nm
+of the truths.
+
+| pair's separation | ceiling, all z (|z| < 300 / 300 - 600 / > 600) | v1f finds both, all z (same bins) |
+|---|---|---|
+| 0 - 100 nm | 0.32 (0.21 / 0.42 / 0.27) | 0.04 (0.04 / 0.06 / 0.02) |
+| 100 - 200 nm | 0.35 (0.40 / 0.45 / 0.24) | 0.10 (0.20 / 0.15 / 0.02) |
+| 200 - 300 nm | 0.45 (0.71 / 0.54 / 0.26) | 0.19 (0.51 / 0.26 / 0.02) |
+
+A perfect estimator separates three to eight times as many close pairs: the gap is the network's, most
+of all away from focus and below 100 nm, where the two molecules' depths tell them apart.  The local
+count term (`loss`'s ``local_count``, the exact count of each 3 x 3 cells; seeds running) asks the map
+for it.
+
+*The ceiling by depth difference and pixel layout* (`ceiling2.py`, the same 4500 pairs saved one by one;
+v1f s2 at 6 M; a pair counts as found when each molecule has a detection of its own within 100 nm, a
+stricter rule than the benchmark's matching, so v1f's numbers are lower than above).  Pairs below 100 nm:
+
+| |Delta z| | pairs | ceiling | v1f, `mixture_peak` (`lookahead`) |
+|---|---|---|---|
+| < 200 nm | 309 | 0.01 | 0.01 (0.01) |
+| 200 - 500 nm | 450 | 0.34 | 0.02 (0.02) |
+| > 500 nm | 741 | 0.44 | 0.03 (0.03) |
+| same pixel | 639 | 0.33 | 0.02 (0.01) |
+| neighbouring pixels | 861 | 0.32 | 0.03 (0.03) |
+
+* Below 100 nm the ceiling separates a pair only by its depths: none closer than 200 nm in z.
+* The pixel layout does not decide it: the ceiling is the same whether both molecules fall in one pixel
+  or in two neighbouring ones, and so is the network's failure -- neighbouring pixels could hold two
+  detections, and DECODE's lookahead keeps a second where its own p passes 0.6, yet 3 % come out.  It
+  is not learnt, not prevented by the output's one molecule per pixel.
+* The network separates worse the larger the depth difference, where the ceiling does better: at
+  100 - 200 nm v1f finds both in 0.03 / 0.13 / 0.05 of the three |Delta z| bins (ceiling 0.10 / 0.42 /
+  0.45), at 200 - 300 nm 0.19 / 0.19 / 0.09 (0.33 / 0.54 / 0.45).  A large |Delta z| usually puts one
+  molecule far from focus, where the network misses bright pairs outright: no detection within 250 nm
+  of the pair in 26 - 32 % of pairs with a molecule beyond 600 nm, none near focus.
+* The usual failure is one detection for the two: 64 - 75 % of pairs in every bin.
+* Near focus, 200 - 300 nm: v1f 0.42, ceiling 0.71.
+
+**The local count term, three seeds** (EMA + `local_count`, weight 1, 3 x 3 windows; 6 M samples, B).
+It does not separate close pairs: bright molecules with a bright neighbour within 100 nm are reported
+merged ("taken") 0.45 of the time against EMA's 0.43, and their recall at precision 0.97 is 0.43
+against 0.42.  Bright recall at precision 0.97 rises a little, 0.552 in all three seeds against EMA's
+0.542 - 0.546, the best Jaccard over thresholds stays 0.591.  It costs pixelation, pixel_mod 0.19 -
+0.20 against 0.05 - 0.07, and lateral RMSE 70 nm against 67: a count per window of cells rewards p in
+the cell that holds the molecule, which ties the position to its cell.  Dropped as it is.
+
+Round 2, the same scores (3 seeds each): every combination equals v1f and EMA on the bright and close-pair
+scores (recall at P 0.97 0.540 - 0.549); they differ in pixelation -- EMA + offsets 2 + `sigmix` 0.019 -
+0.022, the lowest, with EMA + `sigmix` 0.022 - 0.035, EMA + `sigmix` + reporting head 0.027 - 0.034,
+offsets 2 alone 0.024 - 0.035, EMA alone 0.045 - 0.067.
+
+**The reporting head goes into the base** (2026-11-15; `sigma_eval.py`, B, 6 M, 3 seeds each).  Mean
+negative log-likelihood of the truth under the claim, lateral / axial:
+
+| claim | EMA + `sigmix` + head | EMA + offsets 2 + `sigmix` |
+|---|---|---|
+| the head's | 4.83 - 4.84 / 5.58 - 5.59 | -- |
+| the mixture's | 4.91 - 4.93 / 5.82 - 5.83 | 4.85 - 4.89 / 5.67 - 5.83 |
+| the mixture's, recalibrated (variant 3) | 4.87 - 4.89 / 5.68 - 5.69 | 4.86 - 4.88 / 5.67 |
+
+The head beats the recalibrated claim in every seed, by 0.04 laterally and 0.10 axially, at no cost to
+the detection or the positions (round 2).  Its robust width is 0.90 / 0.83 and its coverage at 2
+sigma 0.95: honest in the root mean square, so a little generous in the robust width, the errors'
+tails being heavier than a Gaussian's.  The base becomes EMA + offsets 2 + `sigmix` + the head,
+trained now at 1 frame (gpuvm) and at 3 frames (decodebox, against v1f's 3-frame `nt_t3_pk`) before it
+is made the default, to be sure it does not break the temporal context.
+
+**A position-consistency merge** (Jonas, 2026-11-15; `merge_eval.py`, one model each, v1f and EMA +
+offsets 2 + `sigmix`, B and B_d15).  Every cell above p 0.05 a candidate at its own x, y, z; candidates
+within 2 cells joined when their positions agree (lateral r, |dz| < r_z), a group's p summed, its position
+the p-weighted mean; scored at the threshold where precision on bright molecules reaches 0.97 (the
+threshold grid gives 0.970 - 0.983).  B, the base model:
+
+| extraction | bright recall | pairs found both, 0-100 / 100-200 / 200-300 nm | isolated split | pixel_mod |
+|---|---|---|---|---|
+| `mixture_peak` | 0.537 | 0.032 / 0.065 / 0.133 | 0.46 % | 0.022 |
+| merge, 25 nm / 75 nm | 0.484 | 0.022 / 0.040 / 0.098 | 0.67 % | 0.043 |
+| merge, 50 nm / 150 nm | 0.524 | 0.027 / 0.060 / 0.124 | 0.17 % | 0.025 |
+| merge, 80 nm / 150 nm | 0.546 | 0.031 / 0.064 / 0.139 | 0.09 % | 0.021 |
+
+* It finds no more close pairs, at any radius, on either model or density: the map does not hold the
+  second molecule at a position of its own, so it must be trained in (the matched loss next).
+* With wide radii it is the better extraction otherwise: isolated bright molecules split five times
+  less (0.46 -> 0.09 % on B, 0.55 -> 0.17 % on d15), bright recall up 0.9 - 1.4 points, and on v1f
+  pixel_mod 0.059 -> 0.022.  Narrow radii break one molecule's cells into groups too weak to pass.
+  Worth keeping as an extraction option, decided once the output and loss are.
+
+### The base made the default (2026-11-15)
+
+EMA 0.999 + offsets 2 + `sigmix` + the reporting head, trained at 1 frame (`A_eosr`, gpuvm) and at 3
+(`T3_eosr`, decodebox), 3 seeds each, 6 M, test set B.  At 3 frames against v1f's `nt_t3_pk` (2 seeds):
+
+| | bright recall at P 0.97 | best Jaccard | pixel_mod | recall, \|z\| < 300 nm |
+|---|---|---|---|---|
+| base, 3 frames | 0.612 - 0.618 | 0.656 - 0.658 | 0.019 - 0.043 | 0.904 - 0.916 |
+| v1f, 3 frames | 0.595 - 0.609 | 0.652 - 0.654 | 0.093 - 0.096 | 0.910 - 0.917 |
+
+The RMSE each model gives over its own detections differs with what it detects (a seed that finds
+3 500 more bright molecules, harder ones, reads 2 nm worse), so it is compared on the bright molecules
+every model of a group found, each at its own threshold for precision 0.97 (`fair_eval.py`,
+`fair_table.py`), lateral / axial nm:
+
+| | common set | \|z\| < 300 | 300 - 600 | > 600 | error / CRLB (robust) |
+|---|---|---|---|---|---|
+| base, 3 frames | 43.3 - 43.4 / 51.9 - 52.0 | 31.0 / 52.3 - 52.4 | 55.3 - 55.6 / 50.7 - 51.0 | 70.3 - 70.8 / 56.0 - 56.2 | 1.38 / 1.26 - 1.27 |
+| v1f, 3 frames | 43.5 / 52.5 - 52.8 | 31.0 - 31.2 / 52.0 - 53.3 | 55.7 - 55.8 / 51.4 - 52.4 | 70.5 / 56.0 - 60.2 | 1.38 - 1.39 / 1.29 - 1.30 |
+| base, 1 frame | 46.0 - 46.2 / 64.4 - 64.5 | 36.8 - 37.0 / 64.6 - 64.8 | 61.2 - 61.4 / 63.6 - 64.3 | 79.5 - 80.1 / 65.0 - 65.6 | 1.88 - 1.89 / 1.81 - 1.82 |
+| without the head, 1 frame | 46.0 - 46.2 / 64.3 - 64.8 | 36.7 - 37.0 / 64.5 - 65.3 | 61.3 - 61.4 / 63.3 - 63.6 | 79.9 - 80.1 / 65.9 - 66.5 | 1.88 - 1.89 / 1.81 - 1.82 |
+
+It keeps the temporal context and lowers v1f's pixelation at 3 frames as at 1, so it is netfit's
+default (`settings.Parts`: the backbone's ``offset_range`` 2 and ``sigma_rep``, the loss's
+``reported``, the schedule's ``ema``).  The network's own defaults stay version 1's, so a model saved
+before is built as it was trained.
+
+### The matched loss: dropped (2026-11-15)
+
+SHOT's idea (Seailles et al. 2025, arXiv:2512.10683, from the paper): each true molecule assigned one
+slot by a one-to-one match (Hungarian), every slot whose own p passes the threshold a molecule.  1 slot
+(`M_s1`), 2 slots per cell (`M_s2`), 2 slots with DECODE's mixture and count as helpers (`M_s2x`); on
+the base without the reporting head (`A_eos`), 1 frame, 6 M samples, 3 seeds each.  Scored on `B`
+(density 50) at each model's threshold for precision 0.97 on bright molecules (>= 1000 photons); a
+close pair is two mutual nearest bright neighbours, found both when each has its own detection within
+100 nm; an isolated molecule (nothing >= 100 photons within 500 nm) is split by two detections within
+250 nm.  Mean (min-max) over seeds:
+
+| | bright recall % | pairs found both <100 nm | 100-200 nm | 200-300 nm | isolated split % | pixel_mod |
+|---|---|---|---|---|---|---|
+| A_eos (base, no head) | 53.8 (53.5-54.1) | 3.2 | 6.6 | 13.3 | 0.37 | 0.020 |
+| A_eosr (the default) | 53.6 (53.2-53.8) | 3.3 | 7.0 | 13.6 | 0.52 | 0.027 |
+| M_s1 | 52.7 (52.1-53.3) | 2.4 | 5.6 | 12.4 | 0.18 | 0.119 |
+| M_s2 | 51.6 (51.1-52.1) | 1.8 | 5.0 | 11.8 | 0.18 | 0.124 |
+| M_s2x | 47.6 (46.5-48.6) | 0.9 | 3.4 | 9.3 | 0.33 | 0.150 |
+
+At density 15 (`B_d15`) the order is the same (100-200 nm pairs: 18.8, 17.2 / 15.1, 12.4, 8.4 %).
+On the molecules all of them find (76,635 of 196,669 bright), lateral RMSE is equal (44.4-44.9 nm) and
+z is 1 nm better near focus (|z| < 300: 61-62 vs 63-64 nm) but 1-3 nm worse beyond 300 nm.
+
+So the second slot does not find the second molecule of a close pair -- it finds fewer than one slot,
+and the helpers fewer still -- and the threshold extraction pixelates four to six times more than
+mixture_peak (0.12-0.15 against 0.020; the target is 0.053), since a molecule near a cell's edge is
+one slot's or the other's.  Only isolated splits are fewer (0.18 against 0.37 %), and they were rare
+already.  By the rule set before the runs (kept only for clearly more pairs below 200 nm), the
+matched loss is dropped; the code stays (`loss.matched_terms`, `extract.by_threshold`) for the
+Sinkhorn runs, which ask only whether a soft assignment learns faster or pixelates less.
