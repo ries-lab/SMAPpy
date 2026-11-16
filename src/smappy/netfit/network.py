@@ -213,6 +213,8 @@ class TimeAttention(nn.Module):
     only, LUNAR's temporal dropout): each frame but the middle one hidden from the attention with this
     probability, so that the network does not lean on a neighbour being there."""
 
+    CHUNK = 32768                   # sequences (pixels) per attention call; see forward
+
     def __init__(self, features: int, window: int, heads: int = 4, drop: float = 0.0):
         super().__init__()
         self.place = nn.Parameter(torch.zeros(window, features))
@@ -232,7 +234,12 @@ class TimeAttention(nn.Module):
             hide[..., t // 2] = False
             hide = hide.expand(b, h, w, t).reshape(b * h * w, t)
         y = self.norm1(x)
-        x = x + self.attn(y, y, y, key_padding_mask=hide, need_weights=False)[0]
+        # in pieces: a batch of 64 at 40 px is 102,400 sequences, past the 65,535 a CUDA grid takes in
+        # the kernel torch picks on an H100 ("invalid configuration argument"; a 4090 took it whole)
+        n = self.CHUNK
+        x = x + torch.cat([self.attn(y[a:a + n], y[a:a + n], y[a:a + n], need_weights=False,
+                                     key_padding_mask=None if hide is None else hide[a:a + n])[0]
+                           for a in range(0, len(y), n)])
         x = x + self.mlp(self.norm2(x))
         return x[:, t // 2].reshape(b, h, w, c).permute(0, 3, 1, 2)
 
