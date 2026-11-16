@@ -2827,11 +2827,27 @@ so the twin of the learnt pupil may lie outside it.  Both stacks were learnt bot
   +57.8 → −57.4 nm, AB +56.7 → −55.5), and the coma stays, as a twin's would.  Spherical does not follow: beads Z11
   +21.4 → −2.1, Z22 +3.6 → +13.5, Z37 −5.5 → +13.3; AB Z11 +24.5 → −12.5 and −15.5, Z22 +7.8 → +1.0 and −2.2, Z37 −3.8 → +7.9 and +6.1.  Those are the
   modes the interface's terms live in.  The AB's learnt height moves too (74.5 → 49.5 and 49.2 nm).
-- *What it does not yet show*: how much of the gap is the interface's physics, and how much is the basis.
-  The as-read fits are far from the noise floor (½ deviance well above half the pixel count), so a misfit of
-  that size could tip a preference either way.  Simulated stacks from the as-read model, and from the
-  flipped model with z flipped, learnt both ways, would say whether 20-27 k nats is what the true direction
-  wins by.  A higher order would say whether the gap is the basis.
+- *The beads simulated with the direction known* (`flip_sim.py`).  Each learnt bead model drew the 19 beads
+  again: the same slices, photons, background, drift and bleaching, with the camera's excess and read noise.
+  Each draw was learnt in both layouts, two noise draws per model.  The flipped layout is the as-read one in
+  reverse.  The reading's flip lands one slice further on, which each bead's learnt z takes up.
+
+  | drawn from | learnt as read | learnt flipped | flipped − as read |
+  | --- | --- | --- | --- |
+  | as-read model | 422 109, 421 983 | 437 903, 437 765 | **+15 794, +15 782** |
+  | flipped model | 437 196, 436 268 | 422 595, 422 022 | **−14 601, −14 246** |
+  | the real beads | 491 346 | 518 590 | **+27 244** |
+
+  The fit picks whichever direction drew the data, by 14-16 k nats either way.  It has no lean towards the
+  as-read order: the gap barely changes with the noise draw (±0.2 k) and is almost the same size from either
+  side.  The wrong direction is learnt into nearly the same pupil as on the real data.  From the as-read
+  truth, the flipped learning finds Z11 −2.4 and Z22 +12.6 nm, γ 0.13; the real flipped learning found −1.7,
+  +13.8 and 0.14.  So the model can tell the direction within its own basis, and the real gap points as the
+  data were read.
+
+  The real fits sit about 69 k (as read) and 81 k (flipped) nats above their matched draws.  That misfit adds
+  another 12 k to the as-read side's lead, but the simulation cannot say where it comes from.  A model drawn
+  in the order-8 basis cannot show what lies outside it.  A higher order is what would test the basis.
 
 Both stacks agree with the images: the stage z runs as the code assumes.
 
