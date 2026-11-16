@@ -2804,6 +2804,37 @@ models are not the twin, and the twin preference must have another cause.
   and the nucleus above it, as it must be.  With an inverted stage z it would be the other way round, the glass
   above the focus and the nucleus below it, which the sample's geometry rules out.
 
+*The stacks learnt with stage z turned round* (`m2_new.py` with ``FLIP_Z``, which reads every ``ZPositionUm`` as
+−z; `flip_same.py`).  A pupil learnt from data on the glass is not quite free to become its twin.  The twin is
+exact only for a real, centrosymmetric pupil amplitude and a z that enters only as the stage's defocus.  A free
+pupil phase absorbs most of what departs from that.  It absorbs the height term e^{i k_z,med h}, a fixed phase
+for one h, and the scalar Fresnel phase.  It cannot absorb two things.  One is the phase between s and p above
+the critical angle, which differs and is summed incoherently.  The other is the evanescent weighting
+e^{−2κh} of a spread of heights.  Beyond those, an order-8 basis cannot follow the kink at the critical radius,
+so the twin of the learnt pupil may lie outside it.  Both stacks were learnt both ways on the same emitters:
+- *Beads*, ``REJECT_K=1000`` (all 19 found, kept both ways): ½ deviance 491 346 as read, 518 590 flipped.  As
+  read wins by **27 244 nats**.  With rejection on, the flipped run kept 15 beads and the other 16, and its lower
+  total (399 581 against 410 584) is that bead.
+- *AB sweep* (`flip_same.py`: the 4000 molecules found once, z negated for the second learning, one round,
+  rejection off): 869 480 as read, 889 806 and 893 469 flipped in two runs.  As read wins by **20 326 and
+  23 989 nats** (5-6 nats a molecule).  The as-read learning came back the same to the last digit, while the
+  flipped one, from the same start, stopped in a different place.
+  Rejection on gave the reverse at first.  The flipped model lost more molecules: 3253 against 3469 with
+  `m2_new.py`'s three rounds, and 3669 against 3954 with k = 1000, through the 2 px offset limit.  Its total over
+  fewer molecules came out 32-55 k lower, but per molecule it was worse each time (202.9 against 202.3, 219.1
+  against 217.3 nats).
+- *The flipped pupils are not twins in the radially symmetric modes.*  Astigmatism changes sign (beads Z6
+  +57.8 → −57.4 nm, AB +56.7 → −55.5), and the coma stays, as a twin's would.  Spherical does not follow: beads Z11
+  +21.4 → −2.1, Z22 +3.6 → +13.5, Z37 −5.5 → +13.3; AB Z11 +24.5 → −12.5 and −15.5, Z22 +7.8 → +1.0 and −2.2, Z37 −3.8 → +7.9 and +6.1.  Those are the
+  modes the interface's terms live in.  The AB's learnt height moves too (74.5 → 49.5 and 49.2 nm).
+- *What it does not yet show*: how much of the gap is the interface's physics, and how much is the basis.
+  The as-read fits are far from the noise floor (½ deviance well above half the pixel count), so a misfit of
+  that size could tip a preference either way.  Simulated stacks from the as-read model, and from the
+  flipped model with z flipped, learnt both ways, would say whether 20-27 k nats is what the true direction
+  wins by.  A higher order would say whether the gap is the basis.
+
+Both stacks agree with the images: the stage z runs as the code assumes.
+
 ## 4Pi from beads (October 2026; `docs/4pi.md` D7 and §8)
 
 ```
