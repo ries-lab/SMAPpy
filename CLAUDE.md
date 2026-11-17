@@ -44,6 +44,8 @@ What the assistant tried, the help pages read and the client's transcripts
 go, when a user turns it on, into the usage log (`smappy/usage_log.py`,
 Preferences > Usage log), sent to an upload-only cloud link for the
 developers to read; a tool call is logged in `protocol.Server.tools_call`.
+The bundles are read with the `usage-logs` skill (`.claude/skills/usage-logs`),
+whose `digest.py` is tested by `tests/test_usage_digest.py`.
 A tool's description is what a model reads, so a change to a plugin's
 interface that a tool describes (`run_plugin`'s settings, `INSTRUCTIONS`)
 updates it too.  What the menus and buttons do is the assistant's through
