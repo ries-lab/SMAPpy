@@ -188,6 +188,16 @@ space bar, includes or excludes it.  An excluded ROI stays in the list, grey,
 and is left out of the per-region steps and the results.  There is no
 separate review flag: *use* is the decision, from the moment an ROI is made.
 
+**Many at once.**  The list selects as a file browser does: Shift-click
+selects every ROI between the last one clicked and this one, Ctrl-click (Cmd
+on a Mac) adds an ROI to the selection or takes it out, and Ctrl+A (Cmd+A),
+with the list in focus, selects them all.  The panes still show one ROI, the
+last one clicked, and drawing and *annotate* work on it alone.  The space
+bar, *Remove* and the list's right-click menu -- *Use*, *Don't use* and
+*Remove* -- act on every selected ROI, as one step of *Undo*.  The space bar
+excludes them all when all are included, and otherwise includes them all.
+Up and Down, or a click in the zoom, select one ROI again.
+
 **Annotating.**  Beside the list, *annotate* gives the selected ROI a
 keyword from each of a few lists the user writes -- *quality: good, bad,
 unsure*, say, or the stage of a structure.  The number keys give a keyword
@@ -485,8 +495,10 @@ draft as an ROI, with its shape, lines and ranges if it has them.
 Enter does the same.
 
 ### Remove
-Deletes the selected ROI.  To keep an ROI out of the analysis without
-losing it, untick *use* instead.  The other ROIs keep their numbers: an ROI
+Deletes the selected ROIs -- every one selected in the list, as one step of
+*Undo*, without asking: *Undo* brings them all back.  To keep an ROI out of the analysis without
+losing it, untick *use* instead (the space bar, or *Don't use* in the list's
+right-click menu, for several).  The other ROIs keep their numbers: an ROI
 is given its number when it is made and keeps it, and a number is never given
 again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
 attribute of *Regions to attribute*, whatever was removed before it.  *Undo*
@@ -494,7 +506,7 @@ brings a removed ROI back under its own number.
 
 ### Undo
 Under the ROI list.  Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
-added, and any it replaced), an ROI added, removed, included or excluded,
+added, and any it replaced), ROIs added, removed, included or excluded (several at once are one step),
 an outline, a line drawn, reversed or cleared.  Ctrl+Z in this window does the same.  Its tooltip
 names the edit it would undo -- *undo: Remove ROI 3*, *undo: Segment regions: 141 ROIs* --
 as the main window's *Edit > Undo* names a change of the table (*Undo
@@ -612,7 +624,8 @@ typing a 1 into *lists* writes a 1.
 
 ### use
 The same switch as the list's *use* box, and the space bar: whether the
-per-region steps and the results include the ROI.
+per-region steps and the results include the ROI.  This box is the shown
+ROI's alone; the space bar sets every selected ROI.
 
 ### next ROI after a keyword
 On, a keyword selects the next ROI once given: one key an ROI.  Off, the

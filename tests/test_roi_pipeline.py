@@ -609,3 +609,91 @@ def test_the_manager_undoes_a_removal_with_its_own_undo(app):
     assert not session.can_undo
     window.redo_button.click()
     assert window.table.model().rowCount() == 1 and window.active is None
+
+
+def _manager_of_six(app):
+    from smappy.gui.roi_window import ROIManagerWindow
+    from smappy.session import Session
+    centres = [(1000.0 * k, 0.0) for k in range(6)]
+    session = Session(table(centres, per=20))
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    rois = [project.add_roi(file_id, c) for c in centres]
+    window = ROIManagerWindow(session)
+    window.resize(1300, 850)
+    window.show()
+    app.processEvents()
+    return window, project, rois
+
+
+def _click_row(window, row, modifier=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    rect = window.table.visualRect(window.rows.index(row, 0))
+    QTest.mouseClick(window.table.viewport(), Qt.LeftButton,
+                     modifier if modifier is not None else Qt.NoModifier, rect.center())
+
+
+def test_a_shift_click_selects_a_range_and_the_panes_show_the_clicked_roi(app):
+    from PySide6.QtCore import Qt
+    window, _, rois = _manager_of_six(app)
+    _click_row(window, 1)
+    assert window.selected_ids() == [rois[1].id] and window.active == rois[1].id
+    _click_row(window, 4, Qt.ShiftModifier)
+    assert window.selected_ids() == [r.id for r in rois[1:5]]
+    assert window.active == rois[4].id           # the current row, one ROI
+    # Ctrl (Cmd on a Mac) takes one out, and the panes stay where they were
+    _click_row(window, 2, Qt.ControlModifier)
+    assert window.selected_ids() == [rois[1].id, rois[3].id, rois[4].id]
+    assert window.active == rois[4].id
+    # Down steps from the selected ROI and selects the next alone, as before
+    window.step_roi(1)
+    assert window.selected_ids() == [rois[5].id] and window.active == rois[5].id
+    window.table.selectAll()
+    assert len(window.selected_ids()) == 6 and window.active == rois[5].id
+    window.close()
+
+
+def test_space_excludes_and_includes_every_selected_roi_in_one_undo_step(app):
+    from PySide6.QtCore import Qt
+    window, project, rois = _manager_of_six(app)
+    _click_row(window, 0)
+    _click_row(window, 2, Qt.ShiftModifier)
+    window._toggle()                             # all used: all excluded
+    assert [r.use for r in rois] == [False, False, False, True, True, True]
+    assert window.undo_button.toolTip() == "undo: Exclude 3 ROIs"
+    # the selection survives the list's refresh, for the next key
+    assert window.selected_ids() == [r.id for r in rois[:3]]
+    window.set_use([rois[1].id], True)
+    window._toggle()                             # partly used: all included
+    assert all(r.use for r in rois)
+    assert window.undo_button.toolTip() == "undo: Include 2 ROIs"
+    # an undo puts copies back: the ROIs are looked up again
+    used = lambda: [project.rois[r.id].use for r in rois]
+    window.undo()
+    assert used() == [False, True, False, True, True, True]
+    window.undo()
+    window.undo()
+    assert all(used())
+    window.close()
+
+
+def test_remove_takes_every_selected_roi_in_one_undo_step(app):
+    from PySide6.QtCore import Qt
+    window, project, rois = _manager_of_six(app)
+    _click_row(window, 1)
+    _click_row(window, 2, Qt.ShiftModifier)
+    window._remove()
+    assert [r.id in project.rois for r in rois] == [True, False, False, True, True, True]
+    assert window.undo_button.toolTip() == "undo: Remove 2 ROIs"
+    window.undo()
+    assert all(r.id in project.rois for r in rois)
+
+    window.table.selectAll()
+    window._remove()                             # no question: Undo is the answer
+    assert not project.rois and window.rows.rowCount() == 0
+    window.undo()                                # one step brings all six back
+    assert len(project.rois) == 6 and window.rows.rowCount() == 6
+    assert [project.numbers()[r.id] for r in rois] == [1, 2, 3, 4, 5, 6]
+    window.close()
