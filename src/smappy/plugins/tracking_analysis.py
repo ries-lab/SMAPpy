@@ -12,7 +12,12 @@ from, rewritten rather than ported (`wave4_research.md`: partly broken):
   the file's (step 18);
 * SMAP fitted a lognormal to the histogram of D; here the jump distances
   are fitted with one to three diffusive states by maximum likelihood,
-  which gives the states' D and fractions without a histogram's bins;
+  which gives the states' D and fractions without a histogram's bins --
+  at several lags at once, and with an *axial range* corrected for fast
+  particles leaving the focus (Spot-On's model, saSPT's correction:
+  `tracking.analysis.in_focus`).  In 3D the correction fits the lateral
+  jumps alone: the particles that stay in focus are those that moved
+  less in z, so their z jumps are too short;
 * the *track id* is any integer column -- `track_id` from Link tracks,
   MINFLUX's `tid` (on its own clock, `time_s`), a cluster's id -- and on
   *auto*, the default, the first of those the table has
@@ -65,10 +70,13 @@ class MSDFitSettings:
 
 @dataclass
 class JumpFitSettings:
-    lag: int = param(1, label="lag", unit="frames", min=1,
-                     help="the jumps between localizations this many frames apart")
+    lags: int = param(4, label="lags", unit="frames", min=1, max=20,
+                      help="the jumps 1, 2, ... this many frames apart, fitted together")
     states: int = param(2, label="states", min=1, max=3,
                         help="diffusive states fitted, 1 to 3")
+    axial_range_nm: float = param(0.0, label="axial range", unit="nm", min=0.0,
+                                  help="the depth in which particles are seen, for "
+                                       "the fast ones leaving it; 0: no correction")
 
 
 @dataclass
@@ -98,7 +106,7 @@ class TrackingAnalysis(Plugin):
     per_region = True
     # tracks are of localizations, whatever the layer shows
     grouping = "ungrouped"
-    version = "2"
+    version = "3"
 
     def changes_locs_for(self, settings: TrackingAnalysisSettings) -> bool:
         return bool(settings.msd and settings.msd_fit.write_columns)
@@ -125,7 +133,7 @@ class TrackingAnalysis(Plugin):
 
     def run(self, ctx: Context, settings: TrackingAnalysisSettings) -> Result:
         from ..metadata import table_frame_time
-        from ..tracking.analysis import fit_jumps, gather, jumps, msd_analysis
+        from ..tracking.analysis import fit_jumps, gather, jumps_over_lags, msd_analysis
         if not (settings.msd or settings.jumps):
             raise ValueError("tick MSD or jump distances")
         locs = ctx.locs
@@ -214,10 +222,18 @@ class TrackingAnalysis(Plugin):
         if settings.jumps:
             j = settings.jump_fit
             ctx.report("tracking analysis: jump distances")
-            d2, err = jumps(t, j.lag)
-            lag_s = j.lag * t.dt_s
+            focus = float(j.axial_range_nm or 0.0)
+            tj = t
+            if focus > 0 and t.dims == 3:
+                # what stays in focus moved less in z: the lateral jumps alone
+                tj = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"], None,
+                            locs["xy_err_nm"] if "xy_err_nm" in locs else None,
+                            frame_time_s=(ft or 1.0) / 1000.0,
+                            time_s=locs["time_s"] if clock else None)
+            d2, err, lag = jumps_over_lags(tj, j.lags)
             try:
-                jump = fit_jumps(d2, err, t.dims, lag_s, j.states)
+                jump = fit_jumps(d2, err, tj.dims, lag * t.dt_s, j.states,
+                                 focal_range_nm=focus, step_s=t.dt_s)
             except ValueError as error:
                 if not ctx.per_region:
                     raise
@@ -232,13 +248,25 @@ class TrackingAnalysis(Plugin):
                                    for D, f in zip(jump.D_um2_per_s, jump.fraction))
                 fitted = ("" if jump.n_fitted == jump.n_jumps else
                           f" ({jump.n_fitted} fitted)")
-                lines.append(f"jumps at {j.lag} frame{'s' if j.lag > 1 else ''}: "
-                             f"{jump.n_jumps} jumps{fitted}, {states}; "
-                             f"BIC {jump.bic:.1f}")
-                r = np.sqrt(d2)
-                err_typical = float(np.median(err)) if len(err) else 0.0
-                panels.append(lambda ax, r=r, jump=jump: draw_jumps(
-                    ax, r, jump, err_typical, t.dims, lag_s))
+                at = (f"1 to {j.lags} frames" if j.lags > 1 else "1 frame")
+                where = (f", corrected for a {focus:g} nm focus"
+                         + (" (lateral jumps)" if tj is not t else "")) if focus > 0 else ""
+                lines.append(f"jumps at {at}: {jump.n_jumps} jumps{fitted}{where}, "
+                             f"{states}; BIC {jump.bic:.1f}")
+                if focus > 0:
+                    values.update({f"jump_seen{i}": float(v)
+                                   for i, v in enumerate(jump.seen[:, 0], 1)})
+                    lines.append("of the jumps at 1 frame: " + ", ".join(
+                        f"{100 * v:.0f}%" for v in jump.seen[:, 0]))
+                one = lag == 1
+                r = np.sqrt(d2[one])
+                err_typical = float(np.median(err[one])) if one.any() else 0.0
+                panels.append(lambda ax, r=r, jump=jump, dims=tj.dims: draw_jumps(
+                    ax, r, jump, err_typical, dims, t.dt_s))
+                if len(jump.lag_s) > 1:
+                    seen = _seen_per_lag(d2, err, lag, jump, tj.dims, t.dt_s)
+                    panels.append(lambda ax, jump=jump, seen=seen: draw_shares(
+                        ax, jump, seen))
 
         def draw(figure):
             axes = np.atleast_1d(figure.subplots(1, len(panels)))
@@ -267,6 +295,25 @@ def _with_track_values(locs: Localizations, t, per) -> Localizations:
                         dict(locs.metadata))
     remember(out, "track_D_um2_per_s", "", grouped="mean")
     remember(out, "track_alpha", "", grouped="mean")
+    return out
+
+
+def _seen_per_lag(d2, err, lag, jump, dims, step_s) -> np.ndarray:
+    """Each state's share of the jumps at each lag as the jumps say it, the
+    mean of their memberships (states x lags): what `draw_shares` sets
+    against the model's."""
+    from scipy.special import logsumexp
+    from ..tracking.analysis import _jump_logpdf
+    lags = np.unique(lag)
+    D = jump.D_um2_per_s * 1e6
+    out = np.zeros((len(D), len(lags)))
+    for i, k in enumerate(lags):
+        here = lag == k
+        s2 = 2 * D[None, :] * k * step_s + err[here, None]
+        terms = (_jump_logpdf(d2[here, None], s2, dims)
+                 + np.log(np.maximum(jump.seen[:, i], 1e-300))[None, :])
+        member = np.exp(terms - logsumexp(terms, axis=1)[:, None])
+        out[:, i] = member.mean(0)
     return out
 
 
@@ -305,7 +352,8 @@ def draw_track_d(ax, msd) -> None:
 
 
 def draw_jumps(ax, r, jump, err, dims, lag_s) -> None:
-    """The jump distances and the fitted states."""
+    """The jump distances at the first lag and the fitted states, each at
+    its share of those jumps."""
     from ..tracking.analysis import jump_density
     top = np.quantile(r, 0.995) if len(r) else 1.0
     bins = np.linspace(0, top, 50)
@@ -321,4 +369,23 @@ def draw_jumps(ax, r, jump, err, dims, lag_s) -> None:
     ax.set_ylabel("density")
     ax.set_yticks([])
     ax.legend(fontsize=7)
-    ax.set_title(f"{jump.n_jumps} jumps", fontsize=9)
+    ax.set_title(f"{len(r)} jumps at {lag_s * 1000:.3g} ms", fontsize=9)
+
+
+def draw_shares(ax, jump, seen) -> None:
+    """Each state's share of the jumps against lag: the model's (lines)
+    and the jumps' own (dots), and, corrected, its share of the particles
+    (dashed): fast states lose share with lag when they leave the focus."""
+    lag = jump.lag_s
+    for i, D in enumerate(jump.D_um2_per_s):
+        ax.plot(lag, jump.seen[i], color=f"C{i}", lw=1,
+                label=f"{D:.3g} µm²/s")
+        ax.plot(lag, seen[i], "o", ms=3, color=f"C{i}")
+        if jump.focal_range_nm:
+            ax.axhline(jump.fraction[i], color=f"C{i}", lw=0.8, ls="--")
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("lag (s)")
+    ax.set_ylabel("share of the jumps")
+    ax.legend(fontsize=7)
+    ax.set_title("per lag" + (" (dashed: of the particles)"
+                              if jump.focal_range_nm else ""), fontsize=9)

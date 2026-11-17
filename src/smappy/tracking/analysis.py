@@ -49,15 +49,27 @@ log(lag), on the same lags or two at least: 1 for free diffusion, below for
 confined, above for directed motion.  It needs MSD above the offset, so it
 is NaN for a track that hardly moves.
 
-**Jump distances.**  The distances of every pair exactly *lag* frames apart
-are a mixture of 1 to 3 diffusive states; in d dimensions a state's jump r
-has per axis the variance s^2 = 2 D lag dt + sigma_a^2 + sigma_b^2 (the
-two localizations' errors, from the precisions), so r^2 / s^2 is chi-square
-with d degrees of freedom.  D and the fraction of each state are fitted by
-maximum likelihood on the jumps themselves (`fit_jumps`, by expectation
+**Jump distances.**  The distances of every pair 1, 2, ... frames apart
+(each lag up to *lags*, fitted together) are a mixture of 1 to 3 diffusive
+states; in d dimensions a state's jump r over lag k has per axis the
+variance s^2 = 2 D k dt + sigma_a^2 + sigma_b^2 (the two localizations'
+errors, from the precisions), so r^2 / s^2 is chi-square with d degrees of
+freedom.  D and the fraction of each state are fitted by maximum
+likelihood on the jumps themselves (`fit_jumps`, by expectation
 maximisation), not on a histogram (SMAP's AnalyzeSPT fitted a histogram
-of D); the jumps of one track are not independent, which the
-likelihood ignores, so its errors would be too small and none are given.
+of D, Spot-On fits histograms with one localization error); the jumps of
+one track are not independent, which the likelihood ignores, so its errors
+would be too small and none are given.
+
+**The focus.**  In 2D tracking a particle is seen only while it is within
+a few hundred nm of the focal plane, and a fast one leaves within a few
+frames: its state makes fewer jumps than its number of particles, and
+fewer the longer the lag -- the fast fraction comes out tens of percent
+low (Hansen et al. 2018, Spot-On).  With a focal range, a state's share of
+the jumps at lag k is its fraction times the fraction of its particles
+still in focus k frames on (`in_focus`, saSPT's frame-by-frame form,
+Heckert et al. 2022), so the fractions fitted are of the particles.  Both
+methods are re-implemented from their papers' descriptions, not ported.
 """
 from __future__ import annotations
 
@@ -437,33 +449,135 @@ def msd_analysis(t: Tracks, fitted: bool = False, lags: Optional[int] = None,
 
 # -------------------------------------------------------- jump distances
 
-def jumps(t: Tracks, lag: int = 1) -> Tuple[np.ndarray, np.ndarray]:
-    """Every pair of a track's localizations exactly ``lag`` frames apart:
-    the squared distance (nm^2) and the error variance per axis it carries,
-    ``sigma_a^2 + sigma_b^2`` (nm^2, the mean over the axes)."""
-    out_d2, out_e = [], []
+def _pairs_at(t: Tracks, lag: int):
+    """The pairs of a track's localizations exactly ``lag`` frames apart:
+    the squared distance, the error variance per axis, the track and the
+    first one's row, in the order of the rows (by track, then time)."""
+    out = [], [], [], []
     for m in range(1, int(lag) + 1):
         if m >= len(t.track):
             break
         use = (t.track[m:] == t.track[:-m]) & (t.step[m:] - t.step[:-m] == lag)
         a = np.flatnonzero(use)
-        out_d2.append(((t.xyz[a + m] - t.xyz[a]) ** 2).sum(axis=1))
-        out_e.append((t.err2[a + m] + t.err2[a]) / t.dims)
-    if not out_d2:
-        return np.zeros(0), np.zeros(0)
-    return np.concatenate(out_d2), np.concatenate(out_e)
+        out[0].append(((t.xyz[a + m] - t.xyz[a]) ** 2).sum(axis=1))
+        out[1].append((t.err2[a + m] + t.err2[a]) / t.dims)
+        out[2].append(t.track[a])
+        out[3].append(a)
+    if not out[0]:
+        return np.zeros(0), np.zeros(0), np.zeros(0, np.int64), np.zeros(0, np.int64)
+    d2, err, track, row = (np.concatenate(o) for o in out)
+    order = np.argsort(row, kind="stable")          # rows are sorted by track, time
+    return d2[order], err[order], track[order], row[order]
+
+
+def jumps(t: Tracks, lag: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+    """Every pair of a track's localizations exactly ``lag`` frames apart:
+    the squared distance (nm^2) and the error variance per axis it carries,
+    ``sigma_a^2 + sigma_b^2`` (nm^2, the mean over the axes)."""
+    d2, err, _, _ = _pairs_at(t, lag)
+    return d2, err
+
+
+def jumps_over_lags(t: Tracks, lags: int = 1
+                    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The jumps at every lag 1..``lags`` (frames): squared distance (nm^2),
+    error variance per axis (nm^2) and the lag of each, in frames.
+
+    Every pair, from every localization of every track.  Spot-On takes only
+    each track's first four jumps at each lag (*JumpsToConsider*), so that
+    long tracks of slow particles weigh less; that is what biases the
+    focus correction (`in_focus`), which holds for particles anywhere in
+    the focus, while a track's first localizations are often of a particle
+    that has just come in at its edge.  On simulated tracks (700 nm focus,
+    D = 0.05 and 3 um^2/s, half each) all jumps gave back 49% and 51%, the
+    first four 21% and 79%."""
+    out = [], [], []
+    for lag in range(1, max(int(lags), 1) + 1):
+        d2, err, _, _ = _pairs_at(t, lag)
+        out[0].append(d2)
+        out[1].append(err)
+        out[2].append(np.full(len(d2), lag, np.int64))
+    return tuple(np.concatenate(o) for o in out)
+
+
+# how finely the focal slab is cut when the loss from it is computed: the
+# fraction kept is right to 1e-4 against the exact series for any D
+FOCUS_CELLS = 200
+
+
+def _cell_mean_cdf(u_hi, u_lo):
+    """The mean of Phi over u from u_lo to u_hi, by the antiderivative
+    u Phi(u) + phi(u); Phi(u_hi) where the two are equal."""
+    from scipy.special import ndtr
+    def g(u):
+        return u * ndtr(u) + np.exp(-0.5 * u * u) / np.sqrt(2 * np.pi)
+    width = u_hi - u_lo
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = (g(u_hi) - g(u_lo)) / width
+    return np.where(width > 1e-12, mean, ndtr(u_hi))
+
+
+def in_focus(d_um2_s, step_s: float, range_nm: float, lags: int) -> np.ndarray:
+    """The fraction of particles in focus in one frame that are still in
+    focus in each of the next 1..``lags`` frames, for each D (um^2/s): a
+    (len(D), lags) array.
+
+    The focus is the slab |z| <= range / 2; a particle in it is equally
+    likely anywhere in z (as the particles of a cell in focus at one moment
+    are), moves in z by a Gaussian of variance 2 D step each frame, and is
+    lost the first frame it is outside -- looked at once a frame, as the
+    camera does, not continuously, which is saSPT's correction (Heckert et
+    al. 2022) rather than Spot-On's continuous absorbing series (Hansen et
+    al. 2018), and needs none of Spot-On's empirical widening of the slab.
+    The density inside is carried from frame to frame on `FOCUS_CELLS`
+    cells: a matrix of the probability of moving from each cell into each
+    other, averaged over the cell it leaves, so that it is right however
+    narrow the step is against a cell."""
+    D = np.atleast_1d(np.asarray(d_um2_s, float))
+    K = max(int(lags), 1)
+    out = np.ones((len(D), K))
+    if not range_nm or range_nm <= 0:
+        return out
+    h = float(range_nm) / 2.0
+    N = FOCUS_CELLS
+    edges = np.linspace(-h, h, N + 1)
+    lo, hi = edges[:-1], edges[1:]
+    for i, d in enumerate(D):
+        sigma = np.sqrt(max(2.0 * d * 1e6 * step_s, 0.0))
+        if sigma <= 0:
+            continue
+        # M[a, b]: from anywhere in cell b into cell a, averaged over b
+        # P(z' < e | z) = Phi((e - z) / sigma); its mean over z in cell b
+        # runs over u from (e - hi_b) / sigma to (e - lo_b) / sigma
+        def below(e, sigma=sigma):
+            return _cell_mean_cdf((e[:, None] - lo[None, :]) / sigma,
+                                  (e[:, None] - hi[None, :]) / sigma)
+        M = below(hi) - below(lo)
+        p = np.full(N, 1.0 / N)
+        for k in range(K):
+            p = M @ p
+            out[i, k] = p.sum()
+    return np.clip(out, 0.0, 1.0)
 
 
 @dataclass
 class JumpFit:
     """The diffusive states fitted to the jumps: D (um^2/s) and fraction of
-    each, slowest first; the log-likelihood and BIC."""
+    each, slowest first; the log-likelihood and BIC.  The fractions are of
+    the particles: with a focal range, corrected for the fast ones leaving
+    the focus sooner.  Per lag (``lag_s``), ``seen`` is each state's
+    fraction of the jumps (a state per row), ``kept`` the fraction of its
+    particles still in focus (1 without a focal range)."""
     D_um2_per_s: np.ndarray
     fraction: np.ndarray
     loglik: float
     bic: float
     n_jumps: int
     n_fitted: int
+    lag_s: np.ndarray = None
+    seen: np.ndarray = None
+    kept: np.ndarray = None
+    focal_range_nm: float = 0.0
 
 
 def _jump_logpdf(d2, s2, dims):
@@ -475,22 +589,33 @@ def _jump_logpdf(d2, s2, dims):
             - h * np.log(2 * s2) - gammaln(h))
 
 
-def fit_jumps(d2: np.ndarray, err: np.ndarray, dims: int, lag_s: float,
+def fit_jumps(d2: np.ndarray, err: np.ndarray, dims: int, lag_s,
               states: int = 1, tol: float = 1e-8, max_iter: int = 500,
-              max_jumps: int = 200_000) -> JumpFit:
+              max_jumps: int = 200_000, focal_range_nm: float = 0.0,
+              step_s: Optional[float] = None) -> JumpFit:
     """D and fraction of 1 to 3 diffusive states, by maximum likelihood on
     the squared jumps ``d2`` (nm^2) with their error variance per axis
-    ``err`` (nm^2), over ``lag_s`` seconds: state i's jumps have per axis the
-    variance 2 D_i lag + err.
+    ``err`` (nm^2), each over ``lag_s`` seconds (one number, or one per
+    jump): state i's jumps have per axis the variance 2 D_i lag + err.
 
     Expectation maximisation: the fractions are the mean memberships, and a
     state's D solves its weighted likelihood equation, sum over jumps of
-    membership (d2 - d s^2) / s^4 = 0 with s^2 = 2 D lag + err, by the fixed
-    point D = sum w (d2 / d - err) / (2 lag sum w), w = membership / s^4.
-    Each round is one pass over the jumps, so a million jumps take seconds;
-    a general optimiser on the same likelihood took a minute.  The states
-    start at quantiles of the jumps' own D, so a mixture is not started on
-    one state twice.
+    membership lag (d2 - d s^2) / s^4 = 0 with s^2 = 2 D lag + err, by the
+    fixed point D = sum u (d2 / d - err) / (2 sum u lag), u = membership
+    lag / s^4.  Each round is one pass over the jumps, so a million jumps
+    take seconds; a general optimiser on the same likelihood took a minute.
+    The states start at quantiles of the jumps' own D, so a mixture is not
+    started on one state twice.
+
+    With ``focal_range_nm`` (the thickness of the focus, `in_focus`), a
+    state's share of the jumps at lag k is its fraction of the particles
+    times the fraction of them still in focus after k frames (of
+    ``step_s``, by default the shortest lag), renormalised over the states:
+    fast particles leave sooner, so they make fewer jumps than their
+    number, and fewer the longer the lag (Hansen et al. 2018).  That
+    couples each D to every fraction, so the EM answer is only the start:
+    the likelihood itself is then maximised (L-BFGS, the gradient exact but
+    for the focus's own slope in D, taken by a difference).
 
     At most ``max_jumps`` jumps are fitted, a random subset when there are
     more (the same one every run): D is then known to a few tenths of a
@@ -502,6 +627,7 @@ def fit_jumps(d2: np.ndarray, err: np.ndarray, dims: int, lag_s: float,
     d2 = np.asarray(d2, float)
     err = np.maximum(np.asarray(err, float), 0.0)
     n = n_all = len(d2)
+    t_s = np.broadcast_to(np.asarray(lag_s, float), d2.shape).astype(float)
     states = int(states)
     if states < 1:
         raise ValueError("at least one state")
@@ -510,8 +636,7 @@ def fit_jumps(d2: np.ndarray, err: np.ndarray, dims: int, lag_s: float,
                          f"{'s' if states > 1 else ''}")
     if n > max_jumps:
         pick = np.sort(np.random.default_rng(0).choice(n, int(max_jumps), replace=False))
-        d2, err, n = d2[pick], err[pick], int(max_jumps)
-    t_s = float(lag_s)
+        d2, err, t_s, n = d2[pick], err[pick], t_s[pick], int(max_jumps)
     floor = 1e-9                                      # nm^2/s: D stays above 0
     raw = np.maximum(d2 / dims - err, 0.0) / (2 * t_s)
     D = np.maximum(np.quantile(raw, (np.arange(states) + 0.5) / states), floor)
@@ -519,34 +644,108 @@ def fit_jumps(d2: np.ndarray, err: np.ndarray, dims: int, lag_s: float,
     f = np.full(states, 1.0 / states)
     last = -np.inf
     for _ in range(max_iter):
-        s2 = 2 * D[None, :] * t_s + err[:, None]
+        s2 = 2 * D[None, :] * t_s[:, None] + err[:, None]
         terms = _jump_logpdf(d2[:, None], s2, dims) + np.log(np.maximum(f, 1e-300))[None, :]
         total = logsumexp(terms, axis=1)
         loglik = float(total.sum())
         member = np.exp(terms - total[:, None])
         f = member.mean(axis=0)
-        w = member / (s2 * s2)
-        D = np.maximum((w * (d2[:, None] / dims - err[:, None])).sum(0)
-                       / (2 * t_s * np.maximum(w.sum(0), 1e-300)), floor)
+        u = member * t_s[:, None] / (s2 * s2)
+        D = np.maximum((u * (d2[:, None] / dims - err[:, None])).sum(0)
+                       / (2 * np.maximum((u * t_s[:, None]).sum(0), 1e-300)), floor)
         if abs(loglik - last) <= tol * abs(loglik):
             break
         last = loglik
-    s2 = 2 * D[None, :] * t_s + err[:, None]
+
+    lags_s = np.unique(t_s)
+    step = float(step_s) if step_s else float(lags_s.min())
+    frames = np.maximum(np.round(lags_s / step).astype(np.int64), 1)
+    at = np.searchsorted(lags_s, t_s)               # each jump's lag, an index
+    focus = bool(focal_range_nm) and focal_range_nm > 0
+    if focus:
+        D, f = _fit_in_focus(d2, err, t_s, at, frames, dims, D, f,
+                             float(focal_range_nm), step, floor)
+    kept = in_focus(D * 1e-6, step, focal_range_nm if focus else 0.0,
+                    int(frames.max()))[:, frames - 1]
+    seen = f[:, None] * kept
+    seen = seen / np.maximum(seen.sum(0, keepdims=True), 1e-300)
+    s2 = 2 * D[None, :] * t_s[:, None] + err[:, None]
     loglik = float(logsumexp(_jump_logpdf(d2[:, None], s2, dims)
-                             + np.log(np.maximum(f, 1e-300))[None, :], axis=1).sum())
+                             + np.log(np.maximum(seen[:, at].T, 1e-300)), axis=1).sum())
     order = np.argsort(D)
     k = 2 * states - 1
     return JumpFit(D[order] * 1e-6, f[order], loglik, k * np.log(n) - 2 * loglik,
-                   n_all, n)
+                   n_all, n, lags_s, seen[order], kept[order],
+                   float(focal_range_nm) if focus else 0.0)
+
+
+def _fit_in_focus(d2, err, t_s, at, frames, dims, D, f, range_nm, step, floor):
+    """The states' D (nm^2/s) and fractions of the particles that make the
+    jumps most likely when each state's share of the jumps at a lag is
+    weighed by the fraction of it still in focus (`fit_jumps`).  Started
+    from the EM's D and its fractions of the jumps undone for the focus at
+    the first lag."""
+    from scipy.optimize import minimize
+    from scipy.special import logsumexp
+    S = len(D)
+    K = int(frames.max())
+    h = dims / 2.0
+    N_k = np.bincount(at, minlength=len(frames)).astype(float)
+    eps = 1e-3
+
+    def kept_and_slope(D):
+        F = in_focus(np.concatenate([D, D * np.exp(eps), D * np.exp(-eps)]) * 1e-6,
+                     step, range_nm, K)[:, frames - 1]
+        F0, Fp, Fm = F[:S], F[S:2 * S], F[2 * S:]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            g = (np.log(np.maximum(Fp, 1e-300)) - np.log(np.maximum(Fm, 1e-300))) / (2 * eps)
+        return np.maximum(F0, 1e-300), np.nan_to_num(g)
+
+    def unpack(theta):
+        D = np.exp(theta[:S])
+        a = np.concatenate([[0.0], theta[S:]])
+        f = np.exp(a - logsumexp(a))
+        return D, f
+
+    def negative(theta):
+        D, f = unpack(theta)
+        F, g = kept_and_slope(D)
+        Z = (f[:, None] * F).sum(0)
+        log_pi = np.log(np.maximum(f, 1e-300))[:, None] + np.log(F) - np.log(Z)[None, :]
+        pi = np.exp(log_pi)
+        s2 = 2 * D[None, :] * t_s[:, None] + err[:, None]
+        terms = _jump_logpdf(d2[:, None], s2, dims) + log_pi[:, at].T
+        total = logsumexp(terms, axis=1)
+        r = np.exp(terms - total[:, None])
+        n_mk = np.stack([np.bincount(at, weights=r[:, m], minlength=len(frames))
+                         for m in range(S)])
+        dlogp = (d2[:, None] / (2 * s2 * s2) - h / s2) * 2 * t_s[:, None] * D[None, :]
+        grad_D = (r * dlogp).sum(0) + (g * (n_mk - N_k[None, :] * pi)).sum(1)
+        grad_a = (n_mk - N_k[None, :] * pi).sum(1)[1:]
+        return -float(total.sum()), -np.concatenate([grad_D, grad_a])
+
+    F1 = in_focus(D * 1e-6, step, range_nm, 1)[:, 0]
+    f0 = f / np.maximum(F1, 1e-6)
+    f0 = np.maximum(f0 / f0.sum(), 1e-6)
+    theta = np.concatenate([np.log(np.maximum(D, floor)), np.log(f0[1:] / f0[0])])
+    bounds = [(np.log(floor), np.log(1e12))] * S + [(-30.0, 30.0)] * (S - 1)
+    result = minimize(negative, theta, jac=True, method="L-BFGS-B", bounds=bounds,
+                      options={"maxiter": 500})
+    return unpack(result.x)
 
 
 def jump_density(r_nm: np.ndarray, fit: JumpFit, err: float, dims: int,
                  lag_s: float) -> np.ndarray:
-    """The fitted density of the jump distance r (per nm), each state's as
-    a row, at a typical error variance per axis ``err``."""
+    """The fitted density of the jump distance r (per nm) at ``lag_s``,
+    each state's as a row, at a typical error variance per axis ``err``,
+    each weighed by its share of the jumps at that lag."""
     r = np.asarray(r_nm, float)
     out = []
-    for D, f in zip(fit.D_um2_per_s, fit.fraction):
+    shares = fit.fraction
+    if fit.seen is not None and fit.lag_s is not None and len(fit.lag_s):
+        # the states' shares of the jumps at this lag, as they were seen
+        shares = fit.seen[:, int(np.argmin(np.abs(fit.lag_s - lag_s)))]
+    for D, f in zip(fit.D_um2_per_s, shares):
         s2 = 2 * D * 1e6 * lag_s + err
         # density of r = density of r^2 times 2r
         out.append(f * 2 * r * np.exp(_jump_logpdf(r * r, s2, dims)))

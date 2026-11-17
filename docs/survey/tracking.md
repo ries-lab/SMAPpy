@@ -39,6 +39,8 @@ These are the parts the comparisons below refer to.
 
 #### 1. Multi-lag jump-distance fit with z-escape (defocalisation) correction -- Spot-On's model, saSPT's correction  (M; saSPT's code: port with attribution; Spot-On: re-implement)
 
+**Done, 2026-11** (*Tracking analysis* version 3: *lags* and *axial range*, `tracking.analysis.in_focus`; `simulate_tracks(focal_range_nm=...)`).  Re-implemented, not ported.  Two departures from what is proposed below: no *first jumps per track* (it biases the correction, `jumps_over_lags`), and in 3D the corrected fit uses the lateral jumps alone.
+
 **What it does.**
 * **Spot-On** fits 2 or 3 states jointly to the jump-length distributions at lags 1..TimePoints−1 (default 7 lags: `fastspt.py:33,81,146`). It allows `GapsAllowed` dark frames and uses only the first `JumpsToConsider`=4 jumps of each track (`fastspt.py:116-131`). That last choice stops long-lived, slow or bound tracks from dominating the fit.
 * **The model** (`_compute_2states`, `fastspt.py:357-375`): each state is a 2D Rayleigh of variance 2(D·Δt + σ²). The *free* state is multiplied by Z_corr(Δt, D), the probability of staying inside a slab of thickness ΔZ_use. Z_corr comes from an absorbing-boundary series summed until a term is below 1e-10 (`C_AbsorBoundAUTO`, `fastspt.py:559-590`). The slab is widened empirically: ΔZ_use = dZ + a·√D + b (`fastspt.py:446`; a = 0.15716 and b = 0.20811 are in a comment at `:442`).

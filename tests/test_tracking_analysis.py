@@ -8,9 +8,9 @@ from smappy.mathparse import recipes
 from smappy.plugins import Context, Selection
 from smappy.plugins.tracking_analysis import TrackingAnalysis
 from smappy.simulate import simulate_tracks
-from smappy.tracking.analysis import (fit_jumps, gather, jumps, lag_errors,
-                                      msd_analysis, msd_covariance, optimal_lags,
-                                      steps_of)
+from smappy.tracking.analysis import (fit_jumps, gather, in_focus, jumps,
+                                      jumps_over_lags, lag_errors, msd_analysis,
+                                      msd_covariance, optimal_lags, steps_of)
 
 
 def tracks_of(locs, **values):
@@ -165,3 +165,79 @@ def test_over_the_view_each_tracks_fit_is_kept_as_a_row_of_the_track_id():
     assert len(found) == len(per.D_um2_per_s)
     fitted = np.array([r["D_um2_per_s"] for r in found], float)
     assert np.nanmedian(fitted) == pytest.approx(0.1, rel=0.3)
+
+
+# ------------------------------------------- the focus and the jumps at several lags
+
+def test_the_fraction_kept_in_focus_is_what_particles_diffusing_in_z_keep():
+    rng = np.random.default_rng(0)
+    for D in (0.05, 2.0):
+        z = rng.uniform(-350, 350, 200_000)
+        alive = np.ones(len(z), bool)
+        kept = []
+        for _ in range(5):
+            z = z + rng.normal(size=len(z)) * np.sqrt(2 * D * 1e6 * 0.01)
+            alive &= np.abs(z) <= 350
+            kept.append(alive.mean())
+        assert in_focus([D], 0.01, 700.0, 5)[0] == pytest.approx(kept, abs=3e-3)
+    # no focus, nothing lost; a particle that does not move stays
+    assert (in_focus([1.0, 0.0], 0.01, 0.0, 3) == 1).all()
+    assert (in_focus([0.0], 0.01, 700.0, 3) == 1).all()
+
+
+def test_a_focus_ends_tracks_and_ends_the_fast_ones_sooner():
+    locs = simulate_tracks(n_frames=800, density_um2=0.02, d_um2_s=(0.02, 3.0),
+                           fractions=(0.5, 0.5), track_frames=30.0, use_z=True,
+                           focal_range_nm=600.0, seed=4)
+    assert np.abs(np.asarray(locs["z_nm"])).max() < 300 + 5 * 50   # 50 nm: its error
+    truth, state = np.asarray(locs["track_id_true"]), np.asarray(locs["state_true"])
+    length = np.bincount(truth)
+    slow = np.unique(truth[state == 0])
+    fast = np.unique(truth[state == 1])
+    assert length[fast].mean() < 0.5 * length[slow].mean()
+    # without a focus the simulation is as it was: same seed, same table
+    a = simulate_tracks(n_frames=100, seed=1)
+    b = simulate_tracks(n_frames=100, seed=1, focal_range_nm=0.0)
+    assert np.array_equal(np.asarray(a["x_nm"]), np.asarray(b["x_nm"]))
+
+
+def test_several_lags_fitted_together_give_back_d():
+    locs = simulate_tracks(n_frames=600, density_um2=0.03, d_um2_s=(0.3,),
+                           track_frames=30.0, precision_nm=25.0, seed=8)
+    d2, err, lag = jumps_over_lags(tracks_of(locs), 5)
+    assert set(np.unique(lag)) == {1, 2, 3, 4, 5}
+    fit = fit_jumps(d2, err, 2, lag * 0.01, 1)
+    assert fit.D_um2_per_s[0] == pytest.approx(0.3, rel=0.05)
+    assert list(fit.lag_s) == pytest.approx([0.01, 0.02, 0.03, 0.04, 0.05])
+
+
+def test_the_axial_range_gives_back_the_fraction_of_fast_particles():
+    # half slow, half fast: the fast leave a 700 nm focus within a few
+    # frames, so they make far fewer jumps than their number
+    locs = simulate_tracks(n_frames=2000, density_um2=0.02, d_um2_s=(0.05, 3.0),
+                           fractions=(0.5, 0.5), track_frames=30.0, precision_nm=25.0,
+                           focal_range_nm=700.0, seed=3)
+    d2, err, lag = jumps_over_lags(tracks_of(locs), 7)
+    plain = fit_jumps(d2, err, 2, lag * 0.01, 2)
+    fixed = fit_jumps(d2, err, 2, lag * 0.01, 2, focal_range_nm=700.0, step_s=0.01)
+    assert plain.fraction[1] < 0.35
+    assert fixed.fraction == pytest.approx([0.5, 0.5], abs=0.05)   # seeds scatter by 0.03
+    assert fixed.D_um2_per_s == pytest.approx([0.05, 3.0], rel=0.1)
+    # the fast state's share of the jumps falls with lag, as its particles leave
+    assert (np.diff(fixed.seen[1]) < 0).all()
+    assert fixed.kept[1, 0] < fixed.kept[0, 0]
+
+
+def test_in_3d_the_axial_range_fits_the_lateral_jumps():
+    # what stays in focus moved less in z, so z's jumps would make D too small
+    locs = simulate_tracks(n_frames=1200, density_um2=0.02, d_um2_s=(1.0,),
+                           track_frames=30.0, precision_nm=25.0, use_z=True,
+                           z_precision_nm=40.0, focal_range_nm=800.0, seed=5)
+    settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False)
+    settings.jump_fit.states = 1
+    settings.jump_fit.axial_range_nm = 800.0
+    result = TrackingAnalysis().run(Context(locs=locs), settings)
+    assert result.values["jump_D1_um2_per_s"] == pytest.approx(1.0, rel=0.05)
+    assert "lateral jumps" in result.text
+    assert result.data["jumps"].focal_range_nm == 800.0
+    assert result.plot is not None
