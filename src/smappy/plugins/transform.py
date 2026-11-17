@@ -628,17 +628,10 @@ def _image_like(image, data, name: str, transformation, part: str):
 
 
 def write_tiff(path, image) -> Path:
-    """``image`` as a float TIFF, its pixel size in the resolution tags as
-    SMAP writes it (pixels per centimetre, which ImageJ reads as µm)."""
-    import tifffile
-    path = Path(path)
-    if path.suffix.lower() not in (".tif", ".tiff"):
-        path = path.with_suffix(".tif")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    per_cm = 1e7 / float(image.pixelsize)
-    tifffile.imwrite(str(path), np.asarray(image.data, np.float32),
-                     resolution=(per_cm, per_cm), resolutionunit="CENTIMETER")
-    return path
+    """``image`` as a float TIFF, with its pixel size and place
+    (`images.save_tiff`, which *Save image layer* writes too)."""
+    from ..images import save_tiff
+    return save_tiff(image, path)
 
 
 # ------------------------------------------------------------------ figures

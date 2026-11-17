@@ -930,3 +930,93 @@ def _duration(seconds: float) -> str:
     if seconds < 5400:
         return f"{seconds / 60:.0f} min"
     return f"{seconds / 3600:.1f} h"
+
+
+# ------------------------------------------------------------ an image layer
+
+_PLANES = (("all", "every plane"), ("shown", "the plane shown"))
+
+
+@dataclass
+class ExportImageLayerSettings:
+    image: str = param("", label="image",
+                       help="which image; auto: the one the first image layer "
+                            "shows")
+    path: str = param("", label="file", kind="save_file",
+                      file_filter="TIFF (*.tif)",
+                      help="the TIFF; auto: beside the localization file, "
+                           "named after the image")
+    planes: str = param("all", choices=_PLANES,
+                        help="a stack whole, or the one plane the layer shows")
+
+
+def image_layer_path(session, image) -> Optional[Path]:
+    """Where an image is saved when no file is given: beside the
+    localization file (or the image's own), named after the image."""
+    import re
+    where = getattr(session, "path", None) or image.path
+    if not where:
+        return None
+    where = Path(where)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(image.name).stem).strip("_") or "image"
+    return where.with_name(f"{where.stem}_{stem}.tif")
+
+
+@register("File/Export/Image layer")
+class ExportImageLayer(Plugin):
+    """Save an image -- a widefield picture, the camera frames a fit kept, a
+    map a plugin made -- as a 32-bit TIFF with its pixel size and place."""
+
+    Settings = ExportImageLayerSettings
+    name = "Save image layer"
+    description = ("Save an image layer's image as a 32-bit float TIFF, its "
+                   "values as they are, with its pixel size and its place, "
+                   "which ImageJ and File > Open read back.")
+    changes_locs = False
+    logged = True
+    version = "1"
+
+    def describe(self, ctx: Optional[Context], settings: ExportImageLayerSettings
+                 ) -> FormState:
+        from ..images import find_image, shown_images
+        session = ctx.session if ctx is not None else None
+        state = FormState()
+        if session is None:
+            return state
+        images = shown_images(session)
+        state.choices["image"] = [(im.name, im.name) for im in images]
+        if not images:
+            state.notice = Notice("no image to save: open one, or fit with raw "
+                                  "frames kept", kind="info")
+            return state
+        try:
+            image = find_image(session, settings.image)
+        except ValueError:
+            return state
+        if image is not None:
+            state.hints["image"] = image.name
+            where = image_layer_path(session, image)
+            if where is not None:
+                state.hints["path"] = str(where)
+        return state
+
+    def run(self, ctx: Context, settings: ExportImageLayerSettings) -> Result:
+        from ..images import find_image, save_tiff
+        image = find_image(ctx.session, settings.image) if ctx.session else None
+        if image is None:
+            raise ValueError("no image to save: open one, or fit with raw "
+                             "frames kept")
+        path = (Path(settings.path) if settings.path
+                else image_layer_path(ctx.session, image))
+        if path is None:
+            raise ValueError("choose a file: the localizations are in none yet")
+        plane = None
+        if settings.planes == "shown" and image.n_frames > 1:
+            plane = next((layer.frame for layer in ctx.session.layers
+                          if layer.is_image and layer.image is image), image.frame)
+        written = save_tiff(image, path, plane)
+        ny, nx = image.shape
+        what = (f"{image.n_frames} planes of " if plane is None and image.n_frames > 1
+                else "") + f"{nx} x {ny} pixels of {image.pixelsize:g} nm"
+        return Result(text=f"{image.name} ({what}) to {written}",
+                      written=str(written), settings=settings)

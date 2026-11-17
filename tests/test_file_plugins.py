@@ -31,7 +31,7 @@ def test_every_file_plugin_is_in_the_tree():
     assert set(found) == {
         "File/Load/Auto", "File/Load/Load", "File/Save/smappy HDF5",
         "File/Export/Image", "File/Export/Stack", "File/Export/Localizations",
-        "File/Export/ROI images",
+        "File/Export/ROI images", "File/Export/Image layer",
         "File/Simulate/Simulate"}
 
 
