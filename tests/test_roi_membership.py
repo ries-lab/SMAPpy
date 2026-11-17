@@ -225,20 +225,20 @@ def test_a_track_is_selected_by_a_click_on_its_line_in_the_manager(app):
 def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
     from dataclasses import replace
     from smappy.gui.roi_tab import ROIHeader
-    from smappy.gui.roi_window import ROIManagerWindow
     from smappy.session import Session
     session = Session(crossing_tracks())
     session.show_grouped(0, False)
     project = session.rois
     header = ROIHeader(session)
-    window = ROIManagerWindow(session)
+    header.open_manager()                       # the geometry is the manager's
+    window = header.manager
     window.set_measuring(False)
-    assert not project.drafts_tracks and header.shape.currentText() == "circle"
+    assert not project.drafts_tracks and window.shape_box.currentText() == "circle"
     state = session.layers[0].state
     state.settings = replace(state.settings, mode="tracks")
     session.changed("layer")
-    assert project.drafts_tracks and header.shape.currentText() == "track"
-    assert not header.size.isEnabled()
+    assert project.drafts_tracks and window.shape_box.currentText() == "track"
+    assert not window.size_box.isEnabled()
 
     file_id = next(iter(project.sources))
     window.zoom_pane.render((project.view(file_id), project.state(file_id)), -200, 200, -200, 200)
@@ -254,8 +254,9 @@ def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
     window._zoom_clicked(900, 900)              # nothing there: no draft
     assert window.draft is None
 
-    header.shape.setCurrentText("square")       # chosen: a shape, tracks or not
+    window.shape_box.setCurrentText("square")   # chosen: a shape, tracks or not
     assert not project.drafts_tracks and project.shape == "square"
+    window.zoom_pane.render((project.view(file_id), project.state(file_id)), -200, 200, -200, 200)
     window._zoom_clicked(60, 3)
     assert window.draft is not None and window.draft_track is None
     window.close()

@@ -72,7 +72,7 @@ ax.set_xlim(100, 1500); ax.set_ylim(150, 1450)
 ax.set_xlabel("x (nm)"); ax.set_ylabel("y (nm)")
 ```
 
-All the moves are one step of the ROI manager's undo (*Undo ROI edit*).
+All the moves are one step of the ROI manager's undo (*Undo*).
 Results measured before the move describe the old place, so the per-region
 steps measure the moved ROIs again.
 

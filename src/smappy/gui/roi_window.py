@@ -24,7 +24,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
-                               QDoubleSpinBox,
+                               QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QScrollArea, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
@@ -179,17 +179,6 @@ def link_mode(navigation: dict) -> str:
     return "centre" if navigation.get("follow_2d") else "off"
 
 
-UNDO_TEXT_WIDTH = 130      # px of an undo button's text, past which it is elided
-
-
-def _lowered(label: str) -> str:
-    """"Remove ROI 3" -> "remove ROI 3", to follow "Undo"; an acronym
-    ("NPC") keeps its capitals."""
-    if len(label) > 1 and label[0].isupper() and label[1].islower():
-        return label[0].lower() + label[1:]
-    return label
-
-
 def emphasised(snapshot, fov, marks, base=None) -> np.ndarray:
     """The picture of tracks with the ROIs' tracks marked in it, not over it.
 
@@ -263,6 +252,7 @@ class ImagePane(QWidget):
     # (`grab` decides whether a press takes a point)
     corner_moved = Signal(float, float)
     corner_dropped = Signal(float, float)
+    right_clicked = Signal(float, float)   # a right click, where (a corner goes)
     moved = Signal(float, float)           # only while `tracking` is on
     zoomed = Signal(float)
     panned = Signal(float, float)          # how far to move the view, in nm
@@ -433,6 +423,11 @@ class ImagePane(QWidget):
             else:
                 self._turning = None
                 self.turned.emit(delta, shift)
+            return True
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.RightButton \
+                and self.fov is not None:
+            p = self._data_at(event.position())
+            self.right_clicked.emit(p.x(), p.y())
             return True
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
                 and self.grab is not None and self.fov is not None:
@@ -708,7 +703,6 @@ class ROIManagerWindow(QMainWindow):
         # `ROI` to draw it by; read through `draft_track`, so that whatever
         # drops the draft drops it too
         self._draft_track = None
-        self._filling_lines = False              # the line list being refilled
         self.drawing: Optional[str] = None       # "polygon" or "line"
         self._points: list = []
         self._hover: Optional[np.ndarray] = None
@@ -731,7 +725,9 @@ class ROIManagerWindow(QMainWindow):
         flayout = QVBoxLayout(file_column)
         flayout.setContentsMargins(0, 0, 0, 0)
         flayout.addWidget(self.file_pane, 1)
-        trow = QHBoxLayout()
+        self.file_bar = QWidget()
+        trow = QHBoxLayout(self.file_bar)
+        trow.setContentsMargins(0, 0, 0, 0)
         trow.setSpacing(3)
         self.tiles_button = QPushButton("Tiles")
         self.tiles_button.setCheckable(True)
@@ -755,7 +751,7 @@ class ROIManagerWindow(QMainWindow):
                   self.next_tile, self.tile_label):
             trow.addWidget(w)
         trow.addStretch(1)
-        flayout.addLayout(trow)
+        flayout.addWidget(self.file_bar)
 
         lists = QWidget()
         llayout = QVBoxLayout(lists)
@@ -765,11 +761,39 @@ class ROIManagerWindow(QMainWindow):
         side.setSpacing(6)
         file_side = QVBoxLayout()
         file_side.setSpacing(1)
+        # What a click drafts and how large every ROI of a shape is: above
+        # the files, which are seldom many, beside the list they shape.  It
+        # was the Regions tab's, a window away from the clicks it decides
+        file_side.addWidget(QLabel("<b>geometry</b>"))
+        geometry = QFormLayout()
+        geometry.setContentsMargins(0, 0, 0, 0)
+        geometry.setVerticalSpacing(2)
+        self.shape_box = QComboBox()
+        self.shape_box.addItems(["circle", "square", "track"])
+        self.shape_box.setToolTip("what a click drafts: a circle or square there, or "
+                                  "the track drawn nearest it.  Until one is chosen, "
+                                  "a track whenever the layer draws tracks")
+        self.size_box = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, suffix=" nm")
+        self.size_box.setToolTip("circle diameter, or the side of a square")
+        self.size_box.setKeyboardTracking(False)
+        self.view_box = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
+        self.view_box.setSpecialValueText("2 x ROI size")
+        self.view_box.setToolTip("what the ROI image shows around the ROI")
+        self.view_box.setKeyboardTracking(False)
+        self._filling_geometry = False
+        self.shape_box.currentTextChanged.connect(self._on_draft_shape)
+        self.size_box.valueChanged.connect(self._on_geometry)
+        self.view_box.valueChanged.connect(self._on_geometry)
+        geometry.addRow("shape", self.shape_box)
+        geometry.addRow("size", self.size_box)
+        geometry.addRow("ROI view", self.view_box)
+        file_side.addLayout(geometry)
+        file_side.addSpacing(6)
         file_side.addWidget(QLabel("<b>files</b>"))
         self.files = QListWidget()
         self.files.currentRowChanged.connect(self._on_file)
         file_side.addWidget(self.files, 1)
-        side.addLayout(file_side, 1)
+        side.addLayout(file_side, 2)
         roi_side_list = QVBoxLayout()
         roi_side_list.setSpacing(1)
         heading = QHBoxLayout()
@@ -806,9 +830,11 @@ class ROIManagerWindow(QMainWindow):
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._sort_by_column)
         self._sorted_column = None
-        self.table.setMaximumWidth(260)          # the numbers and a few keywords
+        # the annotations column takes what the list is given beyond the
+        # numbers: with the lists below the pictures there is room for it
+        header.setStretchLastSection(True)
         roi_side_list.addWidget(self.table, 1)
-        side.addLayout(roi_side_list, 0)
+        side.addLayout(roi_side_list, 3)
         llayout.addLayout(side, 1)
         edits = QHBoxLayout()
         edits.setSpacing(3)
@@ -817,11 +843,12 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.clicked.connect(self._remove)
         # the ROIs' own undo (`ROIProject.history`), not the main window's,
         # which is for tables: Ctrl+Z here never undoes a drift correction.
-        # The buttons name the edit ("Undo remove ROI 3"), as Edit > Undo
-        # names the table's step ("Undo RCC"), so the two read differently
-        self.undo_button = QPushButton("Undo ROI edit")
+        # Short, so the row fits beside the 2D view's controls; the tooltip
+        # names the edit ("undo: Remove ROI 3"), as Edit > Undo names the
+        # table's step
+        self.undo_button = QPushButton("Undo")
         self.undo_button.clicked.connect(self.undo)
-        self.redo_button = QPushButton("Redo ROI edit")
+        self.redo_button = QPushButton("Redo")
         self.redo_button.clicked.connect(self.redo)
         # the main picture goes where the ROI is, on its file: the ROI image
         # here is small, and the 2D view is where it is worked on -- and,
@@ -838,17 +865,28 @@ class ROIManagerWindow(QMainWindow):
                                 "along its line when it has one -- so the 3D view "
                                 "shows it")
         self.link_2d.currentIndexChanged.connect(self._on_link_2d)
-        link.addWidget(self.link_2d, 1)
-        llayout.addLayout(link)
-        edits.addWidget(self.remove_button, 1)
+        # at the widths the controls need: stretched over the whole lists
+        # side, a choice of three and a Remove were half a window wide
+        link.addWidget(self.link_2d)
+        # the 2D view's drawn region made an ROI: beside the choice of what
+        # the 2D view is to the ROIs
+        self.from_region = QPushButton("Add drawn region")
+        self.from_region.setToolTip("turn the rectangle, circle, line or polygon "
+                                    "drawn in the 2D view into an ROI")
+        self.from_region.clicked.connect(self._from_region)
+        link.addWidget(self.from_region)
+        link.addStretch(1)
+        self._link_row = link             # under the zoom (below), not the lists
+        edits.addWidget(self.remove_button)
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
-        llayout.addLayout(edits)
+        edits.addStretch(1)
+        roi_side_list.addLayout(edits)          # under the list they act on
         # what the user says of the selected ROI: a keyword from each list,
         # a key per ROI (`roi_annotate`), and *use*
         from .roi_annotate import AnnotationPanel
         self.annotation = AnnotationPanel(self)
-        llayout.addWidget(CollapsibleSection("annotate", self.annotation, expanded=True))
+        self.annotate_side = CollapsibleSection("annotate", self.annotation, expanded=True)
         # shown only while a segmenter's preview is drawn: Run adds it, a
         # new preview replaces it, and this is the way to have neither
         self.add_preview_button = QPushButton("Add previewed ROIs")
@@ -894,43 +932,49 @@ class ROIManagerWindow(QMainWindow):
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
         rlayout.setContentsMargins(0, 0, 0, 0)
-        tools = QHBoxLayout()
+        # One row under the ROI image -- near *annotate*, where the mouse
+        # already is -- of what to draw (the shape, then the line), how the
+        # ROI is turned, and *Add*.  Each drawing button draws on a left
+        # click and offers its choices and its clearing on a right click,
+        # as the main view's ROI button does, so the row holds two buttons
+        # where it held a box and five
+        self.roi_bar = QWidget()
+        tools = QHBoxLayout(self.roi_bar)
+        tools.setContentsMargins(0, 0, 0, 0)
         tools.setSpacing(3)
         self.polygon_button = QPushButton("Polygon")
         self.polygon_button.setCheckable(True)
         self.polygon_button.setToolTip("draw the ROI's own shape in this image; "
-                                       "right-click: polygon, freehand or ellipse.  "
-                                       "Escape cancels")
+                                       "right-click: polygon, freehand or ellipse, "
+                                       "or clear the shape.  Escape cancels")
         self.polygon_button.clicked.connect(lambda: self._start_drawing(self.shape_tool))
         self.polygon_button.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.polygon_button.customContextMenuRequested.connect(self._shape_menu)
-        self.clear_shape_button = QPushButton("Clear shape")
-        self.clear_shape_button.setToolTip("back to the global circle or square; "
-                                           "an ROI of an id, back to its id alone")
-        self.clear_shape_button.clicked.connect(self._clear_shape)
-        # the named lines (`ROI.lines`): which one, then draw, reverse, clear
-        self.line_box = QComboBox()
-        self.line_box.setToolTip("the line that Draw line, Reverse and Clear line "
-                                 "act on (Shift+L the next); the names are "
-                                 "written under *line names*")
-        self.line_box.currentTextChanged.connect(self._on_line_name)
-        self.line_button = QPushButton("Draw line")
+        self.polygon_button.customContextMenuRequested.connect(
+            lambda pos: self._menu_at(self.shape_menu, self.polygon_button, pos))
+        # the menus are made once and refilled before they open, so their
+        # entries exist while the window does (its help page names them)
+        from PySide6.QtWidgets import QMenu
+        self.shape_menu = QMenu("Shape", self)
+        self.shape_menu.aboutToShow.connect(self._fill_shape_menu)
+        self.line_menu = QMenu("Line", self)
+        self.line_menu.aboutToShow.connect(self._fill_line_menu)
+        self._fill_shape_menu()
+        # the named lines (`ROI.lines`): the button draws the chosen one
+        # and is named after it; a right-click chooses, reverses or clears
+        self._line_names: list = []
+        self.line_button = QPushButton("Line")
         self.line_button.setCheckable(True)
-        self.line_button.setToolTip("two clicks, start then end: the chosen line, "
-                                    "its angle and length a column of the results (L)")
+        self.line_button.setToolTip("two clicks, start then end: the chosen line, its "
+                                    "angle and length a column of the results (L); "
+                                    "right-click: which line (Shift+L the next), "
+                                    "reverse (R) or clear it")
         self.line_button.clicked.connect(lambda: self._start_drawing("line"))
-        self.reverse_button = QPushButton("Reverse")
-        self.reverse_button.setToolTip("swap the chosen line's start and end (R)")
-        self.reverse_button.clicked.connect(self._reverse_line)
-        self.clear_line_button = QPushButton("Clear line")
-        self.clear_line_button.setToolTip("remove the chosen line")
-        self.clear_line_button.clicked.connect(self._clear_line)
-        for b in (self.polygon_button, self.clear_shape_button):
-            tools.addWidget(b)
-        tools.addSpacing(8)
-        for b in (self.line_box, self.line_button, self.reverse_button,
-                  self.clear_line_button):
-            tools.addWidget(b)
+        self.line_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.line_button.customContextMenuRequested.connect(
+            lambda pos: self._menu_at(self.line_menu, self.line_button, pos))
+        self._fill_line_menu()
+        tools.addWidget(self.polygon_button)
+        tools.addWidget(self.line_button)
         for key, slot in (("L", lambda: self._start_drawing("line")),
                           ("Shift+L", lambda: self.next_line(1)),
                           ("R", self._reverse_line)):
@@ -941,8 +985,6 @@ class ROIManagerWindow(QMainWindow):
         # the project, since it decides what is measured, shown here because
         # it is a way of looking.  Off, the angle and the handle are gone and
         # every ROI is shown and measured as it lies in the file
-        turns = QHBoxLayout()
-        turns.setSpacing(3)
         self.rotate_box = QCheckBox("rotate")
         self.rotate_box.setToolTip("show and measure each ROI turned to its angle, so "
                                    "its structure lies along x; drag the green "
@@ -959,19 +1001,17 @@ class ROIManagerWindow(QMainWindow):
         self.angle_from_line.setToolTip("take the angle of the chosen line, start "
                                         "to end")
         self.angle_from_line.clicked.connect(self._angle_from_line)
-        turns.addWidget(self.rotate_box)
-        turns.addWidget(self.angle_box)
-        turns.addWidget(self.angle_from_line)
-        turns.addStretch(1)
+        tools.addSpacing(16)                  # drawing apart from turning
+        tools.addWidget(self.rotate_box)
+        tools.addWidget(self.angle_box)
+        tools.addWidget(self.angle_from_line)
+        tools.addSpacing(16)
         for key, step in (("[", -1.0), ("]", 1.0)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.WindowShortcut)
             shortcut.activated.connect(lambda step=step: self._step_angle(step))
-        # the tools that say what to draw sit above the image they draw into;
-        # *Add*, the one button that is pressed over and over, sits directly
-        # under it, where the eye already is after judging the ROI
-        rlayout.addLayout(tools)
-        rlayout.addLayout(turns)
+        # *Add*, the one button pressed over and over, ends the row and takes
+        # what is left of it: a large target right under the ROI just judged
         rlayout.addWidget(self.roi_pane, 1)
         self.add_button = QPushButton("Add")
         self.add_button.setToolTip("store the drafted ROI (Enter)")
@@ -983,35 +1023,62 @@ class ROIManagerWindow(QMainWindow):
             "QPushButton:pressed { background: #24783c; }"
             "QPushButton:disabled { background: #8a8a8a; border-color: #6e6e6e; }")
         self.add_button.clicked.connect(self._add)
-        rlayout.addWidget(self.add_button)
+        self.add_button.setMinimumWidth(70)
+        tools.addWidget(self.add_button, 1)
+        rlayout.addWidget(self.roi_bar)
+        # under the zoom, what the main view is to the ROIs: whether it
+        # follows them, and its drawn region made one.  A row under each
+        # picture keeps their upper and lower edges in line
+        zoom_column = QWidget()
+        zlayout = QVBoxLayout(zoom_column)
+        zlayout.setContentsMargins(0, 0, 0, 0)
+        zlayout.addWidget(self.zoom_pane, 1)
+        self.zoom_bar = QWidget()
+        self._link_row.setContentsMargins(0, 0, 0, 0)
+        self.zoom_bar.setLayout(self._link_row)
+        zlayout.addWidget(self.zoom_bar)
+        bar = max(self.file_bar.sizeHint().height(), self.roi_bar.sizeHint().height())
+        for row in (self.file_bar, self.zoom_bar, self.roi_bar):
+            row.setFixedHeight(bar)
 
+        # The three pictures in a row, each as wide as a third of the window
+        # and so about square -- ROIs are mostly square, and a grid of halves
+        # made the ROI image twice as wide as tall -- and below them the
+        # lists on the left and *annotate* on the right, side by side, so
+        # unfolding *frames and z* no longer takes its height from the list
         top = QSplitter(Qt.Horizontal)
-        top.addWidget(file_column)
-        top.addWidget(self.zoom_pane)
+        for column in (file_column, zoom_column, roi_side):
+            column.layout().setSpacing(4)
+            top.addWidget(column)
         bottom = QSplitter(Qt.Horizontal)
-        # the lists scroll rather than grow: unfolded, *frames and z* and the
-        # other parts of *annotate* took their height from the overview above
-        # until it was a strip
-        lists_scroll = QScrollArea()
-        lists_scroll.setWidget(lists)
-        lists_scroll.setWidgetResizable(True)
-        lists_scroll.setFrameShape(QScrollArea.NoFrame)
-        lists_scroll.setMinimumWidth(lists.sizeHint().width())
-        bottom.addWidget(lists_scroll)
-        bottom.addWidget(roi_side)
+        # each side scrolls rather than grows
+        # *annotate* at the top of its side, its parts folded or not, rather
+        # than spread over the height the scroll area gives it
+        annotate = QWidget()
+        alayout = QVBoxLayout(annotate)
+        alayout.setContentsMargins(0, 0, 0, 0)
+        alayout.addWidget(self.annotate_side)
+        alayout.addStretch(1)
+        for widget in (lists, annotate):
+            scroll = QScrollArea()
+            scroll.setWidget(widget)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.NoFrame)
+            scroll.setMinimumWidth(min(widget.sizeHint().width(), 420))
+            bottom.addWidget(scroll)
         whole = QSplitter(Qt.Vertical)
         whole.addWidget(top)
         whole.addWidget(bottom)
-        for s in (top, bottom, whole):
-            s.setSizes([500, 500])
         self.setCentralWidget(whole)
         self.status = self.statusBar()
-        # as large as the screen comfortably takes: the overview, the zoom and
-        # the ROI are three pictures, and 1100 x 800 left each one small
+        # as large as the screen comfortably takes: three pictures side by side
         screen = QApplication.primaryScreen()
         free = screen.availableGeometry() if screen is not None else None
-        self.resize(min(1400, int(free.width() * 0.9)) if free else 1100,
-                    min(1050, int(free.height() * 0.9)) if free else 800)
+        width = min(1400, int(free.width() * 0.9)) if free else 1200
+        height = min(1000, int(free.height() * 0.9)) if free else 850
+        self.resize(width, height)
+        self.top_splitter, self.bottom_splitter, self.whole_splitter = top, bottom, whole
+        self._sized = False                 # the splitters, once shown (`showEvent`)
 
         self.file_pane.clicked.connect(self._file_clicked)
         self.zoom_pane.clicked.connect(self._zoom_clicked)
@@ -1019,6 +1086,7 @@ class ROIManagerWindow(QMainWindow):
         self.roi_pane.moved.connect(self._roi_hover)
         self.roi_pane.double_clicked.connect(self._roi_double_clicked)
         self.roi_pane.grab = self._grab_corner
+        self.roi_pane.right_clicked.connect(self._delete_corner)
         self.roi_pane.corner_moved.connect(self._move_corner)
         self.roi_pane.corner_dropped.connect(self._drop_corner)
         self._corner: Optional[tuple] = None    # (index, the polygon as it was)
@@ -1069,6 +1137,7 @@ class ROIManagerWindow(QMainWindow):
         self.rotate_box.setChecked(bool(project.rotate))
         self._show_turn_controls()
         self.polygon_button.setText(dict(SHAPE_TOOLS)[self.shape_tool])
+        self.show_geometry()
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -1732,6 +1801,20 @@ class ROIManagerWindow(QMainWindow):
             return
         self._set_shape(polygon=points, what="Move corner")
 
+    def _delete_corner(self, x: float, y: float) -> None:
+        """A right click on a corner of the shown polygon removes it -- not
+        below three, where it would no longer be an outline -- one undo
+        step, as a drag is."""
+        polygon, fov = self._shown_polygon(), self.roi_pane.fov
+        if self.drawing or polygon is None or fov is None or len(polygon) <= 3:
+            return
+        v = np.asarray(polygon, float)
+        distance = np.hypot(v[:, 0] - x, v[:, 1] - y)
+        i = int(np.argmin(distance))
+        if distance[i] <= CORNER_PIXELS * fov.pixelsize:
+            self._set_shape(polygon=[list(p) for k, p in enumerate(polygon) if k != i],
+                            what="Delete corner")
+
     def _set_shape(self, polygon=None, ellipse=None, what: str = "Outline") -> None:
         """The draft's or the selected ROI's own shape, a polygon or an
         ellipse (the other goes), its centre moved to the shape's: one undo
@@ -1772,16 +1855,6 @@ class ROIManagerWindow(QMainWindow):
         self.project.navigation["shape_tool"] = kind
         self.polygon_button.setText(dict(SHAPE_TOOLS)[kind])
 
-    def _shape_menu(self, pos) -> None:
-        from PySide6.QtWidgets import QMenu
-        menu = QMenu(self.polygon_button)
-        for kind, label in SHAPE_TOOLS:
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(kind == self.shape_tool)
-            action.triggered.connect(lambda _=False, k=kind: self.set_shape_tool(k))
-        menu.exec(self.polygon_button.mapToGlobal(pos))
-
     def _roi_double_clicked(self, x: float, y: float) -> None:
         """A double-click closes a polygon, as in the main view: its first
         click has placed the last vertex already."""
@@ -1796,7 +1869,7 @@ class ROIManagerWindow(QMainWindow):
     # ------------------------------------------------- polygon and lines
     @property
     def line_name(self) -> str:
-        """The line Draw line, Reverse and Clear line act on."""
+        """The line the *Line* button draws, reverses and clears."""
         names = self.project.line_names
         name = self.project.navigation.get("line")
         return name if name else (names[0] if names else "")
@@ -1807,30 +1880,52 @@ class ROIManagerWindow(QMainWindow):
 
     def next_line(self, step: int) -> None:
         """The next line name (Shift+L), round the list."""
-        names = [self.line_box.itemText(i) for i in range(self.line_box.count())]
+        names = self._line_names
         if names:
             here = names.index(self.line_name) if self.line_name in names else -1
             self.set_line_name(names[(here + step) % len(names)])
 
-    def _on_line_name(self, name: str) -> None:
-        if name and name != self.line_name and not self._filling_lines:
-            self.set_line_name(name)
-
     def _fill_line_box(self, lines) -> None:
-        """The project's line names, and those the shown ROI has besides."""
+        """The names the line button offers -- the project's, and those the
+        shown ROI has besides -- and the button named after the chosen one."""
         names = list(self.project.line_names)
         names += [n for n in lines if n not in names]
         if self.line_name not in names:
             names.append(self.line_name)
-        names = [n for n in names if n]
-        current = [self.line_box.itemText(i) for i in range(self.line_box.count())]
-        self._filling_lines = True
-        if names != current:
-            self.line_box.clear()
-            self.line_box.addItems(names)
-        if self.line_name in names:
-            self.line_box.setCurrentIndex(names.index(self.line_name))
-        self._filling_lines = False
+        self._line_names = [n for n in names if n]
+        self.line_button.setText(f"Line: {self.line_name}" if self.line_name else "Line")
+
+    @staticmethod
+    def _menu_at(menu, button, pos) -> None:
+        menu.exec(button.mapToGlobal(pos))
+
+    def _fill_shape_menu(self) -> None:
+        """What to draw, then the shape cleared: refilled as it opens, so
+        the tick follows the choice."""
+        menu = self.shape_menu
+        menu.clear()
+        for kind, label in SHAPE_TOOLS:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(kind == self.shape_tool)
+            action.triggered.connect(lambda _=False, k=kind: self.set_shape_tool(k))
+        menu.addSeparator()
+        menu.addAction("Clear shape", self._clear_shape)
+
+    def _fill_line_menu(self) -> None:
+        """Which line, then the chosen one reversed or cleared."""
+        menu = self.line_menu
+        menu.clear()
+        for name in self._line_names or [self.line_name]:
+            if not name:
+                continue
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == self.line_name)
+            action.triggered.connect(lambda _=False, n=name: self.set_line_name(n))
+        menu.addSeparator()
+        menu.addAction("Reverse", self._reverse_line)
+        menu.addAction("Clear line", self._clear_line)
 
     def _shown_lines(self) -> dict:
         roi = self._selected()
@@ -1936,10 +2031,6 @@ class ROIManagerWindow(QMainWindow):
                 (self.redo_button, history.can_redo, history.redo_label, "redo")):
             button.setEnabled(can)
             button.setToolTip(f"{what}: {label}" if can else f"nothing to {what}")
-            text = f"{what.capitalize()} {_lowered(label) if can else 'ROI edit'}"
-            # elided: a long label must not widen the column of the ROI list
-            button.setText(button.fontMetrics().elidedText(
-                text, Qt.ElideRight, UNDO_TEXT_WIDTH))
 
     def _edit(self, what: str):
         """An undoable edit, named after the selected ROI's number."""
@@ -2322,6 +2413,101 @@ class ROIManagerWindow(QMainWindow):
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None
+
+    # ------------------------------------------------------------ geometry
+    def show_geometry(self) -> None:
+        """The project's shape, size and ROI view in the fields; the shape
+        *track* while a click drafts tracks (`ROIProject.drafts_tracks`)."""
+        project = self.project
+        was, self._filling_geometry = self._filling_geometry, True
+        try:
+            self.shape_box.setCurrentText("track" if project.drafts_tracks
+                                          else project.shape)
+            self.size_box.setEnabled(not project.drafts_tracks)
+            if not self.size_box.hasFocus():
+                self.size_box.setValue(project.size_nm)
+            if not self.view_box.hasFocus():
+                self.view_box.setValue(project.preview_nm)
+        finally:
+            self._filling_geometry = was
+
+    def _on_draft_shape(self, text: str) -> None:
+        """A shape chosen: what a click drafts from now on, whatever the
+        layer draws.  *track* leaves the shape of the ROIs that have one."""
+        if self._filling_geometry:
+            return
+        self.project.navigation["draft"] = "track" if text == "track" else "shape"
+        self.size_box.setEnabled(text != "track")
+        if text != "track":
+            self._on_geometry()
+
+    def _on_geometry(self) -> None:
+        if self._filling_geometry:
+            return
+        shape = self.shape_box.currentText()
+        try:
+            self.project.set_geometry(self.size_box.value(),
+                                      None if shape == "track" else shape)
+        except ValueError as error:
+            self.status.showMessage(str(error))
+            return
+        self.project.preview_nm = self.view_box.value()
+        self._fill_table()               # the out-of-date marks follow the size
+        self.redraw()
+        self.changed.emit()
+
+    def _from_region(self) -> None:
+        """The region drawn in the 2D view becomes an ROI of the file shown,
+        its outline kept as it is."""
+        region = self.session.roi
+        file_id = self.current_file()
+        if region is None:
+            self.status.showMessage("draw a region in the 2D view first")
+            return
+        if file_id is None:
+            return
+        if not self.session.axes().is_default:
+            # an ROI is a place in nanometres; this region is in the picture's units
+            self.status.showMessage("the 2D view shows custom axes; switch them off "
+                                    "to draw a region that can become an ROI")
+            return
+        polygon = region.vertices().tolist()
+        center = np.asarray(polygon, float).mean(axis=0)
+        try:
+            with self.project.edit(f"Add the drawn {region.kind}"):
+                roi = self.project.add_roi(file_id, [float(center[0]), float(center[1])],
+                                           polygon=polygon)
+        except ValueError as error:      # a line of zero width, a degenerate outline
+            self.status.showMessage(str(error))
+            return
+        self.draft = None
+        self.select(roi.id)
+        self.changed.emit()
+        self.status.showMessage(f"added the drawn {region.kind} as ROI {roi.number}")
+
+    def showEvent(self, event) -> None:
+        """The splitters sized once the window has its size: set before, Qt
+        shares the room out again by what each side asks for, and the zoom,
+        which asks least, came out half as wide as the others."""
+        super().showEvent(event)
+        if self._sized:
+            return
+        self._sized = True
+        self.size_panes()
+
+    def size_panes(self) -> None:
+        """Three pictures of a third of the width each, as tall as they are
+        wide (with the row of buttons over each), the lists and *annotate*
+        sharing the rest; never less than a third of the height below."""
+        width = self.whole_splitter.width() or self.width()
+        height = self.whole_splitter.height() or self.height()
+        third = width // 3
+        self.top_splitter.setSizes([third, third, width - 2 * third])
+        self.bottom_splitter.setSizes([width // 2, width - width // 2])
+        above = self.roi_pane.height() - self.roi_pane.graphics.height()
+        rows = self.roi_bar.height() + max(above, 0) + 12
+        pictures = min(third + rows, int(height * 0.67))
+        self.whole_splitter.setSizes([pictures, height - pictures])
 
     def shown_roi(self):
         """The ROI the ROI image shows: the draft, as the ROI *Add* would

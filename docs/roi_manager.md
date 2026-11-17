@@ -1,9 +1,10 @@
 # ROI manager
 
 The ROI manager organizes **files → ROIs**.  An ROI (region of interest) is a
-shape -- a circle, a square or a polygon -- around one copy of a structure,
-inside which it is measured.  Its window has four quadrants: the
-whole file, a zoom, the ROI itself, and the file and ROI lists.  The zoom is a
+shape -- a circle, a square, a polygon or an ellipse -- around one copy of a
+structure, inside which it is measured.  Its window has three pictures in a
+row -- the whole file, a zoom and the ROI itself -- and under them the file
+and ROI lists on the left and *annotate* on the right.  The zoom is a
 navigation aid; moving through the file never moves ROIs.
 
 ## Open the manager
@@ -31,8 +32,8 @@ project through a session with no window (*Python API and plugins*, below).
    click there to recentre it, then **Add** or Enter stores it.
 3. Click an ROI's *outline* to select it.  A click inside one drafts a new ROI
    instead, which is what makes overlapping ROIs drawable.
-4. A region drawn in the 2D view becomes an ROI with **Add the drawn region as
-   an ROI** in the tab, keeping its rectangle, line or polygon outline.
+4. A region drawn in the 2D view becomes an ROI with **Add drawn region**,
+   under the zoom, keeping its rectangle, line or polygon outline.
 5. Select an ROI in the list to jump to its file and centre the zoom on it.
    The **use** checkbox, or the space bar, includes or excludes it; **Remove**
    deletes it, and previous run records stay in the history.
@@ -40,16 +41,18 @@ project through a session with no window (*Python API and plugins*, below).
 There is no review step: an ROI counts from the moment it is made, and *use* is
 what excludes one.
 
-**Polygon** draws an outline in the ROI image: a click per vertex, and the first
-vertex or a double-click closes it.  A closed polygon replaces the global circle
-or square for that ROI and moves its centre to the centroid; **Clear shape**
-gives the global geometry back.  **Direction** takes two clicks, start then end,
-and records an arrow the analysis plugins can read; it does not rotate anything.
-**Clear line** removes it.  Escape abandons a drawing.  Both apply to the
-selected ROI, or to a draft, which then carries them when **Add** stores it.
+**Polygon** draws the ROI's own shape in the ROI image -- a polygon (a click
+per vertex; the first vertex or a double-click closes it), a freehand outline or
+an ellipse, chosen by a right-click on the button, whose menu also has **Clear
+shape**, back to the global geometry.  Corners, an ellipse's handles and lines'
+ends are dragged; a right click on a corner removes it.  **Line** takes two
+clicks, start then end, and records the chosen named line, an arrow the analysis
+plugins can read; its right-click menu chooses the name, **Reverse** and **Clear
+line**.  Escape abandons a drawing.  Both apply to the selected ROI, or to a
+draft, which then carries them when **Add** stores it.
 
 The default circle has a **300 nm diameter**.  For a square, the global size is
-its **side length**; both are set in the Regions tab and apply to every ROI at once.
+its **side length**; both are set above the file list and apply to every ROI at once.
 Polygons keep their own boundaries.  **ROI view** sets what the ROI image shows
 around the ROI, independently of the analysis geometry.
 

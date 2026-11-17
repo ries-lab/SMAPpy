@@ -121,10 +121,13 @@ def test_lines_are_drawn_chosen_and_reversed_from_the_keys(app):
     window.table.setFocus()
     first = next(iter(project.rois))
     window.select(first)
-    assert [window.line_box.itemText(i) for i in range(window.line_box.count())] == [
-        "direction", "axis"]
+    window._fill_line_menu()
+    menu = [a.text() for a in window.line_menu.actions()]
+    assert menu == ["direction", "axis", "", "Reverse", "Clear line"]
+    assert window.line_button.text() == "Line: direction"
     QTest.keyClick(window, Qt.Key_L, Qt.ShiftModifier)            # the next line
     assert window.line_name == "axis"
+    assert window.line_button.text() == "Line: axis"
     QTest.keyClick(window, Qt.Key_L)                              # draw it
     assert window.drawing == "line"
     window._roi_clicked(-50.0, 0.0)
@@ -136,7 +139,7 @@ def test_lines_are_drawn_chosen_and_reversed_from_the_keys(app):
     window.set_line_name("direction")
     window._roi_clicked(0.0, 1.0)                     # on the axis: it is chosen
     assert window.line_name == "axis"
-    window.clear_line_button.click()
+    next(a for a in window.line_menu.actions() if a.text() == "Clear line").trigger()
     assert project.rois[first].lines == {}
     window.annotation.line_names.setText("direction, axis, tip")
     window.annotation.apply_line_names()

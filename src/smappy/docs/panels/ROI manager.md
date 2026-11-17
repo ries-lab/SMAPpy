@@ -44,7 +44,7 @@ colour over it, which would hide their own colours: each is drawn twice
 as wide, in its colours when used and grey when not, and the selected or
 drafted one has a white rim besides.  The tracks that are no ROI are dimmed
 a little, to 80 %, so that they stay easy to pick from.  One track at a time is picked by hand
-with *shape* set to *track* in the Regions tab -- its default while the
+with *shape* set to *track* -- its default while the
 layer is rendered as tracks: a click in the zoom drafts the track drawn
 nearest it, and *Add* keeps it.  The list shows *all* ROIs, only the
 *shapes*, or only those *of an id*.
@@ -54,9 +54,9 @@ set under *frames and z* in *annotate*, are part of what the ROI holds, so
 what is measured in it -- and what *Regions to attribute* writes -- is that
 part only.  Every frame and every z, the default, is no cut.
 
-What the Regions tab holds is what an ROI *is*: its shape and size, shared by all
-ROIs, and the plugins that find and summarise.  This window is for choosing
-and judging.
+The Regions tab holds the plugins that find, measure and summarise ROIs;
+this window is for making, choosing and judging them, and holds the shape
+and size all ROIs share.
 
 An ROI sees the localizations the image shows.  The first layer's filters
 and whether it merges blinks, set in the
@@ -122,10 +122,13 @@ def ring(ax, roi, colour, lw=1.0, ls="-"):
     ax.plot(ox, oy, color=colour, lw=lw, ls=ls)
 ```
 
-**1. Three images and a list.**  The window has four quadrants.  At the top
-left is the whole file, at the top right a zoom, at the bottom right the ROI
-being looked at, and at the bottom left the files and the ROIs.  A click in
-the file moves the zoom there.  Moving around never moves an ROI.
+**1. Three images and a list.**  Three pictures side by side, each about
+square: the whole file, a zoom, and the ROI being looked at.  Under the ROI
+image is one row of what to draw, how the ROI is turned, and *Add*.  Under
+the pictures, the files and the ROIs on the left and *annotate* on the
+right.  The
+dividers between them can be dragged.  A click in the file moves the zoom
+there.  Moving around never moves an ROI.
 
 **2. Finding ROIs.**  A segmentation plugin run from the Regions tab adds its
 candidates to the file shown here.  Its *Preview* button proposes them
@@ -143,7 +146,7 @@ step the zoom from one square to the next, row by row, so that every part of
 the data is looked at once, in a fixed order, and not only where the eye
 happened to land.
 
-```figure Simulated nuclear pores (Nup96, 60 % labelling) after Segment regions with its defaults, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *line* drawn on it (magenta).
+```figure Simulated nuclear pores (Nup96, 60 % labelling) after Segment regions with its defaults, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, two ROI widths across, with a line called *line* drawn on it (magenta).
 x0, y0, x1, y1 = state.index.bounds
 here = 5
 tx0, ty0, tx1, ty1 = tiles[here]
@@ -169,7 +172,7 @@ for r in mine:
          pen(ROI_PEN) if r is selected else pen(OTHER_PEN), 1.0)
 ring(b, draft, pen(DRAFT_PEN), 1.2, "--")
 b.set_title("zoom", fontsize=9)
-half = project.size_nm * 1.5
+half = project.size_nm * 1.0
 cx, cy = selected.center
 image(c, cx - half, cx + half, cy - half, cy + half)
 ring(c, selected, pen(ROI_PEN), 1.5)
@@ -184,7 +187,7 @@ space bar, includes or excludes it.  An excluded ROI stays in the list, grey,
 and is left out of the per-region steps and the results.  There is no
 separate review flag: *use* is the decision, from the moment an ROI is made.
 
-**Annotating.**  Under the list, *annotate* gives the selected ROI a
+**Annotating.**  Beside the list, *annotate* gives the selected ROI a
 keyword from each of a few lists the user writes -- *quality: good, bad,
 unsure*, say, or the stage of a structure.  The number keys give a keyword
 of the active list (1 the first, 0 none), Tab moves to the next list, and
@@ -203,16 +206,16 @@ way round; on *ROI*, back to the numbers).  The results table and the
 summaries follow the same order, which is saved with the ROIs.  Sorting
 never changes an ROI's number.
 
-**5. Shapes and lines.**  All ROIs share the circle or square set in the
-Regions tab.  One ROI can have its own shape instead: a polygon, a
+**5. Shapes and lines.**  All ROIs share the circle or square set under
+*shape* and *size*, above the files.  One ROI can have its own shape instead: a polygon, a
 freehand outline or an ellipse (*Polygon*, right-click for the other two).
 
 An ROI can also carry lines drawn by hand, each under a name: the axis of
 an elongated structure, the direction a filament runs, the distance between
 two spots.  The names are written once for the project, under *line names*
 (*line* to start with), and each ROI can have one line of each name.
-Pick the name under *line*, then *Draw line* and two clicks, the start and
-then the end.  A line is an arrow, so it has a direction: a small ring
+Pick the name with a right-click on the *Line* button, then click the
+button and twice in the ROI image, the start and then the end.  A line is an arrow, so it has a direction: a small ring
 marks its start and a head its end, both the same size on the screen at any
 zoom.  *Reverse* turns it round.  Each name has its own colour, and its name
 is written at the arrow's tip.
@@ -423,7 +426,7 @@ click drafts an ROI or, on an outline, selects one.  An ROI is drawn amber
 when included, grey when excluded and green when selected.
 
 ### ROI
-The selected ROI or the draft, as wide as the Regions tab's *ROI view* (three ROI
+The selected ROI or the draft, as wide as *ROI view* (two ROI
 sizes by default); the wheel here changes that width for all ROIs.  An ROI of
 an id is shown as wide as its localizations reach, unless *ROI view* is set.
 The title says what the ROI holds: its shape or id, its range, how many
@@ -433,9 +436,41 @@ there: its centre only, so a polygon and lines stay on the structure they
 were drawn on and move with the localizations (one undo step for a stored
 ROI; an ROI of an id alone stays where its id is).  A click on one of the
 ROI's lines chooses it, and a click on another ROI's outline selects that
-one.  It is also where *Polygon* and *Draw line* are drawn, and where they
+one.  It is also where *Polygon* and *Line* are drawn, and where they
 stay editable: drag a polygon's corner or an ellipse's handle (the small
 squares) or a line's start or end, one undo step each.
+
+### shape
+The three fields above the files: what every ROI's outline is, unless it
+has a shape of its own, and how much of its surroundings the ROI image
+shows.  They were the Regions tab's *geometry*.
+
+*circle* for round structures; *square* for structures that are square or
+when the corners do not matter.  A square of side $d$ is 27 % larger in area
+than a circle of diameter $d$, so its corners reach further towards a
+neighbour.
+
+*track* is not an outline: a click in the ROI manager then drafts an ROI of
+the [track](plugin:Panels/Glossary) whose line passes nearest it -- that
+track's localizations and none of those crossing it -- and *Add* keeps it.
+The tracks are those of the attribute the layer draws them by (the Render
+tab's *track id*), and every ROI that has an outline keeps it.  Until a
+shape is chosen, *track* is what the list shows whenever the layer is
+rendered as *tracks*, and the shape otherwise.
+
+### size
+The circle's diameter, or the square's side.  Start at about twice the
+structure's diameter: the default 300 nm fits a nuclear pore (about 110 nm)
+with room for the localization scatter and a misplaced centre.  Too small,
+and the edge of the structure is cut off where the centre is off; too large,
+and neighbours and background come in.  Changing it applies to every
+circle and square ROI and puts their measurements out of date.
+
+### ROI view
+A display setting only: it changes nothing that is measured.  The width of
+the field the ROI manager shows around the selected ROI.  At 0 it is twice
+the ROI size.  Wider shows more context; narrower, more detail of the
+ROI.
 
 ### Tiles
 Covers the file with a grid of squares of the size beside it and puts the
@@ -444,7 +479,8 @@ step to the previous and next tile.  A tile about ten times the size of a
 structure keeps each step to a few dozen ROIs.
 
 ### Add
-Stores the draft as an ROI, with its polygon and lines if it has them.
+The green button at the end of the row under the ROI image.  Stores the
+draft as an ROI, with its shape, lines and ranges if it has them.
 Enter does the same.
 
 ### Remove
@@ -455,12 +491,12 @@ again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
 attribute of *Regions to attribute*, whatever was removed before it.  *Undo*
 brings a removed ROI back under its own number.
 
-### Undo ROI edit
-Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
+### Undo
+Under the ROI list.  Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
 added, and any it replaced), an ROI added, removed, included or excluded,
-an outline, a line drawn, reversed or cleared.  Ctrl+Z in this window does the same.  The button
-names the edit it would undo -- *Undo remove ROI 3*, *Undo Segment regions: 141 ROIs* --
-where the main window's *Edit > Undo* names a change of the table (*Undo
+an outline, a line drawn, reversed or cleared.  Ctrl+Z in this window does the same.  Its tooltip
+names the edit it would undo -- *undo: Remove ROI 3*, *undo: Segment regions: 141 ROIs* --
+as the main window's *Edit > Undo* names a change of the table (*Undo
 RCC*).  This is the ROI manager's own undo, apart
 from the main window's, which undoes changes to the localizations: one
 never undoes the other.  Measuring is not an undo step, since it can be run
@@ -468,8 +504,8 @@ again, and its results stay with the ROI, so an ROI brought back brings
 its numbers back.  Twenty steps are kept, and opening another file starts
 afresh.
 
-### Redo ROI edit
-Puts back what *Undo* took back, and names it as *Undo* does (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
+### Redo
+Puts back what *Undo* took back, and names it in its tooltip as *Undo* does (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
 after an undo makes the undone step unrecoverable.
 
 ### Add previewed ROIs
@@ -487,8 +523,9 @@ without adding any; *Run* in the segmenter, or *Add previewed ROIs*, adds
 them instead.
 
 ### Polygon
-Draws the ROI's own shape in the ROI image; a right-click chooses which,
-and the button is named after it.  Escape abandons a shape half drawn.
+Draws the ROI's own shape in the ROI image; a right-click on the button
+chooses which -- the button is named after it -- or clears the shape.
+Escape abandons a shape half drawn.
 
 * *Polygon*: click once per vertex; a double-click, or a click near the
   first vertex again, after at least three, closes the outline.
@@ -505,31 +542,35 @@ and the button is named after it.  Escape abandons a shape half drawn.
 
 The ROI's centre moves to the mean of the vertices, or the ellipse's
 centre.  On a draft, the shape goes with it when it is added.  Each shape
-replaces the one before.
+replaces the one before.  A right click on a polygon's corner in the ROI
+image removes that corner (an outline keeps at least three), one undo step.
 
 ### Clear shape
-Back to the circle or square of the Regions tab.  An ROI of an id with a
+In the *Polygon* button's right-click menu.  Back to the circle or square
+of the Regions tab.  An ROI of an id with a
 polygon or an ellipse drawn on it (its id inside the shape) goes back to
 its id alone.
 
-### Draw line
-The list before it is which of the line names *Draw line*, *Reverse* and
-*Clear line* act on: the project's names, and any name the shown ROI has a
-line of besides.  Shift+L chooses the next one; a click on a line in the ROI
-image chooses that one.
-
-Two clicks in the ROI image, the start and then the end (L).  Drawing a
+### Line
+Draws the chosen line, which the button is named after (*Line: line*): two
+clicks in the ROI image, the start and then the end (L).  A right-click on
+the button chooses which line -- the project's names, and any name the
+shown ROI has a line of besides -- or reverses or clears the chosen one.
+Shift+L chooses the next name; a click on a line in the ROI image chooses
+that one.  Drawing a
 line the ROI already has replaces it.  A line does not turn the image or
 the ROI.  It goes into the ROI's signature, so drawing one puts the ROI's
 results out of date, as moving the ROI would.
 
 ### Reverse
-Swaps the chosen line's start and end (R): its angle turns by 180°, its
+In the *Line* button's right-click menu.  Swaps the chosen line's start
+and end (R): its angle turns by 180°, its
 length stays.  For a line drawn the wrong way round, when the direction
 matters, as for averaging ROIs.
 
 ### Clear line
-Removes the chosen line from the ROI.
+In the *Line* button's right-click menu.  Removes the chosen line from the
+ROI.
 
 ### rotate
 Shows every ROI turned by its angle, with the angle and the handle to turn
@@ -545,17 +586,23 @@ Sets the angle to the chosen line's, start to end: draw a line along the
 structure, then turn the ROI by it.  The line stays, as any other.
 
 ### 2D view
-What selecting an ROI does to the main picture.  *not linked* (the default)
+Under the zoom.  What selecting an ROI does to the main picture.  *not linked* (the default)
 leaves it alone.  *centred on the ROI* centres it on the ROI, at the zoom
 it has, and filters every localization layer to the ROI's file, as the
 Render tab's file list would -- so other files are not drawn over it.
 *shows the ROI, in 3D too* does the same and also makes the ROI the 2D
 view's own ROI, which the 3D view's box follows while its *follow 2D ROI*
 is on: an ROI with a line becomes a line ROI along it, as wide as the ROI
-reaches across it -- the chosen line under *Draw line*, or the first it has
+reaches across it -- the chosen line under *Line*, or the first it has
 -- so the 3D view looks along the line; an ROI without one is put there
 as its shape.  With *rotate* ticked, an ROI with no line chosen is looked
 at along its angle instead, through its centre.  That replaces whatever ROI the 2D view had.
+
+### Add drawn region
+Under the zoom, beside *2D view*.  Draw a rectangle, a circle, a line or a polygon in the 2D view first; it
+becomes an ROI of the file shown here, and is selected.  Useful for
+structures that are not round, or a region the automatic finder would not
+propose; the outline is kept as it is.
 
 ### annotate
 What the selected ROI is, in the user's own words.  The keys work wherever

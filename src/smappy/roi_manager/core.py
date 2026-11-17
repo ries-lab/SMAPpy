@@ -566,7 +566,7 @@ class ROIProject:
     def __init__(self, session):
         self.session = session
         self.layer = 0
-        self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
+        self.preview_nm = 0.0        # the ROI image's width; 0 = two ROI widths
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
         # (id and length of a table, file number) -> that file's rows of it:
@@ -2238,7 +2238,9 @@ class ROIProject:
     @property
     def preview_width(self) -> float:
         """What the ROI image covers, in nm."""
-        return self.preview_nm or 3.0 * self.size_nm
+        # twice the ROI: its surroundings, with the structure still filling
+        # the picture (three times left it small)
+        return self.preview_nm or 2.0 * self.size_nm
 
     def rois_of(self, file_id) -> List[ROI]:
         return [r for r in self.rois.values() if r.file_id == file_id]

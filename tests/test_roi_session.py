@@ -697,3 +697,53 @@ def test_an_ellipse_is_saved_with_the_rois_and_read_back(tmp_path):
     assert back.ellipse == {"center": [0.0, 0.0], "axes": [80.0, 40.0], "tilt": 30.0}
     assert str(project.region(back)) == "ellipse ROI 160 x 80"
     assert "ellipse" in project.geometry(back)
+
+
+def test_the_shape_menu_chooses_and_clears_and_a_right_click_removes_a_corner(tmp_path):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtTest import QTest
+    session, window, roi = _shown(tmp_path)
+    window._fill_shape_menu()
+    assert [a.text() for a in window.shape_menu.actions()] == [
+        "Polygon", "Freehand", "Ellipse", "", "Clear shape"]
+    window._start_drawing("polygon")
+    pentagon = [(2000 + 100 * np.cos(a), 2000 + 100 * np.sin(a))
+                for a in np.linspace(0, 2 * np.pi, 6)[:-1]]
+    for x, y in pentagon + pentagon[:1]:
+        window._roi_clicked(float(x), float(y))
+    assert len(roi_now(session, roi).polygon) == 5
+    pane = window.roi_pane
+
+    def at(x, y):
+        return pane.graphics.mapFromScene(pane.content.mapToScene(QPointF(x, y)))
+
+    viewport = pane.graphics.viewport()
+    QTest.mouseClick(viewport, Qt.RightButton, Qt.NoModifier, at(*pentagon[2]))
+    left = roi_now(session, roi).polygon
+    assert len(left) == 4
+    assert not any(np.allclose(p, pentagon[2]) for p in left)
+    QTest.mouseClick(viewport, Qt.RightButton, Qt.NoModifier, at(2000, 2000))
+    assert len(roi_now(session, roi).polygon) == 4               # not on a corner
+    window._fill_shape_menu()
+    next(a for a in window.shape_menu.actions() if a.text() == "Ellipse").trigger()
+    assert window.polygon_button.text() == "Ellipse"
+    next(a for a in window.shape_menu.actions() if a.text() == "Clear shape").trigger()
+    assert roi_now(session, roi).polygon is None
+    window.close()
+
+
+def test_the_geometry_and_the_drawn_region_are_the_managers(tmp_path):
+    session, window, roi = _shown(tmp_path)
+    project = session.rois
+    window.shape_box.setCurrentText("square")
+    window.size_box.setValue(250)
+    window.view_box.setValue(900)
+    assert (project.shape, project.size_nm, project.preview_nm) == ("square", 250, 900)
+    window.from_region.click()                          # nothing drawn: said so
+    assert "draw a region" in window.status.currentMessage()
+    session.set_roi(Region.rect(1500, 1500, 1700, 1600))
+    window.from_region.click()
+    added = project.rois[window.active]
+    assert added.id != roi.id and len(added.polygon) == 4
+    assert np.allclose(added.center, [1600, 1550])
+    window.close()

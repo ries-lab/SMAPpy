@@ -108,7 +108,7 @@ cutting squares out of a picture that is not of space.
 ## Parameters
 
 ### size_nm
-On *auto*, the width of the ROI manager's ROI image -- three times the ROI
+On *auto*, the width of the ROI manager's ROI image -- twice the ROI
 size unless set there.  Large enough to show the ROI's surroundings, small
 enough that the structure fills the picture.
 

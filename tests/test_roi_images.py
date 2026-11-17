@@ -114,7 +114,7 @@ def test_the_form_counts_the_pictures_and_offers_the_lines(tmp_path):
     session = arrows(tmp_path, n=4)
     state = RoiImages().describe(session.context(),
                                  RoiImagesSettings(path="x.pdf", pixelsize_nm=5.0))
-    assert "4 ROIs of 150 x 150 pixels, 1 page" in state.notice.text   # 3 x 250 nm
+    assert "4 ROIs of 100 x 100 pixels, 1 page" in state.notice.text   # 2 x 250 nm
     assert ("line", "line") in state.choices["turn_to"]
     tiff = RoiImages().describe(session.context(), RoiImagesSettings(format="tiff"))
     assert not tiff.active["columns"]
