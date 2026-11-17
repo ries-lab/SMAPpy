@@ -314,6 +314,69 @@ class ImageData:
         return out
 
 
+def shown_images(session) -> List["ImageData"]:
+    """The session's images a plugin can be pointed at by name: every source
+    but a layer's placeholder (`ImageData.empty`)."""
+    return [im for im in (getattr(session, "images", None) or []) if not im.is_empty]
+
+
+def find_image(session, name: str = "") -> Optional["ImageData"]:
+    """The image called ``name``; "" is the one the first image layer shows,
+    else the first image.  None when the session has none; a name it does
+    not have is refused, naming those it has."""
+    images = shown_images(session)
+    if name:
+        for im in images:
+            if im.name == name:
+                return im
+        raise ValueError(f"no image called {name!r}; the session has "
+                         + (", ".join(repr(im.name) for im in images) or "none"))
+    for layer in getattr(session, "layers", None) or []:
+        if layer.is_image and layer.image is not None and not layer.image.is_empty:
+            return layer.image
+    return images[0] if images else None
+
+
+def save_tiff(image: "ImageData", path, plane: Optional[int] = None) -> Path:
+    """``image`` as a 32-bit float TIFF that ImageJ and `load_images` read
+    back as it was: the pixel size in the resolution tags (µm, ImageJ's
+    unit), where it lies (``x0``, ``y0`` in nm, which `load_images` reads),
+    and a stack's planes as z (with the step) or time when it knows which.
+
+    ``plane`` writes that one plane; None writes every plane.  Float, never
+    scaled to 8 or 16 bits: an error map or a camera frame is a measurement,
+    and *Save image* is there for a picture.
+    """
+    import tifffile
+
+    path = Path(path)
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        path = path.with_suffix(".tif")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if plane is None:
+        data = image.volume() if image.n_frames > 1 else np.asarray(image.plane_at(0))
+    else:
+        data = np.asarray(image.plane_at(plane))
+    data = np.ascontiguousarray(data, np.float32)
+    px, py = image.pixelsize_xy
+    metadata = {"unit": "um", "x0": float(image.x0), "y0": float(image.y0)}
+    if data.ndim == 3:
+        if image.is_zstack:
+            metadata["axes"] = "ZYX"
+            metadata["spacing"] = float(image.z_step_nm) / 1000.0
+        elif image.axis == "t":
+            metadata["axes"] = "TYX"
+            if image.frame_time_s:
+                metadata["finterval"] = float(image.frame_time_s)
+        else:
+            metadata["axes"] = "ZYX"
+    else:
+        metadata["axes"] = "YX"
+    tifffile.imwrite(str(path), data, imagej=True,
+                     resolution=(1000.0 / px, 1000.0 / py), metadata=metadata)
+    return path
+
+
 def load_image(path, pixelsize: Optional[float] = None, x0: float = 0.0,
                y0: float = 0.0) -> ImageData:
     """The first image of a file (`load_images`): a script's one-liner for a
