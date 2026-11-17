@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read, from beads in a z stack, from single molecules on the coverslip in a z stack, or in situ from the blinking molecules of a measurement -- the bead average or a physical model of the microscope's pupil learnt with uiPSF v2 -- or, as a fourth, the curves of an elliptical Gaussian's widths in z that Astigmatic z reads, or, in the 4Pi mode, a 4Pi model for Spline 4Pi from 4Pi bead scans, and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.torch_install.cpu_build_on_nvidia, uipsf.device.describe, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings, smappy.calibrate.psf_methods.MoleculeStack, smappy.calibrate.psf_methods.MoleculeElliptical, smappy.calibrate.psf_methods.methods_of, smappy.calibrate.molecule_stack.molecule_rois, smappy.calibrate.molecule_stack.read_file, smappy.calibrate.molecule_stack.stage_z_um, smappy.calibrate.molecule_stack.split_sweeps, smappy.calibrate.molecule_stack.width_curve, smappy.calibrate.molecule_stack.focus_of, smappy.calibrate.molecule_stack.detect, smappy.calibrate.molecule_stack.select, smappy.calibrate.molecule_stack.draw, smappy.calibrate.molecule_stack.illumination_radius, smappy.calibrate.molecule_stack.molecule_widths, smappy.calibrate.molecule_stack.MoleculeStackSettings, smappy.calibrate.molecule_dual.dual_molecule_rois, smappy.calibrate.molecule_dual.registration_from_molecules, smappy.calibrate.molecule_stack_run.run_molecule_stack, smappy.calibrate.molecule_stack_run.spline_range, smappy.calibrate.molecule_stack_run.estimate_seconds, smappy.calibrate.molecule_views.draw_selection, smappy.calibrate.molecule_views.draw_z_check, smappy.calibrate.molecule_views.draw_foci, smappy.calibrate.molecule_views.model_vs_data, uipsf.workflows.molecule_stack.learn_molecule_stack, uipsf.workflows.molecule_stack.z_check, uipsf.workflows.molecule_stack.molecule_chunk, uipsf.model.geometry.CoverslipStackGeometry]
+covers: [smappy.calibrate.pupil.half_split_uncertainty, smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.torch_install.cpu_build_on_nvidia, uipsf.device.describe, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.saved_run.write, smappy.calibrate.saved_run.load, smappy.calibrate.saved_run.find_sources, smappy.calibrate.pupil.bead_size_warning, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.pupil.learns_tilt, uipsf.diagnostics.figures.coverslip_tilt, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow, smappy.calibrate.pupil.estimate_seconds, smappy.calibrate.psf_methods.LearningProgress, smappy.calibrate.model_views.average_views, smappy.calibrate.model_views.pupil_views, smappy.calibrate.model_views.draw_model_vs_data, smappy.calibrate.model_views.planes, smappy.calibrate.stack_browser.StackBrowser, smappy.calibrate.stack_view.StackViewer, smappy.calibrate.pupil.covered_z_nm, smappy.calibrate.psf_methods.InSitu, smappy.calibrate.psf_methods.EllipticalGaussian, smappy.calibrate.elliptical.bead_widths, smappy.calibrate.elliptical.align_beads, smappy.calibrate.elliptical.calibrate_widths, smappy.calibrate.elliptical.save_path, smappy.calibrate.elliptical.EllipticalCalibrationSettings, smappy.calibrate.insitu_run.run_insitu, smappy.calibrate.insitu_run.movie_rois, smappy.calibrate.insitu_run.block_order, smappy.calibrate.insitu_run.enough, smappy.calibrate.insitu_run.start_astigmatism, smappy.calibrate.insitu_run.held_pupil, smappy.microscope_db.gamma_of, smappy.calibrate.insitu.quotas, smappy.calibrate.insitu_run.insitu_spline, smappy.calibrate.insitu_run.InSituModelSettings, smappy.calibrate.insitu.InSituSettings, smappy.calibrate.insitu.select, smappy.calibrate.insitu_views.draw_z_bins, smappy.calibrate.insitu_views.draw_rounds, smappy.calibrate.insitu_views.model_vs_data, uipsf.workflows.insitu_rounds.calibrate_insitu, uipsf.workflows.insitu_rounds.coverslip_edge, uipsf.workflows.insitu_rounds.focus_from_data, uipsf.workflows.insitu.twin, smappy.calibrate.psf_methods.FourPiPupil, smappy.calibrate.psf_methods.FourPiAverage, smappy.calibrate.psf_methods.for_mode, smappy.calibrate.fourpi_beads.average_model, smappy.fourpi.iab_from_beads, smappy.calibrate.fourpi_beads.scan_beads, smappy.calibrate.fourpi_beads.read_scan, smappy.calibrate.fourpi_beads.scan_layout, smappy.calibrate.fourpi_beads.scan_step_nm, smappy.calibrate.fourpi_beads.bead_fits, smappy.calibrate.fourpi_beads.FourPiBeadSettings, smappy.calibrate.psf_methods.MoleculeStack, smappy.calibrate.psf_methods.MoleculeElliptical, smappy.calibrate.psf_methods.methods_of, smappy.calibrate.molecule_stack.molecule_rois, smappy.calibrate.molecule_stack.read_file, smappy.calibrate.molecule_stack.stage_z_um, smappy.calibrate.molecule_stack.split_sweeps, smappy.calibrate.molecule_stack.width_curve, smappy.calibrate.molecule_stack.focus_of, smappy.calibrate.molecule_stack.detect, smappy.calibrate.molecule_stack.select, smappy.calibrate.molecule_stack.draw, smappy.calibrate.molecule_stack.illumination_radius, smappy.calibrate.molecule_stack.molecule_widths, smappy.calibrate.molecule_stack.MoleculeStackSettings, smappy.calibrate.molecule_dual.dual_molecule_rois, smappy.calibrate.molecule_dual.registration_from_molecules, smappy.calibrate.molecule_stack_run.run_molecule_stack, smappy.calibrate.molecule_stack_run.spline_range, smappy.calibrate.molecule_stack_run.estimate_seconds, smappy.calibrate.molecule_views.draw_selection, smappy.calibrate.molecule_views.draw_z_check, smappy.calibrate.molecule_views.draw_foci, smappy.calibrate.molecule_views.model_vs_data, uipsf.workflows.molecule_stack.learn_molecule_stack, uipsf.workflows.molecule_stack.z_check, uipsf.workflows.molecule_stack.molecule_chunk, uipsf.model.geometry.CoverslipStackGeometry]
 ---
 
 ## What it does
@@ -200,6 +200,17 @@ the spline cannot be copied without the model it was drawn from, which
 Spline 3D's *focus* and in situ read, and *start from* starts from.  A calibration
 saved before November 2026 has its model in a `.uipsf.h5` file beside it;
 that is still read.
+
+**What the file keeps of the run.**  For the pupil model and the bead average,
+one channel or two, the calibration also keeps what this window showed of it,
+so that *Open calibration...* can show it again when its beads are long gone:
+the settings of every section the method read, where each bead stack was
+(its path, its path from the calibration's folder, its size), the bead table
+and where each bead was, the averaged data and model of *Model vs data*, the
+fit quality, and, for the pupil model, its bead map and the *start from*
+model it began with.  A few hundred kB, written after every save, *Save
+as...* and *Uncertainty from halves...*.  A single bead's own volume is not
+kept: it is the stacks', and comes back with them.
 
 ## In detail
 
@@ -969,7 +980,10 @@ drift.  Offered for beads, not in situ.
 
 ### bead diameter
 The beads' size, so that it is taken out of the model: a 100 nm bead is not a
-point.  0 for beads much smaller than the resolution.
+point.  0 for beads much smaller than the resolution.  It is 0 by default --
+the beads in use are 40 or 100 nm, and neither would be right for the other --
+but 0 is rarely right, so with beads its label is red while it is 0, and a
+run says so in the warning line under the buttons.
 
 ### learn coverslip tilt
 Learns the coverslip's tilt beside the pupil (*In detail*): always offered in
@@ -1279,6 +1293,23 @@ once SMAPpy is started again, if a calibration had already loaded the old one.
 
 ### Save as...
 Saves the calibration under another name, or one made with *save model* off.
+
+### Open calibration...
+Shows a saved calibration again, as it was shown when it was made: its pages
+-- *Model vs data*, *Fit quality*, *CRLB* and, for the pupil model, the
+pupil, the Zernikes, the residual atlas and the bead map -- and its bead
+table, all from the file; its sample, method, mode and settings set in the
+window.  Its bead stacks go back into the file list where they are found:
+where they were, or at the same place beside the calibration when the folder
+was moved whole.  Where they are not, it asks for the folder they are in now
+and finds them there, in its subfolders too, by name and size; *Cancel*
+shows the calibration from its file alone, with no stacks.  Some found and
+some not, none are added: *Calibrate* would make another calibration from a
+part of them.  With the stacks, *Calibrate* makes the calibration again
+(marks start afresh after its detection); *Browse stacks...* shows the
+average.  For the pupil model and the bead average, and files saved from
+November 2026 on (*Saving*); an older file, or another method's, says that
+only its spline can be used.
 
 ### Browse stacks...
 Under the table.  The beads, slice by slice in any direction (XY, XZ, YZ), in

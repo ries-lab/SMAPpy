@@ -182,6 +182,19 @@ class BeadSettings:
         return self.psf.order
 
 
+def bead_size_warning(settings: "BeadSettings") -> Optional[str]:
+    """What to say of a bead calibration left at a bead diameter of 0, or None.
+
+    0 (point-like) stays the default: the beads in use are 40 or 100 nm, and either as a default would be
+    wrong half the time without anyone noticing.  But 0 is almost never right either -- a 100 nm bead
+    blurs the PSF along z noticeably -- so it is flagged rather than silently taken (the user's, November
+    2026)."""
+    if getattr(settings, "bead_diameter_nm", None) == 0:
+        return ("bead diameter is 0: the beads are taken as points; type their size (often 40 or 100 nm), "
+                "which the model takes out of the PSF")
+    return None
+
+
 def model_shown(method: str, magnitude: str = "minimal", dual: bool = False, layered: bool = False,
                 ring: bool = True) -> dict:
     """Which of `BeadSettings`' fields a method's form shows (`FormState.shown`, dotted for the PSF part):

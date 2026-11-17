@@ -121,6 +121,7 @@ def calibrate(method, dual: bool, paths, inputs: dict, progress=None, cancel=Non
     marks = dict(marks_of(found)) if marks_of else {}
     run = method.run(paths, dual, inputs, report, cancel, detected=found, marks=marks or None)
     run.extra["inputs"] = inputs
+    run.extra["paths"] = paths                 # kept with the saved file, to find the stacks again
     run.extra["detected"] = found.text
     return method.finish(run, report)
 
