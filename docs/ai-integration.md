@@ -372,6 +372,13 @@ other's.  The link stays in the configuration until cleared; *Send now*, or
 every seven days at startup in the background.  Nothing goes without a
 link, and nothing is written while the log is off.
 
+The bundles are read by the `usage-logs` skill (`.claude/skills/usage-logs`):
+its `digest.py` turns them into an overview and one timeline per
+conversation, standard library only, and the skill has a model read those,
+check each finding against the code and write a ranked report, kept on the
+developer's computer -- the conversations are colleagues' and stay out of
+the repository.
+
 ## Steps
 
 1. **Headless server** (built): `smappy-mcp` over a `Session`, the index,
