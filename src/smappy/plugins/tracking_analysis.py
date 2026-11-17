@@ -18,6 +18,9 @@ from, rewritten rather than ported (`wave4_research.md`: partly broken):
   `tracking.analysis.in_focus`).  In 3D the correction fits the lateral
   jumps alone: the particles that stay in focus are those that moved
   less in z, so their z jumps are too short;
+* two approaches SMAP did not have: the D spectrum, saSPT's state arrays
+  (`tracking.spectrum`), and state switching, ExTrack's hidden Markov
+  model with the rates between states (`tracking.hmm`);
 * the *track id* is any integer column -- `track_id` from Link tracks,
   MINFLUX's `tid` (on its own clock, `time_s`), a cluster's id -- and on
   *auto*, the default, the first of those the table has
@@ -77,6 +80,15 @@ class JumpFitSettings:
 
 
 @dataclass
+class SwitchingSettings:
+    states: int = param(2, label="states", min=1, max=3,
+                        help="diffusive states that switch, 1 to 3")
+    write_columns: bool = param(False, label="write per localization",
+                                help="hmm_state and hmm_p1, hmm_p2, ...: each "
+                                     "localization's state and its probabilities")
+
+
+@dataclass
 class SpectrumSettings:
     split: int = param(10, label="piece", unit="jumps", min=1, max=100,
                        help="tracks cut into pieces of at most this many jumps, "
@@ -98,6 +110,9 @@ class TrackingAnalysisSettings:
     spectrum: bool = param(False, label="D spectrum",
                            help="the jumps over a grid of D, no number of states "
                                 "chosen, and each piece of a track's D (saSPT)")
+    switching: bool = param(False, label="state switching",
+                            help="states that switch in time: their D, the rates "
+                                 "between them and each localization's state (HMM)")
     id_column: str = param("", label="track id", choices=_id_choices,
                            help="the attribute naming the tracks; auto: track_id, "
                                 "else tid, else track_id_true")
@@ -113,6 +128,8 @@ class TrackingAnalysisSettings:
                                       label="jump distances")
     spectrum_fit: SpectrumSettings = param(default_factory=SpectrumSettings,
                                            label="D spectrum")
+    switching_fit: SwitchingSettings = param(default_factory=SwitchingSettings,
+                                             label="state switching")
 
 
 @register("Analysis/Tracking/Tracking analysis")
@@ -129,12 +146,14 @@ class TrackingAnalysis(Plugin):
 
     def changes_locs_for(self, settings: TrackingAnalysisSettings) -> bool:
         return bool((settings.msd and settings.msd_fit.write_columns)
-                    or (settings.spectrum and settings.spectrum_fit.write_column))
+                    or (settings.spectrum and settings.spectrum_fit.write_column)
+                    or (settings.switching and settings.switching_fit.write_columns))
 
     def describe(self, ctx: Optional[Context], settings: TrackingAnalysisSettings
                  ) -> FormState:
         state = FormState(shown={"msd_fit": settings.msd, "jump_fit": settings.jumps,
-                                 "spectrum_fit": settings.spectrum},
+                                 "spectrum_fit": settings.spectrum,
+                                 "switching_fit": settings.switching},
                           active={"axial_range_nm": settings.jumps or settings.spectrum})
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             locs = ctx.locs
@@ -156,8 +175,8 @@ class TrackingAnalysis(Plugin):
     def run(self, ctx: Context, settings: TrackingAnalysisSettings) -> Result:
         from ..metadata import table_frame_time
         from ..tracking.analysis import fit_jumps, gather, jumps_over_lags, msd_analysis
-        if not (settings.msd or settings.jumps or settings.spectrum):
-            raise ValueError("tick MSD, jump distances or D spectrum")
+        if not (settings.msd or settings.jumps or settings.spectrum or settings.switching):
+            raise ValueError("tick MSD, jump distances, D spectrum or state switching")
         locs = ctx.locs
         from ..tracking.columns import track_column
         column = track_column(locs, settings.id_column)
@@ -243,7 +262,8 @@ class TrackingAnalysis(Plugin):
 
         focus = float(settings.axial_range_nm or 0.0)
         tj = t
-        if focus > 0 and t.dims == 3 and (settings.jumps or settings.spectrum):
+        if focus > 0 and t.dims == 3 and (settings.jumps or settings.spectrum
+                                          or settings.switching):
             # what stays in focus moved less in z: the lateral jumps alone
             tj = gather(ids, locs["frame"], locs["x_nm"], locs["y_nm"], None,
                         locs["xy_err_nm"] if "xy_err_nm" in locs else None,
@@ -327,6 +347,49 @@ class TrackingAnalysis(Plugin):
                 panels.append(lambda ax, spec=spec, found=found: draw_spectrum(
                     ax, spec, found))
 
+        hmm = None
+        if settings.switching:
+            sw = settings.switching_fit
+            ctx.report("tracking analysis: state switching")
+            from ..tracking.hmm import fit_hmm, per_localization as hmm_states
+            try:
+                hmm = fit_hmm(tj, sw.states)
+            except ValueError as error:
+                if not ctx.per_region:
+                    raise
+                ctx.warn(str(error))
+            if hmm is not None:
+                p = hmm.params
+                fractions, dwell = hmm.fractions, p.dwell_s()
+                for i in range(p.states):
+                    values[f"hmm_D{i + 1}_um2_per_s"] = float(p.D_um2_per_s[i])
+                    values[f"hmm_fraction{i + 1}"] = float(fractions[i])
+                    values[f"hmm_dwell{i + 1}_s"] = float(dwell[i])
+                    for k in range(p.states):
+                        if k != i:
+                            values[f"hmm_rate{i + 1}{k + 1}_per_s"] = float(p.Q_per_s[i, k])
+                values["hmm_bic"] = float(hmm.bic)
+                states = ", ".join(f"D = {D:.4g} µm²/s ({100 * f:.0f}%, {d:.3g} s)"
+                                   for D, f, d in zip(p.D_um2_per_s, fractions, dwell))
+                rates = ", ".join(f"{i + 1}→{k + 1} {p.Q_per_s[i, k]:.3g}/s"
+                                  for i in range(p.states) for k in range(p.states)
+                                  if i != k)
+                lines.append(f"state switching: {hmm.n_jumps} jumps of {hmm.n_tracks} "
+                             f"tracks; {states} (fraction, dwell)"
+                             + (f"; rates {rates}" if rates else "")
+                             + f"; BIC {hmm.bic:.1f}")
+                if focus > 0:
+                    ctx.warn("state switching does not correct for the focus: fast "
+                             "particles leave it, and in simulations the rate from "
+                             "fast to slow came out high and the fast fraction low; "
+                             "take the fractions from the jump distances or the D "
+                             "spectrum")
+                if sw.write_columns and not ctx.per_region:
+                    prob, state = hmm_states(tj, p, len(locs))
+                    base = out_locs if out_locs is not None else locs
+                    out_locs = _with_states(base, prob, state)
+                panels.append(lambda ax, hmm=hmm: draw_switching(ax, hmm))
+
         def draw(figure):
             axes = np.atleast_1d(figure.subplots(1, len(panels)))
             for ax, panel in zip(axes, panels):
@@ -337,7 +400,8 @@ class TrackingAnalysis(Plugin):
         return Result(locs=out_locs, text="\n".join(lines), values=values,
                       id_regions=id_regions,
                       arrays=arrays, plot=plot, settings=settings,
-                      data={"msd": msd, "jumps": jump, "spectrum": spec, "tracks": t},
+                      data={"msd": msd, "jumps": jump, "spectrum": spec,
+                            "switching": hmm, "tracks": t},
                       title="tracking analysis")
 
 
@@ -363,6 +427,24 @@ def _with_column(locs: Localizations, name: str, values: np.ndarray) -> Localiza
     out = Localizations({**locs.columns, name: values.astype(np.float32)},
                         dict(locs.metadata))
     remember(out, name, "", grouped="mean")
+    return out
+
+
+def _with_states(locs: Localizations, prob: np.ndarray, state: np.ndarray
+                 ) -> Localizations:
+    """``hmm_state`` (-1 where none) and ``hmm_p1``, ``hmm_p2``, ...: a
+    blink takes its localizations' mean probabilities, and the largest
+    state among them."""
+    from ..mathparse import remember
+    columns = dict(locs.columns)
+    columns["hmm_state"] = state.astype(np.int32)
+    names = [f"hmm_p{i + 1}" for i in range(prob.shape[1])]
+    for i, name in enumerate(names):
+        columns[name] = prob[:, i].astype(np.float32)
+    out = Localizations(columns, dict(locs.metadata))
+    remember(out, "hmm_state", "", grouped="max")
+    for name in names:
+        remember(out, name, "", grouped="mean")
     return out
 
 
@@ -476,3 +558,37 @@ def draw_spectrum(ax, spec, found) -> None:
     ax.set_xlabel("D (µm²/s)")
     ax.set_ylabel("occupation")
     ax.set_title(f"D spectrum, {len(spec.pieces)} pieces", fontsize=9)
+
+
+def draw_switching(ax, hmm) -> None:
+    """The states as circles of area by their fraction, with their D, and
+    an arrow per rate."""
+    p = hmm.params
+    S = p.states
+    fractions = hmm.fractions
+    angle = np.pi / 2 + 2 * np.pi * np.arange(S) / max(S, 1)
+    xy = (np.column_stack([np.cos(angle), np.sin(angle)]) if S > 2 else
+          np.column_stack([np.linspace(-1, 1, S) if S > 1 else [0.0], np.zeros(S)]))
+    for i in range(S):
+        for k in range(S):
+            if i == k:
+                continue
+            a, b = xy[i], xy[k]
+            normal = np.array([-(b - a)[1], (b - a)[0]])
+            normal = 0.08 * normal / max(np.hypot(*normal), 1e-9)
+            ax.annotate("", xy=b + normal - 0.3 * (b - a), xytext=a + normal + 0.3 * (b - a),
+                        arrowprops={"arrowstyle": "->", "color": "0.4", "lw": 0.8})
+            mid = (a + b) / 2 + 2.2 * normal
+            ax.text(*mid, f"{p.Q_per_s[i, k]:.3g}/s", fontsize=7, ha="center",
+                    va="center", color="0.3")
+    for i in range(S):
+        ax.scatter(*xy[i], s=200 + 2500 * fractions[i], color=f"C{i}", alpha=0.6,
+                   zorder=3)
+        ax.text(xy[i][0], xy[i][1] - 0.32,
+                f"{p.D_um2_per_s[i]:.3g} µm²/s\n{100 * fractions[i]:.0f}%",
+                fontsize=7, ha="center", va="top")
+    ax.set_xlim(-1.6, 1.6)
+    ax.set_ylim(-1.6, 1.4)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    ax.set_title("state switching", fontsize=9)

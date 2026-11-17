@@ -317,3 +317,79 @@ def test_the_plugin_writes_each_pieces_d_onto_its_localizations():
     assert np.mean((D[have] > 0.15) == (state[have] == 1)) > 0.95
     assert "D_post_um2_per_s" in {r["field"] for r in recipes(result.locs)}
     assert result.plot is not None
+
+
+# ------------------------------------------------------- state switching
+
+def switching_tracks(**values):
+    base = dict(n_frames=1500, density_um2=0.02, d_um2_s=(0.02, 1.0), fractions=(0.5, 0.5),
+                switch_probability=0.05, track_frames=40.0, precision_nm=25.0, seed=4)
+    base.update(values)
+    return simulate_tracks(**base)
+
+
+def test_with_one_state_the_filter_is_the_exact_likelihood_of_a_track():
+    # nothing is merged with one state, so the filter must agree with the
+    # Gaussian of the whole jump vector, shared localizations and all
+    from smappy.tracking.hmm import HMMParams, steps_of, track_loglik
+    from smappy.tracking.spectrum import piece_loglik, pieces_of
+    locs = simulate_tracks(n_frames=200, density_um2=0.02, d_um2_s=(0.3,), p_dark=0.1,
+                           track_frames=20.0, precision_nm=40.0, seed=3)
+    t = tracks_of(locs)
+    s = steps_of(t)
+    filtered = track_loglik(s, HMMParams(np.array([0.3]), np.zeros((1, 1)), np.ones(1)))
+    pieces = pieces_of(t, 10_000)
+    exact = piece_loglik(t, pieces, np.array([0.3]))[:, 0]
+    by_track = dict(zip(pieces.track, exact))
+    assert filtered == pytest.approx([by_track[k] for k in s.track], rel=1e-9)
+
+
+def test_the_hmm_gives_back_the_rates_and_the_states_of_switching_particles():
+    from smappy.tracking.hmm import fit_hmm, per_localization
+    locs = switching_tracks()
+    t = tracks_of(locs)
+    fit = fit_hmm(t, 2)
+    p = fit.params
+    assert p.D_um2_per_s == pytest.approx([0.02, 1.0], rel=0.1)
+    # a switch drawn with 5% a frame, half the time to the other state
+    assert [p.Q_per_s[0, 1], p.Q_per_s[1, 0]] == pytest.approx([2.5, 2.5], rel=0.15)
+    assert fit.fractions == pytest.approx([0.5, 0.5], abs=0.04)
+    assert p.dwell_s() == pytest.approx([0.4, 0.4], rel=0.15)
+    prob, state = per_localization(t, p, len(locs))
+    truth = np.asarray(locs["state_true"])
+    have = state >= 0
+    assert np.mean(state[have] == truth[have]) > 0.95
+    assert np.allclose(prob[have].sum(axis=1), 1.0)
+
+
+@pytest.mark.slow
+def test_the_hmm_gives_back_three_states_and_their_six_rates():
+    from smappy.tracking.hmm import fit_hmm
+    locs = switching_tracks(d_um2_s=(0.02, 0.3, 2.0), fractions=(0.3, 0.3, 0.4))
+    fit = fit_hmm(tracks_of(locs), 3)
+    p = fit.params
+    assert p.D_um2_per_s == pytest.approx([0.02, 0.3, 2.0], rel=0.1)
+    # into state b at 5% a frame times its fraction
+    truth = np.array([[0, 1.5, 2.0], [1.5, 0, 2.0], [1.5, 1.5, 0]])
+    off = ~np.eye(3, dtype=bool)
+    assert p.Q_per_s[off] == pytest.approx(truth[off], rel=0.3)
+    assert fit.fractions == pytest.approx([0.3, 0.3, 0.4], abs=0.04)
+
+
+def test_the_plugin_writes_each_localizations_state():
+    locs = switching_tracks(n_frames=800)
+    settings = TrackingAnalysis.Settings(id_column="track_id_true", msd=False,
+                                         jumps=False, switching=True)
+    settings.switching_fit.write_columns = True
+    plugin = TrackingAnalysis()
+    assert plugin.changes_locs_for(settings)
+    result = plugin.run(Context(locs=locs), settings)
+    v = result.values
+    assert v["hmm_D2_um2_per_s"] == pytest.approx(1.0, rel=0.1)
+    assert v["hmm_rate12_per_s"] == pytest.approx(2.5, rel=0.25)
+    assert v["hmm_fraction1"] + v["hmm_fraction2"] == pytest.approx(1.0)
+    state = np.asarray(result.locs["hmm_state"])
+    truth = np.asarray(locs["state_true"])
+    assert np.mean(state[state >= 0] == truth[state >= 0]) > 0.95
+    assert {"hmm_state", "hmm_p1", "hmm_p2"} <= {r["field"] for r in recipes(result.locs)}
+    assert result.plot is not None

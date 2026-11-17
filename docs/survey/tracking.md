@@ -87,6 +87,8 @@ These are the parts the comparisons below refer to.
 
 #### 3. HMM with transitions, localisation error marginalised -- ExTrack (vbSPT as the Bayesian variant)  (M–L, ExTrack: port with attribution; vbSPT: re-implement from the paper)
 
+**Done, 2026-11** (*Tracking analysis*'s *state switching*, `tracking/hmm.py`; `hmm_state`, `hmm_p1`, ... per localization).  Re-implemented from the paper: ExTrack's merging at a memory of one localization, the initial probabilities free, the per-localization states by forward-backward on independent jumps.  Not corrected for leaving a thin focus, which biases the rates (measured on the page); a per-step survival factor was tried and did not help.
+
 **What it does.** ExTrack's `P_Cs_inter_bound_stats` (`tracking.py:160-390`) and its thresholded and "ages" variants (`:618`, `:1116`) compute each track's likelihood under a hidden Markov model.
 * The true positions are integrated out analytically, the Gaussians fused step by step.
 * State sequences that differ only more than `frame_len` steps ago are merged (moment matching, `fuse_gaussians`, `:420`), which keeps long tracks tractable.

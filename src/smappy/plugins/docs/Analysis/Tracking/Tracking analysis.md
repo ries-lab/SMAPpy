@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.tracking.spectrum.pieces_of, smappy.tracking.spectrum.piece_loglik, smappy.tracking.spectrum.state_array, smappy.tracking.spectrum.spectrum, smappy.tracking.spectrum.peaks, smappy.tracking.spectrum.per_localization, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
+covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, smappy.tracking.analysis.lag_sums, smappy.tracking.analysis.msd_covariance, smappy.tracking.analysis.lag_errors, smappy.tracking.analysis.optimal_lags, smappy.tracking.analysis.fit_msd, smappy.tracking.analysis.msd_analysis, smappy.tracking.analysis.jumps, smappy.tracking.analysis.jumps_over_lags, smappy.tracking.analysis.in_focus, smappy.tracking.analysis.fit_jumps, smappy.tracking.analysis.jump_density, smappy.tracking.spectrum.pieces_of, smappy.tracking.spectrum.piece_loglik, smappy.tracking.spectrum.state_array, smappy.tracking.spectrum.spectrum, smappy.tracking.spectrum.peaks, smappy.tracking.spectrum.per_localization, smappy.tracking.hmm.steps_of, smappy.tracking.hmm.track_loglik, smappy.tracking.hmm.state_probabilities, smappy.tracking.hmm.fit_hmm, smappy.tracking.hmm.per_localization, smappy.plugins.tracking_analysis.TrackingAnalysis.run]
 ---
 
 ## What it does
@@ -39,6 +39,12 @@ else a simulation's `track_id_true`.  Two analyses, each ticked on or off:
   piece gets its own *D*, which can be written onto its localizations
   (`D_post_um2_per_s`) to colour, filter or split the tracks by, and
   which shows a particle that changes state within a track.
+* **State switching** (off by default): states that change in time, as a
+  [hidden Markov model](plugin:Panels/Glossary) -- ExTrack's
+  ([Simon et al. 2023](https://doi.org/10.1083/jcb.202208059)).  It gives
+  each state's *D*, the rates at which particles switch between them
+  (binding and unbinding, say), how long a state lasts, and the state of
+  every localization (`hmm_state`).
 
 All take the [localization precision](plugin:Panels/Glossary) into
 account: a molecule that does not move still seems to, by its localization
@@ -70,6 +76,9 @@ thin = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.05, 3.0),
 three = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.02, 0.3, 2.0),
                         fractions=(0.3, 0.3, 0.4), track_frames=30.0,
                         precision_nm=25.0, seed=7)
+hmm_locs = simulate_tracks(n_frames=800, density_um2=0.02, d_um2_s=(0.02, 1.0),
+                           fractions=(0.5, 0.5), switch_probability=0.05,
+                           track_frames=40.0, precision_nm=25.0, seed=4)
 switching = simulate_tracks(n_frames=1000, density_um2=0.01, d_um2_s=(0.02, 2.0),
                             fractions=(0.5, 0.5), switch_probability=0.03,
                             track_frames=100.0, precision_nm=25.0, seed=12)
@@ -255,6 +264,42 @@ right.set_ylabel("D (µm²/s)")
 right.legend(fontsize=7)
 ```
 
+**8. State switching.**  Each particle is in one of *states* states at
+any moment, each with its *D*, and switches from one to another at a
+fixed rate -- so many times a second.  The model follows each track
+localization by localization: for each state it keeps how likely the
+particle is to be in it, and where the particle truly is given the
+localizations so far (each is off by its precision).  The *D*s and rates
+that make all tracks most likely are the answer.  The fractions follow
+from the rates: in the long run, a particle spends in each state the share
+of time the rates into and out of it give.  Each localization's state is
+then the most likely given the whole track, before and after.
+
+```figure Particles switching between 0.02 and 1 µm²/s, 2.5 times a second each way (a switch every 20 frames), half the time in each. Left: the fitted states, with the rates on the arrows -- 2.5/s each way and half in each come back. Right: one track, the probability that the particle is fast at each localization (blue) against when it truly was (grey).
+from smappy.tracking.hmm import fit_hmm, per_localization as hmm_states
+from smappy.plugins.tracking_analysis import draw_switching
+fig.set_size_inches(9, 3.4)
+left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1, 1.6]})
+t = tracks(hmm_locs)
+fit = fit_hmm(t, 2)
+draw_switching(left, fit)
+prob, state = hmm_states(t, fit.params, len(hmm_locs))
+truth = np.asarray(hmm_locs["state_true"])
+ids = np.asarray(hmm_locs["track_id_true"])
+frames = np.asarray(hmm_locs["frame"])
+counts = np.bincount(ids[ids > 0])
+k = next(k for k in np.argsort(-counts) if len(set(truth[ids == k])) > 1)
+here = np.flatnonzero(ids == k)
+here = here[np.argsort(frames[here])]
+time_s = (frames[here] - frames[here][0]) * 0.01
+right.step(time_s, truth[here], where="post", color="0.6", label="truth: fast")
+right.plot(time_s, prob[here, 1], "o-", ms=3, lw=0.8, color="C0",
+           label="probability fast")
+right.set_ylim(-0.05, 1.05)
+right.set_xlabel("time in the track (s)")
+right.legend(fontsize=7)
+```
+
 ## In detail
 
 **The MSD.**  For a track with positions $\mathbf{r}_i$ in frames $f_i$,
@@ -398,6 +443,62 @@ where it is weakest: on simulated tracks two halves a factor of two apart
 in *D* still gave two peaks, but at 62% and 38%; a factor of three gave
 55% and 45%.  Short pieces spread every peak out.
 
+**State switching.**  The state is a Markov chain with a rate $k_{ab}$
+(per second) from state $a$ to $b$; over $k$ frames it moves by
+$\exp(Q k \Delta t)$, $Q$ the rate matrix.  A particle's true position
+moves from localization $i$ to the next, $k_i$ frames later, by a
+Gaussian of variance $2 D_a k_i \Delta t$ per axis, $a$ the state at $i$:
+the state holds over the interval.  What is measured is the true position
+plus the localization's error, of variance $s_i^2$ per axis.
+
+The likelihood of a track integrates out the true positions.  For each
+state of the current localization the filter keeps its log-probability
+and a Gaussian of the true position, and goes on localization by
+localization: from each state $a$, a Kalman step -- the predicted
+position's variance grows by $2 D_a k \Delta t$, the next localization
+updates it, and how well it was predicted is the step's likelihood --
+then into each state $b$ by the transition matrix.  The exact belief is a
+mixture with a Gaussian per past sequence of states, which grows without
+bound; the Gaussians that end in the same state are merged into one with
+their mean and variance at every step.  That is ExTrack's merging with the
+shortest memory (its *frame_len* of 1).  With one state nothing is merged
+and the filter is exact: it agrees with the D spectrum's Gaussian of a
+whole track to $10^{-9}$.
+
+The fit maximises the summed log-likelihood over $\ln D$, $\ln k_{ab}$
+and the probabilities of the state a track starts in (L-BFGS, the
+gradient by differences), from the jump fit's *D*s and a switch every 20
+frames.  The starting probabilities are free rather than the chain's
+long-run ones, because how tracks start -- a fast particle enters a thin
+focus more often -- need not follow the rates.  The fractions reported
+are the long-run ones, $\pi Q = 0$; a state's dwell time is
+$1 / \sum_{b \neq a} k_{ab}$.  At most 50,000 jumps are fitted, a random
+subset of whole tracks beyond (the same each run); two states take a few
+seconds for 10,000 jumps, three about four times as long.
+
+Each localization's state is the posterior of the state over the jump it
+starts (the last of a track: the jump it ends), by the forward-backward
+algorithm with the fitted parameters.  There the jumps are taken as
+independent given the states, each with the error variance
+$s_i^2 + s_{i+1}^2$, the standard hidden Markov model: the merged filter
+has no exact way back.  On the simulations here it gets 95% (three
+states) to 98% (two) of localizations right.
+
+Against simulated tracks (two states, 0.02 and 1 µm²/s, 2.5/s each way)
+the rates come back within 15%, at three states (six rates) within 30%,
+the fractions within 0.04.  Two things are left out.  A jump across dark
+frames is taken in the state it started in throughout.  And a particle
+that leaves a thin focus ends its track: fast particles leave sooner, so
+the tracks seen for long are those that went slow, which the likelihood
+does not count.  Six simulations of each (0.05 and 2 µm²/s, 2.5/s each
+way): without a focus the rates came back at 2.49 ± 0.16 and
+2.66 ± 0.19/s and the fast fraction at 0.48; in a 700 nm focus at 1.99
+and 3.77 ± 0.63/s and 0.35.  A factor for staying in focus at each step
+made it no better -- whether a particle stays depends on its z, which the
+model does not follow -- so it is not applied, and with an *axial range*
+the run warns: take the fractions from the jump distances or the D
+spectrum there, and read the rates with care.
+
 **MINFLUX.**  A table with `time_s` has no regular frames; its
 localizations are put on a grid of the median interval between
 consecutive localizations of a track, each at the nearest step.
@@ -446,7 +547,14 @@ common value; measure it as the z range over which beads are still
 detected and fitted.  0 when nothing leaves -- 3D tracking over a deep
 range, MINFLUX, or particles on a membrane.  A value too large
 undercorrects (the fast fraction too small), one too small overcorrects.
-It applies to the jump distances and the D spectrum, not to the MSD.
+It applies to the jump distances and the D spectrum, not to the MSD or
+the state switching (see *In detail*).
+
+### switching_fit.states
+Compare the BIC of 1, 2 and 3 as for the jump distances.  Three states
+have six rates, which need many switches to pin down: tracks long against
+the dwell times, or many of them.  A state the data do not support comes
+out with a *D* close to another's or with rates at their bounds.
 
 ### spectrum_fit.split
 saSPT's 10.  Shorter pieces follow a particle that changes state more
@@ -479,7 +587,14 @@ particles (dashed).  Per region, the values (`msd_D_um2_per_s`,
 their fractions and a panel of the occupations (with an *axial range*,
 of the particles, and of the jumps dashed); *write per localization*
 writes `D_post_um2_per_s`, each piece's *D* on its localizations (NaN on
-a track of one localization).
+a track of one localization).  State switching adds a line with each
+state's *D*, fraction and dwell time and the rates, the values
+`hmm_D1_um2_per_s`, `hmm_fraction1`, `hmm_dwell1_s`, `hmm_rate12_per_s`
+(from state 1 to 2), ..., `hmm_bic`, and a panel of the states with the
+rates on arrows; *write per localization* writes `hmm_state` (0 the
+slowest state, -1 none) and `hmm_p1`, `hmm_p2`, ... (each state's
+probability), to colour the tracks by state or to measure where the
+particles bind.
 
 Run on the view, the fit of every track is also kept as a
 [region table](plugin:Panels/Glossary) of the track id ("per track_id:
@@ -540,6 +655,11 @@ main changes:
   11, e70169 (2022).
   [doi:10.7554/eLife.70169](https://doi.org/10.7554/eLife.70169)
   -- the loss from the focus computed frame by frame (saSPT).
+* Simon F, Tinevez J-Y, van Teeffelen S. ExTrack characterizes
+  transition kinetics and diffusion in noisy single-particle tracks.
+  *J Cell Biol* 222, e202208059 (2023).
+  [doi:10.1083/jcb.202208059](https://doi.org/10.1083/jcb.202208059)
+  -- the hidden Markov model with the localization error integrated out.
 * Ries J. SMAP: a modular super-resolution microscopy analysis platform for
   SMLM data. *Nat Methods* 17, 870 (2020).
   [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
