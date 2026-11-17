@@ -248,3 +248,31 @@ def test_a_drafted_roi_takes_its_angle_when_it_is_added(app):
     window._add()
     assert project.rois[window.active].angle == 20
     window.close()
+
+
+def test_a_range_cuts_the_roi_image_inside_the_roi_only_and_a_draft_keeps_its_own(app):
+    from smappy.gui.roi_window import ROIManagerWindow
+    # frames 0..3 inside a 200 nm square about (0, 0), 4..7 far outside it
+    points = [(10.0, 0.0), (-20.0, 10.0), (0.0, 30.0), (40.0, -40.0),
+              (5000.0, 5000.0), (5010.0, 5000.0), (5020.0, 5000.0), (5030.0, 5000.0)]
+    session, project = _session(points)
+    window = ROIManagerWindow(session)
+    window.set_measuring(False)
+    window.draft = np.array([0.0, 0.0])
+    window.redraw()
+    assert window.shown_roi().frames is None                       # a draft: all frames
+    window.annotation.ranges.fields[("frames", 0)].setText("1")
+    window.annotation.ranges.fields[("frames", 1)].setText("2")
+    window.annotation.ranges._typed("frames")
+    assert window.draft_frames == [1.0, 2.0] and not project.rois  # no edit yet
+    view = project.view(window.current_file()), project.state(window.current_file())
+    layers, _ = window._cut_to_ranges(view)
+    shown = np.flatnonzero(next(s for s in layers if s.locs is not None).mask)
+    assert shown.tolist() == [1, 2, 4, 5, 6, 7]      # inside: frames 1-2; outside: all
+    window._add()
+    roi = project.rois[window.active]
+    assert roi.frames == [1.0, 2.0]
+    window.zoom_center = np.array([1000.0, 1000.0])
+    window._zoom_clicked(1000.0, 1000.0)                           # a new draft
+    assert window.shown_roi().frames is None
+    window.close()

@@ -48,7 +48,7 @@ OUTPUTS = [("file", "a new file"), ("table", "the table")]
 
 def line_choices():
     """Without a session, the one line a project starts with."""
-    return [("direction", "direction")]
+    return [("line", "line")]
 
 
 @dataclass
@@ -60,7 +60,7 @@ class AverageCentre:
                         "in nm (Cluster shape: centre_x_nm; Circle fit: x_nm)")
     y: str = param("centre_y_nm", label="y value",
                    help="the same for y")
-    line: str = param("direction", label="line", choices=line_choices,
+    line: str = param("line", label="line", choices=line_choices,
                       help="the line whose point is the centre")
     point: str = param("middle", label="point", choices=LINE_POINTS,
                        help="which point of the line")
@@ -70,7 +70,7 @@ class AverageCentre:
 class AverageOrientation:
     by: str = param("none", label="turn by", choices=ORIENTATIONS,
                     help="what each ROI is turned by, so that it points along +x")
-    line: str = param("direction", label="line", choices=line_choices,
+    line: str = param("line", label="line", choices=line_choices,
                       help="the line that ends pointing along +x")
     angle: str = param("angle_deg", label="angle value",
                        help="the column of the results table with the angle, "
@@ -122,7 +122,7 @@ def placement(roi, row: Dict[str, Any], settings: AverageROIsSettings
         centre = np.array([x, y], dtype=float)
     elif c.by == "line":
         if c.line not in roi.lines:
-            return None, None, f"no line {c.line}"
+            return None, None, f"no line called {c.line}"
         centre = line_point(roi.lines[c.line], c.point)
     else:
         centre = np.asarray(roi.center, dtype=float)
@@ -130,7 +130,7 @@ def placement(roi, row: Dict[str, Any], settings: AverageROIsSettings
         angle = float(roi.angle)
     elif o.by == "line":
         if o.line not in roi.lines:
-            return None, None, f"no line {o.line}"
+            return None, None, f"no line called {o.line}"
         angle = line_angle_length(roi.lines[o.line])[0]
     elif o.by == "measured":
         angle = row.get(o.angle)

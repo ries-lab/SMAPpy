@@ -61,7 +61,7 @@ ax.set_xlabel("x (nm)"); ax.set_ylabel("y (nm)")
 ```
 
 **3. The edit.**  The doubles' *use* is set off, as one step of the ROI
-manager's undo (*Undo ROI edit*).  Nothing is deleted: an excluded ROI keeps
+manager's undo (*Undo*).  Nothing is deleted: an excluded ROI keeps
 its number and its results, and can be ticked again.
 
 ## In detail

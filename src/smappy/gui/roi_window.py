@@ -24,7 +24,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
-                               QDoubleSpinBox,
+                               QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QScrollArea, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
@@ -42,6 +42,13 @@ DRAWING_PEN = pg.mkPen("#00c4ff", width=2, style=Qt.DashLine)
 LINE_COLOURS = ("#e05fd0", "#00b8d4", "#ff8a00", "#9ccc65", "#ffee58", "#b388ff")
 LINE_PENS = [pg.mkPen(c, width=2) for c in LINE_COLOURS]
 ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
+CORNER_PIXELS = 7      # a polygon's corner marks, and how near a press takes one
+# the shapes the *Polygon* button draws, chosen by a right-click on it
+SHAPE_TOOLS = (("polygon", "Polygon"), ("freehand", "Freehand"), ("ellipse", "Ellipse"))
+# a freehand path is thinned to the points that leave it more than this far
+# from the line through the others: a drag gives a point per mouse event,
+# hundreds of corners for a smooth outline that a few dozen draw as well
+FREEHAND_PIXELS = 1.0
 EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
@@ -86,6 +93,52 @@ START_RING_PIXELS = 4.0
 RING_POINTS = 13
 
 
+def thin_path(points, tolerance: float) -> np.ndarray:
+    """The points of a drawn path that matter: Ramer-Douglas-Peucker, each
+    point dropped that lies within ``tolerance`` of the chord between those
+    kept round it.  For a closed outline the chord runs from the first point
+    to the farthest from it, then back."""
+    p = np.asarray(points, float).reshape(-1, 2)
+    if len(p) < 4:
+        return p
+
+    def simplify(seg):
+        keep = np.zeros(len(seg), bool)
+        keep[0] = keep[-1] = True
+        stack = [(0, len(seg) - 1)]
+        while stack:
+            i, j = stack.pop()
+            if j <= i + 1:
+                continue
+            a, b = seg[i], seg[j]
+            d = b - a
+            n = float(np.hypot(*d))
+            q = seg[i + 1:j] - a
+            dist = (np.abs(d[0] * q[:, 1] - d[1] * q[:, 0]) / n if n > 0
+                    else np.hypot(q[:, 0], q[:, 1]))
+            k = int(np.argmax(dist))
+            if dist[k] > tolerance:
+                keep[i + 1 + k] = True
+                stack += [(i, i + 1 + k), (i + 1 + k, j)]
+        return seg[keep]
+
+    far = int(np.argmax(np.hypot(*(p - p[0]).T)))
+    there = simplify(p[:far + 1])
+    back = simplify(np.vstack([p[far:], p[:1]]))
+    return np.vstack([there, back[1:-1]])
+
+
+def ellipse_handles(ellipse) -> list:
+    """An ellipse's four handles (`ROI.ellipse`): the ends of its first
+    semi-axis, then of its second -- what a drag turns and stretches it by."""
+    c = np.asarray(ellipse["center"], float)
+    a, b = ellipse["axes"]
+    t = np.radians(ellipse.get("tilt", 0.0))
+    u, v = np.array([np.cos(t), np.sin(t)]), np.array([-np.sin(t), np.cos(t)])
+    return [(c + a * u).tolist(), (c - a * u).tolist(),
+            (c + b * v).tolist(), (c - b * v).tolist()]
+
+
 def arrow(line, pixel: Optional[float] = None):
     """A line marked with which way it goes: a ring at its start and a head
     at its end -- ``o--->``.  ``pixel`` is the pane's pixel size in nm, so
@@ -113,8 +166,7 @@ def arrow(line, pixel: Optional[float] = None):
 # what selecting an ROI does to the main picture (`link_mode`): the 2D view
 # left alone, centred on the ROI, or given the ROI as its own -- which the
 # 3D view's box follows (`ROIProject.view_region`)
-LINK_CHOICES = (("not linked", "off"), ("centred on the ROI", "centre"),
-                ("shows the ROI, in 3D too", "roi"))
+LINK_CHOICES = (("off", "off"), ("centred", "centre"), ("ROI, in 3D too", "roi"))
 
 
 def link_mode(navigation: dict) -> str:
@@ -124,17 +176,6 @@ def link_mode(navigation: dict) -> str:
     if mode in {key for _, key in LINK_CHOICES}:
         return mode
     return "centre" if navigation.get("follow_2d") else "off"
-
-
-UNDO_TEXT_WIDTH = 130      # px of an undo button's text, past which it is elided
-
-
-def _lowered(label: str) -> str:
-    """"Remove ROI 3" -> "remove ROI 3", to follow "Undo"; an acronym
-    ("NPC") keeps its capitals."""
-    if len(label) > 1 and label[0].isupper() and label[1].islower():
-        return label[0].lower() + label[1:]
-    return label
 
 
 def emphasised(snapshot, fov, marks, base=None) -> np.ndarray:
@@ -202,6 +243,15 @@ class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
     clicked = Signal(float, float)
+    # the second press of a double-click, which never makes a click: the
+    # first press already did
+    double_clicked = Signal(float, float)
+    # a corner of the shown polygon or a line's end dragged: where to, and
+    # where let go -- NaN when it never moved, which is then a click as well
+    # (`grab` decides whether a press takes a point)
+    corner_moved = Signal(float, float)
+    corner_dropped = Signal(float, float)
+    right_clicked = Signal(float, float)   # a right click, where (a corner goes)
     moved = Signal(float, float)           # only while `tracking` is on
     zoomed = Signal(float)
     panned = Signal(float, float)          # how far to move the view, in nm
@@ -250,6 +300,10 @@ class ImagePane(QWidget):
                              ("centres_excluded", EXCLUDED_PEN.color())):
             self.shapes[name] = pg.PlotDataItem(pen=None, symbol="o", symbolSize=3,
                                                 symbolPen=None, symbolBrush=colour)
+        # a polygon's corners, which a drag moves: squares of fixed size
+        self.shapes["corners"] = pg.PlotDataItem(
+            pen=None, symbol="s", symbolSize=CORNER_PIXELS, symbolPen=ROI_PEN.color(),
+            symbolBrush=pg.mkBrush(0, 0, 0, 0))
         for item in self.shapes.values():
             item.setParentItem(self.content)
         # the rotation handle, in the pane's own (unturned) coordinates: a
@@ -274,6 +328,11 @@ class ImagePane(QWidget):
         self._last = None
         self._dragged = False
         self.tracking = False
+        # set by the window: called with a press's data point, True when it
+        # takes a corner of the shown polygon, which the drag then moves
+        self.grab = None
+        self._holding = None          # where the press that took a point was
+        self._held_still = True
         self.graphics.viewport().installEventFilter(self)
 
     def set_tracking(self, on: bool) -> None:
@@ -364,6 +423,37 @@ class ImagePane(QWidget):
                 self._turning = None
                 self.turned.emit(delta, shift)
             return True
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.RightButton \
+                and self.fov is not None:
+            p = self._data_at(event.position())
+            self.right_clicked.emit(p.x(), p.y())
+            return True
+        if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton \
+                and self.grab is not None and self.fov is not None:
+            p = self._data_at(event.position())
+            if self.grab(p.x(), p.y()):
+                self._holding = event.position()
+                self._held_still = True
+                return True
+        if self._holding is not None and kind in (QEvent.MouseMove,
+                                                  QEvent.MouseButtonRelease):
+            p = self._data_at(event.position())
+            # still while it never went further than a click's wobble: a
+            # freehand outline ends where it began, and is no click
+            if (event.position() - self._holding).manhattanLength() > 3:
+                self._held_still = False
+            still = self._held_still
+            if kind == QEvent.MouseMove:
+                if not still:
+                    self.corner_moved.emit(p.x(), p.y())
+            else:
+                self._holding = None
+                if still:              # a click on the point, not a drag
+                    self.corner_dropped.emit(float("nan"), float("nan"))
+                    self.clicked.emit(p.x(), p.y())
+                else:
+                    self.corner_dropped.emit(p.x(), p.y())
+            return True
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self._press = self._last = event.position()
             self._dragged = False
@@ -388,6 +478,11 @@ class ImagePane(QWidget):
                 p = self._data_at(event.position())
                 self.clicked.emit(p.x(), p.y())
                 return True
+        elif kind == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton \
+                and self.fov is not None:
+            p = self._data_at(event.position())
+            self.double_clicked.emit(p.x(), p.y())
+            return True
         elif kind == QEvent.Wheel and self.zoomable:
             steps = event.angleDelta().y() / 120.0
             self.width_nm = float(np.clip(self.width_nm * 1.2 ** -steps, 50.0, 1e7))
@@ -595,6 +690,11 @@ class ROIManagerWindow(QMainWindow):
         self.active: Optional[str] = None
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
+        self.draft_ellipse: Optional[dict] = None    # `ROI.ellipse`, for a draft
+        # a draft's frame and z range, the whole of both until set in
+        # *frames and z*; *Add* hands them to the ROI
+        self.draft_frames: Optional[list] = None
+        self.draft_z: Optional[list] = None
         self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
         self.draft_angle = 0.0                   # the draft's, as `ROI.angle`
         self._turn_base: Optional[float] = None  # the angle as a handle drag began
@@ -602,7 +702,6 @@ class ROIManagerWindow(QMainWindow):
         # `ROI` to draw it by; read through `draft_track`, so that whatever
         # drops the draft drops it too
         self._draft_track = None
-        self._filling_lines = False              # the line list being refilled
         self.drawing: Optional[str] = None       # "polygon" or "line"
         self._points: list = []
         self._hover: Optional[np.ndarray] = None
@@ -625,7 +724,9 @@ class ROIManagerWindow(QMainWindow):
         flayout = QVBoxLayout(file_column)
         flayout.setContentsMargins(0, 0, 0, 0)
         flayout.addWidget(self.file_pane, 1)
-        trow = QHBoxLayout()
+        self.file_bar = QWidget()
+        trow = QHBoxLayout(self.file_bar)
+        trow.setContentsMargins(0, 0, 0, 0)
         trow.setSpacing(3)
         self.tiles_button = QPushButton("Tiles")
         self.tiles_button.setCheckable(True)
@@ -649,7 +750,7 @@ class ROIManagerWindow(QMainWindow):
                   self.next_tile, self.tile_label):
             trow.addWidget(w)
         trow.addStretch(1)
-        flayout.addLayout(trow)
+        flayout.addWidget(self.file_bar)
 
         lists = QWidget()
         llayout = QVBoxLayout(lists)
@@ -659,11 +760,39 @@ class ROIManagerWindow(QMainWindow):
         side.setSpacing(6)
         file_side = QVBoxLayout()
         file_side.setSpacing(1)
+        # What a click drafts and how large every ROI of a shape is: above
+        # the files, which are seldom many, beside the list they shape.  It
+        # was the Regions tab's, a window away from the clicks it decides
+        file_side.addWidget(QLabel("<b>geometry</b>"))
+        geometry = QFormLayout()
+        geometry.setContentsMargins(0, 0, 0, 0)
+        geometry.setVerticalSpacing(2)
+        self.shape_box = QComboBox()
+        self.shape_box.addItems(["circle", "square", "track"])
+        self.shape_box.setToolTip("what a click drafts: a circle or square there, or "
+                                  "the track drawn nearest it.  Until one is chosen, "
+                                  "a track whenever the layer draws tracks")
+        self.size_box = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, suffix=" nm")
+        self.size_box.setToolTip("circle diameter, or the side of a square")
+        self.size_box.setKeyboardTracking(False)
+        self.view_box = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
+        self.view_box.setSpecialValueText("2 x ROI size")
+        self.view_box.setToolTip("what the ROI image shows around the ROI")
+        self.view_box.setKeyboardTracking(False)
+        self._filling_geometry = False
+        self.shape_box.currentTextChanged.connect(self._on_draft_shape)
+        self.size_box.valueChanged.connect(self._on_geometry)
+        self.view_box.valueChanged.connect(self._on_geometry)
+        geometry.addRow("shape", self.shape_box)
+        geometry.addRow("size", self.size_box)
+        geometry.addRow("ROI view", self.view_box)
+        file_side.addLayout(geometry)
+        file_side.addSpacing(6)
         file_side.addWidget(QLabel("<b>files</b>"))
         self.files = QListWidget()
         self.files.currentRowChanged.connect(self._on_file)
         file_side.addWidget(self.files, 1)
-        side.addLayout(file_side, 1)
+        side.addLayout(file_side, 2)
         roi_side_list = QVBoxLayout()
         roi_side_list.setSpacing(1)
         heading = QHBoxLayout()
@@ -700,9 +829,11 @@ class ROIManagerWindow(QMainWindow):
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._sort_by_column)
         self._sorted_column = None
-        self.table.setMaximumWidth(260)          # the numbers and a few keywords
+        # the annotations column takes what the list is given beyond the
+        # numbers: with the lists below the pictures there is room for it
+        header.setStretchLastSection(True)
         roi_side_list.addWidget(self.table, 1)
-        side.addLayout(roi_side_list, 0)
+        side.addLayout(roi_side_list, 3)
         llayout.addLayout(side, 1)
         edits = QHBoxLayout()
         edits.setSpacing(3)
@@ -711,11 +842,12 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.clicked.connect(self._remove)
         # the ROIs' own undo (`ROIProject.history`), not the main window's,
         # which is for tables: Ctrl+Z here never undoes a drift correction.
-        # The buttons name the edit ("Undo remove ROI 3"), as Edit > Undo
-        # names the table's step ("Undo RCC"), so the two read differently
-        self.undo_button = QPushButton("Undo ROI edit")
+        # Short, so the row fits beside the 2D view's controls; the tooltip
+        # names the edit ("undo: Remove ROI 3"), as Edit > Undo names the
+        # table's step
+        self.undo_button = QPushButton("Undo")
         self.undo_button.clicked.connect(self.undo)
-        self.redo_button = QPushButton("Redo ROI edit")
+        self.redo_button = QPushButton("Redo")
         self.redo_button.clicked.connect(self.redo)
         # the main picture goes where the ROI is, on its file: the ROI image
         # here is small, and the 2D view is where it is worked on -- and,
@@ -727,22 +859,33 @@ class ROIManagerWindow(QMainWindow):
         for text, key in LINK_CHOICES:
             self.link_2d.addItem(text, key)
         self.link_2d.setToolTip("what selecting an ROI does to the main picture: "
-                                "nothing; centre it on the ROI, on its file; or "
-                                "also make the ROI the 2D view's ROI -- a line ROI "
-                                "along its line when it has one -- so the 3D view "
-                                "shows it")
+                                "off, nothing; centred, centre it on the ROI, on its "
+                                "file; ROI, in 3D too, also make the ROI the 2D "
+                                "view's ROI -- a line ROI along its line when it "
+                                "has one -- so the 3D view shows it")
         self.link_2d.currentIndexChanged.connect(self._on_link_2d)
-        link.addWidget(self.link_2d, 1)
-        llayout.addLayout(link)
-        edits.addWidget(self.remove_button, 1)
+        # at the widths the controls need: stretched over the whole lists
+        # side, a choice of three and a Remove were half a window wide
+        link.addWidget(self.link_2d)
+        # the 2D view's drawn region made an ROI: with the edits of the list
+        self.from_region = QPushButton("Add drawn region")
+        self.from_region.setToolTip("turn the rectangle, circle, line or polygon "
+                                    "drawn in the 2D view into an ROI")
+        self.from_region.clicked.connect(self._from_region)
+        link.addSpacing(16)
+        self._link_row = link             # under the zoom (below), not the lists
+        edits.addWidget(self.remove_button)
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
-        llayout.addLayout(edits)
+        edits.addSpacing(12)
+        edits.addWidget(self.from_region)
+        edits.addStretch(1)
+        roi_side_list.addLayout(edits)          # under the list they act on
         # what the user says of the selected ROI: a keyword from each list,
         # a key per ROI (`roi_annotate`), and *use*
         from .roi_annotate import AnnotationPanel
         self.annotation = AnnotationPanel(self)
-        llayout.addWidget(CollapsibleSection("annotate", self.annotation, expanded=True))
+        self.annotate_side = CollapsibleSection("annotate", self.annotation, expanded=True)
         # shown only while a segmenter's preview is drawn: Run adds it, a
         # new preview replaces it, and this is the way to have neither
         self.add_preview_button = QPushButton("Add previewed ROIs")
@@ -788,42 +931,49 @@ class ROIManagerWindow(QMainWindow):
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
         rlayout.setContentsMargins(0, 0, 0, 0)
-        tools = QHBoxLayout()
+        # One row under the ROI image -- near *annotate*, where the mouse
+        # already is -- of what to draw (the shape, then the line), how the
+        # ROI is turned, and *Add*.  Each drawing button draws on a left
+        # click and offers its choices and its clearing on a right click,
+        # as the main view's ROI button does, so the row holds two buttons
+        # where it held a box and five
+        self.roi_bar = QWidget()
+        tools = QHBoxLayout(self.roi_bar)
+        tools.setContentsMargins(0, 0, 0, 0)
         tools.setSpacing(3)
         self.polygon_button = QPushButton("Polygon")
         self.polygon_button.setCheckable(True)
-        self.polygon_button.setToolTip("draw an outline in this image: a click per "
-                                       "vertex, a click on the first vertex closes it, "
-                                       "Escape cancels")
-        self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
-        self.clear_shape_button = QPushButton("Clear shape")
-        self.clear_shape_button.setToolTip("back to the global circle or square; "
-                                           "an ROI of an id, back to its id alone")
-        self.clear_shape_button.clicked.connect(self._clear_shape)
-        # the named lines (`ROI.lines`): which one, then draw, reverse, clear
-        self.line_box = QComboBox()
-        self.line_box.setToolTip("the line that Draw line, Reverse and Clear line "
-                                 "act on (Shift+L the next); the names are "
-                                 "written under *line names*")
-        self.line_box.currentTextChanged.connect(self._on_line_name)
-        self.line_button = QPushButton("Draw line")
+        self.polygon_button.setToolTip("draw the ROI's own shape in this image; "
+                                       "right-click: polygon, freehand or ellipse, "
+                                       "or clear the shape.  Escape cancels")
+        self.polygon_button.clicked.connect(lambda: self._start_drawing(self.shape_tool))
+        self.polygon_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.polygon_button.customContextMenuRequested.connect(
+            lambda pos: self._menu_at(self.shape_menu, self.polygon_button, pos))
+        # the menus are made once and refilled before they open, so their
+        # entries exist while the window does (its help page names them)
+        from PySide6.QtWidgets import QMenu
+        self.shape_menu = QMenu("Shape", self)
+        self.shape_menu.aboutToShow.connect(self._fill_shape_menu)
+        self.line_menu = QMenu("Line", self)
+        self.line_menu.aboutToShow.connect(self._fill_line_menu)
+        self._fill_shape_menu()
+        # the named lines (`ROI.lines`): the button draws the chosen one
+        # and is named after it; a right-click chooses, reverses or clears
+        self._line_names: list = []
+        self.line_button = QPushButton("Line")
         self.line_button.setCheckable(True)
-        self.line_button.setToolTip("two clicks, start then end: the chosen line, "
-                                    "its angle and length a column of the results (L)")
+        self.line_button.setToolTip("two clicks, start then end: the chosen line, its "
+                                    "angle and length a column of the results (L); "
+                                    "right-click: which line (Shift+L the next), "
+                                    "reverse (R) or clear it")
         self.line_button.clicked.connect(lambda: self._start_drawing("line"))
-        self.reverse_button = QPushButton("Reverse")
-        self.reverse_button.setToolTip("swap the chosen line's start and end (R)")
-        self.reverse_button.clicked.connect(self._reverse_line)
-        self.clear_line_button = QPushButton("Clear line")
-        self.clear_line_button.setToolTip("remove the chosen line")
-        self.clear_line_button.clicked.connect(self._clear_line)
-        for b in (self.polygon_button, self.clear_shape_button):
-            tools.addWidget(b)
-        tools.addSpacing(8)
-        tools.addWidget(QLabel("line"))
-        for b in (self.line_box, self.line_button, self.reverse_button,
-                  self.clear_line_button):
-            tools.addWidget(b)
+        self.line_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.line_button.customContextMenuRequested.connect(
+            lambda pos: self._menu_at(self.line_menu, self.line_button, pos))
+        self._fill_line_menu()
+        tools.addWidget(self.polygon_button)
+        tools.addWidget(self.line_button)
         for key, slot in (("L", lambda: self._start_drawing("line")),
                           ("Shift+L", lambda: self.next_line(1)),
                           ("R", self._reverse_line)):
@@ -834,8 +984,6 @@ class ROIManagerWindow(QMainWindow):
         # the project, since it decides what is measured, shown here because
         # it is a way of looking.  Off, the angle and the handle are gone and
         # every ROI is shown and measured as it lies in the file
-        turns = QHBoxLayout()
-        turns.setSpacing(3)
         self.rotate_box = QCheckBox("rotate")
         self.rotate_box.setToolTip("show and measure each ROI turned to its angle, so "
                                    "its structure lies along x; drag the green "
@@ -852,19 +1000,13 @@ class ROIManagerWindow(QMainWindow):
         self.angle_from_line.setToolTip("take the angle of the chosen line, start "
                                         "to end")
         self.angle_from_line.clicked.connect(self._angle_from_line)
-        turns.addWidget(self.rotate_box)
-        turns.addWidget(self.angle_box)
-        turns.addWidget(self.angle_from_line)
-        turns.addStretch(1)
+        tools.addSpacing(16)                  # drawing apart from adding
         for key, step in (("[", -1.0), ("]", 1.0)):
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.setContext(Qt.WindowShortcut)
             shortcut.activated.connect(lambda step=step: self._step_angle(step))
-        # the tools that say what to draw sit above the image they draw into;
-        # *Add*, the one button that is pressed over and over, sits directly
-        # under it, where the eye already is after judging the ROI
-        rlayout.addLayout(tools)
-        rlayout.addLayout(turns)
+        # *Add*, the one button pressed over and over, ends the row and takes
+        # what is left of it: a large target right under the ROI just judged
         rlayout.addWidget(self.roi_pane, 1)
         self.add_button = QPushButton("Add")
         self.add_button.setToolTip("store the drafted ROI (Enter)")
@@ -876,40 +1018,79 @@ class ROIManagerWindow(QMainWindow):
             "QPushButton:pressed { background: #24783c; }"
             "QPushButton:disabled { background: #8a8a8a; border-color: #6e6e6e; }")
         self.add_button.clicked.connect(self._add)
-        rlayout.addWidget(self.add_button)
+        self.add_button.setMinimumWidth(70)
+        tools.addWidget(self.add_button, 1)
+        rlayout.addWidget(self.roi_bar)
+        # under the zoom, what the main view is to the ROIs: whether it
+        # follows them, and its drawn region made one.  A row under each
+        # picture keeps their upper and lower edges in line
+        zoom_column = QWidget()
+        zlayout = QVBoxLayout(zoom_column)
+        zlayout.setContentsMargins(0, 0, 0, 0)
+        zlayout.addWidget(self.zoom_pane, 1)
+        self.zoom_bar = QWidget()
+        # how the ROIs are turned, beside how the 2D view follows them: on
+        # the ROI image's row, the angle field coming and going with
+        # *rotate* resized *Add* under the mouse
+        for widget in (self.rotate_box, self.angle_box, self.angle_from_line):
+            self._link_row.addWidget(widget)
+        self._link_row.addStretch(1)
+        self._link_row.setContentsMargins(0, 0, 0, 0)
+        self.zoom_bar.setLayout(self._link_row)
+        zlayout.addWidget(self.zoom_bar)
+        bar = max(self.file_bar.sizeHint().height(), self.roi_bar.sizeHint().height())
+        for row in (self.file_bar, self.zoom_bar, self.roi_bar):
+            row.setFixedHeight(bar)
 
+        # The three pictures in a row, each as wide as a third of the window
+        # and so about square -- ROIs are mostly square, and a grid of halves
+        # made the ROI image twice as wide as tall -- and below them the
+        # lists on the left and *annotate* on the right, side by side, so
+        # unfolding *frames and z* no longer takes its height from the list
         top = QSplitter(Qt.Horizontal)
-        top.addWidget(file_column)
-        top.addWidget(self.zoom_pane)
+        for column in (file_column, zoom_column, roi_side):
+            column.layout().setSpacing(4)
+            top.addWidget(column)
         bottom = QSplitter(Qt.Horizontal)
-        # the lists scroll rather than grow: unfolded, *frames and z* and the
-        # other parts of *annotate* took their height from the overview above
-        # until it was a strip
-        lists_scroll = QScrollArea()
-        lists_scroll.setWidget(lists)
-        lists_scroll.setWidgetResizable(True)
-        lists_scroll.setFrameShape(QScrollArea.NoFrame)
-        lists_scroll.setMinimumWidth(lists.sizeHint().width())
-        bottom.addWidget(lists_scroll)
-        bottom.addWidget(roi_side)
+        # each side scrolls rather than grows
+        # *annotate* at the top of its side, its parts folded or not, rather
+        # than spread over the height the scroll area gives it
+        annotate = QWidget()
+        alayout = QVBoxLayout(annotate)
+        alayout.setContentsMargins(0, 0, 0, 0)
+        alayout.addWidget(self.annotate_side)
+        alayout.addStretch(1)
+        for widget in (lists, annotate):
+            scroll = QScrollArea()
+            scroll.setWidget(widget)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.NoFrame)
+            scroll.setMinimumWidth(min(widget.sizeHint().width(), 420))
+            bottom.addWidget(scroll)
         whole = QSplitter(Qt.Vertical)
         whole.addWidget(top)
         whole.addWidget(bottom)
-        for s in (top, bottom, whole):
-            s.setSizes([500, 500])
         self.setCentralWidget(whole)
         self.status = self.statusBar()
-        # as large as the screen comfortably takes: the overview, the zoom and
-        # the ROI are three pictures, and 1100 x 800 left each one small
+        # as large as the screen comfortably takes: three pictures side by side
         screen = QApplication.primaryScreen()
         free = screen.availableGeometry() if screen is not None else None
-        self.resize(min(1400, int(free.width() * 0.9)) if free else 1100,
-                    min(1050, int(free.height() * 0.9)) if free else 800)
+        width = min(1400, int(free.width() * 0.9)) if free else 1200
+        height = min(1000, int(free.height() * 0.9)) if free else 850
+        self.resize(width, height)
+        self.top_splitter, self.bottom_splitter, self.whole_splitter = top, bottom, whole
+        self._sized = False                 # the splitters, once shown (`showEvent`)
 
         self.file_pane.clicked.connect(self._file_clicked)
         self.zoom_pane.clicked.connect(self._zoom_clicked)
         self.roi_pane.clicked.connect(self._roi_clicked)
         self.roi_pane.moved.connect(self._roi_hover)
+        self.roi_pane.double_clicked.connect(self._roi_double_clicked)
+        self.roi_pane.grab = self._grab_corner
+        self.roi_pane.right_clicked.connect(self._delete_corner)
+        self.roi_pane.corner_moved.connect(self._move_corner)
+        self.roi_pane.corner_dropped.connect(self._drop_corner)
+        self._corner: Optional[tuple] = None    # (index, the polygon as it was)
         self.zoom_pane.zoomed.connect(lambda _: self.redraw())
         self.zoom_pane.panned.connect(self._zoom_panned)
         self.roi_pane.zoomed.connect(self._preview_zoomed)
@@ -956,6 +1137,8 @@ class ROIManagerWindow(QMainWindow):
         self.link_2d.setCurrentIndex(max(0, self.link_2d.findData(link_mode(project.navigation))))
         self.rotate_box.setChecked(bool(project.rotate))
         self._show_turn_controls()
+        self.polygon_button.setText(dict(SHAPE_TOOLS)[self.shape_tool])
+        self.show_geometry()
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -1108,6 +1291,8 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
         self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
@@ -1218,6 +1403,10 @@ class ROIManagerWindow(QMainWindow):
             centre, half = self.project.extent(roi)
             return float(np.hypot(*(centre - np.asarray(roi.center, float)))
                          + half * np.sqrt(2))
+        if roi.ellipse is not None:
+            c = np.asarray(roi.ellipse["center"], float)
+            return float(np.hypot(*(c - np.asarray(roi.center, float)))
+                         + max(roi.ellipse["axes"]))
         if roi.polygon is None:
             return float(self.project.size_nm)
         cache = self._reaches
@@ -1265,13 +1454,16 @@ class ROIManagerWindow(QMainWindow):
         emphasis = self._emphasis()
         angle = self._shown_angle() if project.rotate else None
         self.roi_pane.set_turn(centre, angle)
-        self.roi_pane.render(view, centre[0] - half, centre[0] + half,
-                             centre[1] - half, centre[1] + half, emphasis)
+        self._follow_ranges()
+        self.roi_pane.render(self._cut_to_ranges(view), centre[0] - half,
+                             centre[0] + half, centre[1] - half, centre[1] + half,
+                             emphasis)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
+        ellipse = self.draft_ellipse if drafted else (roi.ellipse if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
         if of_id is None:
             xs, ys = Region.site(centre, project.shape, project.size_nm, polygon,
-                                 angle or 0.0).outline()
+                                 angle or 0.0, ellipse).outline()
         else:
             xs, ys = project.outline(of_id)
         self._place_handle(centre, half, xs, ys)
@@ -1281,6 +1473,12 @@ class ROIManagerWindow(QMainWindow):
         if emphasis is not None and of_id is not None:
             xs = ys = []               # a track, marked in the picture instead
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
+        corners = np.empty((0, 2))
+        if of_id is None and polygon is not None:
+            corners = np.asarray(polygon, float)
+        elif of_id is None and ellipse is not None:
+            corners = np.asarray(ellipse_handles(ellipse), float)
+        self.roi_pane.draw("corners", corners[:, 0], corners[:, 1])
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)
         text = "ROI (draft)"
@@ -1366,6 +1564,8 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = None
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
 
@@ -1397,11 +1597,15 @@ class ROIManagerWindow(QMainWindow):
         self._draft_track = track
         self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.redraw()
 
     def _roi_clicked(self, x: float, y: float) -> None:
-        """A click in the ROI image: place a vertex, or recentre the draft."""
+        """A click in the ROI image: place a vertex, choose a line, select
+        another ROI by its outline, or centre the draft or the selected ROI
+        there."""
         if np.isnan(x):
             self.redraw()
             return
@@ -1413,23 +1617,260 @@ class ROIManagerWindow(QMainWindow):
             self.set_line_name(line)
             return
         hit = self._roi_at(x, y, self.roi_pane)
-        if hit is not None and self.draft is None:
+        roi = self._selected()
+        if hit is not None and self.draft is None and (roi is None or hit.id != roi.id):
             self.select(hit.id)
         elif self.draft_track is not None:
             self._draft_track_at(x, y, self.roi_pane)
         elif self.draft is not None:
             self.draft = np.array([x, y])
             self.redraw()
+        elif roi is not None and roi.spatial:
+            # the stored ROI centred on the click as a draft is: its centre
+            # alone, so what is drawn -- a polygon, the lines -- stays on the
+            # structure it was drawn on and moves with the localizations in
+            # the picture.  An ROI of an id alone has no place to move
+            with self._edit("Centre"):
+                roi.center = [float(x), float(y)]
+            self.changed.emit()
+            self.redraw()
+
+    # ------------------------- a polygon's corners, an ellipse's, a line's ends
+    def _shown_polygon(self) -> Optional[list]:
+        """The polygon the ROI pane shows with its corners: the draft's, or
+        the selected ROI's."""
+        if self.draft is not None:
+            return self.draft_polygon if self.draft_track is None else None
+        roi = self._selected()
+        return roi.polygon if roi is not None and roi.spatial else None
+
+    def _shown_ellipse(self) -> Optional[dict]:
+        if self.draft is not None:
+            return self.draft_ellipse if self.draft_track is None else None
+        roi = self._selected()
+        return roi.ellipse if roi is not None and roi.spatial else None
+
+    def _grab_corner(self, x: float, y: float) -> bool:
+        """Whether a press at ``(x, y)`` starts a drag: the start of a
+        freehand outline or an ellipse being drawn, an end of one of the
+        shown lines, a handle of the shown ellipse or a corner of the shown
+        polygon -- within the corner mark's reach.  A line's end first: one
+        drawn across an outline often starts on it.  Never while a polygon
+        or a line is drawn, whose clicks place points."""
+        fov = self.roi_pane.fov
+        if fov is None:
+            return False
+        if self.drawing in ("freehand", "ellipse"):
+            self._points = [np.array([x, y], float)]
+            self._corner = ("draw", self.drawing, 0, None)
+            return True
+        if self.drawing:
+            return False
+        reach = CORNER_PIXELS * fov.pixelsize
+        candidates = [("line", name, [list(p) for p in line])
+                      for name, line in self._shown_lines().items()]
+        ellipse = self._shown_ellipse()
+        if ellipse is not None:
+            candidates.append(("ellipse", ellipse, ellipse_handles(ellipse)))
+        polygon = self._shown_polygon()
+        if polygon is not None:
+            candidates.append(("polygon", None, [list(p) for p in polygon]))
+        for kind, name, points in candidates:
+            v = np.asarray(points, float)
+            distance = np.hypot(v[:, 0] - x, v[:, 1] - y)
+            i = int(np.argmin(distance))
+            if distance[i] <= reach:
+                self._corner = (kind, name, i, points)
+                return True
+        return False
+
+    def _moved_points(self, x: float, y: float) -> list:
+        _, _, i, points = self._corner
+        moved = [list(p) for p in points]
+        moved[i] = [float(x), float(y)]
+        return moved
+
+    def _screen_tilt(self) -> float:
+        """The tilt of the screen's x in data coordinates: 0, or the turn
+        of a rotated pane, so a box dragged on the screen is upright on it."""
+        return float(self.roi_pane.turn[1]) if self.roi_pane.turn is not None else 0.0
+
+    def _dragged_ellipse(self, x: float, y: float) -> Optional[dict]:
+        """The ellipse in the box dragged from the press to ``(x, y)``,
+        upright on the screen; None while it has no width or height."""
+        start = self._points[0]
+        tilt = self._screen_tilt()
+        t = np.radians(tilt)
+        d = np.array([x, y], float) - start
+        u = d[0] * np.cos(t) + d[1] * np.sin(t)          # along the screen's x
+        v = -d[0] * np.sin(t) + d[1] * np.cos(t)
+        if min(abs(u), abs(v)) < self.roi_pane.fov.pixelsize:
+            return None
+        centre = start + d / 2
+        return {"center": [float(centre[0]), float(centre[1])],
+                "axes": [abs(u) / 2, abs(v) / 2], "tilt": tilt}
+
+    def _moved_ellipse(self, x: float, y: float) -> dict:
+        """The shown ellipse with handle ``i`` at ``(x, y)``: that semi-axis
+        as long as the handle is far from the centre, and the ellipse turned
+        to point it there; the centre and the other semi-axis stay."""
+        _, ellipse, i, _ = self._corner
+        c = np.asarray(ellipse["center"], float)
+        d = np.array([x, y], float) - c
+        length = max(float(np.hypot(*d)), self.roi_pane.fov.pixelsize)
+        tilt = float(np.degrees(np.arctan2(d[1], d[0]))) - (0, 180, 90, -90)[i]
+        tilt = (tilt + 180.0) % 360.0 - 180.0
+        axes = list(ellipse["axes"])
+        axes[0 if i < 2 else 1] = length
+        return {"center": list(ellipse["center"]), "axes": axes, "tilt": tilt}
+
+    def _move_corner(self, x: float, y: float) -> None:
+        """The shape as the drag would leave it; the ROI changes only at the
+        release, so a drag is one undo step and the pane stays put."""
+        if self._corner is None:
+            return
+        kind, what = self._corner[:2]
+        if kind == "draw" and what == "freehand":
+            last = self._points[-1]
+            if np.hypot(x - last[0], y - last[1]) >= self.roi_pane.fov.pixelsize:
+                self._points.append(np.array([x, y], float))
+            v = np.asarray(self._points, float)
+            self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+            return
+        if kind == "draw" or kind == "ellipse":
+            ellipse = (self._dragged_ellipse(x, y) if kind == "draw"
+                       else self._moved_ellipse(x, y))
+            if ellipse is None:
+                self.roi_pane.draw("drawing")
+                return
+            xs, ys = Region.site(ellipse["center"], "circle", 1.0,
+                                 ellipse=ellipse).outline()
+            self.roi_pane.draw("drawing", xs, ys)
+            if kind == "ellipse":
+                h = np.asarray(ellipse_handles(ellipse), float)
+                self.roi_pane.draw("corners", h[:, 0], h[:, 1])
+            return
+        v = np.asarray(self._moved_points(x, y), float)
+        if kind == "polygon":
+            self.roi_pane.draw("corners", v[:, 0], v[:, 1])
+            v = np.vstack([v, v[0]])
+        self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+
+    def _drop_corner(self, x: float, y: float) -> None:
+        """The drag let go: the outline or ellipse drawn, or the point where
+        it was let go -- the polygon and its centre as drawing it there would
+        have made them, the ellipse, or the line."""
+        if self._corner is None:
+            return
+        kind, name = self._corner[:2]
+        if np.isnan(x):                  # never moved: a click, nothing to keep
+            self._corner = None
+            if kind == "draw":
+                self._points = []
+            return
+        if kind == "draw":
+            self._corner = None
+            if name == "freehand":
+                self._points.append(np.array([x, y], float))
+                path = thin_path(self._points, FREEHAND_PIXELS * self.roi_pane.fov.pixelsize)
+                self._cancel_drawing()
+                if len(path) >= 3:
+                    self._set_shape(polygon=path.tolist(), what="Outline")
+            else:
+                ellipse = self._dragged_ellipse(x, y)
+                self._cancel_drawing()
+                if ellipse is not None:
+                    self._set_shape(ellipse=ellipse, what="Ellipse")
+            return
+        if kind == "ellipse":
+            ellipse = self._moved_ellipse(x, y)
+            self._corner = None
+            self.roi_pane.draw("drawing")
+            self._set_shape(ellipse=ellipse, what="Ellipse")
+            return
+        points = self._moved_points(x, y)
+        self._corner = None
+        self.roi_pane.draw("drawing")
+        if kind == "line":
+            roi = self._selected()
+            if self.draft is not None or roi is None:
+                self.draft_lines = {**self.draft_lines, name: points}
+            else:
+                self.project.set_line(roi.id, name, points)
+                self.annotated()
+            self.redraw()
+            return
+        self._set_shape(polygon=points, what="Move corner")
+
+    def _delete_corner(self, x: float, y: float) -> None:
+        """A right click on a corner of the shown polygon removes it -- not
+        below three, where it would no longer be an outline -- one undo
+        step, as a drag is."""
+        polygon, fov = self._shown_polygon(), self.roi_pane.fov
+        if self.drawing or polygon is None or fov is None or len(polygon) <= 3:
+            return
+        v = np.asarray(polygon, float)
+        distance = np.hypot(v[:, 0] - x, v[:, 1] - y)
+        i = int(np.argmin(distance))
+        if distance[i] <= CORNER_PIXELS * fov.pixelsize:
+            self._set_shape(polygon=[list(p) for k, p in enumerate(polygon) if k != i],
+                            what="Delete corner")
+
+    def _set_shape(self, polygon=None, ellipse=None, what: str = "Outline") -> None:
+        """The draft's or the selected ROI's own shape, a polygon or an
+        ellipse (the other goes), its centre moved to the shape's: one undo
+        step for a stored ROI; an ROI of an id drawn round keeps its id
+        inside the shape.  No ROI at all and the shape makes a draft."""
+        if polygon is not None:
+            polygon = [[float(p[0]), float(p[1])] for p in polygon]
+            centre = np.asarray(polygon, float).mean(axis=0)
+        else:
+            centre = np.asarray(ellipse["center"], float)
+        roi = self._selected()
+        if self.draft is not None or roi is None:
+            if self.draft is None or self.draft_track is not None:
+                self._draft_track = None
+            self.draft = centre
+            self.draft_polygon, self.draft_ellipse = polygon, ellipse
+        else:
+            with self._edit(what):
+                roi.polygon, roi.ellipse = polygon, ellipse
+                roi.center = [float(centre[0]), float(centre[1])]
+                roi.spatial = True
+            self.changed.emit()
+        self.redraw()
+
+    # ------------------------------------------------------- the shape tool
+    @property
+    def shape_tool(self) -> str:
+        """What *Polygon* draws: a polygon, freehand or an ellipse, chosen by
+        a right-click on it and kept with the project's navigation."""
+        chosen = self.project.navigation.get("shape_tool", "polygon")
+        return chosen if chosen in dict(SHAPE_TOOLS) else "polygon"
+
+    def set_shape_tool(self, kind: str) -> None:
+        if kind not in dict(SHAPE_TOOLS):
+            raise ValueError(f"the shape tool is one of {[k for k, _ in SHAPE_TOOLS]}")
+        if self.drawing in dict(SHAPE_TOOLS):
+            self._cancel_drawing()
+        self.project.navigation["shape_tool"] = kind
+        self.polygon_button.setText(dict(SHAPE_TOOLS)[kind])
+
+    def _roi_double_clicked(self, x: float, y: float) -> None:
+        """A double-click closes a polygon, as in the main view: its first
+        click has placed the last vertex already."""
+        if self.drawing == "polygon" and len(self._points) >= 3:
+            self._finish_polygon()
 
     def _roi_hover(self, x: float, y: float) -> None:
-        if self.drawing and self._points:
+        if self.drawing in ("polygon", "line") and self._points:
             self._hover = np.array([x, y])
             self._draw_in_progress()
 
     # ------------------------------------------------- polygon and lines
     @property
     def line_name(self) -> str:
-        """The line Draw line, Reverse and Clear line act on."""
+        """The line the *Line* button draws, reverses and clears."""
         names = self.project.line_names
         name = self.project.navigation.get("line")
         return name if name else (names[0] if names else "")
@@ -1440,30 +1881,52 @@ class ROIManagerWindow(QMainWindow):
 
     def next_line(self, step: int) -> None:
         """The next line name (Shift+L), round the list."""
-        names = [self.line_box.itemText(i) for i in range(self.line_box.count())]
+        names = self._line_names
         if names:
             here = names.index(self.line_name) if self.line_name in names else -1
             self.set_line_name(names[(here + step) % len(names)])
 
-    def _on_line_name(self, name: str) -> None:
-        if name and name != self.line_name and not self._filling_lines:
-            self.set_line_name(name)
-
     def _fill_line_box(self, lines) -> None:
-        """The project's line names, and those the shown ROI has besides."""
+        """The names the line button offers -- the project's, and those the
+        shown ROI has besides -- and the button named after the chosen one."""
         names = list(self.project.line_names)
         names += [n for n in lines if n not in names]
         if self.line_name not in names:
             names.append(self.line_name)
-        names = [n for n in names if n]
-        current = [self.line_box.itemText(i) for i in range(self.line_box.count())]
-        self._filling_lines = True
-        if names != current:
-            self.line_box.clear()
-            self.line_box.addItems(names)
-        if self.line_name in names:
-            self.line_box.setCurrentIndex(names.index(self.line_name))
-        self._filling_lines = False
+        self._line_names = [n for n in names if n]
+        self.line_button.setText(f"Line: {self.line_name}" if self.line_name else "Line")
+
+    @staticmethod
+    def _menu_at(menu, button, pos) -> None:
+        menu.exec(button.mapToGlobal(pos))
+
+    def _fill_shape_menu(self) -> None:
+        """What to draw, then the shape cleared: refilled as it opens, so
+        the tick follows the choice."""
+        menu = self.shape_menu
+        menu.clear()
+        for kind, label in SHAPE_TOOLS:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(kind == self.shape_tool)
+            action.triggered.connect(lambda _=False, k=kind: self.set_shape_tool(k))
+        menu.addSeparator()
+        menu.addAction("Clear shape", self._clear_shape)
+
+    def _fill_line_menu(self) -> None:
+        """Which line, then the chosen one reversed or cleared."""
+        menu = self.line_menu
+        menu.clear()
+        for name in self._line_names or [self.line_name]:
+            if not name:
+                continue
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == self.line_name)
+            action.triggered.connect(lambda _=False, n=name: self.set_line_name(n))
+        menu.addSeparator()
+        menu.addAction("Reverse", self._reverse_line)
+        menu.addAction("Clear line", self._clear_line)
 
     def _shown_lines(self) -> dict:
         roi = self._selected()
@@ -1501,11 +1964,14 @@ class ROIManagerWindow(QMainWindow):
         self._points = []
         self._hover = None
         self.roi_pane.set_tracking(True)
-        self.polygon_button.setChecked(kind == "polygon")
+        self.polygon_button.setChecked(kind in dict(SHAPE_TOOLS))
         self.line_button.setChecked(kind == "line")
-        self.status.showMessage("a click per vertex; a click on the first vertex "
-                                "closes it, Escape cancels" if kind == "polygon"
-                                else f"{self.line_name}: click the start, then the end")
+        self.status.showMessage({
+            "polygon": "a click per vertex; a double-click or a click on the first "
+                       "vertex closes it, Escape cancels",
+            "freehand": "drag round the structure; let go to close it, Escape cancels",
+            "ellipse": "drag the box the ellipse fills; Escape cancels",
+        }.get(kind, f"{self.line_name}: click the start, then the end"))
 
     def _cancel_drawing(self) -> None:
         self.drawing = None
@@ -1518,6 +1984,8 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
 
     def _place(self, x: float, y: float) -> None:
+        if self.drawing not in ("polygon", "line"):
+            return                 # freehand and ellipse are drags (`_grab_corner`)
         point = np.array([x, y], float)
         if self.drawing == "line":
             self._points.append(point)
@@ -1564,10 +2032,6 @@ class ROIManagerWindow(QMainWindow):
                 (self.redo_button, history.can_redo, history.redo_label, "redo")):
             button.setEnabled(can)
             button.setToolTip(f"{what}: {label}" if can else f"nothing to {what}")
-            text = f"{what.capitalize()} {_lowered(label) if can else 'ROI edit'}"
-            # elided: a long label must not widen the column of the ROI list
-            button.setText(button.fontMetrics().elidedText(
-                text, Qt.ElideRight, UNDO_TEXT_WIDTH))
 
     def _edit(self, what: str):
         """An undoable edit, named after the selected ROI's number."""
@@ -1603,22 +2067,8 @@ class ROIManagerWindow(QMainWindow):
     def _finish_polygon(self) -> None:
         polygon = [[float(p[0]), float(p[1])] for p in self._points]
         self._cancel_drawing()
-        if len(polygon) < 3:
-            return
-        centre = np.asarray(polygon, float).mean(axis=0)
-        roi = self._selected()
-        if self.draft is not None or roi is None:
-            self.draft = centre                    # a drafted ROI with this outline
-            self._draft_track = None
-            self.draft_polygon = polygon
-        else:
-            with self._edit("Outline"):
-                roi.polygon = polygon
-                roi.center = [float(centre[0]), float(centre[1])]
-                # an ROI of an id drawn round: that id inside the outline
-                roi.spatial = True
-            self.changed.emit()
-        self.redraw()
+        if len(polygon) >= 3:
+            self._set_shape(polygon=polygon, what="Outline")
 
     def _finish_line(self) -> None:
         line = [[float(p[0]), float(p[1])] for p in self._points]
@@ -1657,11 +2107,11 @@ class ROIManagerWindow(QMainWindow):
         """Back to the global circle or square."""
         self._cancel_drawing()
         if self.draft is not None:
-            self.draft_polygon = None
+            self.draft_polygon = self.draft_ellipse = None
         roi = self._selected()
         if roi is not None and self.draft is None:
             with self._edit("Clear shape of"):
-                roi.polygon = None
+                roi.polygon = roi.ellipse = None
                 if roi.ids:              # an ROI of an id: back to the id alone
                     roi.spatial = False
             self.changed.emit()
@@ -1736,6 +2186,8 @@ class ROIManagerWindow(QMainWindow):
         self.active = roi_id
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         project.navigation["roi"] = roi_id
         if roi.file_id != self.current_file():
@@ -1941,12 +2393,16 @@ class ROIManagerWindow(QMainWindow):
             else:
                 roi = self.project.add_roi(file_id, [float(self.draft[0]),
                                                      float(self.draft[1])],
-                                           polygon=self.draft_polygon)
+                                           polygon=self.draft_polygon,
+                                           ellipse=self.draft_ellipse)
             roi.lines = dict(self.draft_lines)
             roi.angle = float(self.draft_angle)
+            roi.frames, roi.z = self.draft_frames, self.draft_z
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = None
         self.draft_lines = {}
+        self.draft_frames = self.draft_z = None
+        self.draft_ellipse = None
         self.draft_angle = 0.0
         self.active = roi.id
         self.project.navigation["roi"] = roi.id
@@ -1958,6 +2414,176 @@ class ROIManagerWindow(QMainWindow):
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None
+
+    # ------------------------------------------------------------ geometry
+    def show_geometry(self) -> None:
+        """The project's shape, size and ROI view in the fields; the shape
+        *track* while a click drafts tracks (`ROIProject.drafts_tracks`)."""
+        project = self.project
+        was, self._filling_geometry = self._filling_geometry, True
+        try:
+            self.shape_box.setCurrentText("track" if project.drafts_tracks
+                                          else project.shape)
+            self.size_box.setEnabled(not project.drafts_tracks)
+            if not self.size_box.hasFocus():
+                self.size_box.setValue(project.size_nm)
+            if not self.view_box.hasFocus():
+                self.view_box.setValue(project.preview_nm)
+        finally:
+            self._filling_geometry = was
+
+    def _on_draft_shape(self, text: str) -> None:
+        """A shape chosen: what a click drafts from now on, whatever the
+        layer draws.  *track* leaves the shape of the ROIs that have one."""
+        if self._filling_geometry:
+            return
+        self.project.navigation["draft"] = "track" if text == "track" else "shape"
+        self.size_box.setEnabled(text != "track")
+        if text != "track":
+            self._on_geometry()
+
+    def _on_geometry(self) -> None:
+        if self._filling_geometry:
+            return
+        shape = self.shape_box.currentText()
+        try:
+            self.project.set_geometry(self.size_box.value(),
+                                      None if shape == "track" else shape)
+        except ValueError as error:
+            self.status.showMessage(str(error))
+            return
+        self.project.preview_nm = self.view_box.value()
+        self._fill_table()               # the out-of-date marks follow the size
+        self.redraw()
+        self.changed.emit()
+
+    def _from_region(self) -> None:
+        """The region drawn in the 2D view becomes an ROI of the file shown,
+        its outline kept as it is."""
+        region = self.session.roi
+        file_id = self.current_file()
+        if region is None:
+            self.status.showMessage("draw a region in the 2D view first")
+            return
+        if file_id is None:
+            return
+        if not self.session.axes().is_default:
+            # an ROI is a place in nanometres; this region is in the picture's units
+            self.status.showMessage("the 2D view shows custom axes; switch them off "
+                                    "to draw a region that can become an ROI")
+            return
+        polygon = region.vertices().tolist()
+        center = np.asarray(polygon, float).mean(axis=0)
+        try:
+            with self.project.edit(f"Add the drawn {region.kind}"):
+                roi = self.project.add_roi(file_id, [float(center[0]), float(center[1])],
+                                           polygon=polygon)
+        except ValueError as error:      # a line of zero width, a degenerate outline
+            self.status.showMessage(str(error))
+            return
+        self.draft = None
+        self.select(roi.id)
+        self.changed.emit()
+        self.status.showMessage(f"added the drawn {region.kind} as ROI {roi.number}")
+
+    def showEvent(self, event) -> None:
+        """The splitters sized once the window has its size: set before, Qt
+        shares the room out again by what each side asks for, and the zoom,
+        which asks least, came out half as wide as the others."""
+        super().showEvent(event)
+        if self._sized:
+            return
+        self._sized = True
+        self.size_panes()
+
+    def size_panes(self) -> None:
+        """Three pictures of a third of the width each, as tall as they are
+        wide (with the row of buttons over each), the lists and *annotate*
+        sharing the rest; never less than a third of the height below."""
+        width = self.whole_splitter.width() or self.width()
+        height = self.whole_splitter.height() or self.height()
+        third = width // 3
+        self.top_splitter.setSizes([third, third, width - 2 * third])
+        self.bottom_splitter.setSizes([width // 2, width - width // 2])
+        above = self.roi_pane.height() - self.roi_pane.graphics.height()
+        rows = self.roi_bar.height() + max(above, 0) + 12
+        pictures = min(third + rows, int(height * 0.67))
+        self.whole_splitter.setSizes([pictures, height - pictures])
+
+    def shown_roi(self):
+        """The ROI the ROI image shows: the draft, as the ROI *Add* would
+        make of it (not stored), or the selected one; None when neither."""
+        from dataclasses import replace
+        from ..roi_manager.core import ROI
+        if self.draft is None:
+            return self._selected()
+        if self.draft_track is not None:
+            return replace(self.draft_track, frames=self.draft_frames, z=self.draft_z,
+                           angle=float(self.draft_angle))
+        file_id = self.current_file()
+        if file_id is None:
+            return None
+        return ROI(file_id, [float(self.draft[0]), float(self.draft[1])],
+                   polygon=self.draft_polygon, ellipse=self.draft_ellipse,
+                   lines=dict(self.draft_lines),
+                   angle=float(self.draft_angle), frames=self.draft_frames, z=self.draft_z)
+
+    def _follow_ranges(self) -> None:
+        """*frames and z* shows what the ROI image does -- the draft while
+        there is one -- so it is refreshed when that changes, not on every
+        redraw (its plots measure the ROI)."""
+        roi = self.shown_roi()
+        key = None if roi is None else (
+            self.draft is not None, roi.id if self.draft is None else None,
+            tuple(roi.center), id(roi.polygon), id(roi.ellipse), roi.frames and tuple(roi.frames),
+            roi.z and tuple(roi.z))
+        if key != getattr(self, "_ranges_key", None) and hasattr(self, "annotation"):
+            self._ranges_key = key
+            self.annotation.ranges.refresh()
+
+    def set_draft_ranges(self, **ranges) -> None:
+        """The draft's frame or z range (``frames=``, ``z=``), set in
+        *frames and z*: not an edit of the project, so no undo step."""
+        if "frames" in ranges:
+            self.draft_frames = ranges["frames"]
+        if "z" in ranges:
+            self.draft_z = ranges["z"]
+        self.redraw()
+
+    def _cut_to_ranges(self, view):
+        """The ROI image's layers without the localizations inside the shown
+        ROI that its frame or z range leaves out -- what it measures, where
+        it is, and everything round it as it is.  The ROI image only: the
+        overview and the zoom show the file whatever an ROI's range."""
+        from dataclasses import replace
+        from ..roi_manager.core import narrow
+        roi = self.shown_roi()
+        if roi is None or (roi.frames is None and roi.z is None):
+            return view
+        layers, state = view
+        whole = replace(roi, frames=None, z=None)
+        only_ranges = replace(roi, ids={})
+        out = []
+        for snap in layers:
+            if snap.locs is None or snap.index is None or snap.mask is None \
+                    or not snap.visible:
+                out.append(snap)
+                continue
+            try:
+                rows = self.project.members(whole, snap.locs, snap.index)
+            except Exception:          # a picture is a courtesy, never a failure
+                out.append(snap)
+                continue
+            cut = np.setdiff1d(rows, narrow(only_ranges, snap.locs, rows),
+                               assume_unique=True)
+            cut = cut[cut < len(snap.mask)]
+            if not len(cut):
+                out.append(snap)
+                continue
+            mask = np.array(snap.mask, dtype=bool, copy=True)
+            mask[cut] = False
+            out.append(replace(snap, mask=mask, known_indices=None, memo={}))
+        return tuple(out), state
 
     # ------------------------------------------------------------- turning
     def _shown_angle(self) -> float:

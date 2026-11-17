@@ -3,7 +3,9 @@
 A `Region` is what a viewer draws, what a plugin's `Selection` carries and
 what an ROI of the ROI manager is the shape of; it knows nothing about
 widgets.  A line is a rectangle of a given width around the segment, as in
-SMAP, and is stored as its four corners.  A circle is its centre and radius.
+SMAP, and is stored as its four corners.  A circle is its centre and radius;
+an ellipse its centre, its two semi-axes and its tilt, so that what it holds
+is decided exactly rather than by a polygon round it.
 
 One shape type for both, rather than the session's drawn region and the ROI
 manager's ROI each with their own geometry: `docs/regions.md` has the
@@ -24,7 +26,7 @@ CIRCLE_POINTS = 65
 
 @dataclass
 class Region:
-    kind: str                               # "rect", "polygon", "line" or "circle"
+    kind: str                    # "rect", "polygon", "line", "circle" or "ellipse"
     points: np.ndarray                      # (n, 2): rect corners, vertices, or the centre
     width: float = 0.0                      # line only, in data units
     radius: float = 0.0                     # circle only, in data units
@@ -32,11 +34,18 @@ class Region:
     # outline: an ROI's centre, which a polygon ROI keeps wherever it was
     # put and which a measurement may want (NPC Corners counts round it)
     anchor: Optional[np.ndarray] = None
+    # ellipse only: the semi-axes (a, b), in data units, and the tilt of the
+    # first, in degrees anticlockwise from +x in data coordinates (y up) --
+    # as a line's angle (`roi_manager.core.line_angle_length`)
+    axes: Optional[Tuple[float, float]] = None
+    tilt: float = 0.0
 
     def __post_init__(self):
         self.points = np.asarray(self.points, dtype=np.float64).reshape(-1, 2)
         if self.anchor is not None:
             self.anchor = np.asarray(self.anchor, dtype=np.float64).reshape(2)
+        if self.axes is not None:
+            self.axes = (float(self.axes[0]), float(self.axes[1]))
 
     @classmethod
     def rect(cls, x0, y0, x1, y1) -> "Region":
@@ -76,6 +85,20 @@ class Region:
         return cls("circle", [center], radius=float(radius))
 
     @classmethod
+    def ellipse(cls, center, a: float, b: float, tilt: float = 0.0) -> "Region":
+        """Semi-axes ``a`` along ``tilt`` degrees and ``b`` across it."""
+        return cls("ellipse", [center], axes=(abs(float(a)), abs(float(b))),
+                   tilt=float(tilt))
+
+    def _ellipse_frame(self, x, y):
+        """Points in the ellipse's own axes, in units of its semi-axes."""
+        (cx, cy), (a, b) = self.points[0], self.axes
+        t = np.radians(self.tilt)
+        dx, dy = np.asarray(x, float) - cx, np.asarray(y, float) - cy
+        return ((dx * np.cos(t) + dy * np.sin(t)) / max(a, 1e-12),
+                (-dx * np.sin(t) + dy * np.cos(t)) / max(b, 1e-12))
+
+    @classmethod
     def square(cls, center, size: float) -> "Region":
         """The square of side ``size`` centred on ``center``."""
         cx, cy = np.asarray(center, float)
@@ -84,16 +107,21 @@ class Region:
 
     @classmethod
     def site(cls, center, shape: str, size: float, polygon=None,
-             angle: float = 0.0) -> "Region":
-        """An ROI manager ROI: its own polygon, or the project's shape -- a
-        circle of diameter ``size`` or a square of side ``size`` -- around its
-        centre.  ``angle`` (degrees) turns the square with the structure, so
-        that it is upright in the ROI's own frame (`SiteFrame`): the ROI
-        manager shows the ROI turned by -``angle``, and the square stays
-        square on the screen while the localizations turn under it.  A
-        polygon is drawn round localizations and is never turned."""
+             angle: float = 0.0, ellipse=None) -> "Region":
+        """An ROI manager ROI: its own polygon or ellipse, or the project's
+        shape -- a circle of diameter ``size`` or a square of side ``size``
+        -- around its centre.  ``angle`` (degrees) turns the square with the
+        structure, so that it is upright in the ROI's own frame
+        (`SiteFrame`): the ROI manager shows the ROI turned by -``angle``,
+        and the square stays square on the screen while the localizations
+        turn under it.  A polygon and an ellipse are drawn round
+        localizations and are never turned by it.  ``ellipse`` is
+        ``{"center", "axes", "tilt"}`` (`roi_manager.core.ROI.ellipse`)."""
         if polygon is not None:
             region = cls.polygon(polygon)
+        elif ellipse is not None:
+            region = cls.ellipse(ellipse["center"], *ellipse["axes"],
+                                 ellipse.get("tilt", 0.0))
         elif shape == "circle":
             region = cls.circle(center, size / 2)
         elif angle % 360:
@@ -110,6 +138,12 @@ class Region:
         if self.kind == "circle":
             (cx, cy), r = self.points[0], self.radius
             return cx - r, cy - r, cx + r, cy + r
+        if self.kind == "ellipse":
+            (cx, cy), (a, b) = self.points[0], self.axes
+            t = np.radians(self.tilt)
+            hx = float(np.hypot(a * np.cos(t), b * np.sin(t)))
+            hy = float(np.hypot(a * np.sin(t), b * np.cos(t)))
+            return cx - hx, cy - hy, cx + hx, cy + hy
         (x0, y0), (x1, y1) = self.points.min(axis=0), self.points.max(axis=0)
         return x0, y0, x1, y1
 
@@ -132,7 +166,16 @@ class Region:
             t = np.linspace(0, 2 * np.pi, CIRCLE_POINTS)[:-1]
             (cx, cy), r = self.points[0], self.radius
             return np.column_stack((cx + r * np.cos(t), cy + r * np.sin(t)))
+        if self.kind == "ellipse":
+            t = np.linspace(0, 2 * np.pi, CIRCLE_POINTS)[:-1]
+            return self._ellipse_points(t)
         return self.points.copy()
+
+    def _ellipse_points(self, t) -> np.ndarray:
+        (cx, cy), (a, b) = self.points[0], self.axes
+        u, v = a * np.cos(t), b * np.sin(t)
+        c, s = np.cos(np.radians(self.tilt)), np.sin(np.radians(self.tilt))
+        return np.column_stack((cx + u * c - v * s, cy + u * s + v * c))
 
     def outline(self) -> Tuple[np.ndarray, np.ndarray]:
         """The closed outline, ``(xs, ys)``, for drawing."""
@@ -140,6 +183,9 @@ class Region:
             t = np.linspace(0, 2 * np.pi, CIRCLE_POINTS)
             (cx, cy), r = self.points[0], self.radius
             return cx + r * np.cos(t), cy + r * np.sin(t)
+        if self.kind == "ellipse":
+            p = self._ellipse_points(np.linspace(0, 2 * np.pi, CIRCLE_POINTS))
+            return p[:, 0], p[:, 1]
         v = self.vertices()
         return np.r_[v[:, 0], v[0, 0]], np.r_[v[:, 1], v[0, 1]]
 
@@ -152,6 +198,9 @@ class Region:
         if self.kind == "circle":
             (cx, cy), r = self.points[0], self.radius
             return (x - cx) ** 2 + (y - cy) ** 2 <= r ** 2
+        if self.kind == "ellipse":
+            u, v = self._ellipse_frame(x, y)
+            return u ** 2 + v ** 2 <= 1.0
         return inside_polygon(x, y, self.points)
 
     def rim_distance(self, x: float, y: float) -> float:
@@ -169,12 +218,18 @@ class Region:
             q = np.abs(p - middle) - np.array([x1 - x0, y1 - y0]) / 2
             inside = min(max(q[0], q[1]), 0.0)       # signed distance to the box
             return abs(float(np.linalg.norm(np.maximum(q, 0.0)) + inside))
+        if self.kind == "ellipse":
+            # to the drawn outline: near enough for a click on the rim
+            return polyline_distance(self.vertices(), x, y, closed=True)
         return polyline_distance(self.points, x, y, closed=True)
 
     def to_dict(self) -> Dict:
         d = {"kind": self.kind, "points": self.points.tolist(), "width": self.width}
         if self.kind == "circle":
             d["radius"] = self.radius
+        if self.kind == "ellipse":
+            d["axes"] = list(self.axes)
+            d["tilt"] = self.tilt
         if self.anchor is not None:
             d["anchor"] = self.anchor.tolist()
         return d
@@ -182,9 +237,12 @@ class Region:
     @classmethod
     def from_dict(cls, d: Dict) -> "Region":
         return cls(d["kind"], d["points"], d.get("width", 0.0), d.get("radius", 0.0),
-                   d.get("anchor"))
+                   d.get("anchor"), d.get("axes"), d.get("tilt", 0.0))
 
     def __str__(self) -> str:
+        if self.kind == "ellipse":
+            a, b = self.axes
+            return f"ellipse ROI {2 * a:.0f} x {2 * b:.0f}"
         x0, y0, x1, y1 = self.bounds
         return f"{self.kind} ROI {x1 - x0:.0f} x {y1 - y0:.0f}"
 

@@ -797,6 +797,10 @@ class Assistant:
         elif region.kind == "line":
             out["ends"] = [[round(float(v), 1) for v in end] for end in region.ends()]
             out["width"] = round(float(region.width), 1)
+        elif region.kind == "ellipse":
+            out["center"] = [round(float(v), 1) for v in region.points[0]]
+            out["semi_axes"] = [round(float(v), 1) for v in region.axes]
+            out["tilt_deg"] = round(float(region.tilt), 1)
         else:
             out["vertices"] = [[round(float(v), 1) for v in p] for p in region.points]
         out["bounds_nm"] = [round(float(v), 1) for v in region.bounds]

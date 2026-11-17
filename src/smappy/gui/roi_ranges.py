@@ -21,7 +21,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QGridLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
                                QWidget)
 
-from ..roi_manager.core import DIRECTION
+from ..roi_manager.core import DIRECTION, LINE
 
 SIDE_POINTS = 20000          # the side view draws at most this many, a sample
 BAND_BRUSH = (46, 158, 79, 70)
@@ -43,14 +43,15 @@ def bound_text(value) -> str:
 
 def side_axis(roi, x, y) -> tuple:
     """The side view's horizontal axis: x, or the distance along the ROI's
-    *direction* line from its start, and what to call it."""
-    line = roi.lines.get(DIRECTION)
+    *line* (an older project's *direction*) from its start, and what to
+    call it."""
+    line = roi.lines.get(LINE, roi.lines.get(DIRECTION))
     if line is None:
         return x, "x (nm)"
     (x0, y0), (x1, y1) = line
     d = np.array([x1 - x0, y1 - y0], float)
     d /= max(np.hypot(*d), 1e-12)
-    return (x - x0) * d[0] + (y - y0) * d[1], "along direction (nm)"
+    return (x - x0) * d[0] + (y - y0) * d[1], "along the line (nm)"
 
 
 class RangePlot(pg.PlotWidget):
@@ -72,7 +73,8 @@ class RangePlot(pg.PlotWidget):
 
 
 class RangePanel(QWidget):
-    """The selected ROI's frame range and z range."""
+    """The frame range and z range of the ROI the ROI image shows: the
+    selected one, or the draft while there is one."""
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
@@ -135,7 +137,7 @@ class RangePanel(QWidget):
     # ------------------------------------------------------------ showing
     def refresh(self) -> None:
         """The fields and plots for the selected ROI."""
-        roi = self.window._selected()
+        roi = self.window.shown_roi()
         self._filling = True
         try:
             for (name, k), edit in self.fields.items():
@@ -201,11 +203,17 @@ class RangePanel(QWidget):
 
     # ------------------------------------------------------------ editing
     def _set(self, roi_ids, **ranges) -> None:
-        self.project.set_ranges(roi_ids, **ranges)
+        """Set the ranges of these stored ROIs, one undo step, or of the
+        draft (its id is in none of them), which is no edit of the project."""
+        stored = [i for i in roi_ids if i in self.project.rois]
+        if not stored:
+            self.window.set_draft_ranges(**ranges)
+            return
+        self.project.set_ranges(stored, **ranges)
         self.window.ranges_changed()
 
     def _typed(self, name: str) -> None:
-        roi = self.window._selected()
+        roi = self.window.shown_roi()
         if self._filling or roi is None:
             return
         bounds = [number_or_none(self.fields[(name, k)].text()) for k in (0, 1)]
@@ -218,7 +226,7 @@ class RangePanel(QWidget):
 
     def _dragged(self, name: str) -> None:
         """A band let go: its ends, an end at the data's edge left open."""
-        roi = self.window._selected()
+        roi = self.window.shown_roi()
         plot = self.frame_plot if name == "frames" else self.side_plot
         if self._filling or roi is None or plot.band.data is None:
             return
@@ -234,13 +242,14 @@ class RangePanel(QWidget):
         self._set([roi.id], **{name: None if bounds == [None, None] else bounds})
 
     def _clear(self) -> None:
-        roi = self.window._selected()
+        roi = self.window.shown_roi()
         if roi is not None:
             self._set([roi.id], frames=None, z=None)
 
     def _to_all(self) -> None:
-        roi = self.window._selected()
+        roi = self.window.shown_roi()
         if roi is None:
             return
         used = [i for i, r in self.project.rois.items() if r.use]
-        self._set(used, frames=roi.frames, z=roi.z)
+        if used:
+            self._set(used, frames=roi.frames, z=roi.z)

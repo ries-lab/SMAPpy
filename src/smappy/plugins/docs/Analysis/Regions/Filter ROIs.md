@@ -49,7 +49,7 @@ everything.
 ROIs it would use, and how many are used now.
 
 **Running it** sets *use* on every ROI, as one step of the ROI manager's
-undo (*Undo ROI edit*).  An ROI keeps its number and its results either way.
+undo (*Undo*).  An ROI keeps its number and its results either way.
 
 ## Parameters
 

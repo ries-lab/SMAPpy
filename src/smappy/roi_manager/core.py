@@ -68,6 +68,22 @@ def polygon_vertices(value):
     return v.tolist()
 
 
+def ellipse_shape(value) -> dict:
+    """``{"center": [x, y], "axes": [a, b], "tilt": degrees}`` as floats,
+    or a ValueError: finite, both semi-axes positive."""
+    try:
+        center = [float(v) for v in value["center"]]
+        axes = [abs(float(v)) for v in value["axes"]]
+        tilt = float(value.get("tilt", 0.0))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("an ellipse is a center, two semi-axes and a tilt, "
+                         f"not {value!r}") from None
+    if len(center) != 2 or len(axes) != 2 or not np.isfinite(center + axes + [tilt]).all() \
+            or min(axes) <= 0:
+        raise ValueError("an ellipse needs a finite centre and two positive semi-axes")
+    return {"center": center, "axes": axes, "tilt": tilt}
+
+
 def rows_in(locs, index, region, keep=None):
     """The rows of ``locs`` inside ``region``, sorted, through its spatial
     index: only the rows in the region's bounding box are tested.  ``keep``,
@@ -137,6 +153,11 @@ class ROI:
     # uuid stays the key the results are stored under.
     number: int = 0
     polygon: Optional[list] = None
+    # an ellipse drawn round the structure, ``{"center": [x, y], "axes":
+    # [a, b], "tilt": degrees}`` in absolute nm (`Region.ellipse`): the ROI's
+    # own shape, as a polygon is, never turned by `angle`.  Replaced, never
+    # edited in place.  At most one of the two
+    ellipse: Optional[dict] = None
     # named lines, ``{name: [[x0, y0], [x1, y1]]}`` in absolute nm, start
     # then end: an orientation or a distance drawn by hand (SMAP's ``line1``
     # and ``line2``, with names).  Replaced, never edited in place, as
@@ -180,7 +201,7 @@ class ROI:
         is worked out when asked for rather than held.  ``angle`` turns a
         square with the structure (`Region.site`): the project's to say,
         since only a project that rotates its ROIs turns it."""
-        return Region.site(self.center, shape, size_nm, self.polygon, angle)
+        return Region.site(self.center, shape, size_nm, self.polygon, angle, self.ellipse)
 
     @classmethod
     def from_dict(cls, saved: dict) -> "ROI":
@@ -196,6 +217,8 @@ class ROI:
         point(roi.center)
         if roi.polygon is not None:
             polygon_vertices(roi.polygon)
+        if roi.ellipse is not None:
+            roi.ellipse = ellipse_shape(roi.ellipse)
         lines = {str(k): line_points(v) for k, v in (roi.lines or {}).items()}
         if saved.get("direction") is not None and DIRECTION not in lines:
             lines[DIRECTION] = line_points(saved["direction"])
@@ -299,7 +322,11 @@ class ROIStep:
     rois: Dict[str, "ROI"]
 
 
-# The line a new project offers, and the name an old file's one line had.
+# The line a new project offers.  Before an ROI had an angle it was called
+# ``direction``; the angle took that role, and a line is now only a line
+LINE = "line"
+# the name an old file's one line had, and SMAP's ``rotationpos``: kept, so
+# their lines, angles and signatures read as they were written
 DIRECTION = "direction"
 
 
@@ -539,7 +566,7 @@ class ROIProject:
     def __init__(self, session):
         self.session = session
         self.layer = 0
-        self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
+        self.preview_nm = 0.0        # the ROI image's width; 0 = two ROI widths
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
         # (id and length of a table, file number) -> that file's rows of it:
@@ -585,7 +612,7 @@ class ROIProject:
         self.annotation_lists: Dict[str, List[str]] = {
             k: list(v) for k, v in DEFAULT_ANNOTATION_LISTS.items()}
         # the names a line is drawn under (`ROI.lines`)
-        self.line_names: List[str] = [DIRECTION]
+        self.line_names: List[str] = [LINE]
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -776,13 +803,18 @@ class ROIProject:
         return True
 
     def add_roi(self, file_id, center, polygon=None, origin=None, ids=None,
-                spatial=True, frames=None, z=None):
+                spatial=True, frames=None, z=None, ellipse=None):
         """A new ROI, numbered.  ``ids``, ``spatial``, ``frames`` and ``z``
-        narrow what it holds beyond its shape (`ROI.ids`)."""
+        narrow what it holds beyond its shape (`ROI.ids`); ``polygon`` or
+        ``ellipse`` is its own shape."""
         if file_id not in self.sources:
             raise KeyError(file_id)
+        if polygon is not None and ellipse is not None:
+            raise ValueError("an ROI has a polygon or an ellipse, not both")
         roi = ROI(file_id, point(center), polygon=(None if polygon is None else
-                  polygon_vertices(polygon)), ids=id_values(ids),
+                  polygon_vertices(polygon)),
+                  ellipse=None if ellipse is None else ellipse_shape(ellipse),
+                  ids=id_values(ids),
                   spatial=bool(spatial), frames=value_range(frames, "frame range"),
                   z=value_range(z, "z range"))
         if not roi.spatial and not roi.ids:
@@ -832,6 +864,9 @@ class ROIProject:
         delta = np.asarray(center) - roi.center
         if roi.polygon is not None:
             roi.polygon = (np.asarray(roi.polygon) + delta).tolist()
+        if roi.ellipse is not None:
+            roi.ellipse = {**roi.ellipse,
+                           "center": (np.asarray(roi.ellipse["center"]) + delta).tolist()}
         roi.lines = {name: (np.asarray(line) + delta).tolist()
                      for name, line in roi.lines.items()}
         roi.center = center
@@ -845,6 +880,8 @@ class ROIProject:
             out = {"spatial": False}
         elif roi.polygon is not None:
             out = {"center": roi.center, "polygon": roi.polygon}
+        elif roi.ellipse is not None:
+            out = {"center": roi.center, "ellipse": roi.ellipse}
         else:
             out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
         # only while it turns something (a square, `SITE_X`), so that the
@@ -876,7 +913,8 @@ class ROIProject:
         if roi.spatial:
             angle = self.site_angle(roi)
             parts.append(f"{self.shape} ROI {self.size_nm:.0f} x {self.size_nm:.0f}"
-                         if angle and roi.polygon is None else str(self.region(roi)))
+                         if angle and roi.polygon is None and roi.ellipse is None
+                         else str(self.region(roi)))
             if angle:
                 parts[-1] += f" at {angle:.0f}\u00b0"
         parts += [f"{column} {value}" for column, value in roi.ids.items()]
@@ -980,7 +1018,7 @@ class ROIProject:
         ungrouped = self.state(roi.file_id).tables.ungrouped
         locs = ungrouped.locs
         key = (roi.id, id(locs), json_text([roi.ids, roi.frames, roi.z, roi.spatial,
-                                            roi.center, roi.polygon]))
+                                            roi.center, roi.polygon, roi.ellipse]))
         found = self._traces.get(key)
         if found is None:
             rows = self.members(roi, locs, ungrouped.index)
@@ -2151,7 +2189,7 @@ class ROIProject:
         self.navigation = {}
         self.rotate = False
         self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
-        self.line_names = [DIRECTION]
+        self.line_names = [LINE]
         self.order = []
         from ..chain import Block
         self.block = Block()
@@ -2200,7 +2238,9 @@ class ROIProject:
     @property
     def preview_width(self) -> float:
         """What the ROI image covers, in nm."""
-        return self.preview_nm or 3.0 * self.size_nm
+        # twice the ROI: its surroundings, with the structure still filling
+        # the picture (three times left it small)
+        return self.preview_nm or 2.0 * self.size_nm
 
     def rois_of(self, file_id) -> List[ROI]:
         return [r for r in self.rois.values() if r.file_id == file_id]

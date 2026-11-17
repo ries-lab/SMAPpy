@@ -363,7 +363,7 @@ Unticked, only the cluster's centre is placed, and the ROI is the circle or
 square of the Regions tab, at its size: the right choice when the clusters
 are alike (pores, say) and every ROI should be measured in the same window.
 Such ROIs follow the Regions tab's shape and size when they are changed
-later, and *Clear shape* in the ROI manager turns a hull ROI into one.  A
+later, and *Clear shape* (the ROI manager's *Polygon* menu) turns a hull ROI into one.  A
 cluster whose localizations all lie on one line has no hull; it gets the
 centre and the Regions tab's shape even with the outline ticked, and the
 text says how many did.

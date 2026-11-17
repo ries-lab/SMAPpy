@@ -20,7 +20,7 @@ a line drawn on it in the ROI manager.  The orientation is none, the ROI's
 own angle, a line drawn on it, or an angle that was measured.  For a
 structure without a direction, such as a pore seen from the top, a centre
 is enough.  For one with a direction, turn each ROI in the ROI manager
-(*rotate*, then its handle) or draw a line along it (*Draw line*), and turn
+(*rotate*, then its handle) or draw a line along it (*Line*), and turn
 by that.
 
 The new table is added to the session as a file of its own, beside the data,

@@ -34,7 +34,7 @@ def arrows(tmp_path, n=12, seed=3):
     for x, y, gamma in zip(copies["x_nm"], copies["y_nm"], copies["gamma_deg"]):
         roi = project.add_roi(file_id, [x, y])
         a = np.radians(gamma)
-        project.set_line(roi.id, "direction", [[x, y], [x + 60 * np.cos(a),
+        project.set_line(roi.id, "line", [[x, y], [x + 60 * np.cos(a),
                                                         y + 60 * np.sin(a)]])
     return session
 
@@ -65,12 +65,12 @@ def test_turned_to_their_lines_the_arrows_all_point_the_same_way(tmp_path):
     settings = RoiImagesSettings(path=str(tmp_path / "rois.pdf"), size_nm=250.0,
                                  pixelsize_nm=5.0)
     as_they_lie = session.run(RoiImages(), settings).data["pictures"]
-    settings.turn_to = "direction"
+    settings.turn_to = "line"
     turned = session.run(RoiImages(), settings).data["pictures"]
     assert len(turned) == 12 and turned[0].image.shape == (50, 50, 3)
     assert _alike(turned) > 0.4 > _alike(as_they_lie)
     # the line is drawn along the picture's x, from its centre to the right
-    line = turned[0].lines["direction"]
+    line = turned[0].lines["line"]
     np.testing.assert_allclose(line[:, 1], 25.0, atol=1e-6)
     assert line[1, 0] - line[0, 0] == pytest.approx(60 / 5.0)
 
@@ -114,8 +114,8 @@ def test_the_form_counts_the_pictures_and_offers_the_lines(tmp_path):
     session = arrows(tmp_path, n=4)
     state = RoiImages().describe(session.context(),
                                  RoiImagesSettings(path="x.pdf", pixelsize_nm=5.0))
-    assert "4 ROIs of 150 x 150 pixels, 1 page" in state.notice.text   # 3 x 250 nm
-    assert ("direction", "direction") in state.choices["turn_to"]
+    assert "4 ROIs of 100 x 100 pixels, 1 page" in state.notice.text   # 2 x 250 nm
+    assert ("line", "line") in state.choices["turn_to"]
     tiff = RoiImages().describe(session.context(), RoiImagesSettings(format="tiff"))
     assert not tiff.active["columns"]
 

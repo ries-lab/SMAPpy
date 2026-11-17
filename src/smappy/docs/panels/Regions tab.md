@@ -76,18 +76,17 @@ nearest = gap.min(axis=1)
 roi = rois[int(np.argmin(np.where(nearest > 250, nearest, np.inf)))]
 cx, cy = roi.center
 size = project.size_nm
-view = 3 * size                                   # ROI view left at its default
+view = 2 * size                                   # ROI view left at its default
 render = RenderSettings(sigma_settings=SigmaSettings(factor=0.5))
 display = DisplaySettings(contrast=2.5)
 ```
 
 **1. ROIs.**  ROIs are made in the ROI manager: found automatically, clicked
-by hand, or taken from a region drawn in the 2D view (*Add the drawn region as
-an ROI*).  Each ROI is a centre in one file; its outline is the shape and
-size set here, the same for all of them, unless the ROI has an outline of its
-own (a polygon).
+by hand, or taken from a region drawn in the 2D view (*Add drawn region*).  Each ROI is a centre in one file; its outline is the shape and
+size set in the ROI manager (*shape*, *size*), the same for all of them,
+unless the ROI has an outline of its own (a polygon or an ellipse).
 
-```figure Left: simulated nuclear pores, with the ROIs Segment regions proposed on them with its defaults (discs of 30 to 150 nm), each a circle of the default 300 nm.  Right: one ROI as the ROI manager shows it -- a field three ROIs wide around it, with its neighbour outside.
+```figure Left: simulated nuclear pores, with the ROIs Segment regions proposed on them with its defaults (discs of 30 to 150 nm), each a circle of the default 300 nm.  Right: one ROI as the ROI manager shows it -- a field two ROIs wide around it, with its neighbour outside.
 fig.set_size_inches(7.5, 3.4)
 a, b = fig.subplots(1, 2)
 whole = FieldOfView.from_range((0, 10000), (0, 10000), 20.0)
@@ -140,7 +139,7 @@ show(axes[3], "drawn polygon", Polygon(outline, fill=False, lw=0.8))
 roi.polygon = None
 ```
 
-**3. Measuring.**  *per-region steps*, under *geometry*, is a list of
+**3. Measuring.**  *per-region steps* is a list of
 steps that run once in every included ROI of every file -- plugins that measure a
 region and return a row of numbers for it, such as Localization Statistics,
 the same plugin as on the whole view.  One row per ROI, the rows together
@@ -184,7 +183,7 @@ by the first localization layer's bounds, with blinks merged if that layer
 merges them.  With blinks merged an ROI's count is a count of blinks, and its
 photons are the blinks' summed photons.
 
-**A drawn region.**  *Add the drawn region as an ROI* turns the region drawn
+**A drawn region.**  *Add drawn region*, in the ROI manager, turns the region drawn
 in the 2D view into an ROI of the file chosen in the ROI manager: a rectangle
 becomes its four corners, a line the rectangle of its width around it, a
 polygon its vertices.  The ROI's centre is the mean of the vertices.  Such an
@@ -250,44 +249,6 @@ it is not open): what the steps draw for the selected ROI, a tab per
 enabled step, redrawn in place by the next ROI.  The step whose tab is open
 runs on every selection, measured or not, because a figure cannot be stored.
 Closing that window unticks it.
-
-### geometry
-What every ROI's outline is, unless it has a polygon of its own.  First
-and open when the tab opens: it is what a click in the ROI manager makes.
-Under the two sections, a line, and the tab's plugins with + to add one.
-
-### shape
-*circle* for round structures; *square* for structures that are square or
-when the corners do not matter.  A square of side $d$ is 27 % larger in area
-than a circle of diameter $d$, so its corners reach further towards a
-neighbour.
-
-*track* is not an outline: a click in the ROI manager then drafts an ROI of
-the [track](plugin:Panels/Glossary) whose line passes nearest it -- that
-track's localizations and none of those crossing it -- and *Add* keeps it.
-The tracks are those of the attribute the layer draws them by (the Render
-tab's *track id*), and every ROI that has an outline keeps it.  Until a
-shape is chosen here, *track* is what the list shows whenever the layer is
-rendered as *tracks*, and the shape otherwise.
-
-### size
-The circle's diameter, or the square's side.  Start at about twice the
-structure's diameter: the default 300 nm fits a nuclear pore (about 110 nm)
-with room for the localization scatter and a misplaced centre.  Too small,
-and the edge of the structure is cut off where the centre is off; too large,
-and neighbours and background come in.  Changing it applies to every
-circle and square ROI and puts their measurements out of date.
-
-### ROI view
-A display setting only: it changes nothing that is measured.  The width of
-the field the ROI manager shows around the selected ROI.  At 0 it is three
-times the ROI size.  Wider shows more context; narrower, more detail of the
-ROI.
-
-### Add the drawn region as an ROI
-Draw a rectangle, a circle, a line or a polygon in the 2D view first.  Useful for
-structures that are not round, or a region the automatic finder would not
-propose; the outline is kept as it is.
 
 ### region filter
 Keeps the localizations of the [regions](plugin:Panels/Glossary) whose
