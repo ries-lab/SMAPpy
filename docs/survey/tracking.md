@@ -143,6 +143,14 @@ TrackMate adds a feature penalty to d²: cost = d²·(1 + Σ 1.5·w·|f₁−f�
 
 **How it would fit SMAPpy.** Optional per-candidate weights in `link_global`'s `gain`. Candidates are generated at R_max as now, and a candidate is accepted only when d² ≤ (radius of its end)². Size S for the per-track radius, M for the likelihood cost.
 
+**Measured, 2026-11: not worth it now** (`studies/tracking/two_states.py`, `two_states.csv`).  0.02 and 1 um^2/s at 50/50, 10 ms frames, 20 nm precision, blinking, R for the fast state as the page says; with and without switching at 2.5 /s.
+* Wrong links: 0.2% at 0.05 /um^2 (fast rms jump / spacing 0.09), 1% at 0.1--0.2 (0.13--0.18), 3.5% at 0.5 (0.28), 6.5% at 1 (0.4).  Only 25--40% of them start in the slow state; the rest are fast particles swapping, which no radius per track can tell apart.
+* The jump fit is untouched at every density (D within 5%, fractions within 0.02 of the true ids').  The spectrum loses up to 0.09 of its slow fraction and grows a spurious peak from 0.5 /um^2.
+* The HMM is what suffers: without switching, spurious rates of 0.15 /s at 0.05 /um^2, 0.3 /s at 0.1--0.2, 1.3 /s at 0.5 and 2.7 /s at 1; with 2.5 /s true, +15% at 0.2, +60% at 0.5, +100% at 1.
+* The gain's bound: the links cut where they exceed three times the rms jump of the **true** state at their start (an oracle radius, no relinking) take the wrong links only from 6.6% to 5.3% at 1 /um^2 and from 3.5% to 2.8% at 0.5; the HMM's spurious rates fall by about half.  With each track's own median jump instead of the truth, 3--5% of the true links are cut too and the fast D falls by 10--20%.  R for the slow state cuts a third of the links and loses the fast state.
+
+So a per-track radius or likelihood cost would fix a minority of the errors, and only in the regime (fast jump over a quarter of the spacing) where the fast-fast swaps it cannot fix dominate.  The HMM's sensitivity to single wrong jumps is the thing to address instead: an outlier term in its emissions, or a density limit on the page.
+
 #### 6. Drift from the tracks themselves -- trackpy  (S, port with attribution)
 
 **What it does.** `motion.compute_drift` (`motion.py:271`): the mean displacement of all particles between consecutive frames, accumulated (optionally smoothed). `subtract_drift` (`:318`) removes it.
