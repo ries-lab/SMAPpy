@@ -115,3 +115,61 @@ def note_missing_tool(path: Path, asked: str, workaround: str, tool: str) -> Pat
                   f"- instead: {workaround.strip()}\n"
                   f"- SMAPpy {__version__}\n")
     return path
+
+
+# ------------------------------------------------------------- own code
+# What the assistant computed with code of its own rather than SMAPpy's
+# plugins.  Its own code is welcome -- exploration, a figure, glue between
+# plugins' results, a method SMAPpy lacks -- but an analysis done half outside
+# the plugins looked, in the GUI's history and in a chain, as if it were
+# whole, and nobody learnt which plugin would have saved the detour.  So each
+# such step is written down: in the session's history, where the user sees
+# it beside the plugins' runs, and here, appended to without asking, because
+# it is a record of what was done (as the history is), not a wish list
+# (`note_missing_tool`, which asks first).  The script is copied beside it:
+# the assistant's folder is scratch, and the record should outlive it.
+OWN_CODE = "own-code.md"
+SCRIPT_LIMIT = 1_000_000        # bytes of a script copied; a larger one is named only
+
+
+def own_code_file() -> Path:
+    from .. import config
+    return config.config_dir() / "assistant" / OWN_CODE
+
+
+def record_own_code(path: Path, what: str, why: str, used: Sequence[str] = (),
+                    script: Optional[Path] = None) -> Dict[str, Any]:
+    """Append one step done with the assistant's own code to ``path``, and
+    copy ``script`` into ``<path's folder>/own-code/``.  Returns the log's
+    path and the copy's (None where nothing was copied, with why)."""
+    from .. import __version__
+    now = datetime.now()
+    copied: Optional[Path] = None
+    note = ""
+    if script is not None:
+        script = Path(script).expanduser()
+        if not script.is_file():
+            note = f"not copied: {script} is not a file"
+        elif script.stat().st_size > SCRIPT_LIMIT:
+            note = f"not copied: larger than {SCRIPT_LIMIT // 1000} kB"
+        else:
+            folder = path.parent / "own-code"
+            folder.mkdir(parents=True, exist_ok=True)
+            copied = folder / f"{now:%Y%m%d-%H%M%S}-{script.name}"
+            copied.write_bytes(script.read_bytes())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with path.open("a", encoding="utf-8") as out:
+        if new:
+            out.write("# What the assistant did with its own code\n\n"
+                      "Steps of an analysis computed outside SMAPpy's plugins: "
+                      "what each did, why no plugin did it, and the plugins it "
+                      "built on.  A step that recurs is a plugin to write.\n")
+        out.write(f"\n## {now:%Y-%m-%d %H:%M} -- {what.strip()}\n\n"
+                  f"- why not a plugin: {why.strip()}\n"
+                  f"- built on: {', '.join(used) if used else 'no plugin'}\n")
+        if script is not None:
+            out.write(f"- script: {script}"
+                      + (f" (copy: {copied.name})" if copied else f" ({note})") + "\n")
+        out.write(f"- SMAPpy {__version__}\n")
+    return {"file": path, "copy": copied, "note": note}

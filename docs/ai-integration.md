@@ -198,6 +198,14 @@ Qt-free, returning JSON; the protocol layer only lists and calls them.
   the model in a sentence after a detour), and zipped into *Save a bug
   report*.  The tools are written by hand, through review; this is how a
   conversation's gap reaches whoever writes them.
+* `record_own_code` -- a step the model computed with code of its own
+  rather than a plugin: what, why no plugin did it, the plugins it built
+  on, its script.  A line in the session's history (`Session.log`, "own
+  code"), an entry in `<config dir>/assistant/own-code.md` and the script
+  copied to `own-code/` beside it -- without asking, because it is a record
+  of what was done, as the history is, where `note_missing_tool` is a wish.
+  Not zipped into a bug report: it describes the user's analysis.  See
+  "Plugins first" below.
 * `list_actions`, `do_action` -- the GUI only (`needs="actions"`): what
   the menus and buttons do, by name -- *File/Open*, *File/Add* (the Load
   plugin's buttons), the Render tab's *+ > image layer* and layer buttons,
@@ -288,6 +296,38 @@ and the first paragraph of its page's *What it does* -- where the page says
 what the plugin is for and when not to use it.  Generated, not written, so
 it cannot go stale; the pages and the code stay the authority, and the index
 only says which page to read.
+
+Every plugin a search finds comes with its main settings and defaults
+(`tools._sketch`), enough for a first `run_plugin` without
+`describe_plugin` -- see the next section; every one, because a plugin
+cheaper to try than its neighbours in the list is the one tried.  Words a
+query negates ("drift correction without beads") count for none
+(`index.wanted_words`): they had put the bead plugins above COMET.
+
+### Plugins first
+
+A coding agent has Python against `smappy` at hand, and in use (2026-11)
+it often computed in numpy what a plugin already gives -- the analysis an
+AI without SMAPpy would have written, untested and recorded nowhere.  Its
+own code is wanted -- to explore, to combine plugins' results, for a
+figure or a method SMAPpy lacks -- so there is no rule against it; three
+things lean it towards the plugins and make the rest visible:
+
+* the instructions (`INSTRUCTIONS`, and the assistant folder's AGENTS.md)
+  say to ask `find_plugins` first and to build on the plugins' numbers, and
+  to tell the user in two parts what SMAPpy's plugins did and what its own
+  code did;
+* `find_plugins` is a list of candidates, and the instructions say so: the
+  model chooses among them from their pages, judges whether one is usable
+  on this data at all (its needs against `session_state`), says why it
+  chose it over a close alternative, and says so when none fits -- a
+  word-overlap ranking cannot know that drift without beads is COMET's;
+* the path from a question to a run is shorter: `find_plugins` carries the
+  settings, `run_plugin` answers with the result's `data` and `values`;
+* `record_own_code` puts each step of its own into the history beside the
+  plugins' runs and into `own-code.md`, whose recurring entries are the
+  plugins to write next.  A script worth keeping is offered as a plugin of
+  the user's (their plugin folder), written only on a yes.
 
 What is not in the code -- a lab's preferences, typical values, failure modes
 people have learnt to recognise -- is written down only once test tasks show

@@ -157,6 +157,24 @@ there and what tool would have done it, to `missing-tools.md` in SMAPpy's
 settings folder.  *Help > Save a bug report...* takes the file along, so the
 tools that keep coming up can be built.
 
+## What it did with its own code
+
+The assistant is told to use SMAPpy's plugins first, and to build on their
+numbers rather than compute the same thing again in code of its own.  A
+plugin is tested, appears in the history and runs again in the GUI and in a
+batch; a script the assistant wrote does none of that.  Its own code is
+still welcome, for exploring, for combining plugins' results, for a figure
+or for what no plugin does.  When it tells you a result, it says which part
+SMAPpy's plugins computed and which part its own code did.
+
+Each step of its own code that went into a result is recorded without
+asking.  It appears in the history (*Analysis > Process > History*) as *own
+code*, with why no plugin did it.  It is also added to `own-code.md` in
+SMAPpy's settings folder, with the script copied beside it.  Steps that keep
+coming back there are plugins worth writing.  When a script seems worth
+keeping, the assistant offers to turn it into a plugin of your own, and
+writes one only if you agree.
+
 ## Suggest and act
 
 In *suggest* mode the assistant reads and tries on copies of the session,
