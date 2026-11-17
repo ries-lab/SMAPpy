@@ -164,7 +164,8 @@ def region_values(session, source: str, label: str) -> Tuple[List[str], Dict[str
     if label == ANNOTATIONS:
         from .roi_manager.core import annotation_columns
         rows = [{"use": bool(project.rois[i].use),
-                 **annotation_columns(project.rois[i], {})} for i in ids]
+                 **annotation_columns(project.rois[i], {}, project.uses_angles)}
+                for i in ids]
     else:
         table = project.tables.get(label)
         if table is None:

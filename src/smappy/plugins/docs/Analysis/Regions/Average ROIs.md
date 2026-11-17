@@ -16,11 +16,12 @@ points one way, and writes all of them, superimposed, into one new table.
 
 The centre is the ROI's own centre, a centre that was measured in it (by
 [Cluster shape](plugin:Analysis/Measure/Cluster shape), say), or a point of
-a line drawn on it in the ROI manager.  The orientation is none, a line drawn
-on it, or an angle that was measured.  For a structure without a direction,
-such as a pore seen from the top, a centre is enough.  For one with a
-direction, draw a line along it on each ROI (*Draw line* in the ROI
-manager), and turn by that line.
+a line drawn on it in the ROI manager.  The orientation is none, the ROI's
+own angle, a line drawn on it, or an angle that was measured.  For a
+structure without a direction, such as a pore seen from the top, a centre
+is enough.  For one with a direction, turn each ROI in the ROI manager
+(*rotate*, then its handle) or draw a line along it (*Draw line*), and turn
+by that.
 
 The new table is added to the session as a file of its own, beside the data,
 and can be rendered, filtered and measured like any other.  It holds the
@@ -156,7 +157,10 @@ guessed, measure the centre first and use *measured values*: `x_nm` and
 
 ### orientation.by
 *as it is* averages without turning: right for a structure without a
-direction, or one imaged always the same way round.
+direction, or one imaged always the same way round.  *the ROI's angle* is
+the angle each ROI was turned to in the ROI manager, whether or not
+*rotate* is ticked there -- the same turn that shows its structure along
+$x$ there puts it along $x$ in the average.
 
 ### filtered
 Off, as SMAP: every localization in the ROI, whatever the layers' filters.
@@ -184,7 +188,8 @@ Based on SMAP's *AverageSites* and its variants *AverageSites_kinetochore*,
 *_window* and *_NPC* ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
 * **One plugin, the centre and the turn as choices.**  *AverageSites* only
-  centres; *_window* and *_NPC* turn by the site's own rotation and a
+  centres; *_window* and *_NPC* turn by the site's own rotation (here *the
+  ROI's angle*, which a SMAP file's rotation line becomes) and a
   LocMoFit model; *_kinetochore* centres on a point of one annotation line
   and turns by the other, and draws images rather than writing a table.
   Here any of the centres goes with any of the turns.  LocMoFit's model is

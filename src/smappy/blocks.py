@@ -186,7 +186,8 @@ class BlockPlugin(ChainPlugin):
 
         def cut(k):
             return RegionScratch(source.tables(k), source.region(k),
-                                 source.region_ids()[k], tag=True)
+                                 source.region_ids()[k], tag=True,
+                                 frame=source.frame(k))
         if not n or not steps:
             return None
         picks = np.unique(np.linspace(0, n - 1, min(n, SAMPLE_REGIONS)).astype(int))

@@ -112,6 +112,13 @@ field `field.<i>.<name>`.
 * `ctx.stopped` -- True when the user pressed Stop; check it in long loops.
 * `ctx.region` -- in a per-region run, the ROI's shape; `ctx.per_region`
   says whether this is one.
+* `ctx.frame` -- in an ROI of the ROI manager, its own frame: `.center`,
+  `.angle` (the ROI's angle when the ROI manager's *rotate* is on, else 0),
+  `.to_site(xy)` and `.to_data(uv)`; None elsewhere.  The tables of such a
+  run also have `x_site_nm` / `y_site_nm`: positions relative to the ROI's
+  centre, turned so its structure lies along +x.  `x_nm` / `y_nm` stay the
+  positions in the file -- report a position in those if it is to be found
+  in the file again.
 
 ## The table: `Localizations`
 

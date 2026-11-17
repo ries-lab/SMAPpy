@@ -23,7 +23,7 @@ from ..group import GROUP_COLUMNS, GroupSettings
 from ..layer_state import Tables, ViewState
 from ..locs import Localizations
 from ..region_table import RegionTable
-from ..regions import Region
+from ..regions import SITE_X, SITE_Y, Region, SiteFrame
 from ..render import RenderAxes
 
 
@@ -142,6 +142,12 @@ class ROI:
     # and ``line2``, with names).  Replaced, never edited in place, as
     # `annotations` is
     lines: dict = field(default_factory=dict)
+    # the structure's orientation in degrees, ``atan2(dy, dx)`` as a line's
+    # (`line_angle_length`): an annotation, 0 until turned, which the
+    # project uses only while it rotates its ROIs (`ROIProject.rotate`) --
+    # then the ROI is shown and measured in its own frame (`SiteFrame`).
+    # SMAP's ``rotationpos`` line
+    angle: float = 0.0
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -167,12 +173,14 @@ class ROI:
         return bool(self.ids) or not self.spatial or self.frames is not None \
             or self.z is not None
 
-    def region(self, shape: str, size_nm: float) -> Region:
+    def region(self, shape: str, size_nm: float, angle: float = 0.0) -> Region:
         """This ROI's shape: its own polygon, or the project's ``shape`` of
         ``size_nm`` around its centre -- which the ROI does not know, since
         changing it is one edit for every ROI of the project.  So the shape
-        is worked out when asked for rather than held."""
-        return Region.site(self.center, shape, size_nm, self.polygon)
+        is worked out when asked for rather than held.  ``angle`` turns a
+        square with the structure (`Region.site`): the project's to say,
+        since only a project that rotates its ROIs turns it."""
+        return Region.site(self.center, shape, size_nm, self.polygon, angle)
 
     @classmethod
     def from_dict(cls, saved: dict) -> "ROI":
@@ -180,7 +188,9 @@ class ROI:
         carry ``reviewed``: it was never shown in the GUI, where every ROI
         counted as reviewed, so it is dropped and ``use`` alone decides.
         Files from before the named lines carry one ``direction``: it is the
-        line called ``direction``."""
+        line called ``direction``.  Files from before the angle take it from
+        that line, which was the orientation the ROI was drawn with; the line
+        stays, as any other."""
         names = {f.name for f in fields(cls)}
         roi = cls(**{k: v for k, v in saved.items() if k in names})
         point(roi.center)
@@ -190,6 +200,10 @@ class ROI:
         if saved.get("direction") is not None and DIRECTION not in lines:
             lines[DIRECTION] = line_points(saved["direction"])
         roi.lines = lines
+        if "angle" in saved:
+            roi.angle = normal_angle(saved["angle"])
+        elif DIRECTION in lines:
+            roi.angle = normal_angle(line_angle_length(lines[DIRECTION])[0])
         roi.ids = id_values(roi.ids)
         roi.frames = value_range(roi.frames, "frame range")
         roi.z = value_range(roi.z, "z range")
@@ -295,6 +309,16 @@ def range_text(bounds, unit: str = "") -> str:
     return f"{lo}\u2013{hi}{unit}"
 
 
+def normal_angle(value) -> float:
+    """An angle in degrees, finite, in (-180, 180] as `line_angle_length`
+    gives them, so the same orientation is always the same number."""
+    angle = float(value)
+    if not np.isfinite(angle):
+        raise ValueError(f"an ROI's angle must be a finite number, not {value!r}")
+    angle = -((-angle + 180.0) % 360.0 - 180.0)
+    return 0.0 if angle == 0 else angle
+
+
 def line_points(line) -> list:
     """``[[x0, y0], [x1, y1]]`` as floats, or a ValueError."""
     a = np.asarray(line, dtype=float)
@@ -314,10 +338,15 @@ def line_angle_length(line) -> tuple:
             float(np.hypot(x1 - x0, y1 - y0)))
 
 
-def line_columns(roi: "ROI") -> Dict[str, float]:
-    """An ROI's lines as numbers of its row: ``<name>_angle_deg`` and
-    ``<name>_length_nm``."""
-    out = {}
+def line_columns(roi: "ROI", angle: bool = False) -> Dict[str, float]:
+    """An ROI's orientation and lines as numbers of its row: with ``angle``,
+    ``roi_angle_deg``, the ROI's angle (an annotation, whether or not the
+    ROIs are rotated; named as ``roi_x_nm``, since *Cluster shape* measures
+    an ``angle_deg``), and ``<name>_angle_deg`` and ``<name>_length_nm``
+    per line.  ``angle`` is the project's `ROIProject.uses_angles`: a column
+    of zeros in every project that never turned an ROI was only noise in
+    the summaries."""
+    out = {"roi_angle_deg": float(roi.angle)} if angle else {}
     for name, line in roi.lines.items():
         angle, length = line_angle_length(line)
         out[f"{name}_angle_deg"] = angle
@@ -370,7 +399,8 @@ def annotation_lists_text(lists: Dict[str, List[str]]) -> str:
     return "\n".join(f"{name}: {', '.join(words)}" for name, words in lists.items())
 
 
-def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
+def annotation_columns(roi: ROI, values: Dict[str, Any],
+                       angle: bool = False) -> Dict[str, Any]:
     """What was said of an ROI by hand, as columns of its row in the results
     table: its keywords, named after their lists -- ``annotation.<list>``
     where a measurement already has the name -- as text, so the numeric
@@ -379,7 +409,7 @@ def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {(name if name not in values else f"annotation.{name}"): keyword
                            for name, keyword in roi.annotations.items()}
     out.update({(name if name not in values else f"annotation.{name}"): value
-                for name, value in line_columns(roi).items()})
+                for name, value in line_columns(roi, angle).items()})
     return out
 
 
@@ -525,6 +555,13 @@ class ROIProject:
         self.size_nm = 300.0  # circle diameter or square side length
         self.shape = "circle"
         self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
+        # Whether the ROIs are shown and measured in their own frame, turned
+        # by each ROI's angle (`ROI.angle`, `SiteFrame`).  Chosen in the ROI
+        # manager like a view, but it decides what is measured -- a square
+        # turns with the structure, `SITE_X` / `SITE_Y` are turned -- so it
+        # is saved with the project, not in `navigation`, and enters each
+        # ROI's signature (`geometry`).  Off, every angle is ignored.
+        self.rotate = False
         # the layer's, which `sync` puts here
         self.filters: Dict[str, tuple] = {}
         self.inverted: frozenset = frozenset()      # the layer's bounds turned around
@@ -575,6 +612,38 @@ class ROIProject:
         if shape not in ("circle", "square"):
             raise ValueError("Shape must be circle or square")
         self.size_nm, self.shape = size, shape
+
+    def set_rotate(self, on: bool) -> None:
+        """Show and measure the ROIs in their own frames, or not.  Not an
+        edit of the ROIs (nothing to undo): their angles stay either way."""
+        self.rotate = bool(on)
+
+    @property
+    def uses_angles(self) -> bool:
+        """Whether the ROIs' angles mean anything here: the project rotates
+        them, or one has been turned.  Then each ROI's row has its angle,
+        ``roi_angle_deg`` (`line_columns`)."""
+        return self.rotate or any(r.angle for r in self.rois.values())
+
+    def site_angle(self, roi) -> float:
+        """The angle an ROI is shown and measured at: its own while the
+        project rotates, else 0."""
+        return float(roi.angle) if self.rotate else 0.0
+
+    def frame(self, roi) -> SiteFrame:
+        """The ROI's own frame (`SiteFrame`): its centre, and its angle while
+        the project rotates -- the frame the ROI manager shows it in."""
+        return SiteFrame(roi.center, self.site_angle(roi))
+
+    def set_angle(self, roi_id, angle) -> None:
+        """Turn an ROI: its orientation, in degrees.  Undoable; its results
+        go out of date only while the project rotates (`geometry`)."""
+        roi = self.rois[roi_id]
+        angle = normal_angle(angle)
+        if angle == roi.angle:
+            return
+        with self.edit(f"Turn ROI {roi.number}"):
+            roi.angle = angle
 
     def set_tiles(self, size_nm):
         """Cover each file with a grid of squares this wide; 0 turns it off."""
@@ -778,6 +847,10 @@ class ROIProject:
             out = {"center": roi.center, "polygon": roi.polygon}
         else:
             out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
+        # only while it turns something (a square, `SITE_X`), so that the
+        # signatures of a project that does not rotate stay as they were
+        if self.site_angle(roi):
+            out["angle"] = self.site_angle(roi)
         out["direction"] = roi.lines.get(DIRECTION)
         others = {k: v for k, v in roi.lines.items() if k != DIRECTION}
         if others:
@@ -795,11 +868,17 @@ class ROIProject:
         column has none)."""
         if not roi.spatial:
             return None
-        return roi.region(self.shape, self.size_nm)
+        return roi.region(self.shape, self.size_nm, self.site_angle(roi))
 
     def describe(self, roi) -> str:
         """What the ROI is, in a few words: its shape, or its id."""
-        parts = [str(self.region(roi))] if roi.spatial else []
+        parts = []
+        if roi.spatial:
+            angle = self.site_angle(roi)
+            parts.append(f"{self.shape} ROI {self.size_nm:.0f} x {self.size_nm:.0f}"
+                         if angle and roi.polygon is None else str(self.region(roi)))
+            if angle:
+                parts[-1] += f" at {angle:.0f}\u00b0"
         parts += [f"{column} {value}" for column, value in roi.ids.items()]
         if roi.frames is not None:
             parts.append("frames " + range_text(roi.frames))
@@ -937,7 +1016,10 @@ class ROIProject:
 
         A line first because a line ROI is what the 3D window turns its box
         and its view with: an ROI drawn round a structure with a line along
-        it is looked at along that line, as a profile of it is taken.
+        it is looked at along that line, as a profile of it is taken.  While
+        the project rotates, an ROI with no ``line`` asked for is looked at
+        along its angle instead, through its centre, as the ROI manager
+        shows it.
         """
         if roi.spatial:
             region = self.region(roi)
@@ -948,6 +1030,13 @@ class ROIProject:
             region = Region.rect(float(np.min(xs)), float(np.min(ys)),
                                  float(np.max(xs)), float(np.max(ys)))
         lines = dict(roi.lines or {})
+        if self.rotate and line not in lines:
+            frame = self.frame(roi)
+            xs, ys = region.outline()
+            u, _ = frame.columns(xs, ys)
+            if len(u) and np.ptp(u) > 0:
+                return Region.line(*frame.to_data([[u.min(), 0.0], [u.max(), 0.0]]),
+                                   self._across(region, frame))
         if line not in lines:
             line = next((n for n in list(self.line_names) + list(lines)
                          if n in lines), "")
@@ -963,6 +1052,12 @@ class ROIProject:
             + (np.asarray(ys) - p0[1]) * d[0] / length
         width = float(np.ptp(across)) if len(across) else 0.0
         return Region.line(p0, p1, width if width > 0 else length)
+
+    @staticmethod
+    def _across(region, frame) -> float:
+        """How wide a region is across its frame's x axis."""
+        _, v = frame.columns(*region.outline())
+        return float(np.ptp(v)) if len(v) else 0.0
 
     def rim_distance(self, roi, x: float, y: float) -> float:
         """How far a point is from what the ROI is drawn as: its outline, or
@@ -1025,10 +1120,12 @@ class ROIProject:
         ``ctx.region`` is the ROI's shape.  Which rows belong is the ROI's shape alone -- a
         filter is applied inside it, never to decide membership -- and no
         drawn ROI or 3D slab narrows it further: the region replaces them.
+        Every table carries the ROI's own frame beside ``x_nm`` / ``y_nm``,
+        `SITE_X` / `SITE_Y`, and ``ctx.frame`` is that frame (`SiteFrame`).
         """
         region = self.region(roi)
         return self._context(region, self._region_tables(roi, region),
-                             region_id=roi.id, **extra)
+                             region_id=roi.id, frame=self.frame(roi), **extra)
 
     def _context(self, region, tables, **extra):
         """A context over what `_region_tables` cut: one per run, since a
@@ -1243,7 +1340,7 @@ class ROIProject:
             values.update(segment_columns(roi, values))
             place = {"roi_x_nm": float(roi.center[0]), "roi_y_nm": float(roi.center[1]),
                      "in_drawn_roi": None if inside is None else inside[roi_id]}
-            out[roi_id] = {**place, **values, **annotation_columns(roi, values)}
+            out[roi_id] = {**place, **values, **annotation_columns(roi, values, self.uses_angles)}
         return out
 
     def drawn_roi(self) -> Optional[Region]:
@@ -1480,7 +1577,7 @@ class ROIProject:
             if scratch is None:                     # only if something runs
                 region = self.region(roi)
                 scratch = RegionScratch(self._region_tables(roi, region), region,
-                                        roi_id, tag=tag)
+                                        roi_id, tag=tag, frame=self.frame(roi))
                 original = scratch.locs
             if state != "current":
                 # a step re-run only for its figure tells nobody anything
@@ -1623,7 +1720,7 @@ class ROIProject:
             if values or own:
                 values = {**values, **own}
                 rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values,
-                             **annotation_columns(roi, values)})
+                             **annotation_columns(roi, values, self.uses_angles)})
         return rows
 
     def _pipeline_results(self, steps):
@@ -1642,7 +1739,7 @@ class ROIProject:
             values = pipeline_module.merged_values(record)
             if values:
                 rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values,
-                             **annotation_columns(roi, values)})
+                             **annotation_columns(roi, values, self.uses_angles)})
         return rows
 
     def find(self, file_id, plugin=None, settings=None, parameters=None):
@@ -1975,7 +2072,8 @@ class ROIProject:
                        session.tables.peek_grouped() if session.tables.covers(here)
                        else None)
                    for i, lay in enumerate(session.layers) if not lay.is_image}
-        locs = session.locs[rows]
+        frame = self.frame(roi)
+        locs = with_frame(session.locs[rows], frame)
         tables = {}
         where = self.describe(roi)
         # not the region filter, nor bounds on values written from regions:
@@ -1992,7 +2090,7 @@ class ROIProject:
             if locset is not None:
                 keep = self._file_mask(locset.locs, source.number)
                 g = self._blinks(roi, region, locset, keep, rows)
-                entry["grouped"] = (locset.locs[g], Selection(
+                entry["grouped"] = (with_frame(locset.locs[g], frame), Selection(
                     np.asarray(lay.state.filter_for(locset).mask_without(*skip),
                                dtype=bool)[g],
                     layer=i, roi=region, name=f"{lay.name}, blinks merged, {where}"))
@@ -2028,6 +2126,7 @@ class ROIProject:
         return {"format_version": FORMAT_VERSION if narrowed else 1,
                 "size_nm": self.size_nm, "shape": self.shape,
                 "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
+                "rotate": self.rotate,
                 "navigation": self.navigation,
                 "annotation_lists": self.annotation_lists,
                 "line_names": self.line_names,
@@ -2050,6 +2149,7 @@ class ROIProject:
         self.runs = []
         self.tables = {}
         self.navigation = {}
+        self.rotate = False
         self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
         self.line_names = [DIRECTION]
         self.order = []
@@ -2066,6 +2166,7 @@ class ROIProject:
         self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
         self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
         self.navigation = dict(doc.get("navigation", {}))
+        self.rotate = bool(doc.get("rotate", False))
         self.set_annotation_lists(doc.get("annotation_lists", DEFAULT_ANNOTATION_LISTS))
         self.set_line_names(doc.get("line_names", [DIRECTION]))
         self.order = [str(i) for i in doc.get("order", [])]
@@ -2110,6 +2211,16 @@ class ROIProject:
 
     def source_of(self, number: int) -> Optional[Source]:
         return next((s for s in self.sources.values() if s.number == number), None)
+
+
+def with_frame(locs: Localizations, frame: SiteFrame) -> Localizations:
+    """A region's table with its frame's columns, `SITE_X` and `SITE_Y`,
+    beside the absolute ones: a new table over the same arrays, so the
+    session's own never carries them."""
+    if "x_nm" not in locs or "y_nm" not in locs:
+        return locs
+    u, v = frame.columns(locs["x_nm"], locs["y_nm"])
+    return Localizations({**locs.columns, SITE_X: u, SITE_Y: v}, dict(locs.metadata))
 
 
 def block_from(doc: dict):

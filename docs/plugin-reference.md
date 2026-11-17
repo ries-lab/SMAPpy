@@ -47,6 +47,15 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   result's text if they should reach the history.
 * `ctx.region_id` / `ctx.per_region` -- set when the run is one region of
   many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
+* `ctx.frame` -- in an ROI of the ROI manager, the ROI's own frame
+  (`regions.SiteFrame`): its `center` and the `angle` it is shown at (its
+  `ROI.angle` while the project's *rotate* is on, else 0), with
+  `to_site(xy)` / `to_data(uv)`; None elsewhere.  Every table of such a run
+  carries the same as two columns, `x_site_nm` / `y_site_nm` (SMAP's
+  `xnmrot` / `ynmrot`), beside `x_nm` / `y_nm`, which always stay the
+  file's positions.  Report a position meant to be found again in the file
+  in `x_nm`; use the site columns for the structure's own axes.  The site
+  columns are never written back to the session's table.
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The panel's Run is Stop while a run goes, and sets `stop`.

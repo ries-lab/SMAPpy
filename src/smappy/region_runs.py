@@ -167,6 +167,10 @@ class ColumnRegions:
         """A region of an id column has no shape: its rows are its id's."""
         return None
 
+    def frame(self, k: int):
+        """Nor a frame of its own (`SiteFrame`): an ROI's alone."""
+        return None
+
     def inputs(self, k: Optional[int] = None) -> Dict[str, Any]:
         """What every region's results depend on (see the module docstring):
         the same for all of them, so ``k`` is not read."""
@@ -332,6 +336,10 @@ class ROIRegions:
 
     def region(self, k: int):
         return self.project.region(self.project.rois[self.ids[k]])
+
+    def frame(self, k: int):
+        """The ROI's own frame (`SiteFrame`), which its tables are cut with."""
+        return self.project.frame(self.project.rois[self.ids[k]])
 
     def inputs(self, k: int) -> Dict[str, Any]:
         return self.project.inputs(self.project.rois[self.ids[k]])
@@ -630,9 +638,10 @@ class RegionScratch:
     """
 
     def __init__(self, cut, region=None, region_id: Optional[str] = None,
-                 tag: bool = False):
+                 tag: bool = False, frame=None):
         pinned, rows, layer, session = cut
         self.region, self.region_id = region, region_id
+        self.frame = frame                    # an ROI's own (`SiteFrame`), or None
         self.layer, self.session = layer, session
         self.start_rows = np.asarray(rows)
         self.rows = self.start_rows              # None once the table has changed
@@ -658,7 +667,8 @@ class RegionScratch:
         locs, selection = self.pinned[self.layer]["ungrouped"]
         return Context(session=self.session, locs=locs, selection=selection,
                        layer=self.layer, pinned=self.pinned, rows=self.rows,
-                       region=self.region, region_id=self.region_id, **extra)
+                       region=self.region, region_id=self.region_id,
+                       frame=self.frame, **extra)
 
     def apply(self, result, label: str = "") -> None:
         """What a step handed back: a new table becomes the region's, and the

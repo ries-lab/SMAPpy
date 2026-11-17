@@ -274,7 +274,7 @@ class Context:
                  rois=None, grouping: Optional[str] = None,
                  evaluations: Sequence[Tuple[str, str]] = (),
                  stop=None, writer_finished=None, pinned=None, rows=None,
-                 region_id: Optional[str] = None):
+                 region_id: Optional[str] = None, frame=None):
         self.session = session
         # layer -> {"ungrouped"/"grouped": (locs, selection)}, taken when the
         # session's table was still being appended to (`Session.context`), or
@@ -302,6 +302,11 @@ class Context:
         # which region, when this run is one of a run over many (an ROI's id,
         # a cluster's): set for a cluster too, which has no shape
         self.region_id = region_id
+        # the ROI's own frame (`regions.SiteFrame`) in an ROI of the ROI
+        # manager, else None: its centre and the angle it is shown at, with
+        # `to_site` / `to_data` between it and ``x_nm`` / ``y_nm``.  The
+        # tables carry the same as columns, ``x_site_nm`` / ``y_site_nm``
+        self.frame = frame
         self.site_table = site_table        # the rows evaluation produced
         # (name, evaluator path) of the evaluations a chain has made before
         # this step, oldest first, each name as *results from* spells it

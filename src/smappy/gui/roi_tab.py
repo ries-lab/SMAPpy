@@ -396,7 +396,7 @@ class ROIHeader(QWidget):
                     text + marks.get(label, "")
             if "error" in entry:
                 values[f"{label} failed"] = entry["error"]
-        values.update(annotation_columns(roi, values))     # the keywords given it
+        values.update(annotation_columns(roi, values, project.uses_angles))     # the keywords given it
         self.results.setRowCount(len(values))
         for row, (name, text) in enumerate(sorted(values.items())):
             self.results.setItem(row, 0, QTableWidgetItem(name))

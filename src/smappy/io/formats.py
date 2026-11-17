@@ -527,9 +527,10 @@ def sml_sites_project(sites: List[dict], n_files: int = 1) -> Optional[dict]:
 
     A site is an ROI at its ``pos`` (nm), numbered by its SMAP ID, with
     *use* and the comment.  Its lines (µm in SMAP) become named lines in nm:
-    the orientation line ``rotationpos`` is `direction`, ``line1`` and
-    ``line2`` keep their names; a line never drawn is all zeros and is left
-    out.  ``line3``, the shape drawn by hand inside the site, is the ROI's
+    the orientation line ``rotationpos`` is `direction`, and its angle the
+    ROI's (``ROI.angle``, SMAP's ``rotationpos.angle``), which the ROI
+    manager turns the ROI by when *rotate* is on; ``line1`` and ``line2``
+    keep their names; a line never drawn is all zeros and is left out.  ``line3``, the shape drawn by hand inside the site, is the ROI's
     polygon: a polygon or free-hand outline as drawn, a rectangle
     (``[x y w h]``) by its corners, an ellipse (``[cx cy a b angle]``) as
     64 vertices; a polyline is not a shape and is left out.  SMAP stores
@@ -566,6 +567,10 @@ def sml_sites_project(sites: List[dict], n_files: int = 1) -> Optional[dict]:
             value = _numbers(entry.get("value"))
             if value is not None and value.size and 1 <= int(value[0]) <= len(words):
                 annotations[name] = words[int(value[0]) - 1]
+        angle = 0.0
+        if DIRECTION_LINE in lines:
+            (x0, y0), (x1, y1) = lines[DIRECTION_LINE]
+            angle = float(np.degrees(np.arctan2(y1 - y0, x1 - x0)))
         file = _numbers((site.get("info") or {}).get("filenumber")
                         if isinstance(site.get("info"), dict) else None)
         file = int(file[0]) - 1 if file is not None and file.size \
@@ -577,7 +582,7 @@ def sml_sites_project(sites: List[dict], n_files: int = 1) -> Optional[dict]:
         comment = note.get("comments")
         rois.append({"file_id": f"file{file}", "center": [float(pos[0]), float(pos[1])],
                      "number": number, "polygon": _sml_shape(note.get("line3")),
-                     "lines": lines, "use": bool(use[0]) if use is not None and use.size else True,
+                     "lines": lines, "angle": angle, "use": bool(use[0]) if use is not None and use.size else True,
                      "comment": comment if isinstance(comment, str) else "",
                      "origin": {"method": "SMAP", "name": str(site.get("name") or "")},
                      "annotations": annotations})

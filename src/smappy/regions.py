@@ -83,14 +83,23 @@ class Region:
         return cls.rect(cx - h, cy - h, cx + h, cy + h)
 
     @classmethod
-    def site(cls, center, shape: str, size: float, polygon=None) -> "Region":
+    def site(cls, center, shape: str, size: float, polygon=None,
+             angle: float = 0.0) -> "Region":
         """An ROI manager ROI: its own polygon, or the project's shape -- a
         circle of diameter ``size`` or a square of side ``size`` -- around its
-        centre."""
+        centre.  ``angle`` (degrees) turns the square with the structure, so
+        that it is upright in the ROI's own frame (`SiteFrame`): the ROI
+        manager shows the ROI turned by -``angle``, and the square stays
+        square on the screen while the localizations turn under it.  A
+        polygon is drawn round localizations and is never turned."""
         if polygon is not None:
             region = cls.polygon(polygon)
         elif shape == "circle":
             region = cls.circle(center, size / 2)
+        elif angle % 360:
+            h = size / 2
+            corners = np.array([[-h, -h], [h, -h], [h, h], [-h, h]])
+            region = cls.polygon(SiteFrame(center, angle).to_data(corners))
         else:
             region = cls.square(center, size)
         region.anchor = np.asarray(center, dtype=np.float64).reshape(2)
@@ -178,6 +187,56 @@ class Region:
     def __str__(self) -> str:
         x0, y0, x1, y1 = self.bounds
         return f"{self.kind} ROI {x1 - x0:.0f} x {y1 - y0:.0f}"
+
+
+# the columns of an ROI's own frame (`SiteFrame`) that a measurement in an
+# ROI gets beside ``x_nm`` / ``y_nm`` (`ROIProject._region_tables`)
+SITE_X, SITE_Y = "x_site_nm", "y_site_nm"
+
+
+@dataclass
+class SiteFrame:
+    """An ROI's own coordinates: positions relative to its ``center``,
+    turned by ``-angle`` so that a structure lying at ``angle`` (degrees,
+    ``atan2(dy, dx)`` as a line's, SMAP's ``pos2angle``) lies along +x.
+
+    What the ROI manager shows when *rotate* is on, and what a measurement
+    in an ROI gets as `SITE_X` / `SITE_Y` beside the absolute ``x_nm`` /
+    ``y_nm``, which never change meaning: a plugin that reports a position
+    to be found again in the file (a circle's centre) keeps using those,
+    one that wants the structure's own axes uses these -- SMAP's
+    ``xnmrot`` / ``ynmrot``.  ``angle`` is the angle in use, 0 when the
+    ROIs are not rotated, so the frame is always the one on the screen.
+    """
+    center: np.ndarray
+    angle: float = 0.0
+
+    def __post_init__(self):
+        self.center = np.asarray(self.center, dtype=np.float64).reshape(2)
+        self.angle = float(self.angle)
+
+    def _turn(self, degrees: float) -> np.ndarray:
+        a = np.radians(degrees)
+        return np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+
+    def to_site(self, xy) -> np.ndarray:
+        """Absolute positions, ``(n, 2)`` (or one ``(2,)``), in the frame."""
+        xy = np.asarray(xy, dtype=np.float64)
+        return (xy - self.center) @ self._turn(-self.angle).T
+
+    def to_data(self, uv) -> np.ndarray:
+        """Positions in the frame back to absolute ones."""
+        uv = np.asarray(uv, dtype=np.float64)
+        return uv @ self._turn(self.angle).T + self.center
+
+    def columns(self, x, y) -> Tuple[np.ndarray, np.ndarray]:
+        """`SITE_X` and `SITE_Y` for columns ``x``, ``y``: one pass, float64."""
+        dx = np.asarray(x, dtype=np.float64) - self.center[0]
+        dy = np.asarray(y, dtype=np.float64) - self.center[1]
+        if not self.angle % 360:
+            return dx, dy
+        c, s = np.cos(np.radians(self.angle)), np.sin(np.radians(self.angle))
+        return c * dx + s * dy, -s * dx + c * dy
 
 
 def polyline_distance(points, x: float, y: float, closed: bool = False) -> float:

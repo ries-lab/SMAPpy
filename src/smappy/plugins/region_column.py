@@ -103,7 +103,7 @@ def own_rows(project) -> List[Dict[str, Any]]:
     out = []
     for roi_id in project.ordered_ids():
         roi = project.rois[roi_id]
-        own = {**line_columns(roi), **keyword_columns(project, roi)} if roi.use else {}
+        own = {**line_columns(roi, project.uses_angles), **keyword_columns(project, roi)} if roi.use else {}
         if own:
             out.append({"roi_id": roi.number, "file_id": roi.file_id, **own})
     return out
