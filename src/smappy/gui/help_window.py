@@ -131,6 +131,11 @@ class HelpWindow(QMainWindow):
         if self.dark:
             palette.setColor(QPalette.Link, QColor("#7ab8ff"))
         self.browser.setPalette(palette)
+        # and in a stylesheet too: the application's (`widgets.EDITABLE_STYLE`) paints every read-only
+        # text edit, this one included, in the window's grey, over the palette's base -- the page read on
+        # grey, at less contrast
+        base = "#000000" if self.dark else "#ffffff"
+        self.browser.setStyleSheet(f"QTextBrowser {{ background-color: {base}; color: {self.text_color}; }}")
         self.browser.document().setDefaultStyleSheet(
             docs.DARK_STYLE if self.dark else docs.STYLE)
         # a page is read, not glanced at like a control: the application's
