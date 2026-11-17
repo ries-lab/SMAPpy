@@ -376,6 +376,40 @@ def source_note() -> str:
             f"its source is on GitHub, ries-lab/SMAPpy at tag v{_version()}.\n")
 
 
+def _plugin_paths() -> List[str]:
+    from .. import plugins
+    return list(plugins.refs())
+
+
+SKETCH_FIELDS = 12  # the settings find_plugins gives each plugin it finds
+
+
+def _sketch(path: str) -> Optional[Dict[str, Any]]:
+    """A plugin's main settings and their defaults -- the ones not under
+    *more* -- so that what `find_plugins` finds can be tried at once.
+    It was four calls from a question to a first run (find_plugins,
+    read_doc, describe_plugin, run_plugin), and an agent with Python at hand
+    found ten lines of numpy cheaper than that and wrote its own analysis
+    instead.  Every plugin found gets them, not the best few: the ranking
+    is word overlap, and the method the user needs is often third or
+    fourth -- one that is cheaper to try than the others is the one tried.
+    None where the plugin cannot be imported: the search must still
+    answer."""
+    from .. import plugins
+    from ..batch import _flat_specs
+    try:
+        fields = _flat_specs(plugins.get(path).specs())
+    except Exception:
+        return None
+    main = {name: _plain(spec.default) for name, spec in fields.items()
+            if not spec.info.advanced}
+    out: Dict[str, Any] = dict(list(main.items())[:SKETCH_FIELDS])
+    more = len(fields) - len(out)
+    if more:
+        out["..."] = f"{more} more: describe_plugin"
+    return out
+
+
 def _within(path: Path, folder: Path) -> bool:
     try:
         path.resolve().relative_to(folder.resolve())
@@ -406,7 +440,7 @@ class Assistant:
 
     def __init__(self, session=None, mode: str = "act", output=None,
                  knowledge_folder=None, viewer=None, panels=None,
-                 missing_tools=None, windows=None, actions=None):
+                 missing_tools=None, windows=None, actions=None, own_code=None):
         if mode not in MODES:
             raise ValueError(f"mode is one of {', '.join(MODES)}, not {mode!r}")
         if session is None:
@@ -423,6 +457,7 @@ class Assistant:
         self.runner = None
         self.window = None
         self.missing_tools = Path(missing_tools or knowledge.missing_tools_file()).expanduser()
+        self.own_code = Path(own_code or knowledge.own_code_file()).expanduser()
         self.proposals: List[Proposal] = []
         self.results: List[Kept] = []
         self._let_go: Dict[str, str] = {}     # id -> why, for `figure`
@@ -870,12 +905,25 @@ class Assistant:
                 for path, ref in plugins.refs(prefix).items()]
 
     @tool("The plugins and help pages that match a question in words, best "
-          "first, each with what its page says it is for.  A map, not the "
-          "reference: read the candidates' pages (read_doc) before choosing.",
+          "first, each with what its page says it is for; each plugin with its "
+          "main settings and defaults, enough for a first run_plugin.  Words "
+          "after 'without', 'no' or 'not' count for none.  Candidates, not an "
+          "answer: the ranking is word overlap, so judge them yourself -- "
+          "what each is for and needs (read_doc) against the question and the "
+          "data -- and take none that does not fit.  Ask it before computing something with code of your "
+          "own: a plugin is tested, recorded and runs again in the GUI.  A "
+          "map, not the reference: read the candidates' pages (read_doc) "
+          "before relying on one.",
           query={"type": "string", "description": "e.g. 'drift without beads'"},
           limit={"type": "integer", "description": "how many, default 8"})
-    def find_plugins(self, query: str, limit: int = 8) -> List[Dict[str, str]]:
-        return index.search(query, limit)
+    def find_plugins(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
+        found: List[Dict[str, Any]] = index.search(query, limit)
+        for entry in found:
+            if entry["kind"] == "plugin":
+                settings = _sketch(entry["path"])
+                if settings is not None:
+                    entry["settings"] = settings
+        return found
 
     @tool("A plugin's settings as run_plugin takes them -- flat dotted names "
           "with type, default, unit, range, choices and help; under 'options' "
@@ -1730,6 +1778,45 @@ class Assistant:
         path = knowledge.note_missing_tool(self.missing_tools, asked, workaround, tool)
         return {"noted": tool, "file": str(path)}
 
+    @tool("Record a step you computed with code of your own instead of a "
+          "plugin -- an analysis, a fit, a statistic, a figure from the data.  "
+          "Your own code is welcome; recording it keeps the analysis honest: "
+          "it goes into the session's history beside the plugins' runs, where "
+          "the user sees it, and into a log of steps no plugin made.  Call it "
+          "once per such step, without asking; not for scratch work you threw "
+          "away, and not for a run_plugin or run_chain, which are recorded.",
+          what={"type": "string",
+                "description": "what the code computed, in a line"},
+          why={"type": "string",
+               "description": "why no plugin did it: none does it, or what the "
+                              "nearest plugin lacks"},
+          used={"type": "array", "items": {"type": "string"},
+                "description": "the plugins' paths whose results it built on"},
+          script={"type": "string",
+                  "description": "the script's file, if there is one: copied "
+                                 "beside the log"})
+    def record_own_code(self, what: str, why: str, used: Sequence[str] = (),
+                        script: str = "") -> Dict[str, Any]:
+        if not what.strip() or not why.strip():
+            raise ToolError("record_own_code needs what the code computed and "
+                            "why no plugin did it")
+        known = set(_plugin_paths())
+        unknown = [u for u in used if u not in known]
+        if unknown:
+            raise ToolError(f"no plugin {', '.join(map(repr, unknown))}: give the "
+                            "paths list_plugins shows")
+        kept = knowledge.record_own_code(self.own_code, what, why, list(used),
+                                         Path(script) if script else None)
+        self.session.log("own code", f"{what.strip()} (no plugin: {why.strip()})",
+                         used=list(used), **({"script": script} if script else {}))
+        out = {"recorded": what.strip(), "file": str(kept["file"]),
+               "history": "in the session's history as 'own code'"}
+        if kept["copy"] is not None:
+            out["copy"] = str(kept["copy"])
+        if kept["note"]:
+            out["script"] = kept["note"]
+        return out
+
     @tool("What was proposed in suggest mode, and what the user did with "
           "each: its status is proposed, opened (its panel shown to the user, "
           "filled in), done or dismissed.  A run the user made from the panel "
@@ -1813,10 +1900,18 @@ How to work:
   suggest it (run_plugin with apply=true, a proposal in suggest mode; show
   the place you mean); or do it (act mode).  When unclear, explain and offer
   to suggest.
-* session_state first.  find_plugins for a question, then read_doc of the
-  candidates before choosing: each page says what the method is for, when not
-  to use it, how to choose its settings and what a good and a bad result look
-  like.  read_source when a page leaves a question open; the code is the
+* session_state first.  find_plugins gives candidates, not an answer: its
+  ranking is word overlap, so the first is not necessarily the best, and
+  you can search again in other words or look through list_plugins.  Choose
+  yourself: read_doc of the likely ones -- each page says what the method
+  is for, when not to use it, what it needs, how to choose its settings and
+  what a good and a bad result look like -- and judge each against the
+  question and the data (session_state: the columns, the kind of data, what
+  the table holds already).  A plugin whose needs the data does not meet
+  (beads, a MINFLUX file, a calibration) is not usable, however well it
+  ranked.  Say which you chose and why, and why not a close alternative;
+  if none fits, say so rather than bend one to the question.
+  read_source when a page leaves a question open; the code is the
   authority on what is computed.
 * describe_plugin for the settings' exact names.  Try with run_plugin
   (apply=false, the default), look at the numbers and the figures (figure),
@@ -1824,8 +1919,20 @@ How to work:
 * Check a method on simulated data with a known truth (File/Simulate/Simulate)
   when you are unsure it suits the data.  scan to see how a result depends on
   a setting.
-* Say what you did as a chain (validate_chain, run_chain): it can be run
-  again in the GUI and over many files with smappy-batch.
+* Plugins first.  Before computing something yourself, see whether a
+  plugin does it, or most of it (find_plugins): a plugin is tested, handles
+  the edge cases its page names, is recorded in the history and runs again
+  in the GUI and in a batch.  Code of your own is welcome on top of that --
+  to explore, to combine plugins' results (run_plugin answers with their
+  numbers: data, values), for a figure, or for what no plugin does -- but
+  build on the plugins rather than redo what one computes.
+* Say what you did in two parts: what SMAPpy did -- the plugins and their
+  settings, as a chain where it can be one (validate_chain, run_chain: it
+  runs again in the GUI and over many files with smappy-batch) -- and what
+  your own code did, and why no plugin did it.  record_own_code each step
+  of your own code that went into a result, so that the user sees it in
+  the history.  Where your code would be worth keeping as a tool, offer to
+  make it a plugin of the user's (their plugin folder): only on a yes.
 * recall before deciding what the user may have decided already; remember
   and save_chain only when the user has agreed to keep it.
 * Two kinds of ROI.  The ROI drawn in the 2D view (session_state's 'roi',

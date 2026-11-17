@@ -358,6 +358,65 @@ def test_a_real_mcp_client_lists_the_tools_and_gets_a_picture(tmp_path):
     assert not picture.is_error and picture.content[0].type == "image"
 
 
+def test_own_code_is_recorded_in_the_history_and_the_log_with_its_script(tmp_path):
+    """Recorded in suggest mode too: it is a record of what was done, not a
+    change to the data, and the user should see it in either mode."""
+    a = simulated(tmp_path, mode="suggest")
+    a.own_code = tmp_path / "assistant" / "own-code.md"
+    script = tmp_path / "ratio.py"
+    script.write_text("print('ratio of cluster sizes')\n")
+    answer = a.call("record_own_code", {
+        "what": "ratio of cluster sizes between the halves of the field",
+        "why": "Compare groups compares files, not halves of one",
+        "used": [CLUSTERS], "script": str(script)})
+    entry = a.session.history[-1]
+    assert entry["what"] == "own code" and "halves of the field" in entry["text"]
+    assert "Compare groups compares files" in entry["text"]
+    assert entry["used"] == [CLUSTERS] and entry["script"] == str(script)
+    log = Path(answer["file"]).read_text()
+    assert "## " in log and f"- built on: {CLUSTERS}" in log
+    copy = Path(answer["copy"])
+    assert copy.parent == a.own_code.parent / "own-code"
+    assert copy.read_text() == script.read_text()
+    a.call("record_own_code", {"what": "a figure", "why": "a layout for a paper"})
+    assert Path(answer["file"]).read_text().count("\n## ") == 2          # appended
+    assert "- built on: no plugin" in Path(answer["file"]).read_text()
+    with pytest.raises(ToolError, match="list_plugins"):
+        a.call("record_own_code", {"what": "x", "why": "y", "used": ["Analysis/Nope"]})
+    with pytest.raises(ToolError, match="why no plugin"):
+        a.call("record_own_code", {"what": "x", "why": " "})
+
+
+def test_the_best_plugins_found_come_with_settings_a_run_takes(tmp_path):
+    a = simulated(tmp_path)
+    found = a.call("find_plugins", {"query": "find clusters dbscan"})
+    sketched = [f for f in found if "settings" in f]
+    assert sketched == [f for f in found if f["kind"] == "plugin"]      # every one
+    clusters = next(f for f in sketched if f["path"] == CLUSTERS)
+    fields = a.call("describe_plugin", {"path": CLUSTERS})["fields"]
+    names = [n for n in clusters["settings"] if n != "..."]
+    assert names and all(n in fields for n in names)
+    # the defaults as given run as they are
+    settings = {n: v for n, v in clusters["settings"].items() if n != "..."}
+    assert a.call("run_plugin", {"path": CLUSTERS, "settings": settings})["result"]
+
+
+def test_a_word_the_query_negates_counts_for_nothing():
+    """"Without beads" once put the bead plugins above COMET and RCC."""
+    assert index.search("drift correction without beads") == index.search("drift correction")
+    assert index.search("drift correction, no fiducials or beads") == index.search(
+        "drift correction")
+    assert index.wanted_words("clusters without noise in the nucleus") == ["cluster", "nucleu"]
+    top = [e["path"] for e in index.search("drift correction without beads", 4)]
+    assert "Analysis/Drift/COMET" in top and "Analysis/Drift/RCC" in top
+
+
+def test_the_instructions_put_the_plugins_first_and_name_tools_that_exist():
+    assert "Plugins first" in INSTRUCTIONS
+    for name in ("find_plugins", "record_own_code", "run_plugin", "validate_chain"):
+        assert name in INSTRUCTIONS and name in Assistant.specs()
+
+
 def test_a_missing_tool_is_noted_for_the_developers_and_goes_with_a_bug_report(tmp_path):
     import zipfile
     from smappy import diagnostics

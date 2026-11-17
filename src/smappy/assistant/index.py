@@ -86,9 +86,38 @@ def words(text: str) -> List[str]:
             for w in found]
 
 
+# a word after one of these is what the user does not want: "drift
+# correction without beads" counted "beads" for the bead plugins and put
+# COMET, which needs none, fourth
+_NOT = frozenset("without no not except excluding".split())
+# ... until one of these ends the phrase, or `_NEGATED` words have gone by
+_PHRASE_END = frozenset("and but with in on for from by using via".split())
+_NEGATED = 2
+
+
+def wanted_words(query: str) -> List[str]:
+    """``query``'s words that should match, those negated left out."""
+    kept: List[str] = []
+    negated = 0
+    for raw in _WORD.findall(query.lower()):
+        if raw in _NOT:
+            negated = _NEGATED
+            continue
+        if raw in _PHRASE_END:
+            negated = 0
+            continue
+        found = words(raw)
+        if negated and found:
+            negated -= 1
+            continue
+        kept += found
+    return kept
+
+
 def search(query: str, limit: int = 8) -> List[Dict[str, str]]:
-    """The entries that share most words with ``query``, best first."""
-    wanted = set(words(query))
+    """The entries that share most words with ``query``, best first; words
+    the query negates ("without beads") count for none."""
+    wanted = set(wanted_words(query))
     if not wanted:
         return []
     scored = []

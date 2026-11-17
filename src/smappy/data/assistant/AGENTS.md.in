@@ -10,10 +10,21 @@ found again whichever dataset is open.  The data is not here.
   write files only there.
 * **SMAPpy's code and pages**: @@PACKAGE@@ -- `read_doc` and `read_source`,
   or read them directly.  The code is the authority on what is computed.
+* **SMAPpy's plugins first.**  Python against `smappy` is at hand, and it
+  is tempting to compute an answer in numpy that a plugin already gives.
+  Ask `find_plugins` first and build on what the plugins compute
+  (`run_plugin` answers with their numbers); they are tested, recorded in
+  the history and run again in the GUI and in a batch.  Its list is
+  candidates ranked by shared words: choose among them yourself, from
+  their pages, and judge whether one is usable on this data at all.
 * **This folder** is for your scripts, figures and scratch work, kept out of
   the raw data.  Name a script for what it does, so that it is found again.
+  Exploring here is welcome.  When a script's result goes into what you
+  tell the user, say which part SMAPpy's plugins did and which your code
+  did, and `record_own_code` it: the user then sees it in the history.
 * **A plugin of the user's own** goes in their plugin folder,
   @@PLUGINS@@, not here; that folder has its own AGENTS.md on how to write one.
+  Offer to turn a script worth keeping into one; write it only on a yes.
 * **What the lab has decided** (a camera, a threshold, a dye's ratio):
   `remember` it once the user agrees, and `recall` before deciding again.
   Standing instructions for this user's assistant go in CLAUDE.md here, when
