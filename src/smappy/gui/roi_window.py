@@ -84,6 +84,8 @@ OTHERS_DIM = 0.8
 # the status line counts the ROIs waiting on the evaluation only up to this
 # many: counting means checking every one, the cost the list no longer pays
 COUNT_LIMIT = 2000
+# *Remove* asks first when more ROIs than this are selected
+CONFIRM_REMOVE = 3
 
 
 # a line's marks, in screen pixels: the head at its end and the ring at its
@@ -814,7 +816,11 @@ class ROIManagerWindow(QMainWindow):
         self.table.setModel(self.rows)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        # many at once, as a file browser selects: Shift-click a range,
+        # Ctrl/Cmd-click one more or one less, Ctrl/Cmd+A all.  *Remove*,
+        # *use* and the list's menu act on the selection; the panes show the
+        # current row alone, so drawing and annotating stay on one ROI
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = self.table.horizontalHeader()
         # sized once, not to the contents: that would read every row
@@ -823,7 +829,16 @@ class ROIManagerWindow(QMainWindow):
         for column, width in enumerate((50, 35, 35, 120)):
             header.resizeSection(column, width)
         self.table.verticalHeader().setDefaultSectionSize(20)
+        # A click moves the current row first and selects after, so the
+        # selection says which ROI to show; a key (Shift+Down) selects first
+        # and moves after, so there the current row does.  The current row's
+        # move under a pressed button is left alone: a Ctrl-click that
+        # unselects a row makes it current before it unselects it
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_select())
+        self.table.selectionModel().currentRowChanged.connect(
+            lambda *_: QApplication.mouseButtons() == Qt.NoButton and self._on_select())
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._list_menu)
         # a click on a column sorts by it, again the other way; on *ROI*, back
         # to the numbers.  The same order as Sort ROIs sets, and kept with it
         header.setSectionsClickable(True)
@@ -838,7 +853,7 @@ class ROIManagerWindow(QMainWindow):
         edits = QHBoxLayout()
         edits.setSpacing(3)
         self.remove_button = QPushButton("Remove")
-        self.remove_button.setToolTip("remove the selected ROI")
+        self.remove_button.setToolTip("remove the selected ROIs")
         self.remove_button.clicked.connect(self._remove)
         # the ROIs' own undo (`ROIProject.history`), not the main window's,
         # which is for tables: Ctrl+Z here never undoes a drift correction.
@@ -1144,11 +1159,16 @@ class ROIManagerWindow(QMainWindow):
         self._loading = False
         self.redraw()
 
-    def _fill_table(self) -> None:
+    def _fill_table(self, keep_selection: bool = True) -> None:
+        """The list again.  A selection of several survives it while the
+        selected ROI is one of them (*use* set on twenty, an annotation);
+        an ROI selected elsewhere -- Up, Down, a click in the zoom --
+        selects that one alone (`select` passes ``keep_selection=False``)."""
         project = self.project
         if hasattr(self, "annotation"):
             self.annotation.refresh(lists=not self.annotation.lists.hasFocus())
         was_loading, self._loading = self._loading, True
+        kept = self.selected_ids() if keep_selection else []
         self.rows.reset(project)
         row = self.rows.row_of.get(self.active)
         if row is not None:
@@ -1156,6 +1176,8 @@ class ROIManagerWindow(QMainWindow):
             # table step from the current one, and it was left on the first
             self.table.setCurrentIndex(self.rows.index(row, 0))
             self.table.scrollTo(self.rows.index(row, 0))
+            if self.active in kept and len(kept) > 1:
+                self._select_rows(kept)
         self._loading = was_loading
         used = sum(1 for r in project.rois.values() if r.use)
         waiting = []
@@ -2149,15 +2171,8 @@ class ROIManagerWindow(QMainWindow):
 
     def _set_use(self, roi_id, use: bool) -> None:
         """The use box in the table."""
-        roi = self.project.rois.get(roi_id)
-        if self._loading or roi is None:
-            return
-        number = self.project.numbers().get(roi.id)
-        with self.project.edit(f"{'Include' if use else 'Exclude'} ROI {number}"):
-            roi.use = use
-        self._fill_table()
-        self.redraw()
-        self.changed.emit()
+        if not self._loading:
+            self.set_use([roi_id], use)
 
     def _on_link_2d(self) -> None:
         if self._loading:
@@ -2170,12 +2185,97 @@ class ROIManagerWindow(QMainWindow):
             self.selected.emit(roi)          # the 2D view goes there now
 
     def _on_select(self) -> None:
+        """The current row is the ROI the panes show, once it is selected:
+        a Ctrl-click that takes a row out of the selection moves the current
+        row there and leaves the panes where they were."""
         if self._loading:
             return
-        rows = self.table.selectionModel().selectedRows()
-        if not rows or rows[0].row() >= len(self.rows.ids):
+        current = self.table.currentIndex()
+        if not current.isValid() or current.row() >= len(self.rows.ids):
             return
-        self.select(self.rows.ids[rows[0].row()], from_table=True)
+        if not self.table.selectionModel().isRowSelected(current.row(), QModelIndex()):
+            return
+        roi_id = self.rows.ids[current.row()]
+        if roi_id != self.active:
+            self.select(roi_id, from_table=True)
+
+    def selected_ids(self) -> list:
+        """The ROIs selected in the list, in its order; the selected ROI
+        alone when the list has none selected (a click in the zoom)."""
+        model = self.table.selectionModel()
+        ids = [self.rows.ids[i.row()] for i in sorted(model.selectedRows(), key=QModelIndex.row)
+               if i.row() < len(self.rows.ids)]
+        ids = [i for i in ids if i in self.project.rois]
+        if not ids and self.active in self.project.rois:
+            ids = [self.active]
+        return ids
+
+    def _select_rows(self, ids) -> None:
+        """Select these ROIs' rows, a range at a time, the current row kept."""
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        rows = sorted(self.rows.row_of[i] for i in ids if i in self.rows.row_of)
+        selection = QItemSelection()
+        last = self.rows.columnCount() - 1
+        start = previous = None
+        for row in rows + [None]:
+            if start is not None and (row is None or row != previous + 1):
+                selection.select(self.rows.index(start, 0), self.rows.index(previous, last))
+                start = None
+            if row is not None and start is None:
+                start = row
+            previous = row
+        self.table.selectionModel().select(selection, QItemSelectionModel.ClearAndSelect)
+
+    def _list_menu(self, position) -> None:
+        """The list's right-click menu: what *use* and *Remove* do, on every
+        selected ROI.  A right click on a selected row keeps the selection
+        (Qt's), one on another row selects that row alone."""
+        from PySide6.QtWidgets import QMenu
+        ids = self.selected_ids()
+        if not ids:
+            return
+        menu = QMenu(self)
+        n = f" {len(ids)} ROIs" if len(ids) > 1 else ""
+        menu.addAction(f"Use{n}", lambda: self.set_use(ids, True))
+        menu.addAction(f"Don't use{n}", lambda: self.set_use(ids, False))
+        menu.addSeparator()
+        menu.addAction(f"Remove{n}", self._remove)
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def _label(self, what: str, ids) -> str:
+        """An undo step's name: *Exclude ROI 4*, or *Exclude 12 ROIs*."""
+        if len(ids) == 1:
+            number = self.project.numbers().get(ids[0])
+            return f"{what} ROI {number}" if number else what
+        return f"{what} {len(ids)} ROIs"
+
+    def set_use(self, ids, use: bool) -> None:
+        """Include or exclude these ROIs, in one undo step."""
+        rois = [self.project.rois[i] for i in ids if i in self.project.rois]
+        rois = [r for r in rois if r.use != use]
+        if not rois:
+            return
+        with self.project.edit(self._label("Include" if use else "Exclude",
+                                           [r.id for r in rois])):
+            for roi in rois:
+                roi.use = use
+        self._fill_table()
+        self.redraw()
+        self.changed.emit()
+
+    def remove_rois(self, ids) -> None:
+        """Remove these ROIs, in one undo step, without asking."""
+        ids = [i for i in ids if i in self.project.rois]
+        if not ids:
+            return
+        with self.project.edit(self._label("Remove", ids)):
+            for roi_id in ids:
+                self.project.rois.pop(roi_id, None)
+        if self.active in ids:
+            self.active = None
+        self._fill_table()
+        self.redraw()
+        self.changed.emit()
 
     def select(self, roi_id: str, from_table: bool = False) -> None:
         """Show an ROI: its file, the zoom around it, and the ROI image."""
@@ -2199,7 +2299,7 @@ class ROIManagerWindow(QMainWindow):
                 self._loading = False
         self.zoom_center = np.asarray(roi.center, float)
         if not from_table:
-            self._fill_table()
+            self._fill_table(keep_selection=False)
         else:
             self.annotation.refresh()
         self.redraw()
@@ -2690,21 +2790,23 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
 
     def _toggle(self) -> None:
-        """Space: include or exclude the selected ROI."""
-        roi = self._selected()
-        if roi is not None:
-            with self._edit("Include" if not roi.use else "Exclude"):
-                roi.use = not roi.use
-            self._fill_table()
-            self.redraw()
-            self.changed.emit()
+        """Space: include or exclude the selected ROIs -- all excluded when
+        all are included, else all included, as a box that is partly ticked
+        ticks."""
+        ids = self.selected_ids()
+        if ids:
+            self.set_use(ids, not all(self.project.rois[i].use for i in ids))
 
     def _remove(self) -> None:
-        roi = self._selected()
-        if roi is not None:
-            with self._edit("Remove"):
-                self.project.rois.pop(roi.id, None)
-            self.active = None
-            self._fill_table()
-            self.redraw()
-            self.changed.emit()
+        """*Remove*: the selected ROIs, asking first when there are more than
+        `CONFIRM_REMOVE` -- a stray Ctrl+A should not cost a session's review."""
+        ids = self.selected_ids()
+        if len(ids) > CONFIRM_REMOVE:
+            from PySide6.QtWidgets import QMessageBox
+            answer = QMessageBox.question(
+                self, "Remove ROIs",
+                f"Remove {len(ids)} ROIs?  Undo brings them back.",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if answer != QMessageBox.Yes:
+                return
+        self.remove_rois(ids)
